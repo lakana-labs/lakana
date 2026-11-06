@@ -922,7 +922,8 @@ def kill_largest(
     sizes the earlier candidate is tried first. A task whose leader has exited but whose group a
     grandchild still holds is passed over too (its `kill_for_memory` does nothing; the runner ends
     the group within its poll interval), so in that window the choice moves on to the next
-    largest. One is ended per call.
+    largest. One is ended per call. A consumer with a ``note_resident(size)`` method is told the
+    size it was measured at before each attempt, so a killed process still has a peak.
 
     Parameters
     ----------
@@ -944,7 +945,10 @@ def kill_largest(
         ),
         key=lambda entry: (-entry[0], entry[1]),
     )
-    for _size, _index, consumer, detail in sized:
+    for size, _index, consumer, detail in sized:
+        note = getattr(consumer, "note_resident", None)
+        if note is not None:
+            note(size)  # the last reading, for the figures of a child that dies of this kill
         if consumer.kill_for_memory(detail):
             return consumer
     return None

@@ -33,6 +33,12 @@ simply stops, so the worker checks these bytes itself."""
 EXIT_OK = 0
 EXIT_REFUSED = 2
 """The child did not run: its request was unreadable or its worker was gone."""
+USAGE_FILE = "usage.json"
+"""What the child tells the worker about itself at its end (``bytes_read``, ``peak_memory_bytes``),
+written into its working directory; the worker reads at most `MAX_USAGE_BYTES` of it."""
+MAX_USAGE_BYTES = 256
+"""The most the worker reads of the usage file; a longer one is not trusted."""
+
 EXIT_FAILED = 3
 """The statement failed; an error document is the last line on standard error."""
 

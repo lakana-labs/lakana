@@ -11,15 +11,18 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from itertools import pairwise
 from pathlib import Path
 
 import pyarrow as pa
 import pytest
 
+from lakana_core.runs.resources import AttemptResources
 from lakana_worker import memory, query_process
 from lakana_worker.query_process import (
     REGISTRY,
+    BatchStream,
     ChildFailed,
     QueryChild,
     StopReason,
@@ -34,6 +37,7 @@ from lakana_worker.query_protocol import (
     decode_error,
     encode_error,
 )
+from lakana_worker.resources import usage_collector
 
 SCRIPT = Path(__file__).parent / "scripted_child.py"
 
@@ -1559,3 +1563,155 @@ def test_a_child_that_exits_by_itself_is_not_marked_as_killed_by_the_supervisor(
     failure, _seconds = _failure("error_after_closing_stdout", kill_grace_seconds=0.0)
     assert failure.error == ErrorDocument("invalid", "Query failed: x")
     assert (failure.returncode, failure.own_kill) == (3, False)
+
+
+def run_scripted(behaviour: str) -> AbstractContextManager[tuple[pa.Schema, BatchStream]]:
+    """Run a scripted child through `query_process.run`.
+
+    Parameters
+    ----------
+    behaviour
+        The scripted behaviour.
+
+    Returns
+    -------
+    contextlib.AbstractContextManager
+        What `run` returns.
+    """
+    return query_process.run(
+        _request,
+        timeout_seconds=30,
+        kill_grace_seconds=30,
+        argv=[sys.executable, str(SCRIPT), behaviour],
+    )
+
+
+# --- the figures of a reaped child ------------------------------------------------------------
+
+
+def _figures(behaviour: str, *arguments: str) -> AttemptResources:
+    """Run a scripted child to its end and return the figures of the reaped child.
+
+    Parameters
+    ----------
+    behaviour
+        The scripted behaviour.
+    *arguments
+        Its further arguments.
+
+    Returns
+    -------
+    AttemptResources
+        `QueryChild.resources` after `close`.
+    """
+    child = _child(behaviour)
+    child._argv.extend(arguments)
+    with child:
+        _rows(child)
+    return child.resources
+
+
+def test_nothing_is_known_before_a_child_is_reaped() -> None:
+    assert not _child("ok").resources.known
+
+
+def test_a_child_that_reports_its_figures_gives_them_with_its_processor_time() -> None:
+    figures = _figures("usage", '{"bytes_read": 7, "peak_memory_bytes": 12345}')
+    assert figures.bytes_read == 7
+    assert figures.cpu_seconds is not None and figures.cpu_seconds >= 0
+    if sys.platform.startswith("linux"):
+        assert figures.peak_memory_bytes == 12345
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json",
+        "[1, 2]",
+        '{"bytes_read": -1, "peak_memory_bytes": true}',
+        '{"bytes_read": "7"}',
+        "{" + " " * 300 + "}",
+    ],
+)
+def test_a_usage_file_that_is_garbled_or_oversized_gives_no_count(content: str) -> None:
+    figures = _figures("usage", content)
+    assert figures.bytes_read is None
+    assert figures.cpu_seconds is not None
+
+
+def test_a_missing_usage_file_gives_no_count() -> None:
+    figures = _figures("ok")
+    assert figures.bytes_read is None
+    assert figures.cpu_seconds is not None
+
+
+def test_a_usage_file_that_is_a_symbolic_link_is_not_followed() -> None:
+    assert _figures("usage_symlink").bytes_read is None
+
+
+def test_the_memory_of_a_macos_child_is_its_rusage_peak(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(query_process, "_PLATFORM", "darwin")
+    seen: list[str] = []
+
+    def from_rusage(usage: object, platform: str) -> AttemptResources:
+        seen.append(platform)
+        return AttemptResources(999, 2.0, None)
+
+    monkeypatch.setattr(query_process, "from_rusage", from_rusage)
+    assert _figures("usage", '{"bytes_read": 1, "peak_memory_bytes": 5}') == AttemptResources(
+        999, 2.0, 1
+    )
+    assert seen == ["darwin"]
+
+
+def test_a_killed_child_has_processor_time_and_the_watchdogs_last_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(query_process, "_PLATFORM", "linux")
+    with _child("stops_when_asked") as child:
+        _wait_until_ready(child)
+        assert _kill_largest(lambda _pid: 4096, "over the limit") == child.pid
+    figures = child.resources
+    assert figures.peak_memory_bytes == 4096
+    assert figures.cpu_seconds is not None and figures.cpu_seconds >= 0
+    assert figures.bytes_read is None
+
+
+def test_a_killed_child_that_was_never_measured_has_no_peak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(query_process, "_PLATFORM", "linux")
+    with _child("stops_when_asked") as child:
+        _wait_until_ready(child)
+    assert child.resources.peak_memory_bytes is None
+    assert child.resources.cpu_seconds is not None
+
+
+def test_a_child_reaped_by_someone_else_leaves_the_figures_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def gone(pid: int, options: int) -> tuple[int, int, object]:
+        raise ChildProcessError
+
+    monkeypatch.setattr(query_process.os, "wait4", gone)
+    child = _child("ok")
+    with child:
+        _rows(child)
+    assert not child.resources.known
+
+
+def test_run_adds_the_figures_to_the_collector_after_success_and_after_failure() -> None:
+    with usage_collector() as collector:
+        with run_scripted("ok") as (_schema, batches):
+            assert sum(batch.num_rows for batch in batches) == 30
+        first = collector.resources
+        assert first.cpu_seconds is not None
+        with pytest.raises(ChildFailed), run_scripted("error_document"):
+            pytest.fail("the block must not run")  # pragma: no cover -- unreachable
+        assert collector.resources.cpu_seconds is not None
+        assert collector.resources.cpu_seconds >= first.cpu_seconds
+
+
+def test_run_without_a_collector_just_runs() -> None:
+    with run_scripted("ok") as (_schema, batches):
+        assert sum(batch.num_rows for batch in batches) == 30

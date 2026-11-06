@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import json
 import logging
 import os
+import resource
 import selectors
 import signal
 import subprocess  # nosec B404 -- a fixed argv, no shell, an environment built from scratch
@@ -48,21 +50,26 @@ from types import TracebackType
 
 import pyarrow as pa
 
+from lakana_core.runs.resources import AttemptResources, valid_count
 from lakana_worker.processes import remove_private_tree, signal_group
 from lakana_worker.query_protocol import (
     END_OF_STREAM,
     EXIT_FAILED,
     INTERNAL,
     MAX_ERROR_LINE_BYTES,
+    MAX_USAGE_BYTES,
+    USAGE_FILE,
     ErrorDocument,
     Request,
     decode_error,
     encode_request,
 )
+from lakana_worker.resources import current_collector, from_rusage, peak_memory
 
 logger = logging.getLogger(__name__)
 
 CHILD_MODULE = "lakana_worker.query_child"
+_PLATFORM = sys.platform
 _CHUNK = 65536
 _DISCARD_CHUNK = 1024 * 1024
 _MAX_STDERR_BYTES = 2 * MAX_ERROR_LINE_BYTES
@@ -270,6 +277,8 @@ class QueryChild:
         self._drain_until: float | None = None
         self._next_cancel_poll = 0.0
         self._cancel_poll_failed = False
+        self._resources = AttemptResources()
+        self._watched: int | None = None
         self.reason: StopReason | None = None
         self.killed = False
         self.detail: str | None = None
@@ -283,6 +292,26 @@ class QueryChild:
     def stderr(self) -> bytes:
         """The kept end of what the child wrote to standard error."""
         return bytes(self._stderr)
+
+    @property
+    def resources(self) -> AttemptResources:
+        """The figures of the reaped child; all unknown until `close` has reaped it.
+
+        Processor time comes from ``wait4``. Peak memory is what the child reported about itself
+        (Linux) or its ``ru_maxrss`` (macOS), else the memory watchdog's last reading of a child
+        it killed, else unknown. Bytes read is what the child counted, if it lived to say.
+        """
+        return self._resources
+
+    def note_resident(self, size: int) -> None:
+        """Record the size the memory watchdog measured, for a child it is about to kill.
+
+        Parameters
+        ----------
+        size
+            The resident bytes of the child's process tree.
+        """
+        self._watched = size
 
     @property
     def closed(self) -> bool:
@@ -803,6 +832,75 @@ class QueryChild:
         assert failed is not None  # nosec B101 -- a failed reader is never a complete result
         return failed
 
+    @staticmethod
+    def _reap(process: subprocess.Popen[bytes]) -> resource.struct_rusage | None:
+        """Wait for the exited leader and take its resource usage; the caller holds `_lock`.
+
+        Parameters
+        ----------
+        process
+            The leader, which has exited.
+
+        Returns
+        -------
+        resource.struct_rusage or None
+            Its usage; `None` if somebody else had reaped it already.
+        """
+        try:
+            _pid, status, usage = os.wait4(process.pid, 0)
+        except ChildProcessError:
+            process.wait()
+            return None
+        process.returncode = os.waitstatus_to_exitcode(status)
+        return usage
+
+    def _figures(self, usage: resource.struct_rusage | None) -> AttemptResources:
+        """Put the figures of the reaped child together.
+
+        Parameters
+        ----------
+        usage
+            The child's resource usage, or `None` if it could not be taken.
+
+        Returns
+        -------
+        AttemptResources
+            Processor time, peak memory and bytes read; any may be unknown.
+        """
+        if usage is None:
+            return AttemptResources()
+        measured = from_rusage(usage, _PLATFORM)
+        told = self._told()
+        peak = peak_memory(
+            _PLATFORM,
+            rusage=measured.peak_memory_bytes,
+            reported=valid_count(told.get("peak_memory_bytes")),
+            watched=self._watched,
+        )
+        return AttemptResources(peak, measured.cpu_seconds, valid_count(told.get("bytes_read")))
+
+    def _told(self) -> dict[str, object]:
+        """Read what the child wrote about itself, with the file bounded and never followed.
+
+        Returns
+        -------
+        dict
+            The document; empty if the file is missing, too long, a link or not a JSON object.
+        """
+        assert self._directory is not None  # nosec B101 -- a reaped child was started in it
+        try:
+            descriptor = os.open(
+                Path(self._directory, USAGE_FILE), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+            )
+            try:
+                raw = os.read(descriptor, MAX_USAGE_BYTES + 1)
+            finally:
+                os.close(descriptor)
+            document = json.loads(raw) if len(raw) <= MAX_USAGE_BYTES else None
+        except (OSError, ValueError):
+            return {}
+        return document if isinstance(document, dict) else {}
+
     def close(self) -> int | None:
         """Kill the group if anything is left, reap the leader, remove the directory.
 
@@ -823,8 +921,9 @@ class QueryChild:
             while not self._exited():
                 time.sleep(0.005)
             with self._lock:
-                process.wait()
+                usage = self._reap(process)
                 self._reaped = True
+            self._resources = self._figures(usage)
             REGISTRY.remove(self)
             assert process.stdin and process.stdout and process.stderr  # nosec B101 -- all PIPE
             for pipe in (process.stdin, process.stdout, process.stderr):
@@ -991,17 +1090,28 @@ def run(
     ChildFailed
         If the child fails before the schema, or the iterator meets a result that is not
         complete.
+
+    Notes
+    -----
+    Whatever way the block ends, the reaped child's figures (`QueryChild.resources`) are added to
+    the current `lakana_worker.resources.usage_collector`, if there is one.
     """
-    with QueryChild(
+    child = QueryChild(
         make_request,
         timeout_seconds=timeout_seconds,
         kill_grace_seconds=kill_grace_seconds,
         stops=stops,
         argv=argv,
         directory_prefix=directory_prefix,
-    ) as child:
-        try:
-            reader = pa.ipc.open_stream(child)
-        except (OSError, pa.ArrowException, MemoryError) as exc:
-            raise child.failed() from exc
-        yield reader.schema, BatchStream(child, reader)
+    )
+    try:
+        with child:
+            try:
+                reader = pa.ipc.open_stream(child)
+            except (OSError, pa.ArrowException, MemoryError) as exc:
+                raise child.failed() from exc
+            yield reader.schema, BatchStream(child, reader)
+    finally:
+        collector = current_collector()
+        if collector is not None:
+            collector.add(child.resources)

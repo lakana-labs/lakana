@@ -126,6 +126,7 @@ from typing import BinaryIO, NoReturn, TextIO
 import duckdb
 import pyarrow as pa
 
+from lakana_worker.own_peak import own_peak_bytes
 from lakana_worker.query_protocol import (
     CHECK,
     EXIT_FAILED,
@@ -142,12 +143,18 @@ from lakana_worker.query_protocol import (
     STORE_CERTIFICATE_UNVERIFIED,
     TRANSIENT,
     UNCONVERTED_VALUE,
+    USAGE_FILE,
     ErrorDocument,
     ParameterValue,
     Request,
     decode_request,
     encode_error,
 )
+
+PROFILE_METRIC = "io.total_bytes_read"
+"""The one metric DuckDB tracks while profiling: the bytes a statement read."""
+PROFILE_FILE = "profile.json"
+"""Where DuckDB's profiler writes, inside the child's temp directory; it is never read."""
 
 _DUCKDB_LINE_MARKER = re.compile(r"^LINE \d+:")
 """Matches DuckDB's own echo of the offending line, e.g. ``LINE 1: SELECT ...``."""
@@ -609,6 +616,13 @@ def configure(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
     connection.execute("SET allow_extension_repositories = 'forbidden'")
     connection.execute("INSTALL httpfs")
     connection.execute("LOAD httpfs")
+    # The order matters: `tracked_metrics` needs profiling on, and without an output file DuckDB 2
+    # prints the profile of every statement to standard error, where the error document goes.
+    connection.execute("PRAGMA enable_profiling = 'json'")
+    connection.execute(
+        "SET profiling_output = ?", [os.path.join(request.temp_directory, PROFILE_FILE)]
+    )
+    connection.execute(f"SET tracked_metrics = ['{PROFILE_METRIC}']")
     for credential in ("s3_access_key_id", "s3_secret_access_key", "s3_session_token"):
         connection.execute(f"SET {credential} = ''")
     connection.execute("SET allow_persistent_secrets = false")
@@ -765,6 +779,8 @@ class Session:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._connection: duckdb.DuckDBPyConnection | None = None
+        self.bytes_read: int | None = None
+        """DuckDB's count of the bytes the statement read; set by `measure`, else `None`."""
 
     def open(self, config: ConnectionConfig) -> duckdb.DuckDBPyConnection:
         """Open the in-memory connection.
@@ -789,6 +805,27 @@ class Session:
         with self._lock:
             if self._connection is not None:
                 self._connection.interrupt()
+
+    def measure(self) -> None:
+        """Keep DuckDB's own count of the bytes the last statement read.
+
+        Call it only when the statement finished successfully: after a failed one the profile is
+        still the previous statement's. `bytes_read` stays `None` when DuckDB has no count (a
+        statement answered from metadata).
+        """
+        with self._lock:
+            connection = self._connection
+        if connection is None:
+            return
+        try:
+            document = json.loads(connection.get_profiling_information("json"))
+        except (duckdb.Error, ValueError, TypeError):
+            return
+        io = document.get("io") if isinstance(document, dict) else None
+        if isinstance(io, dict):
+            count = io.get("total_bytes_read")
+            if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                self.bytes_read = count
 
     def close(self) -> None:
         """Close the connection; a later `interrupt` does nothing."""
@@ -1075,7 +1112,10 @@ def serve(
                 reader = connection.sql(request.sql).to_arrow_reader(request.batch_rows)
         except (duckdb.Error, OSError) as exc:
             return classify(exc)
-        return _stream(reader, sink, asked, classify)
+        document = _stream(reader, sink, asked, classify)
+        if document is None:
+            session.measure()
+        return document
     except BaseException as exc:  # the statement's thread must hand back a document
         _report_unexpected(exc)
         return ErrorDocument(
@@ -1087,12 +1127,34 @@ def serve(
             session.close()
 
 
+def write_usage(path: str, bytes_read: int | None, peak_memory_bytes: int | None) -> None:
+    """Write the figures the child measured about itself; a failure only loses them.
+
+    Parameters
+    ----------
+    path
+        The file; it must not exist, and a symbolic link is not followed.
+    bytes_read
+        Bytes the statement read, or `None` if DuckDB had no count.
+    peak_memory_bytes
+        The child's own peak resident memory, or `None` where it cannot be read.
+    """
+    document = json.dumps({"bytes_read": bytes_read, "peak_memory_bytes": peak_memory_bytes})
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(document)
+    except OSError:
+        return
+
+
 def main(
     stdin: BinaryIO,
     stream: BinaryIO,
     stderr: TextIO,
     asked: threading.Event,
     parent: Callable[[], int] = os.getppid,
+    usage_path: str | None = None,
 ) -> int:
     """Read the request, run it in a second thread, and report how it ended.
 
@@ -1109,6 +1171,9 @@ def main(
         tenth of a second until the statement's thread ends.
     parent
         Returns the process id of the parent; compared with the request's ``parent_pid``.
+    usage_path
+        Where to write the figures the child measured (`write_usage`) once the statement's
+        thread has ended; `None` writes nothing.
 
     Returns
     -------
@@ -1135,6 +1200,8 @@ def main(
         thread.join(_INTERRUPT_SECONDS)
         if asked.is_set():
             session.interrupt()
+    if usage_path is not None:
+        write_usage(usage_path, session.bytes_read, own_peak_bytes())
     error = outcome[0]
     if error is None:
         return EXIT_OK
@@ -1179,7 +1246,7 @@ def run_cli() -> NoReturn:
         # Not closed: closing flushes, and a reader that went away makes that raise again behind
         # the error document. `_stream` flushes a complete result; `os._exit` below ends the rest.
         stream = os.fdopen(stream_fd, "wb")
-        code = main(sys.stdin.buffer, stream, sys.stderr, asked)
+        code = main(sys.stdin.buffer, stream, sys.stderr, asked, usage_path=USAGE_FILE)
     except Exception:
         traceback.print_exc(file=sys.stderr)
     finally:

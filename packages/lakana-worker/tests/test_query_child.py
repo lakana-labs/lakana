@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import datetime as dt
 import io
@@ -9,9 +10,11 @@ import json
 import os
 import posixpath
 import selectors
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -47,6 +50,9 @@ from lakana_worker.query_protocol import (
     encode_request,
 )
 
+SCRATCH = tempfile.mkdtemp(prefix="lakana-child-test-")
+"""A directory that exists for every request's `temp_directory`; the profiler opens a file in it."""
+atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 MODULE = "lakana_worker.query_child"
 CHILD_ARGV = [sys.executable, "-I", "-B", "-m", MODULE]
 EXTENSIONS = str(Path.home() / ".duckdb" / "extensions")
@@ -87,7 +93,7 @@ def _request(sql: str = "SELECT 42 AS answer", **overrides: object) -> Request:
         "spill": False,
         "memory_limit": "200MB",
         "threads": 2,
-        "temp_directory": "/nonexistent/lakana-test-spill",
+        "temp_directory": SCRATCH,
         "max_temp_directory_size": "1GB",
         "batch_rows": 2048,
         "extension_directory": EXTENSIONS,
@@ -98,7 +104,10 @@ def _request(sql: str = "SELECT 42 AS answer", **overrides: object) -> Request:
 
 
 def _main(
-    request: Request | bytes, asked: threading.Event | None = None, parent: int | None = None
+    request: Request | bytes,
+    asked: threading.Event | None = None,
+    parent: int | None = None,
+    usage_path: str | None = None,
 ) -> tuple[int, bytes, str]:
     """Run `query_child.main` in this process; return the status, the stream and stderr.
 
@@ -110,6 +119,8 @@ def _main(
         The ask flag; a fresh one by default.
     parent
         The parent process id to report; this process by default.
+    usage_path
+        Where `main` writes the figures the child measured; nowhere by default.
 
     Returns
     -------
@@ -124,6 +135,7 @@ def _main(
         stderr,
         asked or threading.Event(),
         parent=lambda: os.getpid() if parent is None else parent,
+        usage_path=usage_path,
     )
     return code, stream.getvalue(), stderr.getvalue()
 
@@ -390,6 +402,7 @@ def test_the_connection_holds_no_credential_and_loads_nothing_by_itself(
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "ambient-token")
     spill = tmp_path / "spill"
+    spill.mkdir()
     statements: list[str] = []
     connection, settings = _configured(
         _request(
@@ -1187,15 +1200,24 @@ def _run_cli(monkeypatch: pytest.MonkeyPatch, main: object) -> tuple[int, list[s
 def test_run_cli_prepares_the_process_in_order_and_exits_with_mains_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    code, steps = _run_cli(monkeypatch, lambda stdin, stream, stderr, asked: 3)
+    given: dict[str, object] = {}
+
+    def main(
+        stdin: object, stream: object, stderr: object, asked: object, **options: object
+    ) -> int:
+        given.update(options)
+        return 3
+
+    code, steps = _run_cli(monkeypatch, main)
     assert code == 3
+    assert given == {"usage_path": query_child.USAGE_FILE}
     assert steps == ["pdeathsig", f"signal {int(signal.SIGTERM)}", "dup 1", "dup2 2 1"]
 
 
 def test_run_cli_reports_a_crash_and_still_ends_the_process(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def crash(stdin: object, stream: object, stderr: object, asked: object) -> int:
+    def crash(stdin: object, stream: object, stderr: object, asked: object, **_: object) -> int:
         raise RuntimeError("boom")
 
     code, _steps = _run_cli(monkeypatch, crash)
@@ -2210,3 +2232,179 @@ def test_a_statement_duckdb_cannot_serialise_is_refused(monkeypatch: pytest.Monk
     monkeypatch.setattr(query_child, "SERIALISE", "SELECT error('cannot serialise') || ?")
     monkeypatch.setattr(query_child, "configure", lambda *_a: pytest.fail("configured"))
     assert _failed(_request("SELECT 1")) == ErrorDocument("internal", query_child.WRITES_IN_SELECT)
+
+
+# --- the figures the child measures about itself ---------------------------------------------
+
+
+def _usage(request: Request, tmp_path: Path) -> tuple[int, bytes, str, dict[str, object]]:
+    """Run a request and read back the usage file it wrote.
+
+    Parameters
+    ----------
+    request
+        The request.
+    tmp_path
+        A directory for the usage file.
+
+    Returns
+    -------
+    tuple
+        The status, the stream, standard error and the usage document.
+    """
+    path = tmp_path / query_child.USAGE_FILE
+    code, stream, stderr = _main(request, usage_path=str(path))
+    return code, stream, stderr, json.loads(path.read_text())
+
+
+def _parquet(tmp_path: Path) -> tuple[str, Path]:
+    """Write a Parquet file of 2000 rows and name the request's statement that reads it.
+
+    Parameters
+    ----------
+    tmp_path
+        The directory.
+
+    Returns
+    -------
+    tuple of (str, Path)
+        The variable's name and the file.
+    """
+    path = tmp_path / "rows.parquet"
+    duckdb.sql(
+        "COPY (SELECT i, repeat('x', 20) || i::VARCHAR AS s FROM range(2000) AS t(i)) "
+        f"TO '{path}' (FORMAT parquet)"
+    )
+    return "v_0_files", path
+
+
+def _read_request(tmp_path: Path, sql: str) -> Request:
+    """Build a request whose statement may read the Parquet file of `_parquet`.
+
+    Parameters
+    ----------
+    tmp_path
+        The directory.
+    sql
+        The statement.
+
+    Returns
+    -------
+    Request
+        The request.
+    """
+    name, path = _parquet(tmp_path)
+    return _request(sql, parameters={name: [str(path)]}, read_prefixes=(f"{tmp_path}/",))
+
+
+def test_the_child_tracks_only_the_bytes_read_and_profiles_into_a_file() -> None:
+    connection, _settings = _configured(_request())
+    try:
+        rows = connection.execute(
+            "SELECT name, value FROM duckdb_settings() "
+            "WHERE name IN ('tracked_metrics', 'enable_profiling', 'profiling_output')"
+        ).fetchall()
+    finally:
+        connection.close()
+    found = dict(rows)
+    assert found["tracked_metrics"] == "[io.total_bytes_read]"
+    assert found["enable_profiling"] == "json"
+    assert found["profiling_output"] == os.path.join(SCRATCH, query_child.PROFILE_FILE)
+
+
+def test_a_parquet_read_reports_the_bytes_it_read_and_the_childs_own_peak(tmp_path: Path) -> None:
+    sql = "SELECT sum(i) AS n FROM read_parquet(getvariable('v_0_files'))"
+    code, stream, stderr, usage = _usage(_read_request(tmp_path, sql), tmp_path)
+    assert (code, stderr) == (EXIT_OK, "")
+    assert _table(stream).to_pylist() == [{"n": sum(range(2000))}]
+    assert set(usage) == {"bytes_read", "peak_memory_bytes"}
+    assert isinstance(usage["bytes_read"], int) and usage["bytes_read"] > 0
+
+
+def test_a_statement_that_reads_nothing_reports_zero_bytes(tmp_path: Path) -> None:
+    *_rest, usage = _usage(_request("SELECT 1 AS one"), tmp_path)
+    assert usage["bytes_read"] == 0
+
+
+def test_a_statement_answered_from_metadata_reports_null(tmp_path: Path) -> None:
+    sql = "SELECT count(*) AS n FROM read_parquet(getvariable('v_0_files'))"
+    code, stream, _stderr, usage = _usage(_read_request(tmp_path, sql), tmp_path)
+    assert code == EXIT_OK
+    assert _table(stream).to_pylist() == [{"n": 2000}]
+    assert usage["bytes_read"] is None
+
+
+def test_the_profiler_never_writes_to_standard_error(tmp_path: Path) -> None:
+    sql = "SELECT sum(i) AS n FROM read_parquet(getvariable('v_0_files'))"
+    code, stream, stderr, _usage_document = _usage(_read_request(tmp_path, sql), tmp_path)
+    assert (code, stderr) == (EXIT_OK, "")
+    assert stream.endswith(END_OF_STREAM)
+
+
+def test_a_failed_statement_reports_null_and_its_error_document_still_decodes(
+    tmp_path: Path,
+) -> None:
+    read = _read_request(tmp_path, "SELECT sum(i) AS n FROM read_parquet(getvariable('v_0_files'))")
+    assert _main(read)[0] == EXIT_OK  # the file is real; the profile of a good read is non-zero
+    request = _request("SELECT * FROM no_such_table", read_prefixes=(f"{tmp_path}/",))
+    code, _stream, stderr, usage = _usage(request, tmp_path)
+    assert code == EXIT_FAILED
+    assert decode_error(stderr.encode()) is not None
+    assert usage["bytes_read"] is None
+
+
+def test_an_unwritable_usage_file_only_loses_the_figures(tmp_path: Path) -> None:
+    path = tmp_path / query_child.USAGE_FILE
+    path.write_text("taken")
+    code, _stream, stderr = _main(_request(), usage_path=str(path))
+    assert (code, stderr) == (EXIT_OK, "")
+    assert path.read_text() == "taken"
+
+
+def test_a_usage_file_is_not_written_through_a_symbolic_link(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    link = tmp_path / query_child.USAGE_FILE
+    link.symlink_to(target)
+    _main(_request(), usage_path=str(link))
+    assert not target.exists()
+
+
+def test_a_session_without_a_connection_measures_nothing() -> None:
+    session = query_child.Session()
+    session.measure()
+    assert session.bytes_read is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        '{"result": "error"}',
+        "[]",
+        '{"io": 3}',
+        '{"io": {"total_bytes_read": -1}}',
+        '{"io": {"total_bytes_read": true}}',
+        '{"io": {"total_bytes_read": "7"}}',
+        "not json",
+        5,
+    ],
+)
+def test_a_profile_that_is_not_a_count_measures_nothing(answer: object) -> None:
+    class Fake:
+        def get_profiling_information(self, _format: str) -> object:
+            return answer
+
+    session = query_child.Session()
+    session._connection = Fake()  # ty: ignore[invalid-assignment]
+    session.measure()
+    assert session.bytes_read is None
+
+
+def test_a_profile_the_connection_cannot_give_measures_nothing() -> None:
+    class Broken:
+        def get_profiling_information(self, _format: str) -> str:
+            raise duckdb.Error("closed")
+
+    session = query_child.Session()
+    session._connection = Broken()  # ty: ignore[invalid-assignment]
+    session.measure()
+    assert session.bytes_read is None
