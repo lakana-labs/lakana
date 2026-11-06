@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from graph_test_helpers import (
+    TABLES,
     Grants,
     StarWorld,
     asset_entry,
@@ -59,8 +60,8 @@ from lakana_core.projects.diff import DeployDiff
 
 _COLUMN = (
     "this deploy removes the column `store_id` of `gold.dim_store`, which other repositories' "
-    "declarations use; tell their owners, or keep it, and see everything it affects with: lakana "
-    "graph impact --env dev gold.dim_store --column store_id — the declarations: check "
+    "declarations or assets use; tell their owners, or keep it, and see everything it affects "
+    "with: lakana graph impact --env dev gold.dim_store --column store_id — what uses it: check "
     "`gold.fact_sales/ref_store_id` (sales), glossary term `shop` (glossary), reference "
     "`gold.fact_sales.store_id → gold.dim_store.store_id` (sales)"
 )
@@ -227,8 +228,8 @@ def test_a_table_no_longer_built_warns_with_the_whole_tables_dependents(star: St
     (entry,) = _stored(run)
     assert entry["warning"].startswith(
         "this deploy no longer builds `gold.dim_store`, which other repositories' declarations "
-        "use; tell their owners, or keep it, and see everything it affects with: lakana graph "
-        "impact --env dev gold.dim_store — the declarations: "
+        "or assets use; tell their owners, or keep it, and see everything it affects with: "
+        "lakana graph impact --env dev gold.dim_store — what uses it: "
     )
     assert (
         "reference `gold.fact_sales.store_id → gold.dim_store.store_id` (sales)"
@@ -236,6 +237,77 @@ def test_a_table_no_longer_built_warns_with_the_whole_tables_dependents(star: St
     )
     assert "glossary term `shop` (glossary)" in entry["warning"]
     assert "(stores)" not in entry["warning"]  # its own repository's declarations are not another's
+
+
+def test_a_table_no_longer_built_names_the_assets_of_other_repositories_that_read_it(
+    star: StarWorld,
+) -> None:
+    """#451: `sales`' `gold.fact_sales` reads `gold.dim_store`, so its next run fails."""
+    p = _principal(star.session, "deployer")
+    run = _deploy(star, p, _everything(), _stores_without(column=False))
+    (entry,) = _stored(run)
+    assert "asset `gold.fact_sales` (sales)" in entry["warning"]
+    assert "gold.fact_sales" in entry["tables"]
+
+    def warnings_for(reader: PrincipalRef, grants: Grants) -> list[str]:
+        return DeployService(star.session, grants).get(reader, "dev", run.id).warnings
+
+    reader = _principal(star.session, "reader")
+    assert warnings_for(reader, Grants(others=True)) == [entry["warning"]]
+    everything_but_the_fact = set(TABLES) - {"gold.fact_sales"}
+    assert warnings_for(reader, Grants(everything_but_the_fact, others=True)) == []
+    # Computed with the deployer's visibility: an asset whose table it may not read is left out.
+    limited = _deploy(
+        star, p, Grants(everything_but_the_fact, others=True), _stores_without(column=False)
+    )
+    assert all("asset" not in e["warning"] for e in _stored(limited))
+
+
+def _sales_reading_the_store_name() -> dict[str, Any]:
+    """Build `sales`' manifest, its fact's `net_amount` traced to `gold.dim_store.store_name`.
+
+    Returns
+    -------
+    dict
+        The manifest; `gold.fact_sales` lists its columns, so its lineage counts.
+    """
+    manifest = sales_manifest()
+    manifest["assets"][2]["lineage"] = {
+        "date": [{"table": "silver.sales", "column": "date"}],
+        "store_id": [{"table": "silver.sales", "column": "store_id"}],
+        "net_amount": [{"table": "gold.dim_store", "column": "STORE_NAME"}],
+    }
+    return manifest
+
+
+def test_a_removed_column_names_the_assets_that_read_it_and_what_names_their_columns(
+    star: StarWorld,
+) -> None:
+    """#451: an asset with a column list reads the column its lineage traces back to."""
+    point(star.session, star.env_id, star.repos["sales"], _sales_reading_the_store_name())
+    star.session.commit()
+    manifest = stores_manifest()
+    manifest["assets"][0]["columns"] = ["store_id"]
+    p = _principal(star.session, "deployer")
+    (entry,) = _stored(_deploy(star, p, _everything(), manifest))
+    assert entry["warning"].endswith(
+        "— what uses it: asset `gold.fact_sales` (sales), glossary term `net_revenue` (sales), "
+        "measure `gold.fact_sales.net_amount` (sales)"
+    )
+    assert entry["tables"] == ["gold.dim_store", "gold.fact_sales"]
+
+
+def test_an_asset_without_a_column_list_is_not_named_for_a_removed_column(
+    star: StarWorld,
+) -> None:
+    sales = _sales_reading_the_store_name()
+    sales["assets"][2]["columns"] = None  # `SELECT *`: what it reads is not known
+    point(star.session, star.env_id, star.repos["sales"], sales)
+    star.session.commit()
+    manifest = stores_manifest()
+    manifest["assets"][0]["columns"] = ["store_id"]
+    p = _principal(star.session, "deployer")
+    assert _stored(_deploy(star, p, _everything(), manifest)) == []
 
 
 def test_the_deployers_visibility_leaves_out_what_it_may_not_see(star: StarWorld) -> None:

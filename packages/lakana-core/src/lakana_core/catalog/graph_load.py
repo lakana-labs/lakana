@@ -125,6 +125,10 @@ class AssetRecord:
         The header's `owner:`.
     reads
         The dotted tables it reads, sorted, without itself.
+    lineage
+        ``(its column, source table, source column)`` per source its manifest traces each of its
+        columns to, sorted; empty unless the entry lists its columns (a `SELECT` with named
+        columns), so only then is it known which columns of a table it reads (#451).
     """
 
     id: str
@@ -132,6 +136,7 @@ class AssetRecord:
     name: str
     owner: str | None
     reads: tuple[str, ...]
+    lineage: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -373,7 +378,38 @@ def _asset(repository: str, name: str, entry: Mapping[str, Any]) -> AssetRecord:
         name,
         owner if isinstance(owner, str) else None,
         tuple(sorted(reads - {name})),
+        _lineage(entry),
     )
+
+
+def _lineage(entry: Mapping[str, Any]) -> tuple[tuple[str, str, str], ...]:
+    """Read which source columns an asset entry traces each of its columns to.
+
+    Parameters
+    ----------
+    entry
+        Its manifest entry; untrusted.
+
+    Returns
+    -------
+    tuple of tuple
+        ``(column, source table, source column)``, sorted; empty when the entry does not list
+        its columns, or holds no lineage.
+    """
+    lineage = entry.get("lineage")
+    if not isinstance(entry.get("columns"), list) or not isinstance(lineage, Mapping):
+        return ()
+    found: set[tuple[str, str, str]] = set()
+    for column, sources in lineage.items():
+        if not isinstance(column, str) or not isinstance(sources, list):
+            continue
+        for source in sources:
+            if not isinstance(source, Mapping):
+                continue
+            table, read = source.get("table"), source.get("column")
+            if isinstance(table, str) and isinstance(read, str):
+                found.add((column, table, read))
+    return tuple(sorted(found))
 
 
 def _job(repository: str, name: str, entry: Mapping[str, Any], dag: ManifestGraph) -> JobRecord:
@@ -507,6 +543,8 @@ class EnvironmentGraph:
         self.table_ids: dict[str, uuid.UUID] = {}
         self.records: dict[str, Record] = {}
         self.builder_of: dict[uuid.UUID, AssetRecord] = {}
+        self.column_readers: defaultdict[tuple[str, str], set[str]] = defaultdict(set)
+        """``(dotted table, case-folded column)`` → the assets whose lineage reads it."""
         self._term_keys: dict[str, str] = {}
         self._references_by_source: dict[tuple[uuid.UUID, str], str] = {}
         self._adjacent: defaultdict[str, list[GraphEdge]] = defaultdict(list)
@@ -630,6 +668,8 @@ class EnvironmentGraph:
             if built is not None:
                 self.builder_of.setdefault(built, asset)
                 self._link(EdgeKind.BUILDS, asset.id, table_node(built))
+            for _, source, column in asset.lineage:
+                self.column_readers[source, column.casefold()].add(asset.id)
             for read in asset.reads:
                 read_id = self.table_ids.get(read)
                 if read_id is not None:

@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.catalog.glossary_read import term_names
-from lakana_core.catalog.graph_impact import NAMING_KINDS, impact_of
+from lakana_core.catalog.graph_impact import WARNING_KINDS, impact_of
 from lakana_core.catalog.graph_join import JoinPath, JoinPaths, JoinStep, shortest_paths
 from lakana_core.catalog.graph_load import (
     AssetRecord,
@@ -1136,15 +1136,16 @@ class GraphService:
     def breakage(
         self, p: PrincipalRef, environment: str, nodes: Sequence[str]
     ) -> dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]]:
-        """List the declarations that name each of several tables and columns, for a deploy.
+        """List what names or reads each of several tables and columns, for a warning.
 
-        Only the references, measures, checks and glossary terms that name a node itself are
-        listed (`impact_of` with ``named_only``), never what only may use it: nothing
-        downstream is walked, and only those declarations are built, in one build for every
-        node. So the cost grows with the declarations on the nodes, not with what lies
-        downstream of them, and one budget covers it all: the clock is read after each walk
-        and after the build. A node that does not exist, or that `p` may not see, gets
-        nothing.
+        Only the references, measures, checks and glossary terms that name a node itself, and
+        the assets that read it, are listed (`impact_of` with ``named_only``; for a column, an
+        asset whose lineage traces a column to it, with what names that column), never what
+        only may use it: nothing further downstream is walked, and only those nodes are built,
+        in one build for every node. So the cost grows with the declarations and the direct
+        readers of the nodes, not with what lies downstream of them, and one budget covers it
+        all: the clock is read after each walk and after the build. A node that does not
+        exist, or that `p` may not see, gets nothing.
 
         Parameters
         ----------
@@ -1158,8 +1159,8 @@ class GraphService:
         Returns
         -------
         dict
-            Node → each declaration naming it, with the dotted tables it names
-            (`_named_tables`), in node id order.
+            Node → each declaration naming it and each asset reading it, with the dotted tables
+            it names (`_named_tables`), in node id order.
 
         Raises
         ------
@@ -1183,7 +1184,7 @@ class GraphService:
                     [
                         (n, _Found(h.distance, h.reason))
                         for n, h in sorted(hits.items())
-                        if not h.may_use and node_kind(n) in NAMING_KINDS
+                        if not h.may_use and node_kind(n) in WARNING_KINDS
                     ],
                 )
             )
@@ -1412,9 +1413,12 @@ def _named_tables(graph: EnvironmentGraph, node_id: str) -> tuple[str, ...]:
     -------
     tuple of str
         Dotted tables: a reference its own and its target; a measure its table; a check its
-        table, and a generated ``ref_`` check its target too (R3); any other node none.
+        table, and a generated ``ref_`` check its target too (R3); an asset the table it
+        builds; any other node none.
     """
     record = graph.records.get(node_id)
+    if isinstance(record, AssetRecord):
+        return (record.name,)
     if isinstance(record, ReferenceRecord):
         return (graph.tables[record.source_table_id].ref.dotted(), record.target_name)
     if isinstance(record, CheckRecord):

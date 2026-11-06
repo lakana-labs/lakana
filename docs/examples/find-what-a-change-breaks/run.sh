@@ -87,4 +87,4 @@ capture_start
 lakana deploy --env dev
 # docs:end warned
 capture_end
-tr -s '\n ' ' ' <"$captured" | grep -Fq "warning: this deploy removes the column \`store_id\` of \`gold.dim_store\`, which other repositories' declarations use; tell their owners, or keep it, and see everything it affects with: lakana graph impact --env dev gold.dim_store --column store_id — the declarations: check \`gold.fact_sales/ref_store_id\` (sales), glossary term \`store\` (sales), reference \`gold.fact_sales.store_id → gold.dim_store.store_id\` (sales)"
+tr -s '\n ' ' ' <"$captured" | grep -Fq "warning: this deploy removes the column \`store_id\` of \`gold.dim_store\`, which other repositories' declarations or assets use; tell their owners, or keep it, and see everything it affects with: lakana graph impact --env dev gold.dim_store --column store_id — what uses it: check \`gold.fact_sales/ref_store_id\` (sales), glossary term \`store\` (sales), reference \`gold.fact_sales.store_id → gold.dim_store.store_id\` (sales)"

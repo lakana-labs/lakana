@@ -165,11 +165,11 @@ _IMPACT_BUDGET_SECONDS = 2.0
 """The time budget of that check: it runs while the deploy holds its locks, so it stays short."""
 
 IMPACT_WARNING = (
-    "this deploy {what}, which other repositories' declarations use; tell their owners, or keep "
-    "it, and see everything it affects with: lakana graph impact --env {env} {command} — the "
-    "declarations: {items}"
+    "this deploy {what}, which other repositories' declarations or assets use; tell their "
+    "owners, or keep it, and see everything it affects with: lakana graph impact --env {env} "
+    "{command} — what uses it: {items}"
 )
-"""A removed table or column that other repositories declare something on.
+"""A removed table or column that other repositories declare something on, or read (#451).
 
 The next step comes before the list, which has no bound, and `--env` before the names: the CLI
 cuts a long warning at 500 characters, and the cut must not take the next step with it."""
@@ -225,13 +225,15 @@ def _counted(count: int) -> dict[str, object]:
     return {"count": count, "things": "tables or columns", "were": "were", "them": "them"}
 
 
-_BREAKING = {
+BREAKING = {
+    NodeKind.ASSET: "asset",
     NodeKind.REFERENCE: "reference",
     NodeKind.MEASURE: "measure",
     NodeKind.CHECK: "check",
     NodeKind.TERM: "glossary term",
 }
-"""The kinds of node an impact warning lists, with the word it names each by."""
+"""The kinds of node an impact warning lists (`graph_impact.WARNING_KINDS`), with the word it
+names each by."""
 
 
 _NAMED_CHARS = 100
@@ -1011,7 +1013,7 @@ class DeployService:
     def _impact_warnings(
         self, p: PrincipalRef, env_name: str, repo_name: str, previous: object, manifest: object
     ) -> list[dict[str, object]]:
-        """Warn about each removed table or column that another repository declares something on.
+        """Warn about each removed table or column that other repositories use (declare on, read).
 
         Computed with `p`'s visibility: what `p` may not see is left out and not counted. At most
         `_MAX_IMPACT_WARNINGS` items are checked, and one more line counts the rest. The deploy
@@ -1079,7 +1081,7 @@ class DeployService:
                 )
                 continue
             broken = sorted(
-                (_BREAKING[g.kind], g.name, g.repository, named)
+                (BREAKING[g.kind], g.name, g.repository, named)
                 for g, named in answers.get(node, ())
                 if g.repository not in (None, repo_name)
             )

@@ -206,9 +206,9 @@ are `null`.
 ## The deploy warning
 
 A deploy that removes a column, or stops building a table, that another repository declares
-something on still goes through and prints a warning. The line names the removed column or table,
-the command that shows everything it affects, and the declarations of other repositories that use
-it, each with its repository. The how-to shows one:
+something on or reads still goes through and prints a warning. The line names the removed column or
+table, the command that shows everything it affects, and the declarations and assets of other
+repositories that use it, each with its repository. The how-to shows one:
 [What a deploy tells you](../how-to/find-what-a-change-breaks.md#what-a-deploy-tells-you).
 
 - It never refuses the deploy.
@@ -217,15 +217,19 @@ it, each with its repository. The how-to shows one:
   A column counts as removed only when both the deployed and the new version of its asset list
   their columns, which a `SELECT` with named columns does; `SELECT *` and Python assets are not
   checked.
-- It lists only the references, measures, checks and glossary terms of other repositories that
-  name the removed column or table. What only *may* use it (the `may_use` nodes) and what lies
-  downstream are left to `lakana graph impact`, so the check stays short however much is
-  downstream.
+- It lists the references, measures, checks and glossary terms of other repositories that
+  name the removed column or table, and the assets of other repositories that read it. For a
+  removed table, that is every asset that reads it. For a removed column, it is an asset that
+  lists its columns and whose lineage takes one of them from the removed column, with the
+  measures, checks, references and glossary terms on the columns it takes; an asset with
+  `SELECT *`, a Python asset, or one that uses the column only in a join or a filter is not
+  named. What only *may* use it (the `may_use` nodes) and what lies further downstream are left
+  to `lakana graph impact`, so the check stays short however much is downstream.
 - It is computed with what the deployer may see: a deployer without `READ_ENVIRONMENT` gets no
   impact warning, because the repositories of what depends on the table are not visible to them.
 - It is shown to the deployer, and to a reader of the deploy who has `READ_ENVIRONMENT` and may
-  read every table it names (the removed table, and the tables of the references and checks it
-  lists). Other readers are not shown it, and nothing tells them it exists.
+  read every table it names (the removed table, the tables of the references, measures and checks
+  it lists, and the tables the assets it lists build). Other readers are not shown it, and nothing tells them it exists.
 - A CI token is never shown it, not even for its own deploy: a CI token reads nothing, so the
   warning does not appear in a CI log. A task token of the deployer is shown it only when its
   declared assets cover every table it names. See it as a person with

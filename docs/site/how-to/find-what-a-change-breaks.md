@@ -91,7 +91,7 @@ Deployed stores in dev at 80e5a76bdd56e27bf3069498bb89bac7cdd31cb4
 └───────────────┴────────────────┘
 Checks:
   gold.dim_store: key_not_null (generated), key_unique (generated)
-warning: this deploy removes the column `store_id` of `gold.dim_store`, which other repositories' declarations use; tell their owners, or keep it, and see everything it affects with: lakana graph impact --env dev gold.dim_store --column store_id — the declarations: check `gold.fact_sales/ref_store_id` (sales), glossary term `store` (sales), reference `gold.fact_sales.store_id → gold.dim_store.store_id` (sales)
+warning: this deploy removes the column `store_id` of `gold.dim_store`, which other repositories' declarations or assets use; tell their owners, or keep it, and see everything it affects with: lakana graph impact --env dev gold.dim_store --column store_id — what uses it: check `gold.fact_sales/ref_store_id` (sales), glossary term `store` (sales), reference `gold.fact_sales.store_id → gold.dim_store.store_id` (sales)
 Hint: run 'lakana run --env dev' to run what you just deployed.
 ```
 
@@ -100,6 +100,11 @@ shows everything the change affects. You see it if you ran the deploy, or if you
 environment (`READ_ENVIRONMENT`) and every table it names; other readers of the deploy are not
 shown it. A CI token is not shown it either, so it stays out of CI logs: look the deploy up with
 `lakana deploys get DEPLOY_ID --env ENV`.
+
+The warning also names the assets of other repositories that read what the deploy removes: every
+asset that reads a table the deploy stops building, and, for a removed column, every asset that
+lists its columns (a `SELECT` with named columns) and takes one of them from it, with the measures
+and glossary terms on the columns it takes. Their next run fails, so their owners need to know.
 
 The warning covers removed tables and columns only. Lakana cannot tell from a project that a
 column's type changed, because types come from the first run; that case is not warned about yet
