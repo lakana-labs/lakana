@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, PrincipalRef, Securable
-from lakana_core.catalog import service as catalog_service
+from lakana_core.catalog import current_fields
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import PermissionDenied
@@ -292,7 +292,7 @@ def test_the_catalog_logs_the_class_only_when_the_metadata_cannot_be_read(
     gold: CatalogService,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with mock.patch.object(catalog_service, "read_metadata", side_effect=OSError("secret path")):
+    with mock.patch.object(current_fields, "read_metadata", side_effect=OSError("secret path")):
         assert gold.policy_fields(principal, _table_id(session, "orders")) is None
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
