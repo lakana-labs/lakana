@@ -597,6 +597,27 @@ def connection_config(request: Request) -> ConnectionConfig:
     }
 
 
+def profiling_statements(output: str) -> list[str]:
+    """Give the statements that switch profiling on, in the order `configure` runs them.
+
+    Parameters
+    ----------
+    output
+        The file DuckDB's profiler writes to.
+
+    Returns
+    -------
+    list of str
+        The statements. ``tracked_metrics`` needs profiling on first, and without an output file
+        DuckDB 2 prints every statement's profile to standard error.
+    """
+    return [
+        "PRAGMA enable_profiling = 'json'",
+        "SET profiling_output = '" + output.replace("'", "''") + "'",
+        f"SET tracked_metrics = ['{PROFILE_METRIC}']",
+    ]
+
+
 def configure(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
     """Apply the isolation settings and the limits, in their required order, then lock them.
 
@@ -618,11 +639,8 @@ def configure(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
     connection.execute("LOAD httpfs")
     # The order matters: `tracked_metrics` needs profiling on, and without an output file DuckDB 2
     # prints the profile of every statement to standard error, where the error document goes.
-    connection.execute("PRAGMA enable_profiling = 'json'")
-    connection.execute(
-        "SET profiling_output = ?", [os.path.join(request.temp_directory, PROFILE_FILE)]
-    )
-    connection.execute(f"SET tracked_metrics = ['{PROFILE_METRIC}']")
+    for statement in profiling_statements(os.path.join(request.temp_directory, PROFILE_FILE)):
+        connection.execute(statement)
     for credential in ("s3_access_key_id", "s3_secret_access_key", "s3_session_token"):
         connection.execute(f"SET {credential} = ''")
     connection.execute("SET allow_persistent_secrets = false")
@@ -1114,7 +1132,8 @@ def serve(
             return classify(exc)
         document = _stream(reader, sink, asked, classify)
         if document is None:
-            session.measure()
+            with contextlib.suppress(Exception):  # measuring must never fail a good query
+                session.measure()
         return document
     except BaseException as exc:  # the statement's thread must hand back a document
         _report_unexpected(exc)

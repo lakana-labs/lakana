@@ -948,7 +948,10 @@ def kill_largest(
     for size, _index, consumer, detail in sized:
         note = getattr(consumer, "note_resident", None)
         if note is not None:
-            note(size)  # the last reading, for the figures of a child that dies of this kill
+            try:
+                note(size)  # the last reading, for the figures of a child that dies of this kill
+            except Exception:  # a figure is never worth a missed kill
+                logger.warning("note_resident failed; the kill goes ahead", exc_info=True)
         if consumer.kill_for_memory(detail):
             return consumer
     return None

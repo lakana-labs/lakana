@@ -18,7 +18,7 @@ from pathlib import Path
 
 import duckdb
 
-from lakana_worker.query_child import PROFILE_METRIC
+from lakana_worker.query_child import profiling_statements
 
 LIMIT_PERCENT = 2.0
 """The largest median difference, in percent, that is accepted."""
@@ -34,26 +34,6 @@ QUERIES: dict[str, str] = {
     "limit": "SELECT * FROM read_parquet('{path}') LIMIT 1000",
 }
 """The benchmark queries; `{path}` is the Parquet file."""
-
-
-def profiling_statements(output: str) -> list[str]:
-    """Give the statements with which the query child switches profiling on.
-
-    Parameters
-    ----------
-    output
-        The file DuckDB's profiler writes to.
-
-    Returns
-    -------
-    list of str
-        The statements, in the order the child runs them.
-    """
-    return [
-        "PRAGMA enable_profiling = 'json'",
-        f"SET profiling_output = '{output}'",
-        f"SET tracked_metrics = ['{PROFILE_METRIC}']",
-    ]
 
 
 def percent_difference(without: float, with_profiling: float) -> float:

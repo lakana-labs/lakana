@@ -298,8 +298,9 @@ class QueryChild:
         """The figures of the reaped child; all unknown until `close` has reaped it.
 
         Processor time comes from ``wait4``. Peak memory is what the child reported about itself
-        (Linux) or its ``ru_maxrss`` (macOS), else the memory watchdog's last reading of a child
-        it killed, else unknown. Bytes read is what the child counted, if it lived to say.
+        (Linux, its own ``VmHWM``), else the memory watchdog's last reading of a child it
+        killed, else unknown; macOS has none yet. Bytes read is what the child counted, if it
+        lived to say.
         """
         return self._resources
 
@@ -332,7 +333,8 @@ class QueryChild:
             If the process could not be started.
         """
         try:
-            self._directory = tempfile.mkdtemp(prefix=self._prefix)
+            # Absolute: the request names paths inside it, and the child's working directory is it.
+            self._directory = os.path.abspath(tempfile.mkdtemp(prefix=self._prefix))
             home, tmp = Path(self._directory, "home"), Path(self._directory, "tmp")
             home.mkdir(mode=0o700)
             tmp.mkdir(mode=0o700)
@@ -873,7 +875,6 @@ class QueryChild:
         told = self._told()
         peak = peak_memory(
             _PLATFORM,
-            rusage=measured.peak_memory_bytes,
             reported=valid_count(told.get("peak_memory_bytes")),
             watched=self._watched,
         )

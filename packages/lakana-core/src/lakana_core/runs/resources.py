@@ -6,8 +6,13 @@ A figure is `None` when nobody measured it. Zero is a measurement, so the two ne
 from __future__ import annotations
 
 import math
+import operator
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
+_Figure = TypeVar("_Figure", int, float)
+"""An optional figure: a count or a duration."""
 MAX_BYTES = 2**63 - 1
 """The largest count the database columns (signed 64-bit) hold."""
 
@@ -48,9 +53,9 @@ class AttemptResources:
             The combined figures.
         """
         return AttemptResources(
-            peak_memory_bytes=_larger(self.peak_memory_bytes, other.peak_memory_bytes),
-            cpu_seconds=_total(self.cpu_seconds, other.cpu_seconds),
-            bytes_read=_sum_counts(self.bytes_read, other.bytes_read),
+            peak_memory_bytes=_combine(self.peak_memory_bytes, other.peak_memory_bytes, max),
+            cpu_seconds=_combine(self.cpu_seconds, other.cpu_seconds, operator.add),
+            bytes_read=_combine(self.bytes_read, other.bytes_read, operator.add),
         )
 
     @property
@@ -67,8 +72,10 @@ class AttemptResources:
         )
 
 
-def _sum_counts(a: int | None, b: int | None) -> int | None:
-    """Add two optional counts exactly; an unknown one is ignored.
+def _combine(
+    a: _Figure | None, b: _Figure | None, both: Callable[[_Figure, _Figure], _Figure]
+) -> _Figure | None:
+    """Combine two optional figures; an unknown one is ignored.
 
     Parameters
     ----------
@@ -76,55 +83,17 @@ def _sum_counts(a: int | None, b: int | None) -> int | None:
         The first, or `None`.
     b
         The second, or `None`.
+    both
+        How two known figures combine (`operator.add` or `max`).
 
     Returns
     -------
-    int or None
+    int or float or None
         `None` only if both are `None`.
     """
     if a is None or b is None:
         return b if a is None else a
-    return a + b
-
-
-def _larger(a: int | None, b: int | None) -> int | None:
-    """Take the larger of two optional figures; an unknown one is ignored.
-
-    Parameters
-    ----------
-    a
-        The first, or `None`.
-    b
-        The second, or `None`.
-
-    Returns
-    -------
-    int or None
-        `None` only if both are `None`.
-    """
-    if a is None or b is None:
-        return b if a is None else a
-    return max(a, b)
-
-
-def _total(a: float | None, b: float | None) -> float | None:
-    """Add two optional figures; an unknown one is ignored.
-
-    Parameters
-    ----------
-    a
-        The first, or `None`.
-    b
-        The second, or `None`.
-
-    Returns
-    -------
-    float or None
-        `None` only if both are `None`.
-    """
-    if a is None or b is None:
-        return b if a is None else a
-    return a + b
+    return both(a, b)
 
 
 def valid_count(value: object) -> int | None:

@@ -8,6 +8,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from lakana_worker.query_child import profiling_statements
 from scripts import measure_profiling_overhead as overhead
 
 
@@ -57,7 +58,7 @@ def test_the_runs_alternate_and_each_connection_gets_the_durations_scripted_for_
 
 def test_the_profiling_statements_track_only_the_bytes_read(tmp_path: Path) -> None:
     connection = duckdb.connect()
-    for statement in overhead.profiling_statements(str(tmp_path / "profile.json")):
+    for statement in profiling_statements(str(tmp_path / "profile.json")):
         connection.execute(statement)
     (tracked,) = connection.execute(
         "SELECT value FROM duckdb_settings() WHERE name = 'tracked_metrics'"

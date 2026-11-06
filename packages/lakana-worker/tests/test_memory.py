@@ -1539,3 +1539,15 @@ def test_when_every_child_has_exited_nothing_is_signalled_and_the_worker_must_st
         )
         assert dog.check_once() is True
         assert stops == [500] and signalled == []
+
+
+def test_a_hook_that_raises_never_stops_the_kill(caplog: pytest.LogCaptureFixture) -> None:
+    class Noting(_Consumer):
+        def note_resident(self, size: int) -> None:
+            raise RuntimeError("the hook broke")
+
+    consumer = Noting(4242)
+    with caplog.at_level(logging.WARNING):
+        ended = memory.kill_largest([(consumer, "over")], lambda _pid: 10)
+    assert ended is consumer and consumer.details == ["over"]
+    assert "note_resident" in caplog.text

@@ -1649,19 +1649,12 @@ def test_a_usage_file_that_is_a_symbolic_link_is_not_followed() -> None:
     assert _figures("usage_symlink").bytes_read is None
 
 
-def test_the_memory_of_a_macos_child_is_its_rusage_peak(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_macos_child_has_processor_time_and_no_peak(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(query_process, "_PLATFORM", "darwin")
-    seen: list[str] = []
-
-    def from_rusage(usage: object, platform: str) -> AttemptResources:
-        seen.append(platform)
-        return AttemptResources(999, 2.0, None)
-
-    monkeypatch.setattr(query_process, "from_rusage", from_rusage)
-    assert _figures("usage", '{"bytes_read": 1, "peak_memory_bytes": 5}') == AttemptResources(
-        999, 2.0, 1
-    )
-    assert seen == ["darwin"]
+    figures = _figures("usage", '{"bytes_read": 1, "peak_memory_bytes": 5}')
+    assert figures.peak_memory_bytes is None
+    assert figures.bytes_read == 1
+    assert figures.cpu_seconds is not None
 
 
 def test_a_killed_child_has_processor_time_and_the_watchdogs_last_reading(

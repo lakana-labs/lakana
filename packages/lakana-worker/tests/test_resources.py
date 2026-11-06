@@ -70,18 +70,16 @@ def test_a_child_of_a_big_parent_reports_its_own_peak_not_the_parents() -> None:
     assert 0 < int(out.stdout) < len(held)
 
 
-@pytest.mark.parametrize(
-    ("platform", "expected"),
-    [("darwin", 7), ("linux", 5)],
-)
-def test_the_peak_of_a_child_follows_the_platform(platform: str, expected: int) -> None:
-    assert peak_memory(platform, rusage=7, reported=5, watched=3) == expected
+def test_macos_has_no_peak_until_its_rusage_is_known_not_to_be_inherited() -> None:
+    usage = SimpleNamespace(ru_maxrss=100, ru_utime=1.25, ru_stime=0.5)
+    assert from_rusage(usage, "darwin") == AttemptResources(None, 1.75, None)
+    assert peak_memory("darwin", reported=5, watched=3) is None
 
 
 def test_a_linux_child_that_reported_nothing_falls_back_to_the_watchdogs_reading() -> None:
-    assert peak_memory("linux", rusage=7, reported=None, watched=3) == 3
-    assert peak_memory("linux", rusage=7, reported=None, watched=None) is None
-    assert peak_memory("linux", rusage=7, reported=5, watched=9) == 9
+    assert peak_memory("linux", reported=None, watched=3) == 3
+    assert peak_memory("linux", reported=None, watched=None) is None
+    assert peak_memory("linux", reported=5, watched=9) == 9
 
 
 def test_there_is_no_collector_outside_a_usage_collector() -> None:

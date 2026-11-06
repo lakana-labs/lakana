@@ -2237,6 +2237,14 @@ def test_a_statement_duckdb_cannot_serialise_is_refused(monkeypatch: pytest.Monk
 # --- the figures the child measures about itself ---------------------------------------------
 
 
+PARQUET = str(Path(SCRATCH) / "rows.parquet")
+duckdb.sql(
+    "COPY (SELECT i, repeat('x', 20) || i::VARCHAR AS s FROM range(2000) AS t(i)) "
+    f"TO '{PARQUET}' (FORMAT parquet)"
+)
+"""A Parquet file of 2000 rows that the real-child test reads."""
+
+
 def _usage(request: Request, tmp_path: Path) -> tuple[int, bytes, str, dict[str, object]]:
     """Run a request and read back the usage file it wrote.
 
@@ -2334,18 +2342,11 @@ def test_a_statement_answered_from_metadata_reports_null(tmp_path: Path) -> None
     assert usage["bytes_read"] is None
 
 
-def test_the_profiler_never_writes_to_standard_error(tmp_path: Path) -> None:
-    sql = "SELECT sum(i) AS n FROM read_parquet(getvariable('v_0_files'))"
-    code, stream, stderr, _usage_document = _usage(_read_request(tmp_path, sql), tmp_path)
-    assert (code, stderr) == (EXIT_OK, "")
-    assert stream.endswith(END_OF_STREAM)
-
-
 def test_a_failed_statement_reports_null_and_its_error_document_still_decodes(
     tmp_path: Path,
 ) -> None:
-    read = _read_request(tmp_path, "SELECT sum(i) AS n FROM read_parquet(getvariable('v_0_files'))")
-    assert _main(read)[0] == EXIT_OK  # the file is real; the profile of a good read is non-zero
+    # The statement before the user's is `set_variables`, whose profile counts 0 bytes: measuring
+    # after the failure would give 0 and not null.
     request = _request("SELECT * FROM no_such_table", read_prefixes=(f"{tmp_path}/",))
     code, _stream, stderr, usage = _usage(request, tmp_path)
     assert code == EXIT_FAILED
@@ -2408,3 +2409,50 @@ def test_a_profile_the_connection_cannot_give_measures_nothing() -> None:
     session._connection = Broken()  # ty: ignore[invalid-assignment]
     session.measure()
     assert session.bytes_read is None
+
+
+def test_a_measurement_that_fails_never_fails_the_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(self: query_child.Session) -> None:
+        raise RuntimeError("the binding broke")
+
+    monkeypatch.setattr(query_child.Session, "measure", broken)
+    code, stream, stderr, usage = _usage(_request(), tmp_path)
+    assert (code, stderr) == (EXIT_OK, "")
+    assert _table(stream).to_pylist() == [{"answer": 42}]
+    assert usage["bytes_read"] is None
+
+
+def test_configure_sends_the_profiling_statements_the_overhead_script_measures(
+    tmp_path: Path,
+) -> None:
+    sent: list[str] = []
+    connection, _settings = _configured(_request(), sent)
+    connection.close()
+    expected = query_child.profiling_statements(os.path.join(SCRATCH, query_child.PROFILE_FILE))
+    assert [statement for statement in sent if statement in expected] == expected
+
+
+def test_a_real_child_through_the_workers_query_child_reports_its_figures() -> None:
+    """The child writes `usage.json` where the worker looks: its working directory."""
+    from lakana_worker.query_process import QueryChild
+
+    def make(tmp: str) -> Request:
+        return _request(
+            "SELECT sum(i) AS n FROM read_parquet(getvariable('v_0_files'))",
+            parameters={"v_0_files": [PARQUET]},
+            read_prefixes=(f"{Path(PARQUET).parent}/",),
+            temp_directory=tmp,
+        )
+
+    with QueryChild(make, timeout_seconds=30, kill_grace_seconds=5) as child:
+        reader = pa.ipc.open_stream(child)
+        assert reader.read_all().to_pylist() == [{"n": sum(range(2000))}]
+        child.finish()
+    assert child.stderr == b""
+    figures = child.resources
+    assert figures.bytes_read is not None and figures.bytes_read > 0
+    if sys.platform.startswith("linux"):
+        assert figures.peak_memory_bytes is not None and figures.peak_memory_bytes > 0
+    assert figures.cpu_seconds is not None
