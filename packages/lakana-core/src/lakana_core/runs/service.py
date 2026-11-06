@@ -2407,6 +2407,42 @@ class RunService:
 
     # -- logs and status -----------------------------------------------------
 
+    def _declares_task(self, env: Environment, job: str, task: str, repository: str | None) -> bool:
+        """Say whether a deployed project version declares a job and a task of these names.
+
+        Parameters
+        ----------
+        env
+            The environment.
+        job
+            The job's name.
+        task
+            The task's name (its table).
+        repository
+            Only this repository's deployed version; `None` for any.
+
+        Returns
+        -------
+        bool
+            `True` if the current version of some deployed repository has the job and the table.
+        """
+        query = (
+            select(JobVersion.manifest_json)
+            .join(
+                EnvironmentDeployment,
+                EnvironmentDeployment.current_job_version_id == JobVersion.id,
+            )
+            .where(EnvironmentDeployment.environment_id == env.id)
+        )
+        if repository is not None:
+            query = query.where(
+                EnvironmentDeployment.repository_id == self._repository(repository).id
+            )
+        return any(
+            job in manifest_jobs(manifest) and task in manifest_assets(manifest)
+            for manifest in self._session.scalars(query)
+        )
+
     def task_attempts(
         self,
         p: PrincipalRef,
@@ -2447,8 +2483,9 @@ class RunService:
         PermissionDenied
             Without RUN or READ_ENVIRONMENT.
         NotFoundError
-            If the environment or repository does not exist, or no run of the job has an attempt
-            of the task.
+            If the environment or repository does not exist, or the job or task is unknown: no
+            deployed project declares it and no run attempted it. A declared task that has not
+            run yet gives an empty page.
         ConflictError
             If several repositories ran the job and none was named.
         ValidationError
@@ -2481,10 +2518,12 @@ class RunService:
             .limit(2)
         ).all()
         if not repositories:
+            if self._declares_task(env, job, task, repository):
+                return [], None
             raise NotFoundError(
-                f"No attempts of task {task!r} of job {job!r} in {environment!r}. Check both "
-                "names (`lakana job list` shows the jobs); a task that has not run yet has no "
-                "history."
+                f"No task {task!r} of job {job!r} in {environment!r}: the project declares no "
+                "such job or task, and no run has attempted it. Check both names "
+                "(`lakana job list` shows the jobs)."
             )
         if len(repositories) > 1:
             raise ConflictError(

@@ -109,3 +109,18 @@ def test_the_repository_parameter_narrows_the_history(client: TestClient) -> Non
     ok = client.get(_URL, headers=AUTH_HEADER, params={"repository": "analytics"})
     assert [a["attempt"] for a in ok.json()["attempts"]] == [1]
     assert client.get(_URL, headers=AUTH_HEADER, params={"repository": "x"}).status_code == 404
+
+
+def test_a_declared_task_that_never_ran_is_an_empty_page(client: TestClient) -> None:
+    """The project declares job and task, no run yet: 200 and nothing; a typo stays 404."""
+    from lakana_core.models import JobVersion
+
+    _deploy(client)
+    with Session(client.app.state.engine) as session:
+        for version in session.query(JobVersion):
+            version.manifest_json = {**version.manifest_json, "jobs": {"nightly": {}}}
+        session.commit()
+    answer = client.get(_URL, headers=AUTH_HEADER)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {"attempts": [], "next_cursor": None}
+    assert client.get(_URL.replace("silver.clean", "ghost"), headers=AUTH_HEADER).status_code == 404

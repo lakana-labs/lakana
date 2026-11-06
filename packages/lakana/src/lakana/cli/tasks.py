@@ -21,6 +21,10 @@ _REPO = Annotated[
 _JOB = Annotated[str, typer.Argument(help="The job's name, as in lakana.yaml.")]
 _TASK = Annotated[str, typer.Argument(help="The task's table name, such as silver.orders.")]
 _LAST = Annotated[int, typer.Option("--last", help="How many of the newest attempts (1 to 200).")]
+_CURSOR = Annotated[
+    str | None,
+    typer.Option("--cursor", help="Continue after a page: the cursor the previous page printed."),
+]
 _COLUMNS = ["run", "attempt", "status", "duration", "resources"]
 
 task_app = typer.Typer(
@@ -112,6 +116,7 @@ def history(
     env: _ENV = None,
     repo: _REPO = None,
     last: _LAST = 20,
+    cursor: _CURSOR = None,
 ) -> None:
     """List the newest attempts of TASK of JOB across runs: status, duration, memory, CPU, bytes.
 
@@ -132,6 +137,8 @@ def history(
         Repository name; needed only when several repositories ran a job of this name.
     last
         How many of the newest attempts to show.
+    cursor
+        The cursor of the previous page, to continue after it.
 
     Raises
     ------
@@ -142,8 +149,17 @@ def history(
         raise CliError("--last must be between 1 and 200.")
     state = state_of(ctx)
     page = state.client().runs.task_history(
-        resolve_environment(state, env), job, task, repository=repo, limit=last
+        resolve_environment(state, env), job, task, repository=repo, limit=last, cursor=cursor
     )
+    if state.output == "json":
+        _output.emit(state, {"attempts": page.items, "next_cursor": page.next_cursor})
+        return
+    if not page.items:
+        typer.echo(
+            "No attempts yet: the task has not run. Start its job with "
+            f"`lakana job run {_output.inline(job)}`; the attempts appear here."
+        )
+        return
     _output.emit(
         state,
         page.items,
@@ -156,5 +172,10 @@ def history(
         },
         whole=["run", "status", "resources"],
     )
-    if page.next_cursor is not None and state.output != "json":
-        typer.echo("Older attempts exist; show more with a larger --last (at most 200).")
+    if page.next_cursor is not None:
+        more = (
+            f"continue with --cursor {page.next_cursor}"
+            if last >= 200
+            else "show more with a larger --last (at most 200)"
+        )
+        typer.echo(f"Older attempts exist; {more}.")

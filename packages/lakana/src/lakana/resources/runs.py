@@ -581,7 +581,8 @@ class Runs:
         Raises
         ------
         lakana.errors.NotFoundError
-            If no run of the job has an attempt of the task.
+            If the job or task is unknown: no deployed project declares it and no run attempted it.
+            A declared task that has not run yet gives an empty page.
         lakana.errors.ConflictError
             If several repositories ran the job and none was named.
         lakana.errors.ValidationError

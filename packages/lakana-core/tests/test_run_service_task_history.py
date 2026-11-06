@@ -13,6 +13,7 @@ from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.models import (
     AttemptOutcome,
+    JobVersion,
     Repository,
     RepositoryKind,
     Run,
@@ -185,3 +186,40 @@ def test_two_repositories_with_the_job_need_a_name(
     assert {e.run_id for e in mine} == {runs[2]}
     theirs, _ = service.task_attempts(principal, "dev", "nightly", task, repository="analytics")
     assert {e.run_id for e in theirs} == set(runs[:2])
+
+
+def _declare_job(session: Session, name: str) -> None:
+    """Declare job `name` in the manifests of every deployed project version.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    name
+        The job's name.
+    """
+    for version in session.scalars(select(JobVersion)):
+        version.manifest_json = {**version.manifest_json, "jobs": {name: {"select": ["silver.*"]}}}
+    session.commit()
+
+
+def test_a_declared_task_that_never_ran_has_an_empty_history(
+    session: Session, run_id: uuid.UUID, principal: PrincipalRef
+) -> None:
+    """The job and the task are declared but nothing ran them: an empty page, not a 404."""
+    _declare_job(session, "nightly")
+    service = _service(session)
+    assert service.task_attempts(principal, "dev", "nightly", "silver.a") == ([], None)
+    named = service.task_attempts(principal, "dev", "nightly", "silver.a", repository="analytics")
+    assert named == ([], None)
+
+
+def test_a_declared_job_with_an_unknown_task_is_not_found(
+    session: Session, run_id: uuid.UUID, principal: PrincipalRef
+) -> None:
+    """A task the project does not declare is a typo: 404, naming both."""
+    _declare_job(session, "nightly")
+    with pytest.raises(NotFoundError, match=r"'ghost'.*'nightly'.*lakana job list"):
+        _service(session).task_attempts(principal, "dev", "nightly", "ghost")
+    with pytest.raises(NotFoundError, match=r"'silver.a'.*'other'"):
+        _service(session).task_attempts(principal, "dev", "other", "silver.a")

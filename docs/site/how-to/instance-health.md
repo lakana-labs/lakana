@@ -326,9 +326,12 @@ same name, and the environment with `--env`. `--output json` prints every figure
 A `—`, or a missing part, means nobody measured it. Figures are recorded only for attempts that
 ran after the upgrade that brought them, so older attempts show `—`. A task in a container on a
 host whose control groups the launcher cannot read has no memory figure, and a Python task that
-was killed has no count of bytes read. The command answers 404 when no run of the job has an
-attempt of the task: check both names (`lakana job list` shows the jobs); a task that has not
-run yet has no history.
+was killed has no count of bytes read. A task the project declares that has not run yet has no attempts: the command says so and
+suggests starting the job. The command answers 404 only for a job or task name the project does
+not declare and no run has attempted: check both names (`lakana job list` shows the jobs).
+
+Past the newest `--last` attempts, the command prints a `--cursor` that continues after them;
+with `--output json` the `next_cursor` field carries it.
 
 ## A stuck run and why
 

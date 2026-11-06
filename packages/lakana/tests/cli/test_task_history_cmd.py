@@ -113,23 +113,53 @@ def test_task_history_refuses_last_out_of_range(tmp_path: Path) -> None:
         assert api.requests == []
 
 
-def test_task_history_json_is_the_entries(tmp_path: Path) -> None:
-    """`--output json` prints the list of entries."""
-    api = _api(_entry(1))
+def test_task_history_json_keeps_the_cursor_so_a_script_can_page(tmp_path: Path) -> None:
+    """`--output json` prints the entries and `next_cursor`; `--cursor` is sent back."""
+    api = FakeApi()
+    api.on("GET", _URL, json={"attempts": [_entry(1)], "next_cursor": "abc"})
     result = invoke(
         make_state(tmp_path, api),
         *("--output", "json", "task", "history", "nightly", "orders", "--env", "dev"),
     )
-    (entry,) = json.loads(result.stdout)
+    body = json.loads(result.stdout)
+    assert body["next_cursor"] == "abc"
+    (entry,) = body["attempts"]
     assert (entry["attempt"], entry["peak_memory_bytes"]) == (1, 432013312)
+    invoke(
+        make_state(tmp_path, api),
+        *("task", "history", "nightly", "orders", "--env", "dev", "--cursor", "abc"),
+    )
+    assert api.requests[1].url.params["cursor"] == "abc"
 
 
-def test_task_history_says_when_there_are_more_attempts(tmp_path: Path) -> None:
-    """A next cursor means older attempts exist: the output says so and names the flag."""
+def test_task_history_points_at_last_below_200_and_at_the_cursor_at_200(tmp_path: Path) -> None:
+    """More attempts exist: a larger `--last` helps below 200, only `--cursor` pages at 200."""
     api = FakeApi()
     api.on("GET", _URL, json={"attempts": [_entry(1)], "next_cursor": "abc"})
+    below = _plain(
+        invoke(
+            make_state(tmp_path, api), "task", "history", "nightly", "orders", "--env", "dev"
+        ).stdout
+    )
+    assert "Older attempts exist" in below
+    assert "larger --last" in below
+    at_200 = _plain(
+        invoke(
+            make_state(tmp_path, api),
+            *("task", "history", "nightly", "orders", "--env", "dev", "--last", "200"),
+        ).stdout
+    )
+    assert "--cursor abc" in at_200
+    assert "larger --last" not in at_200
+
+
+def test_task_history_of_a_task_that_never_ran_says_so(tmp_path: Path) -> None:
+    """An empty list is explained, with the next step."""
+    api = _api()
     result = invoke(
         make_state(tmp_path, api), "task", "history", "nightly", "orders", "--env", "dev"
     )
-    assert "Older attempts exist" in _plain(result.stdout)
-    assert "--last" in _plain(result.stdout)
+    assert result.exit_code == 0, result.output
+    assert "No attempts yet: the task has not run." in _plain(result.stdout)
+    assert "lakana job run nightly" in _plain(result.stdout)
+    assert "(none)" not in result.stdout

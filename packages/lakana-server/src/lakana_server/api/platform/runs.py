@@ -257,10 +257,11 @@ def task_history(
 
     Lists the attempts of one task of one job over all its runs, newest first, with what each
     used (peak memory, processor time, bytes read), to see which task needs the most memory
-    or whether it grows from run to run. Needs `RUN` or `READ_ENVIRONMENT`. Answers 404 when
-    the environment or repository does not exist or no run of the job has an attempt of the
-    task, 409 when several repositories ran a job of this name and none was named, and 422
-    for a `limit` outside 1 to 200 or a `cursor` this server did not issue.
+    or whether it grows from run to run. Needs `RUN` or `READ_ENVIRONMENT`. Answers an empty
+    list for a task the project declares that has not run yet, 404 when the environment or
+    repository does not exist or the job or task is unknown (no deployed project declares it
+    and no run attempted it), 409 when several repositories ran a job of this name and none was
+    named, and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue.
 
     Parameters
     ----------

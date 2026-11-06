@@ -2242,6 +2242,7 @@ Use it to see which task needs the most memory, or whether a task's memory climb
 | `--env` | text | none | Environment (default: the profile's). |
 | `--repo` | text | none | Repository name; needed only when several repositories ran a job of this name. |
 | `--last` | whole number | `20` | How many of the newest attempts (1 to 200). |
+| `--cursor` | text | none | Continue after a page: the cursor the previous page printed. |
 
 ## `lakana check`
 
