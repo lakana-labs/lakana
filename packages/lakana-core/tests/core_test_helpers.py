@@ -1224,3 +1224,26 @@ def deploy_manifest(
         pointer.current_job_version_id = version.id
     session.commit()
     return version
+
+
+NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
+"""The instant the pinned task clock starts at."""
+
+
+class Clock:
+    """A settable stand-in for the database clock."""
+
+    def __init__(self) -> None:
+        """Start at `NOW`."""
+        self.now = NOW
+
+
+def half_jitter() -> float:
+    """No jitter.
+
+    Returns
+    -------
+    float
+        0.5.
+    """
+    return 0.5

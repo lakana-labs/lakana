@@ -50,7 +50,7 @@ class AttemptResources:
         return AttemptResources(
             peak_memory_bytes=_larger(self.peak_memory_bytes, other.peak_memory_bytes),
             cpu_seconds=_total(self.cpu_seconds, other.cpu_seconds),
-            bytes_read=_as_count(_total(self.bytes_read, other.bytes_read)),
+            bytes_read=_sum_counts(self.bytes_read, other.bytes_read),
         )
 
     @property
@@ -67,20 +67,24 @@ class AttemptResources:
         )
 
 
-def _as_count(value: float | None) -> int | None:
-    """Narrow a sum of two counts back to a count.
+def _sum_counts(a: int | None, b: int | None) -> int | None:
+    """Add two optional counts exactly; an unknown one is ignored.
 
     Parameters
     ----------
-    value
-        The sum.
+    a
+        The first, or `None`.
+    b
+        The second, or `None`.
 
     Returns
     -------
     int or None
-        The value as an `int`, or `None`.
+        `None` only if both are `None`.
     """
-    return None if value is None else int(value)
+    if a is None or b is None:
+        return b if a is None else a
+    return a + b
 
 
 def _larger(a: int | None, b: int | None) -> int | None:

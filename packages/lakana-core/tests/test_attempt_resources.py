@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-import test_runs_tasks as base
+from core_test_helpers import half_jitter
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -15,16 +15,22 @@ from lakana_core.runs.resources import AttemptResources, valid_count, valid_seco
 from lakana_core.runs.service import RunService
 from lakana_core.runs.tasks import ClaimedTask, FailureKind, claim_task, record_attempt
 
-_half = base._half
-clock = base.clock  # the fixtures `run_id` needs
-run_id = base.run_id
-
 
 def test_merged_takes_max_memory_and_sums_the_rest() -> None:
     """Memory is a high-water mark; processor time and bytes add up."""
     a = AttemptResources(100, 1.5, 10)
     b = AttemptResources(300, 0.5, None)
     assert a.merged(b) == AttemptResources(300, 2.0, 10)
+
+
+def test_merged_bytes_stay_exact_integers() -> None:
+    """Large counts add without a float round-trip; an unknown side is ignored."""
+    big = 2**62 + 1
+    assert AttemptResources(bytes_read=big).merged(AttemptResources(bytes_read=1)).bytes_read == (
+        big + 1
+    )
+    assert AttemptResources().merged(AttemptResources(bytes_read=7)).bytes_read == 7
+    assert AttemptResources(bytes_read=7).merged(AttemptResources()).bytes_read == 7
 
 
 def test_merged_keeps_none_when_both_unknown() -> None:
@@ -103,7 +109,7 @@ def test_record_attempt_stores_the_figures(session: Session, run_id: uuid.UUID) 
         "w1",
         claimed.claim,
         kind=None,
-        rand=_half,
+        rand=half_jitter,
         resources=AttemptResources(412 * 2**20, 3.1, 2**30),
     )
     assert _figures(session) == (412 * 2**20, 3.1, 2**30)
@@ -115,7 +121,12 @@ def test_a_released_attempt_without_figures_stores_null(
     """No measurement and no write run: three nulls."""
     claimed = _claim(session)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.RELEASED, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.RELEASED,
+        rand=half_jitter,
     )
     assert _figures(session) == (None, None, None)
 
@@ -158,7 +169,13 @@ def test_a_sql_task_attempt_takes_its_write_runs_figures(
     claimed = _claim(session)
     _link_run(session, claimed, peak_memory_bytes=5, cpu_seconds=0.5, bytes_read=7)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=_half, resources=None
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=None,
+        rand=half_jitter,
+        resources=None,
     )
     assert _figures(session) == (5, 0.5, 7)
 
@@ -175,7 +192,7 @@ def test_empty_figures_do_not_fall_back_to_the_write_run(
         "w1",
         claimed.claim,
         kind=None,
-        rand=_half,
+        rand=half_jitter,
         resources=AttemptResources(),
     )
     assert _figures(session) == (None, None, None)
@@ -190,7 +207,7 @@ def test_a_failed_attempt_keeps_what_was_measured(session: Session, run_id: uuid
         "w1",
         claimed.claim,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         resources=AttemptResources(9, None, None),
     )
     assert _figures(session) == (9, None, None)
@@ -207,7 +224,7 @@ def test_the_attempt_view_shows_the_figures(
         "w1",
         claimed.claim,
         kind=None,
-        rand=_half,
+        rand=half_jitter,
         resources=AttemptResources(1, 2.0, 3),
     )
     task = session.get(TaskRun, claimed.task_run_id)
