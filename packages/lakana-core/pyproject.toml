@@ -42,7 +42,7 @@ dependencies = [
     # (which also lacks pyarrow unless something else pulls it in) runs a
     # different FileIO implementation than the tests exercise. Apache-2.0,
     # same as the rest of this dependency set.
-    "pyarrow>=26.0.0",
+    "pyarrow>=26.0.1",
     # `StorageConfig.scheme` promises "s3", and `StorageResolver.for_environment`
     # builds `FsspecStorage` eagerly through `fsspec.core.url_to_fs`, which
     # raises ImportError for the s3 scheme without this installed — before any
