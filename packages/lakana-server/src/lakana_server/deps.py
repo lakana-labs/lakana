@@ -15,6 +15,7 @@ from lakana_core.artifacts.service import ArtifactService
 from lakana_core.audit.authorization import AuditingAuthorization
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import AuthorizationService, PrincipalRef
+from lakana_core.catalog.current_fields import current_fields
 from lakana_core.catalog.glossary_read import GlossaryService
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.lineage_graph import LineageService
@@ -643,6 +644,7 @@ def get_graph_service(
     session: Session = Depends(get_session),
     authz: AuthorizationService = Depends(get_grant_authorization),
     main_language: str = Depends(get_main_language),
+    key_provider: KeyProvider = Depends(get_key_provider),
 ) -> GraphService:
     """Build a GraphService for the current request.
 
@@ -654,13 +656,22 @@ def get_graph_service(
         The real, grant-backed authorization service.
     main_language
         `LAKANA_MAIN_LANGUAGE`, for labels and term names without a translation.
+    key_provider
+        Decrypts a secret-backed environment's storage credentials, to read a table's current
+        fields so a column mask is linked to its column's current name.
 
     Returns
     -------
     GraphService
         The metadata graph reader.
     """
-    return GraphService(session, authz, main_language=main_language)
+    storage = StorageResolver(session, key_provider)
+    return GraphService(
+        session,
+        authz,
+        main_language=main_language,
+        fields_of=lambda table_id: current_fields(session, storage, table_id),
+    )
 
 
 def get_artifact_service(

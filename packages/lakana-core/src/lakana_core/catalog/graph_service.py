@@ -28,6 +28,7 @@ from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, S
 from dataclasses import dataclass
 from typing import Any
 
+from pyiceberg.types import NestedField
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -584,6 +585,9 @@ class GraphService:
         The step budget.
     part
         Reads one repository's part (`load_graph`'s `part`); `None` for no cache.
+    fields_of
+        Reads a table's current top-level fields (`load_graph`'s `fields_of`), so a column mask
+        is linked to its column's current name; `None` links it by the name it was made with.
     """
 
     def __init__(
@@ -596,6 +600,7 @@ class GraphService:
         budget_seconds: float = GRAPH_TIME_BUDGET_SECONDS,
         max_steps: int = MAX_GRAPH_STEPS,
         part: Callable[[uuid.UUID, str, object], ManifestPart] | None = None,
+        fields_of: Callable[[uuid.UUID], Sequence[NestedField] | None] | None = None,
     ) -> None:
         self._session = session
         self._authz = authz
@@ -604,6 +609,7 @@ class GraphService:
         self._budget_seconds = budget_seconds
         self._max_steps = max_steps
         self._part = part
+        self._fields_of = fields_of
 
     def _open(self, p: PrincipalRef, environment: str, node: str) -> _Context:
         """Find the environment, load its graph, and start the budget.
@@ -640,7 +646,9 @@ class GraphService:
             ):
                 raise NotFoundError(NO_ENVIRONMENT.format(env=environment))
             raise NotFoundError(NO_NODE.format(node=shown(node), env=shown(environment)))
-        graph = load_graph(self._session, environment_id, environment, part=self._part)
+        graph = load_graph(
+            self._session, environment_id, environment, part=self._part, fields_of=self._fields_of
+        )
         budget.check()
         visible = _Visibility(self._authz, p, graph)
         budget.check()
