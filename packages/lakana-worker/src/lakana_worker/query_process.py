@@ -41,8 +41,8 @@ import subprocess  # nosec B404 -- a fixed argv, no shell, an environment built 
 import sys
 import tempfile
 import threading
-import uuid
 import time
+import uuid
 from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass

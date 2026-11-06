@@ -8,9 +8,9 @@ import logging
 import os
 import signal
 import sys
-import uuid
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from itertools import pairwise

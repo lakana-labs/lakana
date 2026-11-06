@@ -3976,7 +3976,9 @@ def test_a_sampler_that_cannot_start_does_not_fail_the_run(
     monkeypatch.setattr(
         "lakana_worker.launcher.cgroup.threading",
         types.SimpleNamespace(
-            Thread=lambda **kwargs: types.SimpleNamespace(start=refuse), Event=threading.Event
+            Thread=lambda **kwargs: types.SimpleNamespace(start=refuse),
+            Event=threading.Event,
+            Lock=threading.Lock,
         ),
     )
 

@@ -1058,6 +1058,7 @@ class _Consumer:
         self.asset = "sales.daily"
         self.task_run_id = uuid.uuid4()
         self.details: list[str] = []
+        self.unit: uuid.UUID | None = None
 
     def kill_for_memory(self, detail: str) -> bool:
         """End the scripted process, unless it has ended already.
