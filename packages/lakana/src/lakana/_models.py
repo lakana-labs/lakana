@@ -2654,6 +2654,63 @@ class RunPage:
 
 
 @dataclass(frozen=True)
+class TaskHistoryEntry:
+    """One attempt in the history of a task across runs.
+
+    Parameters
+    ----------
+    run_id
+        The run the attempt belongs to.
+    attempt
+        Attempt number within its task run, from 1.
+    status
+        How the attempt ended (``succeeded``, ``failed``, ``timed_out``, ``lost``,
+        ``released``, ``cancelled``), or ``running`` while it has not ended.
+    started_at
+        When it started.
+    finished_at
+        When it ended; ``None`` while it runs.
+    duration_seconds
+        Seconds from start to end; ``None`` while it runs.
+    peak_memory_bytes
+        Highest resident memory in bytes; ``None`` if it was not measured.
+    cpu_seconds
+        Processor time in seconds; ``None`` if it was not measured.
+    bytes_read
+        Bytes read; ``None`` if unknown.
+    failure_code
+        Why the attempt failed, when it did and the reason is known; otherwise ``None``.
+    """
+
+    run_id: str
+    attempt: int
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    duration_seconds: float | None
+    peak_memory_bytes: int | None
+    cpu_seconds: float | None
+    bytes_read: int | None
+    failure_code: str | None
+
+
+@dataclass(frozen=True)
+class TaskHistoryPage:
+    """One page of a task's attempts across runs, newest first.
+
+    Parameters
+    ----------
+    items
+        The attempts on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[TaskHistoryEntry]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
 class QueryListPage:
     """One page of the queries of an environment.
 

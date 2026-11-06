@@ -20,6 +20,8 @@ from lakana._models import (
     RunTask,
     SchedulerStatus,
     TaskAttempt,
+    TaskHistoryEntry,
+    TaskHistoryPage,
     TaskLog,
     WorkerCaches,
     WorkerInfo,
@@ -540,6 +542,75 @@ class Runs:
             ROUTES["runs.resume"], path_params={"env": environment, "run_id": run_id}
         )
         return run_from_json(response.json())
+
+    def task_history(
+        self,
+        environment: str,
+        job: str,
+        task: str,
+        *,
+        repository: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> TaskHistoryPage:
+        """List the attempts of one task of one job across runs, newest first.
+
+        Each entry carries what the attempt used, so a task whose memory climbs from run to
+        run shows up. A figure that was not measured is `None`.
+
+        Parameters
+        ----------
+        environment
+            Environment name.
+        job
+            The job's name.
+        task
+            The task's dotted table name.
+        repository
+            The repository; needed only when several repositories ran a job of this name.
+        limit
+            Most attempts returned (1 to 200); `None` leaves it to the server (20).
+        cursor
+            A previous page's `next_cursor`.
+
+        Returns
+        -------
+        TaskHistoryPage
+            The attempts, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.NotFoundError
+            If no run of the job has an attempt of the task.
+        lakana.errors.ConflictError
+            If several repositories ran the job and none was named.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200 or `cursor` is not one the server issued.
+        """
+        response = self._transport.request(
+            ROUTES["runs.task_history"],
+            path_params={"env": environment, "job": job, "task": task},
+            params=query_params(repository=repository, limit=limit, cursor=cursor),
+        )
+        data = response.json()
+        return TaskHistoryPage(
+            items=[
+                TaskHistoryEntry(
+                    run_id=a["run_id"],
+                    attempt=a["attempt"],
+                    status=a["status"],
+                    started_at=datetime.fromisoformat(a["started_at"]),
+                    finished_at=_when(a["finished_at"]),
+                    duration_seconds=a["duration_seconds"],
+                    peak_memory_bytes=a.get("peak_memory_bytes"),
+                    cpu_seconds=a.get("cpu_seconds"),
+                    bytes_read=a.get("bytes_read"),
+                    failure_code=a.get("failure_code"),
+                )
+                for a in data["attempts"]
+            ],
+            next_cursor=data["next_cursor"],
+        )
 
     def log(self, environment: str, run_id: str, asset: str, offset: int | None = None) -> TaskLog:
         """Return a task's free-text log and attempts, all of it or from a byte offset.

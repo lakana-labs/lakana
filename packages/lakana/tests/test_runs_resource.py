@@ -117,3 +117,43 @@ def test_a_query_status_parses_the_figures() -> None:
         {**base, "peak_memory_bytes": 7, "cpu_seconds": 1.5, "bytes_read": 9}
     )
     assert (status.peak_memory_bytes, status.cpu_seconds, status.bytes_read) == (7, 1.5, 9)
+
+
+def test_task_history_asks_for_a_page_and_parses_the_entries() -> None:
+    """The route, the query and the entries (`None` for a figure not measured)."""
+    seen: list[httpx.Request] = []
+    entry = {
+        "run_id": _RUN["id"],
+        "attempt": 2,
+        "status": "failed",
+        "started_at": "2026-11-01T12:00:00+00:00",
+        "finished_at": "2026-11-01T12:00:12+00:00",
+        "duration_seconds": 12.0,
+        "peak_memory_bytes": 432013312,
+        "cpu_seconds": 3.1,
+        "bytes_read": None,
+        "failure_code": "out_of_memory",
+    }
+    running = {**entry, "attempt": 3, "status": "running", "finished_at": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"attempts": [running, entry], "next_cursor": "abc"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    page = Runs(HttpTransport(_CONFIG, http_client=client)).task_history(
+        "dev", "nightly", "silver.clean", repository="analytics", limit=2, cursor="c0"
+    )
+    (request,) = seen
+    assert request.url.path == "/api/v1/environments/dev/jobs/nightly/tasks/silver.clean/attempts"
+    assert dict(request.url.params) == {"repository": "analytics", "limit": "2", "cursor": "c0"}
+    assert page.next_cursor == "abc"
+    newest, older = page.items
+    assert (newest.status, newest.finished_at, newest.duration_seconds) == ("running", None, 12.0)
+    assert (older.run_id, older.attempt, older.failure_code) == (_RUN["id"], 2, "out_of_memory")
+    assert (older.peak_memory_bytes, older.cpu_seconds, older.bytes_read) == (
+        432013312,
+        3.1,
+        None,
+    )
+    assert older.started_at.isoformat() == "2026-11-01T12:00:00+00:00"
