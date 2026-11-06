@@ -7,7 +7,8 @@ query's id only for the command; Ctrl-C needs nothing.
 Every query runs in a process of its own, which the worker starts and can end. A cancel asks the
 worker to end that process. A query that ends `CANCELLED` has stored nothing; one that was already
 storing its result or committing its write when the cancel arrived is not interrupted and ends
-`SUCCEEDED` (see below).
+`SUCCEEDED` (see below). A stopped query keeps the memory and processor time it had used when it
+ended (`peak_memory_bytes`, `cpu_seconds` and `bytes_read` of the query's status).
 
 ## Find a query
 

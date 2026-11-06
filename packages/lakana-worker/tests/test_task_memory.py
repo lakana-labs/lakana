@@ -386,7 +386,7 @@ def _watchdog_over_twice(
             What was ended.
         """
         kill()
-        return memory.Ended(1, ended_task)
+        return memory.Ended(1, ended_task, 4096)
 
     def stop_worker(total: int, limit: memory.Limit, **steps: Callable[[], None]) -> None:
         """Note the stop and run its record step, without exiting.
@@ -521,6 +521,8 @@ def test_a_task_the_watchdog_ended_is_recorded_by_the_stop_when_its_thread_left_
     task = _task(world, claimed.asset)
     assert task.status is TaskStatus.PENDING and task.attempt == 1
     assert task.error_message == memory.task_ended_message(memory.resolve_limit("4GB"))
+    with world.session() as session:  # the size the watchdog chose it by travels to the attempt
+        assert session.scalars(select(TaskAttempt.peak_memory_bytes)).one() == 4096
 
 
 def test_a_task_the_watchdog_ended_and_recorded_itself_is_not_recorded_again_by_the_stop(
@@ -542,6 +544,7 @@ def test_a_task_the_watchdog_ended_and_recorded_itself_is_not_recorded_again_by_
         failure_code: FailureCode | None = None,
         on_committed: str | None = None,
         stopped: bool = False,
+        resources: object = None,
     ) -> bool:
         """Pass on and note whether the record was written.
 
@@ -567,6 +570,8 @@ def test_a_task_the_watchdog_ended_and_recorded_itself_is_not_recorded_again_by_
             Passed on.
         stopped
             Passed on.
+        resources
+            Passed on.
 
         Returns
         -------
@@ -584,6 +589,7 @@ def test_a_task_the_watchdog_ended_and_recorded_itself_is_not_recorded_again_by_
             failure_code=failure_code,
             on_committed=on_committed,
             stopped=stopped,
+            resources=resources,  # ty: ignore[invalid-argument-type]
         )
         calls.append(written)
         return written
@@ -652,6 +658,31 @@ def test_a_task_the_watchdog_ended_that_is_still_in_flight_is_recorded_once_as_t
         assert len(session.scalars(select(TaskAttempt)).all()) == 1
 
 
+def test_the_attempt_of_a_task_the_watchdog_ended_keeps_the_size_it_was_ended_at(
+    world: World,
+) -> None:
+    """Only the ended task gets the peak; the other attempt in the same call stays `NULL`."""
+    from lakana_worker.activity import Activity, TaskClaim
+
+    _start(world)
+    claimed = _claim(world)
+    claim = TaskClaim(claimed.task_run_id, "w1", claimed.claim)
+    limit = memory_module.resolve_limit("4GB")
+    memory_module.record_memory_failure(
+        world.session,
+        limit,
+        lambda: 0.0,
+        "w1",
+        Activity(),
+        earlier_tasks=(claim,),
+        earlier_peaks={claim.task_run_id: 123456, uuid.uuid4(): 1},
+    )
+    with world.session() as session:
+        attempt = session.scalars(select(TaskAttempt)).one()
+        assert attempt.peak_memory_bytes == 123456
+        assert attempt.cpu_seconds is None and attempt.bytes_read is None
+
+
 def test_a_task_ended_by_an_earlier_check_does_not_count_against_a_later_lone_task(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -683,6 +714,7 @@ def test_a_task_ended_by_an_earlier_check_does_not_count_against_a_later_lone_ta
         failure_code: FailureCode | None = None,
         on_committed: str | None = None,
         stopped: bool = False,
+        resources: object = None,
     ) -> bool:
         """Note which task is recorded against, and pass on.
 
@@ -708,6 +740,8 @@ def test_a_task_ended_by_an_earlier_check_does_not_count_against_a_later_lone_ta
             Passed on.
         stopped
             Passed on.
+        resources
+            Passed on.
 
         Returns
         -------
@@ -726,6 +760,7 @@ def test_a_task_ended_by_an_earlier_check_does_not_count_against_a_later_lone_ta
             failure_code=failure_code,
             on_committed=on_committed,
             stopped=stopped,
+            resources=resources,  # ty: ignore[invalid-argument-type]
         )
 
     monkeypatch.setattr(memory_module.MemoryWatchdog, "start", lambda self: None)

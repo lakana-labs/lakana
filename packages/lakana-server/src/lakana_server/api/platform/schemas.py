@@ -570,7 +570,8 @@ class QueryStatusOut(BaseModel):
         `null` for a run that did not end that way and for a failure recorded without one
         (a run from before the field existed).
     peak_memory_bytes
-        Highest resident memory of the query's process in bytes; `null` if not measured.
+        Highest resident memory of the query's process in bytes; `null` if not measured. A query
+        that failed or was stopped keeps what it measured before it ended.
     cpu_seconds
         Processor time the query used, in seconds; `null` if not measured.
     bytes_read

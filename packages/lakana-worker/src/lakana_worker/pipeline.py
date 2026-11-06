@@ -206,6 +206,7 @@ from lakana_worker.executor import (
 )
 from lakana_worker.memory import MACHINE_MEMORY_ADVICE
 from lakana_worker.query_protocol import STORE_CERTIFICATE_UNVERIFIED
+from lakana_worker.resources import current_collector, usage_collector
 
 if TYPE_CHECKING:
     from pyiceberg.table.metadata import TableMetadata
@@ -2632,7 +2633,8 @@ def run_one(
 
     Same as `_run_one`; the run is registered with the memory watchdog meanwhile, so that
     a worker stopped for memory can fail it, and runs under the query run's cancel flag
-    (`_watching_for_cancel`): a cancel request stops the query's child.
+    (`_watching_for_cancel`): a cancel request stops the query's child. A fresh usage collector
+    is current meanwhile: what the run's query children measured is stored on the run when it ends.
 
     Parameters
     ----------
@@ -2664,6 +2666,7 @@ def run_one(
     """
     with (
         ACTIVITY.query(query_run_id),
+        usage_collector(),
         _watching_for_cancel(session, query_run_id) as requested,
         cancel_requests(requested),
     ):
@@ -3021,6 +3024,11 @@ def _run_one(
         session.rollback()
         return failure_exc
     run.finished_at = datetime.now(UTC)
+    if (collector := current_collector()) is not None:
+        measured = collector.resources
+        run.peak_memory_bytes = measured.peak_memory_bytes
+        run.cpu_seconds = measured.cpu_seconds
+        run.bytes_read = measured.bytes_read
     if not _keep_a_prior_stamp(session, run, outcome, worker_id=worker_id):
         if run.status is QueryRunStatus.RUNNING:
             # Another worker holds the run (the stamp matches only this worker's id): its own
