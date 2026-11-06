@@ -610,7 +610,7 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ),
         (
             "timestamp",
-            r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?",
+            r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?",
             "<timestamp>",
         ),
         ("hash", rf"(?<![0-9A-Za-z]){_HEX}{{40,64}}(?![0-9A-Za-z])", "<hash>"),
