@@ -35,7 +35,7 @@ def _attempts(client: TestClient, count: int) -> str:
     """
     _deploy(client)
     started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
-    with Session(client.app.state.engine) as session:  # ty: ignore[unresolved-attribute]
+    with Session(client.app.state.engine) as session:
         run = session.get(Run, uuid.UUID(started["id"]))
         assert run is not None
         run.job = "nightly"
