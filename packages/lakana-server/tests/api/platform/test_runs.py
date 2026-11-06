@@ -12,6 +12,11 @@ from sqlalchemy.orm import Session
 from lakana_core.models import Run, RunStatus, TaskRun, TaskStatus
 from lakana_core.runs.service import task_log_path
 from lakana_core.storage.resolver import StorageResolver
+from lakana_server.api.platform.schemas import (
+    QueryStatusOut,
+    TaskAttemptOut,
+    TaskAttemptResourcesOut,
+)
 from tests.api.platform.test_deployments_run_as import _deploy
 from tests.api.platform.test_deploys import _token_for
 from tests.conftest import AUTH_HEADER
@@ -984,8 +989,8 @@ def test_the_run_detail_lists_each_attempts_resources(client: TestClient) -> Non
     assert [a["bytes_read"] for a in log["attempts"]] == [None, 1288490188]
 
 
-def test_the_openapi_says_where_the_figures_come_from(client: TestClient) -> None:
+def test_the_openapi_says_where_the_figures_come_from() -> None:
     """`bytes_read` is documented as DuckDB's measured figure."""
-    schemas = client.get("/openapi.json").json()["components"]["schemas"]
-    for name in ("TaskAttemptOut", "TaskAttemptResourcesOut", "QueryStatusOut"):
-        assert "DuckDB" in schemas[name]["properties"]["bytes_read"]["description"], name
+    for model in (TaskAttemptOut, TaskAttemptResourcesOut, QueryStatusOut):
+        description = model.model_json_schema()["properties"]["bytes_read"]["description"]
+        assert "DuckDB" in description, model.__name__

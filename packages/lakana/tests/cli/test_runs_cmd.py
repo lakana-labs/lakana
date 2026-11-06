@@ -2094,6 +2094,8 @@ def test_runs_show_and_run_print_the_note_and_an_administrators_warnings(tmp_pat
         ((1023, None, 1024), "1023 B · 1.0 KiB read"),
         ((None, None, 5 * 2**40), "5.0 TiB read"),
         ((None, 59.96, None), "1 m 0 s CPU"),
+        ((104_806_000, None, None), "100 MiB"),
+        ((104_750_000, None, None), "99.9 MiB"),
     ],
 )
 def test_resources_text(args: tuple[int | None, float | None, int | None], text: str) -> None:

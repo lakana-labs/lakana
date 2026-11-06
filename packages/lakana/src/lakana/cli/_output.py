@@ -198,7 +198,9 @@ def _bytes_text(count: int) -> str:
         unit += 1
     if unit == 0:
         return f"{count} B"
-    return f"{value:.0f} {_UNITS[unit]}" if value >= 100 else f"{value:.1f} {_UNITS[unit]}"
+    return (
+        f"{value:.0f} {_UNITS[unit]}" if round(value, 1) >= 100 else f"{value:.1f} {_UNITS[unit]}"
+    )
 
 
 def _cpu_text(seconds: float) -> str:
