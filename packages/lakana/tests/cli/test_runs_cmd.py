@@ -2117,13 +2117,18 @@ def _with_attempts(*attempts: dict[str, object]) -> dict[str, object]:
     return _run("succeeded", {**_task("a.b", "succeeded", 2), "attempts": list(attempts)})
 
 
-_FIRST = {
+_FIRST: dict[str, object] = {
     "attempt": 1,
     "peak_memory_bytes": 432013312,
     "cpu_seconds": 3.1,
     "bytes_read": 1288490188,
 }
-_SECOND = {"attempt": 2, "peak_memory_bytes": None, "cpu_seconds": None, "bytes_read": None}
+_SECOND: dict[str, object] = {
+    "attempt": 2,
+    "peak_memory_bytes": None,
+    "cpu_seconds": None,
+    "bytes_read": None,
+}
 
 
 def test_run_show_lists_resources_per_attempt(tmp_path: Path) -> None:
