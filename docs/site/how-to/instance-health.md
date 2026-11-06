@@ -286,6 +286,50 @@ The first command lists every volume with its size. The second shows how full th
 the workers' cache is. Also look at the disk of the machine itself with `df -h` on the host.
 The documentation gives no figure for how much space your data needs; measure on your own data.
 
+## Which task needs the most memory
+
+Set a memory limit for a task, or find the one that grows, from what its attempts used.
+`lakana task history JOB TASK` lists the newest attempts of one task of one job across all its
+runs, newest first:
+
+<!-- source: docs/examples/run-a-job/run.sh#task-history -->
+```bash
+lakana task history hourly_bronze bronze.readings --env dev --last 10
+```
+
+<!-- output: run-a-job#task-history -->
+```text
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━┓
+┃ run                                  ┃ attempt ┃ status    ┃ duration ┃ resources ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━┩
+│ 87189d2e-caab-4e49-953f-d9f53a1fb143 │ 1       │ succeeded │ 1.0s     │ —         │
+└──────────────────────────────────────┴─────────┴───────────┴──────────┴───────────┘
+```
+
+- **`run` and `attempt`**: the run the attempt belongs to (`lakana runs show RUN_ID` shows the
+  run) and its number; a task that was retried has several attempts in one run.
+- **`status`**: how the attempt ended. A failed attempt names why, as in `failed (out_of_memory)`
+  ([Why did it fail?](../reference/why-did-it-fail.md)); one that has not ended is `running`.
+- **`resources`**: the highest memory the attempt reached, its processor time and the bytes it
+  read, for example `412 MiB · 3.1 s CPU · 1.2 GiB read`. A part that was not measured is left
+  out, and a row with no part at all shows `—`.
+
+A task whose memory climbs run over run reads from the bottom of the table upwards: the
+`resources` of each newer row is larger than the one before, while the data it reads grows too.
+That is the time to raise its limit, or to read less of the data per run, before an attempt
+fails with `out_of_memory`.
+
+`--last` sets how many attempts to show (1 to 200, 20 by default); when older ones exist the
+command says so. Name the repository with `--repo` when two repositories have a job with the
+same name, and the environment with `--env`. `--output json` prints every figure for a script.
+
+A `—`, or a missing part, means nobody measured it. Figures are recorded only for attempts that
+ran after the upgrade that brought them, so older attempts show `—`. A task in a container on a
+host whose control groups the launcher cannot read has no memory figure, and a Python task that
+was killed has no count of bytes read. The command answers 404 when no run of the job has an
+attempt of the task: check both names (`lakana job list` shows the jobs); a task that has not
+run yet has no history.
+
 ## A stuck run and why
 
 A query or a task that has not started says why, in one sentence, and a task that failed has a
