@@ -268,6 +268,55 @@ def test_a_launcher_that_predates_the_figures_gives_none(tmp_path: Path) -> None
     assert outcome.resources == AttemptResources(None, None, 7)
 
 
+@pytest.mark.parametrize("record_status", ["succeeded", "failed"])
+def test_the_bytes_read_survive_a_launcher_that_timed_out(
+    tmp_path: Path, record_status: str
+) -> None:
+    """The record is read although the launcher did not answer; its bytes read stay."""
+    record: dict[str, object] = {"status": record_status, "bytes_read": 4096}
+    if record_status == "succeeded":
+        record["rows"] = 3
+    else:
+        record.update(error_type="E", message="x", retryable=False)
+    launcher = FakeLauncher()
+
+    def silent(request: dict[str, Any], on_log: Callable[[bytes], None]) -> dict[str, object]:
+        """Write the record, then never answer.
+
+        Parameters
+        ----------
+        request
+            The request.
+        on_log
+            The log sink.
+
+        Raises
+        ------
+        LauncherTimedOut
+            Always.
+        """
+        work = Path(request["_attempt_dir"]) / "task"
+        (work / "result.json").write_text(json.dumps(record))
+        raise LauncherTimedOut("no result")
+
+    launcher.scripts["run"] = silent
+
+    outcome, _, _ = _run(tmp_path, launcher)
+
+    assert outcome.resources == AttemptResources(None, None, 4096)
+
+
+def test_the_figures_survive_a_container_without_an_exit_status(tmp_path: Path) -> None:
+    """Docker gave no exit status: the launcher's figures and the record's bytes still show."""
+    result = {"exit": None, "oom_killed": False, "peak_memory_bytes": 7, "cpu_seconds": 0.25}
+    record = {"status": "succeeded", "rows": 1, "bytes_read": 9}
+
+    outcome, _, _ = _run(tmp_path, FakeLauncher(scripts={"run": _writes(record, result)}))
+
+    assert outcome.failure_code is FailureCode.INTERNAL
+    assert outcome.resources == AttemptResources(7, 0.25, 9)
+
+
 def test_a_stale_record_from_an_earlier_run_is_removed_first(tmp_path: Path) -> None:
     """A record left in the work directory must not count for this run."""
     work = tmp_path / "attempt-abc_12" / "task"

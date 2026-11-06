@@ -137,6 +137,11 @@ def read_cgroup(directory: Path) -> CgroupReading:
 class CgroupSampler:
     """Read a running container's cgroup in the background; keep the highest memory.
 
+    It reads at once, then every `interval` seconds, and the launcher reads once more when the
+    output ends and again after the container is waited for. The cgroup is deleted when the
+    container's process ends, so the figures are the highest values seen by the last successful
+    read: lower bounds, and none for a task that ended before the first read.
+
     Parameters
     ----------
     container_id
@@ -153,7 +158,7 @@ class CgroupSampler:
         self,
         container_id: str,
         *,
-        interval: float = 1.0,
+        interval: float = 0.25,
         root: Path = DEFAULT_ROOT,
         sleep: Callable[[float], bool] | None = None,
     ) -> None:
@@ -168,15 +173,21 @@ class CgroupSampler:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        """Start sampling in a daemon thread."""
-        self._thread = threading.Thread(target=self._run, daemon=True, name="cgroup-sampler")
-        self._thread.start()
+        """Start sampling in a daemon thread; if none can start, there are no samples."""
+        try:
+            thread = threading.Thread(target=self._run, daemon=True, name="cgroup-sampler")
+            thread.start()
+        except RuntimeError as error:
+            logger.debug("cgroup sampler not started: %s", error)
+            return
+        self._thread = thread
+
+    def sample(self) -> None:
+        """Read once now, e.g. as the container's output ends, before its cgroup is deleted."""
+        self._sample()
 
     def stop(self) -> CgroupReading:
         """Stop sampling, read once more and give what was seen.
-
-        The container has exited but is not yet removed here, so the last read often sees the
-        final figures of a task that ran for less than one interval.
 
         Returns
         -------
@@ -190,7 +201,8 @@ class CgroupSampler:
         return CgroupReading(self._peak, self._cpu)
 
     def _run(self) -> None:
-        """Sample until stopped."""
+        """Read at once, then sample until stopped."""
+        self._sample()
         while not self._sleep(self._interval):
             self._sample()
 

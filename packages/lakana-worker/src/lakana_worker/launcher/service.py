@@ -2032,6 +2032,10 @@ class Launcher:
                     emit({"log": base64.b64encode(payload).decode("ascii")})
             finally:
                 stream.close()
+            # The process has ended and its cgroup goes with the container, which `/wait` below
+            # only reports afterwards: this is the read most likely to see the final figures.
+            assert sampler is not None  # nosec B101 -- set above, before the stream was read
+            sampler.sample()
             # The stream ended, so the container is gone or about to be: wait no longer than its
             # timeout, its grace and a margin, then the removal below is forced.
             left = max(timeout - (time.monotonic() - began), 0.0)

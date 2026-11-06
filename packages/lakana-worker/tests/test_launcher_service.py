@@ -275,6 +275,9 @@ class _SamplerSpy:
     def start(self) -> None:
         self.order.append("start")
 
+    def sample(self) -> None:
+        self.order.append("sample")
+
     def stop(self) -> service_module.CgroupReading:
         self.order.append("stop")
         return self.reading
@@ -312,7 +315,7 @@ def _spied(engine: FakeEngine, monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_a_run_reports_the_cgroup_figures_of_its_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The sampler starts with the container, stops after `/wait`, and its figures are returned."""
+    """It starts with the container, reads once as the output ends, stops after `/wait`."""
     engine = FakeEngine()
     order = _spied(engine, monkeypatch)
     launcher = _started(engine, tmp_path, cgroup_root=tmp_path / "cg")
@@ -321,7 +324,7 @@ def test_a_run_reports_the_cgroup_figures_of_its_container(
     result = launcher.run(_run(), lambda line: None)
 
     assert (result["peak_memory_bytes"], result["cpu_seconds"]) == (536870912, 3.1)
-    assert order == ["start", "wait", "stop"]
+    assert order == ["start", "sample", "wait", "stop"]
     assert [root for _, root in _SamplerSpy.made] == [tmp_path / "cg"]
     assert _SamplerSpy.made[0][0].startswith("c")
 
@@ -346,7 +349,7 @@ def test_the_sampler_stops_when_waiting_for_the_container_fails(
     with pytest.raises(EngineError):
         launcher.run(_run(), lambda line: None)
 
-    assert order == ["start", "stop"]
+    assert order == ["start", "sample", "stop"]
 
 
 def test_the_sampler_stops_when_the_output_cannot_be_sent(
@@ -3958,3 +3961,26 @@ def test_a_relays_output_buffered_at_its_removal_still_reaches_the_caller(tmp_pa
     launcher.check(_check(relay=(_DB,)), emitted.append)
 
     assert first in _logs(emitted) and second in _logs(emitted)
+
+
+def test_a_sampler_that_cannot_start_does_not_fail_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thread pressure in the launcher costs the figures, never the task."""
+
+    def refuse() -> None:
+        raise RuntimeError("can't start new thread")
+
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    monkeypatch.setattr(
+        "lakana_worker.launcher.cgroup.threading",
+        types.SimpleNamespace(
+            Thread=lambda **kwargs: types.SimpleNamespace(start=refuse), Event=threading.Event
+        ),
+    )
+
+    result = launcher.run(_run(), lambda line: None)
+
+    assert result["exit"] == 0
+    assert (result["peak_memory_bytes"], result["cpu_seconds"]) == (None, None)

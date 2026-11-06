@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import types
 from collections.abc import Callable
 from pathlib import Path
 
@@ -193,3 +195,43 @@ def test_a_sampler_keeps_each_figure_it_can_read(tmp_path: Path) -> None:
     other = tmp_path / "other"
     _tree(other / f"docker/{ID}", cpu="user_usec 1\n")
     assert CgroupSampler(ID, root=other).stop() == CgroupReading(536870912, None)
+
+
+def test_the_first_read_comes_before_the_first_sleep(tmp_path: Path) -> None:
+    """A task that ends within the first interval still has a reading."""
+    _tree(tmp_path / f"docker/{ID}")
+    sampler = CgroupSampler(ID, root=tmp_path, sleep=lambda seconds: True)
+    sampler.start()
+    sampler._thread.join(5)  # ty: ignore[unresolved-attribute]
+    (tmp_path / f"docker/{ID}/memory.peak").unlink()
+    (tmp_path / f"docker/{ID}/cpu.stat").unlink()
+    (tmp_path / f"docker/{ID}").rmdir()
+    assert sampler.stop() == CgroupReading(536870912, 3.1)
+
+
+def test_sample_reads_on_demand(tmp_path: Path) -> None:
+    """`sample` is the read the launcher makes as the output stream ends."""
+    _tree(tmp_path / f"docker/{ID}")
+    sampler = CgroupSampler(ID, root=tmp_path)
+    sampler.sample()
+    assert sampler.stop() == CgroupReading(536870912, 3.1)
+
+
+def test_a_thread_that_cannot_start_is_not_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`start` and `stop` survive thread pressure; the final read still works."""
+    _tree(tmp_path / f"docker/{ID}")
+
+    def refuse() -> None:
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(
+        "lakana_worker.launcher.cgroup.threading",
+        types.SimpleNamespace(
+            Thread=lambda **kwargs: types.SimpleNamespace(start=refuse), Event=threading.Event
+        ),
+    )
+    sampler = CgroupSampler(ID, root=tmp_path)
+    sampler.start()
+    assert sampler.stop() == CgroupReading(536870912, 3.1)

@@ -1761,8 +1761,10 @@ class DockerRunner:
             )
         if isinstance(error, LauncherTimedOut):
             self._stop(ident)
+            record = _read_record(work / RESULT_FILE, task.output)
+            figures = AttemptResources(bytes_read=valid_count((record or {}).get("bytes_read")))
             outcome = _outcome_from(
-                _read_record(work / RESULT_FILE, task.output),
+                record,
                 code=-1,
                 stopped=True,
                 timed_out=stop.reason is None,
@@ -1771,13 +1773,14 @@ class DockerRunner:
                 secrets_to_hide=secrets_to_hide,
             )
             if outcome.succeeded or stop.reason is not None:
-                return outcome
+                return dataclasses.replace(outcome, resources=figures)
             return RunOutcome(
                 succeeded=False,
                 error_message=_deadline_message(deadline, self._deadline_margin),
                 killed=True,
                 timed_out=True,
                 failure_code=FailureCode.TIMEOUT,
+                resources=figures,
             )
         if isinstance(error, LauncherUnavailable):
             return RunOutcome(
@@ -1815,19 +1818,20 @@ class DockerRunner:
         timed_out = result.get("timed_out") is True
         stopped = result.get("stopped") is True or timed_out or oom
         code = _exit_status(result.get("exit"))
-        if code is None and not stopped:
-            return RunOutcome(
-                succeeded=False,
-                error_message="the task's container ended without an exit status from Docker; "
-                "the launcher's log has the reason (docker compose logs launcher)",
-                failure_code=FailureCode.INTERNAL,
-            )
         record = _read_record(work / RESULT_FILE, task.output)
         resources = AttemptResources(
             valid_count(result.get("peak_memory_bytes")),
             valid_seconds(result.get("cpu_seconds")),
             valid_count((record or {}).get("bytes_read")),
         )
+        if code is None and not stopped:
+            return RunOutcome(
+                succeeded=False,
+                error_message="the task's container ended without an exit status from Docker; "
+                "the launcher's log has the reason (docker compose logs launcher)",
+                failure_code=FailureCode.INTERNAL,
+                resources=resources,
+            )
         outcome = _outcome_from(
             record,
             code=-1 if code is None else code,
