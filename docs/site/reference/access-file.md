@@ -2,13 +2,14 @@
 
 An access file lists, in one YAML file, who has access to what: groups and their members, service
 accounts, grants, row filters, column masks and CI trust rules. You can write the file by hand or
-start from `lakana access export`, keep it in git, and read what it would change with
-`lakana access plan` before anything is applied. This page lists the exact format, the limits,
-the two commands and every error. For the steps, see the how-to guides; for the lists and
+start from `lakana access export`, keep it in git, read what it would change with
+`lakana access plan`, and make the changes with `lakana access apply`. This page lists the exact
+format, the limits, the four commands and every error. For the steps, see [Keep access in a
+reviewed file](../how-to/keep-access-in-a-reviewed-file.md); for the lists and
 explanations of access that exist today, see [Grants, permissions, principals and
 groups](access.md).
 
-This page covers reading a file, where `export` and `plan` change nothing, and how a scope a
+`export`, `plan` and `status` change nothing; `apply` makes the changes, and from then on a scope a
 file manages refuses changes made outside it.
 
 ## An example
@@ -286,11 +287,55 @@ Route: `POST /api/v1/access/plan` with `{"file_name": "access.yaml", "text": "..
 SDK: `client.access.plan(text, file_name="access.yaml", allow_lockout=False)` returns an
 `AccessPlan` with the same fields.
 
+## Apply
+
+`lakana access apply access.yaml` makes the file's changes in one transaction: all of them or
+none, with one `ACCESS_APPLIED` event in the audit log and every change linked to it by an apply
+id. It records the scopes the file manages, the file's hash and the commit, and from then on
+those scopes refuse changes made outside the file (see [Changes outside the
+file](#changes-outside-the-file)). A scope that an earlier apply managed and the file no longer
+lists is released: the plan shows `stops managing prod`, and the apply prints `Stopped managing:
+prod`.
+
+| Option | Meaning |
+|---|---|
+| `--plan-fingerprint F` | The `Fingerprint:` of the plan you reviewed. The apply is refused with `409` when access changed since. |
+| `--source-commit SHA` | The commit the file came from (7 to 64 hex digits). Recorded with the apply and shown by `status`. |
+| `--yes` | Do not ask. |
+| `--allow-lockout` | As for `plan`. |
+
+Without `--plan-fingerprint` the command plans the file, prints the plan, asks `Apply these
+changes?` (unless `--yes`), and applies exactly that plan. Without `--yes` and without a
+terminal it stops before anything changes, with a message that names `--yes`: in CI pass `--yes`,
+and `--plan-fingerprint` to apply the plan an earlier step showed. A plan with problems is never
+applied. The server makes the plan again under a lock and compares its fingerprint, so what you
+reviewed is what is applied. The command prints `Applied: 3 created, 0 changed, 1 removed.`;
+`--output json` prints the result as an object. The SDK never repeats an apply request on its
+own.
+
+Route: `POST /api/v1/access/apply` with `{"file_name": "access.yaml", "text": "...",
+"plan_fingerprint": "64 hex digits", "source_commit": null, "allow_lockout": false}`, answering
+`200` with `apply_id`, `file_sha256`, `source_commit`, `created`, `changed`, `removed`,
+`released` and `applied_at`. SDK: `client.access.apply(text, plan_fingerprint=..., file_name=...,
+source_commit=..., allow_lockout=False)` returns an `AccessApplyResult`.
+
+## Status
+
+`lakana access status` lists each managed scope with the file, the commit, who applied it and
+when. Under `Open overrides (the next apply reverts them unless the file lists them):` it lists
+the changes made with `--override-managed` since the scope's last apply, with who, when and why.
+`--output json` prints both lists. Route: `GET /api/v1/access/status`, answering `{"scopes":
+[...], "overrides": [...]}`. SDK: `client.access.status()` returns an `AccessStatus`.
+
 ## Who may use it
 
-Both calls need the `ADMIN` role on the instance. They are refused with `403` for anyone else, and
-the refusal is recorded in the audit log. They take a personal access token: a CI token or a task
-token is refused, so a CI job cannot read or change who has access.
+All four commands need the `ADMIN` role on the instance. They are refused with `403` for anyone
+else, and the refusal is recorded in the audit log. They take a personal access token: a CI token
+or a task token is refused with `403` on all four routes, so a CI job cannot read or change who has
+access. A CI job that applies a file therefore holds an administrator's personal token as a
+secret; letting a CI token apply is a later option, tracked in
+[issue 455](https://github.com/lakana-labs/lakana/issues/455). The how-to describes the stricter
+way, where CI only plans.
 
 ## Errors
 
@@ -316,3 +361,9 @@ token is refused, so a CI job cannot read or change who has access.
 | `access.yaml: the file removes your own ADMIN role on the instance (MANAGE_GRANT); keep it, or repeat with --allow-lockout if another administrator applies from now on` | Pass `--allow-lockout` only when someone else will apply from now on. |
 | `file_name must be 1 to 255 characters without / or \ or a control character; send the file's base name, such as access.yaml` | `422`: send the base name only. |
 | `no environment X; lakana env list shows them` | `422`, for `export --scope`. |
+| `access changed since your plan (fingerprint 3fa9c1…); nothing was applied. Run lakana access plan again and review the changes` | `409`. Someone changed access after your plan. Plan again, read the new plan, and apply with its fingerprint. |
+| `access.yaml: ...` (one line per problem, the same texts as above) | `422` from `apply`: the file has problems and nothing was applied. All are listed, at most 50 and then `and N more problems`. Fix them, then plan again. |
+| `the file removes your own ADMIN role in more than one change, so it would end before the rest of the changes can be made; nothing was applied. Apply in two steps: ...` | `409`. Your last way to administer is a group whose `ADMIN` grant and whose membership of you both go. Apply a first file that keeps one of them, then the file without it. |
+| `access.yaml: service_accounts: the file removes service:access-admin, the account applying it, which would end its access part-way through the apply; have another administrator apply this file` | A problem in the plan, so `422` on apply. The account applying the file cannot remove itself. Another administrator applies the file, or keep the account in `service_accounts`. |
+| `` `prod` is managed by an access file (last applied ...); change the file and run `lakana access apply`, or, in an emergency, repeat with `--override-managed --reason …` `` | `409`, from a command that changes access by hand. See [Changes outside the file](#changes-outside-the-file) and [The override](#the-override). |
+| `lakana access apply asks before it changes access; in CI pass --yes, with --plan-fingerprint from the plan step` | The CLI, exit 1: there is no terminal to ask on. Pass `--yes`. |

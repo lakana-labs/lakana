@@ -6028,6 +6028,30 @@ matter for an operator deciding where to run it:
 - **Strict YAML.** No anchors, aliases, merge keys, tags or duplicate keys; `on`, `no`, `off`,
   `yes` are text (YAML 1.2 booleans). Each of the first four would hide what a file grants from
   its reviewer or expand the file's size beyond what the limit counts.
+- **Apply and status authorize like export and plan.** `AccessService.apply` and `status` call
+  `authorize_admin_only` for `MANAGE_GRANT` first; `apply` then requires `MANAGE_POLICY`,
+  `MANAGE_PRINCIPAL`, `MANAGE_GROUP` and `MANAGE_TOKEN` through `_authorize`, so no service call
+  inside the transaction can be denied half-way. A CI token and a task token get 403 on all four
+  routes (`test_a_ci_token_is_refused_on_the_access_routes`,
+  `test_a_task_token_is_refused_on_the_access_routes`). A CI job therefore applies with an
+  administrator's personal token stored as a secret; the stricter pattern is CI running only
+  `plan` and an administrator applying after the merge. A CI-token apply is a later option
+  (#455).
+- **Apply is atomic and compares, never trusts.** It takes the exclusive access lock, plans again
+  inside the lock and compares the fingerprint of that plan with the caller's (409 when they
+  differ, before any change). Every change then runs in one transaction through the services
+  with `ACCESS_APPLY_KEY` set, and the single `ACCESS_APPLIED` event carries the apply id that
+  links each change's own event. Any error rolls the whole transaction back, so no half-applied
+  state is committed; a denial is audited after the rollback. Two checks keep the caller from
+  ending its own access part-way: a file that removes the applying service account is a plan
+  problem (422), and a file whose last remaining ADMIN path for the caller is a group whose
+  grant and membership both go is refused with 409 "apply in two steps".
+  The SDK sends the request with `retry=False`, so a lost answer never becomes a second apply.
+- **The CLI confirms, the server decides.** `lakana access apply` without `--plan-fingerprint`
+  plans, prints and asks (`--yes` skips the question; no terminal and no `--yes` is refused
+  before anything is sent). The confirmation is a convenience: the authority is the fingerprint
+  the server compares, so a client that skips the question changes nothing a caller could not
+  already do with the REST route.
 
 ## Mutation testing
 
