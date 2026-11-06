@@ -264,6 +264,12 @@ class TaskAttemptView:
     failure
         The code, cause and next step of a failed attempt; ``unknown`` for one recorded before
         the codes existed; `None` for an attempt that did not fail.
+    peak_memory_bytes
+        Peak resident memory of the attempt in bytes; `None` if it was not measured.
+    cpu_seconds
+        Processor time the attempt used in seconds; `None` if it was not measured.
+    bytes_read
+        Bytes the attempt read from tables, files and sources; `None` if they were not counted.
     """
 
     attempt: int
@@ -274,6 +280,31 @@ class TaskAttemptView:
     rows_written: int | None
     error_message: str | None
     failure: Failure | None = None
+    peak_memory_bytes: int | None = None
+    cpu_seconds: float | None = None
+    bytes_read: int | None = None
+
+
+@dataclass(frozen=True)
+class AttemptResourcesView:
+    """What one attempt used, as the run detail shows it.
+
+    Parameters
+    ----------
+    attempt
+        Attempt number.
+    peak_memory_bytes
+        Peak resident memory in bytes; `None` if it was not measured.
+    cpu_seconds
+        Processor time in seconds; `None` if it was not measured.
+    bytes_read
+        Bytes read from tables, files and sources; `None` if they were not counted.
+    """
+
+    attempt: int
+    peak_memory_bytes: int | None = None
+    cpu_seconds: float | None = None
+    bytes_read: int | None = None
 
 
 @dataclass(frozen=True)
@@ -340,6 +371,8 @@ class TaskRunView:
         measures, checks, glossary terms, assets), or that it could not be checked; only what
         the reader may see: `READ_ENVIRONMENT` and `READ_TABLE` on every table a use names
         (`lakana_core.catalog.retype_impact.impact_for_reader`, #446).
+    attempts
+        What each attempt used, oldest first.
     """
 
     asset: str
@@ -363,6 +396,7 @@ class TaskRunView:
     schema_note: str | None = None
     policy_warnings: tuple[PolicyWarningView, ...] = ()
     impact_warnings: tuple[ImpactWarningView, ...] = ()
+    attempts: tuple[AttemptResourcesView, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -473,6 +507,47 @@ class PreparedStart(NamedTuple):
     selection: Selection
     assets: Sequence[str]
     actor: PrincipalRef
+
+
+@dataclass(frozen=True)
+class TaskHistoryEntry:
+    """One attempt of a task in the history of that task across runs.
+
+    Parameters
+    ----------
+    run_id
+        The run the attempt belongs to.
+    attempt
+        The attempt's number within its task run, from 1.
+    status
+        The attempt's outcome (``succeeded``, ``failed``, ``timed_out``, ``lost``,
+        ``released``, ``cancelled``), or ``running`` while it has none.
+    started_at
+        When the attempt started.
+    finished_at
+        When it ended; `None` while it runs.
+    duration_seconds
+        Seconds from start to end; `None` while it runs.
+    peak_memory_bytes
+        Peak memory in bytes, or `None` if not measured.
+    cpu_seconds
+        Processor time in seconds, or `None` if not measured.
+    bytes_read
+        Bytes read, or `None` if not counted.
+    failure_code
+        Why the attempt did not succeed, when it did not and the reason is known.
+    """
+
+    run_id: uuid.UUID
+    attempt: int
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    duration_seconds: float | None
+    peak_memory_bytes: int | None
+    cpu_seconds: float | None
+    bytes_read: int | None
+    failure_code: str | None
 
 
 @dataclass(frozen=True)
@@ -1070,6 +1145,22 @@ class RunService:
                     .order_by(TaskAttempt.attempt)
                 )
             }
+            figures: dict[uuid.UUID, list[AttemptResourcesView]] = {}
+            for attempt_row in self._session.execute(
+                select(
+                    TaskAttempt.task_run_id,
+                    TaskAttempt.attempt,
+                    TaskAttempt.peak_memory_bytes,
+                    TaskAttempt.cpu_seconds,
+                    TaskAttempt.bytes_read,
+                )
+                .join(TaskRun, TaskRun.id == TaskAttempt.task_run_id)
+                .where(TaskRun.run_id == run.id)
+                .order_by(TaskAttempt.attempt)
+            ):
+                figures.setdefault(attempt_row[0], []).append(
+                    AttemptResourcesView(*attempt_row[1:])
+                )
             reasons = self._waiting(run, [task for task, _ in rows], reader, env.name)
             built = set(manifest_assets(version.manifest_json)) if version is not None else set()
             run_as = self._name(run.run_as_principal_id)
@@ -1138,6 +1229,7 @@ class RunService:
                     schema_note=schema_changes[task.id][0],
                     policy_warnings=schema_changes[task.id][1],
                     impact_warnings=impacts.get(task.id, ()),
+                    attempts=tuple(figures.get(task.id, ())),
                 )
                 for task, rows_written in rows
             )
@@ -2315,6 +2407,192 @@ class RunService:
 
     # -- logs and status -----------------------------------------------------
 
+    def _declares_task(self, env: Environment, job: str, task: str, repository: str | None) -> bool:
+        """Say whether a deployed project version has the job and the job runs the task.
+
+        Parameters
+        ----------
+        env
+            The environment.
+        job
+            The job's name.
+        task
+            The task's name (its table).
+        repository
+            Only this repository's deployed version; `None` for any.
+
+        Returns
+        -------
+        bool
+            `True` if the current version of some deployed repository has the job and the job's
+            selection covers the table.
+        """
+        query = (
+            select(JobVersion.manifest_json)
+            .join(
+                EnvironmentDeployment,
+                EnvironmentDeployment.current_job_version_id == JobVersion.id,
+            )
+            .where(EnvironmentDeployment.environment_id == env.id)
+        )
+        if repository is not None:
+            query = query.where(
+                EnvironmentDeployment.repository_id == self._repository(repository).id
+            )
+        return any(
+            self._job_covers(manifest, job, task) for manifest in self._session.scalars(query)
+        )
+
+    @staticmethod
+    def _job_covers(manifest: Mapping[str, object], job: str, task: str) -> bool:
+        """Say whether a manifest's job selects a task.
+
+        Parameters
+        ----------
+        manifest
+            A stored manifest; untrusted.
+        job
+            The job's name.
+        task
+            The task's name (its table).
+
+        Returns
+        -------
+        bool
+            `True` if the manifest has the job and its selection resolves to the task.
+        """
+        entry = manifest_jobs(manifest).get(job)
+        if entry is None or task not in manifest_assets(manifest):
+            return False
+        try:
+            covered = resolve_selection(ManifestGraph.from_manifest(manifest), selection_of(entry))
+        except ValidationError:
+            return False
+        return task in covered
+
+    def task_attempts(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        job: str,
+        task: str,
+        *,
+        repository: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> tuple[list[TaskHistoryEntry], str | None]:
+        """List the attempts of one task of one job across runs, newest first.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        environment
+            Environment name.
+        job
+            The job's name.
+        task
+            The task's name (its table).
+        repository
+            The repository; needed only when several repositories ran a job of this name.
+        limit
+            Most attempts returned (1 to 200).
+        cursor
+            The cursor of the previous page. Attempts are ordered by start time, then id.
+
+        Returns
+        -------
+        tuple of (list of TaskHistoryEntry, str or None)
+            The page, and the cursor of the next one, or `None` on the last.
+
+        Raises
+        ------
+        PermissionDenied
+            Without RUN or READ_ENVIRONMENT.
+        NotFoundError
+            If the environment or repository does not exist, or the job or task is unknown: no
+            deployed project declares it and no run attempted it. A declared task that has not
+            run yet gives an empty page.
+        ConflictError
+            If several repositories ran the job and none was named.
+        ValidationError
+            If `limit` is outside 1 to 200 or `cursor` is not one this server issued for this
+            list.
+        """
+        env = self._authorize_read(p, environment)
+        if not 1 <= limit <= 200:
+            raise ValidationError(f"limit must be between 1 and 200, got {limit}.")
+        position = None if cursor is None else decode_cursor("task-history", cursor)
+        scope = [
+            Run.environment_id == env.id,
+            Run.job == job,
+            TaskRun.asset == task,
+        ]
+        if repository is not None:
+            scope.append(Run.repository_id == self._repository(repository).id)
+        base = (
+            select(TaskAttempt, TaskRun.run_id)
+            .join(TaskRun, TaskRun.id == TaskAttempt.task_run_id)
+            .join(Run, Run.id == TaskRun.run_id)
+            .where(*scope)
+        )
+        repositories = self._session.scalars(
+            select(Run.repository_id)
+            .join(TaskRun, TaskRun.run_id == Run.id)
+            .join(TaskAttempt, TaskAttempt.task_run_id == TaskRun.id)
+            .where(*scope)
+            .distinct()
+            .limit(2)
+        ).all()
+        if not repositories:
+            if self._declares_task(env, job, task, repository):
+                return [], None
+            raise NotFoundError(
+                f"No task {task!r} of job {job!r} in {environment!r}: the project declares no "
+                "such job or task, and no run has attempted it. Check both names "
+                "(`lakana job list` shows the jobs)."
+            )
+        if len(repositories) > 1:
+            raise ConflictError(
+                f"Several repositories ran job {job!r} in {environment!r}. Name one with the "
+                "`repository` parameter (`--repo` on the command line)."
+            )
+        if position is not None:
+            base = base.where(
+                or_(
+                    TaskAttempt.started_at < position.at,
+                    and_(TaskAttempt.started_at == position.at, TaskAttempt.id < position.id),
+                )
+            )
+        rows = self._session.execute(
+            base.order_by(TaskAttempt.started_at.desc(), TaskAttempt.id.desc()).limit(limit + 1)
+        ).all()
+        page = rows[:limit]
+        next_cursor = None
+        if len(rows) > limit:
+            last = page[-1][0]
+            next_cursor = encode_cursor("task-history", last.started_at, last.id)
+        entries = [
+            TaskHistoryEntry(
+                run_id=run_id,
+                attempt=a.attempt,
+                status="running" if a.outcome is None else a.outcome.value,
+                started_at=a.started_at,
+                finished_at=a.finished_at,
+                duration_seconds=(
+                    None
+                    if a.finished_at is None
+                    else (a.finished_at - a.started_at).total_seconds()
+                ),
+                peak_memory_bytes=a.peak_memory_bytes,
+                cpu_seconds=a.cpu_seconds,
+                bytes_read=a.bytes_read,
+                failure_code=a.failure_code,
+            )
+            for a, run_id in page
+        ]
+        return entries, next_cursor
+
     def task_log(
         self,
         p: PrincipalRef,
@@ -2390,6 +2668,9 @@ class RunService:
                     environment=env.name,
                 ),
                 failure=attempt_failure(a),
+                peak_memory_bytes=a.peak_memory_bytes,
+                cpu_seconds=a.cpu_seconds,
+                bytes_read=a.bytes_read,
             )
             for a in self._session.scalars(
                 select(TaskAttempt)

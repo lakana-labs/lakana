@@ -20,7 +20,7 @@ import httpx
 import pytest
 from sdk_tls_fixture import Answer, Authority, Exchange, make_authority, scripted
 
-from lakana import context
+from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
     SourceError,
@@ -1285,3 +1285,21 @@ class _Chunks(httpx.SyncByteStream):
             One chunk.
         """
         yield from self._chunks
+
+
+def test_read_capped_counts_the_decoded_bytes_it_returns() -> None:
+    response = httpx.Response(
+        200, content=b"abcdef", request=httpx.Request("GET", "https://a.test")
+    )
+    _http.read_capped(response, 100, "api")
+    assert _usage.bytes_read() == 6
+
+
+def test_read_capped_counts_a_streamed_body() -> None:
+    response = httpx.Response(
+        200,
+        stream=_Chunks([b"abc", b"de"]),
+        request=httpx.Request("GET", "https://a.test"),
+    )
+    _http.read_capped(response, 100, "api")
+    assert _usage.bytes_read() == 5

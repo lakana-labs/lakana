@@ -5968,6 +5968,12 @@ matter for an operator deciding where to run it:
   interpreter (`python -I -S`, standard library only) for its command and its healthcheck, so no
   `.pth` file of a dependency runs next to the socket. The workers reach it through the
   `launcher-socket` volume and never mount the Docker socket; `test_deploy_init.py` pins both.
+  The launcher also mounts the host's `/sys/fs/cgroup` read-only at `/host/cgroup`
+  (`LAKANA_LAUNCHER__CGROUP_ROOT`) to read `memory.peak` and `cpu.stat` of the containers it
+  started (#282). That adds no privilege beyond the socket, which already reaches the whole host;
+  the read-only mount of kernel statistics grants no write. `launcher/cgroup.py` builds a path only
+  from a container id that matches `^[0-9a-f]{64}$`, reads at most 4 KiB of two files, and
+  imports the standard library only; a figure it cannot read is unknown, never an error.
 - **The server binds to `127.0.0.1` by default.** `lakana bundle init`'s `--bind` defaults to
   loopback; exposing it on the network (a specific address, or the `0.0.0.0`/`::` wildcard)
   triggers a plain-HTTP warning, since Lakana itself does not terminate TLS.

@@ -24,6 +24,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import ClassVar
 
+from lakana import _usage
 from lakana.ingest._errors import CapExceeded, IngestError
 
 MAX_DEPTH = 32
@@ -582,6 +583,7 @@ def read(root_dir: str, base: str, relative: str, *, max_bytes: int) -> bytes:
                     f"{relative!r} grew past max_file_bytes ({max_bytes}) while it was read"
                 )
             chunks.append(chunk)
+        _usage.add_bytes_read(total)
         return b"".join(chunks)
     finally:
         os.close(handle)

@@ -10,6 +10,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -278,6 +279,12 @@ class TaskAttempt(Base):
     """Why this attempt did not succeed (a `FailureCode` value); null otherwise and for old rows."""
     check_message_state: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     """The `CheckMessageState` of this attempt's `error_message`, as on the task run."""
+    peak_memory_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """Peak resident memory in bytes, or null if it was not measured."""
+    cpu_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    """Processor time (user plus system) in seconds, or null if it was not measured."""
+    bytes_read: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """Bytes read from tables, files and sources, or null if they were not counted."""
 
 
 class SchedulerLease(Base):

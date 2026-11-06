@@ -10,6 +10,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.ipc
 
+from lakana import _usage
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param, query_params
 from lakana._models import QueryListEntry, QueryListPage, QueryStatus, WaitingFor
 from lakana._routes import ROUTES
@@ -113,6 +114,9 @@ def _status_from_json(data: dict[str, Any]) -> QueryStatus:
         maintenance=data.get("maintenance"),
         error_cause=data.get("error_cause"),
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
+        peak_memory_bytes=data.get("peak_memory_bytes"),
+        cpu_seconds=data.get("cpu_seconds"),
+        bytes_read=data.get("bytes_read"),
     )
 
 
@@ -334,6 +338,7 @@ class QueryRun:
         response = self._transport.request(
             ROUTES["queries.result"], path_params={"env": self.environment, "query_id": self.id}
         )
+        _usage.add_bytes_read(len(response.content))
         with pyarrow.ipc.open_file(pa.BufferReader(response.content)) as reader:
             return reader.read_all()
 

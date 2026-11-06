@@ -174,6 +174,84 @@ def _visible(text: str) -> str:
     )
 
 
+_UNITS = ("B", "KiB", "MiB", "GiB", "TiB")
+
+
+def _bytes_text(count: int) -> str:
+    """Write a byte count in binary units.
+
+    Parameters
+    ----------
+    count
+        The count, at least 0.
+
+    Returns
+    -------
+    str
+        ``0 B`` for zero; whole bytes below 1 KiB; above that one decimal, none from 100 on
+        (``1.2 GiB``, ``412 MiB``).
+    """
+    value = float(count)
+    unit = 0
+    while unit < len(_UNITS) - 1 and round(value, 0 if value >= 100 else 1) >= 1024:
+        value /= 1024
+        unit += 1
+    if unit == 0:
+        return f"{count} B"
+    return (
+        f"{value:.0f} {_UNITS[unit]}" if round(value, 1) >= 100 else f"{value:.1f} {_UNITS[unit]}"
+    )
+
+
+def _cpu_text(seconds: float) -> str:
+    """Write processor time.
+
+    Parameters
+    ----------
+    seconds
+        The time, at least 0.
+
+    Returns
+    -------
+    str
+        ``3.1 s CPU`` below a minute, ``1 m 5 s CPU`` from 60 s.
+    """
+    if round(seconds, 1) < 60:
+        return f"{seconds:.1f} s CPU"
+    whole = round(seconds)
+    return f"{whole // 60} m {whole % 60} s CPU"
+
+
+def resources_text(
+    peak_memory_bytes: int | None, cpu_seconds: float | None, bytes_read: int | None
+) -> str:
+    """Write what an attempt or a query used, on one line.
+
+    Parameters
+    ----------
+    peak_memory_bytes
+        Peak memory in bytes, or `None` if not measured.
+    cpu_seconds
+        Processor time in seconds, or `None` if not measured.
+    bytes_read
+        Bytes read, or `None` if unknown.
+
+    Returns
+    -------
+    str
+        For example ``412 MiB · 3.1 s CPU · 1.2 GiB read``. A part that is unknown is left
+        out (zero is a measurement and stays); with none known, ``—``.
+    """
+    parts = []
+    if peak_memory_bytes is not None:
+        parts.append(_bytes_text(peak_memory_bytes))
+    if cpu_seconds is not None:
+        parts.append(_cpu_text(cpu_seconds))
+    if bytes_read is not None:
+        parts.append(f"{_bytes_text(bytes_read)} read")
+    return " \u00b7 ".join(parts) or "\u2014"
+
+
 def inline(text: str, limit: int = 200) -> str:
     r"""Make one untrusted value safe to put inside a line of a message.
 

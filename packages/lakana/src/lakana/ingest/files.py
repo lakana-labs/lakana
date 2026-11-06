@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, NoReturn, Protocol
 from urllib.parse import quote, urlsplit
 
-from lakana import context
+from lakana import _usage, context
 from lakana.ingest import _check, _directory, _formats, _http, _read_set, _stores, connections
 from lakana.ingest._connections import FetchedConnection, fetch
 from lakana.ingest._errors import (
@@ -613,6 +613,7 @@ class _ObjectSource:
                         f"{_quoted(path)} grew past max_file_bytes ({max_bytes}) while it was read"
                     )
                 chunks.append(bytes(chunk))
+            _usage.add_bytes_read(total)
         except (obstore.exceptions.BaseError, FileNotFoundError, ValueError) as exc:
             _refuse(
                 self.name,

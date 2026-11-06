@@ -172,6 +172,12 @@ python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == [{"id":1,"greetin
 # a task container; the worker holds no Docker socket.
 out=$(lakana --profile team --output json sql "SELECT id, doubled FROM silver.doubled")
 python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == [{"id":1,"doubled":2}], sys.argv[1]' "$out"
+# The launcher read the task container's peak memory and processor time from the host's cgroup tree
+# it mounts read-only at /host/cgroup (F7 of #282): the Python task shows both.
+out=$(lakana --profile team --output json runs list --env dev --limit 1)
+run_id=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])[0]["id"])' "$out")
+out=$(lakana --profile team --output json runs show "$run_id" --env dev)
+python3 -c 'import json,sys; t=[t for t in json.loads(sys.argv[1])["tasks"] if t["asset"] == "silver.doubled"]; a=t[0]["attempts"][-1]; assert a["peak_memory_bytes"] and a["cpu_seconds"], "the container task has no peak memory or processor time: the launcher cannot read the host cgroup (/host/cgroup), " + str(a)' "$out"
 cache=/home/lakana/.cache/lakana-worker
 mode=$(docker compose exec -T worker stat -c '%u %a' "$cache")
 if [ "$mode" != "10001 700" ]; then echo "worker cache is '$mode', expected '10001 700'" >&2; exit 1; fi

@@ -3194,3 +3194,26 @@ def test_0067_on_postgres() -> None:
         tables = set(sqlalchemy.inspect(engine).get_table_names())
         assert not tables & {"access_managed_scopes", "access_overrides"}
         engine.dispose()
+
+
+def test_0068_on_postgres() -> None:
+    """0068 adds the three nullable figures to attempts and query runs; downgrade drops them."""
+    revision_0067 = "a9c3e5f7b1d2"
+    revision_0068 = "c4e6a8b0d2f1"
+    figures = {"peak_memory_bytes", "cpu_seconds", "bytes_read"}
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0068)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0068
+        for table in ("task_attempts", "query_runs"):
+            columns = {c["name"]: c for c in sqlalchemy.inspect(engine).get_columns(table)}
+            assert figures <= columns.keys()
+            assert all(columns[name]["nullable"] for name in figures)
+            assert isinstance(columns["peak_memory_bytes"]["type"], sqlalchemy.BigInteger)
+            assert isinstance(columns["cpu_seconds"]["type"], sqlalchemy.Float)
+        migrate.downgrade(url, revision_0067)
+        for table in ("task_attempts", "query_runs"):
+            names = {c["name"] for c in sqlalchemy.inspect(engine).get_columns(table)}
+            assert not figures & names
+        engine.dispose()

@@ -11,17 +11,25 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from core_test_helpers import Clock, _prepared_catalog, half_jitter
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from sqlalchemy.orm import Session
+from test_projects_dag import make_asset
+from test_projects_deploys import _deployed, _repo
 
+import lakana_core.runs.tasks as tasks_module
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
+from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import Base, Principal, PrincipalType
+from lakana_core.runs.selection import Selection
+from lakana_core.runs.service import RunService
+from lakana_core.runs.store import scheduler_tick
 from lakana_core.storage.resolver import StorageResolver
 
 if TYPE_CHECKING:
@@ -143,3 +151,65 @@ def star(session: Session, tmp_path: Path, principal: PrincipalRef) -> "StarWorl
     from graph_test_helpers import build_star
 
     return build_star(session, tmp_path, principal)
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
+    """Pin `db_now` as seen by the task functions.
+
+    Parameters
+    ----------
+    monkeypatch
+        pytest's patcher.
+
+    Returns
+    -------
+    Clock
+        The clock; set `.now` to move time.
+    """
+    pinned = Clock()
+    monkeypatch.setattr(tasks_module, "db_now", lambda session: pinned.now)
+    return pinned
+
+
+@pytest.fixture
+def run_id(session: Session, tmp_path: Path, principal: PrincipalRef, clock: Clock) -> uuid.UUID:
+    """Start a run whose two independent tasks are ready.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The admin.
+    clock
+        The pinned database clock.
+
+    Returns
+    -------
+    uuid.UUID
+        The run's id.
+    """
+    bronze = NamespacePath.from_parts(["bronze"])
+    _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        namespaces=[bronze],
+        tables=[TableRef("dev", bronze, "events")],
+    )
+    _deployed(
+        session,
+        principal,
+        _repo(session),
+        "a" * 40,
+        make_asset("silver.a", ("bronze.events",)),
+        make_asset("silver.b", ("bronze.events",)),
+    )
+    run = RunService(session, AllowAllAuthorization()).start(
+        principal, "dev", "analytics", Selection()
+    )
+    scheduler_tick(session, clock.now, half_jitter)
+    return run.id

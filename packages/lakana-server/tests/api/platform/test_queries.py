@@ -1157,3 +1157,40 @@ def test_a_conflict_error_from_cancel_query_is_answered_409_with_its_message(
 
     assert response.status_code == 409
     assert response.json()["detail"] == message
+
+
+def test_the_status_of_a_query_carries_its_resources(client: TestClient) -> None:
+    """The three figures of a finished query are in its status; an unmeasured one is `null`."""
+    import uuid
+
+    from sqlalchemy.orm import Session
+
+    from lakana_core.models import QueryRun
+
+    client.post(
+        "/api/v1/environments",
+        json={
+            "name": "devr",
+            "storage": {"scheme": "file", "root": "file:///tmp/r", "options": {}},
+        },
+        headers=AUTH_HEADER,
+    )
+    url = "/api/v1/environments/devr/queries"
+    query_id = client.post(url, json={"sql": "SELECT 1"}, headers=AUTH_HEADER).json()["query_id"]
+    before = client.get(f"{url}/{query_id}", headers=AUTH_HEADER).json()
+    assert (before["peak_memory_bytes"], before["cpu_seconds"], before["bytes_read"]) == (
+        None,
+        None,
+        None,
+    )
+    with Session(client.app.state.engine) as session:
+        run = session.get(QueryRun, uuid.UUID(query_id))
+        assert run is not None
+        run.peak_memory_bytes, run.cpu_seconds, run.bytes_read = 432013312, 3.1, 1288490188
+        session.commit()
+    after = client.get(f"{url}/{query_id}", headers=AUTH_HEADER).json()
+    assert (after["peak_memory_bytes"], after["cpu_seconds"], after["bytes_read"]) == (
+        432013312,
+        3.1,
+        1288490188,
+    )

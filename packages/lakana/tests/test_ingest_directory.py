@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from lakana import _usage
 from lakana.ingest import CapExceeded
 from lakana.ingest._directory import (
     MAX_DEPTH,
@@ -536,3 +537,15 @@ def test_an_io_error_while_listing_a_directory_may_be_retried(
     with pytest.raises(DirectoryError) as caught:
         walk(str(tree), "exports", "*.csv", max_files=10)
     assert caught.value.retryable is None
+
+
+def test_a_directory_read_counts_the_bytes_of_the_file(tree: Path) -> None:
+    """The walker is where a local file's bytes enter the process: counted once, as read."""
+    read(str(tree), "exports", "b.csv", max_bytes=100)
+    assert _usage.bytes_read() == 7
+
+
+def test_an_empty_directory_file_counts_zero_bytes(tree: Path) -> None:
+    (tree / "exports" / "empty.csv").write_bytes(b"")
+    read(str(tree), "exports", "empty.csv", max_bytes=100)
+    assert _usage.bytes_read() == 0

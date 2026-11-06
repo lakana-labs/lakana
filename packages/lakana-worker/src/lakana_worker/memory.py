@@ -52,7 +52,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -66,6 +66,7 @@ from lakana_core.identifiers import shown
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import QueryRun, QueryRunStatus
 from lakana_core.runs.failures import FailureCode
+from lakana_core.runs.resources import AttemptResources
 from lakana_core.runs.scheduler import COMMITTED_BEFORE_STOPPED_MESSAGE
 from lakana_core.runs.store import committed_write
 from lakana_core.runs.tasks import FailureKind, record_attempt
@@ -922,7 +923,8 @@ def kill_largest(
     sizes the earlier candidate is tried first. A task whose leader has exited but whose group a
     grandchild still holds is passed over too (its `kill_for_memory` does nothing; the runner ends
     the group within its poll interval), so in that window the choice moves on to the next
-    largest. One is ended per call.
+    largest. One is ended per call. A consumer with a ``note_resident(size)`` method is told the
+    size it was measured at before each attempt, so a killed process still has a peak.
 
     Parameters
     ----------
@@ -944,7 +946,13 @@ def kill_largest(
         ),
         key=lambda entry: (-entry[0], entry[1]),
     )
-    for _size, _index, consumer, detail in sized:
+    for size, _index, consumer, detail in sized:
+        note = getattr(consumer, "note_resident", None)
+        if note is not None:
+            try:
+                note(size)  # the last reading, for the figures of a child that dies of this kill
+            except Exception:  # a figure is never worth a missed kill
+                logger.warning("note_resident failed; the kill goes ahead", exc_info=True)
         if consumer.kill_for_memory(detail):
             return consumer
     return None
@@ -960,10 +968,16 @@ class Ended:
         The root process of the ended tree.
     task_run_id
         The task run, when it was a Python task; `None` for a query.
+    peak_bytes
+        The resident size the watchdog chose it by: its peak, since a killed process reports none.
+    query_run_id
+        The query run, when it was a query child that works for one.
     """
 
     pid: int
     task_run_id: uuid.UUID | None = None
+    peak_bytes: int | None = None
+    query_run_id: uuid.UUID | None = None
 
 
 def stop_largest_consumer(
@@ -1010,10 +1024,15 @@ def stop_largest_consumer(
         What was ended; `None` when nothing endable was running.
     """
     candidates: list[tuple[Consumer, str]] = []
-    described: dict[int, tuple[str, uuid.UUID | None, int | None]] = {}
+    described: dict[int, tuple[str, uuid.UUID | None, int | None, uuid.UUID | None]] = {}
     for child in queries.children():
         candidates.append((child, query_child_message(limit)))
-        described[id(child)] = (f"a query (process {child.pid})", None, child.pid)
+        described[id(child)] = (
+            f"a query (process {child.pid})",
+            None,
+            child.pid,
+            getattr(child, "unit", None),
+        )
     for task in tasks.running():
         candidates.append((task, task_ended_message(limit)))
         described[id(task)] = (
@@ -1021,11 +1040,31 @@ def stop_largest_consumer(
             f"process {task.pid})",
             task.task_run_id,
             task.pid,
+            None,
         )
-    chosen = kill_largest(candidates, resident)
+    readings: dict[int, int] = {}
+
+    def measured(pid: int) -> int:
+        """Measure a process and keep the first reading, the one the choice is made by.
+
+        Parameters
+        ----------
+        pid
+            The process id.
+
+        Returns
+        -------
+        int
+            Its resident size.
+        """
+        size = resident(pid)
+        readings.setdefault(pid, size)
+        return size
+
+    chosen = kill_largest(candidates, measured)
     if chosen is None:
         return None
-    what, task_run_id, pid = described[id(chosen)]
+    what, task_run_id, pid, query_run_id = described[id(chosen)]
     assert pid is not None  # nosec B101 -- `kill_largest` passes over a consumer without a pid
     logger.error(
         "Memory limit exceeded: the worker and its tasks use %d MB, the limit is %s. The "
@@ -1038,7 +1077,7 @@ def stop_largest_consumer(
     deadline = clock() + RELEASE_SECONDS
     while resident(pid) > 0 and clock() < deadline:
         wait(0.01)
-    return Ended(pid, task_run_id)
+    return Ended(pid, task_run_id, readings.get(pid), query_run_id)
 
 
 def task_message(limit: Limit) -> str:
@@ -1105,6 +1144,8 @@ def record_memory_failure(
     peak: bool = False,
     earlier: tuple[uuid.UUID, ...] = (),
     earlier_tasks: tuple[TaskClaim, ...] = (),
+    earlier_peaks: Mapping[uuid.UUID, int] | None = None,
+    earlier_query_peaks: Mapping[uuid.UUID, int] | None = None,
 ) -> None:
     """Fail what the worker is running, so the user sees why.
 
@@ -1161,11 +1202,20 @@ def record_memory_failure(
         recorded it already is left alone. It always gets the transient failure with
         `task_ended_message`, never the certain blame: the worker's own memory may be what
         stays over the limit.
+    earlier_peaks
+        The size the watchdog ended each of those tasks at (`Ended.peak_bytes`), by task run id;
+        it is the attempt's peak memory, as a killed task reports none. Any other attempt keeps
+        no figures.
+    earlier_query_peaks
+        The size the watchdog ended a query child at, by query run id: the run keeps it as its
+        peak memory (a killed child reports none), and so does the attempt of a SQL task whose
+        write run it is.
     """
     queries, tasks = activity.snapshot()
     queries = tuple(dict.fromkeys((*queries, *earlier)))
     ended = {claim.task_run_id for claim in earlier_tasks}
     tasks = tuple(dict.fromkeys((*tasks, *earlier_tasks)))
+    peaks = earlier_peaks or {}
     task_ids = [task.task_run_id for task in tasks]
     with session_factory() as session:
         foreign = 0
@@ -1205,6 +1255,18 @@ def record_memory_failure(
                 )
                 .execution_options(synchronize_session=False)
             )
+            for run_id, size in (earlier_query_peaks or {}).items():
+                session.execute(
+                    update(QueryRun)
+                    .where(
+                        QueryRun.id == run_id,
+                        mine,
+                        QueryRun.status == QueryRunStatus.FAILED,
+                        QueryRun.peak_memory_bytes.is_(None),
+                    )
+                    .values(peak_memory_bytes=size)
+                    .execution_options(synchronize_session=False)
+                )
             session.commit()
         certain = len(tasks) == 1 and foreign == 0 and not peak
         for task in tasks:
@@ -1220,6 +1282,9 @@ def record_memory_failure(
                 failure_code=FailureCode.MEMORY,
                 on_committed=COMMITTED_BEFORE_STOPPED_MESSAGE,
                 stopped=True,
+                resources=AttemptResources(peak_memory_bytes=peaks.get(task.task_run_id))
+                if was_ended
+                else None,
             )
 
 
@@ -1274,6 +1339,8 @@ def start_watchdog(
 
     before_kill: list[tuple[uuid.UUID, ...]] = [()]
     ended_tasks: list[tuple[TaskClaim, ...]] = [()]
+    ended_peaks: list[Mapping[uuid.UUID, int]] = [{}]
+    ended_query_peaks: list[Mapping[uuid.UUID, int]] = [{}]
 
     def relieve(total: int) -> bool:
         """End the largest query or Python task, after noting what is in flight.
@@ -1291,11 +1358,17 @@ def start_watchdog(
         queries, claims = ACTIVITY.snapshot()
         before_kill[0] = queries
         ended_tasks[0] = ()
+        ended_peaks[0] = {}
+        ended_query_peaks[0] = {}
         ended = stop_largest_consumer(total, limit)
         if ended is None:
             return False
+        if ended.query_run_id is not None and ended.peak_bytes is not None:
+            ended_query_peaks[0] = {ended.query_run_id: ended.peak_bytes}
         if ended.task_run_id is not None:
             ended_tasks[0] = tuple(c for c in claims if c.task_run_id == ended.task_run_id)
+            if ended.peak_bytes is not None:
+                ended_peaks[0] = {ended.task_run_id: ended.peak_bytes}
         return True
 
     def on_exceeded(total: int) -> None:
@@ -1317,6 +1390,8 @@ def start_watchdog(
                 peak=platform == "darwin",
                 earlier=before_kill[0],
                 earlier_tasks=ended_tasks[0],
+                earlier_peaks=ended_peaks[0],
+                earlier_query_peaks=ended_query_peaks[0],
             ),
             kill_children=kill_children,
             exit_process=os._exit,

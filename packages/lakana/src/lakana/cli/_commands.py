@@ -153,6 +153,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "runs show": ("runs.get",),
     "runs logs": ("runs.get", "runs.log"),
     "runs cancel": ("runs.cancel",),
+    "task history": ("runs.task_history",),
     "runs resume": ("runs.resume",),
     "job list": ("jobs.list",),
     "job show": ("jobs.get",),

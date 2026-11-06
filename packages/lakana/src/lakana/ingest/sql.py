@@ -43,6 +43,7 @@ from collections.abc import Generator, Iterable, Mapping
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
+from lakana import _usage
 from lakana.ingest import _check, _directory
 from lakana.ingest._connections import FetchedConnection, fetch
 from lakana.ingest._errors import (
@@ -454,6 +455,7 @@ def _collect(
                 f"{_NARROW}, or raise max_bytes"
             )
         kept.append(batch)
+    _usage.add_bytes_read(size)
     return pa.Table.from_batches(kept, schema=schema)
 
 

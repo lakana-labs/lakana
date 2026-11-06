@@ -90,7 +90,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 import pyarrow as pa
 
-from lakana import assets, context
+from lakana import _usage, assets, context
 from lakana._arrow import (
     cast_timestamp_ns_columns_to_us,
     normalize_view_columns,
@@ -2429,6 +2429,9 @@ def _write_record(path: str, record: dict[str, object]) -> bool:
     followed) and is renamed over `path`, which replaces a link there rather
     than writing through it.
 
+    The task's own figures (`lakana._usage.record_fields`: bytes read, peak memory) are added
+    to every record, so the worker can store them whether the task succeeded or failed.
+
     Parameters
     ----------
     path
@@ -2447,7 +2450,7 @@ def _write_record(path: str, record: dict[str, object]) -> bool:
             dir=os.path.dirname(path) or ".", prefix=".result-", suffix=".tmp"
         )
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(record, handle)
+            json.dump({**record, **_usage.record_fields()}, handle)
         os.replace(temporary, path)
     except OSError as exc:
         if temporary is not None:

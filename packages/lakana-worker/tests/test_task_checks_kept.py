@@ -253,7 +253,9 @@ def _note_of(world: World, dotted: str) -> tuple[uuid.UUID | None, uuid.UUID | N
         return row[0], row[1], row[2]
 
 
-_STATEMENTS = {False: 64, True: 129}
+# One more than before #282: recording an attempt reads its write run's figures
+# (`_write_run_figures`) until the worker passes the figures it measured itself.
+_STATEMENTS = {False: 65, True: 130}
 """Statements of a task's own thread, by whether it has checks (measured before the note).
 
 Two of them look for the project's descriptions of the table the task creates. With checks, each

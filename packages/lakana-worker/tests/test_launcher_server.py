@@ -163,7 +163,14 @@ def test_a_run_streams_its_logs_then_its_result(served: Served) -> None:
 
     assert base64.b64decode(str(answer[0]["log"])) == b"hello\n"
     assert answer[-1] == {
-        "result": {"exit": 0, "oom_killed": False, "timed_out": False, "stopped": False}
+        "result": {
+            "exit": 0,
+            "oom_killed": False,
+            "timed_out": False,
+            "stopped": False,
+            "peak_memory_bytes": None,
+            "cpu_seconds": None,
+        }
     }
     assert served.launcher._abandoned == set()
 
@@ -814,7 +821,14 @@ def test_a_check_is_served_with_its_output_and_result(served: Served) -> None:
 
     assert "log" in answer[0]
     assert answer[-1] == {
-        "result": {"exit": 0, "oom_killed": False, "timed_out": False, "stopped": False}
+        "result": {
+            "exit": 0,
+            "oom_killed": False,
+            "timed_out": False,
+            "stopped": False,
+            "peak_memory_bytes": None,
+            "cpu_seconds": None,
+        }
     }
 
 
