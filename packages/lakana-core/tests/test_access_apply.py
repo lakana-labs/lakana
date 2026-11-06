@@ -17,7 +17,14 @@ from sqlalchemy.orm import Session
 from lakana_core.access import service as access_service
 from lakana_core.access.apply import admin_lost_part_way
 from lakana_core.access.file import AccessFileError
-from lakana_core.access.model import GrantEntry, GroupEntry, MembershipEntry, Subject, Target
+from lakana_core.access.model import (
+    GrantEntry,
+    GroupEntry,
+    MembershipEntry,
+    ServiceAccountEntry,
+    Subject,
+    Target,
+)
 from lakana_core.access.plan import PlannedChange
 from lakana_core.access.service import AccessService
 from lakana_core.audit.authorization import AuditingAuthorization
@@ -816,6 +823,54 @@ def test_dropping_an_admin_group_the_caller_is_in_revokes_its_grant_first(
     service.apply(world.admin, text, plan_fingerprint=plan.fingerprint)
     assert _count(session, Group, Group.name == "admins") == 0
     assert holds_instance_admin(session, world.admin.id)
+
+
+def test_a_service_account_cannot_apply_its_own_removal(session: Session) -> None:
+    """Review R1: removing the account that applies ends every ADMIN path; refused up front.
+
+    The plan names it, the apply refuses with that problem before any write, and no denial is
+    recorded: two steps cannot help, since the account is gone either way.
+    """
+    world = access_world(session)
+    GrantService(session, AllowAllAuthorization()).grant(
+        world.admin, principal="etl-bot", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    service = _service(session, world)
+    bot = world.ref("etl-bot")
+
+    def drop(document: dict[str, Any]) -> None:
+        """Remove etl-bot and its grant.
+
+        Parameters
+        ----------
+        document
+            The loaded file.
+        """
+        document["service_accounts"] = []
+        document["grants"] = [g for g in document["grants"] if g["to"] != "service:etl-bot"]
+
+    text = _edit(service.export(bot, ["instance"]), drop)
+    plan = service.plan(bot, text, allow_lockout=True)
+    [problem] = plan.problems
+    assert "removes service:etl-bot, the account applying it" in problem
+    assert "have another administrator apply this file" in problem
+    before = _snapshot(session)
+    with pytest.raises(AccessFileError, match="have another administrator apply this file"):
+        service.apply(bot, text, plan_fingerprint=plan.fingerprint, allow_lockout=True)
+    assert _snapshot(session) == before
+    assert _events(session, AuditEventType.AUTHORIZATION_DENIED) == []
+
+
+def test_removing_the_callers_own_account_ends_every_path() -> None:
+    """Review R1: the pre-write check counts the deactivation of the caller as the end."""
+    bot = PrincipalRef(id=uuid.uuid4(), name="bot", type=PrincipalType.SERVICE_ACCOUNT)
+    ordered = [
+        PlannedChange("remove", ServiceAccountEntry("bot"), None),
+        PlannedChange(
+            "remove", GrantEntry(Subject("service", "bot"), "ADMIN", None, Target()), None
+        ),
+    ]
+    assert admin_lost_part_way(ordered, bot, direct=True, caller_groups=set(), admin_groups=set())
 
 
 def test_a_denial_part_way_rolls_back_and_is_audited_once(

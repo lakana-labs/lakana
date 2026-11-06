@@ -220,7 +220,8 @@ def admin_lost_part_way(
 
     Every change is authorized as it is made, and each needs the instance ADMIN role. The
     caller's paths to it are a direct grant and each admin group they are in; creates only add
-    paths, and each removal of a grant, membership or group can end one. When the last path
+    paths, and each removal of a grant, membership or group can end one. Removing the caller's
+    own service account ends them all. When the last path
     ends before the last change, no order can make the apply: it takes two.
 
     Parameters
@@ -258,6 +259,8 @@ def admin_lost_part_way(
             continue
         if not alive:
             return True
+        if change.entry == ServiceAccountEntry(p.name):
+            alive.clear()  # a deactivated caller holds no role at all
         alive.discard(_path_of(change.entry, p.name))
     return False
 

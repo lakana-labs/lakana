@@ -560,6 +560,12 @@ class AccessService:
             caller=_caller(p),
             allow_lockout=allow_lockout,
         )
+        if any(c.op == "remove" and c.entry == ServiceAccountEntry(p.name) for c in changes):
+            problems.append(
+                f"{parsed.file_name}: service_accounts: the file removes service:{p.name}, the "
+                "account applying it, which would end its access part-way through the apply; "
+                "have another administrator apply this file"
+            )
         covered = scopes.union(Scopes(frozenset(managed)))
         return AccessPlan(
             file_name=parsed.file_name,
