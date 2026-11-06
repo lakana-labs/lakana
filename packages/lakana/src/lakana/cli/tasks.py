@@ -60,7 +60,7 @@ def _status(entry: TaskHistoryEntry) -> str:
     Returns
     -------
     str
-        For example ``succeeded`` or ``failed (out_of_memory)``.
+        For example ``succeeded`` or ``failed (memory)``.
     """
     return f"{entry.status} ({entry.failure_code})" if entry.failure_code else entry.status
 

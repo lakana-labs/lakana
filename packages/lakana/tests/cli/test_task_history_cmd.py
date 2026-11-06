@@ -65,7 +65,7 @@ def test_task_history_prints_a_row_per_attempt(tmp_path: Path) -> None:
     """Header, a failed row with its failure code, a not-measured row with a dash."""
     api = _api(
         _entry(3),
-        _entry(2, status="failed", failure_code="out_of_memory", bytes_read=None),
+        _entry(2, status="failed", failure_code="memory", bytes_read=None),
         _entry(
             1,
             peak_memory_bytes=None,
@@ -84,7 +84,7 @@ def test_task_history_prints_a_row_per_attempt(tmp_path: Path) -> None:
     for header in ("run", "attempt", "status", "duration", "resources"):
         assert header in out.lower()
     assert f"{_RUN} 3 succeeded 12.0s 412 MiB · 3.1 s CPU · 1.2 GiB read" in out
-    assert f"{_RUN} 2 failed (out_of_memory) 12.0s 412 MiB · 3.1 s CPU" in out
+    assert f"{_RUN} 2 failed (memory) 12.0s 412 MiB · 3.1 s CPU" in out
     assert f"{_RUN} 1 running —" in out
 
 
