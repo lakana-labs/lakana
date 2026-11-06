@@ -4082,6 +4082,71 @@ class TaskAttemptOut(BaseModel):
     )
 
 
+class TaskHistoryEntryOut(BaseModel):
+    """One attempt in the history of a task.
+
+    Parameters
+    ----------
+    run_id
+        The run the attempt belongs to.
+    attempt
+        Attempt number within its task run, from 1.
+    status
+        How the attempt ended: `succeeded`, `failed`, `timed_out`, `lost`, `released` or
+        `cancelled`; `running` while it has not ended.
+    started_at
+        When it started.
+    finished_at
+        When it ended; `null` while it runs.
+    duration_seconds
+        Seconds from start to end; `null` while it runs.
+    peak_memory_bytes
+        Highest resident memory of the attempt's process in bytes; `null` if not measured.
+    cpu_seconds
+        Processor time the attempt used, in seconds; `null` if not measured.
+    bytes_read
+        Bytes read; `null` if unknown.
+    failure_code
+        Why the attempt failed, when it did and the reason is known; otherwise `null`.
+    """
+
+    run_id: uuid.UUID
+    attempt: int
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    duration_seconds: float | None
+    peak_memory_bytes: int | None = Field(
+        default=None, description="Highest resident memory in bytes; null if not measured."
+    )
+    cpu_seconds: float | None = Field(
+        default=None, description="Processor time in seconds; null if not measured."
+    )
+    bytes_read: int | None = Field(
+        default=None,
+        description=(
+            "Bytes DuckDB read for a query, or the bytes the SDK readers read for a Python "
+            "task; null if unknown."
+        ),
+    )
+    failure_code: str | None = None
+
+
+class TaskHistoryPage(BaseModel):
+    """One page of a task's attempts across runs, newest first.
+
+    Parameters
+    ----------
+    attempts
+        The attempts on this page.
+    next_cursor
+        Pass back as `?cursor=` to fetch the next page; `null` on the last page.
+    """
+
+    attempts: list[TaskHistoryEntryOut]
+    next_cursor: str | None
+
+
 class TaskLogOut(BaseModel):
     """A task's logs.
 
