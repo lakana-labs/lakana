@@ -315,7 +315,9 @@ terminal it stops before anything changes, with a message that names `--yes`: in
 and `--plan-fingerprint` to apply the plan an earlier step showed. A plan with problems is never
 applied. The server makes the plan again under a lock and compares its fingerprint, so what you
 reviewed is what is applied. The command prints `Applied: 3 created, 0 changed, 1 removed.`;
-`--output json` prints the result as an object. The SDK never repeats an apply request on its
+`--output json` prints the result as an object. With `--output json` the command shows no plan,
+so it does not ask either: without `--yes` or `--plan-fingerprint` it stops before anything
+changes. The SDK never repeats an apply request on its
 own.
 
 Route: `POST /api/v1/access/apply` with `{"file_name": "access.yaml", "text": "...",
@@ -372,3 +374,4 @@ way, where CI only plans.
 | `access.yaml: service_accounts: the file removes service:access-admin, the account applying it, which would end its access part-way through the apply; have another administrator apply this file` | A problem in the plan, so `422` on apply. The account applying the file cannot remove itself. Another administrator applies the file, or keep the account in `service_accounts`. |
 | `` `prod` is managed by an access file (last applied ...); change the file and run `lakana access apply`, or, in an emergency, repeat with `--override-managed --reason …` `` | `409`, from a command that changes access by hand. See [Changes outside the file](#changes-outside-the-file) and [The override](#the-override). |
 | `lakana access apply asks before it changes access; in CI pass --yes, with --plan-fingerprint from the plan step` | The CLI, exit 1: there is no terminal to ask on. Pass `--yes`. |
+| `lakana access apply --output json shows no plan to confirm; review it with lakana access plan, then pass --yes (or --plan-fingerprint from that plan)` | The CLI, exit 1: JSON output cannot show the plan, so the command does not ask. Plan first, then pass `--yes` or `--plan-fingerprint`. |
