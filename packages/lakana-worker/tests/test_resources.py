@@ -52,9 +52,9 @@ def test_a_missing_status_file_gives_none(tmp_path: Path) -> None:
     assert read_peak_bytes(tmp_path / "absent") is None
 
 
-def test_this_process_reports_a_peak_on_linux_and_none_elsewhere() -> None:
+def test_this_process_reports_a_peak_on_linux_and_macos() -> None:
     peak = own_peak_bytes()
-    if sys.platform.startswith("linux"):
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
         assert peak is not None and peak > 0
     else:
         assert peak is None
@@ -72,16 +72,32 @@ def test_a_child_of_a_big_parent_reports_its_own_peak_not_the_parents() -> None:
     assert 0 < int(out.stdout) < len(held)
 
 
-def test_macos_has_no_peak_until_its_rusage_is_known_not_to_be_inherited() -> None:
+def test_macos_peak_is_the_childs_rusage_in_bytes() -> None:
     usage = SimpleNamespace(ru_maxrss=100, ru_utime=1.25, ru_stime=0.5)
-    assert from_rusage(usage, "darwin") == AttemptResources(None, 1.75, None)
-    assert peak_memory("darwin", reported=5, watched=3) is None
+    assert from_rusage(usage, "darwin") == AttemptResources(100, 1.75, None)
+
+
+def test_macos_peak_is_the_larger_of_the_reported_and_the_watched_reading() -> None:
+    assert peak_memory(reported=5, watched=3) == 5
+
+
+def test_macos_reads_its_own_peak_from_getrusage_in_bytes() -> None:
+    fake = SimpleNamespace(ru_maxrss=4096)
+    assert own_peak_bytes("darwin", getrusage=lambda _who: fake) == 4096
+
+
+def test_macos_peak_of_zero_is_unknown() -> None:
+    assert own_peak_bytes("darwin", getrusage=lambda _who: SimpleNamespace(ru_maxrss=0)) is None
+
+
+def test_other_platforms_have_no_peak() -> None:
+    assert own_peak_bytes("win32") is None
 
 
 def test_a_linux_child_that_reported_nothing_falls_back_to_the_watchdogs_reading() -> None:
-    assert peak_memory("linux", reported=None, watched=3) == 3
-    assert peak_memory("linux", reported=None, watched=None) is None
-    assert peak_memory("linux", reported=5, watched=9) == 9
+    assert peak_memory(reported=None, watched=3) == 3
+    assert peak_memory(reported=None, watched=None) is None
+    assert peak_memory(reported=5, watched=9) == 9
 
 
 def test_there_is_no_collector_outside_a_usage_collector() -> None:
@@ -114,9 +130,9 @@ def test_a_collector_is_fresh_in_a_nested_block() -> None:
         assert not outer.resources.known
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="settles whether macOS inherits ru_maxrss")
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS ru_maxrss is the child's own")
 def test_a_macos_child_of_a_big_parent_reports_a_peak_below_the_parents_buffer() -> None:
-    """If this fails, macOS folds the parent's mark into the child's, so its peak stays unknown."""
+    """If this fails, macOS folds the parent's mark into the child's: switch its peak off again."""
     held = bytearray(64 * 2**20)
     for offset in range(0, len(held), 4096):
         held[offset] = 1

@@ -3,6 +3,7 @@
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -75,6 +76,19 @@ def test_a_task_reports_its_own_peak_on_linux() -> None:
     assert peak > 0
 
 
+def test_a_task_on_macos_reports_its_rusage_peak_in_bytes() -> None:
+    fake = SimpleNamespace(ru_maxrss=4096)
+    assert _usage.own_peak_bytes("darwin", getrusage=lambda _who: fake) == 4096
+    assert (
+        _usage.own_peak_bytes("darwin", getrusage=lambda _who: SimpleNamespace(ru_maxrss=0)) is None
+    )
+
+
+def test_a_task_on_another_platform_reports_no_peak() -> None:
+    assert _usage.own_peak_bytes("win32") is None
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS reads its peak from getrusage")
 def test_a_task_without_proc_reports_no_peak(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

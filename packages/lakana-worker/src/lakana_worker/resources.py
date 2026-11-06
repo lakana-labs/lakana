@@ -5,9 +5,9 @@ The kernel's ``ru_maxrss`` of a reaped child is not a measure of the child on Li
 (measured: 11 MiB from a small worker, 411 MiB after the worker touched 400 MiB). So on Linux the
 peak is the child's own ``VmHWM`` (`lakana_worker.own_peak`), which the child reports about
 itself at its end, or the last reading of the memory watchdog for a child that was killed.
-Processor time is not inherited and always comes from ``wait4``. macOS has no ``/proc``, and
-nobody has shown yet that its ``ru_maxrss`` is not inherited the same way, so it has no peak
-(`None`) until a check on macOS CI says otherwise.
+Processor time is not inherited and always comes from ``wait4``. macOS has no ``/proc``, but its
+``ru_maxrss`` is the child's own (a macOS CI test shows it is not inherited), in bytes: the child
+reports it about itself through ``getrusage``, and ``wait4`` gives the same figure.
 """
 
 from __future__ import annotations
@@ -72,23 +72,20 @@ def from_rusage(usage: Rusage, platform: str = sys.platform) -> AttemptResources
     Returns
     -------
     AttemptResources
-        The ``ru_maxrss`` peak and the processor time; ``bytes_read`` is unknown here. On macOS
-        the peak is `None`: its ``ru_maxrss`` is not trusted yet (see the module).
+        The ``ru_maxrss`` peak and the processor time; ``bytes_read`` is unknown here.
     """
     return AttemptResources(
-        peak_memory_bytes=None if platform == "darwin" else maxrss_bytes(usage.ru_maxrss, platform),
+        peak_memory_bytes=maxrss_bytes(usage.ru_maxrss, platform),
         cpu_seconds=usage.ru_utime + usage.ru_stime,
         bytes_read=None,
     )
 
 
-def peak_memory(platform: str, *, reported: int | None, watched: int | None) -> int | None:
+def peak_memory(*, reported: int | None, watched: int | None) -> int | None:
     """Choose the peak memory of a reaped child.
 
     Parameters
     ----------
-    platform
-        ``sys.platform``.
     reported
         The peak the child reported about itself, or `None` if it did not (it was killed).
     watched
@@ -97,11 +94,8 @@ def peak_memory(platform: str, *, reported: int | None, watched: int | None) -> 
     Returns
     -------
     int or None
-        `None` on macOS (nothing trusted yet). Elsewhere the larger of the two readings, or `None`
-        when there is none: a guess is never made.
+        The larger of the two readings, or `None` when there is none: a guess is never made.
     """
-    if platform == "darwin":
-        return None
     readings = [value for value in (reported, watched) if value is not None]
     return max(readings) if readings else None
 

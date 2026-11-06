@@ -882,7 +882,6 @@ class QueryChild:
         measured = from_rusage(usage, _PLATFORM)
         told = self._told()
         peak = peak_memory(
-            _PLATFORM,
             reported=valid_count(told.get("peak_memory_bytes")),
             watched=self._watched,
         )

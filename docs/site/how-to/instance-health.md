@@ -342,8 +342,6 @@ next step:
 - **A Python task has no memory or bytes read, and its project was locked before this release.**
   The task reports them through the `lakana` package locked in the project. Lock the project
   again (`uv lock --upgrade-package lakana`, so that it names this release) and deploy it.
-- **A Python task on macOS.** Its peak memory is not measured there yet; the processor time and
-  the bytes read are.
 - **The task was shorter than the first reading.** A container task that ends before the
   launcher's first reading has no memory figure; a Python task that was killed has no count of
   bytes read.

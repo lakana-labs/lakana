@@ -37,7 +37,6 @@ import selectors
 import signal
 import stat
 import subprocess  # nosec B404 -- starts the task's own interpreter, fixed argv, no shell
-import sys
 import tarfile
 import threading
 import time
@@ -1061,7 +1060,6 @@ def task_resources(running: RunningTask, record: dict[str, object] | None) -> At
     told = record or {}
     measured = from_rusage(running.usage) if running.usage is not None else AttemptResources()
     peak = peak_memory(
-        sys.platform,
         reported=valid_count(told.get("peak_memory_bytes")),
         watched=running.watched,
     )
