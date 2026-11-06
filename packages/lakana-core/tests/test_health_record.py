@@ -494,6 +494,27 @@ def test_the_history_reaches_back_only_twice_history_commits(
     assert len(found["range", "id"]) == 3
 
 
+def test_delete_only_commits_do_not_take_places_in_the_volume_window(
+    catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The newest `HISTORY` volume values are loads, however many delete-only rows are newer.
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates the table.
+    session
+        Database session.
+    monkeypatch
+        Lowers `HISTORY` to three.
+    """
+    monkeypatch.setattr(health_record, "HISTORY", 3)
+    _seed(session, "volume", {"added": 5, "total": 5}, count=3)
+    _seed(session, "volume", {"added": 0, "loaded": False, "total": 5}, count=4, first_day=3)
+    found = recent_observations(session, _table_id(session))
+    assert found["volume", None] == [{"added": 5, "total": 5}] * 3
+
+
 def test_set_back_rows_neither_feed_the_band_nor_reach_back_its_window(
     catalog: CatalogService, session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:

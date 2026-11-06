@@ -136,6 +136,27 @@ def test_volume_without_a_count_has_no_metrics() -> None:
     assert volume_signal({"added-records": "many"}, []).state == "no_metrics"
 
 
+@pytest.mark.parametrize("records", ["0", None])
+def test_a_delete_only_commit_with_explicit_zero_counts_is_not_a_load(
+    records: str | None,
+) -> None:
+    """``added-data-files`` 0 decides "no load", whatever ``added-records`` says."""
+    summary = {"added-data-files": "0", "total-records": "9"}
+    if records is not None:
+        summary["added-records"] = records
+    seen = volume_signal(summary, _volumes(*[10_000] * 8))
+    assert seen.state == "ok"
+    assert seen.observed == {"added": 0, "loaded": False, "total": 9}
+    assert seen.band is None
+
+
+def test_a_commit_that_read_no_data_files_is_not_a_load_with_a_zero_count() -> None:
+    """The files read and none found decides "no load" even with ``added-records`` "0"."""
+    seen = volume_signal({"added-records": "0"}, _volumes(*[10_000] * 8), no_data_files=True)
+    assert seen.state == "ok"
+    assert seen.observed is not None and seen.observed["loaded"] is False
+
+
 def test_volume_history_ignores_entries_without_a_count() -> None:
     history = [{"added": 10_000}] * 8 + [{"added": None}, {}]
     assert volume_signal({"added-records": "10000"}, history).state == "ok"

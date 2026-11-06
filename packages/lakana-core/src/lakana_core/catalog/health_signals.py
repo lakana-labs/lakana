@@ -329,9 +329,10 @@ def volume_signal(
     A commit that added no data file (a delete of whole files, a merge-on-read commit that adds
     only delete files) is not a load: it records ``ok`` with observed ``{"added": 0, "loaded":
     false}``, never fires and is left out of the band. That needs evidence: the commit's added
-    files read and none found (`no_data_files`), or an ``added-data-files`` of 0. pyiceberg
-    writes both counts only above 0, so without either a summary that lacks ``added-records``
-    records ``not_recorded``.
+    files read and none found (`no_data_files`), or an ``added-data-files`` of 0; either decides
+    it whatever ``added-records`` says (a writer may record explicit zeros). pyiceberg writes
+    both counts only above 0, so without either a summary that lacks ``added-records`` records
+    ``not_recorded``.
 
     Parameters
     ----------
@@ -353,7 +354,7 @@ def volume_signal(
     raw = (summary or {}).get("added-records")
     total = _whole((summary or {}).get("total-records"))
     files = (summary or {}).get("added-data-files")
-    if raw is None and (no_data_files or (files is not None and _whole(files) == 0)):
+    if no_data_files or (files is not None and _whole(files) == 0):
         return Observation(
             "volume", None, "ok", {"added": 0, "loaded": False, "total": total}, None
         )
