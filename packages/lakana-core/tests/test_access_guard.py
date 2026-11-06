@@ -542,3 +542,18 @@ def test_lockout_recovery_without_a_managed_scope_records_no_override(session: S
     """With no file applied, the recovery grant is a plain grant: nothing to show as drift."""
     assert bootstrap_if_needed(session, "root", key_id="testkey", secret="testsecret")
     assert session.scalar(select(func.count()).select_from(AccessOverride)) == 0
+
+
+def test_an_override_on_a_person_is_refused(session: Session) -> None:
+    """Strict, as R11: people are never in a file, so an override on one is a stale flag."""
+    world = access_world(session)
+    principals = PrincipalService(session, _authz(session))
+    message = "people are not managed by an access file; repeat without `--override-managed`"
+    with pytest.raises(ValidationError) as created:
+        principals.create_principal(_overriding(world.admin), name="carol", type=PrincipalType.USER)
+    assert str(created.value) == message
+    with pytest.raises(ValidationError) as deactivated:
+        principals.deactivate_principal(_overriding(world.admin), "bob")
+    assert str(deactivated.value) == message
+    bob = session.scalars(select(Principal).where(Principal.name == "bob")).one()
+    assert bob.is_active

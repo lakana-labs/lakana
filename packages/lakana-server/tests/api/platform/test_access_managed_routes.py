@@ -248,3 +248,22 @@ def test_outside_the_managed_scope_a_route_works_and_an_override_is_refused(
     )
     assert stale.status_code == 422
     assert "repeat without `--override-managed`" in stale.text
+
+
+def test_an_override_on_a_person_answers_422(managed_client: TestClient) -> None:
+    """People are not in an access file: creating or deactivating one refuses the override."""
+    message = "people are not managed by an access file; repeat without `--override-managed`"
+    created = managed_client.post(
+        "/api/v1/principals",
+        headers=AUTH_HEADER,
+        json={"name": "carol", "type": "USER"},
+        params=_OVERRIDE,
+    )
+    assert created.status_code == 422
+    assert created.json()["detail"] == message
+    _post(managed_client, "/api/v1/principals", {"name": "carol", "type": "USER"})
+    deactivated = managed_client.delete(
+        "/api/v1/principals/carol", headers=AUTH_HEADER, params=_OVERRIDE
+    )
+    assert deactivated.status_code == 422
+    assert deactivated.json()["detail"] == message

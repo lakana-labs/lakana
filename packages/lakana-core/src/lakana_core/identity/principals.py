@@ -70,8 +70,7 @@ class PrincipalService:
         ).scalar_one_or_none()
         if existing is not None:
             raise AlreadyExistsError(f"Principal {name!r} already exists.")
-        if type is PrincipalType.SERVICE_ACCOUNT:
-            self._guard(p, f"create service account {name}")
+        self._guard(p, type, f"create service account {name}")
         principal = Principal(id=uuid.uuid4(), type=type, name=name, is_active=True)
         self._session.add(principal)
         AuditService(self._session).record(
@@ -83,18 +82,33 @@ class PrincipalService:
             self._session.commit()
         return principal
 
-    def _guard(self, p: PrincipalRef, change: str) -> None:
+    def _guard(self, p: PrincipalRef, type: PrincipalType, change: str) -> None:
         """Pass a service account's change through the guard of the managed `instance` scope.
 
-        People are never in an access file, so only service accounts are guarded.
+        People are never in an access file, so only service accounts are guarded, and an
+        override asked for on a person is refused as a stale flag (as in a scope no file
+        manages).
 
         Parameters
         ----------
         p
             The acting principal, already authorized.
+        type
+            The type of the principal changed.
         change
-            What is changed.
+            What is changed, for a service account.
+
+        Raises
+        ------
+        ValidationError
+            If `p` asks for an override and the principal is a person.
         """
+        if type is not PrincipalType.SERVICE_ACCOUNT:
+            if p.managed_override_reason is not None:
+                raise ValidationError(
+                    "people are not managed by an access file; repeat without `--override-managed`"
+                )
+            return
         guard_change(
             self._session,
             p,
@@ -135,8 +149,7 @@ class PrincipalService:
         principal = self.get_principal_by_name(p, name)
         if not principal.is_active:
             return
-        if principal.type is PrincipalType.SERVICE_ACCOUNT:
-            self._guard(p, f"deactivate service account {name}")
+        self._guard(p, principal.type, f"deactivate service account {name}")
         assert_admin_headroom(self._session, excluding_principal_id=principal.id)
         principal.is_active = False
         AuditService(self._session).record(

@@ -3438,9 +3438,12 @@ is the only way to change access there, so that what was reviewed in git is what
   instance with no way in). It is still recorded as an override with a fixed reason, so the next
   plan shows it as drift and an apply that does not list it reverts it. Nothing else sets the flag.
 - **Not guarded, by design.** PAT issue and revoke (tokens are never in a file), user principals
-  (people are not in a file), the cascades of dropping a table or an environment (`revoke_attached`
-  removes what can no longer apply), and deploy run-as. These either hold no access a file
-  describes, or only take access away.
+  (people are not in a file; an override on their routes is refused with 422), the cascades of
+  dropping a table or an environment (`revoke_attached` removes what can no longer apply), their
+  restore (`undrop_table`, `restore_environment`), and deploy run-as. The drop cascades only take
+  access away. A restore is the exception: it re-adds the grants and policies the object had, so
+  that an operational recovery never depends on the file. In a managed scope the next plan lists
+  those as removals (`-`), and the next apply removes them unless the file lists them.
 
 ## Query isolation: credential scoping, not blacklisting (M2/M3)
 

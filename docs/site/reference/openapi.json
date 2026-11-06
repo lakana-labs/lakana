@@ -8409,7 +8409,7 @@
           "principals"
         ],
         "summary": "Create a principal",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nCreates a user or a service account. Needs `MANAGE_PRINCIPAL` on the instance. Answers 409 when the name is taken.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is managed by a file: for a person the override answers 422.\n\nCreates a user or a service account. Needs `MANAGE_PRINCIPAL` on the instance. Answers 409 when the name is taken.",
         "operationId": "create_principal_api_v1_principals_post",
         "parameters": [
           {
@@ -8745,7 +8745,7 @@
           "principals"
         ],
         "summary": "Deactivate a principal",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nStops the principal from signing in. The record stays, with every grant, token and audit entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when there is no principal of that name and 409 when it is the last active administrator.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is managed by a file: for a person the override answers 422.\n\nStops the principal from signing in. The record stays, with every grant, token and audit entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when there is no principal of that name and 409 when it is the last active administrator.",
         "operationId": "deactivate_principal_api_v1_principals__name__delete",
         "parameters": [
           {

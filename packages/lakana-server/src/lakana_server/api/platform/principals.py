@@ -37,7 +37,8 @@ def create_principal(
     """Create a principal.
 
     Answers 409 when an access file manages the scope; `override_managed` with
-    `override_reason` overrides it (ADMIN on the instance; audited).
+    `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is
+    managed by a file: for a person the override answers 422.
 
     Creates a user or a service account. Needs `MANAGE_PRINCIPAL` on the instance. Answers
     409 when the name is taken.
@@ -195,7 +196,8 @@ def deactivate_principal(
     """Deactivate a principal.
 
     Answers 409 when an access file manages the scope; `override_managed` with
-    `override_reason` overrides it (ADMIN on the instance; audited).
+    `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is
+    managed by a file: for a person the override answers 422.
 
     Stops the principal from signing in. The record stays, with every grant, token and audit
     entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when

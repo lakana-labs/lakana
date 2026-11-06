@@ -164,9 +164,14 @@ service accounts and grants on the instance are guarded only when `instance` is 
 | Row filters and column masks | `lakana row-filter create`, `revoke`; `lakana column-mask create`, `revoke` |
 | CI trust rules | `lakana ci-trust create`, `update`, `enable`, `disable`, `delete` |
 
-Not guarded, because a file does not hold them: people (user principals), personal access
-tokens, and the grants and policies that dropping a table or an environment takes with it. A call
-that changes nothing, such as revoking a grant that is already revoked, is not refused.
+Not guarded, because a file does not hold them: people (user principals) and personal access
+tokens. An override on the commands for people is refused (`people are not managed by an access
+file; repeat without --override-managed`). Dropping a table or an environment is not guarded
+either: it takes the grants and policies of the object with it. Restoring one
+(`lakana table undrop`, `lakana env restore`) is not guarded, so that a recovery never waits
+for the file, and it re-adds the grants and policies the object had. In a managed scope the next
+plan lists them as removals (`-`), and the next apply removes them unless the file lists them. A
+call that changes nothing, such as revoking a grant that is already revoked, is not refused.
 
 ### The override
 
