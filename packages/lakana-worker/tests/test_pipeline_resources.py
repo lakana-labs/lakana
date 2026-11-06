@@ -194,6 +194,51 @@ def test_a_run_that_never_started_a_child_keeps_null(
     assert _figures(file_session, run_id) == AttemptResources(None, None, None)
 
 
+def test_a_run_without_a_collector_still_records_its_outcome_and_keeps_null(
+    file_session: Session, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Call the inner runner with no collector installed: figures stay null, outcome is stored.
+
+    Parameters
+    ----------
+    file_session
+        Database session on a file.
+    principal
+        The admin.
+    monkeypatch
+        Patches the executor.
+    """
+    seen: list[object] = []
+
+    def execute(*args: object, **kwargs: object) -> object:
+        """Fail like bad SQL after noting there is no collector.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        ValueError
+            Always.
+        """
+        seen.append(current_collector())
+        raise ValueError("bad sql")
+
+    monkeypatch.setattr(pipeline, "execute_query", execute)
+    run_id = _queued(file_session, principal, "SELECT 1")
+    pipeline._run_one(file_session, run_id, AllowAllAuthorization())
+    assert seen == [None]
+    file_session.expire_all()
+    run = file_session.get(QueryRun, run_id)
+    assert run is not None and run.status is QueryRunStatus.FAILED
+    assert run.finished_at is not None
+    assert _figures(file_session, run_id) == AttemptResources(None, None, None)
+
+
 def test_a_refused_run_keeps_null(file_session: Session, principal: PrincipalRef) -> None:
     run_id = _queued(file_session, principal, "SELECT 1")
     file_session.execute(
