@@ -646,8 +646,14 @@ class GraphService:
             ):
                 raise NotFoundError(NO_ENVIRONMENT.format(env=environment))
             raise NotFoundError(NO_NODE.format(node=shown(node), env=shown(environment)))
+        # The schema is read only for a reader who can see mask nodes (`_Visibility.policies`).
+        sees_masks = self._authz.permits(p, Action.MANAGE_POLICY, Securable.instance_scope())
         graph = load_graph(
-            self._session, environment_id, environment, part=self._part, fields_of=self._fields_of
+            self._session,
+            environment_id,
+            environment,
+            part=self._part,
+            fields_of=self._fields_of if sees_masks else None,
         )
         budget.check()
         visible = _Visibility(self._authz, p, graph)

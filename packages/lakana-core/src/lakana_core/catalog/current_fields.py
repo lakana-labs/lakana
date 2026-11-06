@@ -59,7 +59,8 @@ def current_fields(
         return tuple(metadata.schema().fields)
     except Exception as exc:
         logger.warning(
-            "The columns of table %s in %s could not be read to list its policies (%s).",
+            "The columns of table %s in %s could not be read to resolve its policies' column "
+            "names (%s).",
             shown(row.name),
             shown(environment),
             type(exc).__name__,

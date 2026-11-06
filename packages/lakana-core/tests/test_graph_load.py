@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 import pytest
 from graph_test_helpers import (
+    Grants,
     StarWorld,
     asset_entry,
     check_entry,
@@ -16,6 +17,7 @@ from graph_test_helpers import (
 from pyiceberg.types import NestedField, StringType
 from sqlalchemy import event, select
 
+from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.glossary import write_glossary
 from lakana_core.catalog.glossary_read import term_names
@@ -37,6 +39,7 @@ from lakana_core.catalog.graph_model import (
     job_node,
     table_node,
 )
+from lakana_core.catalog.graph_service import GraphService
 from lakana_core.models import (
     ColumnMask,
     GlossaryTerm,
@@ -299,6 +302,35 @@ def test_a_mask_that_cannot_be_resolved_keeps_the_name_it_was_made_with(
     }[case]
     graph = load_graph(star.session, star.env_id, "dev", fields_of=fields_of)
     assert _edges(graph, mask) == {(EdgeKind.MASKS, mask, column_node(dim, "store_name"))}
+
+
+@pytest.mark.parametrize("policies", [True, False])
+def test_current_fields_are_read_only_for_a_reader_who_sees_masks(
+    star: StarWorld, principal: PrincipalRef, policies: bool
+) -> None:
+    """The schema is read for bound masks only when the reader holds MANAGE_POLICY."""
+    _bind_the_mask(star)
+    asked: list[uuid.UUID] = []
+
+    def spy(table_id: uuid.UUID) -> tuple[NestedField, ...]:
+        """Record the read and give a renamed schema.
+
+        Parameters
+        ----------
+        table_id
+            The table read.
+
+        Returns
+        -------
+        tuple of NestedField
+            Its fields.
+        """
+        asked.append(table_id)
+        return _fields("store_id", "shop_name")(table_id)
+
+    service = GraphService(star.session, Grants(policies=policies), "en", fields_of=spy)
+    service.neighbours(principal, "dev", "gold.dim_store")
+    assert bool(asked) is policies
 
 
 def test_a_reference_keeps_its_id_across_a_changed_target_and_a_rollback(star: StarWorld) -> None:
