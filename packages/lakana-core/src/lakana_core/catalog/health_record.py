@@ -130,6 +130,8 @@ def recent_observations(
     row, but compactions and commits whose signals failed record no other: on a table compacted
     more often than appended to, the window can hold fewer than `HISTORY` values of a signal
     (fewer than `MIN_HISTORY` leaves it at ``no_history``). The rows it misses are the oldest.
+    A delete-only ``volume`` row (``loaded`` false) is skipped before the newest `HISTORY` are
+    taken, so the band is learnt from loads.
 
     Parameters
     ----------
@@ -164,6 +166,8 @@ def recent_observations(
         TableHealthSignal.state.in_(_LEARNED_STATES),
         not_(and_(TableHealthSignal.state == "fired", TableHealthSignal.effect == "block")),
         NOT_SET_BACK,
+        # A delete-only commit loaded nothing: it takes no place in a window of loads.
+        TableHealthSignal.observed["loaded"].as_boolean().is_not(False),
     ]
     if since is not None:
         conditions.append(TableHealthSignal.observed_at >= since)

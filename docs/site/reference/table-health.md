@@ -305,7 +305,11 @@ delete files) is not judged by volume and does not move its band: `volume` recor
 `observed` `{"added": 0, "loaded": false}`, it never fires, and its columns, which it did not write,
 are not counted as unjudged. It still counts as a write for freshness. Lakana takes a commit for
 delete-only when it read the commit's added files and none was a data file, or when the snapshot
-says `added-data-files` is 0; a summary without any counts is `not_recorded`. A column
+says `added-data-files` is 0, whatever `added-records` says (a writer that records explicit zeros
+is treated the same); a summary without any counts is `not_recorded`. The band is learnt from the
+newest 30 loads among the table's last 60 commits: a delete-only commit counts toward those 60 but
+does not teach the band, so a table whose recent commits are mostly deletes can stay `no_history` (fewer than 8
+loads in the window) until more loads arrive. A column
 that never records a value can never be judged: `range` of a column without a range (text,
 boolean, a nested type) and any column past the 200th. A deploy that knows the columns refuses
 `block` on a column past the 200th (counted as the refusal table below says); for the rest, `lakana table get` marks the entry, as in

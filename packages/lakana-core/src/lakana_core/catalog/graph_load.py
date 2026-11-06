@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
+from pyiceberg.types import NestedField
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -54,6 +55,7 @@ from lakana_core.models import (
     TableColumn,
     TableType,
 )
+from lakana_core.policy.shown import shown_policies
 from lakana_core.projects.checks import read_manifest_checks
 from lakana_core.projects.lookups import current_manifests
 from lakana_core.projects.manifest import entry_inputs, manifest_assets, manifest_jobs
@@ -810,6 +812,7 @@ def load_graph(
     environment: str,
     *,
     part: Callable[[uuid.UUID, str, object], ManifestPart] | None = None,
+    fields_of: Callable[[uuid.UUID], Sequence[NestedField] | None] | None = None,
 ) -> EnvironmentGraph:
     """Load an environment's graph.
 
@@ -824,6 +827,12 @@ def load_graph(
     part
         Reads one repository's part from ``(project version id, repository, manifest)``;
         `manifest_part` when `None`.
+    fields_of
+        A table's current top-level fields, or `None` when they cannot be read; called once per
+        table that has a column mask bound to field ids. A mask is linked to its column's
+        current name, resolved through the same field-id binding a query uses
+        (`policy.shown.shown_policies`); with no reader, an unbound mask, or a column that is
+        gone, it stays linked to the name it was made with.
 
     Returns
     -------
@@ -911,19 +920,24 @@ def load_graph(
                 None,
             )
         )
-    for mask_id, table_id, column in session.execute(
-        select(ColumnMask.id, ColumnMask.table_id, ColumnMask.column).where(
-            ColumnMask.environment_id == environment_id,
-            ColumnMask.revoked_at.is_(None),
-            ColumnMask.table_id.is_not(None),
+    masks = list(
+        session.scalars(
+            select(ColumnMask).where(
+                ColumnMask.environment_id == environment_id,
+                ColumnMask.revoked_at.is_(None),
+                ColumnMask.table_id.is_not(None),
+            )
         )
-    ):
+    )
+    current = shown_policies(masks, fields_of) if fields_of is not None else {}
+    for mask in masks:
+        shown_mask = current.get(mask.id)
         graph.add_policy(
             PolicyNode(
-                row_node(NodeKind.COLUMN_MASK, mask_id),
+                row_node(NodeKind.COLUMN_MASK, mask.id),
                 NodeKind.COLUMN_MASK,
-                cast(uuid.UUID, table_id),
-                column,
+                cast(uuid.UUID, mask.table_id),
+                shown_mask.column if shown_mask and shown_mask.column else mask.column,
             )
         )
     read = part or (lambda _version, repository, manifest: manifest_part(repository, manifest))

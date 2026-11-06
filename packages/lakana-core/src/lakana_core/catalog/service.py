@@ -72,6 +72,7 @@ from lakana_core.catalog.connection_lineage import (
     connection_edges,
     connection_sources,
 )
+from lakana_core.catalog.current_fields import current_fields
 from lakana_core.catalog.datafiles import list_data_files
 from lakana_core.catalog.descriptions import (
     KEEP,
@@ -4105,30 +4106,7 @@ class CatalogService:
             If `p` may not manage policies.
         """
         self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        found = self._session.execute(
-            select(Table, Environment.name)
-            .join(Namespace, Namespace.id == Table.namespace_id)
-            .join(Environment, Environment.id == Namespace.environment_id)
-            .where(Table.id == table_id)
-        ).one_or_none()
-        if found is None or found[0].table_type is not TableType.ICEBERG:
-            return None
-        row, environment = found
-        if row.metadata_location is None:
-            return None
-        try:
-            metadata = read_metadata(
-                self._storage.for_environment(environment).file_io, row.metadata_location
-            )
-            return tuple(metadata.schema().fields)
-        except Exception as exc:
-            logger.warning(
-                "The columns of table %s in %s could not be read to list its policies (%s).",
-                shown(row.name),
-                shown(environment),
-                type(exc).__name__,
-            )
-            return None
+        return current_fields(self._session, self._storage, table_id)
 
     def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:
         """Describe a table row by kind, without its descriptions.

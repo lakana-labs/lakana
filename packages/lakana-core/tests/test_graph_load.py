@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 
+import pytest
 from graph_test_helpers import (
+    Grants,
     StarWorld,
     asset_entry,
     check_entry,
     point,
     sales_manifest,
 )
+from pyiceberg.types import NestedField, StringType
 from sqlalchemy import event, select
 
+from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.glossary import write_glossary
 from lakana_core.catalog.glossary_read import term_names
@@ -34,7 +39,9 @@ from lakana_core.catalog.graph_model import (
     job_node,
     table_node,
 )
+from lakana_core.catalog.graph_service import GraphService
 from lakana_core.models import (
+    ColumnMask,
     GlossaryTerm,
     Namespace,
     Repository,
@@ -220,6 +227,110 @@ def test_a_named_form_resolves_to_the_id_and_a_missing_one_to_none(star: StarWor
         NodeRef(NodeKind.TABLE, str(uuid.uuid4())),
     ):
         assert graph.resolve(missing) is None
+
+
+def _bind_the_mask(star: StarWorld, *, binding: str = "field_ids") -> str:
+    """Bind the star's mask on ``dim_store.store_name`` (field id 2) the way #120 does.
+
+    Parameters
+    ----------
+    star
+        The star.
+    binding
+        The binding state to store.
+
+    Returns
+    -------
+    str
+        The mask's node id.
+    """
+    mask = star.session.scalars(select(ColumnMask)).one()
+    mask.binding = binding
+    mask.field_ids = {"store_name": 2} if binding == "field_ids" else None
+    mask.column_field_id = 2 if binding == "field_ids" else None
+    star.session.flush()
+    return star.policy(NodeKind.COLUMN_MASK)
+
+
+def _fields(*names: str) -> Callable[[uuid.UUID], tuple[NestedField, ...]]:
+    """Give a table's current fields: the given names with the ids 1, 2, ...
+
+    Parameters
+    ----------
+    *names
+        The columns' current names.
+
+    Returns
+    -------
+    Callable
+        What `load_graph` takes as ``fields_of``.
+    """
+    fields = tuple(NestedField(i + 1, n, StringType(), required=False) for i, n in enumerate(names))
+    return lambda _table_id: fields
+
+
+def test_a_mask_follows_its_column_through_a_rename(star: StarWorld) -> None:
+    """#460: the MASKS edge points at the column's current name, resolved by field id."""
+    mask = _bind_the_mask(star)
+    dim = star.table_id("gold.dim_store")
+    graph = load_graph(star.session, star.env_id, "dev", fields_of=_fields("store_id", "shop_name"))
+    assert _edges(graph, mask) == {(EdgeKind.MASKS, mask, column_node(dim, "shop_name"))}
+
+
+def test_a_mask_not_renamed_keeps_its_column(star: StarWorld) -> None:
+    """A bound mask whose column kept its name links the same node."""
+    mask = _bind_the_mask(star)
+    dim = star.table_id("gold.dim_store")
+    graph = load_graph(
+        star.session, star.env_id, "dev", fields_of=_fields("store_id", "store_name")
+    )
+    assert _edges(graph, mask) == {(EdgeKind.MASKS, mask, column_node(dim, "store_name"))}
+
+
+@pytest.mark.parametrize("case", ["unbound", "no_reader", "unreadable", "gone"])
+def test_a_mask_that_cannot_be_resolved_keeps_the_name_it_was_made_with(
+    star: StarWorld, case: str
+) -> None:
+    """An unbound policy, no schema reader, a failing one, or a gone field: today's link."""
+    mask = _bind_the_mask(star, binding="unbound" if case == "unbound" else "field_ids")
+    dim = star.table_id("gold.dim_store")
+    fields_of = {
+        "unbound": _fields("store_id", "shop_name"),
+        "no_reader": None,
+        "unreadable": lambda _table_id: None,
+        "gone": _fields("store_id"),
+    }[case]
+    graph = load_graph(star.session, star.env_id, "dev", fields_of=fields_of)
+    assert _edges(graph, mask) == {(EdgeKind.MASKS, mask, column_node(dim, "store_name"))}
+
+
+@pytest.mark.parametrize("policies", [True, False])
+def test_current_fields_are_read_only_for_a_reader_who_sees_masks(
+    star: StarWorld, principal: PrincipalRef, policies: bool
+) -> None:
+    """The schema is read for bound masks only when the reader holds MANAGE_POLICY."""
+    _bind_the_mask(star)
+    asked: list[uuid.UUID] = []
+
+    def spy(table_id: uuid.UUID) -> tuple[NestedField, ...]:
+        """Record the read and give a renamed schema.
+
+        Parameters
+        ----------
+        table_id
+            The table read.
+
+        Returns
+        -------
+        tuple of NestedField
+            Its fields.
+        """
+        asked.append(table_id)
+        return _fields("store_id", "shop_name")(table_id)
+
+    service = GraphService(star.session, Grants(policies=policies), "en", fields_of=spy)
+    service.neighbours(principal, "dev", "gold.dim_store")
+    assert bool(asked) is policies
 
 
 def test_a_reference_keeps_its_id_across_a_changed_target_and_a_rollback(star: StarWorld) -> None:

@@ -243,6 +243,34 @@ def test_remove_member_who_is_the_last_active_admin_is_refused(session: Session)
         groups.remove_member(admin, "ops", "root")
 
 
+def test_the_sole_admin_with_a_direct_grant_may_leave_an_admin_group(session: Session) -> None:
+    """A direct ADMIN grant still counts when the membership alone is taken away."""
+    admin = _persisted_admin(session)
+    _add_principal(session, "root")
+    groups = GroupService(session, AllowAllAuthorization())
+    grants = GrantService(session, AllowAllAuthorization())
+    grants.grant(admin, principal="root", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    groups.create_group(admin, name="ops")
+    groups.add_member(admin, "ops", "root")
+    grants.grant(admin, group="ops", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+
+    groups.remove_member(admin, "ops", "root")  # does not raise
+
+
+def test_the_sole_admin_may_leave_one_of_two_admin_groups(session: Session) -> None:
+    """Another ADMIN group the person is in still counts."""
+    admin = _persisted_admin(session)
+    _add_principal(session, "root")
+    groups = GroupService(session, AllowAllAuthorization())
+    grants = GrantService(session, AllowAllAuthorization())
+    for name in ("ops", "ops2"):
+        groups.create_group(admin, name=name)
+        groups.add_member(admin, name, "root")
+        grants.grant(admin, group=name, role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+
+    groups.remove_member(admin, "ops", "root")  # does not raise
+
+
 def test_the_last_admin_may_leave_a_group_without_the_admin_role(session: Session) -> None:
     """A group that grants no instance ADMIN cannot take the role away: the guard is not asked."""
     admin = _persisted_admin(session)

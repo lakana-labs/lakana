@@ -35,7 +35,7 @@ Answers always carry the ids.
 | `references` | reference → its column, → the table and the column it points at |
 | `measures` | measure → its column |
 | `checks` | check → its table; a generated `ref_` check → its reference; a key check → the key's columns |
-| `filters`, `masks` | row filter → its table; column mask → its column |
+| `filters`, `masks` | row filter → its table; column mask → its column, by the column's current name: a mask follows its column through a rename, and one that is not bound to a field id (or whose column is gone) stays with the name it was made with |
 | `links` | glossary term → a table or a column |
 | `runs` | job → an asset it runs |
 | `has_column` | table → its column |

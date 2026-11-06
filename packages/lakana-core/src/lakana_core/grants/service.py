@@ -629,6 +629,7 @@ def active_instance_admin_ids(
     session: Session,
     *,
     exclude_grant_id: uuid.UUID | None = None,
+    exclude_membership: tuple[uuid.UUID, uuid.UUID] | None = None,
 ) -> set[uuid.UUID]:
     """Collect the active principals holding an active instance ADMIN grant.
 
@@ -645,6 +646,11 @@ def active_instance_admin_ids(
     exclude_grant_id
         A grant to treat as already revoked regardless of its stored
         `revoked_at`, for a revocation that hasn't been committed yet.
+    exclude_membership
+        A ``(group_id, principal_id)`` pair to treat as already removed, for a
+        group-membership removal that hasn't been committed yet. Only that one
+        path is taken away; the principal still counts through a direct grant
+        or another group.
 
     Returns
     -------
@@ -685,7 +691,11 @@ def active_instance_admin_ids(
                 .scalars()
                 .all()
             )
-            ids.update(member_ids)
+            ids.update(
+                member_id
+                for member_id in member_ids
+                if exclude_membership != (admin_grant.group_id, member_id)
+            )
     if not ids:
         return set()
     return set(
@@ -702,13 +712,14 @@ def assert_admin_headroom(
     *,
     excluding_principal_id: uuid.UUID | None = None,
     excluding_grant_id: uuid.UUID | None = None,
+    excluding_membership: tuple[uuid.UUID, uuid.UUID] | None = None,
 ) -> None:
     """Refuse if the given exclusion would leave zero active instance admins.
 
     Shared by `GrantService.revoke` (excluding the grant being revoked) and
     `lakana_core.identity.principals.PrincipalService.deactivate_principal`/
     `lakana_core.identity.groups.GroupService.remove_member` (excluding the
-    principal being deactivated or losing membership) — all reduce to the
+    principal being deactivated, or only the membership being removed) — all reduce to the
     same question: after this change, does at least one active principal
     still hold an active `admin` grant at instance scope, directly or
     through a group? `GroupService.delete_group` does not call this: it
@@ -727,6 +738,11 @@ def assert_admin_headroom(
     excluding_grant_id
         A grant to treat as already revoked regardless of its stored
         `revoked_at`, for a revocation that hasn't been committed yet.
+    excluding_membership
+        A ``(group_id, principal_id)`` pair to treat as already removed, for a
+        group-membership removal that hasn't been committed yet. Unlike
+        `excluding_principal_id`, it takes away only that membership: a direct
+        grant or another admin group still counts the principal.
 
     Raises
     ------
@@ -741,7 +757,11 @@ def assert_admin_headroom(
     # changes over, or every deactivate/revoke call would fail forever.
     if not active_instance_admin_ids(session):
         return
-    remaining_ids = active_instance_admin_ids(session, exclude_grant_id=excluding_grant_id)
+    remaining_ids = active_instance_admin_ids(
+        session,
+        exclude_grant_id=excluding_grant_id,
+        exclude_membership=excluding_membership,
+    )
     remaining_ids.discard(excluding_principal_id)
     if not remaining_ids:
         raise ConflictError("Cannot leave the instance with zero active admins.")

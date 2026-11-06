@@ -763,6 +763,35 @@ def test_leaving_an_admin_group_runs_last(session: Session) -> None:
     assert _count(session, Group, Group.name == "spare") == 0
 
 
+def test_leaving_an_admin_group_keeps_a_direct_admin_grant_counting(session: Session) -> None:
+    """The only administrator, also ADMIN directly, may drop out of an ADMIN group by apply."""
+    world = access_world(session)
+    groups = GroupService(session, AllowAllAuthorization())
+    groups.create_group(world.admin, name="admins")
+    groups.add_member(world.admin, "admins", "admin")
+    GrantService(session, AllowAllAuthorization()).grant(
+        world.admin, group="admins", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    service = _service(session, world)
+
+    def edit(document: dict[str, Any]) -> None:
+        """Leave the group admins.
+
+        Parameters
+        ----------
+        document
+            The loaded file.
+        """
+        document["groups"]["admins"]["members"] = []
+
+    text = _edit(service.export(world.admin, ["instance"]), edit)
+    plan = service.plan(world.admin, text)
+    assert plan.problems == ()
+    service.apply(world.admin, text, plan_fingerprint=plan.fingerprint)
+    assert holds_instance_admin(session, world.admin.id)
+    assert _count(session, GroupMembership, GroupMembership.principal_id == world.admin.id) == 0
+
+
 def test_losing_admin_part_way_through_is_refused_with_two_steps(session: Session) -> None:
     """The caller's last ADMIN path needs two removals: the second could not be authorized.
 

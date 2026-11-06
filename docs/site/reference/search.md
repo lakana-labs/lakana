@@ -9,8 +9,8 @@ columns of tables that existed before search are filled in. For the steps, see
 
 | Kind | Matched against | `matched` is |
 |---|---|---|
-| `table` | the table's name, its name with the namespace (`silver.orders`), its shown label, its shown description, its declared grain; the name and synonyms of a glossary term that links it | `name`, `label`, `description`, `grain` or `term` |
-| `column` | the column's name, its shown label, its shown description, the label and description of its measure; the name and synonyms of a glossary term that links it | `name`, `label`, `description`, `measure` or `term` |
+| `table` | the table's name, its name with the namespace (`silver.orders`), its shown label, its shown description, its declared grain; the key, name and synonyms of a glossary term that links it | `name`, `label`, `description`, `grain` or `term` |
+| `column` | the column's name, its shown label, its shown description, the label and description of its measure; the key, name and synonyms of a glossary term that links it | `name`, `label`, `description`, `measure` or `term` |
 | `run` | the run's id (four hex characters or more, with or without dashes), its job, its repository | `id`, `job` or `repository` |
 | `principal` | the principal's name | `name` |
 | `term` | the term's key, its shown name, its synonyms (main language always, translated ones in your languages), its definition | `name`, `synonym` or `definition` |
@@ -20,12 +20,16 @@ has no grain to match. Key columns are found as columns. The declared kind (`fac
 `wide`, `staging`) is not matched as text: to find the tables of one kind, filter with
 `--model-kind` (`model_kind` over REST and in the SDK).
 
-A table or column linked from a glossary term is found by that term's name and synonyms, not by its
+A table or column linked from a glossary term is found by that term's key, name and synonyms, not by its
 definition, with `matched: term` and the term's key in `term`: "revenue" finds the term
 `net_revenue`, the column `gold.fact_sales.net_amount` it links, and the tables it links as a
-whole. A term is found by the synonyms it *shows* you: those of its main language, then those of
+whole. The key finds them too: if the term `nrv` is named "Net revenue", searching `nrv` finds the table
+it links, with the snippet "Net revenue". A term is found by the synonyms it *shows* you: those of its main language, then those of
 your languages that come before the term's main language in your list (all of them when the main
-language is not in your list). The links are those the term declares, see
+language is not in your list). A translated name or definition is found only in the one language the term shows them in: the first of
+those languages that has a translated name or definition, as `term get` picks it. With the languages
+`de, fr`, a term whose `de` text is a definition and whose `fr` text is a name shows its main-language
+name, so searching the `fr` name finds nothing by name; ask in `fr` alone to find it. The links are those the term declares, see
 [Glossary](glossary.md).
 
 A table is a managed table, an external table, a view or an artifact, as in the table listing

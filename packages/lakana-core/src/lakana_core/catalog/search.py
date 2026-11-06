@@ -30,6 +30,7 @@ from sqlalchemy import (
     and_,
     case,
     cast,
+    exists,
     func,
     literal,
     literal_column,
@@ -1214,6 +1215,39 @@ def _shown_term_language(
     )
 
 
+def _in_chosen_language(
+    text: type[GlossaryTermText], languages: Sequence[str]
+) -> ColumnElement[bool]:
+    """Say whether a translated name or definition is in the language the term view shows.
+
+    The view (`glossary_read._shown`) takes its name and definition from one language: the
+    first of the reader's languages, before the term's main language, that has a translated name
+    or definition. A text of a later language is shown nowhere, so search does not match it. The
+    caller has already restricted the text to the languages the term shows.
+
+    Parameters
+    ----------
+    text
+        The text row, or an alias of `GlossaryTermText`.
+    languages
+        The reader's languages, truncation included; not empty.
+
+    Returns
+    -------
+    ColumnElement
+        True when no text of the same term, in a name or definition field, is in an earlier
+        language of the reader's.
+    """
+    earlier = aliased(GlossaryTermText)
+    return ~exists().where(
+        earlier.term_id == text.term_id,
+        earlier.field.in_(("name", "definition")),
+        earlier.language != MAIN_TEXT_LANGUAGE,
+        earlier.language.in_(languages),
+        _language_place(earlier.language, languages) < _language_place(text.language, languages),
+    )
+
+
 def _terms(match: _Match, environment_id: uuid.UUID) -> _Candidates:
     """Select the terms whose key, name, main-language synonym or definition matches.
 
@@ -1297,7 +1331,8 @@ def _term_translations(
     Returns
     -------
     Select
-        Candidates of the term kind, in the languages the term shows. A name or synonym ranks
+        Candidates of the term kind, in the languages the term shows (a name or definition only
+        in the one language the term view takes them from). A name or synonym ranks
         like a name; a definition after names. Of one term's texts at one rank, the first of the
         reader's languages comes first, then a name, a synonym, a definition.
     """
@@ -1330,6 +1365,7 @@ def _term_translations(
             GlossaryTerm.environment_id == environment_id,
             GlossaryTermText.language != MAIN_TEXT_LANGUAGE,
             _shown_term_language(GlossaryTermText.language, languages, main_language),
+            or_(field == "synonym", _in_chosen_language(GlossaryTermText, languages)),
             match.contains(text),
         )
     )
@@ -1385,6 +1421,7 @@ def _term_words(match: _Match, languages: Sequence[str], main_language: str) -> 
         translated = and_(
             word.field.in_(("name", "synonym")),
             _shown_term_language(word.language, languages, main_language),
+            or_(word.field == "synonym", _in_chosen_language(word, languages)),
         )
         shown = or_(shown, translated)
     name_rank = match.rank([GlossaryTerm.name, GlossaryTerm.term_key], otherwise=3)
