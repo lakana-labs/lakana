@@ -167,6 +167,7 @@ class CgroupSampler:
         self._root = root
         self._done = threading.Event()
         self._sleep = sleep or self._done.wait
+        self._lock = threading.Lock()
         self._peak: int | None = None
         self._cpu: float | None = None
         self._logged = False
@@ -213,10 +214,11 @@ class CgroupSampler:
             if directory is None:
                 return
             reading = read_cgroup(directory)
-            if reading.peak_memory_bytes is not None:
-                self._peak = max(self._peak or 0, reading.peak_memory_bytes)
-            if reading.cpu_seconds is not None:
-                self._cpu = reading.cpu_seconds
+            with self._lock:
+                if reading.peak_memory_bytes is not None:
+                    self._peak = max(self._peak or 0, reading.peak_memory_bytes)
+                if reading.cpu_seconds is not None:
+                    self._cpu = max(self._cpu or 0.0, reading.cpu_seconds)
         except Exception as error:  # a figure is never worth failing a task
             if not self._logged:
                 self._logged = True

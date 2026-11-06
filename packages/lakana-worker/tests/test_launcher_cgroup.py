@@ -156,6 +156,27 @@ def test_stopping_before_the_first_sample_gives_nothing(tmp_path: Path) -> None:
     assert sampler.stop() == CgroupReading(None, None)
 
 
+def test_the_merge_of_a_reading_is_made_under_the_samplers_lock(tmp_path: Path) -> None:
+    """The thread and the end-of-output read both merge: each merge holds the lock."""
+    _tree(tmp_path / f"docker/{ID}")
+    held: list[bool] = []
+
+    class Recording:
+        """A lock that notes that it was taken, and whether the merge ran inside it."""
+
+        def __enter__(self) -> None:
+            held.append(True)
+
+        def __exit__(self, *exc: object) -> None:
+            held.append(False)
+
+    sampler = CgroupSampler(ID, root=tmp_path, sleep=lambda seconds: True)
+    sampler._lock = Recording()  # ty: ignore[invalid-assignment]
+    sampler.sample()
+    assert held == [True, False]
+    assert sampler.stop() == CgroupReading(536870912, 3.1)
+
+
 def test_stop_reads_once_more_so_a_short_task_has_figures(tmp_path: Path) -> None:
     """The cgroup is read after the container ended and before its removal."""
     _tree(tmp_path / f"docker/{ID}")
@@ -229,7 +250,9 @@ def test_a_thread_that_cannot_start_is_not_an_error(
     monkeypatch.setattr(
         "lakana_worker.launcher.cgroup.threading",
         types.SimpleNamespace(
-            Thread=lambda **kwargs: types.SimpleNamespace(start=refuse), Event=threading.Event
+            Thread=lambda **kwargs: types.SimpleNamespace(start=refuse),
+            Event=threading.Event,
+            Lock=threading.Lock,
         ),
     )
     sampler = CgroupSampler(ID, root=tmp_path)
