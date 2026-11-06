@@ -18269,6 +18269,180 @@
         }
       }
     },
+    "/api/v1/access/apply": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Make an access file's changes in one audited transaction, or none of them",
+        "description": "Needs the ADMIN role on the instance. The plan is made again under a lock: 409 when access changed since the plan with `plan_fingerprint` (plan again), and 409 when the changes would end the caller's last way to administer (apply in two steps). 422 lists every problem of the file (at most 50).",
+        "operationId": "apply_access_api_v1_access_apply_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessApplyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessApplyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/access/status": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the scopes access files manage and the open overrides",
+        "description": "Needs the ADMIN role on the instance.",
+        "operationId": "access_status_api_v1_access_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessStatusOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/oidc/token": {
       "post": {
         "tags": [
@@ -18560,6 +18734,109 @@
   },
   "components": {
     "schemas": {
+      "AccessApplyIn": {
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "title": "File Name",
+            "default": "access.yaml"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "plan_fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Fingerprint"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commit"
+          },
+          "allow_lockout": {
+            "type": "boolean",
+            "title": "Allow Lockout",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "plan_fingerprint"
+        ],
+        "title": "AccessApplyIn",
+        "description": "Request body for applying an access file.\n\nParameters\n----------\nfile_name\n    The file's base name, which the messages and the record use.\ntext\n    The file's content.\nplan_fingerprint\n    The ``fingerprint`` of the plan the caller reviewed (64 hex digits); the apply is\n    refused with 409 when access changed since.\nsource_commit\n    The commit the file came from, 7 to 64 hex digits; recorded with the apply.\nallow_lockout\n    Accept a file that drops the caller's own ``ADMIN`` role while another administrator\n    remains."
+      },
+      "AccessApplyOut": {
+        "properties": {
+          "apply_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Apply Id"
+          },
+          "file_sha256": {
+            "type": "string",
+            "title": "File Sha256"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commit"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "changed": {
+            "type": "integer",
+            "title": "Changed"
+          },
+          "removed": {
+            "type": "integer",
+            "title": "Removed"
+          },
+          "released": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Released"
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Applied At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "apply_id",
+          "file_sha256",
+          "source_commit",
+          "created",
+          "changed",
+          "removed",
+          "released",
+          "applied_at"
+        ],
+        "title": "AccessApplyOut",
+        "description": "What an apply did.\n\nParameters\n----------\napply_id\n    The apply's id; every audit event of the apply carries it as ``access_apply_id``.\nfile_sha256\n    Hash of the file's text.\nsource_commit\n    The commit the file came from, in lower case; `null` when not given.\ncreated\n    How many entries were created.\nchanged\n    How many CI trust rules were changed in place.\nremoved\n    How many entries were removed.\nreleased\n    The scopes no file manages any longer.\napplied_at\n    When the apply committed."
+      },
       "AccessChangeOut": {
         "properties": {
           "op": {
@@ -18686,6 +18963,48 @@
         "title": "AccessFileIn",
         "description": "Request body for planning an access file.\n\nThe text has no length limit here: the server names the limit in its answer (1 MiB) and\nthe request body limit bounds the request.\n\nParameters\n----------\nfile_name\n    The file's base name, which the messages use, such as ``access.yaml``.\ntext\n    The file's content.\nallow_lockout\n    Accept a file that drops the caller's own ``ADMIN`` role while another administrator\n    remains."
       },
+      "AccessOverrideOut": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "change": {
+            "type": "string",
+            "title": "Change"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "change",
+          "reason",
+          "by",
+          "at"
+        ],
+        "title": "AccessOverrideOut",
+        "description": "A change made by hand in a managed scope that no apply has taken into account yet.\n\nParameters\n----------\nscope\n    The managed scope.\nchange\n    What was changed.\nreason\n    Why.\nby\n    Who changed it; `null` once that principal is deleted.\nat\n    When."
+      },
       "AccessPlanOut": {
         "properties": {
           "file_name": {
@@ -18765,6 +19084,31 @@
         ],
         "title": "AccessPlanOut",
         "description": "What applying an access file would change, and every problem that stops it.\n\nParameters\n----------\nfile_name\n    The base name the messages use.\nfile_sha256\n    Hash of the file's text.\nmanages\n    The scopes the file manages; empty when it did not parse.\ncreates\n    Entries the apply creates.\nchanged\n    CI trust rules the apply changes in place.\nremovals\n    Entries the apply removes.\nreleases\n    Managed scopes the file no longer lists.\ndrift\n    Access in the scopes that did not come from the file.\nproblems\n    Every problem; an apply refuses while there is one.\nfingerprint\n    Hash of the live state of the managed scopes, which an apply checks again."
+      },
+      "AccessStatusOut": {
+        "properties": {
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedScopeOut"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/AccessOverrideOut"
+            },
+            "type": "array",
+            "title": "Overrides"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scopes",
+          "overrides"
+        ],
+        "title": "AccessStatusOut",
+        "description": "The scopes access files manage, and the open overrides.\n\nParameters\n----------\nscopes\n    Every managed scope, sorted by name.\noverrides\n    Every open override, oldest first."
       },
       "Action": {
         "type": "string",
@@ -23281,6 +23625,60 @@
         "type": "object",
         "title": "MaintenanceIn",
         "description": "Request body for table maintenance.\n\nParameters\n----------\nkeep_days\n    Snapshots younger than this many days are kept.\nkeep_last\n    The most recent this many snapshots are always kept.\ndry_run\n    Report what would happen without changing anything.\nolder_than_hours\n    Unreferenced files younger than this many hours are never deleted;\n    1 to 87600 (ten years)."
+      },
+      "ManagedScopeOut": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "file_sha256": {
+            "type": "string",
+            "title": "File Sha256"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commit"
+          },
+          "applied_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied By"
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Applied At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "file_name",
+          "file_sha256",
+          "source_commit",
+          "applied_by",
+          "applied_at"
+        ],
+        "title": "ManagedScopeOut",
+        "description": "A scope an access file manages, and its last apply.\n\nParameters\n----------\nscope\n    ``instance`` or an environment's name.\nfile_name\n    The name of the file that last applied it.\nfile_sha256\n    That file's hash.\nsource_commit\n    The commit the file came from, when given.\napplied_by\n    Who applied it; `null` once that principal is deleted.\napplied_at\n    When."
       },
       "MeasureOut": {
         "properties": {

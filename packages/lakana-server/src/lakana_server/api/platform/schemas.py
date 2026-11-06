@@ -4862,3 +4862,130 @@ class AccessPlanOut(BaseModel):
     drift: list[AccessDriftOut]
     problems: list[str]
     fingerprint: str
+
+
+class AccessApplyIn(BaseModel):
+    """Request body for applying an access file.
+
+    Parameters
+    ----------
+    file_name
+        The file's base name, which the messages and the record use.
+    text
+        The file's content.
+    plan_fingerprint
+        The ``fingerprint`` of the plan the caller reviewed (64 hex digits); the apply is
+        refused with 409 when access changed since.
+    source_commit
+        The commit the file came from, 7 to 64 hex digits; recorded with the apply.
+    allow_lockout
+        Accept a file that drops the caller's own ``ADMIN`` role while another administrator
+        remains.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_name: str = "access.yaml"
+    text: str
+    plan_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_commit: str | None = None
+    allow_lockout: bool = False
+
+
+class AccessApplyOut(BaseModel):
+    """What an apply did.
+
+    Parameters
+    ----------
+    apply_id
+        The apply's id; every audit event of the apply carries it as ``access_apply_id``.
+    file_sha256
+        Hash of the file's text.
+    source_commit
+        The commit the file came from, in lower case; `null` when not given.
+    created
+        How many entries were created.
+    changed
+        How many CI trust rules were changed in place.
+    removed
+        How many entries were removed.
+    released
+        The scopes no file manages any longer.
+    applied_at
+        When the apply committed.
+    """
+
+    apply_id: uuid.UUID
+    file_sha256: str
+    source_commit: str | None
+    created: int
+    changed: int
+    removed: int
+    released: list[str]
+    applied_at: datetime
+
+
+class ManagedScopeOut(BaseModel):
+    """A scope an access file manages, and its last apply.
+
+    Parameters
+    ----------
+    scope
+        ``instance`` or an environment's name.
+    file_name
+        The name of the file that last applied it.
+    file_sha256
+        That file's hash.
+    source_commit
+        The commit the file came from, when given.
+    applied_by
+        Who applied it; `null` once that principal is deleted.
+    applied_at
+        When.
+    """
+
+    scope: str
+    file_name: str
+    file_sha256: str
+    source_commit: str | None
+    applied_by: str | None
+    applied_at: datetime
+
+
+class AccessOverrideOut(BaseModel):
+    """A change made by hand in a managed scope that no apply has taken into account yet.
+
+    Parameters
+    ----------
+    scope
+        The managed scope.
+    change
+        What was changed.
+    reason
+        Why.
+    by
+        Who changed it; `null` once that principal is deleted.
+    at
+        When.
+    """
+
+    scope: str
+    change: str
+    reason: str
+    by: str | None
+    at: datetime
+
+
+class AccessStatusOut(BaseModel):
+    """The scopes access files manage, and the open overrides.
+
+    Parameters
+    ----------
+    scopes
+        Every managed scope, sorted by name.
+    overrides
+        Every open override, oldest first.
+    """
+
+    scopes: list[ManagedScopeOut]
+    overrides: list[AccessOverrideOut]

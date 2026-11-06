@@ -10,7 +10,7 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
-from lakana.errors import InvalidResponse
+from lakana.errors import InvalidResponse, ServerError
 from lakana.resources.access import Access
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
@@ -132,3 +132,108 @@ def test_plan_refuses_an_odd_answer() -> None:
     """A body that is not a plan raises InvalidResponse."""
     with pytest.raises(InvalidResponse):
         _access(lambda r: httpx.Response(200, json={"file_name": "x"})).plan("x")
+
+
+_APPLIED = {
+    "apply_id": "6b0f4c1e-5d7a-4a43-8d5e-0a7f1c2d3e4f",
+    "file_sha256": "b" * 64,
+    "source_commit": "0123abc",
+    "created": 2,
+    "changed": 1,
+    "removed": 3,
+    "released": ["staging"],
+    "applied_at": "2026-11-06T09:30:00+00:00",
+}
+
+
+def test_apply_posts_the_file_with_the_fingerprint_and_parses_the_result() -> None:
+    """The body carries every field; the answer becomes an `AccessApplyResult`."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_APPLIED)
+
+    result = _access(handler).apply(
+        "version: 1\n", plan_fingerprint="f" * 64, source_commit="0123abc", allow_lockout=True
+    )
+    assert seen[0].method == "POST"
+    assert seen[0].url.path == "/api/v1/access/apply"
+    assert json.loads(seen[0].content) == {
+        "file_name": "access.yaml",
+        "text": "version: 1\n",
+        "plan_fingerprint": "f" * 64,
+        "source_commit": "0123abc",
+        "allow_lockout": True,
+    }
+    assert (result.created, result.changed, result.removed) == (2, 1, 3)
+    assert result.released == ["staging"]
+    assert result.source_commit == "0123abc"
+    assert result.applied_at.year == 2026
+    assert str(result.apply_id) == _APPLIED["apply_id"]
+
+
+def test_apply_is_sent_once_even_when_the_server_fails() -> None:
+    """`retry=False`: an apply that may have happened is never repeated by the SDK."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(503, json={"detail": "busy"})
+
+    with pytest.raises(ServerError):
+        _access(handler).apply("x", plan_fingerprint="f" * 64)
+    assert len(seen) == 1
+
+
+def test_apply_refuses_an_odd_answer() -> None:
+    """An answer that is not an apply result is named."""
+    with pytest.raises(InvalidResponse):
+        _access(lambda r: httpx.Response(200, json={"created": "x"})).apply(
+            "x", plan_fingerprint="f" * 64
+        )
+
+
+def test_status_parses_scopes_and_overrides() -> None:
+    """Both lists become dataclasses; null names stay `None`."""
+    body = {
+        "scopes": [
+            {
+                "scope": "prod",
+                "file_name": "access.yaml",
+                "file_sha256": "c" * 64,
+                "source_commit": None,
+                "applied_by": None,
+                "applied_at": "2026-11-06T09:30:00+00:00",
+            }
+        ],
+        "overrides": [
+            {
+                "scope": "prod",
+                "change": "grant VIEWER to bob",
+                "reason": "Incident 42",
+                "by": "carol",
+                "at": "2026-11-06T10:00:00+00:00",
+            }
+        ],
+    }
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=body)
+
+    status = _access(handler).status()
+    assert seen[0].method == "GET"
+    assert seen[0].url.path == "/api/v1/access/status"
+    assert status.scopes[0].scope == "prod"
+    assert status.scopes[0].applied_by is None
+    assert status.scopes[0].source_commit is None
+    assert status.overrides[0].reason == "Incident 42"
+    assert status.overrides[0].at.year == 2026
+
+
+def test_status_refuses_an_odd_answer() -> None:
+    """A body without the lists is named."""
+    with pytest.raises(InvalidResponse):
+        _access(lambda r: httpx.Response(200, json={"scopes": 3})).status()

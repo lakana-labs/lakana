@@ -1274,6 +1274,32 @@ The file format: https://lakana-labs.github.io/lakana/reference/access-file/.
 | `FILE` | path | required | The access file, such as access.yaml. |
 | `--allow-lockout` | flag | off | Accept a file that drops your own ADMIN role while another administrator remains. |
 
+### `lakana access apply`
+
+Usage: `lakana access apply [OPTIONS] {file}`
+
+Make an access file's changes in one audited transaction, or none of them.
+
+Without `--plan-fingerprint` the command plans the file, shows the plan and asks before it applies exactly that plan. In CI, pass `--yes` and the fingerprint of the plan step: the apply is refused, with nothing changed, when access changed since that plan. Needs the ADMIN role on the instance and a personal access token.
+
+The file format: https://lakana-labs.github.io/lakana/reference/access-file/.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `FILE` | path | required | The access file, such as access.yaml. |
+| `--plan-fingerprint` | text | none | The fingerprint `lakana access plan` printed. Without it the command plans first and applies that plan. |
+| `--source-commit` | text | none | The commit the file came from (7 to 64 hex digits), recorded with the apply. |
+| `--yes` | flag | off | Do not ask before applying; for CI. |
+| `--allow-lockout` | flag | off | Accept a file that drops your own ADMIN role while another administrator remains. |
+
+### `lakana access status`
+
+Usage: `lakana access status [OPTIONS]`
+
+Show the scopes access files manage and the changes made outside them.
+
+Lists each managed scope with the file, commit, administrator and time of its last apply, then the overrides no apply has taken into account yet. Needs the ADMIN role on the instance.
+
 ## `lakana row-filter`
 
 Usage: `lakana row-filter [OPTIONS] COMMAND [ARGS]...`

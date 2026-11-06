@@ -7,6 +7,7 @@ response bodies, field for field — the resource modules in
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field, fields
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
@@ -3807,6 +3808,109 @@ class AccessPlan:
     drift: list[AccessDrift]
     problems: list[str]
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class AccessApplyResult:
+    """What an apply of an access file did.
+
+    Parameters
+    ----------
+    apply_id
+        The apply's id; every audit event of the apply carries it as ``access_apply_id``.
+    file_sha256
+        Hash of the file's text.
+    source_commit
+        The commit the file came from, in lower case; `None` when not given.
+    created
+        How many entries were created.
+    changed
+        How many CI trust rules were changed in place.
+    removed
+        How many entries were removed.
+    released
+        The scopes no file manages any longer.
+    applied_at
+        When the apply committed.
+    """
+
+    apply_id: uuid.UUID
+    file_sha256: str
+    source_commit: str | None
+    created: int
+    changed: int
+    removed: int
+    released: list[str]
+    applied_at: datetime
+
+
+@dataclass(frozen=True)
+class ManagedScope:
+    """A scope an access file manages, and its last apply.
+
+    Parameters
+    ----------
+    scope
+        ``instance`` or an environment's name.
+    file_name
+        The name of the file that last applied it.
+    file_sha256
+        That file's hash.
+    source_commit
+        The commit the file came from, when given.
+    applied_by
+        Who applied it; `None` once that principal is deleted.
+    applied_at
+        When.
+    """
+
+    scope: str
+    file_name: str
+    file_sha256: str
+    source_commit: str | None
+    applied_by: str | None
+    applied_at: datetime
+
+
+@dataclass(frozen=True)
+class AccessOverride:
+    """A change made by hand in a managed scope that no apply has taken into account yet.
+
+    Parameters
+    ----------
+    scope
+        The managed scope.
+    change
+        What was changed.
+    reason
+        Why.
+    by
+        Who changed it; `None` once that principal is deleted.
+    at
+        When.
+    """
+
+    scope: str
+    change: str
+    reason: str
+    by: str | None
+    at: datetime
+
+
+@dataclass(frozen=True)
+class AccessStatus:
+    """The scopes access files manage, and the open overrides.
+
+    Parameters
+    ----------
+    scopes
+        Every managed scope, sorted by name.
+    overrides
+        Every open override, oldest first.
+    """
+
+    scopes: list[ManagedScope]
+    overrides: list[AccessOverride]
 
 
 # jscpd:ignore-end

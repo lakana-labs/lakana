@@ -240,3 +240,251 @@ def test_plan_json_with_problems_exits_1(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert json.loads(result.stdout)["problems"] == ["access.yaml: x: bad"]
+
+
+_APPLIED: dict[str, Any] = {
+    "apply_id": "6b0f4c1e-5d7a-4a43-8d5e-0a7f1c2d3e4f",
+    "file_sha256": "b" * 64,
+    "source_commit": "0123abc",
+    "created": 1,
+    "changed": 0,
+    "removed": 1,
+    "released": [],
+    "applied_at": "2026-11-06T09:30:00+00:00",
+}
+
+_APPLY = "/api/v1/access/apply"
+_PLAN_ROUTE = "/api/v1/access/plan"
+
+
+def _apply_api(plan: dict[str, Any] = _PLAN, applied: dict[str, Any] = _APPLIED) -> FakeApi:
+    """Build a fake that answers plan and apply.
+
+    Parameters
+    ----------
+    plan
+        The plan body.
+    applied
+        The apply body.
+
+    Returns
+    -------
+    FakeApi
+        The fake.
+    """
+    api = FakeApi()
+    api.on("POST", _PLAN_ROUTE, json=plan)
+    api.on("POST", _APPLY, json=applied)
+    return api
+
+
+def _sent(api: FakeApi, path: str) -> list[dict[str, Any]]:
+    """Return the JSON bodies posted to `path`.
+
+    Parameters
+    ----------
+    api
+        The fake.
+    path
+        The request path.
+
+    Returns
+    -------
+    list of dict
+        The bodies, oldest first.
+    """
+    return [json.loads(r.content) for r in api.requests if r.url.path == path]
+
+
+def test_apply_without_a_fingerprint_plans_asks_and_applies_with_it(tmp_path: Path) -> None:
+    """Spec 4: plan shown, confirmation read, apply sent with the plan's fingerprint."""
+    api = _apply_api()
+    result = invoke(
+        make_state(tmp_path, api, interactive=True),
+        "access",
+        "apply",
+        str(_file(tmp_path)),
+        input="y\n",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert _sent(api, _APPLY)[0]["plan_fingerprint"] == "f" * 64
+    assert "+ grant role VIEWER on environment prod to group:finance" in result.stdout
+    assert "Apply these changes?" in result.stdout
+    assert "Applied: 1 created, 0 changed, 1 removed." in result.stdout
+
+
+def test_apply_declined_changes_nothing(tmp_path: Path) -> None:
+    """Answering no sends no apply."""
+    api = _apply_api()
+    result = invoke(
+        make_state(tmp_path, api, interactive=True),
+        "access",
+        "apply",
+        str(_file(tmp_path)),
+        input="n\n",
+    )
+    assert result.exit_code != 0
+    assert _sent(api, _APPLY) == []
+
+
+def test_apply_refuses_to_ask_without_a_terminal(tmp_path: Path) -> None:
+    """No --yes and no terminal: exit 1, nothing applied, the message names --yes."""
+    api = _apply_api()
+    result = invoke(make_state(tmp_path, api), "access", "apply", str(_file(tmp_path)))
+    assert result.exit_code == 1
+    assert "--yes" in result.stderr
+    assert "--plan-fingerprint" in result.stderr
+    assert _sent(api, _APPLY) == []
+
+
+def test_apply_with_yes_and_a_fingerprint_sends_at_once(tmp_path: Path) -> None:
+    """CI: no plan request, no prompt; the commit and the file name go along."""
+    api = _apply_api()
+    result = invoke(
+        make_state(tmp_path, api),
+        "access",
+        "apply",
+        str(_file(tmp_path)),
+        "--yes",
+        "--plan-fingerprint",
+        "e" * 64,
+        "--source-commit",
+        "0123abc",
+        "--allow-lockout",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert _sent(api, _PLAN_ROUTE) == []
+    body = _sent(api, _APPLY)[0]
+    assert body["plan_fingerprint"] == "e" * 64
+    assert body["source_commit"] == "0123abc"
+    assert body["file_name"] == "access.yaml"
+    assert body["allow_lockout"] is True
+
+
+def test_apply_with_yes_alone_plans_then_applies(tmp_path: Path) -> None:
+    """`--yes` skips the question, not the plan."""
+    api = _apply_api()
+    result = invoke(make_state(tmp_path, api), "access", "apply", str(_file(tmp_path)), "--yes")
+    assert result.exit_code == 0, result.stderr
+    assert _sent(api, _APPLY)[0]["plan_fingerprint"] == "f" * 64
+
+
+def test_apply_with_problems_prints_them_and_applies_nothing(tmp_path: Path) -> None:
+    """The plan's problems stop the apply before any prompt."""
+    broken = {**_PLAN, "problems": ["access.yaml: x: bad"]}
+    api = _apply_api(broken)
+    result = invoke(make_state(tmp_path, api), "access", "apply", str(_file(tmp_path)), "--yes")
+    assert result.exit_code == 1
+    assert "access.yaml: x: bad" in result.stderr
+    assert _sent(api, _APPLY) == []
+
+
+def test_apply_says_what_it_stopped_managing(tmp_path: Path) -> None:
+    """Released scopes are named after the counts."""
+    api = _apply_api(applied={**_APPLIED, "released": ["staging"]})
+    result = invoke(make_state(tmp_path, api), "access", "apply", str(_file(tmp_path)), "--yes")
+    assert "Stopped managing: staging" in result.stdout
+
+
+def test_a_stale_fingerprint_says_to_plan_again(tmp_path: Path) -> None:
+    """The 409 text is passed through, with the CLI's conflict exit code (7)."""
+    api = FakeApi()
+    api.on(
+        "POST",
+        _APPLY,
+        status=409,
+        json={"detail": "access changed since your plan; nothing was applied. Run plan again"},
+    )
+    result = invoke(
+        make_state(tmp_path, api),
+        "access",
+        "apply",
+        str(_file(tmp_path)),
+        "--yes",
+        "--plan-fingerprint",
+        "e" * 64,
+    )
+    assert result.exit_code == 7
+    assert "plan again" in result.stderr
+
+
+def test_apply_prints_json(tmp_path: Path) -> None:
+    """`--output json` prints the result as an object."""
+    result = invoke(
+        make_state(tmp_path, _apply_api()),
+        "--output",
+        "json",
+        "access",
+        "apply",
+        str(_file(tmp_path)),
+        "--yes",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["created"] == 1
+
+
+def test_apply_refuses_a_file_over_one_mib_before_sending(tmp_path: Path) -> None:
+    """R8 again: nothing is planned or applied."""
+    big = tmp_path / "access.yaml"
+    big.write_bytes(b"#" * (1024 * 1024 + 1))
+    api = _apply_api()
+    result = invoke(make_state(tmp_path, api), "access", "apply", str(big), "--yes")
+    assert result.exit_code == 1
+    assert api.requests == []
+
+
+def test_status_lists_scopes_and_overrides(tmp_path: Path) -> None:
+    """Scope, file, commit, who, when; then the open overrides with their reasons."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/access/status",
+        json={
+            "scopes": [
+                {
+                    "scope": "prod",
+                    "file_name": "access.yaml",
+                    "file_sha256": "c" * 64,
+                    "source_commit": "0123abc",
+                    "applied_by": "access-admin",
+                    "applied_at": "2026-11-06T09:30:00+00:00",
+                }
+            ],
+            "overrides": [
+                {
+                    "scope": "prod",
+                    "change": "grant VIEWER to bob",
+                    "reason": "Incident 42 hotfix",
+                    "by": "carol",
+                    "at": "2026-11-06T10:00:00+00:00",
+                }
+            ],
+        },
+    )
+    result = invoke(make_state(tmp_path, api), "access", "status")
+    assert result.exit_code == 0, result.stderr
+    out = " ".join(result.stdout.split())
+    for text in ("prod", "access.yaml", "0123abc", "access-admin", "2026-11-06"):
+        assert text in out
+    assert "Open overrides (the next apply reverts them unless the file lists them):" in out
+    assert "grant VIEWER to bob" in out
+    assert "Incident 42 hotfix" in out
+
+
+def test_status_without_scopes_says_how_to_start(tmp_path: Path) -> None:
+    """Nothing managed: the message names the first command."""
+    api = FakeApi()
+    api.on("GET", "/api/v1/access/status", json={"scopes": [], "overrides": []})
+    result = invoke(make_state(tmp_path, api), "access", "status")
+    assert result.exit_code == 0, result.stderr
+    assert "No scope is managed by an access file" in result.stdout
+    assert "lakana access export" in result.stdout
+    assert "Open overrides" not in result.stdout
+
+
+def test_status_prints_json(tmp_path: Path) -> None:
+    """`--output json` prints both lists."""
+    api = FakeApi()
+    api.on("GET", "/api/v1/access/status", json={"scopes": [], "overrides": []})
+    result = invoke(make_state(tmp_path, api), "--output", "json", "access", "status")
+    assert json.loads(result.stdout) == {"scopes": [], "overrides": []}
