@@ -15,7 +15,7 @@ import polars as pl
 import pyarrow as pa
 import pytest
 
-from lakana import context
+from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
     FileShapeError,
@@ -1691,3 +1691,11 @@ def test_a_name_lakana_cannot_store_is_refused_before_any_file_is_read(root: Pat
         "character or is not valid UTF-8; rename the file; Lakana stores file names as UTF-8 text"
     )
     assert files.read("exports", "*.csv").num_rows == 1  # without since= nothing is recorded
+
+
+def test_a_local_file_read_counts_its_bytes_once(root: Path) -> None:
+    _write(root / "a.csv", b"id\n" + b"x" * 1231)  # 1234 bytes
+
+    files.read("exports", "a.csv")
+
+    assert _usage.bytes_read() == 1234

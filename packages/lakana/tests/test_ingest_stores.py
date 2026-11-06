@@ -21,7 +21,7 @@ import pytest
 from obstore.store import MemoryStore
 from sdk_tls_fixture import Authority, make_authority, serving
 
-from lakana import context
+from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
     IngestError,
@@ -1867,3 +1867,12 @@ def test_an_https_etag_that_changes_on_an_unchanged_file_does_not_read_it_again(
     assert files.read("site", "a.csv", since=mark).num_rows == 0
     state.recorded = frozenset({context.ReadFile("site", "a.csv", 5, mark - dt.timedelta(hours=1))})
     assert files.read("site", "a.csv", since=mark).num_rows == 1
+
+
+def test_an_object_store_read_counts_the_bytes_of_each_object(memory: MemoryStore) -> None:
+    obstore.put(memory, "orders/a.csv", b"id\n1\n")
+    obstore.put(memory, "orders/b.csv", b"id\n2\n3\n")
+
+    files.read("lake", "orders/*.csv")
+
+    assert _usage.bytes_read() == 5 + 7
