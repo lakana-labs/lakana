@@ -304,7 +304,8 @@ def apply(
     ------
     CliError
         If the file cannot be read or is too large, the plan has problems, or there is no
-        terminal to ask on and neither `--yes` nor `--plan-fingerprint` was given (exit 1).
+        terminal to ask on, or the output is JSON, and neither `--yes` nor `--plan-fingerprint`
+        was given (exit 1).
     """
     state = state_of(ctx)
     text = _read_file(file)
@@ -322,6 +323,12 @@ def apply(
             raise CliError(
                 "lakana access apply asks before it changes access; in CI pass --yes, with "
                 "--plan-fingerprint from the plan step",
+                1,
+            )
+        if not yes and state.output == "json":
+            raise CliError(
+                "lakana access apply --output json shows no plan to confirm; review it with "
+                "lakana access plan, then pass --yes (or --plan-fingerprint from that plan)",
                 1,
             )
         if state.output != "json":

@@ -441,6 +441,23 @@ def test_apply_prints_json(tmp_path: Path) -> None:
     assert json.loads(result.stdout)["created"] == 1
 
 
+def test_apply_with_json_output_refuses_to_ask_without_showing_the_plan(tmp_path: Path) -> None:
+    """`--output json` shows no plan, so it does not ask: --yes is needed, nothing applied."""
+    api = _apply_api()
+    result = invoke(
+        make_state(tmp_path, api, interactive=True),
+        "--output",
+        "json",
+        "access",
+        "apply",
+        str(_file(tmp_path)),
+        input="y\n",
+    )
+    assert result.exit_code == 1
+    assert "--yes" in result.stderr
+    assert _sent(api, _APPLY) == []
+
+
 def test_apply_refuses_a_file_over_one_mib_before_sending(tmp_path: Path) -> None:
     """R8 again: nothing is planned or applied."""
     big = tmp_path / "access.yaml"

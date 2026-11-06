@@ -216,8 +216,11 @@ administrator`, and the next plan lists it as drift.
 | Problems listed at once | 50, then a count of the rest. |
 | File name | The base name only, 1 to 255 characters, without `/` or `\`. |
 
-An export of a large instance can exceed the size or entry limit. Export and keep one file per
-environment instead: `lakana access export --scope prod -o prod.yaml`.
+An export of a large instance can exceed the size or entry limit; export one environment at a
+time to read it: `lakana access export --scope prod -o prod.yaml`. Keep one access file to
+apply, though: an apply stops managing every scope its file does not list, so applying
+`prod.yaml` and then `staging.yaml` leaves `prod` unmanaged. An instance whose access does not
+fit in one file cannot be managed by a file yet.
 
 ## Environment names
 
