@@ -15,10 +15,15 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from lakana_core.access import service as access_service
+from lakana_core.access.apply import admin_lost_part_way
 from lakana_core.access.file import AccessFileError
+from lakana_core.access.model import GrantEntry, GroupEntry, MembershipEntry, Subject, Target
+from lakana_core.access.plan import PlannedChange
 from lakana_core.access.service import AccessService
-from lakana_core.audit.service import AuditService
-from lakana_core.auth import AllowAllAuthorization, SecurableKind
+from lakana_core.audit.authorization import AuditingAuthorization
+from lakana_core.audit.denial_limiter import DenialAuditLimiter
+from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable, SecurableKind
 from lakana_core.ci_oidc.config import GITHUB_ISSUER
 from lakana_core.errors import ConflictError, PermissionDenied, ValidationError
 from lakana_core.grants.admin import holds_instance_admin
@@ -41,6 +46,7 @@ from lakana_core.models import (
     GroupMembership,
     PersonalAccessToken,
     Principal,
+    PrincipalType,
     RowFilter,
 )
 from lakana_core.policy.expressions import normalized_expression, validate_restricted_expression
@@ -100,11 +106,11 @@ def _service(session: Session, world: AccessWorld) -> AccessService:
     Returns
     -------
     AccessService
-        With the real authorization and GitHub as the one configured CI issuer.
+        With the authorization the server uses (`AuditingAuthorization` over
+        `GrantAuthorization`) and GitHub as the one configured CI issuer.
     """
-    return AccessService(
-        session, GrantAuthorization(session), world.catalog, issuers=[GITHUB_ISSUER]
-    )
+    authz = AuditingAuthorization(GrantAuthorization(session), session, DenialAuditLimiter(100))
+    return AccessService(session, authz, world.catalog, issuers=[GITHUB_ISSUER])
 
 
 def _edit(text: str, change: Callable[[dict[str, Any]], None]) -> str:
@@ -776,9 +782,89 @@ def test_losing_admin_part_way_through_is_refused_with_two_steps(session: Sessio
     plan = service.plan(world.admin, text, allow_lockout=True)
     assert plan.problems == ()
     before = _snapshot(session)
-    with pytest.raises(ConflictError, match="your own ADMIN role ends part-way"):
+    with pytest.raises(ConflictError, match="Apply in two steps"):
         service.apply(world.admin, text, plan_fingerprint=plan.fingerprint, allow_lockout=True)
     assert _snapshot(session) == before
+    assert _events(session, AuditEventType.AUTHORIZATION_DENIED) == []
+
+
+def test_dropping_an_admin_group_the_caller_is_in_revokes_its_grant_first(
+    session: Session,
+) -> None:
+    """Review I2: the group's grant moves to the end, and its deletion moves with it, after it."""
+    world = access_world(session)
+    _admin_through_group(session, world)
+    GrantService(session, AllowAllAuthorization()).grant(
+        world.admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    service = _service(session, world)
+
+    def edit(document: dict[str, Any]) -> None:
+        """Delete the group admins and its grant.
+
+        Parameters
+        ----------
+        document
+            The loaded file.
+        """
+        del document["groups"]["admins"]
+        document["grants"] = [g for g in document["grants"] if g["to"] != "group:admins"]
+
+    text = _edit(service.export(world.admin, ["instance"]), edit)
+    plan = service.plan(world.admin, text)
+    assert plan.problems == ()
+    service.apply(world.admin, text, plan_fingerprint=plan.fingerprint)
+    assert _count(session, Group, Group.name == "admins") == 0
+    assert holds_instance_admin(session, world.admin.id)
+
+
+def test_a_denial_part_way_rolls_back_and_is_audited_once(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review I1: the apply is rolled back, then the denial is recorded in its own commit."""
+    world = access_world(session)
+    service = _service(session, world)
+    text = _policy_file("region = 'eu'").replace(
+        "policies:", "grants:\n- {to: user:bob, role: VIEWER, on: prod}\npolicies:"
+    )
+    plan = service.plan(world.admin, text)
+    assert plan.problems == ()
+    original = GrantAuthorization.authorize
+
+    def deny_policies_in_an_apply(
+        self: GrantAuthorization, principal: PrincipalRef, action: Action, securable: Securable
+    ) -> None:
+        """Refuse MANAGE_POLICY while an apply runs; delegate otherwise.
+
+        Parameters
+        ----------
+        self
+            The authorization.
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Raises
+        ------
+        PermissionDenied
+            For MANAGE_POLICY inside an apply.
+        """
+        if action is Action.MANAGE_POLICY and ACCESS_APPLY_KEY in session.info:
+            raise PermissionDenied("no policies today")
+        original(self, principal, action, securable)
+
+    monkeypatch.setattr(GrantAuthorization, "authorize", deny_policies_in_an_apply)
+    before = _snapshot(session)
+    with pytest.raises(PermissionDenied, match="no policies today"):
+        service.apply(world.admin, text, plan_fingerprint=plan.fingerprint)
+    session.expire_all()
+    after = _snapshot(session)
+    assert (after[:-1], after[-1]) == (before[:-1], before[-1] + 1)
+    [denied] = _events(session, AuditEventType.AUTHORIZATION_DENIED)
+    assert denied.detail == {"action": "MANAGE_POLICY"}
 
 
 def test_a_change_outside_the_fingerprint_is_caught_by_the_recomputed_lockout(
@@ -1031,3 +1117,34 @@ def test_status_lists_scopes_and_open_overrides(session: Session) -> None:
         "admin",
         override.created_at,
     )
+
+
+@pytest.mark.parametrize(
+    ("created", "lost"),
+    [
+        ((), True),
+        ((GrantEntry(Subject("user", "admin"), "ADMIN", None, Target()),), False),
+        (
+            (
+                GrantEntry(Subject("group", "new"), "ADMIN", None, Target()),
+                MembershipEntry("new", "admin"),
+            ),
+            False,
+        ),
+        ((GrantEntry(Subject("group", "new"), "ADMIN", None, Target()),), True),
+    ],
+)
+def test_paths_the_file_creates_keep_the_caller_admin(
+    created: tuple[GrantEntry | MembershipEntry, ...], lost: bool
+) -> None:
+    """A direct grant or an admin group the caller joins, both made first, carry the removals."""
+    admin = PrincipalRef(id=uuid.uuid4(), name="admin", type=PrincipalType.USER)
+    ordered = [
+        *(PlannedChange("create", entry, "x") for entry in created),
+        PlannedChange("remove", MembershipEntry("old", "admin"), None),
+        PlannedChange("remove", GroupEntry("spare"), None),
+    ]
+    found = admin_lost_part_way(
+        ordered, admin, direct=False, caller_groups={"old"}, admin_groups={"old"}
+    )
+    assert found is lost

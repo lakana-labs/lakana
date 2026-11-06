@@ -243,6 +243,27 @@ def test_remove_member_who_is_the_last_active_admin_is_refused(session: Session)
         groups.remove_member(admin, "ops", "root")
 
 
+def test_the_last_admin_may_leave_a_group_without_the_admin_role(session: Session) -> None:
+    """A group that grants no instance ADMIN cannot take the role away: the guard is not asked."""
+    admin = _persisted_admin(session)
+    _add_principal(session, "root")
+    groups = GroupService(session, AllowAllAuthorization())
+    grants = GrantService(session, AllowAllAuthorization())
+    grants.grant(admin, principal="root", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    ensure_table(session, "prod", "gold", "orders")
+    groups.create_group(admin, name="engineers")
+    groups.add_member(admin, "engineers", "root")
+    grants.grant(
+        admin,
+        group="engineers",
+        role=Role.ADMIN,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="prod",
+    )
+
+    groups.remove_member(admin, "engineers", "root")  # does not raise
+
+
 def test_remove_member_who_is_not_an_admin_is_unaffected_by_the_lockout_guard(
     session: Session,
 ) -> None:

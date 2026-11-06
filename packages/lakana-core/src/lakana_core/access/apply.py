@@ -26,6 +26,7 @@ from lakana_core.access.model import (
 from lakana_core.access.plan import PlannedChange, apply_order
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, SecurableKind
 from lakana_core.ci_oidc.rules import CiTrustRuleService
+from lakana_core.errors import ConflictError
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
@@ -143,11 +144,14 @@ def callers_admin_last(
         Returns
         -------
         int
-            2 for the caller's own ADMIN grant, 1 for a group path of it, else 0.
+            2 for the caller's own ADMIN grant, 1 for a group path of it (the group's grant,
+            the caller's membership, the group itself, kept in that order), else 0.
         """
         entry = change.entry
         if change.op != "remove":
             return 0
+        if isinstance(entry, GroupEntry):
+            return int(entry.name in caller_groups and entry.name in admin_groups)
         if isinstance(entry, MembershipEntry):
             return int(entry.member == p.name and entry.group in admin_groups)
         if not isinstance(entry, GrantEntry) or entry.role != Role.ADMIN.value:
@@ -159,6 +163,103 @@ def callers_admin_last(
         return 2 if entry.to.name == p.name else 0
 
     return sorted(changes, key=rank)
+
+
+def _instance_admin(entry: object) -> GrantEntry | None:
+    """Give a grant of the instance ADMIN role.
+
+    Parameters
+    ----------
+    entry
+        Any entry.
+
+    Returns
+    -------
+    GrantEntry or None
+        The entry when it grants ADMIN on the instance, else `None`.
+    """
+    if isinstance(entry, GrantEntry) and entry.role == Role.ADMIN.value:
+        return entry if entry.on.environment is None else None
+    return None
+
+
+def _path_of(entry: object, caller: str) -> str | None:
+    """Name the path to the caller's ADMIN role an entry is part of.
+
+    Parameters
+    ----------
+    entry
+        Any entry.
+    caller
+        The caller's name.
+
+    Returns
+    -------
+    str or None
+        ``""`` for the caller's own grant, a group's name for that group's grant, the caller's
+        membership of it or the group itself; `None` for an entry of no path.
+    """
+    if (grant := _instance_admin(entry)) is not None:
+        if grant.to.kind == "group":
+            return grant.to.name
+        return "" if grant.to.name == caller else None
+    if isinstance(entry, MembershipEntry):
+        return entry.group if entry.member == caller else None
+    return entry.name if isinstance(entry, GroupEntry) else None
+
+
+def admin_lost_part_way(
+    ordered: Sequence[PlannedChange],
+    p: PrincipalRef,
+    *,
+    direct: bool,
+    caller_groups: set[str],
+    admin_groups: set[str],
+) -> bool:
+    """Say whether the caller loses ADMIN while changes that need it remain.
+
+    Every change is authorized as it is made, and each needs the instance ADMIN role. The
+    caller's paths to it are a direct grant and each admin group they are in; creates only add
+    paths, and each removal of a grant, membership or group can end one. When the last path
+    ends before the last change, no order can make the apply: it takes two.
+
+    Parameters
+    ----------
+    ordered
+        The changes in the order they are made.
+    p
+        The acting principal.
+    direct
+        Whether the caller holds the role through a grant of their own now.
+    caller_groups
+        The groups the caller is a member of now.
+    admin_groups
+        The groups that hold the role now.
+
+    Returns
+    -------
+    bool
+        True when a change would find the caller without the role.
+    """
+    groups, admins = set(caller_groups), set(admin_groups)
+    for change in ordered:
+        if change.op != "create":
+            continue
+        entry = change.entry
+        if (grant := _instance_admin(entry)) is not None and grant.to.kind == "group":
+            admins.add(grant.to.name)
+        elif grant is not None:
+            direct = direct or grant.to.name == p.name
+        elif isinstance(entry, MembershipEntry) and entry.member == p.name:
+            groups.add(entry.group)
+    alive = ({""} if direct else set()) | (groups & admins)
+    for change in ordered:
+        if change.op != "remove":
+            continue
+        if not alive:
+            return True
+        alive.discard(_path_of(change.entry, p.name))
+    return False
 
 
 class AccessApplier:
@@ -197,7 +298,8 @@ class AccessApplier:
         """Make each change, creates first, removals last in reverse dependency order.
 
         The removals that end the caller's own ADMIN role run after every other change
-        (`callers_admin_last`).
+        (`callers_admin_last`). Nothing is made when the caller would lose the role while
+        changes remain (`admin_lost_part_way`).
 
         Parameters
         ----------
@@ -205,13 +307,38 @@ class AccessApplier:
             The acting principal.
         changes
             The plan's changes.
+
+        Raises
+        ------
+        ConflictError
+            When the caller's own ADMIN role would end before the last change, which then
+            could not be authorized: the file must be applied in two steps.
         """
+        caller_groups, admin_groups = _groups_of(self._session, p), _admin_groups(self._session)
         ordered = callers_admin_last(
-            apply_order(changes),
-            p,
-            caller_groups=_groups_of(self._session, p),
-            admin_groups=_admin_groups(self._session),
+            apply_order(changes), p, caller_groups=caller_groups, admin_groups=admin_groups
         )
+        direct = self._session.scalar(
+            select(Grant.id).where(
+                Grant.principal_id == p.id,
+                Grant.role == Role.ADMIN,
+                Grant.kind == SecurableKind.INSTANCE,
+                Grant.revoked_at.is_(None),
+            )
+        )
+        if admin_lost_part_way(
+            ordered,
+            p,
+            direct=direct is not None,
+            caller_groups=caller_groups,
+            admin_groups=admin_groups,
+        ):
+            raise ConflictError(
+                "the file removes your own ADMIN role in more than one change, so it would end "
+                "before the rest of the changes can be made; nothing was applied. Apply in two "
+                "steps: first a file that keeps one of your ADMIN grants or group memberships, "
+                "then one without it"
+            )
         for change in ordered:
             getattr(self, f"_{change.op}_{type(change.entry).__name__}")(p, change)
 

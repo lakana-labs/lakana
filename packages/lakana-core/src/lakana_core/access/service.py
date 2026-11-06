@@ -44,11 +44,12 @@ from lakana_core.access.model import (
     unwritable_environments,
 )
 from lakana_core.access.plan import AccessPlan, Drift, PlannedChange, diff, drift
+from lakana_core.audit.authorization import record_deferred_denials
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.ci_oidc.rules import CiTrustRuleService
-from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
-from lakana_core.grants.admin import authorize_admin_only, holds_instance_admin
+from lakana_core.errors import ConflictError, NotFoundError, ValidationError
+from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.service import GrantService, active_instance_admin_ids
 from lakana_core.identifiers import TableRef, environment_name_problem
 from lakana_core.models import (
@@ -691,23 +692,15 @@ class AccessService:
                 applier = AccessApplier(
                     self._session, self._authz, self._catalog, issuers=self._issuers
                 )
-                try:
-                    applier.run(p, plan.changes)
-                except PermissionDenied as exc:
-                    if holds_instance_admin(self._session, p.id):
-                        raise
-                    raise ConflictError(
-                        "the file removes your own ADMIN role in more than one change, and your "
-                        "own ADMIN role ends part-way through the apply, before the rest can "
-                        "be made; nothing was applied. Apply in two steps: first a file that "
-                        "keeps one of your ADMIN grants or group memberships, then one without it"
-                    ) from exc
+                applier.run(p, plan.changes)
                 self._session.flush()
                 self._recheck_lockout(p, plan, allow_lockout=allow_lockout)
                 result = self._record(p, plan, apply_id, commit)
                 finish_apply(self._session)
+            record_deferred_denials(self._session)
         except BaseException:
             self._session.rollback()
+            record_deferred_denials(self._session)
             raise
         return result
 

@@ -8,9 +8,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, SecurableKind
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.grants.roles import Role
 from lakana_core.grants.service import assert_admin_headroom
 from lakana_core.models import (
     AuditEventType,
@@ -361,7 +362,8 @@ class GroupService:
         ).scalar_one_or_none()
         if membership is None:
             raise NotFoundError(f"{principal_name!r} is not a member of {group_name!r}.")
-        assert_admin_headroom(self._session, excluding_principal_id=principal.id)
+        if self._grants_instance_admin(group.id):
+            assert_admin_headroom(self._session, excluding_principal_id=principal.id)
         self._session.delete(membership)
         AuditService(self._session).record(
             p.id,
@@ -370,6 +372,30 @@ class GroupService:
         )
         if commit:
             self._session.commit()
+
+    def _grants_instance_admin(self, group_id: uuid.UUID) -> bool:
+        """Say whether a group holds an active instance ADMIN grant.
+
+        Leaving a group without one cannot take the role from anyone, so the lockout guard is
+        not asked; an access apply revokes an admin group's grant before its memberships.
+
+        Parameters
+        ----------
+        group_id
+            The group.
+
+        Returns
+        -------
+        bool
+            True with an unrevoked ADMIN grant of kind INSTANCE to the group.
+        """
+        found = select(Grant.id).where(
+            Grant.group_id == group_id,
+            Grant.role == Role.ADMIN,
+            Grant.kind == SecurableKind.INSTANCE,
+            Grant.revoked_at.is_(None),
+        )
+        return self._session.execute(found.limit(1)).first() is not None
 
     def list_members(self, p: PrincipalRef, group_name: str) -> list[Principal]:
         """List every principal in a group.
