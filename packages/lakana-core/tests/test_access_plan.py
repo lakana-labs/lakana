@@ -596,6 +596,24 @@ def test_a_removal_in_a_managed_scope_is_not_drift() -> None:
     assert [d.scope for d in found] == ["staging"]
 
 
+def test_apply_order_creates_a_service_account_before_its_membership() -> None:
+    """A membership names its member: the service account the file creates comes first."""
+    account = ServiceAccountEntry("bot")
+    member = MembershipEntry("g", "bot")
+    changes = [
+        PlannedChange("create", member, "groups.g.members[0]"),
+        PlannedChange("create", account, "service_accounts[0]"),
+        PlannedChange("remove", ServiceAccountEntry("old"), None),
+        PlannedChange("remove", MembershipEntry("g", "old"), None),
+    ]
+    assert [c.entry for c in apply_order(changes)] == [
+        account,
+        member,
+        MembershipEntry("g", "old"),
+        ServiceAccountEntry("old"),
+    ]
+
+
 def test_apply_order_creates_first_and_removes_in_reverse() -> None:
     """Creates and changes in dependency order, then removals in reverse order."""
     account = ServiceAccountEntry("bot")

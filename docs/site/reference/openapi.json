@@ -19006,7 +19006,8 @@
           "CI_TRUST_RULE_ENABLED",
           "CI_TRUST_RULE_DISABLED",
           "OIDC_TOKEN_EXCHANGED",
-          "OIDC_EXCHANGE_REFUSED"
+          "OIDC_EXCHANGE_REFUSED",
+          "ACCESS_APPLIED"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."

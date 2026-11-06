@@ -106,6 +106,27 @@ _PREPARE: dict[str, _Call] = {
 }
 """Committed set-up a call needs before it is measured."""
 
+_EVENTS: dict[str, AuditEventType] = {
+    "create_group": AuditEventType.GROUP_CREATED,
+    "delete_group": AuditEventType.GROUP_DELETED,
+    "add_member": AuditEventType.GROUP_MEMBER_ADDED,
+    "remove_member": AuditEventType.GROUP_MEMBER_REMOVED,
+    "create_principal": AuditEventType.PRINCIPAL_CREATED,
+    "deactivate_principal": AuditEventType.PRINCIPAL_DEACTIVATED,
+    "revoke_pat": AuditEventType.PAT_REVOKED,
+    "revoke_grant": AuditEventType.GRANT_REVOKED,
+    "create_row_filter": AuditEventType.ROW_FILTER_CREATED,
+    "revoke_row_filter": AuditEventType.ROW_FILTER_REVOKED,
+    "create_column_mask": AuditEventType.COLUMN_MASK_CREATED,
+    "revoke_column_mask": AuditEventType.COLUMN_MASK_REVOKED,
+    "create_ci_rule": AuditEventType.CI_TRUST_RULE_CREATED,
+    "update_ci_rule": AuditEventType.CI_TRUST_RULE_UPDATED,
+    "enable_ci_rule": AuditEventType.CI_TRUST_RULE_ENABLED,
+    "disable_ci_rule": AuditEventType.CI_TRUST_RULE_DISABLED,
+    "delete_ci_rule": AuditEventType.CI_TRUST_RULE_DELETED,
+}
+"""The audit event each call records."""
+
 _CALLS: dict[str, _Call] = {
     "create_group": lambda s, w: GroupService(s, _ALLOW).create_group(
         w.admin, name="g", commit=False
@@ -320,6 +341,24 @@ def test_an_apply_that_fails_leaves_the_session_usable(session: Session) -> None
     assert session.scalar(select(func.count()).select_from(Group).where(Group.name == "after")) == 1
 
 
+def test_applying_clears_a_final_flag_left_behind(session: Session) -> None:
+    """Task 5 review M1: a stray flag from earlier never opens a later apply to commits."""
+    world = access_world(session)
+    session.info["lakana.access_apply_final"] = True
+    groups = GroupService(session, _ALLOW)
+    with pytest.raises(RuntimeError, match="commits once"), applying(session, uuid.uuid4()):
+        groups.create_group(world.admin, name="g")
+    session.rollback()
+    assert session.scalar(select(func.count()).select_from(Group).where(Group.name == "g")) == 0
+
+
+def test_finish_apply_outside_an_apply_is_refused(session: Session) -> None:
+    """Task 5 review M1: `finish_apply` commits only inside `applying`."""
+    with pytest.raises(RuntimeError, match="only inside an access apply"):
+        finish_apply(session)
+    assert "lakana.access_apply_final" not in session.info
+
+
 def test_lock_access_does_nothing_off_postgres(session: Session) -> None:
     """On SQLite the advisory lock is skipped; the key is a signed 64-bit integer."""
     lock_access(session, shared=False)
@@ -330,6 +369,26 @@ def test_lock_access_does_nothing_off_postgres(session: Session) -> None:
 def test_every_call_is_covered() -> None:
     """The brief names 17 methods; the table below must list all of them."""
     assert len(_CALLS) == 17
+    assert set(_EVENTS) == set(_CALLS)
+
+
+def _events_of(session: Session, event_type: AuditEventType) -> int:
+    """Count the audit events of one type the session holds, flushed or committed.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    event_type
+        The type.
+
+    Returns
+    -------
+    int
+        The number of events.
+    """
+    found = select(func.count()).select_from(AuditEvent)
+    return session.scalar(found.where(AuditEvent.event_type == event_type)) or 0
 
 
 @pytest.mark.parametrize("name", list(_CALLS))
@@ -340,8 +399,10 @@ def test_commit_false_leaves_the_change_uncommitted(session: Session, name: str)
     if name in _PREPARE:
         _PREPARE[name](session, world)
     before = _state(session)
+    events = _events_of(session, _EVENTS[name])
     _CALLS[name](session, world)
     session.flush()
     assert _state(session) != before
+    assert _events_of(session, _EVENTS[name]) == events + 1
     session.rollback()
     assert _state(session) == before

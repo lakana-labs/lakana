@@ -778,6 +778,23 @@ def test_a_connection_tests_id_is_shown() -> None:
     assert "test_id" in SHOWN_FIELDS
 
 
+def test_an_access_apply_shows_its_file_commit_counts_and_scopes() -> None:
+    """#46: every field of `ACCESS_APPLIED` is configuration or a count, shown to every reader."""
+    fields = {
+        "file_name",
+        "file_sha256",
+        "source_commit",
+        "created",
+        "changed",
+        "removed",
+        "scopes",
+        "released",
+        "access_apply_id",
+    }
+    assert fields <= SHOWN_FIELDS
+    assert AuditEventType.ACCESS_APPLIED not in CONTENT_FIELDS
+
+
 def test_each_group_of_shown_fields_is_in_alphabetical_order() -> None:
     """A reviewer looks a field up by name: only the start of a new group breaks the order."""
     source = inspect.getsource(content)

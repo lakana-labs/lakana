@@ -55,6 +55,7 @@ def applying(session: Session, apply_id: uuid.UUID) -> Generator[None]:
         if not session.info.get(_FINAL):
             raise RuntimeError("an access apply commits once, at its end")
 
+    session.info.pop(_FINAL, None)
     session.info[ACCESS_APPLY_KEY] = apply_id
     event.listen(session, "before_commit", refuse)
     try:
@@ -72,7 +73,14 @@ def finish_apply(session: Session) -> None:
     ----------
     session
         The session inside `applying`.
+
+    Raises
+    ------
+    RuntimeError
+        Outside `applying`, where the flag would let a later apply commit half-way.
     """
+    if ACCESS_APPLY_KEY not in session.info:
+        raise RuntimeError("finish_apply commits only inside an access apply")
     session.info[_FINAL] = True
     session.commit()
 
