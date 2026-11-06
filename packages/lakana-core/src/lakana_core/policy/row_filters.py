@@ -303,6 +303,12 @@ class RowFilterService(PolicyShowing):
         target = self.check_target(
             p, environment=environment, namespace=namespace, table=table, expression=expression
         )
+        on = f"{environment}.{NamespacePath.parse(namespace)}.{table}"
+        self._guard(
+            p,
+            environment,
+            f"create a row filter on {on} for {principal or group}",
+        )
         row = RowFilter(
             id=uuid.uuid4(),
             principal_id=principal_id,
@@ -472,6 +478,11 @@ class RowFilterService(PolicyShowing):
             raise NotFoundError(f"No row filter {row_filter_id}.")
         if row.revoked_at is not None:
             return
+        self._guard(
+            p,
+            row.environment,
+            f"revoke row filter {row.id} of {self._subject_name(row)}",
+        )
         row.revoked_at = datetime.now(UTC)
         row.revoked_by = p.id
         AuditService(self._session).record(

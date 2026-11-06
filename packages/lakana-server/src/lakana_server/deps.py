@@ -26,7 +26,7 @@ from lakana_core.ci_oidc.exchange import CiTokenService
 from lakana_core.ci_oidc.rules import CiTrustRuleService
 from lakana_core.config import ViewAuditConfig
 from lakana_core.connections.service import ConnectionService
-from lakana_core.errors import AuthenticationError
+from lakana_core.errors import AuthenticationError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
@@ -411,6 +411,57 @@ def get_write_principal(
         The principal, with the reason attached when given.
     """
     return with_break_glass(principal, break_glass_reason)
+
+
+def get_managed_write_principal(
+    principal: PrincipalRef = Depends(get_principal),
+    override_managed: bool = Query(
+        default=False,
+        description=(
+            "Change access in a scope an access file manages anyway, in an emergency. Needs the "
+            "ADMIN role on the instance and `override_reason`; audited, and shown as drift until "
+            "the next apply."
+        ),
+    ),
+    override_reason: str | None = Query(
+        default=None,
+        max_length=500,
+        description="Why, 10 to 500 characters on one line; with `override_managed=true`.",
+    ),
+) -> PrincipalRef:
+    """Authenticate a route that changes access, honouring the managed-scope override (#46).
+
+    Parameters
+    ----------
+    principal
+        The authenticated caller.
+    override_managed
+        Whether the caller overrides the scope's access file.
+    override_reason
+        The override's reason.
+
+    Returns
+    -------
+    PrincipalRef
+        The principal, carrying the reason when overriding; the service's guard checks it.
+
+    Raises
+    ------
+    ValidationError
+        If one of the two parameters comes without the other (422).
+    """
+    if override_managed and override_reason is None:
+        raise ValidationError(
+            "override_managed=true needs override_reason (`--override-managed` needs `--reason`)"
+        )
+    if override_reason is not None and not override_managed:
+        raise ValidationError(
+            "override_reason goes with override_managed=true "
+            "(`--reason` goes with `--override-managed`)"
+        )
+    if override_reason is None:
+        return principal
+    return dataclasses.replace(principal, managed_override_reason=override_reason)
 
 
 def get_key_provider(request: Request) -> KeyProvider:

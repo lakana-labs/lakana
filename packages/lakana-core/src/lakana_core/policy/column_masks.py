@@ -332,6 +332,12 @@ class ColumnMaskService(PolicyShowing):
             column=column,
             expression=expression,
         )
+        on = f"{environment}.{NamespacePath.parse(namespace)}.{table}"
+        self._guard(
+            p,
+            environment,
+            f"create a column mask on {on} for {principal or group}",
+        )
         row = ColumnMask(
             id=uuid.uuid4(),
             principal_id=principal_id,
@@ -505,6 +511,11 @@ class ColumnMaskService(PolicyShowing):
             raise NotFoundError(f"No column mask {column_mask_id}.")
         if row.revoked_at is not None:
             return
+        self._guard(
+            p,
+            row.environment,
+            f"revoke column mask {row.id} of {self._subject_name(row)}",
+        )
         row.revoked_at = datetime.now(UTC)
         row.revoked_by = p.id
         AuditService(self._session).record(

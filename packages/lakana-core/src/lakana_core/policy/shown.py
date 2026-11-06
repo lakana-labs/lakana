@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from functools import partial
 
 from pyiceberg.types import NestedField
+from sqlalchemy.orm import Session
 
-from lakana_core.auth import PrincipalRef
+from lakana_core.access.managed import guard_change
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef
 from lakana_core.errors import ValidationError
 from lakana_core.models import ColumnMask, RowFilter
 from lakana_core.policy.columns import ColumnSource
@@ -121,9 +123,32 @@ def shown_policies(
 
 
 class PolicyShowing:
-    """The `shown` method of the row filter and column mask services, written once."""
+    """The methods the row filter and column mask services share, written once."""
 
     _catalog: ColumnSource
+    _session: Session
+    _authz: AuthorizationService
+
+    def _guard(self, p: PrincipalRef, environment: str, change: str) -> None:
+        """Guard a change of a policy in a scope an access file may manage (#46).
+
+        Parameters
+        ----------
+        p
+            The acting principal, already authorized to manage policies.
+        environment
+            The policy's environment.
+        change
+            What is changed.
+        """
+        guard_change(
+            self._session,
+            p,
+            environment=environment,
+            change=change,
+            authz=self._authz,
+            action=Action.MANAGE_POLICY,
+        )
 
     def shown(
         self, p: PrincipalRef, rows: Sequence[RowFilter] | Sequence[ColumnMask]

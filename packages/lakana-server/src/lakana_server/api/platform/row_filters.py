@@ -19,7 +19,12 @@ from lakana_core.policy.shown import ShownPolicy
 from lakana_server.api.platform.schemas import RowFilterCreate, RowFilterOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import check_statement, get_principal, get_row_filter_service
+from lakana_server.deps import (
+    check_statement,
+    get_managed_write_principal,
+    get_principal,
+    get_row_filter_service,
+)
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -91,14 +96,17 @@ def _to_out(row: RowFilter, shown: ShownPolicy) -> RowFilterOut:
     )
 
 
-@router.post("", response_model=RowFilterOut, status_code=201, responses=errors(403, 404))
+@router.post("", response_model=RowFilterOut, status_code=201, responses=errors(403, 404, 409))
 def create_row_filter(
     body: RowFilterCreate,
     request: Request,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: RowFilterService = Depends(get_row_filter_service),
 ) -> RowFilterOut:
     """Create a row filter.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Restricts which rows of a table a principal or group sees, by a SQL condition. The
     filter binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers
@@ -202,13 +210,16 @@ def list_row_filters(
     return [_to_out(row, shown[row.id]) for row in rows]
 
 
-@router.delete("/{row_filter_id}", status_code=204, responses=errors(403, 404))
+@router.delete("/{row_filter_id}", status_code=204, responses=errors(403, 404, 409))
 def revoke_row_filter(
     row_filter_id: uuid.UUID,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: RowFilterService = Depends(get_row_filter_service),
 ) -> None:
     """Revoke a row filter.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Needs `MANAGE_POLICY` on the instance. Answers 404 when there is no such row filter.
 

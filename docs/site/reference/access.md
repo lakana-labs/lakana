@@ -9,7 +9,9 @@ and [Why may (or may not) someone do this?](../how-to/why-may-someone-do-this.md
 
 To keep who has access in a file in git, write it with `lakana access export` and read what it would
 change with `lakana access plan`. The format, the commands and the errors are on [The access
-file](access-file.md).
+file](access-file.md). Once a file manages a scope, grants, groups, service accounts and policies
+there are changed through the file: the commands that change them are refused with `409`, unless an
+instance administrator overrides it ([Changes outside the file](access-file.md#changes-outside-the-file)).
 
 ## Who may read what
 
@@ -124,6 +126,7 @@ grants.
 | a caller without the right in "Who may read what" | `403`, audited |
 | an unknown principal, group, environment, namespace or table, for an administrator | `404` |
 | an unknown principal, for anyone else | `403`, audited |
+| a change in a scope an access file manages | `409`; the message names the scope and the next step, and `--override-managed --reason` overrides it ([The access file](access-file.md#the-override)) |
 
 ## SDK and REST
 

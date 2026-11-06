@@ -29,7 +29,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_grant_service, get_principal
+from lakana_server.deps import get_grant_service, get_managed_write_principal, get_principal
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -104,13 +104,16 @@ def _to_out(grant: Grant) -> GrantOut:
     )
 
 
-@router.post("", response_model=GrantOut, status_code=201, responses=errors(403, 404))
+@router.post("", response_model=GrantOut, status_code=201, responses=errors(403, 404, 409))
 def create_grant(
     body: GrantCreate,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: GrantService = Depends(get_grant_service),
 ) -> GrantOut:
     """Grant a role or an action.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Gives a principal or a group a role or a single action on the instance, an environment,
     a namespace or a table. Needs the `ADMIN` role on the instance. Answers 404 when the
@@ -284,10 +287,13 @@ def permissions_out(report: PermissionReport) -> PermissionsOut:
 @router.delete("/{grant_id}", status_code=204, responses=errors(403, 404, 409))
 def revoke_grant(
     grant_id: uuid.UUID,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: GrantService = Depends(get_grant_service),
 ) -> None:
     """Revoke a grant.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Needs the `ADMIN` role on the instance. Answers 404 when there is no such grant and 409
     when revoking it would leave the instance without an active administrator.

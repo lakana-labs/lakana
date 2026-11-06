@@ -16,6 +16,7 @@ from typing import Annotated, Any
 import typer
 
 from lakana.cli import _output
+from lakana.cli._override import OVERRIDE_MANAGED, OVERRIDE_REASON, override_reason
 from lakana.cli._state import CliError, confirm, parse_key_values, state_of
 
 ci_trust_app = typer.Typer(
@@ -64,6 +65,8 @@ def create(
             "in its environment, as the CI identity (off by default).",
         ),
     ] = False,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Create a CI trust rule.
 
@@ -85,7 +88,12 @@ def create(
         What the rule allows.
     start_on_deploy_jobs
         Whether its deploys start the project's on_deploy jobs.
+    override_managed
+        `--override-managed`: create the rule although an access file manages its scope.
+    reason
+        `--reason`: why you create the rule anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     rule = state.client().ci_trust_rules.create(
         issuer=issuer,
@@ -95,6 +103,7 @@ def create(
         conditions=parse_key_values(claim, "--claim"),
         kinds=kind or ["deploy"],
         start_on_deploy_jobs=start_on_deploy_jobs,
+        override_reason=why,
     )
     starts = " Each deploy starts the deploy's on_deploy jobs." if rule.start_on_deploy_jobs else ""
     _output.done(
@@ -164,6 +173,8 @@ def update(
             help="Whether a deploy under this rule starts the project's on_deploy jobs.",
         ),
     ] = None,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Change CI trust rule RULE_ID; the tokens issued under it stop working at once.
 
@@ -181,12 +192,17 @@ def update(
         New kinds.
     start_on_deploy_jobs
         Whether its deploys start the project's on_deploy jobs.
+    override_managed
+        `--override-managed`: change the rule although an access file manages its scope.
+    reason
+        `--reason`: why you change the rule anyway.
 
     Raises
     ------
     CliError
         If nothing would change (exit 2).
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     if principal is None and not claim and not kind and start_on_deploy_jobs is None:
         raise CliError(
@@ -198,12 +214,18 @@ def update(
         kinds=kind or None,
         conditions=parse_key_values(claim, "--claim") if claim else None,
         start_on_deploy_jobs=start_on_deploy_jobs,
+        override_reason=why,
     )
     _output.done(state, f"Updated CI trust rule {rule.id}.", rule)
 
 
 @ci_trust_app.command("enable")
-def enable(ctx: typer.Context, rule_id: str) -> None:
+def enable(
+    ctx: typer.Context,
+    rule_id: str,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
+) -> None:
     """Enable CI trust rule RULE_ID.
 
     Parameters
@@ -212,14 +234,24 @@ def enable(ctx: typer.Context, rule_id: str) -> None:
         The Typer context.
     rule_id
         The rule's id.
+    override_managed
+        `--override-managed`: enable the rule although an access file manages its scope.
+    reason
+        `--reason`: why you enable the rule anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
-    rule = state.client().ci_trust_rules.enable(rule_id)
+    rule = state.client().ci_trust_rules.enable(rule_id, override_reason=why)
     _output.done(state, f"Enabled CI trust rule {rule.id}.", rule)
 
 
 @ci_trust_app.command("disable")
-def disable(ctx: typer.Context, rule_id: str) -> None:
+def disable(
+    ctx: typer.Context,
+    rule_id: str,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
+) -> None:
     """Disable CI trust rule RULE_ID; the tokens issued under it stop working at once.
 
     Parameters
@@ -228,9 +260,14 @@ def disable(ctx: typer.Context, rule_id: str) -> None:
         The Typer context.
     rule_id
         The rule's id.
+    override_managed
+        `--override-managed`: disable the rule although an access file manages its scope.
+    reason
+        `--reason`: why you disable the rule anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
-    rule = state.client().ci_trust_rules.disable(rule_id)
+    rule = state.client().ci_trust_rules.disable(rule_id, override_reason=why)
     _output.done(
         state,
         f"Disabled CI trust rule {rule.id}; the tokens issued under it no longer work.",
@@ -243,6 +280,8 @@ def delete(
     ctx: typer.Context,
     rule_id: str,
     yes: Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")] = False,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Delete CI trust rule RULE_ID; the tokens issued under it stop working at once.
 
@@ -254,14 +293,19 @@ def delete(
         The rule's id.
     yes
         Skip the confirmation prompt.
+    override_managed
+        `--override-managed`: delete the rule although an access file manages its scope.
+    reason
+        `--reason`: why you delete the rule anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     confirm(
         state,
         f"Delete CI trust rule {_output.inline(rule_id)}? CI jobs it accepts can no longer deploy.",
         yes,
     )
-    state.client().ci_trust_rules.delete(rule_id)
+    state.client().ci_trust_rules.delete(rule_id, override_reason=why)
     _output.done(state, f"Deleted CI trust rule {_output.inline(rule_id)}.")
 
 

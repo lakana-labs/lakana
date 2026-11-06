@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lakana_core.access.managed import guard_change
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
@@ -69,6 +70,8 @@ class PrincipalService:
         ).scalar_one_or_none()
         if existing is not None:
             raise AlreadyExistsError(f"Principal {name!r} already exists.")
+        if type is PrincipalType.SERVICE_ACCOUNT:
+            self._guard(p, f"create service account {name}")
         principal = Principal(id=uuid.uuid4(), type=type, name=name, is_active=True)
         self._session.add(principal)
         AuditService(self._session).record(
@@ -79,6 +82,27 @@ class PrincipalService:
         if commit:
             self._session.commit()
         return principal
+
+    def _guard(self, p: PrincipalRef, change: str) -> None:
+        """Pass a service account's change through the guard of the managed `instance` scope.
+
+        People are never in an access file, so only service accounts are guarded.
+
+        Parameters
+        ----------
+        p
+            The acting principal, already authorized.
+        change
+            What is changed.
+        """
+        guard_change(
+            self._session,
+            p,
+            environment=None,
+            change=change,
+            authz=self._authz,
+            action=Action.MANAGE_PRINCIPAL,
+        )
 
     def deactivate_principal(self, p: PrincipalRef, name: str, *, commit: bool = True) -> None:
         """Deactivate a principal, revoking its access without deleting it.
@@ -111,6 +135,8 @@ class PrincipalService:
         principal = self.get_principal_by_name(p, name)
         if not principal.is_active:
             return
+        if principal.type is PrincipalType.SERVICE_ACCOUNT:
+            self._guard(p, f"deactivate service account {name}")
         assert_admin_headroom(self._session, excluding_principal_id=principal.id)
         principal.is_active = False
         AuditService(self._session).record(

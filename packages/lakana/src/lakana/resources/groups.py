@@ -8,6 +8,7 @@ from typing import Any
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
 from lakana._models import Group, GroupPage, Principal
 from lakana._routes import ROUTES
+from lakana.resources._override import override_params
 from lakana.resources.principals import _principal_from_json
 
 
@@ -51,13 +52,16 @@ class Groups:
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
-    def create(self, name: str) -> Group:
+    def create(self, name: str, *, override_reason: str | None = None) -> Group:
         """Create a group.
 
         Parameters
         ----------
         name
             The group's unique name.
+        override_reason
+            Why, 10 to 500 characters on one line, to create the group although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
@@ -69,7 +73,9 @@ class Groups:
         lakana.errors.Conflict
             If a group of this name already exists.
         """
-        response = self._transport.request(ROUTES["groups.create"], json={"name": name})
+        response = self._transport.request(
+            ROUTES["groups.create"], params=override_params(override_reason), json={"name": name}
+        )
         return _group_from_json(response.json())
 
     def list(
@@ -142,13 +148,16 @@ class Groups:
             lambda cursor: self.list_page(search=search, limit=page_size, cursor=cursor)
         )
 
-    def delete(self, name: str) -> None:
+    def delete(self, name: str, *, override_reason: str | None = None) -> None:
         """Delete a group.
 
         Parameters
         ----------
         name
             The group's name.
+        override_reason
+            Why, 10 to 500 characters on one line, to delete the group although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Raises
         ------
@@ -158,7 +167,11 @@ class Groups:
             If any active grant, row filter, or column mask still
             references the group.
         """
-        self._transport.request(ROUTES["groups.delete"], path_params={"name": name})
+        self._transport.request(
+            ROUTES["groups.delete"],
+            params=override_params(override_reason),
+            path_params={"name": name},
+        )
 
     def list_members(self, name: str) -> _PrincipalList:
         """List a group's members.
@@ -183,7 +196,31 @@ class Groups:
         )
         return [_principal_from_json(item) for item in response.json()]
 
-    def add_member(self, name: str, principal_name: str) -> None:
+    def _membership(
+        self, route: str, name: str, principal_name: str, override_reason: str | None
+    ) -> None:
+        """Add a principal to a group or remove it.
+
+        Parameters
+        ----------
+        route
+            The route's key: ``groups.add_member`` or ``groups.remove_member``.
+        name
+            The group's name.
+        principal_name
+            The principal.
+        override_reason
+            The managed-scope override's reason, or `None`.
+        """
+        self._transport.request(
+            ROUTES[route],
+            params=override_params(override_reason),
+            path_params={"name": name, "principal_name": principal_name},
+        )
+
+    def add_member(
+        self, name: str, principal_name: str, *, override_reason: str | None = None
+    ) -> None:
         """Add a principal to a group. Idempotent.
 
         Parameters
@@ -192,18 +229,20 @@ class Groups:
             The group's name.
         principal_name
             The principal to add.
+        override_reason
+            Why, 10 to 500 characters on one line, to add the member although an access file manages
+            its scope (an audited override, for an administrator of the instance).
 
         Raises
         ------
         lakana.errors.NotFound
             If no group or principal of these names exists.
         """
-        self._transport.request(
-            ROUTES["groups.add_member"],
-            path_params={"name": name, "principal_name": principal_name},
-        )
+        self._membership("groups.add_member", name, principal_name, override_reason)
 
-    def remove_member(self, name: str, principal_name: str) -> None:
+    def remove_member(
+        self, name: str, principal_name: str, *, override_reason: str | None = None
+    ) -> None:
         """Remove a principal from a group.
 
         Parameters
@@ -212,13 +251,13 @@ class Groups:
             The group's name.
         principal_name
             The principal to remove.
+        override_reason
+            Why, 10 to 500 characters on one line, to remove the member although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Raises
         ------
         lakana.errors.NotFound
             If no group or principal of these names exists.
         """
-        self._transport.request(
-            ROUTES["groups.remove_member"],
-            path_params={"name": name, "principal_name": principal_name},
-        )
+        self._membership("groups.remove_member", name, principal_name, override_reason)

@@ -109,6 +109,7 @@ class AuditEventType(enum.StrEnum):
     OIDC_TOKEN_EXCHANGED = "OIDC_TOKEN_EXCHANGED"  # nosec B105 -- an event name, not a credential
     OIDC_EXCHANGE_REFUSED = "OIDC_EXCHANGE_REFUSED"
     ACCESS_APPLIED = "ACCESS_APPLIED"
+    MANAGED_SCOPE_OVERRIDDEN = "MANAGED_SCOPE_OVERRIDDEN"
 
 
 class AuditEvent(Base):

@@ -25,6 +25,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lakana_core.access.managed import guard_change
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.ci_oidc.config import GITHUB_ISSUER, PRESETS
@@ -560,6 +561,25 @@ class CiTrustRuleService:
             raise NotFoundError(f"No CI trust rule {rule_id}.")
         return row
 
+    def _guard_rule(self, p: PrincipalRef, row: CiTrustRule, verb: str) -> None:
+        """Pass a change of a rule through the guard of its environment's managed scope.
+
+        Parameters
+        ----------
+        p
+            The acting administrator, already authorized.
+        row
+            The rule.
+        verb
+            What is done to it, for the guard's change text.
+        """
+        guard_change(
+            self._session,
+            p,
+            environment=self._name(Environment, row.environment_id),
+            change=f"{verb} CI trust rule {row.id}",
+        )
+
     def _name(self, model: type[Principal | Environment | Repository], row_id: object) -> str:
         """Read the name of a principal, environment or repository by id.
 
@@ -740,6 +760,12 @@ class CiTrustRuleService:
             If a field breaks the rules of this module's docstring.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        guard_change(
+            self._session,
+            p,
+            environment=environment,
+            change=f"create a CI trust rule for {principal} deploying {repository}",
+        )
         checked = self.check_rule(
             issuer=issuer,
             environment=environment,
@@ -869,6 +895,7 @@ class CiTrustRuleService:
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         row = self._rule(rule_id)
+        self._guard_rule(p, row, "update")
         if (
             principal is None
             and kinds is None
@@ -927,6 +954,7 @@ class CiTrustRuleService:
         if enabled:
             _validate_conditions(row.issuer, row.conditions)
         if row.enabled is not enabled:
+            self._guard_rule(p, row, "enable" if enabled else "disable")
             row.enabled = enabled
             row.revision += 1
             row.updated_by = p.id
@@ -1024,6 +1052,7 @@ class CiTrustRuleService:
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         row = self._rule(rule_id)
+        self._guard_rule(p, row, "delete")
         view = self._view(row)
         self._session.delete(row)
         self._audit(p, AuditEventType.CI_TRUST_RULE_DELETED, view)

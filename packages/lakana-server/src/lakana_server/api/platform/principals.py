@@ -13,7 +13,12 @@ from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import PermissionsOut, PrincipalCreate, PrincipalOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_grant_service, get_principal, get_principal_service
+from lakana_server.deps import (
+    get_grant_service,
+    get_managed_write_principal,
+    get_principal,
+    get_principal_service,
+)
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -26,10 +31,13 @@ router = APIRouter(
 @router.post("", response_model=PrincipalOut, status_code=201, responses=errors(403, 409))
 def create_principal(
     body: PrincipalCreate,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: PrincipalService = Depends(get_principal_service),
 ) -> PrincipalOut:
     """Create a principal.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Creates a user or a service account. Needs `MANAGE_PRINCIPAL` on the instance. Answers
     409 when the name is taken.
@@ -181,10 +189,13 @@ def list_principals(
 @router.delete("/{name}", status_code=204, responses=errors(403, 404, 409))
 def deactivate_principal(
     name: str,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: PrincipalService = Depends(get_principal_service),
 ) -> None:
     """Deactivate a principal.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Stops the principal from signing in. The record stays, with every grant, token and audit
     entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when

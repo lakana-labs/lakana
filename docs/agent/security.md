@@ -3399,6 +3399,49 @@ when the process stops are not written (unlike `DenialAuditLimiter.drain`). Fail
 unchanged (`AuthAuditLimiter` above). `authenticate_before_body` already makes a request one
 `get_principal` call, so a body route is not counted twice.
 
+## Access as code: managed scopes and the override (#46)
+
+An applied access file makes its scopes *managed* (`access_managed_scopes`). From then on the file
+is the only way to change access there, so that what was reviewed in git is what holds.
+
+- **Guard placement.** `lakana_core.access.managed.guard_change` is called by each mutating
+  service method, right after the method's own authorization and once the row it changes is
+  loaded (so the environment of a revoke comes from the row, never from the request): `GrantService.grant`/`revoke`,
+  the four `GroupService` mutators, `PrincipalService.create_principal`/`deactivate_principal`
+  (service accounts only), `RowFilterService` and `ColumnMaskService` `create`/`revoke`, and
+  `CiTrustRuleService` `create`/`update`/`enable`/`disable`/`delete`. A call that changes nothing
+  (a revoked grant revoked again, an existing member added again, a disabled rule disabled) returns
+  before the guard. An environment-scoped change is guarded when that environment or `instance`
+  is managed; an instance-wide object only when `instance` is. The guard lives in the service,
+  not the route, so every caller — REST, SDK, CLI, an apply's own services — meets it (rule 2).
+- **Locks.** On Postgres the guard takes `pg_advisory_xact_lock_shared(ACCESS_LOCK_KEY)` and an
+  apply takes the exclusive one, both until the transaction ends. A single-route change therefore
+  waits for a running apply and cannot slip between its plan and its commit; guarded changes do
+  not wait for one another. Inside an apply (`ACCESS_APPLY_KEY` in `session.info`) the guard
+  returns at once: the apply already holds the exclusive lock and is the file.
+- **The override needs ADMIN.** `?override_managed=true&override_reason=...` (the server's
+  `get_managed_write_principal`; one without the other is 422) sets
+  `PrincipalRef.managed_override_reason`. The guard then asks `holds_instance_admin` itself, even
+  on routes whose own action is `MANAGE_POLICY` or `MANAGE_PRINCIPAL`: holding those must not let
+  a caller step around a reviewed file. A refusal is recorded as `AUTHORIZATION_DENIED` (reason
+  `managed_override_not_admin`) through the service's own `AuditingAuthorization` limiter. The
+  reason is checked like a break-glass reason (10–500 characters, one line, no control or
+  invisible characters). The override records `MANAGED_SCOPE_OVERRIDDEN` (`scope`, `change`,
+  `reason`) and an open `access_overrides` row in the change's own transaction, so a failed change
+  leaves neither. Every plan lists open overrides as drift; the next apply resolves them and
+  reverts each change the file does not list. An override in a scope no file manages is refused
+  (422), so a stale flag in a script never hides a change.
+- **The one exemption: lockout recovery.** `bootstrap_if_needed` grants the bootstrap principal
+  ADMIN when no active administrator exists. That grant runs inside `lockout_recovery(session)`,
+  which lets it pass the guard: recovering from a lockout must never depend on the file (a file
+  that removed the last admin path, or an admin deactivated by hand, would otherwise leave the
+  instance with no way in). It is still recorded as an override with a fixed reason, so the next
+  plan shows it as drift and an apply that does not list it reverts it. Nothing else sets the flag.
+- **Not guarded, by design.** PAT issue and revoke (tokens are never in a file), user principals
+  (people are not in a file), the cascades of dropping a table or an environment (`revoke_attached`
+  removes what can no longer apply), and deploy run-as. These either hold no access a file
+  describes, or only take access away.
+
 ## Query isolation: credential scoping, not blacklisting (M2/M3)
 
 **This is running code, not a plan.** The query executor

@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from lakana_core.access.managed import guard_change
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, SecurableKind
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
@@ -114,6 +115,7 @@ class GroupService:
             (`MANAGE_GROUP` works only with it).
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        guard_change(self._session, p, environment=None, change=f"create group {name}")
         existing = self._session.execute(
             select(Group).where(Group.name == name)
         ).scalar_one_or_none()
@@ -179,6 +181,7 @@ class GroupService:
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
         group = self._get_group(name)
+        guard_change(self._session, p, environment=None, change=f"delete group {name}")
         self._session.execute(
             select(Group).where(Group.id == group.id).with_for_update()
         ).scalar_one()
@@ -314,6 +317,9 @@ class GroupService:
         ).scalar_one_or_none()
         if existing is not None:
             return
+        guard_change(
+            self._session, p, environment=None, change=f"add {principal_name} to {group_name}"
+        )
         self._session.add(GroupMembership(group_id=group.id, principal_id=principal.id))
         AuditService(self._session).record(
             p.id,
@@ -362,6 +368,9 @@ class GroupService:
         ).scalar_one_or_none()
         if membership is None:
             raise NotFoundError(f"{principal_name!r} is not a member of {group_name!r}.")
+        guard_change(
+            self._session, p, environment=None, change=f"remove {principal_name} from {group_name}"
+        )
         if self._grants_instance_admin(group.id):
             assert_admin_headroom(self._session, excluding_principal_id=principal.id)
         self._session.delete(membership)

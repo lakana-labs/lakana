@@ -13,6 +13,7 @@ from typing import Any
 from lakana._http import HttpTransport, query_params
 from lakana._models import RowFilter
 from lakana._routes import ROUTES
+from lakana.resources._override import override_params
 
 
 def _row_filter_from_json(data: dict[str, Any]) -> RowFilter:
@@ -72,6 +73,7 @@ class RowFilters:
         namespace: str,
         table: str,
         expression: str,
+        override_reason: str | None = None,
     ) -> RowFilter:
         """Create a row filter.
 
@@ -95,6 +97,9 @@ class RowFilters:
             The table name.
         expression
             The restricted-subset predicate.
+        override_reason
+            Why, 10 to 500 characters on one line, to create the row filter although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
@@ -111,6 +116,7 @@ class RowFilters:
         """
         response = self._transport.request(
             ROUTES["row_filters.create"],
+            params=override_params(override_reason),
             json={
                 "principal": principal,
                 "group": group,
@@ -171,13 +177,16 @@ class RowFilters:
         )
         return [_row_filter_from_json(item) for item in response.json()]
 
-    def revoke(self, row_filter_id: str) -> None:
+    def revoke(self, row_filter_id: str, *, override_reason: str | None = None) -> None:
         """Revoke a row filter.
 
         Parameters
         ----------
         row_filter_id
             The row filter's id.
+        override_reason
+            Why, 10 to 500 characters on one line, to revoke the row filter although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Raises
         ------
@@ -185,5 +194,7 @@ class RowFilters:
             If no row filter of this id exists.
         """
         self._transport.request(
-            ROUTES["row_filters.revoke"], path_params={"row_filter_id": row_filter_id}
+            ROUTES["row_filters.revoke"],
+            params=override_params(override_reason),
+            path_params={"row_filter_id": row_filter_id},
         )

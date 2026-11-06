@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from lakana.cli import _output
+from lakana.cli._override import OVERRIDE_MANAGED, OVERRIDE_REASON, override_reason
 from lakana.cli._paging import CURSOR, LIMIT, SEARCH, more_results
 from lakana.cli._state import confirm, state_of
 
@@ -16,7 +17,12 @@ _YES = Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")
 
 
 @group_app.command("create")
-def create(ctx: typer.Context, name: str) -> None:
+def create(
+    ctx: typer.Context,
+    name: str,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
+) -> None:
     """Create group NAME.
 
     Parameters
@@ -25,9 +31,18 @@ def create(ctx: typer.Context, name: str) -> None:
         The Typer context.
     name
         The group name.
+    override_managed
+        `--override-managed`: create the group although an access file manages its scope.
+    reason
+        `--reason`: why you create the group anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
-    _output.done(state, f"Created group {_output.inline(name)}", state.client().groups.create(name))
+    _output.done(
+        state,
+        f"Created group {_output.inline(name)}",
+        state.client().groups.create(name, override_reason=why),
+    )
 
 
 @group_app.command("list")
@@ -62,7 +77,13 @@ def list_groups(
 
 
 @group_app.command("delete")
-def delete(ctx: typer.Context, name: str, yes: _YES = False) -> None:
+def delete(
+    ctx: typer.Context,
+    name: str,
+    yes: _YES = False,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
+) -> None:
     """Delete group NAME.
 
     Parameters
@@ -73,10 +94,15 @@ def delete(ctx: typer.Context, name: str, yes: _YES = False) -> None:
         The group name.
     yes
         Skip the confirmation prompt.
+    override_managed
+        `--override-managed`: delete the group although an access file manages its scope.
+    reason
+        `--reason`: why you delete the group anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     confirm(state, f"Delete group {name!r}?", yes)
-    state.client().groups.delete(name)
+    state.client().groups.delete(name, override_reason=why)
     _output.done(state, f"Deleted group {_output.inline(name)}")
 
 
@@ -96,7 +122,13 @@ def members(ctx: typer.Context, name: str) -> None:
 
 
 @group_app.command("add-member")
-def add_member(ctx: typer.Context, name: str, principal: str) -> None:
+def add_member(
+    ctx: typer.Context,
+    name: str,
+    principal: str,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
+) -> None:
     """Add PRINCIPAL to group NAME.
 
     Parameters
@@ -107,14 +139,26 @@ def add_member(ctx: typer.Context, name: str, principal: str) -> None:
         The group name.
     principal
         The principal name.
+    override_managed
+        `--override-managed`: add the member although an access file manages its scope.
+    reason
+        `--reason`: why you add the member anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
-    state.client().groups.add_member(name, principal)
+    state.client().groups.add_member(name, principal, override_reason=why)
     _output.done(state, f"Added {_output.inline(principal)} to group {_output.inline(name)}")
 
 
 @group_app.command("remove-member")
-def remove_member(ctx: typer.Context, name: str, principal: str, yes: _YES = False) -> None:
+def remove_member(
+    ctx: typer.Context,
+    name: str,
+    principal: str,
+    yes: _YES = False,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
+) -> None:
     """Remove PRINCIPAL from group NAME.
 
     Parameters
@@ -127,10 +171,15 @@ def remove_member(ctx: typer.Context, name: str, principal: str, yes: _YES = Fal
         The principal name.
     yes
         Skip the confirmation prompt.
+    override_managed
+        `--override-managed`: remove the member although an access file manages its scope.
+    reason
+        `--reason`: why you remove the member anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     confirm(state, f"Remove {principal!r} from group {name!r}?", yes)
-    state.client().groups.remove_member(name, principal)
+    state.client().groups.remove_member(name, principal, override_reason=why)
     _output.done(state, f"Removed {_output.inline(principal)} from group {_output.inline(name)}")
 
 

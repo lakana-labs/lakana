@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import uuid
 from collections.abc import Callable
@@ -1112,22 +1113,21 @@ def test_in_a_managed_scope_only_open_overrides_are_drift(session: Session) -> N
     ]
     service.apply(world.admin, text, plan_fingerprint=first.fingerprint)
     grants.grant(
-        world.admin,
+        dataclasses.replace(world.admin, managed_override_reason="incident 42 hotfix"),
         principal="bob",
         role=Role.VIEWER,
         kind=SecurableKind.ENVIRONMENT,
         environment="prod",
     )
-    plan = service.plan(world.admin, text)
-    assert (len(plan.removals), plan.drift) == (1, ())
-    override = _override(session, world, "prod", "grant VIEWER to bob")
+    override = session.scalars(select(AccessOverride)).one()
     _override(session, world, "staging", "grant VIEWER to alice")  # not a scope of this file
     plan = service.plan(world.admin, text)
+    assert len(plan.removals) == 1
     [drift] = plan.drift
     assert (drift.scope, drift.by, drift.reason, drift.at) == (
         "prod",
         _AUTO,
-        "incident 42",
+        "incident 42 hotfix",
         override.created_at,
     )
     assert drift.text == "grant VIEWER to bob (override)"

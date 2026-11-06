@@ -10,6 +10,7 @@ import typer
 
 from lakana._models import Grant
 from lakana.cli import _output
+from lakana.cli._override import OVERRIDE_MANAGED, OVERRIDE_REASON, override_reason
 from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, CliState, confirm, state_of
 from lakana.errors import LakanaError
@@ -306,6 +307,8 @@ def create(
     env: _ENV = None,
     ns: _NS = None,
     table: _TABLE = None,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Grant a role or action on a securable to a principal or group.
 
@@ -329,7 +332,12 @@ def create(
         The securable's namespace.
     table
         The securable's table.
+    override_managed
+        `--override-managed`: make the grant although an access file manages its scope.
+    reason
+        `--reason`: why you make the grant anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     exactly_one(principal, group, "--principal or --group")
     exactly_one(role, action, "--role or --action")
@@ -342,6 +350,7 @@ def create(
         environment=env,
         namespace=ns,
         table=table,
+        override_reason=why,
     )
     recipient = f"group {_output.inline(group)}" if group else _output.inline(principal or "")
     _output.done(
@@ -476,6 +485,8 @@ def revoke(
     ctx: typer.Context,
     grant_id: str,
     yes: Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")] = False,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Revoke grant GRANT_ID.
 
@@ -489,10 +500,15 @@ def revoke(
         The grant id.
     yes
         Skip the confirmation prompt.
+    override_managed
+        `--override-managed`: revoke the grant although an access file manages its scope.
+    reason
+        `--reason`: why you revoke the grant anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     confirm(state, f"Revoke grant {grant_id}?", yes)
-    state.client().grants.revoke(grant_id)
+    state.client().grants.revoke(grant_id, override_reason=why)
     _output.done(state, f"Revoked grant {grant_id}")
 
 

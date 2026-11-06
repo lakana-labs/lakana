@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from lakana_core.access.managed import guard_change
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
 from lakana_core.catalog.identity import namespace_exists, resolve_environment_id, resolve_table_id
@@ -369,6 +370,12 @@ class GrantService:
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
+        guard_change(
+            self._session,
+            p,
+            environment=environment if kind is not SecurableKind.INSTANCE else None,
+            change=f"grant {role or action} to {principal or group}",
+        )
         environment_id, table_id = self.check_target(
             role=role,
             action=action,
@@ -542,6 +549,23 @@ class GrantService:
             )
         return explain_permissions(self._session, target, scope)
 
+    def _holder(self, grant: Grant) -> str:
+        """Name the principal or group a grant is held by.
+
+        Parameters
+        ----------
+        grant
+            The grant.
+
+        Returns
+        -------
+        str
+            The name.
+        """
+        if grant.principal_id is not None:
+            return self._session.get_one(Principal, grant.principal_id).name
+        return self._session.get_one(Group, grant.group_id).name
+
     def revoke(self, p: PrincipalRef, grant_id: uuid.UUID, *, commit: bool = True) -> None:
         """Revoke a grant.
 
@@ -575,6 +599,12 @@ class GrantService:
             raise NotFoundError(f"No grant {grant_id}.")
         if grant.revoked_at is not None:
             return
+        guard_change(
+            self._session,
+            p,
+            environment=grant.environment if grant.kind is not SecurableKind.INSTANCE else None,
+            change=f"revoke {grant.role or grant.action} from {self._holder(grant)}",
+        )
         if grant.role == Role.ADMIN and grant.kind == SecurableKind.INSTANCE:
             assert_admin_headroom(self._session, excluding_grant_id=grant.id)
         AuditService(self._session).record(

@@ -23,6 +23,7 @@ from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import (
     check_statement,
     get_column_mask_service,
+    get_managed_write_principal,
     get_principal,
 )
 
@@ -97,14 +98,17 @@ def _to_out(row: ColumnMask, shown: ShownPolicy) -> ColumnMaskOut:
     )
 
 
-@router.post("", response_model=ColumnMaskOut, status_code=201, responses=errors(403, 404))
+@router.post("", response_model=ColumnMaskOut, status_code=201, responses=errors(403, 404, 409))
 def create_column_mask(
     body: ColumnMaskCreate,
     request: Request,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: ColumnMaskService = Depends(get_column_mask_service),
 ) -> ColumnMaskOut:
     """Create a column mask.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Hides or rewrites a column of a table for a principal or group, by a SQL expression. The
     mask binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers
@@ -211,13 +215,16 @@ def list_column_masks(
     return [_to_out(row, shown[row.id]) for row in rows]
 
 
-@router.delete("/{column_mask_id}", status_code=204, responses=errors(403, 404))
+@router.delete("/{column_mask_id}", status_code=204, responses=errors(403, 404, 409))
 def revoke_column_mask(
     column_mask_id: uuid.UUID,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: ColumnMaskService = Depends(get_column_mask_service),
 ) -> None:
     """Revoke a column mask.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Needs `MANAGE_POLICY` on the instance. Answers 404 when there is no such column mask.
 

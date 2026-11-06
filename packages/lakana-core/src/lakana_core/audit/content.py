@@ -86,6 +86,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "asset",
         "asset_scope",
         "attempt",
+        # a change made by hand in a scope an access file manages (`MANAGED_SCOPE_OVERRIDDEN`)
+        "change",
         "check",
         "check_result_id",
         "checks",
@@ -142,7 +144,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "rule_ids",
         "run_as",
         "run_id",
-        # the scopes an access file manages
+        # the scope an override changed, and the scopes an access file manages
+        "scope",
         "scopes",
         # the name of the secret a connection uses, never a value
         "secret",

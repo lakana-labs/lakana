@@ -214,13 +214,16 @@ def _dotted(target: Target) -> str:
     return ".".join(target)
 
 
-def validate_break_glass_reason(reason: str) -> str:
-    """Check a break-glass reason.
+def validate_break_glass_reason(reason: str, *, what: str = "A break-glass reason") -> str:
+    """Check a break-glass reason, or another reason recorded in the audit log.
 
     Parameters
     ----------
     reason
         The reason as given.
+    what
+        What the reason is, starting the message: an access-file override checks its reason
+        here too (`lakana_core.access.managed.guard_change`).
 
     Returns
     -------
@@ -239,12 +242,11 @@ def validate_break_glass_reason(reason: str) -> str:
     stripped = reason.strip()
     if not MIN_REASON_LENGTH <= len(stripped) <= MAX_REASON_LENGTH:
         raise ValidationError(
-            f"A break-glass reason must be {MIN_REASON_LENGTH} to {MAX_REASON_LENGTH} characters."
+            f"{what} must be {MIN_REASON_LENGTH} to {MAX_REASON_LENGTH} characters."
         )
     if any(unicodedata.category(char) in _REFUSED_CATEGORIES for char in stripped):
         raise ValidationError(
-            "A break-glass reason must be one line of text without control or invisible "
-            "formatting characters."
+            f"{what} must be one line of text without control or invisible formatting characters."
         )
     return stripped
 

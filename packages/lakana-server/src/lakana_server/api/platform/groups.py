@@ -10,7 +10,7 @@ from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import GroupCreate, GroupOut, PrincipalOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_group_service, get_principal
+from lakana_server.deps import get_group_service, get_managed_write_principal, get_principal
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -23,10 +23,13 @@ router = APIRouter(
 @router.post("", response_model=GroupOut, status_code=201, responses=errors(403, 409))
 def create_group(
     body: GroupCreate,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: GroupService = Depends(get_group_service),
 ) -> GroupOut:
     """Create a group.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Needs the `ADMIN` role on the instance. Answers 409 when the name is taken.
 
@@ -95,10 +98,13 @@ def list_groups(
 @router.delete("/{name}", status_code=204, responses=errors(403, 404, 409))
 def delete_group(
     name: str,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: GroupService = Depends(get_group_service),
 ) -> None:
     """Delete a group.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Needs the `ADMIN` role on the instance. Answers 404 when there is no such group and 409
     while an active grant, row filter or column mask still names it.
@@ -155,14 +161,17 @@ def list_members(
     return [PrincipalOut.model_validate(row) for row in service.list_members(principal, name)]
 
 
-@router.put("/{name}/members/{principal_name}", status_code=204, responses=errors(403, 404))
+@router.put("/{name}/members/{principal_name}", status_code=204, responses=errors(403, 404, 409))
 def add_member(
     name: str,
     principal_name: str,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: GroupService = Depends(get_group_service),
 ) -> None:
     """Add a principal to a group.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Adding a principal that is a member already changes nothing. Needs the `ADMIN` role on
     the instance. Answers 404 when the group or the principal does not exist.
@@ -186,14 +195,17 @@ def add_member(
     service.add_member(principal, name, principal_name)
 
 
-@router.delete("/{name}/members/{principal_name}", status_code=204, responses=errors(403, 404))
+@router.delete("/{name}/members/{principal_name}", status_code=204, responses=errors(403, 404, 409))
 def remove_member(
     name: str,
     principal_name: str,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: GroupService = Depends(get_group_service),
 ) -> None:
     """Remove a principal from a group.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Needs the `ADMIN` role on the instance. Answers 404 when the group or the principal does
     not exist.

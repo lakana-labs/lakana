@@ -8,7 +8,8 @@ the two commands and every error. For the steps, see the how-to guides; for the 
 explanations of access that exist today, see [Grants, permissions, principals and
 groups](access.md).
 
-This page covers reading a file: `export` and `plan` change nothing.
+This page covers reading a file, where `export` and `plan` change nothing, and how a scope a
+file manages refuses changes made outside it.
 
 ## An example
 
@@ -144,6 +145,62 @@ An entry outside `manages` is an error. `instance` already covers every environm
 are not mixed. There is one access file per instance: two files that both manage the same scope
 would each undo the other.
 
+## Changes outside the file
+
+Once an apply has made a scope managed, the file is the only way to change access in it. Every
+command, SDK method and route that would change access there is refused with `409`:
+
+`` `prod` is managed by an access file (last applied 2026-11-06T09:30Z); change the file and run `lakana access apply`, or, in an emergency, repeat with `--override-managed --reason …` ``
+
+The time is the last apply of that scope, in UTC. An environment is managed when the file lists
+it, or when the file lists `instance`, which covers every environment. Groups, memberships,
+service accounts and grants on the instance are guarded only when `instance` is managed.
+
+| Guarded | Commands |
+|---|---|
+| Grants | `lakana grant create`, `lakana grant revoke` |
+| Groups and their members | `lakana group create`, `delete`, `add-member`, `remove-member` |
+| Service accounts | `lakana principal create --type service-account`, and `lakana principal deactivate` of a service account |
+| Row filters and column masks | `lakana row-filter create`, `revoke`; `lakana column-mask create`, `revoke` |
+| CI trust rules | `lakana ci-trust create`, `update`, `enable`, `disable`, `delete` |
+
+Not guarded, because a file does not hold them: people (user principals), personal access
+tokens, and the grants and policies that dropping a table or an environment takes with it. A call
+that changes nothing, such as revoking a grant that is already revoked, is not refused.
+
+### The override
+
+In an emergency an instance administrator can make the change anyway, by adding
+`--override-managed --reason "Incident 42: bob needs to read prod to debug the outage"` to the
+command. The CLI warns on stderr: `Overriding a scope an access file manages; the next apply
+reverts this unless the file lists it.` The override:
+
+- needs the `ADMIN` role on the instance, even where the change itself needs less (a row filter
+  needs only `MANAGE_POLICY`). Anyone else is refused with `403` (`Only an instance administrator
+  may override a scope an access file manages; ask one, or change the file`), and the refusal is
+  recorded in the audit log;
+- needs a reason of 10 to 500 characters on one line;
+- is recorded in the audit log as `MANAGED_SCOPE_OVERRIDDEN`, with the `scope`, the `change` and
+  the `reason`, in the same transaction as the change;
+- is listed by every plan as drift, for example `! drift in prod: grant VIEWER to bob (override)`
+  followed by who, when and why, until the next apply. That apply reverts the change unless the
+  file now lists it.
+
+`--override-managed` without `--reason`, or `--reason` without `--override-managed`, is refused
+before anything is sent. In a scope that no file manages the override is refused too
+(`` `staging` is not managed by an access file; repeat without `--override-managed` ``), so a
+script that still carries the flag does not hide its changes.
+
+Over REST the override is two query parameters of the guarded route,
+`?override_managed=true&override_reason=...`; one without the other is refused with `422`. In the
+SDK, each method that changes access takes `override_reason="..."`.
+
+When no active administrator is left, the server restores its bootstrap administrator when it
+starts (`LAKANA_BOOTSTRAP_ADMIN` in [Settings](settings.md)). That grant is the one change the
+guard lets through, so recovering from a lockout never depends on the file. It is recorded like
+an override, with the reason `Lockout recovery at server start: no active instance
+administrator`, and the next plan lists it as drift.
+
 ## Limits
 
 | Limit | Value |
@@ -194,7 +251,7 @@ changes nothing. It prints:
 | `+ text  (grants[3])` | An entry the apply would create, and where the file lists it. |
 | `~ text  (ci_trust[0])` | A CI trust rule the apply would change in place; the text shows the rule before and after. |
 | `- text` | Access that exists in a managed scope and that the file does not list; the apply would remove it. |
-| `! drift in prod: text` | Access in a scope that no earlier apply of a file has managed yet, made outside any file; the apply would remove it, so look before you apply. The scope is the environment, or `instance`. When known, `— by, at: reason` follows: who made it, when (a timestamp) and why. These are printed only when known; a first apply has none. |
+| `! drift in prod: text` | Access in a scope that no earlier apply of a file has managed yet, made outside any file; the apply would remove it, so look before you apply. The scope is the environment, or `instance`. When known, `— by, at: reason` follows: who made it, when (a timestamp) and why. These are printed only when known; a first apply has none. In a managed scope, drift is an override, and its text ends with `(override)` (see [The override](#the-override)). |
 | `No changes.` | The file and the live access agree. |
 | `Fingerprint: ...` | A hash of the live access of the managed scopes, which an apply checks again. |
 
