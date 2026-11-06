@@ -87,7 +87,7 @@ class GroupService:
             raise NotFoundError(f"No principal named {name!r}.")
         return principal
 
-    def create_group(self, p: PrincipalRef, *, name: str) -> Group:
+    def create_group(self, p: PrincipalRef, *, name: str, commit: bool = True) -> Group:
         """Create a new group.
 
         Parameters
@@ -96,6 +96,8 @@ class GroupService:
             The acting principal.
         name
             Unique name for the new group.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -121,10 +123,11 @@ class GroupService:
         AuditService(self._session).record(
             p.id, AuditEventType.GROUP_CREATED, detail={"group": name}
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
         return group
 
-    def delete_group(self, p: PrincipalRef, name: str) -> None:
+    def delete_group(self, p: PrincipalRef, name: str, *, commit: bool = True) -> None:
         """Delete a group, along with its membership rows.
 
         Refused while any active grant, row filter, or column mask still
@@ -158,6 +161,8 @@ class GroupService:
             The acting principal.
         name
             Name of the group to delete.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -215,7 +220,8 @@ class GroupService:
             )
         audit.record(p.id, AuditEventType.GROUP_DELETED, detail={"group": name})
         self._session.delete(group)
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
     def list_groups(
         self,
@@ -269,7 +275,9 @@ class GroupService:
             cursor=cursor,
         )
 
-    def add_member(self, p: PrincipalRef, group_name: str, principal_name: str) -> None:
+    def add_member(
+        self, p: PrincipalRef, group_name: str, principal_name: str, *, commit: bool = True
+    ) -> None:
         """Add a principal to a group, idempotently.
 
         Matches the router's `PUT` semantics: adding an existing member is
@@ -283,6 +291,8 @@ class GroupService:
             The group to add to.
         principal_name
             The principal to add.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -309,9 +319,12 @@ class GroupService:
             AuditEventType.GROUP_MEMBER_ADDED,
             detail={"group": group_name, "principal": principal_name},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
-    def remove_member(self, p: PrincipalRef, group_name: str, principal_name: str) -> None:
+    def remove_member(
+        self, p: PrincipalRef, group_name: str, principal_name: str, *, commit: bool = True
+    ) -> None:
         """Remove a principal from a group.
 
         Parameters
@@ -322,6 +335,8 @@ class GroupService:
             The group to remove from.
         principal_name
             The principal to remove.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -353,7 +368,8 @@ class GroupService:
             AuditEventType.GROUP_MEMBER_REMOVED,
             detail={"group": group_name, "principal": principal_name},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
     def list_members(self, p: PrincipalRef, group_name: str) -> list[Principal]:
         """List every principal in a group.

@@ -246,6 +246,7 @@ class RowFilterService(PolicyShowing):
         namespace: str,
         table: str,
         expression: str,
+        commit: bool = True,
     ) -> RowFilter:
         """Create a row filter.
 
@@ -267,6 +268,8 @@ class RowFilterService(PolicyShowing):
         expression
             The restricted-subset predicate — validated before the row is
             ever stored.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -328,7 +331,8 @@ class RowFilterService(PolicyShowing):
             ),
             detail={"id": str(row.id), "subject": principal if principal is not None else group},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
         return row
 
     def list_for_principal(self, p: PrincipalRef, principal_name: str) -> list[RowFilter]:
@@ -439,7 +443,7 @@ class RowFilterService(PolicyShowing):
             .all()
         )
 
-    def revoke(self, p: PrincipalRef, row_filter_id: uuid.UUID) -> None:
+    def revoke(self, p: PrincipalRef, row_filter_id: uuid.UUID, *, commit: bool = True) -> None:
         """Revoke a row filter.
 
         Idempotent: revoking an already-revoked row filter is a no-op — it
@@ -452,6 +456,8 @@ class RowFilterService(PolicyShowing):
             The acting principal.
         row_filter_id
             The row filter's id.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -479,4 +485,5 @@ class RowFilterService(PolicyShowing):
             ),
             detail={"id": str(row.id), "subject": self._subject_name(row)},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()

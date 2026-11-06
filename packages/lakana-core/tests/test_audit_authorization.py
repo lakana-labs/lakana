@@ -394,6 +394,7 @@ class _CountingSession:
 
     def __init__(self, on_commit: Callable[[], None] | None = None) -> None:
         self.added = 0
+        self.info: dict[str, object] = {}
         self._on_commit = on_commit
 
     def add(self, row: object) -> None:

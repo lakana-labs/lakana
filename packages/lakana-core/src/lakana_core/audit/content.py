@@ -70,6 +70,8 @@ only; a check's failure holds the count of rows, never the rows.
 
 SHOWN_FIELDS: frozenset[str] = frozenset(
     {
+        # the access apply a change belongs to (`lakana_core.access.managed`)
+        "access_apply_id",
         # who and what
         "action",
         "actor",

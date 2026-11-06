@@ -267,6 +267,7 @@ class ColumnMaskService(PolicyShowing):
         table: str,
         column: str,
         expression: str,
+        commit: bool = True,
     ) -> ColumnMask:
         """Create a column mask.
 
@@ -292,6 +293,8 @@ class ColumnMaskService(PolicyShowing):
             (comparisons, boolean logic, literals, column references,
             context functions, plus `substr`/`substring`/`||`/`md5`)
             before the row is ever stored.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -360,6 +363,8 @@ class ColumnMaskService(PolicyShowing):
             ),
             detail={"id": str(row.id), "subject": principal if principal is not None else group},
         )
+        if not commit:
+            return row
         self._session.commit()
         return row
 
@@ -471,7 +476,7 @@ class ColumnMaskService(PolicyShowing):
             .all()
         )
 
-    def revoke(self, p: PrincipalRef, column_mask_id: uuid.UUID) -> None:
+    def revoke(self, p: PrincipalRef, column_mask_id: uuid.UUID, *, commit: bool = True) -> None:
         """Revoke a column mask.
 
         Idempotent: revoking an already-revoked column mask is a no-op —
@@ -484,6 +489,8 @@ class ColumnMaskService(PolicyShowing):
             The acting principal.
         column_mask_id
             The column mask's id.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -511,4 +518,5 @@ class ColumnMaskService(PolicyShowing):
             ),
             detail={"id": str(row.id), "subject": self._subject_name(row)},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()

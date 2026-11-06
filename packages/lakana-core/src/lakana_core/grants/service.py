@@ -542,7 +542,7 @@ class GrantService:
             )
         return explain_permissions(self._session, target, scope)
 
-    def revoke(self, p: PrincipalRef, grant_id: uuid.UUID) -> None:
+    def revoke(self, p: PrincipalRef, grant_id: uuid.UUID, *, commit: bool = True) -> None:
         """Revoke a grant.
 
         Idempotent: revoking an already-revoked grant is a no-op — it
@@ -556,6 +556,8 @@ class GrantService:
             The acting principal.
         grant_id
             The grant's id.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -589,7 +591,8 @@ class GrantService:
         )
         grant.revoked_at = datetime.now(UTC)
         grant.revoked_by = p.id
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
 
 def active_instance_admin_ids(

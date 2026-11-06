@@ -26,6 +26,9 @@ from lakana_core.config import ViewAuditConfig
 from lakana_core.errors import ValidationError
 from lakana_core.models import AuditEvent, AuditEventType
 
+ACCESS_APPLY_KEY = "lakana.access_apply_id"
+"""The `Session.info` key under which `lakana_core.access.managed.applying` keeps the apply's id."""
+
 
 @dataclass(frozen=True)
 class AuditCursor:
@@ -173,6 +176,9 @@ class AuditService:
         UnclassifiedAuditFieldWarning
             If `detail` has a field that `lakana_core.audit.content` does not classify.
         """
+        apply_id = self._session.info.get(ACCESS_APPLY_KEY)
+        if apply_id is not None:
+            detail = {**(detail or {}), "access_apply_id": str(apply_id)}
         warn_unclassified(event_type, detail or {})
         event = AuditEvent(
             id=uuid.uuid4(),

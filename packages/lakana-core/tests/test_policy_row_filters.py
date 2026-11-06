@@ -5,6 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
 from core_test_helpers import FakeColumnCatalog, NoPolicyFields, ensure_table
@@ -616,26 +617,44 @@ def test_create_refuses_a_view(session: Session) -> None:
 # --- the filter's columns are checked against the table's when it is created ---
 
 
-def _filter_args(expression: str) -> dict[str, str]:
+class _FilterArgs(TypedDict):
+    """The keyword arguments of `create`, typed so that `**` unpacking checks."""
+
+    principal: str
+    environment: str
+    namespace: str
+    table: str
+    expression: str
+
+
+def _filter_args(expression: str, **override: str) -> _FilterArgs:
     """Build the arguments of a filter for `alice` on `dev`/`gold.customers`.
 
     Parameters
     ----------
     expression
         The filter's expression.
+    **override
+        Fields to change from the defaults.
 
     Returns
     -------
     dict
         The keyword arguments of `RowFilterService.create`.
     """
-    return {
-        "principal": "alice",
-        "environment": "dev",
-        "namespace": "gold",
-        "table": "customers",
-        "expression": expression,
-    }
+    return cast(
+        _FilterArgs,
+        {
+            **{
+                "principal": "alice",
+                "environment": "dev",
+                "namespace": "gold",
+                "table": "customers",
+                "expression": expression,
+            },
+            **override,
+        },
+    )
 
 
 def _ready(
@@ -1016,7 +1035,7 @@ def _create_error(session: Session, expression: str = "id > 1", **override: str)
     """
     service, admin = _ready(session, FakeColumnCatalog(names=["id", "region", "address"]))
     with pytest.raises(LakanaError) as caught:
-        service.create(admin, **{**_filter_args(expression), **override})
+        service.create(admin, **_filter_args(expression, **override))
     return caught.value
 
 

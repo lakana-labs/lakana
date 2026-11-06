@@ -699,6 +699,7 @@ class CiTrustRuleService:
         kinds: Sequence[str],
         conditions: Mapping[str, str],
         start_on_deploy_jobs: bool = False,
+        commit: bool = True,
     ) -> CiTrustRuleView:
         """Create an enabled rule.
 
@@ -721,6 +722,8 @@ class CiTrustRuleService:
         start_on_deploy_jobs
             Let a deploy accepted under the rule start the project's jobs with
             ``on_deploy: true`` in the environment, as the CI identity; off by default.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -765,7 +768,8 @@ class CiTrustRuleService:
         self._session.flush()
         view = self._view(row)
         self._audit(p, AuditEventType.CI_TRUST_RULE_CREATED, view)
-        self._session.commit()
+        if commit:
+            self._session.commit()
         return view
 
     def list(self, p: PrincipalRef) -> builtins.list[CiTrustRuleView]:
@@ -826,6 +830,7 @@ class CiTrustRuleService:
         kinds: Sequence[str] | None = None,
         conditions: Mapping[str, str] | None = None,
         start_on_deploy_jobs: bool | None = None,
+        commit: bool = True,
     ) -> CiTrustRuleView:
         """Change a rule's principal, kinds, conditions or opt-in; every token issued under it ends.
 
@@ -845,6 +850,8 @@ class CiTrustRuleService:
             New conditions, replacing all of the old ones.
         start_on_deploy_jobs
             Whether a deploy under the rule starts the project's ``on_deploy`` jobs.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -886,10 +893,13 @@ class CiTrustRuleService:
         self._session.flush()
         view = self._view(row)
         self._audit(p, AuditEventType.CI_TRUST_RULE_UPDATED, view)
-        self._session.commit()
+        if commit:
+            self._session.commit()
         return view
 
-    def _set_enabled(self, p: PrincipalRef, rule_id: uuid.UUID, enabled: bool) -> CiTrustRuleView:
+    def _set_enabled(
+        self, p: PrincipalRef, rule_id: uuid.UUID, enabled: bool, *, commit: bool = True
+    ) -> CiTrustRuleView:
         """Enable or disable a rule; doing it again changes nothing and records nothing.
 
         Parameters
@@ -900,6 +910,8 @@ class CiTrustRuleService:
             The rule.
         enabled
             The new state.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -926,10 +938,13 @@ class CiTrustRuleService:
                 else AuditEventType.CI_TRUST_RULE_DISABLED
             )
             self._audit(p, kind, self._view(row))
-            self._session.commit()
+            if commit:
+                self._session.commit()
         return self._view(row)
 
-    def enable(self, p: PrincipalRef, rule_id: uuid.UUID) -> CiTrustRuleView:
+    def enable(
+        self, p: PrincipalRef, rule_id: uuid.UUID, *, commit: bool = True
+    ) -> CiTrustRuleView:
         """Enable a rule. Tokens issued before it was disabled stay dead.
 
         Parameters
@@ -938,6 +953,8 @@ class CiTrustRuleService:
             The acting administrator.
         rule_id
             The rule to enable.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -955,9 +972,11 @@ class CiTrustRuleService:
             earlier build).
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
-        return self._set_enabled(p, rule_id, True)
+        return self._set_enabled(p, rule_id, True, commit=commit)
 
-    def disable(self, p: PrincipalRef, rule_id: uuid.UUID) -> CiTrustRuleView:
+    def disable(
+        self, p: PrincipalRef, rule_id: uuid.UUID, *, commit: bool = True
+    ) -> CiTrustRuleView:
         """Disable a rule: no exchange matches it, and every token issued under it ends.
 
         Parameters
@@ -966,6 +985,8 @@ class CiTrustRuleService:
             The acting administrator.
         rule_id
             The rule to disable.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -980,9 +1001,9 @@ class CiTrustRuleService:
             If there is no such rule.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
-        return self._set_enabled(p, rule_id, False)
+        return self._set_enabled(p, rule_id, False, commit=commit)
 
-    def delete(self, p: PrincipalRef, rule_id: uuid.UUID) -> None:
+    def delete(self, p: PrincipalRef, rule_id: uuid.UUID, *, commit: bool = True) -> None:
         """Delete a rule; every token issued under it ends.
 
         Parameters
@@ -991,6 +1012,8 @@ class CiTrustRuleService:
             The acting administrator.
         rule_id
             The rule to delete.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -1004,7 +1027,8 @@ class CiTrustRuleService:
         view = self._view(row)
         self._session.delete(row)
         self._audit(p, AuditEventType.CI_TRUST_RULE_DELETED, view)
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
     def explain(
         self,

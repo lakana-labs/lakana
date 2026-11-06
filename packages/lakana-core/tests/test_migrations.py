@@ -5213,3 +5213,60 @@ def test_0066_adds_the_field_id_binding_and_marks_existing_policies_pending(
             assert not names & {"field_ids", "column_field_id", "binding"}
     finally:
         engine.dispose()
+
+
+_REVISION_0067 = "a9c3e5f7b1d2"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0067_adds_the_managed_scope_tables_and_downgrades_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0067`: `access_managed_scopes` and `access_overrides`; the downgrade drops them.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0067)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert {c["name"] for c in inspector.get_columns("access_managed_scopes")} == {
+            "scope",
+            "file_sha256",
+            "file_name",
+            "source_commit",
+            "apply_id",
+            "applied_by",
+            "applied_at",
+        }
+        assert {c["name"] for c in inspector.get_columns("access_overrides")} == {
+            "id",
+            "scope",
+            "change",
+            "reason",
+            "principal_id",
+            "created_at",
+            "audit_event_id",
+            "resolved_at",
+            "resolved_by_apply",
+        }
+        assert "ix_access_overrides_scope" in {
+            i["name"] for i in inspector.get_indexes("access_overrides")
+        }
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0066)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        tables = set(inspect(engine).get_table_names())
+        assert not tables & {"access_managed_scopes", "access_overrides"}
+    finally:
+        engine.dispose()

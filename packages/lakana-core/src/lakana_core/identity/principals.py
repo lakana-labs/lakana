@@ -32,7 +32,9 @@ class PrincipalService:
         self._session = session
         self._authz = authz
 
-    def create_principal(self, p: PrincipalRef, *, name: str, type: PrincipalType) -> Principal:
+    def create_principal(
+        self, p: PrincipalRef, *, name: str, type: PrincipalType, commit: bool = True
+    ) -> Principal:
         """Create a new principal.
 
         Parameters
@@ -46,6 +48,8 @@ class PrincipalService:
             both authenticate identically, via PAT — `type` is a label for
             display and audit until M7 gives `USER` a second, distinct
             authentication path.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -72,10 +76,11 @@ class PrincipalService:
             AuditEventType.PRINCIPAL_CREATED,
             detail={"principal": name, "type": type.value},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
         return principal
 
-    def deactivate_principal(self, p: PrincipalRef, name: str) -> None:
+    def deactivate_principal(self, p: PrincipalRef, name: str, *, commit: bool = True) -> None:
         """Deactivate a principal, revoking its access without deleting it.
 
         Idempotent: deactivating an already-inactive principal is a no-op
@@ -89,6 +94,8 @@ class PrincipalService:
             The acting principal.
         name
             Name of the principal to deactivate.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -111,7 +118,8 @@ class PrincipalService:
             AuditEventType.PRINCIPAL_DEACTIVATED,
             detail={"principal": name, "type": principal.type.value},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
     def get_principal_by_name(self, p: PrincipalRef, name: str) -> Principal:
         """Fetch a principal by name.
