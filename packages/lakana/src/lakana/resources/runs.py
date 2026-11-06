@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param, query_params
 from lakana._models import (
+    AttemptResources,
     Failure,
     ImpactUse,
     ImpactWarning,
@@ -217,6 +218,15 @@ def run_from_json(data: dict[str, Any]) -> Run:
                 schema_note=note if isinstance(note := t.get("schema_note"), str) else None,
                 policy_warnings=policy_warnings_from_json(t.get("policy_warnings")),
                 impact_warnings=impact_warnings_from_json(t.get("impact_warnings")),
+                attempts=tuple(
+                    AttemptResources(
+                        attempt=a["attempt"],
+                        peak_memory_bytes=a.get("peak_memory_bytes"),
+                        cpu_seconds=a.get("cpu_seconds"),
+                        bytes_read=a.get("bytes_read"),
+                    )
+                    for a in t.get("attempts", ())
+                ),
             )
             for t in data["tasks"]
         ],
@@ -578,6 +588,9 @@ class Runs:
                     rows_written=a["rows_written"],
                     error_message=a["error_message"],
                     failure=failure_from_json(a.get("failure")),
+                    peak_memory_bytes=a.get("peak_memory_bytes"),
+                    cpu_seconds=a.get("cpu_seconds"),
+                    bytes_read=a.get("bytes_read"),
                 )
                 for a in data["attempts"]
             ],

@@ -1338,6 +1338,14 @@ class QueryStatus:
     waiting_for
         Why a `QUEUED` query has not started; `None` for any other status and when the server
         predates the field.
+    peak_memory_bytes
+        Highest resident memory of the query's process in bytes; `None` if it was not measured
+        and from a server that predates the field.
+    cpu_seconds
+        Processor time the query used, in seconds; `None` if it was not measured.
+    bytes_read
+        Bytes DuckDB read for the query (its `io.total_bytes_read` metric); `None` if unknown,
+        such as when DuckDB answered from file metadata.
     """
 
     id: str
@@ -1353,6 +1361,9 @@ class QueryStatus:
     maintenance: dict | None = None
     error_cause: str | None = None
     waiting_for: WaitingFor | None = None
+    peak_memory_bytes: int | None = None
+    cpu_seconds: float | None = None
+    bytes_read: int | None = None
 
 
 @dataclass(frozen=True)
@@ -2746,6 +2757,28 @@ class ImpactWarning:
 
 
 @dataclass(frozen=True)
+class AttemptResources:
+    """What one attempt of a task used.
+
+    Parameters
+    ----------
+    attempt
+        Attempt number.
+    peak_memory_bytes
+        Highest resident memory of the attempt's process in bytes; `None` if it was not measured.
+    cpu_seconds
+        Processor time the attempt used, in seconds; `None` if it was not measured.
+    bytes_read
+        Bytes DuckDB read (a query) or the SDK readers read (a Python task); `None` if unknown.
+    """
+
+    attempt: int
+    peak_memory_bytes: int | None = None
+    cpu_seconds: float | None = None
+    bytes_read: int | None = None
+
+
+@dataclass(frozen=True)
 class RunTask:
     """One task run of a run.
 
@@ -2808,6 +2841,9 @@ class RunTask:
     impact_warnings
         Per column those writes retyped, what other repositories use it for (`ImpactWarning`),
         only what you may see; empty otherwise and from an older server.
+    attempts
+        What each attempt used (`AttemptResources`), oldest first; empty before the first attempt
+        and from an older server.
     """
 
     asset: str
@@ -2831,6 +2867,7 @@ class RunTask:
     schema_note: str | None = None
     policy_warnings: tuple[PolicyWarning, ...] = ()
     impact_warnings: tuple[ImpactWarning, ...] = ()
+    attempts: tuple[AttemptResources, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -3142,6 +3179,13 @@ class TaskAttempt:
     failure
         The code, cause and next step of an attempt that did not succeed (`Failure`); `None`
         for one that succeeded or is running, and for a server that predates the field.
+    peak_memory_bytes
+        Highest resident memory of the attempt's process in bytes; `None` if it was not measured
+        and from a server that predates the field.
+    cpu_seconds
+        Processor time the attempt used, in seconds; `None` if it was not measured.
+    bytes_read
+        Bytes DuckDB read (a query) or the SDK readers read (a Python task); `None` if unknown.
     """
 
     attempt: int
@@ -3152,6 +3196,9 @@ class TaskAttempt:
     rows_written: int | None
     error_message: str | None
     failure: Failure | None = None
+    peak_memory_bytes: int | None = None
+    cpu_seconds: float | None = None
+    bytes_read: int | None = None
 
 
 @dataclass(frozen=True)

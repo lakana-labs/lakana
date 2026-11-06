@@ -113,6 +113,9 @@ def _status_from_json(data: dict[str, Any]) -> QueryStatus:
         maintenance=data.get("maintenance"),
         error_cause=data.get("error_cause"),
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
+        peak_memory_bytes=data.get("peak_memory_bytes"),
+        cpu_seconds=data.get("cpu_seconds"),
+        bytes_read=data.get("bytes_read"),
     )
 
 
