@@ -2408,7 +2408,7 @@ class RunService:
     # -- logs and status -----------------------------------------------------
 
     def _declares_task(self, env: Environment, job: str, task: str, repository: str | None) -> bool:
-        """Say whether a deployed project version declares a job and a task of these names.
+        """Say whether a deployed project version has the job and the job runs the task.
 
         Parameters
         ----------
@@ -2424,7 +2424,8 @@ class RunService:
         Returns
         -------
         bool
-            `True` if the current version of some deployed repository has the job and the table.
+            `True` if the current version of some deployed repository has the job and the job's
+            selection covers the table.
         """
         query = (
             select(JobVersion.manifest_json)
@@ -2439,9 +2440,35 @@ class RunService:
                 EnvironmentDeployment.repository_id == self._repository(repository).id
             )
         return any(
-            job in manifest_jobs(manifest) and task in manifest_assets(manifest)
-            for manifest in self._session.scalars(query)
+            self._job_covers(manifest, job, task) for manifest in self._session.scalars(query)
         )
+
+    @staticmethod
+    def _job_covers(manifest: Mapping[str, object], job: str, task: str) -> bool:
+        """Say whether a manifest's job selects a task.
+
+        Parameters
+        ----------
+        manifest
+            A stored manifest; untrusted.
+        job
+            The job's name.
+        task
+            The task's name (its table).
+
+        Returns
+        -------
+        bool
+            `True` if the manifest has the job and its selection resolves to the task.
+        """
+        entry = manifest_jobs(manifest).get(job)
+        if entry is None or task not in manifest_assets(manifest):
+            return False
+        try:
+            covered = resolve_selection(ManifestGraph.from_manifest(manifest), selection_of(entry))
+        except ValidationError:
+            return False
+        return task in covered
 
     def task_attempts(
         self,

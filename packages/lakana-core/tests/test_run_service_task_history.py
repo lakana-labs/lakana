@@ -13,6 +13,7 @@ from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.models import (
     AttemptOutcome,
+    Environment,
     JobVersion,
     Repository,
     RepositoryKind,
@@ -188,7 +189,7 @@ def test_two_repositories_with_the_job_need_a_name(
     assert {e.run_id for e in theirs} == set(runs[:2])
 
 
-def _declare_job(session: Session, name: str) -> None:
+def _declare_job(session: Session, name: str, select_: str = "silver.*") -> None:
     """Declare job `name` in the manifests of every deployed project version.
 
     Parameters
@@ -197,10 +198,22 @@ def _declare_job(session: Session, name: str) -> None:
         Database session.
     name
         The job's name.
+    select_
+        The one pattern the job selects.
     """
     for version in session.scalars(select(JobVersion)):
-        version.manifest_json = {**version.manifest_json, "jobs": {name: {"select": ["silver.*"]}}}
+        version.manifest_json = {**version.manifest_json, "jobs": {name: {"select": [select_]}}}
     session.commit()
+
+
+def test_a_task_of_another_job_is_not_found(
+    session: Session, run_id: uuid.UUID, principal: PrincipalRef
+) -> None:
+    """`silver.a` is in the project but not in this job: 404, not an empty page."""
+    _declare_job(session, "nightly", "silver.b")
+    with pytest.raises(NotFoundError, match=r"'silver.a'.*'nightly'.*lakana job list"):
+        _service(session).task_attempts(principal, "dev", "nightly", "silver.a")
+    assert _service(session).task_attempts(principal, "dev", "nightly", "silver.b") == ([], None)
 
 
 def test_a_declared_task_that_never_ran_has_an_empty_history(
@@ -223,3 +236,22 @@ def test_a_declared_job_with_an_unknown_task_is_not_found(
         _service(session).task_attempts(principal, "dev", "nightly", "ghost")
     with pytest.raises(NotFoundError, match=r"'silver.a'.*'other'"):
         _service(session).task_attempts(principal, "dev", "other", "silver.a")
+
+
+def test_the_history_stays_inside_one_environment(
+    session: Session, run_id: uuid.UUID, principal: PrincipalRef
+) -> None:
+    """The same job and task in `prod` never appear in `dev`'s history, nor the reverse."""
+    runs, task = _history(session, principal, run_id)
+    prod = Environment(id=uuid.uuid4(), name="prod", storage_root="file:///prod")
+    session.add(prod)
+    session.flush()
+    moved = session.get(Run, runs[2])
+    assert moved is not None
+    moved.environment_id = prod.id
+    session.commit()
+    service = _service(session)
+    dev, _ = service.task_attempts(principal, "dev", "nightly", task)
+    there, _ = service.task_attempts(principal, "prod", "nightly", task)
+    assert {e.run_id for e in dev} == set(runs[:2])
+    assert {e.run_id for e in there} == {runs[2]}
