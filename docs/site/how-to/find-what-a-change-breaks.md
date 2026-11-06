@@ -91,7 +91,7 @@ Deployed stores in dev at 80e5a76bdd56e27bf3069498bb89bac7cdd31cb4
 └───────────────┴────────────────┘
 Checks:
   gold.dim_store: key_not_null (generated), key_unique (generated)
-warning: this deploy removes the column `store_id` of `gold.dim_store`, which other repositories' declarations use; tell their owners, or keep it, and see everything it affects with: lakana graph impact --env dev gold.dim_store --column store_id — the declarations: check `gold.fact_sales/ref_store_id` (sales), glossary term `store` (sales), reference `gold.fact_sales.store_id → gold.dim_store.store_id` (sales)
+warning: this deploy removes the column `store_id` of `gold.dim_store`, which other repositories' declarations or assets use; tell their owners, or keep it, and see everything it affects with: lakana graph impact --env dev gold.dim_store --column store_id — what uses it: check `gold.fact_sales/ref_store_id` (sales), glossary term `store` (sales), reference `gold.fact_sales.store_id → gold.dim_store.store_id` (sales)
 Hint: run 'lakana run --env dev' to run what you just deployed.
 ```
 
@@ -101,8 +101,45 @@ environment (`READ_ENVIRONMENT`) and every table it names; other readers of the 
 shown it. A CI token is not shown it either, so it stays out of CI logs: look the deploy up with
 `lakana deploys get DEPLOY_ID --env ENV`.
 
+The warning also names the assets of other repositories that read what the deploy removes: every
+asset that reads a table the deploy stops building, and, for a removed column, every asset that
+lists its columns (a `SELECT` with named columns) and takes one of them from it, with the measures
+and glossary terms on the columns it takes. A table the deploy stops building stays, so its readers
+keep running on data that no longer changes; a reader of a removed column fails at its next run.
+Either way their owners need to know.
+
 The warning covers removed tables and columns only. Lakana cannot tell from a project that a
-column's type changed, because types come from the first run; that case is not warned about yet
-([#446](https://github.com/lakana-labs/lakana/issues/446)).
+column's type changed, because types come from the first run; the run that changes it warns
+instead (below).
+
+## What a run that changes a column type tells you
+
+A run whose write changes a column's type in a way that does not widen (a text column that becomes
+a number, a `BIGINT` that becomes an `INTEGER`) replaces the column with a new one under the same
+name. At that write Lakana asks the metadata graph what other repositories use the column for, and
+`lakana runs show RUN --env ENV` (and `lakana run`, when the run ends) prints it under the task's
+note, one paragraph per column, for example:
+``This run changed the type of column `store_name` of `gold.dim_store`, which other repositories use; tell their owners, and see everything it affects with: lakana graph impact --env dev gold.dim_store --column store_name — what uses it: asset `gold.fact_sales` (sales), glossary term `net_revenue` (sales), measure `gold.fact_sales.net_amount` (sales)``
+
+It names the references, checks and glossary terms of other repositories on the column, the assets
+that read it (an asset that lists its columns and takes one of them from it), and the measures,
+checks and glossary terms on the columns those assets take from it. The run's own repository is
+left out. The write goes through either way; tell the owners, who may need to change a measure's
+aggregation or a reference.
+
+- You are shown a use only if you may read the environment (`READ_ENVIRONMENT`) and every table it
+  names: the changed table, the use's own table, and the table an asset builds. A use you may not
+  see is left out, without a count.
+- The SDK has the same in `RunTask.impact_warnings`, the REST API in `impact_warnings` on each task
+  of `GET /api/v1/environments/{env}/runs/{id}`: per column its table, its name, the uses (kind,
+  name, repository) and the paragraph.
+- Lakana gives itself 2 seconds for this. The time is read between the steps of the check (while
+  it reads the environment's projects, one repository at a time, after deciding what can be seen,
+  after each column and after building the paragraphs), so it can run past 2 seconds by the length
+  of one step. When it cannot finish in time, or the graph cannot be read, the run still writes,
+  and the paragraph says that Lakana could not check in time and names the `lakana graph impact`
+  command to run yourself.
+- A write outside a run (`lakana query --evolve-schema`, an upload) is not checked: it has no run to
+  show it on.
 
 For every node, edge, route and limit, see [Metadata graph](../reference/graph.md).

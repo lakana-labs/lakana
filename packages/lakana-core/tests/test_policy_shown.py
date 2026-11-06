@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
@@ -298,6 +300,42 @@ def test_the_catalog_logs_the_class_only_when_the_metadata_cannot_be_read(
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "(OSError)" in warnings[0].getMessage()
+    assert "secret path" not in caplog.text
+
+
+def test_a_read_past_its_time_gives_no_fields_without_waiting_for_storage(
+    session: Session, gold: CatalogService, caplog: pytest.LogCaptureFixture
+) -> None:
+    """PR #465's review: a hanging storage read is given up after its time, not waited for."""
+    released = threading.Event()
+
+    def hang(*_args: object) -> None:
+        released.wait(5)
+
+    started = time.monotonic()
+    with mock.patch.object(current_fields, "read_metadata", side_effect=hang):
+        found = current_fields.current_fields(
+            session, StorageResolver(session), _table_id(session, "orders"), timeout=0.05
+        )
+    released.set()
+    assert found is None
+    assert time.monotonic() - started < 0.5
+    assert "did not answer within" in caplog.text
+
+
+def test_a_read_within_its_time_gives_its_fields_or_its_error(
+    session: Session, gold: CatalogService, caplog: pytest.LogCaptureFixture
+) -> None:
+    table_id = _table_id(session, "orders")
+    found = current_fields.current_fields(session, StorageResolver(session), table_id, timeout=5)
+    assert found is not None
+    assert [f.name for f in found] == ["id", "status"]
+    with mock.patch.object(current_fields, "read_metadata", side_effect=OSError("secret path")):
+        assert (
+            current_fields.current_fields(session, StorageResolver(session), table_id, timeout=5)
+            is None
+        )
+    assert "(OSError)" in caplog.text
     assert "secret path" not in caplog.text
 
 

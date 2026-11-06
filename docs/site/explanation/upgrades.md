@@ -289,6 +289,19 @@ again ([The run that changes a column says so](when-columns-change.md#the-run-th
 - **Audit log:** a commit through the Iceberg REST catalog that removes or replaces a column
   records the new event `TABLE_SCHEMA_CHANGED`, with the row filters and column masks it affects.
 
+### What a change breaks in other repositories
+
+A deploy that stops building a table, or removes a column, now also names the assets of other
+repositories that read it, besides their references, measures, checks and glossary terms. A run
+that changes a column's type in a way that does not widen names, under the task's note, what other
+repositories use the column for, in `lakana runs show` and in `impact_warnings` on each task of the
+REST API and the SDK
+([Find what a change breaks](../how-to/find-what-a-change-breaks.md#what-a-run-that-changes-a-column-type-tells-you)).
+No migration: the run stores it with the task's column change. The text of the deploy warning
+changed from ``which other repositories' declarations use; … — the declarations:`` to
+``which other repositories' declarations or assets use; … — what uses it:``; a script that
+matches the old text needs the new one.
+
 ### Checks that never finish end the run
 
 Migration `0059` counts the tries of a task's checks after its write. A task whose checks never

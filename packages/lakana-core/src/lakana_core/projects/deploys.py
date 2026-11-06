@@ -12,9 +12,7 @@ import dataclasses
 import difflib
 import functools
 import re
-import shlex
 import time
-import unicodedata
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -48,6 +46,8 @@ from lakana_core.catalog.graph_model import NodeKind, parse_node
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.model_metadata import clear_health_effects, clear_removed_models
+from lakana_core.catalog.warning_text import named as _named
+from lakana_core.catalog.warning_text import typed as _typed
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
 from lakana_core.ci_oidc.scope import (
     ALREADY_USED_MESSAGE,
@@ -165,11 +165,11 @@ _IMPACT_BUDGET_SECONDS = 2.0
 """The time budget of that check: it runs while the deploy holds its locks, so it stays short."""
 
 IMPACT_WARNING = (
-    "this deploy {what}, which other repositories' declarations use; tell their owners, or keep "
-    "it, and see everything it affects with: lakana graph impact --env {env} {command} — the "
-    "declarations: {items}"
+    "this deploy {what}, which other repositories' declarations or assets use; tell their "
+    "owners, or keep it, and see everything it affects with: lakana graph impact --env {env} "
+    "{command} — what uses it: {items}"
 )
-"""A removed table or column that other repositories declare something on.
+"""A removed table or column that other repositories declare something on, or read (#451).
 
 The next step comes before the list, which has no bound, and `--env` before the names: the CLI
 cuts a long warning at 500 characters, and the cut must not take the next step with it."""
@@ -225,79 +225,15 @@ def _counted(count: int) -> dict[str, object]:
     return {"count": count, "things": "tables or columns", "were": "were", "them": "them"}
 
 
-_BREAKING = {
+BREAKING = {
+    NodeKind.ASSET: "asset",
     NodeKind.REFERENCE: "reference",
     NodeKind.MEASURE: "measure",
     NodeKind.CHECK: "check",
     NodeKind.TERM: "glossary term",
 }
-"""The kinds of node an impact warning lists, with the word it names each by."""
-
-
-_NAMED_CHARS = 100
-"""The most characters of a removed name a warning shows, and puts into a command."""
-
-_UNSAFE = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
-"""Characters a warning writes as escapes: control, format and surrogate characters, and line
-and paragraph separators, which could hide or forge text in a terminal or a CI log."""
-
-
-def _named(name: str) -> str:
-    """Show a removed name in a warning: as it is, but for escaped unsafe characters, and short.
-
-    Parameters
-    ----------
-    name
-        A table or column name from a manifest; untrusted.
-
-    Returns
-    -------
-    str
-        `name` with each `_UNSAFE` character ASCII-escaped (non-ASCII letters stay as they
-        are), cut at `_NAMED_CHARS` characters with ``…``.
-    """
-    text = "".join(ascii(c)[1:-1] if unicodedata.category(c) in _UNSAFE else c for c in name)
-    return text if len(text) <= _NAMED_CHARS else text[:_NAMED_CHARS] + "…"
-
-
-def _pastable(name: str) -> bool:
-    """Say whether a name can go into a command as it is: short, and without `_UNSAFE` characters.
-
-    Parameters
-    ----------
-    name
-        A table or column name from a manifest; untrusted.
-
-    Returns
-    -------
-    bool
-        The answer.
-    """
-    return len(name) <= _NAMED_CHARS and _named(name) == name
-
-
-def _typed(table: str, column: str | None = None) -> str:
-    """Write the arguments of the `lakana graph impact` hint, quoted for a shell.
-
-    Parameters
-    ----------
-    table
-        The removed column's table, or the removed table.
-    column
-        The removed column; `None` for a table.
-
-    Returns
-    -------
-    str
-        ``TABLE --column COLUMN``, each part shell-quoted only where it needs it; the table
-        alone for a table and for a column that is not `_pastable`; the table as `_named`
-        shows it when it is not `_pastable` itself.
-    """
-    if not _pastable(table):
-        return _named(table)
-    if column is None or not _pastable(column):
-        return shlex.quote(table)
-    return f"{shlex.quote(table)} --column {shlex.quote(column)}"
+"""The kinds of node an impact warning lists (`graph_impact.WARNING_KINDS`), with the word it
+names each by."""
 
 
 def _is_deployer(reader: PrincipalRef, run: DeployRun) -> bool:
@@ -1011,7 +947,7 @@ class DeployService:
     def _impact_warnings(
         self, p: PrincipalRef, env_name: str, repo_name: str, previous: object, manifest: object
     ) -> list[dict[str, object]]:
-        """Warn about each removed table or column that another repository declares something on.
+        """Warn about each removed table or column that other repositories use (declare on, read).
 
         Computed with `p`'s visibility: what `p` may not see is left out and not counted. At most
         `_MAX_IMPACT_WARNINGS` items are checked, and one more line counts the rest. The deploy
@@ -1079,7 +1015,7 @@ class DeployService:
                 )
                 continue
             broken = sorted(
-                (_BREAKING[g.kind], g.name, g.repository, named)
+                (BREAKING[g.kind], g.name, g.repository, named)
                 for g, named in answers.get(node, ())
                 if g.repository not in (None, repo_name)
             )

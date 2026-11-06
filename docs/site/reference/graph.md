@@ -35,7 +35,7 @@ Answers always carry the ids.
 | `references` | reference → its column, → the table and the column it points at |
 | `measures` | measure → its column |
 | `checks` | check → its table; a generated `ref_` check → its reference; a key check → the key's columns |
-| `filters`, `masks` | row filter → its table; column mask → its column, by the column's current name: a mask follows its column through a rename, and one that is not bound to a field id (or whose column is gone) stays with the name it was made with |
+| `filters`, `masks` | row filter → its table; column mask → its column, by the column's current name: a mask follows its column through a rename, and one that is not bound to a field id (or whose column is gone) stays with the name it was made with. The current names are read from storage, each table once per question and only in the first half of the 10-second budget; when storage is slow or does not answer, a mask stays with the name it was made with rather than stopping the question |
 | `links` | glossary term → a table or a column |
 | `runs` | job → an asset it runs |
 | `has_column` | table → its column |
@@ -206,33 +206,38 @@ are `null`.
 ## The deploy warning
 
 A deploy that removes a column, or stops building a table, that another repository declares
-something on still goes through and prints a warning. The line names the removed column or table,
-the command that shows everything it affects, and the declarations of other repositories that use
-it, each with its repository. The how-to shows one:
+something on or reads still goes through and prints a warning. The line names the removed column or
+table, the command that shows everything it affects, and the declarations and assets of other
+repositories that use it, each with its repository. The how-to shows one:
 [What a deploy tells you](../how-to/find-what-a-change-breaks.md#what-a-deploy-tells-you).
 
 - It never refuses the deploy.
 - It covers removed tables and columns. A changed column type is not seen at deploy, because a
-  project records no types ([#446](https://github.com/lakana-labs/lakana/issues/446)).
+  project records no types; the run that changes it names what other repositories use the column
+  for ([What a run that changes a column type tells you](../how-to/find-what-a-change-breaks.md#what-a-run-that-changes-a-column-type-tells-you)).
   A column counts as removed only when both the deployed and the new version of its asset list
   their columns, which a `SELECT` with named columns does; `SELECT *` and Python assets are not
   checked.
-- It lists only the references, measures, checks and glossary terms of other repositories that
-  name the removed column or table. What only *may* use it (the `may_use` nodes) and what lies
-  downstream are left to `lakana graph impact`, so the check stays short however much is
-  downstream.
+- It lists the references, measures, checks and glossary terms of other repositories that
+  name the removed column or table, and the assets of other repositories that read it. For a
+  removed table, that is every asset that reads it. For a removed column, it is an asset that
+  lists its columns and whose lineage takes one of them from the removed column, with the
+  measures, checks, references and glossary terms on the columns it takes; an asset with
+  `SELECT *`, a Python asset, or one that uses the column only in a join or a filter is not
+  named. What only *may* use it (the `may_use` nodes) and what lies further downstream are left
+  to `lakana graph impact`, so the check stays short however much is downstream.
 - It is computed with what the deployer may see: a deployer without `READ_ENVIRONMENT` gets no
   impact warning, because the repositories of what depends on the table are not visible to them.
 - It is shown to the deployer, and to a reader of the deploy who has `READ_ENVIRONMENT` and may
-  read every table it names (the removed table, and the tables of the references and checks it
-  lists). Other readers are not shown it, and nothing tells them it exists.
+  read every table it names (the removed table, the tables of the references, measures and checks
+  it lists, and the tables the assets it lists build). Other readers are not shown it, and nothing tells them it exists.
 - A CI token is never shown it, not even for its own deploy: a CI token reads nothing, so the
   warning does not appear in a CI log. A task token of the deployer is shown it only when its
   declared assets cover every table it names. See it as a person with
   `lakana deploys get DEPLOY_ID --env ENV`.
 - At most 20 removed tables and columns are checked; one more line says how many were not. The
-  check has a budget of 2 seconds and 200,000 edges. The time is read between its steps (after
-  loading the graph, after deciding what the deployer may see, after each removed table or column,
+  check has a budget of 2 seconds and 200,000 edges. The time is read between its steps (while
+  loading the graph, after each repository's project, after deciding what the deployer may see, after each removed table or column,
   and after building the lines), so a check can run past 2 seconds by the length of one step. A
   check past either budget ends, the deploy goes on, and one line says Lakana could not check in
   time.

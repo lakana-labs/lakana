@@ -19,7 +19,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import (
+    Action,
+    AuthorizationService,
+    PrincipalRef,
+    Securable,
+    permits_each,
+)
+from lakana_core.catalog.retype_impact import (
+    ImpactWarningView,
+    impact_for_reader,
+    stored_entries,
+)
 from lakana_core.db import db_now
 from lakana_core.errors import (
     ConflictError,
@@ -324,6 +335,11 @@ class TaskRunView:
         The row filters and column masks those writes left out of date, with their ids, for a
         reader who may manage policies; empty for everyone else, who may not learn which policies
         exist (`lakana_core.policy.schema_change.schema_change_for_reader`).
+    impact_warnings
+        Per column those writes retyped, what other repositories use it for (references,
+        measures, checks, glossary terms, assets), or that it could not be checked; only what
+        the reader may see: `READ_ENVIRONMENT` and `READ_TABLE` on every table a use names
+        (`lakana_core.catalog.retype_impact.impact_for_reader`, #446).
     """
 
     asset: str
@@ -346,6 +362,7 @@ class TaskRunView:
     failure: Failure | None = None
     schema_note: str | None = None
     policy_warnings: tuple[PolicyWarningView, ...] = ()
+    impact_warnings: tuple[ImpactWarningView, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1070,6 +1087,7 @@ class RunService:
                 )
                 for task, _ in rows
             }
+            impacts = self._impacts_for_reader(reader, env.name, [task for task, _ in rows])
             for result in self._session.scalars(
                 select(CheckResult)
                 .where(CheckResult.run_id == run.id)
@@ -1119,6 +1137,7 @@ class RunService:
                     failure=task_failure(task),
                     schema_note=schema_changes[task.id][0],
                     policy_warnings=schema_changes[task.id][1],
+                    impact_warnings=impacts.get(task.id, ()),
                 )
                 for task, rows_written in rows
             )
@@ -1829,6 +1848,58 @@ class RunService:
         )
 
     # -- reads -------------------------------------------------------------
+
+    def _impacts_for_reader(
+        self, reader: PrincipalRef, environment: str, tasks: Sequence[TaskRun]
+    ) -> dict[uuid.UUID, tuple[ImpactWarningView, ...]]:
+        """Show each task's retyped columns' uses to one reader, asking its rights in one batch.
+
+        Parameters
+        ----------
+        reader
+            The principal reading.
+        environment
+            The run's environment.
+        tasks
+            The run's task runs.
+
+        Returns
+        -------
+        dict
+            Task run id → its impact warnings; a task without any is left out.
+        """
+        entries = {task.id: stored_entries(task.schema_change_json) for task in tasks}
+        names = sorted({t for found in entries.values() for e in found for t in e.tables})
+        if not names:
+            return {}
+        refs: dict[str, TableRef] = {}
+        for name in names:
+            try:
+                refs[name] = TableRef.from_dotted(environment, name)
+            except ValidationError:
+                continue
+        answers = permits_each(
+            self._authz,
+            reader,
+            [
+                (Action.READ_ENVIRONMENT, Securable.environment_scope(environment)),
+                *(
+                    (Action.READ_TABLE, Securable.table_scope(environment, r.namespace, r.name))
+                    for r in refs.values()
+                ),
+            ],
+        )
+        may_read = dict(zip(refs, answers[1:], strict=True))
+        return {
+            task_id: impact_for_reader(
+                found,
+                environment,
+                lambda name: may_read.get(name, False),
+                reads_environment=answers[0],
+            )
+            for task_id, found in entries.items()
+            if found
+        }
 
     def get(self, p: PrincipalRef, environment: str, run_id: uuid.UUID) -> RunView:
         """Show one run with its tasks.

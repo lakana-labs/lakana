@@ -248,9 +248,10 @@ class TaskRun(Base):
     schema_change_json: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     """What the task's writes did to its table's columns, when one removed or replaced a column
     (`lakana_core.policy.schema_change.merge_schema_change`): ``{"tables": [...], "policies":
-    [...]}``, the row filters and column masks that use such a column, each once. Null when no
-    write removed or replaced a column. Recorded in the commit of the write, and kept when a later
-    attempt changes nothing."""
+    [...]}``, the row filters and column masks that use such a column, each once, and
+    ``"impact": [...]`` when a retyped column is used by other repositories
+    (`lakana_core.catalog.retype_impact`). Null when no write removed or replaced a column.
+    Recorded in the commit of the write, and kept when a later attempt changes nothing."""
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 

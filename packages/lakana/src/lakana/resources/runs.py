@@ -10,6 +10,8 @@ from typing import Any, cast
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param, query_params
 from lakana._models import (
     Failure,
+    ImpactUse,
+    ImpactWarning,
     Notification,
     PolicyWarning,
     Run,
@@ -124,6 +126,44 @@ def policy_warnings_from_json(data: object) -> tuple[PolicyWarning, ...]:
     return tuple(found)
 
 
+def impact_warnings_from_json(data: object) -> tuple[ImpactWarning, ...]:
+    """Build the `impact_warnings` of a task.
+
+    A warning is a help for the reader, so an entry that cannot be read never fails a command: it
+    is left out, and so is a use that cannot be read.
+
+    Parameters
+    ----------
+    data
+        The decoded list, or `None` from a server that predates the field.
+
+    Returns
+    -------
+    tuple of ImpactWarning
+        The warnings that could be read, in order.
+    """
+    found: list[ImpactWarning] = []
+    for entry in data if isinstance(data, list) else ():
+        if not isinstance(entry, dict):
+            continue
+        table, column, message = entry.get("table"), entry.get("column"), entry.get("message")
+        if not (isinstance(table, str) and isinstance(column, str) and isinstance(message, str)):
+            continue
+        uses: list[ImpactUse] = []
+        raw = entry.get("uses")
+        for use in raw if isinstance(raw, list) else ():
+            texts = (
+                [use.get(key) for key in ("kind", "name", "repository")]
+                if isinstance(use, dict)
+                else []
+            )
+            if texts and all(isinstance(t, str) for t in texts):
+                kind, name, repository = cast(list[str], texts)
+                uses.append(ImpactUse(kind, name, repository))
+        found.append(ImpactWarning(table, column, tuple(uses), message))
+    return tuple(found)
+
+
 def run_from_json(data: dict[str, Any]) -> Run:
     """Build a `Run` from a `RunOut` body.
 
@@ -176,6 +216,7 @@ def run_from_json(data: dict[str, Any]) -> Run:
                 failure=failure_from_json(t.get("failure")),
                 schema_note=note if isinstance(note := t.get("schema_note"), str) else None,
                 policy_warnings=policy_warnings_from_json(t.get("policy_warnings")),
+                impact_warnings=impact_warnings_from_json(t.get("impact_warnings")),
             )
             for t in data["tasks"]
         ],

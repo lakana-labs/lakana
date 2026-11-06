@@ -31,6 +31,8 @@ from lakana._models import (
     ExternalTable,
     Failure,
     HistoryResult,
+    ImpactUse,
+    ImpactWarning,
     Lineage,
     LineageEdge,
     LineageNode,
@@ -2583,6 +2585,65 @@ def test_a_run_task_parses_policy_warnings_and_skips_what_it_cannot_read() -> No
         PolicyWarning("column_mask", "ssn", "removed", "p1", warning["message"]),
     )
     assert old.policy_warnings == ()
+
+
+def test_a_run_task_parses_impact_warnings_and_skips_what_it_cannot_read() -> None:
+    """#446: what other repositories use a retyped column for; an older server sends none."""
+    task = {
+        "asset": "gold.orders",
+        "status": "succeeded",
+        "attempt": 1,
+        "max_attempts": 3,
+        "timeout_seconds": 60,
+        "next_attempt_at": None,
+        "started_at": None,
+        "finished_at": None,
+        "error_message": None,
+        "query_run_id": None,
+        "rows_written": None,
+    }
+    warning = {
+        "table": "gold.orders",
+        "column": "region",
+        "uses": [
+            {"kind": "measure", "name": "gold.sales.region", "repository": "sales"},
+            {"kind": "measure", "name": 5, "repository": "sales"},
+            "odd",
+        ],
+        "message": "This run changed the type of column `region` of `gold.orders`, ...",
+    }
+    body = {
+        "id": "r1",
+        "environment": "dev",
+        "repository": "analytics",
+        "project_version_id": "v1",
+        "commit_sha": "a" * 40,
+        "kind": "full",
+        "status": "succeeded",
+        "cancel_requested": False,
+        "triggered_by": "admin",
+        "run_as": "admin",
+        "resumed_from_run_id": None,
+        "selection": {},
+        "error_message": None,
+        "created_at": "2026-10-09T14:00:00+00:00",
+        "started_at": None,
+        "finished_at": None,
+        "tasks": [
+            {**task, "impact_warnings": [warning, {**warning, "message": None}, 7]},
+            task,
+        ],
+    }
+    warned, old = run_from_json(body).tasks
+    assert warned.impact_warnings == (
+        ImpactWarning(
+            "gold.orders",
+            "region",
+            (ImpactUse("measure", "gold.sales.region", "sales"),),
+            warning["message"],
+        ),
+    )
+    assert old.impact_warnings == ()
 
 
 def _sequence_run(statuses: list[dict[str, Any]]) -> QueryRun:

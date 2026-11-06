@@ -670,7 +670,9 @@ def get_graph_service(
         session,
         authz,
         main_language=main_language,
-        fields_of=lambda table_id: current_fields(session, storage, table_id),
+        fields_of=lambda table_id, seconds: current_fields(
+            session, storage, table_id, timeout=seconds
+        ),
     )
 
 

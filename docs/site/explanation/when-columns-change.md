@@ -99,6 +99,11 @@ the policy again for the column it is meant for, then revoke the old one with th
 `policy_warnings`, which is empty for everyone else. Nobody sees a policy's expression or whom it
 applies to here.
 
+For a changed type, the task also names what other repositories use the column for: their
+references, measures, checks, glossary terms and the assets that read it, as far as you may see
+them. The SDK and the REST API have these in `impact_warnings`
+([What a run that changes a column type tells you](../how-to/find-what-a-change-breaks.md#what-a-run-that-changes-a-column-type-tells-you)).
+
 The write's `TABLE_WRITE` event in the audit log lists the policies in `broken_policies`: kind,
 id, column and change (`removed` or `replaced`). Reading the audit log is for administrators and
 reviewers.

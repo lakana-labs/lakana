@@ -31,7 +31,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from lakana_core.catalog.graph_load import AssetRecord, CheckRecord, ReferenceRecord
 from lakana_core.catalog.graph_model import (
@@ -66,7 +66,11 @@ _ON_TABLE = (
 """The edges by which something names a table."""
 
 NAMING_KINDS = frozenset({NodeKind.REFERENCE, NodeKind.MEASURE, NodeKind.CHECK, NodeKind.TERM})
-"""The kinds of declaration that name a table or column, which a deploy's warning lists."""
+"""The kinds of declaration that name a table or column."""
+
+WARNING_KINDS = NAMING_KINDS | {NodeKind.ASSET}
+"""What a warning about a removed or retyped table or column lists: those declarations, and the
+assets that read it (`impact_of` with ``named_only``)."""
 
 _COLUMN_VERBS = {
     EdgeKind.MEASURES: "a measure on",
@@ -87,11 +91,17 @@ class Hit:
         Why it is listed; `None` for the start (and a column start's table).
     may_use
         Whether it only may use the start, rather than naming it.
+    via
+        The dotted tables the walk passed through to reach it, beyond the start's and its own:
+        the table an asset that reads the start builds, for what names a column it takes from
+        the start (`_readers`). A warning that names it names them too, so that a reader who may
+        not read them is not shown it.
     """
 
     distance: int
     reason: str | None
     may_use: bool
+    via: tuple[str, ...] = ()
 
 
 class _Answer:
@@ -135,10 +145,10 @@ class _Answer:
         old = self.hits.get(node)
         if old is None or (old.may_use and not may_use):
             shortest = distance if old is None else min(distance, old.distance)
-            self.hits[node] = Hit(shortest, reason, may_use)
+            self.hits[node] = Hit(shortest, reason, may_use, old.via if old else ())
             return True
         if distance < old.distance:
-            self.hits[node] = Hit(distance, old.reason, old.may_use)
+            self.hits[node] = Hit(distance, old.reason, old.may_use, old.via)
         return False
 
 
@@ -156,9 +166,12 @@ def impact_of(
     key
         Whether the question is about the table's declared key (the caller checked it has one).
     named_only
-        List only what names the start itself, for a deploy's warning: no tables declaring
-        the references found, nothing downstream and no jobs. Its cost then grows with the
-        declarations on the start, not with what lies downstream of it.
+        List only what names the start itself, for a warning (a deploy's, a retyping run's):
+        no tables declaring the references found, nothing further downstream, no jobs and not
+        the asset that builds the start. Instead the assets that read the start are listed
+        (`_readers`): for a column only those whose lineage traces one of their columns to it,
+        with what names those columns. Its cost then grows with the declarations on the start
+        and its direct readers, not with what lies downstream of them.
 
     Returns
     -------
@@ -186,7 +199,10 @@ def impact_of(
             answer.add(column, 1, f"a key column of {dotted}", False, edge)
     for column in columns:
         _on_column(ctx, answer, column, dotted, base)
-    _on_table(ctx, answer, table, dotted, subject)
+    _on_table(ctx, answer, table, dotted, subject, builders=not named_only)
+    if named_only and not key:
+        read = root.partition("/")[2] if node_kind(root) is NodeKind.COLUMN else None
+        _readers(ctx, answer, table, dotted, read)
     if not named_only:
         _referencing_tables(ctx, answer, table_id)
         _downstream(ctx, answer, table, may_use=subject is not None)
@@ -253,7 +269,7 @@ def _settle(answer: _Answer, starts: list[str]) -> None:
                 distance[other] = distance[node] + 1
                 queue.append(other)
     for node, hit in answer.hits.items():
-        answer.hits[node] = Hit(distance[node], hit.reason, hit.may_use)
+        answer.hits[node] = Hit(distance[node], hit.reason, hit.may_use, hit.via)
 
 
 def _on_column(ctx: _Context, answer: _Answer, column: str, dotted: str, base: int) -> None:
@@ -312,7 +328,15 @@ def _reference_checks(
         answer.add(check, distance, reason, False, edge)
 
 
-def _on_table(ctx: _Context, answer: _Answer, table: str, dotted: str, subject: str | None) -> None:
+def _on_table(
+    ctx: _Context,
+    answer: _Answer,
+    table: str,
+    dotted: str,
+    subject: str | None,
+    *,
+    builders: bool = True,
+) -> None:
     """Add what hangs on the start table itself.
 
     Parameters
@@ -328,12 +352,15 @@ def _on_table(ctx: _Context, answer: _Answer, table: str, dotted: str, subject: 
     subject
         `None` for the whole table. For a column or key, what checks and row filters may use;
         then references to the table, terms on it and its generated checks are left out.
+    builders
+        Whether the asset that builds the table is listed.
     """
     may = "" if subject is None else f"; may use {subject}"
     for edge, other in ctx.around(table, _ON_TABLE):
         record = ctx.graph.records[other]
         if edge.kind is EdgeKind.BUILDS:
-            answer.add(other, 1, f"builds {dotted}", False, edge)
+            if builders:
+                answer.add(other, 1, f"builds {dotted}", False, edge)
         elif edge.kind is EdgeKind.FILTERS:
             answer.add(other, 1, f"filters {dotted}{may}", subject is not None, edge)
         elif isinstance(record, CheckRecord):
@@ -347,6 +374,60 @@ def _on_table(ctx: _Context, answer: _Answer, table: str, dotted: str, subject: 
                 _reference_checks(ctx, answer, record, 2)
         else:
             answer.add(other, 1, f"links {dotted}", False, edge)
+
+
+def _readers(ctx: _Context, answer: _Answer, table: str, dotted: str, column: str | None) -> None:
+    """Add the assets that read the start, for a warning (#451).
+
+    For a table, every asset that reads it. For a column, only an asset whose lineage traces one
+    of its columns to it (which a manifest records only for an asset that lists its columns),
+    and then the table it builds, those columns, and what names them (`_on_column`): a measure
+    or a glossary term on a column derived from the start breaks with it.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    answer
+        The answer; filled.
+    table
+        The start table.
+    dotted
+        Its name.
+    column
+        The start column; `None` for the whole table.
+    """
+    wanted = None if column is None else column.casefold()
+    if wanted is not None and not ctx.graph.column_readers.get((dotted, wanted)):
+        return  # no lineage reads it: the table's readers are not walked for nothing
+    for read, asset in ctx.around(table, (EdgeKind.READS,)):
+        # A `reads` edge always starts at an asset (`EnvironmentGraph.add_part`).
+        record = cast(AssetRecord, ctx.graph.records[asset])
+        if wanted is None:
+            answer.add(asset, 1, f"reads {dotted}", False, read)
+            continue
+        derived = {
+            out.casefold()
+            for out, source, name in record.lineage
+            if source == dotted and name.casefold() == wanted
+        }
+        if not derived:
+            continue
+        answer.add(asset, 1, f"reads {dotted}.{column}", False, read)
+        for built_edge, built in ctx.around(asset, (EdgeKind.BUILDS,)):
+            built_id = table_part(built)
+            built_dotted = ctx.graph.tables[built_id].ref.dotted()
+            answer.add(built, 2, f"built from {dotted}.{column}", False, built_edge)
+            for name in ctx.graph.columns_of(built_id):
+                node = column_node(built_id, name)
+                if name.casefold() in derived and ctx.visible.node(node):
+                    before = set(answer.hits)
+                    _on_column(ctx, answer, node, built_dotted, 3)
+                    for found in set(answer.hits) - before:
+                        hit = answer.hits[found]
+                        answer.hits[found] = Hit(
+                            hit.distance, hit.reason, hit.may_use, (*hit.via, built_dotted)
+                        )
 
 
 def _downstream(ctx: _Context, answer: _Answer, table: str, *, may_use: bool) -> None:

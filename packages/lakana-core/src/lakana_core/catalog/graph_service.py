@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.catalog.glossary_read import term_names
-from lakana_core.catalog.graph_impact import NAMING_KINDS, impact_of
+from lakana_core.catalog.graph_impact import WARNING_KINDS, impact_of
 from lakana_core.catalog.graph_join import JoinPath, JoinPaths, JoinStep, shortest_paths
 from lakana_core.catalog.graph_load import (
     AssetRecord,
@@ -93,6 +93,13 @@ from lakana_core.pagination import decode_key_cursor, encode_key_cursor
 
 _CHECK_EVERY = 256
 """How many edges examined, visible or hidden, pass between two looks at the clock."""
+
+_FIELDS_SHARE = 0.5
+"""The share of the time budget that reading masked tables' current fields may use.
+
+No read starts once less than the rest is left, and each read is given only what is left of
+this share, so slow storage leaves a mask on the name it was made with, never `GraphBusyError`.
+"""
 
 _LINEAGE_STARTS = frozenset({NodeKind.TABLE, NodeKind.COLUMN, NodeKind.ASSET})
 
@@ -327,6 +334,21 @@ class _Budget:
         self.steps += 1
         if self.steps > self._max_steps:
             raise ValidationError(TOO_LARGE.format(steps=self._max_steps))
+
+    def left(self) -> float:
+        """Say how many seconds of the time budget are left.
+
+        Returns
+        -------
+        float
+            The seconds to the deadline; negative past it.
+        """
+        return self._deadline - self._clock()
+
+    @property
+    def seconds(self) -> float:
+        """The whole time budget, in seconds."""
+        return self._seconds
 
     def check(self) -> None:
         """Look at the clock.
@@ -566,6 +588,44 @@ def _common(node_id: str, found: _Found) -> dict[str, Any]:
     }
 
 
+class _MaskFields:
+    """Read masked tables' current fields for one request: each table once, within the budget.
+
+    Parameters
+    ----------
+    read
+        Reads a table's current fields, given the most seconds the read may take.
+    budget
+        The request's budget.
+    """
+
+    def __init__(
+        self, read: Callable[[uuid.UUID, float], Sequence[NestedField] | None], budget: _Budget
+    ) -> None:
+        self._read = read
+        self._budget = budget
+        self._read_tables: dict[uuid.UUID, Sequence[NestedField] | None] = {}
+
+    def __call__(self, table_id: uuid.UUID) -> Sequence[NestedField] | None:
+        """Read one table's current fields, or give `None` once the time for reads is spent.
+
+        Parameters
+        ----------
+        table_id
+            The table.
+
+        Returns
+        -------
+        Sequence of NestedField or None
+            The fields; `None` when they cannot be read, or not in the time left, which leaves
+            the mask on the name it was made with.
+        """
+        if table_id not in self._read_tables:
+            seconds = self._budget.left() - self._budget.seconds * (1 - _FIELDS_SHARE)
+            self._read_tables[table_id] = self._read(table_id, seconds) if seconds > 0 else None
+        return self._read_tables[table_id]
+
+
 class GraphService:
     """Answer questions about an environment's metadata graph for one reader at a time.
 
@@ -586,8 +646,10 @@ class GraphService:
     part
         Reads one repository's part (`load_graph`'s `part`); `None` for no cache.
     fields_of
-        Reads a table's current top-level fields (`load_graph`'s `fields_of`), so a column mask
-        is linked to its column's current name; `None` links it by the name it was made with.
+        Reads a table's current top-level fields, given the most seconds the read may take, so a
+        column mask is linked to its column's current name; `None` links it by the name it was
+        made with. Asked only for a reader who sees masks, each table once per request, and
+        only within `_FIELDS_SHARE` of the time budget (`_MaskFields`).
     """
 
     def __init__(
@@ -600,7 +662,7 @@ class GraphService:
         budget_seconds: float = GRAPH_TIME_BUDGET_SECONDS,
         max_steps: int = MAX_GRAPH_STEPS,
         part: Callable[[uuid.UUID, str, object], ManifestPart] | None = None,
-        fields_of: Callable[[uuid.UUID], Sequence[NestedField] | None] | None = None,
+        fields_of: Callable[[uuid.UUID, float], Sequence[NestedField] | None] | None = None,
     ) -> None:
         self._session = session
         self._authz = authz
@@ -634,7 +696,8 @@ class GraphService:
             If the environment does not exist: `NO_ENVIRONMENT` for a caller who may read
             environments, the start's `NO_NODE` for anyone else (as search answers).
         GraphBusyError
-            If loading the graph or deciding what the reader may see ran past the time budget.
+            If loading the graph (read after its rows and after each repository's part) or
+            deciding what the reader may see ran past the time budget.
         """
         budget = _Budget(self._clock, self._budget_seconds, self._max_steps)
         environment_id = self._session.scalar(
@@ -653,7 +716,12 @@ class GraphService:
             environment_id,
             environment,
             part=self._part,
-            fields_of=self._fields_of if sees_masks else None,
+            fields_of=(
+                _MaskFields(self._fields_of, budget)
+                if sees_masks and self._fields_of is not None
+                else None
+            ),
+            check=budget.check,
         )
         budget.check()
         visible = _Visibility(self._authz, p, graph)
@@ -1070,15 +1138,16 @@ class GraphService:
     def breakage(
         self, p: PrincipalRef, environment: str, nodes: Sequence[str]
     ) -> dict[str, tuple[tuple[GraphNode, tuple[str, ...]], ...]]:
-        """List the declarations that name each of several tables and columns, for a deploy.
+        """List what names or reads each of several tables and columns, for a warning.
 
-        Only the references, measures, checks and glossary terms that name a node itself are
-        listed (`impact_of` with ``named_only``), never what only may use it: nothing
-        downstream is walked, and only those declarations are built, in one build for every
-        node. So the cost grows with the declarations on the nodes, not with what lies
-        downstream of them, and one budget covers it all: the clock is read after each walk
-        and after the build. A node that does not exist, or that `p` may not see, gets
-        nothing.
+        Only the references, measures, checks and glossary terms that name a node itself, and
+        the assets that read it, are listed (`impact_of` with ``named_only``; for a column, an
+        asset whose lineage traces a column to it, with what names that column), never what
+        only may use it: nothing further downstream is walked, and only those nodes are built,
+        in one build for every node. So the cost grows with the declarations and the direct
+        readers of the nodes, not with what lies downstream of them, and one budget covers it
+        all: the clock is read after each walk and after the build. A node that does not
+        exist, or that `p` may not see, gets nothing.
 
         Parameters
         ----------
@@ -1092,8 +1161,9 @@ class GraphService:
         Returns
         -------
         dict
-            Node → each declaration naming it, with the dotted tables it names
-            (`_named_tables`), in node id order.
+            Node → each declaration naming it and each asset reading it, with the dotted tables
+            it names (`_named_tables`) and those the walk passed through to reach it
+            (`Hit.via`), in node id order.
 
         Raises
         ------
@@ -1106,21 +1176,19 @@ class GraphService:
         """
         ctx = self._open(p, environment, nodes[0] if nodes else "")
         walked: list[tuple[str, list[tuple[str, _Found]]]] = []
+        via: dict[tuple[str, str], tuple[str, ...]] = {}
         for node in nodes:
             found = ctx.graph.resolve(parse_node(node))
             if found is None or not ctx.visible.node(found):
                 continue
             hits, _ = impact_of(ctx, found, key=False, named_only=True)
-            walked.append(
-                (
-                    node,
-                    [
-                        (n, _Found(h.distance, h.reason))
-                        for n, h in sorted(hits.items())
-                        if not h.may_use and node_kind(n) in NAMING_KINDS
-                    ],
-                )
-            )
+            listed = [
+                (n, h)
+                for n, h in sorted(hits.items())
+                if not h.may_use and node_kind(n) in WARNING_KINDS
+            ]
+            via.update(((node, n), h.via) for n, h in listed)
+            walked.append((node, [(n, _Found(h.distance, h.reason)) for n, h in listed]))
             ctx.budget.check()
         # One build for every answer, so its statements do not grow with the number of nodes.
         built = self._nodes(ctx, [e for _, entries in walked for e in entries], ())
@@ -1129,7 +1197,10 @@ class GraphService:
         start = 0
         for node, entries in walked:
             end = start + len(entries)
-            answers[node] = tuple((g, _named_tables(ctx.graph, g.id)) for g in built[start:end])
+            answers[node] = tuple(
+                (g, tuple(dict.fromkeys((*_named_tables(ctx.graph, g.id), *via[node, g.id]))))
+                for g in built[start:end]
+            )
             start = end
         return answers
 
@@ -1346,9 +1417,12 @@ def _named_tables(graph: EnvironmentGraph, node_id: str) -> tuple[str, ...]:
     -------
     tuple of str
         Dotted tables: a reference its own and its target; a measure its table; a check its
-        table, and a generated ``ref_`` check its target too (R3); any other node none.
+        table, and a generated ``ref_`` check its target too (R3); an asset the table it
+        builds; any other node none.
     """
     record = graph.records.get(node_id)
+    if isinstance(record, AssetRecord):
+        return (record.name,)
     if isinstance(record, ReferenceRecord):
         return (graph.tables[record.source_table_id].ref.dotted(), record.target_name)
     if isinstance(record, CheckRecord):
