@@ -510,6 +510,47 @@ class PreparedStart(NamedTuple):
 
 
 @dataclass(frozen=True)
+class TaskHistoryEntry:
+    """One attempt of a task in the history of that task across runs.
+
+    Parameters
+    ----------
+    run_id
+        The run the attempt belongs to.
+    attempt
+        The attempt's number within its task run, from 1.
+    status
+        The attempt's outcome (``succeeded``, ``failed``, ``timed_out``, ``lost``,
+        ``released``, ``cancelled``), or ``running`` while it has none.
+    started_at
+        When the attempt started.
+    finished_at
+        When it ended; `None` while it runs.
+    duration_seconds
+        Seconds from start to end; `None` while it runs.
+    peak_memory_bytes
+        Peak memory in bytes, or `None` if not measured.
+    cpu_seconds
+        Processor time in seconds, or `None` if not measured.
+    bytes_read
+        Bytes read, or `None` if not counted.
+    failure_code
+        Why the attempt did not succeed, when it did not and the reason is known.
+    """
+
+    run_id: uuid.UUID
+    attempt: int
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    duration_seconds: float | None
+    peak_memory_bytes: int | None
+    cpu_seconds: float | None
+    bytes_read: int | None
+    failure_code: str | None
+
+
+@dataclass(frozen=True)
 class TaskLogView:
     """A task's logs.
 
@@ -2365,6 +2406,126 @@ class RunService:
         )
 
     # -- logs and status -----------------------------------------------------
+
+    def task_attempts(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        job: str,
+        task: str,
+        *,
+        repository: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> tuple[list[TaskHistoryEntry], str | None]:
+        """List the attempts of one task of one job across runs, newest first.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        environment
+            Environment name.
+        job
+            The job's name.
+        task
+            The task's name (its table).
+        repository
+            The repository; needed only when several repositories ran a job of this name.
+        limit
+            Most attempts returned (1 to 200).
+        cursor
+            The cursor of the previous page. Attempts are ordered by start time, then id.
+
+        Returns
+        -------
+        tuple of (list of TaskHistoryEntry, str or None)
+            The page, and the cursor of the next one, or `None` on the last.
+
+        Raises
+        ------
+        PermissionDenied
+            Without RUN or READ_ENVIRONMENT.
+        NotFoundError
+            If the environment or repository does not exist, or no run of the job has an attempt
+            of the task.
+        ConflictError
+            If several repositories ran the job and none was named.
+        ValidationError
+            If `limit` is outside 1 to 200 or `cursor` is not one this server issued for this
+            list.
+        """
+        env = self._authorize_read(p, environment)
+        if not 1 <= limit <= 200:
+            raise ValidationError(f"limit must be between 1 and 200, got {limit}.")
+        position = None if cursor is None else decode_cursor("task-history", cursor)
+        scope = [
+            Run.environment_id == env.id,
+            Run.job == job,
+            TaskRun.asset == task,
+        ]
+        if repository is not None:
+            scope.append(Run.repository_id == self._repository(repository).id)
+        base = (
+            select(TaskAttempt, TaskRun.run_id)
+            .join(TaskRun, TaskRun.id == TaskAttempt.task_run_id)
+            .join(Run, Run.id == TaskRun.run_id)
+            .where(*scope)
+        )
+        repositories = self._session.scalars(
+            select(Run.repository_id)
+            .join(TaskRun, TaskRun.run_id == Run.id)
+            .join(TaskAttempt, TaskAttempt.task_run_id == TaskRun.id)
+            .where(*scope)
+            .distinct()
+            .limit(2)
+        ).all()
+        if not repositories:
+            raise NotFoundError(
+                f"No attempts of task {task!r} of job {job!r} in {environment!r}. Check both "
+                "names (`lakana job list` shows the jobs); a task that has not run yet has no "
+                "history."
+            )
+        if len(repositories) > 1:
+            raise ConflictError(
+                f"Several repositories ran job {job!r} in {environment!r}. Name one with the "
+                "`repository` parameter (`--repo` on the command line)."
+            )
+        if position is not None:
+            base = base.where(
+                or_(
+                    TaskAttempt.started_at < position.at,
+                    and_(TaskAttempt.started_at == position.at, TaskAttempt.id < position.id),
+                )
+            )
+        rows = self._session.execute(
+            base.order_by(TaskAttempt.started_at.desc(), TaskAttempt.id.desc()).limit(limit + 1)
+        ).all()
+        page = rows[:limit]
+        next_cursor = None
+        if len(rows) > limit:
+            last = page[-1][0]
+            next_cursor = encode_cursor("task-history", last.started_at, last.id)
+        entries = [
+            TaskHistoryEntry(
+                run_id=run_id,
+                attempt=a.attempt,
+                status="running" if a.outcome is None else a.outcome.value,
+                started_at=a.started_at,
+                finished_at=a.finished_at,
+                duration_seconds=(
+                    None
+                    if a.finished_at is None
+                    else (a.finished_at - a.started_at).total_seconds()
+                ),
+                peak_memory_bytes=a.peak_memory_bytes,
+                cpu_seconds=a.cpu_seconds,
+                bytes_read=a.bytes_read,
+                failure_code=a.failure_code,
+            )
+            for a, run_id in page
+        ]
+        return entries, next_cursor
 
     def task_log(
         self,

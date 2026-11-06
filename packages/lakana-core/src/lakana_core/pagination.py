@@ -82,7 +82,7 @@ def encode_cursor(kind: str, at: datetime, row_id: uuid.UUID, part: int = 0) -> 
     Parameters
     ----------
     kind
-        The list the cursor belongs to (``checks``, ``runs``, ``queries``, ``deploys``,
+        The list the cursor belongs to (``checks``, ``runs``, ``task-history``, ``queries``, ``deploys``,
         ``grants``, ``principals`` or ``groups``).
     at
         The time the list is ordered by, of the last item (timezone-aware).
