@@ -19050,6 +19050,13 @@
             "type": "array",
             "title": "Releases"
           },
+          "starts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Starts"
+          },
           "drift": {
             "items": {
               "$ref": "#/components/schemas/AccessDriftOut"
@@ -19078,12 +19085,13 @@
           "changed",
           "removals",
           "releases",
+          "starts",
           "drift",
           "problems",
           "fingerprint"
         ],
         "title": "AccessPlanOut",
-        "description": "What applying an access file would change, and every problem that stops it.\n\nParameters\n----------\nfile_name\n    The base name the messages use.\nfile_sha256\n    Hash of the file's text.\nmanages\n    The scopes the file manages; empty when it did not parse.\ncreates\n    Entries the apply creates.\nchanged\n    CI trust rules the apply changes in place.\nremovals\n    Entries the apply removes.\nreleases\n    Managed scopes the file no longer lists.\ndrift\n    Access in the scopes that did not come from the file.\nproblems\n    Every problem; an apply refuses while there is one.\nfingerprint\n    Hash of the live state of the managed scopes, which an apply checks again."
+        "description": "What applying an access file would change, and every problem that stops it.\n\nParameters\n----------\nfile_name\n    The base name the messages use.\nfile_sha256\n    Hash of the file's text.\nmanages\n    The scopes the file manages; empty when it did not parse.\ncreates\n    Entries the apply creates.\nchanged\n    CI trust rules the apply changes in place.\nremovals\n    Entries the apply removes.\nreleases\n    Managed scopes the file no longer lists.\nstarts\n    Scopes the file manages that no apply manages yet; changes made by hand there are\n    refused once the file is applied.\ndrift\n    Access in the scopes that did not come from the file.\nproblems\n    Every problem; an apply refuses while there is one.\nfingerprint\n    Hash of the live state of the managed scopes, which an apply checks again."
       },
       "AccessStatusOut": {
         "properties": {

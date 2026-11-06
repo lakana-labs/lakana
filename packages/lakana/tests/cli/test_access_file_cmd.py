@@ -28,6 +28,7 @@ _PLAN: dict[str, Any] = {
         }
     ],
     "releases": ["staging"],
+    "starts": ["dev"],
     "drift": [
         {
             "scope": "prod",
@@ -102,6 +103,7 @@ def test_plan_prints_each_change_and_the_fingerprint(tmp_path: Path) -> None:
     ) in lines
     assert "! drift in prod: grant role VIEWER on environment prod to user:dan" in lines
     assert "stops managing staging" in lines
+    assert "starts managing dev" in lines
     assert lines[-1] == "Fingerprint: " + "f" * 64
     assert "No changes." not in lines
 
@@ -120,10 +122,26 @@ def test_plan_sends_the_file_name_and_text(tmp_path: Path) -> None:
 
 def test_plan_without_changes_says_so(tmp_path: Path) -> None:
     """An empty plan prints `No changes.`."""
-    empty = {**_PLAN, "creates": [], "changed": [], "removals": [], "releases": [], "drift": []}
+    empty = {
+        **_PLAN,
+        "creates": [],
+        "changed": [],
+        "removals": [],
+        "releases": [],
+        "starts": [],
+        "drift": [],
+    }
     result = invoke(make_state(tmp_path, _api(empty)), "access", "plan", str(_file(tmp_path)))
     assert result.exit_code == 0
     assert "No changes." in result.stdout.splitlines()
+
+
+def test_plan_that_only_starts_managing_is_not_no_changes(tmp_path: Path) -> None:
+    """A plan with nothing but `starts` prints the line, not `No changes.`."""
+    only = {**_PLAN, "creates": [], "changed": [], "removals": [], "releases": [], "drift": []}
+    result = invoke(make_state(tmp_path, _api(only)), "access", "plan", str(_file(tmp_path)))
+    assert "starts managing dev" in result.stdout.splitlines()
+    assert "No changes." not in result.stdout.splitlines()
 
 
 def test_plan_exits_1_on_problems_and_prints_them_all(tmp_path: Path) -> None:

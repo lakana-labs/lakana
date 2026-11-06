@@ -258,7 +258,9 @@ changes nothing. It prints:
 | `~ text  (ci_trust[0])` | A CI trust rule the apply would change in place; the text shows the rule before and after. |
 | `- text` | Access that exists in a managed scope and that the file does not list; the apply would remove it. |
 | `! drift in prod: text` | Access in a scope that no earlier apply of a file has managed yet, made outside any file; the apply would remove it, so look before you apply. The scope is the environment, or `instance`. When known, `— by, at: reason` follows: who made it, when (a timestamp) and why. These are printed only when known; a first apply has none. In a managed scope, drift is an override, and its text ends with `(override)` (see [The override](#the-override)). |
-| `No changes.` | The file and the live access agree. |
+| `starts managing prod` | The scope is not managed yet; applying the file starts managing it, and changes made by hand there are then refused (see [Changes outside the file](#changes-outside-the-file)). Not printed for an environment that a managed `instance` already covers. |
+| `stops managing prod` | An earlier apply managed the scope and the file no longer lists it; the apply releases it. |
+| `No changes.` | The file and the live access agree and the apply starts and stops managing no scope. |
 | `Fingerprint: ...` | A hash of the exact text of the file and of the live access of the managed scopes. An apply plans the file again and checks it: a different file, or access changed since, gives a different value. |
 
 The problems of the file are not changes. When there are any, `plan` prints all of them on

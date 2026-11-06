@@ -23,6 +23,7 @@ _PLAN = {
     "changed": [{"op": "change", "entry": "ci_trust[0]", "text": "rule x"}],
     "removals": [{"op": "remove", "entry": None, "text": "grant role ANALYST on prod"}],
     "releases": ["staging"],
+    "starts": ["dev"],
     "drift": [
         {
             "scope": "prod",
@@ -108,6 +109,7 @@ def test_plan_posts_the_file_and_parses_every_field() -> None:
     assert plan.changed[0].op == "change"
     assert plan.removals[0].entry is None
     assert plan.releases == ["staging"]
+    assert plan.starts == ["dev"]
     assert (plan.drift[0].by, plan.drift[0].reason) == ("carol", "incident")
     assert plan.drift[0].at is not None and plan.drift[0].at.year == 2026
     assert plan.drift[1].at is None

@@ -109,6 +109,9 @@ class AccessPlan:
         Every change: creates, then changes, then removals, each sorted.
     releases
         Managed scopes the file no longer lists (from PR 2 on; none before).
+    starts
+        Scopes the file manages that no apply manages yet, without the environments a managed
+        ``instance`` already covers; from the apply on, changes made by hand there are refused.
     drift
         Access in the scopes that did not come from the file.
     problems
@@ -122,6 +125,7 @@ class AccessPlan:
     manages: tuple[str, ...]
     changes: tuple[PlannedChange, ...]
     releases: tuple[str, ...]
+    starts: tuple[str, ...]
     drift: tuple[Drift, ...]
     problems: tuple[str, ...]
     fingerprint: str
@@ -181,9 +185,9 @@ class AccessPlan:
         Returns
         -------
         bool
-            True without changes and releases.
+            True without changes, releases and starts.
         """
-        return not self.changes and not self.releases
+        return not self.changes and not self.releases and not self.starts
 
 
 def diff(desired: AccessFile, live: LiveAccess, scopes: Scopes) -> tuple[PlannedChange, ...]:

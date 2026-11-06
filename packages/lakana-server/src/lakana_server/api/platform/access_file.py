@@ -75,6 +75,7 @@ def _plan_out(plan: AccessPlan) -> AccessPlanOut:
         changed=[_change_out(c) for c in plan.changed],
         removals=[_change_out(c) for c in plan.removals],
         releases=list(plan.releases),
+        starts=list(plan.starts),
         drift=[
             AccessDriftOut(scope=d.scope, text=d.text, by=d.by, reason=d.reason, at=d.at)
             for d in plan.drift

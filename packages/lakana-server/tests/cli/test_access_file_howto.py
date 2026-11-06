@@ -95,7 +95,8 @@ def test_the_access_file_how_to_does_what_the_page_says(
         "+ grant role ANALYST on environment dev to group:finance  (grants[2])",
         "+ column mask on dev.gold.customers.email for group:finance: '***'  (policies[0])",
     ]
-    assert re.fullmatch(r"Fingerprint: [0-9a-f]{64}", planned.splitlines()[3])
+    assert planned.splitlines()[3] == "starts managing instance"
+    assert re.fullmatch(r"Fingerprint: [0-9a-f]{64}", planned.splitlines()[4])
 
     # Step 4: the workflow's apply, then nothing is left to apply.
     applied = ok("access", "apply", str(access), "--yes", "--source-commit", "0123abc")

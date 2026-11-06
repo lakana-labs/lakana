@@ -4844,6 +4844,9 @@ class AccessPlanOut(BaseModel):
         Entries the apply removes.
     releases
         Managed scopes the file no longer lists.
+    starts
+        Scopes the file manages that no apply manages yet; changes made by hand there are
+        refused once the file is applied.
     drift
         Access in the scopes that did not come from the file.
     problems
@@ -4859,6 +4862,7 @@ class AccessPlanOut(BaseModel):
     changed: list[AccessChangeOut]
     removals: list[AccessChangeOut]
     releases: list[str]
+    starts: list[str]
     drift: list[AccessDriftOut]
     problems: list[str]
     fingerprint: str

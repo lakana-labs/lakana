@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -478,7 +478,7 @@ class AccessService:
         except AccessFileError as exc:
             sha256 = hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
             nothing = fingerprint(AccessState(frozenset()))
-            return AccessPlan(file_name, sha256, (), (), (), (), exc.problems, nothing)
+            return AccessPlan(file_name, sha256, (), (), (), (), (), exc.problems, nothing)
         return self._plan(p, parsed, allow_lockout=allow_lockout)
 
     def _missing_environments(self, parsed: AccessFile) -> list[str]:
@@ -574,6 +574,9 @@ class AccessService:
             changes=changes,
             releases=tuple(
                 sorted(n for n in managed if n not in scopes.names and not _covered(n, scopes))
+            ),
+            starts=tuple(
+                sorted(n for n in scopes.names if n not in managed and not _under(n, managed))
             ),
             drift=drift(changes, scopes, frozenset(managed)) + self._override_drift(covered),
             problems=tuple(cap_problems(parsed.file_name, problems)),
@@ -860,6 +863,24 @@ class AccessService:
                 for row in overrides
             ),
         )
+
+
+def _under(scope: str, managed: Mapping[str, str]) -> bool:
+    """Say whether a managed ``instance`` already covers a scope.
+
+    Parameters
+    ----------
+    scope
+        A scope the file manages.
+    managed
+        The scopes managed before.
+
+    Returns
+    -------
+    bool
+        True for an environment under a managed ``instance``.
+    """
+    return scope != INSTANCE and INSTANCE in managed
 
 
 def _covered(scope: str, scopes: Scopes) -> bool:

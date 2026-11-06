@@ -596,6 +596,7 @@ def test_moving_from_environments_to_instance_releases_nothing_and_lists_overrid
     moved = _access(session, world).export(world.admin, ["instance"])
     plan = _access(session, world).plan(world.admin, moved)
     assert plan.releases == ()
+    assert plan.starts == ("instance",)
     assert [(d.scope, d.text) for d in plan.drift if d.text.endswith("(override)")] == [
         ("prod", "grant VIEWER to bob (override)")
     ]

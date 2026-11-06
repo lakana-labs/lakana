@@ -77,8 +77,12 @@ text of the file and of the live access that `apply` checks again:
 + member alice of group finance  (groups.finance.members[0])
 + grant role ANALYST on environment dev to group:finance  (grants[2])
 + column mask on dev.gold.customers.email for group:finance: '***'  (policies[0])
+starts managing instance
 Fingerprint: <hash>
 ```
+
+`starts managing instance` means the first apply makes the file the owner of that scope: access
+changed by hand there is refused from then on (an administrator can override it with a reason).
 
 Read every `-` line twice: it is access someone had and the file does not list. A problem in the
 file stops the plan with exit code 1 and lists all of them.

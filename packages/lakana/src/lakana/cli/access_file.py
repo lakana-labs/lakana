@@ -132,7 +132,9 @@ def _print_plan(plan: AccessPlan) -> None:
         typer.echo(_drift_line(drift.scope, drift.text, drift.by, drift.reason, at))
     for scope in plan.releases:
         typer.echo(f"stops managing {_output.inline(scope)}")
-    if not changes and not plan.releases:
+    for scope in plan.starts:
+        typer.echo(f"starts managing {_output.inline(scope)}")
+    if not changes and not plan.releases and not plan.starts:
         typer.echo("No changes.")
     typer.echo(f"Fingerprint: {plan.fingerprint}")
 

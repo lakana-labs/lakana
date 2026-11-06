@@ -95,6 +95,7 @@ def _plan_from_json(data: dict[str, Any]) -> AccessPlan:
             changed=[_change_from_json(x) for x in data["changed"]],
             removals=[_change_from_json(x) for x in data["removals"]],
             releases=[str(x) for x in data["releases"]],
+            starts=[str(x) for x in data["starts"]],
             drift=[_drift_from_json(x) for x in data["drift"]],
             problems=[str(x) for x in data["problems"]],
             fingerprint=str(data["fingerprint"]),
