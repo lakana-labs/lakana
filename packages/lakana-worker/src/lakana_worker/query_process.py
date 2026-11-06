@@ -41,6 +41,7 @@ import subprocess  # nosec B404 -- a fixed argv, no shell, an environment built 
 import sys
 import tempfile
 import threading
+import uuid
 import time
 from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import contextmanager
@@ -259,6 +260,8 @@ class QueryChild:
         )
         self._prefix = directory_prefix
         self._poll_seconds = poll_seconds
+        collector = current_collector()
+        self._unit = None if collector is None else collector.unit
         self._lock = threading.Lock()
         self._process: subprocess.Popen[bytes] | None = None
         self._directory: str | None = None
@@ -287,6 +290,11 @@ class QueryChild:
     def pid(self) -> int | None:
         """The child's process id, or `None` before it started."""
         return None if self._process is None else self._process.pid
+
+    @property
+    def unit(self) -> uuid.UUID | None:
+        """The query run whose collector was current when the child was made, if any."""
+        return self._unit
 
     @property
     def stderr(self) -> bytes:

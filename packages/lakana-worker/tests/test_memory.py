@@ -1163,6 +1163,12 @@ def test_a_query_larger_than_the_task_is_the_one_ended() -> None:
     assert query.details == [memory.query_child_message(LIMIT)]
 
 
+def test_an_ended_query_names_its_run() -> None:
+    query = _Consumer(10)
+    query.unit = uuid.uuid4()
+    assert _stop([query], [], {10: 900}) == memory.Ended(10, None, 900, query.unit)
+
+
 def test_a_task_larger_than_the_query_is_the_one_ended_with_its_own_message() -> None:
     query, task = _Consumer(10), _Consumer(20)
     ended = _stop([query], [task], {10: 100, 20: 900})

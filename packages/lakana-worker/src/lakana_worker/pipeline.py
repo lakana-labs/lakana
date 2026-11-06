@@ -2666,7 +2666,7 @@ def run_one(
     """
     with (
         ACTIVITY.query(query_run_id),
-        usage_collector(),
+        usage_collector(query_run_id),
         _watching_for_cancel(session, query_run_id) as requested,
         cancel_requests(requested),
     ):

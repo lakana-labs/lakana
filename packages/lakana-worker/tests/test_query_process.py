@@ -8,6 +8,7 @@ import logging
 import os
 import signal
 import sys
+import uuid
 import threading
 import time
 from collections.abc import Callable
@@ -1703,6 +1704,13 @@ def test_run_adds_the_figures_to_the_collector_after_success_and_after_failure()
             pytest.fail("the block must not run")  # pragma: no cover -- unreachable
         assert collector.resources.cpu_seconds is not None
         assert collector.resources.cpu_seconds >= first.cpu_seconds
+
+
+def test_a_child_knows_the_unit_of_work_whose_collector_was_current_when_it_was_made() -> None:
+    unit = uuid.uuid4()
+    with usage_collector(unit):
+        assert _child("ok").unit == unit
+    assert _child("ok").unit is None
 
 
 def test_run_without_a_collector_just_runs() -> None:

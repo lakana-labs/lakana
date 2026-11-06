@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -95,6 +96,14 @@ def test_a_collector_merges_what_is_added_and_is_gone_after_the_block() -> None:
         collector.add(AttemptResources(30, 0.5, None))
         assert collector.resources == AttemptResources(30, 1.5, 5)
     assert current_collector() is None
+
+
+def test_a_collector_names_the_unit_of_work_it_belongs_to() -> None:
+    unit = uuid.uuid4()
+    with usage_collector(unit) as collector:
+        assert collector.unit == unit
+    with usage_collector() as bare:
+        assert bare.unit is None
 
 
 def test_a_collector_is_fresh_in_a_nested_block() -> None:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+import uuid
 from collections.abc import Generator
 from contextvars import ContextVar
 from typing import Protocol
@@ -111,8 +112,14 @@ class UsageCollector:
     One collector belongs to one unit of work (one run); see `usage_collector`.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, unit: uuid.UUID | None = None) -> None:
         self._total = AttemptResources()
+        self._unit = unit
+
+    @property
+    def unit(self) -> uuid.UUID | None:
+        """The query run this collector belongs to, when it belongs to one."""
+        return self._unit
 
     def add(self, resources: AttemptResources) -> None:
         """Add the figures of one reaped child.
@@ -145,15 +152,21 @@ def current_collector() -> UsageCollector | None:
 
 
 @contextlib.contextmanager
-def usage_collector() -> Generator[UsageCollector, None, None]:
+def usage_collector(unit: uuid.UUID | None = None) -> Generator[UsageCollector, None, None]:
     """Make a fresh collector current for the block; an outer one is not shared with it.
+
+    Parameters
+    ----------
+    unit
+        The query run the block works for; a query child made inside reports it, so the memory
+        watchdog can name the run it ends.
 
     Yields
     ------
     UsageCollector
         The collector; it keeps its figures after the block.
     """
-    collector = UsageCollector()
+    collector = UsageCollector(unit)
     token = _COLLECTOR.set(collector)
     try:
         yield collector
