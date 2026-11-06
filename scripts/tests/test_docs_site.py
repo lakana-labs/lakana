@@ -17,8 +17,8 @@ EXEMPT = (
     "scripts/tests/test_docs_site.py",
     "scripts/tests/test_docs_only.py",
 )
-NOT_TESTED_CEILING = 60
-UNCHECKED_OUTPUT_CEILING = 84
+NOT_TESTED_CEILING = 54
+UNCHECKED_OUTPUT_CEILING = 80
 """Blocks marked as not tested; it only goes down, apart from the rises below.
 
 The artifact pages left six when they were written: the `artifact uploads abort` command,
@@ -127,12 +127,6 @@ checked by `test_deploy_init.py`) and the launcher's volume removal under "Start
 `UNCHECKED_OUTPUT_CEILING` rose from 77 to 78 with the Model block of `lakana table get` in
 "See a table's model" (`describe-a-table.md`): the page shows that block only, not the whole
 output, and the example `see-a-tables-model` runs the command and checks the model in its JSON.
-
-"How to keep access in a reviewed file" (#46) rose `NOT_TESTED_CEILING` by six, to 60, and
-`UNCHECKED_OUTPUT_CEILING` by four, to 84. Its commands need an instance and an administrator's
-profile, and its output holds timestamps and a fingerprint the example harness cannot pin;
-`packages/lakana-server/tests/cli/test_access_file_howto.py` runs every command of the page against
-the real server and asserts the lines it prints.
 """
 SECTIONS = ("tutorials", "how-to", "reference", "explanation")
 

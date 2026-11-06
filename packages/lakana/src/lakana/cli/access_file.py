@@ -251,8 +251,9 @@ def apply(
         str | None,
         typer.Option(
             "--plan-fingerprint",
-            help="The fingerprint `lakana access plan` printed. Without it the command plans "
-            "first and applies that plan.",
+            help="The fingerprint `lakana access plan` printed: applies without asking, since "
+            "that plan was the review. Without it the command plans first, shows the plan "
+            "and asks (the command asks only when it plans itself).",
         ),
     ] = None,
     source_commit: Annotated[
@@ -275,7 +276,8 @@ def apply(
     """Make an access file's changes in one audited transaction, or none of them.
 
     Without `--plan-fingerprint` the command plans the file, shows the plan and asks before
-    it applies exactly that plan. In CI, pass `--yes` and the fingerprint of the plan step:
+    it applies exactly that plan. With `--plan-fingerprint` it does not ask: that plan was the
+    review. In CI, pass `--yes` and the fingerprint of the plan step:
     the apply is refused, with nothing changed, when access changed since that plan. Needs the
     ADMIN role on the instance and a personal access token.
 
@@ -367,7 +369,14 @@ def status(ctx: typer.Context) -> None:
         _output.emit(
             state,
             answer.scopes,
-            columns=["scope", "file_name", "source_commit", "applied_by", "applied_at"],
+            columns=["scope", "file", "commit", "applied by", "applied at"],
+            derived={
+                "file": lambda x: x.file_name,
+                "commit": lambda x: x.source_commit,
+                "applied by": lambda x: x.applied_by,
+                "applied at": lambda x: x.applied_at,
+            },
+            whole=["applied at"],
         )
     if answer.overrides:
         typer.echo("Open overrides (the next apply reverts them unless the file lists them):")

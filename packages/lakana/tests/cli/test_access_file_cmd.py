@@ -464,11 +464,26 @@ def test_status_lists_scopes_and_overrides(tmp_path: Path) -> None:
     result = invoke(make_state(tmp_path, api), "access", "status")
     assert result.exit_code == 0, result.stderr
     out = " ".join(result.stdout.split())
+    header = result.stdout.splitlines()[1]
+    assert [cell.strip() for cell in header.strip("┃").split("┃")] == [
+        "scope",
+        "file",
+        "commit",
+        "applied by",
+        "applied at",
+    ]
     for text in ("prod", "access.yaml", "0123abc", "access-admin", "2026-11-06"):
         assert text in out
     assert "Open overrides (the next apply reverts them unless the file lists them):" in out
     assert "grant VIEWER to bob" in out
     assert "Incident 42 hotfix" in out
+
+
+def test_apply_help_says_a_fingerprint_applies_without_asking(tmp_path: Path) -> None:
+    """The option text names the one case where the command asks."""
+    result = invoke(make_state(tmp_path, FakeApi()), "access", "apply", "--help")
+    text = " ".join(result.stdout.split())
+    assert "asks only when it plans" in text
 
 
 def test_status_without_scopes_says_how_to_start(tmp_path: Path) -> None:

@@ -79,6 +79,7 @@ def test_the_access_file_how_to_does_what_the_page_says(
     access = tmp_path / "access.yaml"
     ok("access", "export", "-o", str(access))
     exported = access.read_text()
+    assert "manages:\n- instance\n" in exported
     assert "service_accounts:\n- access-admin\n" in exported
     access.write_text(
         exported.replace("members: []", "members: [alice]")
@@ -127,5 +128,9 @@ def test_the_access_file_how_to_does_what_the_page_says(
     assert lines[1].endswith(": Incident 42 hotfix")
     assert "Incident 42 hotfix" in ok("access", "status")
 
-    # The administrator's own profile cannot be locked out of the lake by the file.
-    assert "access-admin" in access.read_text()
+    # "When an apply is refused": a file that removes the account applying it is a problem.
+    without = tmp_path / "without.yaml"
+    without.write_text(access.read_text().replace("service_accounts:\n- access-admin\n", ""))
+    message = refused(1, "access", "plan", str(without))
+    assert "the file removes service:access-admin, the account applying it" in message
+    assert "have another administrator apply this file" in message

@@ -299,13 +299,13 @@ prod`.
 
 | Option | Meaning |
 |---|---|
-| `--plan-fingerprint F` | The `Fingerprint:` of the plan you reviewed. The apply is refused with `409` when access changed since. |
+| `--plan-fingerprint F` | The `Fingerprint:` of the plan you reviewed. The command then applies without asking, even without `--yes`, since that plan was the review; it is refused with `409` when access changed since. |
 | `--source-commit SHA` | The commit the file came from (7 to 64 hex digits). Recorded with the apply and shown by `status`. |
 | `--yes` | Do not ask. |
 | `--allow-lockout` | As for `plan`. |
 
 Without `--plan-fingerprint` the command plans the file, prints the plan, asks `Apply these
-changes?` (unless `--yes`), and applies exactly that plan. Without `--yes` and without a
+changes?` (unless `--yes`; it asks only when it plans itself), and applies exactly that plan. Without `--yes` and without a
 terminal it stops before anything changes, with a message that names `--yes`: in CI pass `--yes`,
 and `--plan-fingerprint` to apply the plan an earlier step showed. A plan with problems is never
 applied. The server makes the plan again under a lock and compares its fingerprint, so what you

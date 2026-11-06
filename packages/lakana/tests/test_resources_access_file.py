@@ -10,7 +10,7 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
-from lakana.errors import InvalidResponse, ServerError
+from lakana.errors import InvalidResponse
 from lakana.resources.access import Access
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
@@ -173,17 +173,28 @@ def test_apply_posts_the_file_with_the_fingerprint_and_parses_the_result() -> No
     assert str(result.apply_id) == _APPLIED["apply_id"]
 
 
-def test_apply_is_sent_once_even_when_the_server_fails() -> None:
-    """`retry=False`: an apply that may have happened is never repeated by the SDK."""
-    seen: list[httpx.Request] = []
+def test_apply_is_sent_with_retry_off() -> None:
+    """The transport is asked not to repeat an apply; a status read keeps the default."""
+    seen: list[dict[str, object]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(503, json={"detail": "busy"})
+        body = _APPLIED if request.method == "POST" else {"scopes": [], "overrides": []}
+        return httpx.Response(200, json=body)
 
-    with pytest.raises(ServerError):
-        _access(handler).apply("x", plan_fingerprint="f" * 64)
-    assert len(seen) == 1
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    transport = HttpTransport(_CONFIG, http_client=client)
+    original = transport.request
+
+    def spy(route: object, **kwargs: object) -> object:
+        seen.append(kwargs)
+        return original(route, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    transport.request = spy  # ty: ignore[invalid-assignment]
+    access = Access(transport)
+    access.apply("x", plan_fingerprint="f" * 64)
+    access.status()
+    assert seen[0]["retry"] is False
+    assert "retry" not in seen[1]
 
 
 def test_apply_refuses_an_odd_answer() -> None:

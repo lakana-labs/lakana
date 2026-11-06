@@ -5,6 +5,9 @@ through a pull request, a workflow shows what it would change before the merge a
 and the instance refuses changes made by hand in the meantime. You need the `ADMIN` role on the
 instance, a git repository for the file, and (for the workflow) GitHub Actions or a similar CI.
 
+The examples use the user `alice`, the group `finance` and the table `dev.gold.customers` with an
+`email` column; replace them with yours.
+
 Keep the file in a repository of its own, which only administrators can merge into: whoever can
 merge into it decides who has access. The format and every error are in [The access
 file](../reference/access-file.md).
@@ -15,7 +18,7 @@ An apply acts as a person or service account with the `ADMIN` role on the instan
 a service account and give it a personal access token. Create the account first, so that the
 file you export next lists it; a file that leaves it out would remove it.
 
-<!-- not tested: needs a running instance and an administrator's profile; packages/lakana-server/tests/cli/test_access_file_howto.py runs the commands of the following steps against the real server and checks what they print -->
+<!-- source: docs/examples/access-file/run.sh#account -->
 ```bash
 lakana principal create access-admin --type service-account
 lakana grant create --principal access-admin --role ADMIN --kind INSTANCE
@@ -30,7 +33,7 @@ cannot read or change access: every `lakana access` command is refused with `403
 
 Export the live access once and put the file in the repository:
 
-<!-- not tested: needs a running instance and an administrator's profile; packages/lakana-server/tests/cli/test_access_file_howto.py runs these commands against the real server and checks what they print -->
+<!-- source: docs/examples/access-file/run.sh#export -->
 ```bash
 lakana access export -o access.yaml
 ```
@@ -61,7 +64,7 @@ policies:
 
 ## 3. See what it would change
 
-<!-- not tested: needs a running instance and an administrator's profile; packages/lakana-server/tests/cli/test_access_file_howto.py runs these commands against the real server and checks what they print -->
+<!-- source: docs/examples/access-file/run.sh#plan -->
 ```bash
 lakana access plan access.yaml
 ```
@@ -69,7 +72,7 @@ lakana access plan access.yaml
 The plan changes nothing. `+` is created, `-` is removed, and the fingerprint is a hash of the live
 access that `apply` checks again:
 
-<!-- output -->
+<!-- output: access-file#plan -->
 ```text
 + member alice of group finance  (groups.finance.members[0])
 + grant role ANALYST on environment dev to group:finance  (grants[2])
@@ -122,7 +125,8 @@ jobs:
 Pin the actions to commit hashes as your organisation does. `apply --yes` plans the merged file and
 applies exactly that plan in one step, in one transaction: either every change is made or none is.
 The apply is recorded in the audit log with the commit. To apply a plan you reviewed earlier, pass
-its fingerprint with `--plan-fingerprint`; the apply is then refused with a message that says to
+its fingerprint with `--plan-fingerprint`; the apply is then made without asking, since that plan
+was the review, and refused with a message that says to
 plan again if access changed since.
 
 Anyone who can merge into the repository can change access, and the secret in it is an
@@ -134,7 +138,7 @@ If a stored administrator token in CI is more than your team wants, leave the `a
 runs `lakana access plan access.yaml` on pull requests, and after the merge an administrator
 applies from their own profile:
 
-<!-- not tested: needs a running instance and an administrator's profile; packages/lakana-server/tests/cli/test_access_file_howto.py runs these commands against the real server and checks what they print -->
+<!-- source: docs/examples/access-file/run.sh#stricter -->
 ```bash
 lakana access apply access.yaml --source-commit 0123abc
 ```
@@ -162,18 +166,18 @@ ci_trust:
 
 ## 5. See what the file manages
 
-<!-- not tested: needs a running instance and an administrator's profile; packages/lakana-server/tests/cli/test_access_file_howto.py runs these commands against the real server and checks what they print -->
+<!-- source: docs/examples/access-file/run.sh#status -->
 ```bash
 lakana access status
 ```
 
-<!-- output -->
+<!-- output: access-file#status -->
 ```text
-┏━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ scope    ┃ file_name   ┃ source_commit ┃ applied_by   ┃ applied_at                       ┃
-┡━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ instance │ access.yaml │ 0123abc       │ access-admin │ 2026-11-06T09:30:24.141307+00:00 │
-└──────────┴─────────────┴───────────────┴──────────────┴──────────────────────────────────┘
+┏━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ scope    ┃ file        ┃ commit  ┃ applied by   ┃ applied at                       ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ instance │ access.yaml │ 0123abc │ access-admin │ 2026-11-06T02:49:50.848024+00:00 │
+└──────────┴─────────────┴─────────┴──────────────┴──────────────────────────────────┘
 ```
 
 ## 6. What a managed scope refuses
@@ -181,22 +185,33 @@ lakana access status
 From the first apply the file is the only way to change access in its scopes. A command that
 changes it by hand is refused:
 
-<!-- output -->
+<!-- source: docs/examples/access-file/run.sh#refused -->
+```bash
+lakana grant create --principal alice --role viewer --kind ENVIRONMENT --env dev
+```
+
+<!-- output: access-file#refused -->
 ```text
-Error: `instance` is managed by an access file (last applied 2026-11-06T09:30Z); change the file and run `lakana access apply`, or, in an emergency, repeat with `--override-managed --reason …`
+Error: `instance` is managed by an access file (last applied 2026-11-06T02:49Z); change the file and run `lakana access apply`, or, in an emergency, repeat with `--override-managed --reason …`
 ```
 
 The way out is the file: change it, review it, apply it. In an emergency an administrator can make
-the change anyway and give a reason; the change is recorded in the audit log and the next plan
-shows it:
+the change anyway and give a reason; the change is recorded in the audit log:
 
-<!-- not tested: needs a running instance and an administrator's profile; packages/lakana-server/tests/cli/test_access_file_howto.py runs these commands against the real server and checks what they print -->
+<!-- source: docs/examples/access-file/run.sh#override -->
 ```bash
 lakana grant create --principal alice --role viewer --kind ENVIRONMENT --env dev --override-managed --reason "Incident 42 hotfix"
+```
+
+The CLI warns that the next apply reverts the change unless the file lists it. The next plan shows
+the change as drift:
+
+<!-- source: docs/examples/access-file/run.sh#drift -->
+```bash
 lakana access plan access.yaml
 ```
 
-<!-- output -->
+<!-- output: access-file#drift -->
 ```text
 - grant role VIEWER on environment dev to user:alice
 ! drift in instance: grant VIEWER to alice (override) — access-admin, 2026-11-06T09:45:24.453110+00:00: Incident 42 hotfix
