@@ -216,6 +216,15 @@ def test_a_task_of_another_job_is_not_found(
     assert _service(session).task_attempts(principal, "dev", "nightly", "silver.b") == ([], None)
 
 
+def test_a_job_whose_selection_matches_nothing_is_not_found(
+    session: Session, run_id: uuid.UUID, principal: PrincipalRef
+) -> None:
+    """A stored selection that no longer resolves is a 404, not a crash."""
+    _declare_job(session, "nightly", "ghost.*")
+    with pytest.raises(NotFoundError, match=r"'silver.a'.*'nightly'"):
+        _service(session).task_attempts(principal, "dev", "nightly", "silver.a")
+
+
 def test_a_declared_task_that_never_ran_has_an_empty_history(
     session: Session, run_id: uuid.UUID, principal: PrincipalRef
 ) -> None:
