@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import pytest
 from graph_test_helpers import (
+    TABLES,
     Grants,
     StarWorld,
     asset_entry,
@@ -312,13 +314,15 @@ def test_current_fields_are_read_only_for_a_reader_who_sees_masks(
     _bind_the_mask(star)
     asked: list[uuid.UUID] = []
 
-    def spy(table_id: uuid.UUID) -> tuple[NestedField, ...]:
+    def spy(table_id: uuid.UUID, seconds: float) -> tuple[NestedField, ...]:
         """Record the read and give a renamed schema.
 
         Parameters
         ----------
         table_id
             The table read.
+        seconds
+            How long the read may take.
 
         Returns
         -------
@@ -519,3 +523,91 @@ def test_exists_says_whether_a_canonical_id_is_there(star: StarWorld) -> None:
     assert graph.exists(column_node(dim, "store_id"))
     assert not graph.exists(column_node(dim, "nope"))
     assert graph.exists(star.term("store"))
+
+
+def _bound_mask(star: StarWorld, principal: PrincipalRef, dotted: str, column: str) -> None:
+    """Add a column mask bound to field id 1 (#120) on a table of the star.
+
+    Parameters
+    ----------
+    star
+        The star.
+    principal
+        The mask's subject and creator.
+    dotted
+        The table.
+    column
+        The masked column.
+    """
+    namespace, _, name = dotted.partition(".")
+    star.session.add(
+        ColumnMask(
+            id=uuid.uuid4(),
+            principal_id=principal.id,
+            environment="dev",
+            namespace=namespace,
+            table=name,
+            column=column,
+            environment_id=star.env_id,
+            table_id=star.table_id(dotted),
+            created_by=principal.id,
+            created_at=datetime.now(UTC),
+            expression="NULL",
+            binding="field_ids",
+            field_ids={column: 1},
+            column_field_id=1,
+        )
+    )
+    star.session.flush()
+
+
+def test_mask_fields_are_read_once_per_table_and_stop_while_time_is_left(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    """PR #465's review: slow storage falls back to the stored names, never to GraphBusyError."""
+    _bind_the_mask(star)
+    _bound_mask(star, principal, "gold.dim_store", "store_id")  # a second mask, same table
+    for dotted in ("gold.fact_sales", "gold.dim_date", "silver.sales"):
+        _bound_mask(star, principal, dotted, TABLES[dotted][0][0])
+    now = [0.0]
+    asked: list[tuple[uuid.UUID, float]] = []
+
+    def slow(table_id: uuid.UUID, seconds: float) -> tuple[NestedField, ...]:
+        """Take three seconds per read, as storage that hangs before it answers.
+
+        Parameters
+        ----------
+        table_id
+            The table read.
+        seconds
+            How long the read may take.
+
+        Returns
+        -------
+        tuple of NestedField
+            Its fields.
+        """
+        asked.append((table_id, seconds))
+        now[0] += 3.0
+        return _fields("store_id", "shop_name")(table_id)
+
+    service = GraphService(
+        star.session, Grants(policies=True), "en", clock=lambda: now[0], fields_of=slow
+    )
+    page = service.neighbours(principal, "dev", "gold.dim_store")
+    assert page.nodes  # answered, not GraphBusyError
+    # Each table once, and no read starts once half the 10 s budget is spent.
+    assert len({table_id for table_id, _ in asked}) == len(asked) == 2
+    assert [seconds for _, seconds in asked] == [5.0, 2.0]
+
+
+def test_a_failing_mask_field_reader_keeps_the_stored_names(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    mask = _bind_the_mask(star)
+    dim = star.table_id("gold.dim_store")
+    service = GraphService(
+        star.session, Grants(policies=True), "en", fields_of=lambda _table_id, _seconds: None
+    )
+    page = service.neighbours(principal, "dev", mask)
+    assert column_node(dim, "store_name") in {n.id for n in page.nodes}

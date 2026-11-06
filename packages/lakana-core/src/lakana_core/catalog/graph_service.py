@@ -94,6 +94,13 @@ from lakana_core.pagination import decode_key_cursor, encode_key_cursor
 _CHECK_EVERY = 256
 """How many edges examined, visible or hidden, pass between two looks at the clock."""
 
+_FIELDS_SHARE = 0.5
+"""The share of the time budget that reading masked tables' current fields may use.
+
+No read starts once less than the rest is left, and each read is given only what is left of
+this share, so slow storage leaves a mask on the name it was made with, never `GraphBusyError`.
+"""
+
 _LINEAGE_STARTS = frozenset({NodeKind.TABLE, NodeKind.COLUMN, NodeKind.ASSET})
 
 _STEPS: dict[LineageWay, dict[NodeKind, EdgeKind]] = {
@@ -327,6 +334,21 @@ class _Budget:
         self.steps += 1
         if self.steps > self._max_steps:
             raise ValidationError(TOO_LARGE.format(steps=self._max_steps))
+
+    def left(self) -> float:
+        """Say how many seconds of the time budget are left.
+
+        Returns
+        -------
+        float
+            The seconds to the deadline; negative past it.
+        """
+        return self._deadline - self._clock()
+
+    @property
+    def seconds(self) -> float:
+        """The whole time budget, in seconds."""
+        return self._seconds
 
     def check(self) -> None:
         """Look at the clock.
@@ -566,6 +588,44 @@ def _common(node_id: str, found: _Found) -> dict[str, Any]:
     }
 
 
+class _MaskFields:
+    """Read masked tables' current fields for one request: each table once, within the budget.
+
+    Parameters
+    ----------
+    read
+        Reads a table's current fields, given the most seconds the read may take.
+    budget
+        The request's budget.
+    """
+
+    def __init__(
+        self, read: Callable[[uuid.UUID, float], Sequence[NestedField] | None], budget: _Budget
+    ) -> None:
+        self._read = read
+        self._budget = budget
+        self._read_tables: dict[uuid.UUID, Sequence[NestedField] | None] = {}
+
+    def __call__(self, table_id: uuid.UUID) -> Sequence[NestedField] | None:
+        """Read one table's current fields, or give `None` once the time for reads is spent.
+
+        Parameters
+        ----------
+        table_id
+            The table.
+
+        Returns
+        -------
+        Sequence of NestedField or None
+            The fields; `None` when they cannot be read, or not in the time left, which leaves
+            the mask on the name it was made with.
+        """
+        if table_id not in self._read_tables:
+            seconds = self._budget.left() - self._budget.seconds * (1 - _FIELDS_SHARE)
+            self._read_tables[table_id] = self._read(table_id, seconds) if seconds > 0 else None
+        return self._read_tables[table_id]
+
+
 class GraphService:
     """Answer questions about an environment's metadata graph for one reader at a time.
 
@@ -586,8 +646,10 @@ class GraphService:
     part
         Reads one repository's part (`load_graph`'s `part`); `None` for no cache.
     fields_of
-        Reads a table's current top-level fields (`load_graph`'s `fields_of`), so a column mask
-        is linked to its column's current name; `None` links it by the name it was made with.
+        Reads a table's current top-level fields, given the most seconds the read may take, so a
+        column mask is linked to its column's current name; `None` links it by the name it was
+        made with. Asked only for a reader who sees masks, each table once per request, and
+        only within `_FIELDS_SHARE` of the time budget (`_MaskFields`).
     """
 
     def __init__(
@@ -600,7 +662,7 @@ class GraphService:
         budget_seconds: float = GRAPH_TIME_BUDGET_SECONDS,
         max_steps: int = MAX_GRAPH_STEPS,
         part: Callable[[uuid.UUID, str, object], ManifestPart] | None = None,
-        fields_of: Callable[[uuid.UUID], Sequence[NestedField] | None] | None = None,
+        fields_of: Callable[[uuid.UUID, float], Sequence[NestedField] | None] | None = None,
     ) -> None:
         self._session = session
         self._authz = authz
@@ -653,7 +715,11 @@ class GraphService:
             environment_id,
             environment,
             part=self._part,
-            fields_of=self._fields_of if sees_masks else None,
+            fields_of=(
+                _MaskFields(self._fields_of, budget)
+                if sees_masks and self._fields_of is not None
+                else None
+            ),
         )
         budget.check()
         visible = _Visibility(self._authz, p, graph)

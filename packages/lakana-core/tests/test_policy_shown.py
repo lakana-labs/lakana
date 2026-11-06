@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
@@ -299,6 +301,26 @@ def test_the_catalog_logs_the_class_only_when_the_metadata_cannot_be_read(
     assert len(warnings) == 1
     assert "(OSError)" in warnings[0].getMessage()
     assert "secret path" not in caplog.text
+
+
+def test_a_read_past_its_time_gives_no_fields_without_waiting_for_storage(
+    session: Session, gold: CatalogService, caplog: pytest.LogCaptureFixture
+) -> None:
+    """PR #465's review: a hanging storage read is given up after its time, not waited for."""
+    released = threading.Event()
+
+    def hang(*_args: object) -> None:
+        released.wait(5)
+
+    started = time.monotonic()
+    with mock.patch.object(current_fields, "read_metadata", side_effect=hang):
+        found = current_fields.current_fields(
+            session, StorageResolver(session), _table_id(session, "orders"), timeout=0.05
+        )
+    released.set()
+    assert found is None
+    assert time.monotonic() - started < 0.5
+    assert "did not answer within" in caplog.text
 
 
 def test_the_catalog_refuses_the_fields_to_a_principal_who_may_not_manage_policies(
