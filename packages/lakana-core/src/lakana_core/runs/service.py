@@ -264,6 +264,12 @@ class TaskAttemptView:
     failure
         The code, cause and next step of a failed attempt; ``unknown`` for one recorded before
         the codes existed; `None` for an attempt that did not fail.
+    peak_memory_bytes
+        Peak resident memory of the attempt in bytes; `None` if it was not measured.
+    cpu_seconds
+        Processor time the attempt used in seconds; `None` if it was not measured.
+    bytes_read
+        Bytes the attempt read from tables, files and sources; `None` if they were not counted.
     """
 
     attempt: int
@@ -274,6 +280,9 @@ class TaskAttemptView:
     rows_written: int | None
     error_message: str | None
     failure: Failure | None = None
+    peak_memory_bytes: int | None = None
+    cpu_seconds: float | None = None
+    bytes_read: int | None = None
 
 
 @dataclass(frozen=True)
@@ -2390,6 +2399,9 @@ class RunService:
                     environment=env.name,
                 ),
                 failure=attempt_failure(a),
+                peak_memory_bytes=a.peak_memory_bytes,
+                cpu_seconds=a.cpu_seconds,
+                bytes_read=a.bytes_read,
             )
             for a in self._session.scalars(
                 select(TaskAttempt)

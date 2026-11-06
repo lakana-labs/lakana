@@ -5270,3 +5270,41 @@ def test_0067_adds_the_managed_scope_tables_and_downgrades_cleanly(
         assert not tables & {"access_managed_scopes", "access_overrides"}
     finally:
         engine.dispose()
+
+
+_REVISION_0068 = "c4e6a8b0d2f1"
+
+
+@pytest.mark.usefixtures("_without_fsync")
+def test_0068_adds_the_attempt_resource_columns_and_downgrades_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revision `0068`: three nullable figures on attempts and query runs; the downgrade drops them.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    monkeypatch
+        Points `lakana_core.config.Settings` at that file.
+    """
+    db_path = tmp_path / "migrated.db"
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    config = Config(str(ALEMBIC_INI))
+    command.upgrade(config, _REVISION_0068)
+    figures = {"peak_memory_bytes", "cpu_seconds", "bytes_read"}
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        for table in ("task_attempts", "query_runs"):
+            columns = {c["name"]: c for c in inspect(engine).get_columns(table)}
+            assert figures <= columns.keys()
+            assert all(columns[name]["nullable"] for name in figures)
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0067)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        for table in ("task_attempts", "query_runs"):
+            assert not figures & {c["name"] for c in inspect(engine).get_columns(table)}
+    finally:
+        engine.dispose()
