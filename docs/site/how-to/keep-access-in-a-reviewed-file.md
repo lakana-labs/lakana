@@ -69,8 +69,8 @@ policies:
 lakana access plan access.yaml
 ```
 
-The plan changes nothing. `+` is created, `-` is removed, and the fingerprint is a hash of the live
-access that `apply` checks again:
+The plan changes nothing. `+` is created, `-` is removed, and the fingerprint is a hash of the exact
+text of the file and of the live access that `apply` checks again:
 
 <!-- output: access-file#plan -->
 ```text
@@ -126,8 +126,8 @@ Pin the actions to commit hashes as your organisation does. `apply --yes` plans 
 applies exactly that plan in one step, in one transaction: either every change is made or none is.
 The apply is recorded in the audit log with the commit. To apply a plan you reviewed earlier, pass
 its fingerprint with `--plan-fingerprint`; the apply is then made without asking, since that plan
-was the review, and refused with a message that says to
-plan again if access changed since.
+was the review. It is refused, with a message that says to plan again, if the file text or the
+access changed since: what you reviewed is the file as it was and the access it was planned against.
 
 Anyone who can merge into the repository can change access, and the secret in it is an
 administrator's token. Protect the `main` branch, and restrict who can edit the workflow.
@@ -224,6 +224,6 @@ should stay. [The override](../reference/access-file.md#the-override) lists what
 ## When an apply is refused
 
 Each message names the cause and the next step; the full list is in [The access
-file](../reference/access-file.md#errors). The two you will meet first: access changed since the
-plan (plan again and review), and a file that removes the account that applies it (list the
+file](../reference/access-file.md#errors). The two you will meet first: the file or the access changed
+since the plan (plan again and review), and a file that removes the account that applies it (list the
 account and its `ADMIN` grant, or have another administrator apply).

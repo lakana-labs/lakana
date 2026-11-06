@@ -153,7 +153,7 @@ def apply_access(
     """Make an access file's changes in one audited transaction, or none of them.
 
     Needs the ADMIN role on the instance. The plan is made again under a lock: 409 when
-    access changed since the plan with `plan_fingerprint` (plan again), and 409 when the
+    the file or access changed since the plan with `plan_fingerprint` (plan again), and 409 when the
     changes would end the caller's last way to administer (apply in two steps). 422 lists
     every problem of the file (at most 50).
 

@@ -3404,6 +3404,9 @@ unchanged (`AuthAuditLimiter` above). `authenticate_before_body` already makes a
 An applied access file makes its scopes *managed* (`access_managed_scopes`). From then on the file
 is the only way to change access there, so that what was reviewed in git is what holds.
 
+- **Deactivation takes the lock.** `PrincipalService.deactivate_principal` takes the shared access
+  lock for every principal type (skipped inside an apply, which holds the exclusive one), so it
+  cannot race an apply into zero admins.
 - **Guard placement.** `lakana_core.access.managed.guard_change` is called by each mutating
   service method, right after the method's own authorization and once the row it changes is
   loaded (so the environment of a revoke comes from the row, never from the request): `GrantService.grant`/`revoke`,
@@ -6047,6 +6050,8 @@ matter for an operator deciding where to run it:
   problem (422), and a file whose last remaining ADMIN path for the caller is a group whose
   grant and membership both go is refused with 409 "apply in two steps".
   The SDK sends the request with `retry=False`, so a lost answer never becomes a second apply.
+- **The fingerprint binds the file.** It hashes the file's `file_sha256` as well as the live access
+  and the managed-scope records, so a fingerprint planned for file A never applies file B.
 - **The CLI confirms, the server decides.** `lakana access apply` without `--plan-fingerprint`
   plans, prints and asks (`--yes` skips the question; no terminal and no `--yes` is refused
   before anything is sent). The confirmation is a convenience: the authority is the fingerprint

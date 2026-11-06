@@ -274,8 +274,8 @@ class Access:
     ) -> AccessApplyResult:
         """Make an access file's changes in one audited transaction, or none of them.
 
-        The server plans the file again and refuses when access changed since the plan with
-        `plan_fingerprint`. The request is sent once and never retried.
+        The server plans the file again and refuses when the file or access changed since the
+        plan with `plan_fingerprint`. The request is sent once and never retried.
 
         Parameters
         ----------

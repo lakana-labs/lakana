@@ -7,8 +7,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.access.managed import guard_change
-from lakana_core.audit.service import AuditService
+from lakana_core.access.managed import guard_change, lock_access
+from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.service import assert_admin_headroom
@@ -150,6 +150,8 @@ class PrincipalService:
         if not principal.is_active:
             return
         self._guard(p, principal.type, f"deactivate service account {name}")
+        if ACCESS_APPLY_KEY not in self._session.info:
+            lock_access(self._session, shared=True)
         assert_admin_headroom(self._session, excluding_principal_id=principal.id)
         principal.is_active = False
         AuditService(self._session).record(

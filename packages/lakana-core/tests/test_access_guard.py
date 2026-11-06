@@ -26,6 +26,7 @@ from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.models import (
+    AccessManagedScope,
     AccessOverride,
     AuditEvent,
     AuditEventType,
@@ -557,3 +558,68 @@ def test_an_override_on_a_person_is_refused(session: Session) -> None:
     assert str(deactivated.value) == message
     bob = session.scalars(select(Principal).where(Principal.name == "bob")).one()
     assert bob.is_active
+
+
+def test_deactivating_a_person_takes_the_shared_access_lock(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review M1: a person's deactivation is serialized with an apply by the access lock."""
+    from lakana_core.identity import principals as principals_module
+
+    world = access_world(session)
+    PrincipalService(session, _authz(session)).create_principal(
+        world.admin, name="carol", type=PrincipalType.USER
+    )
+    taken: list[bool] = []
+    monkeypatch.setattr(
+        principals_module,
+        "lock_access",
+        lambda _session, *, shared: taken.append(shared),
+    )
+    PrincipalService(session, _authz(session)).deactivate_principal(world.admin, "carol")
+    assert taken == [True]
+
+
+def test_moving_from_environments_to_instance_releases_nothing_and_lists_overrides(
+    session: Session,
+) -> None:
+    """Review M2 probe P1: `instance` still covers prod; the open prod override is drift."""
+    world = access_world(session)
+    _apply(session, world, "version: 1\nmanages: [prod]\n")
+    _grants(session).grant(
+        _overriding(world.admin),
+        principal="bob",
+        role=Role.VIEWER,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="prod",
+    )
+    moved = _access(session, world).export(world.admin, ["instance"])
+    plan = _access(session, world).plan(world.admin, moved)
+    assert plan.releases == ()
+    assert [(d.scope, d.text) for d in plan.drift if d.text.endswith("(override)")] == [
+        ("prod", "grant VIEWER to bob (override)")
+    ]
+    _access(session, world).apply(world.admin, moved, plan_fingerprint=plan.fingerprint)
+    assert session.get(AccessManagedScope, "prod") is None
+    assert session.get(AccessManagedScope, "instance") is not None
+    assert session.scalars(select(AccessOverride)).one().resolved_at is not None
+
+
+def test_moving_from_instance_to_environments_lists_the_instance_override(
+    session: Session,
+) -> None:
+    """Review M2 probe P2: an override recorded under `instance` is drift of the new file."""
+    world = access_world(session)
+    _apply(session, world, _access(session, world).export(world.admin, ["instance"]))
+    _grants(session).grant(
+        _overriding(world.admin),
+        principal="bob",
+        role=Role.VIEWER,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="prod",
+    )
+    plan = _access(session, world).plan(world.admin, "version: 1\nmanages: [prod]\n")
+    assert plan.releases == ("instance",)
+    assert [(d.scope, d.text) for d in plan.drift if d.text.endswith("(override)")] == [
+        ("instance", "grant VIEWER to bob (override)")
+    ]

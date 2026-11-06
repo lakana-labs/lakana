@@ -18275,7 +18275,7 @@
           "access"
         ],
         "summary": "Make an access file's changes in one audited transaction, or none of them",
-        "description": "Needs the ADMIN role on the instance. The plan is made again under a lock: 409 when access changed since the plan with `plan_fingerprint` (plan again), and 409 when the changes would end the caller's last way to administer (apply in two steps). 422 lists every problem of the file (at most 50).",
+        "description": "Needs the ADMIN role on the instance. The plan is made again under a lock: 409 when the file or access changed since the plan with `plan_fingerprint` (plan again), and 409 when the changes would end the caller's last way to administer (apply in two steps). 422 lists every problem of the file (at most 50).",
         "operationId": "apply_access_api_v1_access_apply_post",
         "parameters": [
           {
@@ -18774,7 +18774,7 @@
           "plan_fingerprint"
         ],
         "title": "AccessApplyIn",
-        "description": "Request body for applying an access file.\n\nParameters\n----------\nfile_name\n    The file's base name, which the messages and the record use.\ntext\n    The file's content.\nplan_fingerprint\n    The ``fingerprint`` of the plan the caller reviewed (64 hex digits); the apply is\n    refused with 409 when access changed since.\nsource_commit\n    The commit the file came from, 7 to 64 hex digits; recorded with the apply.\nallow_lockout\n    Accept a file that drops the caller's own ``ADMIN`` role while another administrator\n    remains."
+        "description": "Request body for applying an access file.\n\nParameters\n----------\nfile_name\n    The file's base name, which the messages and the record use.\ntext\n    The file's content.\nplan_fingerprint\n    The ``fingerprint`` of the plan the caller reviewed (64 hex digits); the apply is\n    refused with 409 when the file or access changed since.\nsource_commit\n    The commit the file came from, 7 to 64 hex digits; recorded with the apply.\nallow_lockout\n    Accept a file that drops the caller's own ``ADMIN`` role while another administrator\n    remains."
       },
       "AccessApplyOut": {
         "properties": {

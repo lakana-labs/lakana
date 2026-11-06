@@ -572,10 +572,14 @@ class AccessService:
             file_sha256=parsed.sha256,
             manages=parsed.manages,
             changes=changes,
-            releases=tuple(sorted(managed.keys() - scopes.names)),
-            drift=drift(changes, scopes, frozenset(managed)) + self._override_drift(scopes),
+            releases=tuple(
+                sorted(n for n in managed if n not in scopes.names and not _covered(n, scopes))
+            ),
+            drift=drift(changes, scopes, frozenset(managed)) + self._override_drift(covered),
             problems=tuple(cap_problems(parsed.file_name, problems)),
-            fingerprint=fingerprint(live.state.owned(covered), sorted(managed.items())),
+            fingerprint=fingerprint(
+                live.state.owned(covered), sorted(managed.items()), parsed.sha256
+            ),
         )
 
     def _names(self, ids: set[uuid.UUID | None]) -> dict[uuid.UUID, str]:
@@ -606,12 +610,12 @@ class AccessService:
         return list(self._session.scalars(found.order_by(AccessOverride.created_at)))
 
     def _override_drift(self, scopes: Scopes) -> tuple[Drift, ...]:
-        """Name the open overrides of the scopes a file manages.
+        """Name the open overrides an apply of the file would resolve.
 
         Parameters
         ----------
         scopes
-            The scopes.
+            The scopes the file manages and those managed before it.
 
         Returns
         -------
@@ -688,8 +692,9 @@ class AccessService:
             plan = self._plan_text(p, text, file_name=file_name, allow_lockout=allow_lockout)
             if plan.fingerprint != plan_fingerprint:
                 raise ConflictError(
-                    f"access changed since your plan (fingerprint {plan_fingerprint[:12]}…); "
-                    "nothing was applied. Run lakana access plan again and review the changes"
+                    "the file or the access changed since your plan (fingerprint "
+                    f"{plan_fingerprint[:12]}…); nothing was applied. Run lakana access plan "
+                    "again and review the changes"
                 )
             if plan.problems:
                 raise AccessFileError(plan.problems)
@@ -774,9 +779,11 @@ class AccessService:
             row.applied_by = p.id
             row.applied_at = now
             self._session.add(row)
-        for scope in plan.releases:
-            self._session.delete(self._session.get_one(AccessManagedScope, scope))
-        touched = {*plan.manages, *plan.releases}
+        touched = set(plan.manages)
+        for row in self._session.scalars(select(AccessManagedScope)).all():
+            touched.add(row.scope)
+            if row.scope not in plan.manages:
+                self._session.delete(row)
         for override in self._open_overrides():
             if override.scope in touched:
                 override.resolved_at = now
@@ -853,6 +860,24 @@ class AccessService:
                 for row in overrides
             ),
         )
+
+
+def _covered(scope: str, scopes: Scopes) -> bool:
+    """Say whether the file's scopes still cover a scope managed before.
+
+    Parameters
+    ----------
+    scope
+        A scope managed before.
+    scopes
+        The scopes the file manages.
+
+    Returns
+    -------
+    bool
+        True for an environment under a managed ``instance``.
+    """
+    return scope != INSTANCE and scopes.instance
 
 
 def _active_after(live: LiveAccess, changes: Sequence[PlannedChange]) -> frozenset[str]:

@@ -259,7 +259,7 @@ changes nothing. It prints:
 | `- text` | Access that exists in a managed scope and that the file does not list; the apply would remove it. |
 | `! drift in prod: text` | Access in a scope that no earlier apply of a file has managed yet, made outside any file; the apply would remove it, so look before you apply. The scope is the environment, or `instance`. When known, `— by, at: reason` follows: who made it, when (a timestamp) and why. These are printed only when known; a first apply has none. In a managed scope, drift is an override, and its text ends with `(override)` (see [The override](#the-override)). |
 | `No changes.` | The file and the live access agree. |
-| `Fingerprint: ...` | A hash of the live access of the managed scopes, which an apply checks again. |
+| `Fingerprint: ...` | A hash of the exact text of the file and of the live access of the managed scopes. An apply plans the file again and checks it: a different file, or access changed since, gives a different value. |
 
 The problems of the file are not changes. When there are any, `plan` prints all of them on
 stderr, each naming the file, the entry and its line, the cause and the next step, and exits with
@@ -295,11 +295,11 @@ id. It records the scopes the file manages, the file's hash and the commit, and 
 those scopes refuse changes made outside the file (see [Changes outside the
 file](#changes-outside-the-file)). A scope that an earlier apply managed and the file no longer
 lists is released: the plan shows `stops managing prod`, and the apply prints `Stopped managing:
-prod`.
+prod`. An environment that a managed `instance` still covers is not released, and the plan lists every open override the apply resolves, in the scopes managed before or after.
 
 | Option | Meaning |
 |---|---|
-| `--plan-fingerprint F` | The `Fingerprint:` of the plan you reviewed. The command then applies without asking, even without `--yes`, since that plan was the review; it is refused with `409` when access changed since. |
+| `--plan-fingerprint F` | The `Fingerprint:` of the plan you reviewed. The command then applies without asking, even without `--yes`, since that plan was the review; it is refused with `409` when the file or the access changed since: the apply does what the plan showed, for exactly that file text. |
 | `--source-commit SHA` | The commit the file came from (7 to 64 hex digits). Recorded with the apply and shown by `status`. |
 | `--yes` | Do not ask. |
 | `--allow-lockout` | As for `plan`. |
@@ -361,7 +361,7 @@ way, where CI only plans.
 | `access.yaml: the file removes your own ADMIN role on the instance (MANAGE_GRANT); keep it, or repeat with --allow-lockout if another administrator applies from now on` | Pass `--allow-lockout` only when someone else will apply from now on. |
 | `file_name must be 1 to 255 characters without / or \ or a control character; send the file's base name, such as access.yaml` | `422`: send the base name only. |
 | `no environment X; lakana env list shows them` | `422`, for `export --scope`. |
-| `access changed since your plan (fingerprint 3fa9c1…); nothing was applied. Run lakana access plan again and review the changes` | `409`. Someone changed access after your plan. Plan again, read the new plan, and apply with its fingerprint. |
+| `the file or the access changed since your plan (fingerprint 3fa9c1…); nothing was applied. Run lakana access plan again and review the changes` | `409`. The file or the access changed after your plan (a different file text, or someone changed access). Plan again, read the new plan, and apply with its fingerprint. |
 | `access.yaml: ...` (one line per problem, the same texts as above) | `422` from `apply`: the file has problems and nothing was applied. All are listed, at most 50 and then `and N more problems`. Fix them, then plan again. |
 | `the file removes your own ADMIN role in more than one change, so it would end before the rest of the changes can be made; nothing was applied. Apply in two steps: ...` | `409`. Your last way to administer is a group whose `ADMIN` grant and whose membership of you both go. Apply a first file that keeps one of them, then the file without it. |
 | `access.yaml: service_accounts: the file removes service:access-admin, the account applying it, which would end its access part-way through the apply; have another administrator apply this file` | A problem in the plan, so `422` on apply. The account applying the file cannot remove itself. Another administrator applies the file, or keep the account in `service_accounts`. |

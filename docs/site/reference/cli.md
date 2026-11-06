@@ -1280,7 +1280,7 @@ Usage: `lakana access apply [OPTIONS] {file}`
 
 Make an access file's changes in one audited transaction, or none of them.
 
-Without `--plan-fingerprint` the command plans the file, shows the plan and asks before it applies exactly that plan. With `--plan-fingerprint` it does not ask: that plan was the review. In CI, pass `--yes` and the fingerprint of the plan step: the apply is refused, with nothing changed, when access changed since that plan. Needs the ADMIN role on the instance and a personal access token.
+Without `--plan-fingerprint` the command plans the file, shows the plan and asks before it applies exactly that plan. With `--plan-fingerprint` it does not ask: that plan was the review. In CI, pass `--yes` and the fingerprint of the plan step: the apply is refused, with nothing changed, when the file or the access changed since that plan. Needs the ADMIN role on the instance and a personal access token.
 
 The file format: https://lakana-labs.github.io/lakana/reference/access-file/.
 

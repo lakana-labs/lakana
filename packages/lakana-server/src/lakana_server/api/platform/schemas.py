@@ -4875,7 +4875,7 @@ class AccessApplyIn(BaseModel):
         The file's content.
     plan_fingerprint
         The ``fingerprint`` of the plan the caller reviewed (64 hex digits); the apply is
-        refused with 409 when access changed since.
+        refused with 409 when the file or access changed since.
     source_commit
         The commit the file came from, 7 to 64 hex digits; recorded with the apply.
     allow_lockout

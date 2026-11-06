@@ -1203,3 +1203,17 @@ def test_paths_the_file_creates_keep_the_caller_admin(
         ordered, admin, direct=False, caller_groups={"old"}, admin_groups={"old"}
     )
     assert found is lost
+
+
+def test_a_fingerprint_of_one_file_does_not_apply_another(session: Session) -> None:
+    """Review I1: the fingerprint binds the file text; B under A's fingerprint is refused."""
+    world = access_world(session)
+    service = _service(session, world)
+    file_a = "version: 1\nmanages: [prod]\n"
+    file_b = file_a + "grants:\n  - {to: user:bob, role: VIEWER, on: prod}\n"
+    plan_a = service.plan(world.admin, file_a)
+    assert plan_a.fingerprint != service.plan(world.admin, file_b).fingerprint
+    with pytest.raises(ConflictError, match="the file or the access changed"):
+        service.apply(world.admin, file_b, plan_fingerprint=plan_a.fingerprint)
+    assert session.get(AccessManagedScope, "prod") is None
+    assert not session.scalars(select(Grant).where(Grant.environment == "prod")).all()

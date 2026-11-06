@@ -155,7 +155,8 @@ def test_removals_in_a_scope_not_yet_managed_are_drift(session: Session) -> None
     assert plan.fingerprint == fingerprint(
         AccessState(
             frozenset({GrantEntry(Subject("user", "bob"), "VIEWER", None, Target("staging"))})
-        )
+        ),
+        file_sha256=plan.file_sha256,
     )
 
 
