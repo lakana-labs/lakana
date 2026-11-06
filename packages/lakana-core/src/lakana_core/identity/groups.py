@@ -372,7 +372,7 @@ class GroupService:
             self._session, p, environment=None, change=f"remove {principal_name} from {group_name}"
         )
         if self._grants_instance_admin(group.id):
-            assert_admin_headroom(self._session, excluding_principal_id=principal.id)
+            assert_admin_headroom(self._session, excluding_membership=(group.id, principal.id))
         self._session.delete(membership)
         AuditService(self._session).record(
             p.id,
