@@ -3470,6 +3470,47 @@ class PolicyWarningOut(BaseModel):
     message: str
 
 
+class ImpactUseOut(BaseModel):
+    """One use of a retyped column by another repository.
+
+    Parameters
+    ----------
+    kind
+        The metadata graph's node kind: ``asset``, ``reference``, ``measure``, ``check`` or
+        ``term``.
+    name
+        Its name, as the metadata graph shows it.
+    repository
+        Its repository.
+    """
+
+    kind: str
+    name: str
+    repository: str
+
+
+class ImpactWarningOut(BaseModel):
+    """A column a task's write retyped, and what other repositories use it for.
+
+    Parameters
+    ----------
+    table
+        The column's table.
+    column
+        The retyped column.
+    uses
+        Its uses the caller may see (`ImpactUseOut`); empty when Lakana could not check them in
+        time, which `message` then says.
+    message
+        What happened, the next step and the uses, in one paragraph.
+    """
+
+    table: str
+    column: str
+    uses: list[ImpactUseOut] = Field(default_factory=list)
+    message: str
+
+
 class TaskRunOut(BaseModel):
     """One task run.
 
@@ -3540,6 +3581,13 @@ class TaskRunOut(BaseModel):
         those writes left out of date (`PolicyWarningOut`); reads by the people they apply to are
         refused until an administrator creates them again. Always empty for every other caller,
         who may not learn which policies exist.
+    impact_warnings
+        Per column those writes retyped (its type changed in a way that does not widen), what
+        other repositories than the run's use it for: references, measures, checks, glossary terms
+        and assets that read it (`ImpactWarningOut`), computed when the run wrote the table. Only
+        what the caller may see: READ_ENVIRONMENT, and READ_TABLE on the retyped table and on
+        every table a use names; a use the caller may not see is left out without a count. Empty
+        for a task without a retyped column that others use.
     """
 
     asset: str
@@ -3568,6 +3616,7 @@ class TaskRunOut(BaseModel):
     failure: FailureOut | None = None
     schema_note: str | None = None
     policy_warnings: list[PolicyWarningOut] = Field(default_factory=list)
+    impact_warnings: list[ImpactWarningOut] = Field(default_factory=list)
 
 
 class NotificationOut(BaseModel):

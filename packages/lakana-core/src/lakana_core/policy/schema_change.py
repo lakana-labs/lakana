@@ -9,7 +9,9 @@ fail. A policy bound to field ids (`policy.field_binding`) is judged by them: a 
 working and is no warning; only a dropped or replaced field is.
 
 A task run stores, for its writes that removed or replaced a column, the tables and the policies
-found (`merge_schema_change`): ``{"tables": [...], "policies": [BrokenPolicy.to_json(), ...]}``.
+found (`merge_schema_change`): ``{"tables": [...], "policies": [BrokenPolicy.to_json(), ...]}``,
+and, for a retyped column that other repositories use, ``"impact"``
+(`lakana_core.catalog.retype_impact`).
 Only a principal who may manage policies learns from it that a policy exists
 (`schema_change_for_reader`): `lakana table get` shows no policies, and listing them needs that
 right. Everyone else sees one neutral line, the same whether or not a policy is affected, on every
@@ -365,7 +367,10 @@ def _message(warning: BrokenPolicy) -> str:
 
 
 def merge_schema_change(
-    held: object, table: str, policies: Sequence[Mapping[str, str]]
+    held: object,
+    table: str,
+    policies: Sequence[Mapping[str, str]],
+    impact: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, list]:
     """Add one write's schema change to what its task run holds.
 
@@ -378,17 +383,30 @@ def merge_schema_change(
         The table whose columns the write removed or replaced.
     policies
         The policies it left out of date, as stored (`BrokenPolicy.to_json`).
+    impact
+        What other repositories use the columns it retyped for, as stored
+        (`lakana_core.catalog.retype_impact.retype_impact`, #446).
 
     Returns
     -------
     dict
-        ``{"tables": [...], "policies": [...]}``, each entry once, in the order first seen.
+        ``{"tables": [...], "policies": [...]}``, each entry once, in the order first seen, and
+        ``"impact": [...]`` the same way once any write of the task stored one.
     """
     tables = changed_tables(held)
     old = held.get("policies") if isinstance(held, Mapping) else None
     merged: list = list(old) if isinstance(old, list) else []
     merged += [dict(policy) for policy in policies if dict(policy) not in merged]
-    return {"tables": [*tables, *([] if table in tables else [table])], "policies": merged}
+    found: dict[str, list] = {
+        "tables": [*tables, *([] if table in tables else [table])],
+        "policies": merged,
+    }
+    old_impact = held.get("impact") if isinstance(held, Mapping) else None
+    uses: list = list(old_impact) if isinstance(old_impact, list) else []
+    uses += [dict(entry) for entry in impact if dict(entry) not in uses]
+    if uses:
+        found["impact"] = uses
+    return found
 
 
 def changed_tables(stored: object) -> tuple[str, ...]:

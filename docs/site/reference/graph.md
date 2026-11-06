@@ -213,7 +213,8 @@ repositories that use it, each with its repository. The how-to shows one:
 
 - It never refuses the deploy.
 - It covers removed tables and columns. A changed column type is not seen at deploy, because a
-  project records no types ([#446](https://github.com/lakana-labs/lakana/issues/446)).
+  project records no types; the run that changes it names what other repositories use the column
+  for ([What a run that changes a column type tells you](../how-to/find-what-a-change-breaks.md#what-a-run-that-changes-a-column-type-tells-you)).
   A column counts as removed only when both the deployed and the new version of its asset list
   their columns, which a `SELECT` with named columns does; `SELECT *` and Python assets are not
   checked.

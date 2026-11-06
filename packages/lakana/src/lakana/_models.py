@@ -2704,6 +2704,48 @@ class PolicyWarning:
 
 
 @dataclass(frozen=True)
+class ImpactUse:
+    """One use of a retyped column by another repository.
+
+    Parameters
+    ----------
+    kind
+        The metadata graph's node kind: ``asset``, ``reference``, ``measure``, ``check`` or
+        ``term``.
+    name
+        Its name, as the metadata graph shows it.
+    repository
+        Its repository.
+    """
+
+    kind: str
+    name: str
+    repository: str
+
+
+@dataclass(frozen=True)
+class ImpactWarning:
+    """A column a task's write retyped, and what other repositories use it for.
+
+    Parameters
+    ----------
+    table
+        The column's table.
+    column
+        The retyped column.
+    uses
+        The uses you may see; empty when Lakana could not check them in time.
+    message
+        What happened, the next step and the uses.
+    """
+
+    table: str
+    column: str
+    uses: tuple[ImpactUse, ...]
+    message: str
+
+
+@dataclass(frozen=True)
 class RunTask:
     """One task run of a run.
 
@@ -2763,6 +2805,9 @@ class RunTask:
         The row filters and column masks those writes left out of date (`PolicyWarning`), only
         when you may manage policies; empty otherwise, for a task without any, and from an older
         server.
+    impact_warnings
+        Per column those writes retyped, what other repositories use it for (`ImpactWarning`),
+        only what you may see; empty otherwise and from an older server.
     """
 
     asset: str
@@ -2785,6 +2830,7 @@ class RunTask:
     failure: Failure | None = None
     schema_note: str | None = None
     policy_warnings: tuple[PolicyWarning, ...] = ()
+    impact_warnings: tuple[ImpactWarning, ...] = ()
 
 
 @dataclass(frozen=True)

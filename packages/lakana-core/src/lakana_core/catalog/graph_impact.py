@@ -91,11 +91,17 @@ class Hit:
         Why it is listed; `None` for the start (and a column start's table).
     may_use
         Whether it only may use the start, rather than naming it.
+    via
+        The dotted tables the walk passed through to reach it, beyond the start's and its own:
+        the table an asset that reads the start builds, for what names a column it takes from
+        the start (`_readers`). A warning that names it names them too, so that a reader who may
+        not read them is not shown it.
     """
 
     distance: int
     reason: str | None
     may_use: bool
+    via: tuple[str, ...] = ()
 
 
 class _Answer:
@@ -139,10 +145,10 @@ class _Answer:
         old = self.hits.get(node)
         if old is None or (old.may_use and not may_use):
             shortest = distance if old is None else min(distance, old.distance)
-            self.hits[node] = Hit(shortest, reason, may_use)
+            self.hits[node] = Hit(shortest, reason, may_use, old.via if old else ())
             return True
         if distance < old.distance:
-            self.hits[node] = Hit(distance, old.reason, old.may_use)
+            self.hits[node] = Hit(distance, old.reason, old.may_use, old.via)
         return False
 
 
@@ -263,7 +269,7 @@ def _settle(answer: _Answer, starts: list[str]) -> None:
                 distance[other] = distance[node] + 1
                 queue.append(other)
     for node, hit in answer.hits.items():
-        answer.hits[node] = Hit(distance[node], hit.reason, hit.may_use)
+        answer.hits[node] = Hit(distance[node], hit.reason, hit.may_use, hit.via)
 
 
 def _on_column(ctx: _Context, answer: _Answer, column: str, dotted: str, base: int) -> None:
@@ -416,7 +422,13 @@ def _readers(ctx: _Context, answer: _Answer, table: str, dotted: str, column: st
             for name in ctx.graph.columns_of(built_id):
                 node = column_node(built_id, name)
                 if name.casefold() in derived and ctx.visible.node(node):
+                    before = set(answer.hits)
                     _on_column(ctx, answer, node, built_dotted, 3)
+                    for found in set(answer.hits) - before:
+                        hit = answer.hits[found]
+                        answer.hits[found] = Hit(
+                            hit.distance, hit.reason, hit.may_use, (*hit.via, built_dotted)
+                        )
 
 
 def _downstream(ctx: _Context, answer: _Answer, table: str, *, may_use: bool) -> None:

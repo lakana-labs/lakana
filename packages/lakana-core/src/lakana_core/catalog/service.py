@@ -331,7 +331,12 @@ from lakana_core.models import (
 from lakana_core.models.run import TERMINAL_TASK_STATUSES
 from lakana_core.pagination import Page, escape_like
 from lakana_core.policy.resolver import PolicyResolver
-from lakana_core.policy.schema_change import BrokenPolicy, broken_policies, changed_columns
+from lakana_core.policy.schema_change import (
+    REPLACED,
+    BrokenPolicy,
+    broken_policies,
+    changed_columns,
+)
 from lakana_core.projects.layers import LAYERS
 from lakana_core.projects.translations import MAX_LANGUAGES
 from lakana_core.query_rewrite import ViewDefinition
@@ -5078,7 +5083,7 @@ class CatalogService:
         schema_change = (
             None
             if maintenance or internal_rollback or own_data_files
-            else self._commit_schema_change(ref, table_id, current, updated)
+            else self._commit_schema_change(p, ref, table_id, current, updated)
         )
         had, has = current.current_snapshot_id, updated.current_snapshot_id
         with self._state_withheld(
@@ -5160,11 +5165,15 @@ class CatalogService:
                 detail={
                     "target": ref.dotted(),
                     "principal": p.name,
-                    "broken_policies": list(schema_change),
+                    "broken_policies": list(schema_change[0]),
                 },
             )
             self._guard.note_schema_change(
-                ref.environment, table_target(ref), table=ref.dotted(), policies=schema_change
+                ref.environment,
+                table_target(ref),
+                table=ref.dotted(),
+                policies=schema_change[0],
+                impact=schema_change[1],
             )
         commit_metadata_pointer(
             self._session,
@@ -5345,15 +5354,20 @@ class CatalogService:
 
     def _commit_schema_change(
         self,
+        p: PrincipalRef,
         ref: TableRef,
         table_id: uuid.UUID,
         current: TableMetadata,
         updated: TableMetadata,
-    ) -> tuple[dict[str, str], ...] | None:
-        """Find the column change of an Iceberg commit and the policies it leaves out of date.
+    ) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, object], ...]] | None:
+        """Find the column change of an Iceberg commit, its broken policies and retypes' uses.
+
+        The uses are what other repositories use the columns it retypes for (#446).
 
         Parameters
         ----------
+        p
+            The committer; only a write in a task run asks what other repositories use.
         ref
             The table.
         table_id
@@ -5365,9 +5379,9 @@ class CatalogService:
 
         Returns
         -------
-        tuple of dict or None
-            The policies, as stored (possibly none), when the commit removes or replaces a column;
-            `None` when it does not.
+        tuple or None
+            The policies and the uses, as stored (possibly none), when the commit removes or
+            replaces a column; `None` when it does not.
         """
         if updated.current_schema_id == current.current_schema_id:
             return None
@@ -5382,7 +5396,37 @@ class CatalogService:
             before=current.schema(),
             after=updated.schema(),
         )
-        return tuple(warning.to_json() for warning in broken)
+        impact = self._retype_impact(p, ref, current.schema(), changed)
+        return tuple(warning.to_json() for warning in broken), impact
+
+    def _retype_impact(
+        self, p: PrincipalRef, ref: TableRef, before: Schema, changed: Mapping[str, str]
+    ) -> tuple[dict[str, object], ...]:
+        """Find what other repositories use the columns a write in a task run retypes for (#446).
+
+        Parameters
+        ----------
+        p
+            The writer; nothing is asked outside a task run.
+        ref
+            The table.
+        before
+            Its schema before the write.
+        changed
+            `changed_columns` of the write.
+
+        Returns
+        -------
+        tuple of dict
+            The uses as stored (`retype_impact`); empty outside a run or without a retype.
+        """
+        if p.run_context is None:
+            return ()
+        # Imported here: the metadata graph imports the projects package, which imports this one.
+        from lakana_core.catalog.retype_impact import retype_impact, retyped_columns
+
+        columns = retyped_columns((f.name for f in before.fields), changed, REPLACED)
+        return retype_impact(self._session, p, ref.environment, ref.dotted(), columns)
 
     def roll_back(
         self,
@@ -7603,6 +7647,7 @@ class CatalogService:
             table_name=ref.dotted(),
         )
         changed = {} if plan.schema is None else changed_columns(current.schema(), plan.schema)
+        impact = self._retype_impact(p, ref, current.schema(), changed)
         broken = broken_policies(
             self._session,
             table_id,
@@ -7673,6 +7718,7 @@ class CatalogService:
                 publishes=unpublished,
                 policy_warnings=broken,
                 columns_changed=bool(changed),
+                retype_impact=impact,
                 files_read=files_read,
             )
             self.commit_table(
@@ -8539,6 +8585,7 @@ class CatalogService:
         detail: Mapping[str, object] | None = None,
         policy_warnings: Sequence[BrokenPolicy] = (),
         columns_changed: bool = False,
+        retype_impact: tuple[dict[str, object], ...] = (),
         files_read: FilesReadReport | None = None,
     ) -> None:
         """Add a write's `TABLE_WRITE` event and lineage edges to the session, uncommitted.
@@ -8583,6 +8630,9 @@ class CatalogService:
             Whether the write removed or replaced a column: the guard records that on the task run
             of a write in a run, with or without a policy, so that what a reader who manages no
             policies is shown does not tell whether one exists.
+        retype_impact
+            What other repositories use the columns the write retypes for, as stored: the guard
+            records it on the task run with the schema change (#446).
         files_read
             The files the write's run read, recorded with its snapshot; nothing when no snapshot
             was committed. A committed `REPLACE` first deletes the table's earlier record, sent
@@ -8634,7 +8684,11 @@ class CatalogService:
         )
         if columns_changed:
             self._guard.note_schema_change(
-                ref.environment, table_target(ref), table=ref.dotted(), policies=stored
+                ref.environment,
+                table_target(ref),
+                table=ref.dotted(),
+                policies=stored,
+                impact=retype_impact,
             )
 
     def _connection_sources(

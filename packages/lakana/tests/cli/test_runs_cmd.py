@@ -2032,6 +2032,36 @@ def _changed_task(*messages: str) -> dict[str, object]:
     }
 
 
+def test_runs_show_prints_what_other_repositories_use_a_retyped_column_for(
+    tmp_path: Path,
+) -> None:
+    """#446: each impact warning after the note, in full and escaped."""
+    message = (
+        "This run changed the type of column `region` of `gold.orders`, which other repositories "
+        "use; tell their owners, and see everything it affects with: lakana graph impact --env "
+        "dev gold.orders --column region — what uses it: measure `gold.sales.region` (sales)"
+    )
+    task = {
+        **_task("gold.orders", "succeeded"),
+        "schema_note": _NOTE,
+        "impact_warnings": [
+            {
+                "table": "gold.orders",
+                "column": "region",
+                "uses": [{"kind": "measure", "name": "gold.sales.region", "repository": "sales"}],
+                "message": message + "\x1b[2J",
+            }
+        ],
+    }
+    api = FakeApi()
+    api.on("GET", _RUN_PATH, json=_run("succeeded", task))
+    state = make_state(tmp_path, api)
+
+    lines = invoke(state, "runs", "show", _ID, "--env", "dev", env=_CI).stdout.splitlines()
+    at = lines.index("gold.orders warning:")
+    assert lines[at + 1 :] == [f"  {_NOTE}", f"  {message}\\x1b[2J"]
+
+
 def test_runs_show_and_run_print_the_note_and_an_administrators_warnings(tmp_path: Path) -> None:
     """The note for everyone, the warnings in full and escaped; a run without either prints none."""
     api = FakeApi()

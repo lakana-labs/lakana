@@ -323,14 +323,16 @@ def _emit_failures(run: Run) -> None:
 
 
 _WARNING_LIMIT = 1000
-"""The most characters of a policy warning `lakana runs show` keeps; the server's are shorter."""
+"""The most characters of a warning `lakana runs show` keeps. A policy warning is shorter; an impact
+warning's list of uses has no bound, and its next step comes before the list, so a cut keeps it."""
 
 
 def _emit_schema_changes(run: Run) -> None:
     """Print, for each task whose writes changed its table's columns, the note and the warnings.
 
     The note is the same for everyone; the row filters and column masks left out of date come only
-    to an administrator, always with the note. Prints nothing for a run without a column change.
+    to an administrator, always with the note; then what other repositories use a retyped column
+    for, as far as the reader may see it. Prints nothing for a run without a column change.
 
     Parameters
     ----------
@@ -345,6 +347,8 @@ def _emit_schema_changes(run: Run) -> None:
         typer.echo(f"  {_output.inline(task.schema_note, _WARNING_LIMIT)}")
         for warning in task.policy_warnings:
             typer.echo(f"  {_output.inline(warning.message, _WARNING_LIMIT)}")
+        for impact in task.impact_warnings:
+            typer.echo(f"  {_output.inline(impact.message, _WARNING_LIMIT)}")
 
 
 _NAME_PAD = 2

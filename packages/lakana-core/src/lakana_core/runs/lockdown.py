@@ -399,9 +399,15 @@ class ProtectedWriteGuard:
         self._relied_on: _RunWrite | None = None
         self._fence: WriteFence | None = None
         self._evidence: _Evidence | None = None
-        self._schema_change: tuple[tuple[str, Target], str, tuple[dict[str, str], ...]] | None = (
-            None
-        )
+        self._schema_change: (
+            tuple[
+                tuple[str, Target],
+                str,
+                tuple[dict[str, str], ...],
+                tuple[dict[str, object], ...],
+            ]
+            | None
+        ) = None
 
     def note_result(
         self,
@@ -456,6 +462,7 @@ class ProtectedWriteGuard:
         *,
         table: str,
         policies: tuple[dict[str, str], ...],
+        impact: tuple[dict[str, object], ...] = (),
     ) -> None:
         """Remember that the commit of `target` removes or replaces a column, for `record_pending`.
 
@@ -475,8 +482,11 @@ class ProtectedWriteGuard:
         policies
             The row filters and column masks the change leaves out of date, as stored
             (`lakana_core.policy.schema_change.BrokenPolicy.to_json`).
+        impact
+            What other repositories use the columns it retypes for, as stored
+            (`lakana_core.catalog.retype_impact.retype_impact`).
         """
-        self._schema_change = ((environment, target), table, policies)
+        self._schema_change = ((environment, target), table, policies, impact)
 
     def note_own_commit(
         self,
@@ -731,7 +741,7 @@ class ProtectedWriteGuard:
             and schema_change[0] == (relied_on.environment, relied_on.target)
         ):
             self._note_schema_change(
-                relied_on.context.task_run_id, schema_change[1], schema_change[2]
+                relied_on.context.task_run_id, schema_change[1], schema_change[2], schema_change[3]
             )
         if self._pending is None:
             return
@@ -747,7 +757,11 @@ class ProtectedWriteGuard:
         )
 
     def _note_schema_change(
-        self, task_run_id: uuid.UUID, table: str, warnings: tuple[dict[str, str], ...]
+        self,
+        task_run_id: uuid.UUID,
+        table: str,
+        warnings: tuple[dict[str, str], ...],
+        impact: tuple[dict[str, object], ...] = (),
     ) -> None:
         """Add a write's schema change to its task run, in the write's own transaction.
 
@@ -764,6 +778,8 @@ class ProtectedWriteGuard:
             The table whose columns changed.
         warnings
             The policies it left out of date, as stored.
+        impact
+            What other repositories use the columns it retyped for, as stored.
         """
         held = self._session.scalar(
             select(TaskRun.schema_change_json).where(TaskRun.id == task_run_id)
@@ -771,7 +787,7 @@ class ProtectedWriteGuard:
         self._session.execute(
             update(TaskRun)
             .where(TaskRun.id == task_run_id)
-            .values(schema_change_json=merge_schema_change(held, table, warnings))
+            .values(schema_change_json=merge_schema_change(held, table, warnings, impact))
             .execution_options(synchronize_session=False)
         )
 

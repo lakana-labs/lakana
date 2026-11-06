@@ -841,6 +841,52 @@ def test_an_old_failed_task_without_a_code_is_unknown_over_rest(client: TestClie
     assert task_body["error_message"] == "boom"
 
 
+def test_a_retyped_column_shows_its_uses_to_a_reader_who_may_read_what_they_name(
+    client: TestClient,
+) -> None:
+    """#446: `impact_warnings`, withheld from a reader without READ_TABLE on a named table."""
+    _deploy(client)
+    started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
+    use = {
+        "table": "silver.clean",
+        "column": "region",
+        "kind": "measure",
+        "name": "gold.other.region",
+        "repository": "other",
+        "tables": ["gold.other", "silver.clean"],
+    }
+    with Session(client.app.state.engine) as session:
+        task = session.query(TaskRun).filter(TaskRun.run_id == uuid.UUID(started["id"])).one()
+        task.schema_change_json = {"tables": ["silver.clean"], "policies": [], "impact": [use]}
+        session.commit()
+    outsider = _token_for(client, "outsider")
+    created = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "outsider",
+            "action": "READ_ENVIRONMENT",
+            "kind": "ENVIRONMENT",
+            "environment": "dev",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    def task_of(headers: dict[str, str]) -> dict[str, Any]:
+        shown = client.get(f"{_RUNS}/{started['id']}", headers=headers)
+        assert shown.status_code == 200, shown.text
+        (task_body,) = shown.json()["tasks"]
+        return task_body
+
+    (warning,) = task_of(AUTH_HEADER)["impact_warnings"]
+    assert (warning["table"], warning["column"]) == ("silver.clean", "region")
+    assert warning["uses"] == [
+        {"kind": "measure", "name": "gold.other.region", "repository": "other"}
+    ]
+    assert warning["message"].endswith("— what uses it: measure `gold.other.region` (other)")
+    assert task_of(outsider)["impact_warnings"] == []
+
+
 def test_a_schema_change_shows_policy_details_only_to_an_administrator(client: TestClient) -> None:
     """Non-administrators get one neutral line, the same with or without a policy on the column."""
     _deploy(client)

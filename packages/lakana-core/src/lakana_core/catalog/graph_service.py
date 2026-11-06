@@ -1160,7 +1160,8 @@ class GraphService:
         -------
         dict
             Node → each declaration naming it and each asset reading it, with the dotted tables
-            it names (`_named_tables`), in node id order.
+            it names (`_named_tables`) and those the walk passed through to reach it
+            (`Hit.via`), in node id order.
 
         Raises
         ------
@@ -1173,21 +1174,19 @@ class GraphService:
         """
         ctx = self._open(p, environment, nodes[0] if nodes else "")
         walked: list[tuple[str, list[tuple[str, _Found]]]] = []
+        via: dict[tuple[str, str], tuple[str, ...]] = {}
         for node in nodes:
             found = ctx.graph.resolve(parse_node(node))
             if found is None or not ctx.visible.node(found):
                 continue
             hits, _ = impact_of(ctx, found, key=False, named_only=True)
-            walked.append(
-                (
-                    node,
-                    [
-                        (n, _Found(h.distance, h.reason))
-                        for n, h in sorted(hits.items())
-                        if not h.may_use and node_kind(n) in WARNING_KINDS
-                    ],
-                )
-            )
+            listed = [
+                (n, h)
+                for n, h in sorted(hits.items())
+                if not h.may_use and node_kind(n) in WARNING_KINDS
+            ]
+            via.update(((node, n), h.via) for n, h in listed)
+            walked.append((node, [(n, _Found(h.distance, h.reason)) for n, h in listed]))
             ctx.budget.check()
         # One build for every answer, so its statements do not grow with the number of nodes.
         built = self._nodes(ctx, [e for _, entries in walked for e in entries], ())
@@ -1196,7 +1195,10 @@ class GraphService:
         start = 0
         for node, entries in walked:
             end = start + len(entries)
-            answers[node] = tuple((g, _named_tables(ctx.graph, g.id)) for g in built[start:end])
+            answers[node] = tuple(
+                (g, tuple(dict.fromkeys((*_named_tables(ctx.graph, g.id), *via[node, g.id]))))
+                for g in built[start:end]
+            )
             start = end
         return answers
 
