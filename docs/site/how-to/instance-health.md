@@ -313,9 +313,10 @@ lakana task history hourly_bronze bronze.readings --env dev --last 10
 - **`resources`**: the highest memory the attempt reached, its processor time and the bytes it
   read, for example `412 MiB · 3.1 s CPU · 1.2 GiB read`. A part that was not measured is left
   out, and a row with no part at all shows `—`. For a Python task in a container the memory and
-  processor time come from the container's cgroup, read by the launcher about once a second, so
-  the memory is the last reading of a task that lived long enough and the row shows `—` where the
-  launcher cannot read the host's cgroup tree
+  processor time come from the container's cgroup, read by the launcher about four times a second:
+  they are at least that much (growth after the last reading is not counted), a task that ends
+  before the first reading can show `—`, and so does every task where the launcher cannot read the
+  host's cgroup tree
   ([Peak memory and processor time of a task](run-python-tasks-in-containers.md#the-launcher)).
 
 A task whose memory climbs run over run reads from the bottom of the table upwards: the

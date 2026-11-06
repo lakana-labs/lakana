@@ -27,9 +27,10 @@ connections its asset declares.
   default), enforced by the kernel. A task over its memory ends with "this task was ended because
   it used more than its container's memory limit" and is retried while it has attempts left.
   The attempt's peak memory and processor time are read by the launcher from the container's
-  cgroup, about once a second and once more when the container ends, so a task that lives for
-  under a second may show `—` (see [The launcher](#the-launcher)). They appear as `resources` in
-  `lakana runs show` and `lakana task history`.
+  cgroup, at once, about four times a second and as the task's output ends. They are the
+  highest values seen by the last successful read, so at least that much: growth after it is not
+  counted, and a task that ends before the first read can show `—` (see
+  [The launcher](#the-launcher)). They appear as `resources` in `lakana runs show` and `lakana task history`.
 - **Leftovers.** When a task ends, is cancelled or times out, or its worker stops or dies (its
   connection to the launcher closes), the container is removed with every process in it,
   including those the task started in the background. An environment build is stopped the same
