@@ -297,6 +297,23 @@ def test_a_removed_column_names_the_assets_that_read_it_and_what_names_their_col
     assert entry["tables"] == ["gold.dim_store", "gold.fact_sales"]
 
 
+def test_only_the_reader_whose_lineage_takes_the_removed_column_is_named(
+    star: StarWorld,
+) -> None:
+    sales = _sales_reading_the_store_name()
+    other = asset_entry("gold.store_names", ("gold.dim_store",), "o", columns=("store_id",))
+    other["lineage"] = {"store_id": [{"table": "gold.dim_store", "column": "store_id"}]}
+    sales["assets"].append(other)
+    point(star.session, star.env_id, star.repos["sales"], sales)
+    star.session.commit()
+    manifest = stores_manifest()
+    manifest["assets"][0]["columns"] = ["store_id"]
+    p = _principal(star.session, "deployer")
+    (entry,) = _stored(_deploy(star, p, _everything(), manifest))
+    assert "asset `gold.fact_sales` (sales)" in entry["warning"]
+    assert "gold.store_names" not in entry["warning"]
+
+
 def test_an_asset_without_a_column_list_is_not_named_for_a_removed_column(
     star: StarWorld,
 ) -> None:

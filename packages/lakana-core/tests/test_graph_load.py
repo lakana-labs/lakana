@@ -20,6 +20,7 @@ from pyiceberg.types import NestedField, StringType
 from sqlalchemy import event, select
 
 from lakana_core.auth import PrincipalRef
+from lakana_core.catalog import graph_service
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.glossary import write_glossary
 from lakana_core.catalog.glossary_read import term_names
@@ -649,3 +650,26 @@ def test_the_graph_load_stops_at_the_budget_between_repositories(
     with pytest.raises(GraphBusyError):
         service.breakage(principal, "dev", ["gold.dim_store"])
     assert len(read) == 1  # stopped after the first part, not after loading both
+
+
+def test_lineage_is_read_only_from_an_entry_that_lists_its_columns_and_skips_junk() -> None:
+    entry = asset_entry("gold.x", ("gold.a",), "o", columns=("c",))
+    entry["lineage"] = {
+        "c": [{"table": "gold.a", "column": "k"}, "junk", {"table": 1, "column": "k"}],
+        "d": "junk",
+        7: [],
+    }
+    (asset,) = manifest_part("r", {"assets": [entry]}).assets
+    assert asset.lineage == (("c", "gold.a", "k"),)
+
+
+def test_mask_fields_are_cached_per_table() -> None:
+    """Each table read once per request, whoever asks again (`shown_policies` asks once too)."""
+    read: list[uuid.UUID] = []
+    fields = graph_service._MaskFields(
+        lambda table_id, _seconds: read.append(table_id) or (),
+        graph_service._Budget(lambda: 0.0, 10.0, 10),
+    )
+    table = uuid.uuid4()
+    assert fields(table) == fields(table) == ()
+    assert read == [table]

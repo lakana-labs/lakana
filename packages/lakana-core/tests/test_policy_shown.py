@@ -323,6 +323,22 @@ def test_a_read_past_its_time_gives_no_fields_without_waiting_for_storage(
     assert "did not answer within" in caplog.text
 
 
+def test_a_read_within_its_time_gives_its_fields_or_its_error(
+    session: Session, gold: CatalogService, caplog: pytest.LogCaptureFixture
+) -> None:
+    table_id = _table_id(session, "orders")
+    found = current_fields.current_fields(session, StorageResolver(session), table_id, timeout=5)
+    assert found is not None
+    assert [f.name for f in found] == ["id", "status"]
+    with mock.patch.object(current_fields, "read_metadata", side_effect=OSError("secret path")):
+        assert (
+            current_fields.current_fields(session, StorageResolver(session), table_id, timeout=5)
+            is None
+        )
+    assert "(OSError)" in caplog.text
+    assert "secret path" not in caplog.text
+
+
 def test_the_catalog_refuses_the_fields_to_a_principal_who_may_not_manage_policies(
     session: Session, principal: PrincipalRef, gold: CatalogService
 ) -> None:

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -180,28 +181,26 @@ def retyped_columns(fields: Iterable[str], changed: Mapping[str, str], replaced:
     return [name for name in fields if changed.get(name.casefold()) == replaced]
 
 
-def run_repository(session: Session, p: PrincipalRef) -> str | None:
-    """Name the repository of the run a write is executed for.
+def run_repository(session: Session, task_run_id: uuid.UUID) -> str | None:
+    """Name the repository of the run a task run belongs to.
 
     Parameters
     ----------
     session
         Database session.
-    p
-        The writer; its run context names the task run.
+    task_run_id
+        The task run a write is executed for.
 
     Returns
     -------
     str or None
-        The repository's name; `None` for a write outside a run.
+        The repository's name; `None` when no such task run exists.
     """
-    if p.run_context is None:
-        return None
     return session.scalar(
         select(Repository.name)
         .join(Run, Run.repository_id == Repository.id)
         .join(TaskRun, TaskRun.run_id == Run.id)
-        .where(TaskRun.id == p.run_context.task_run_id)
+        .where(TaskRun.id == task_run_id)
     )
 
 
@@ -255,7 +254,7 @@ def retype_impact(
             continue
     try:
         with session.begin_nested():
-            own = run_repository(session, p)
+            own = run_repository(session, p.run_context.task_run_id)
             graph = GraphService(
                 session,
                 _SeesTheGraph(),

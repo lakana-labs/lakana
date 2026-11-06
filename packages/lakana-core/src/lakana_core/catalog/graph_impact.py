@@ -31,7 +31,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from lakana_core.catalog.graph_load import AssetRecord, CheckRecord, ReferenceRecord
 from lakana_core.catalog.graph_model import (
@@ -401,9 +401,8 @@ def _readers(ctx: _Context, answer: _Answer, table: str, dotted: str, column: st
     if wanted is not None and not ctx.graph.column_readers.get((dotted, wanted)):
         return  # no lineage reads it: the table's readers are not walked for nothing
     for read, asset in ctx.around(table, (EdgeKind.READS,)):
-        record = ctx.graph.records[asset]
-        if not isinstance(record, AssetRecord):
-            continue
+        # A `reads` edge always starts at an asset (`EnvironmentGraph.add_part`).
+        record = cast(AssetRecord, ctx.graph.records[asset])
         if wanted is None:
             answer.add(asset, 1, f"reads {dotted}", False, read)
             continue

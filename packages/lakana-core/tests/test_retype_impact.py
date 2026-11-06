@@ -15,10 +15,11 @@ from pyiceberg.table.update import AddSchemaUpdate, AssertCurrentSchemaId, SetCu
 from pyiceberg.types import LongType, NestedField
 from sqlalchemy import select
 
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef, RunContext
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunContext, Securable
+from lakana_core.catalog import retype_impact as retype_impact_module
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.retype_impact import ImpactUseView, ImpactWarningView
-from lakana_core.errors import GraphBusyError
+from lakana_core.errors import GraphBusyError, PermissionDenied
 from lakana_core.identifiers import TableRef
 from lakana_core.models import Environment, Run, TaskRun, WriteMode
 from lakana_core.policy.schema_change import COLUMNS_CHANGED_NOTE
@@ -209,3 +210,52 @@ def test_a_write_outside_a_run_computes_no_impact(
         evolve_schema=True,
     )
     assert asked == []
+
+
+def test_the_graph_service_of_the_check_answers_visibility_and_permits_no_action(
+    principal: PrincipalRef,
+) -> None:
+    sees = retype_impact_module._SeesTheGraph()
+    scope = Securable.environment_scope("dev")
+    assert sees.permits(principal, Action.READ_ENVIRONMENT, scope)
+    assert not sees.permits(principal, Action.MANAGE_POLICY, Securable.instance_scope())
+    with pytest.raises(PermissionDenied):
+        sees.authorize(principal, Action.READ_ENVIRONMENT, scope)
+
+
+def test_a_column_name_the_graph_cannot_read_is_recorded_as_unchecked(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    bound = dataclasses.replace(
+        principal, run_context=RunContext(task_run_id=uuid.uuid4(), claim=1)
+    )
+    found = retype_impact_module.retype_impact(
+        star.session, bound, "dev", _DIM, ["a‎b", "store_name"]
+    )
+    assert found == ({"table": _DIM, "column": "a‎b", "unchecked": True},)
+
+
+def test_stored_entries_skip_what_this_module_did_not_write() -> None:
+    use = {
+        "table": _DIM,
+        "column": "c",
+        "kind": "measure",
+        "name": "m",
+        "repository": "r",
+        "tables": [_DIM],
+    }
+    stored = {"impact": [7, {"table": 1, "column": "c"}, {**use, "kind": "mask"}, use]}
+    (entry,) = retype_impact_module.stored_entries(stored)
+    assert entry.use == ImpactUseView("measure", "m", "r")
+
+
+def test_a_stored_use_naming_a_table_that_is_no_table_name_is_withheld(
+    star: StarWorld, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    run_id = _retype_the_store_name(star, principal, tmp_path)
+    task = star.session.scalars(select(TaskRun).where(TaskRun.run_id == run_id)).one()
+    held = dict(task.schema_change_json or {})
+    held["impact"] = [{**entry, "tables": ["not a table"]} for entry in held["impact"]]
+    task.schema_change_json = held
+    star.session.commit()
+    assert _warnings(star, principal, run_id, Grants(others=True))[1] == ()
