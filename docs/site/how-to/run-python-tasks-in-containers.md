@@ -26,6 +26,10 @@ connections its asset declares.
 - **Resources.** Memory, CPUs and processes are limits of the container (`2GB`, `1` and `256` by
   default), enforced by the kernel. A task over its memory ends with "this task was ended because
   it used more than its container's memory limit" and is retried while it has attempts left.
+  The attempt's peak memory and processor time are read by the launcher from the container's
+  cgroup, about once a second and once more when the container ends, so a task that lives for
+  under a second may show `—` (see [The launcher](#the-launcher)). They appear as `resources` in
+  `lakana runs show` and `lakana task history`.
 - **Leftovers.** When a task ends, is cancelled or times out, or its worker stops or dies (its
   connection to the launcher closes), the container is removed with every process in it,
   including those the task started in the background. An environment build is stopped the same
@@ -264,6 +268,25 @@ first two. Keep your additions when you replace `compose.yaml` on an upgrade.
 | `LAKANA_LAUNCHER__EGRESS_REFUSED` | none (from `LAKANA_EGRESS_REFUSED` in `.env`) | Address ranges builds, tasks and connection tests never reach, besides Docker's gateways and the ranges always refused: comma-separated CIDR ranges or addresses, at most 64, such as `192.168.1.0/24,10.0.0.7`. List the Docker host's LAN address or subnet. A malformed entry stops the launcher, naming it. |
 | `LAKANA_LAUNCHER__INGESTION_ROOTS` | none | Host directories, by name, that a task may read at `/ingest/<name>`, as JSON such as `{"shared": "/srv/landing"}`. A task gets only the roots its `directory` and `sqlite-file` connections name. |
 | `LAKANA_LAUNCHER__PROBE_MAX_ENTRIES` | `100000` | The most entries the start-up check looks at in one ingestion root. |
+| `LAKANA_LAUNCHER__CGROUP_ROOT` | `/sys/fs/cgroup` (the Compose bundle sets `/host/cgroup`) | Where the launcher sees the host's cgroup v2 tree, to read each task container's peak memory and processor time. |
+
+**Peak memory and processor time of a task.** The Compose bundle mounts the host's
+`/sys/fs/cgroup` read-only into the launcher at `/host/cgroup`, which the launcher reads
+(`memory.peak` and `cpu.stat`) for the containers it started; it can read nothing else from it
+and writes nothing. Where the launcher cannot read the tree, a task shows `—` for these two
+figures and runs as usual. That is the case with cgroup v1, a kernel before 5.19 (no
+`memory.peak`: only the processor time shows), a Docker that does not use the host's cgroup tree
+(some rootless setups), a bundle from before this mount (add the line below to the `launcher`
+service) and a worker that is newer than its launcher; none of these is an error.
+
+```yaml
+  launcher:
+    # ... the lines that are already here stay ...
+    environment:
+      LAKANA_LAUNCHER__CGROUP_ROOT: /host/cgroup
+    volumes:
+      - /sys/fs/cgroup:/host/cgroup:ro
+```
 
 **The network range.** Task and build networks take their addresses from
 `LAKANA_LAUNCHER__NETWORK_RANGE`. If your network uses `10.207.0.0/16` (a VPN, a site, a company

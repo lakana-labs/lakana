@@ -143,7 +143,9 @@ names it.
 
 The `launcher` service is the only one that holds the Docker socket. The worker asks it, over a
 Unix socket in a volume only the two share, to start each Python task and each environment build
-in a container of its own; it has no network, no capabilities and a read-only filesystem. `egress`
+in a container of its own; it has no network, no capabilities and a read-only filesystem, and
+sees the host's `/sys/fs/cgroup` read-only to read each task's peak memory and processor time
+(see [Settings](run-python-tasks-in-containers.md#the-launcher)). `egress`
 is the only way out of a build container: it lets a build reach the hosts of the package indexes
 its project may use and nothing else. It is also the only way out of a task whose asset declares
 connections: such a task reaches exactly those connections' endpoints (see
