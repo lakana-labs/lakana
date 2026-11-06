@@ -937,6 +937,17 @@ def test_only_the_launcher_holds_the_docker_socket_and_it_has_no_network(
     )
 
 
+def test_the_launcher_sees_the_host_cgroup_tree_read_only_to_measure_tasks(
+    tmp_path: Path, released: None
+) -> None:
+    """Peak memory and processor time of a task container are read from the host's cgroup tree."""
+    launcher = _services(tmp_path)["launcher"]
+
+    assert "/sys/fs/cgroup:/host/cgroup:ro" in launcher["volumes"]
+    assert launcher["environment"]["LAKANA_LAUNCHER__CGROUP_ROOT"] == "/host/cgroup"
+    assert launcher["read_only"] is True and "privileged" not in launcher
+
+
 def test_the_worker_reaches_the_launcher_by_its_socket_and_runs_docker_by_default(
     tmp_path: Path, released: None
 ) -> None:

@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
+from lakana_worker.launcher.cgroup import CgroupReading, CgroupSampler
 from lakana_worker.launcher.egress import PORT as EGRESS_PORT
 from lakana_worker.launcher.egress import REFUSED_FILE
 from lakana_worker.launcher.egress_token import mint, rotate_key
@@ -1992,7 +1993,8 @@ class Launcher:
         Returns
         -------
         dict
-            ``exit``, ``oom_killed``, ``timed_out``, ``stopped``.
+            ``exit``, ``oom_killed``, ``timed_out``, ``stopped``, and the container's
+            ``peak_memory_bytes`` and ``cpu_seconds`` from its cgroup (`None` when unreadable).
 
         Raises
         ------
@@ -2005,6 +2007,8 @@ class Launcher:
         began = time.monotonic()
         timer = threading.Timer(timeout, self._expire, (live,))
         timer.daemon = True
+        sampler: CgroupSampler | None = None
+        reading: CgroupReading | None = None
         try:
             if live.stopped.is_set():
                 return dict(_STOPPED_BEFORE_START)
@@ -2015,6 +2019,8 @@ class Launcher:
                 status, body = self.engine.request("POST", f"/containers/{cid}/start")
                 if status != 204:
                     raise EngineError(f"Docker could not start the container: {_message(body)}")
+                sampler = CgroupSampler(cid, root=self.settings.cgroup_root)
+                sampler.start()
                 if live.stopped.is_set():
                     self._kill(live)
                 timer.start()
@@ -2029,9 +2035,12 @@ class Launcher:
             # The stream ended, so the container is gone or about to be: wait no longer than its
             # timeout, its grace and a margin, then the removal below is forced.
             left = max(timeout - (time.monotonic() - began), 0.0)
-            _, waited = self.engine.request(
-                "POST", f"/containers/{cid}/wait", timeout=left + live.grace + _WAIT_MARGIN
-            )
+            try:
+                _, waited = self.engine.request(
+                    "POST", f"/containers/{cid}/wait", timeout=left + live.grace + _WAIT_MARGIN
+                )
+            finally:
+                reading = sampler.stop() if sampler is not None else None
             _, info = self.engine.request("GET", f"/containers/{cid}/json")
             state = info.get("State", {}) if isinstance(info, dict) else {}
             code = waited.get("StatusCode") if isinstance(waited, dict) else None
@@ -2046,9 +2055,13 @@ class Launcher:
                 "oom_killed": bool(state.get("OOMKilled")) or killed,
                 "timed_out": timed_out,
                 "stopped": stopped,
+                "peak_memory_bytes": reading.peak_memory_bytes if reading else None,
+                "cpu_seconds": reading.cpu_seconds if reading else None,
             }
         finally:
             timer.cancel()
+            if sampler is not None and reading is None:
+                sampler.stop()
             self._remove_container(cid)
 
     def _expire(self, live: _Live) -> None:

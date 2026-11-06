@@ -50,7 +50,7 @@ from typing import Protocol
 
 from lakana_core.projects.history_columns import HistorySpec
 from lakana_core.runs.failures import FailureCode
-from lakana_core.runs.resources import AttemptResources, valid_count
+from lakana_core.runs.resources import AttemptResources, valid_count, valid_seconds
 from lakana_worker.git import HFS_IGNORABLE, fold_name
 from lakana_worker.launcher.requests import EGRESS_MISSING, EGRESS_TOKEN_TOO_LONG, allowed_roots
 from lakana_worker.launcher_client import (
@@ -1822,8 +1822,14 @@ class DockerRunner:
                 "the launcher's log has the reason (docker compose logs launcher)",
                 failure_code=FailureCode.INTERNAL,
             )
+        record = _read_record(work / RESULT_FILE, task.output)
+        resources = AttemptResources(
+            valid_count(result.get("peak_memory_bytes")),
+            valid_seconds(result.get("cpu_seconds")),
+            valid_count((record or {}).get("bytes_read")),
+        )
         outcome = _outcome_from(
-            _read_record(work / RESULT_FILE, task.output),
+            record,
             code=-1 if code is None else code,
             stopped=stopped,
             timed_out=timed_out,
@@ -1838,6 +1844,7 @@ class DockerRunner:
                 error_message="the log sink failed",
                 retryable=False,
                 failure_code=FailureCode.INTERNAL,
+                resources=resources,
             )
         if not outcome.succeeded and stopped and not timed_out and not oom and stop.reason is None:
             return RunOutcome(
@@ -1845,8 +1852,9 @@ class DockerRunner:
                 error_message=_LAUNCHER_STOPPED,
                 killed=True,
                 failure_code=FailureCode.INTERNAL,
+                resources=resources,
             )
-        return outcome
+        return dataclasses.replace(outcome, resources=resources)
 
 
 class CodeUnpackError(Exception):

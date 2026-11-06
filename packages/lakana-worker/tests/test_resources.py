@@ -112,5 +112,6 @@ def test_a_macos_child_of_a_big_parent_reports_a_peak_below_the_parents_buffer()
     for offset in range(0, len(held), 4096):
         held[offset] = 1
     child = subprocess.Popen([sys.executable, "-I", "-c", "pass"])  # nosec B603 -- fixed argv
-    _, _, usage = os.wait4(child.pid, 0)
+    _, status, usage = os.wait4(child.pid, 0)
+    child.returncode = os.waitstatus_to_exitcode(status)  # as `RunningTask.reap` does; no warning
     assert 0 < usage.ru_maxrss < len(held)  # bytes on macOS
