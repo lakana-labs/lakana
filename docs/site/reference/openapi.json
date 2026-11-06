@@ -18835,7 +18835,7 @@
           "applied_at"
         ],
         "title": "AccessApplyOut",
-        "description": "What an apply did.\n\nParameters\n----------\napply_id\n    The apply's id; every audit event of the apply carries it as ``access_apply_id``.\nfile_sha256\n    Hash of the file's text.\nsource_commit\n    The commit the file came from, in lower case; `null` when not given.\ncreated\n    How many entries were created.\nchanged\n    How many CI trust rules were changed in place.\nremoved\n    How many entries were removed.\nreleased\n    The scopes no file manages any longer.\napplied_at\n    When the apply committed."
+        "description": "What an apply did, as the REST answer of `AccessService.apply`.\n\nParameters\n----------\napply_id\n    Find the apply's audit events by it: each carries it as ``access_apply_id``.\nfile_sha256\n    SHA-256 of the applied text, 64 hex digits.\nsource_commit\n    `--source-commit` as sent, lower case, or `null`.\ncreated\n    Count of new entries.\nchanged\n    Count of CI trust rules updated in place.\nremoved\n    Count of entries taken away.\nreleased\n    Scopes that are no longer managed after this apply.\napplied_at\n    Commit time of the apply, UTC."
       },
       "AccessChangeOut": {
         "properties": {

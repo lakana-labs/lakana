@@ -4897,26 +4897,26 @@ class AccessApplyIn(BaseModel):
 
 
 class AccessApplyOut(BaseModel):
-    """What an apply did.
+    """What an apply did, as the REST answer of `AccessService.apply`.
 
     Parameters
     ----------
     apply_id
-        The apply's id; every audit event of the apply carries it as ``access_apply_id``.
+        Find the apply's audit events by it: each carries it as ``access_apply_id``.
     file_sha256
-        Hash of the file's text.
+        SHA-256 of the applied text, 64 hex digits.
     source_commit
-        The commit the file came from, in lower case; `null` when not given.
+        `--source-commit` as sent, lower case, or `null`.
     created
-        How many entries were created.
+        Count of new entries.
     changed
-        How many CI trust rules were changed in place.
+        Count of CI trust rules updated in place.
     removed
-        How many entries were removed.
+        Count of entries taken away.
     released
-        The scopes no file manages any longer.
+        Scopes that are no longer managed after this apply.
     applied_at
-        When the apply committed.
+        Commit time of the apply, UTC.
     """
 
     apply_id: uuid.UUID

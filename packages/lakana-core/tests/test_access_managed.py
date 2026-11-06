@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from access_test_helpers import AccessWorld, access_world, seed_every_kind
@@ -364,6 +366,47 @@ def test_lock_access_does_nothing_off_postgres(session: Session) -> None:
     lock_access(session, shared=False)
     lock_access(session, shared=True)
     assert -(2**63) <= ACCESS_LOCK_KEY < 2**63
+
+
+class _PostgresSession:
+    """A session double whose bind says Postgres and that records what it executes."""
+
+    def __init__(self) -> None:
+        """Start with nothing executed."""
+        self.executed: list[tuple[str, dict[str, int]]] = []
+
+    def get_bind(self) -> SimpleNamespace:
+        """Return a bind whose dialect is Postgres.
+
+        Returns
+        -------
+        SimpleNamespace
+            An object with ``dialect.name == "postgresql"``.
+        """
+        return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    def execute(self, statement: object, params: dict[str, int]) -> None:
+        """Record a statement and its parameters.
+
+        Parameters
+        ----------
+        statement
+            The statement.
+        params
+            Its parameters.
+        """
+        self.executed.append((str(statement), params))
+
+
+@pytest.mark.parametrize(
+    ("shared", "function"),
+    [(True, "pg_advisory_xact_lock_shared"), (False, "pg_advisory_xact_lock")],
+)
+def test_lock_access_takes_the_transaction_lock_on_postgres(shared: bool, function: str) -> None:
+    """On Postgres a guarded change takes the shared lock and an apply the exclusive one."""
+    fake = _PostgresSession()
+    lock_access(cast(Session, fake), shared=shared)
+    assert fake.executed == [(f"SELECT {function}(:key)", {"key": ACCESS_LOCK_KEY})]
 
 
 def test_every_call_is_covered() -> None:
