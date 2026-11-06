@@ -10,13 +10,33 @@ from collections.abc import Callable, Sequence
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
-from lakana_core.audit.service import AuditService
+from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.errors import PermissionDenied
 from lakana_core.identifiers import NamespacePath, shown
 from lakana_core.models import AuditEventType
 
 logger = logging.getLogger(__name__)
+
+DEFERRED_DENIALS_KEY = "lakana.deferred_denials"
+"""`Session.info` key of the denials met inside an access apply, recorded after its rollback."""
+
+
+def record_deferred_denials(session: Session) -> None:
+    """Record the denials an access apply met, each in its own commit.
+
+    Inside `lakana_core.access.managed.applying` a denial cannot commit its audit row: the
+    apply commits once, at its end, and a refused apply is rolled back, row included. So
+    `AuditingAuthorization.record_denial` keeps it in `Session.info` instead, and the apply
+    calls this after its rollback.
+
+    Parameters
+    ----------
+    session
+        The apply's session, already rolled back and outside `applying`.
+    """
+    for record in session.info.pop(DEFERRED_DENIALS_KEY, []):
+        record()
 
 
 def _describe(securable: Securable) -> str:
@@ -127,6 +147,12 @@ class AuditingAuthorization:
             Why, when it was not the wrapped service that refused; recorded
             in `detail["reason"]`.
         """
+        if ACCESS_APPLY_KEY in self._session.info:
+            # Inside an access apply nothing may commit; the apply records it after its rollback.
+            self._session.info.setdefault(DEFERRED_DENIALS_KEY, []).append(
+                lambda: self.record_denial(principal, action, securable, reason=reason)
+            )
+            return
         admitted, suppressed = self._limiter.admit(str(principal.id), action.value)
         if admitted:
             detail: dict[str, str | int] = {"action": action.value}

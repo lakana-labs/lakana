@@ -2,13 +2,15 @@
 
 An access file lists, in one YAML file, who has access to what: groups and their members, service
 accounts, grants, row filters, column masks and CI trust rules. You can write the file by hand or
-start from `lakana access export`, keep it in git, and read what it would change with
-`lakana access plan` before anything is applied. This page lists the exact format, the limits,
-the two commands and every error. For the steps, see the how-to guides; for the lists and
+start from `lakana access export`, keep it in git, read what it would change with
+`lakana access plan`, and make the changes with `lakana access apply`. This page lists the exact
+format, the limits, the four commands and every error. For the steps, see [Keep access in a
+reviewed file](../how-to/keep-access-in-a-reviewed-file.md); for the lists and
 explanations of access that exist today, see [Grants, permissions, principals and
 groups](access.md).
 
-This page covers reading a file: `export` and `plan` change nothing.
+`export`, `plan` and `status` change nothing; `apply` makes the changes, and from then on a scope a
+file manages refuses changes made outside it.
 
 ## An example
 
@@ -144,6 +146,67 @@ An entry outside `manages` is an error. `instance` already covers every environm
 are not mixed. There is one access file per instance: two files that both manage the same scope
 would each undo the other.
 
+## Changes outside the file
+
+Once an apply has made a scope managed, the file is the only way to change access in it. Every
+command, SDK method and route that would change access there is refused with `409`:
+
+`` `prod` is managed by an access file (last applied 2026-11-06T09:30Z); change the file and run `lakana access apply`, or, in an emergency, repeat with `--override-managed --reason …` ``
+
+The time is the last apply of that scope, in UTC. An environment is managed when the file lists
+it, or when the file lists `instance`, which covers every environment. Groups, memberships,
+service accounts and grants on the instance are guarded only when `instance` is managed.
+
+| Guarded | Commands |
+|---|---|
+| Grants | `lakana grant create`, `lakana grant revoke` |
+| Groups and their members | `lakana group create`, `delete`, `add-member`, `remove-member` |
+| Service accounts | `lakana principal create --type service-account`, and `lakana principal deactivate` of a service account |
+| Row filters and column masks | `lakana row-filter create`, `revoke`; `lakana column-mask create`, `revoke` |
+| CI trust rules | `lakana ci-trust create`, `update`, `enable`, `disable`, `delete` |
+
+Not guarded, because a file does not hold them: people (user principals) and personal access
+tokens. An override on the commands for people is refused (`people are not managed by an access
+file; repeat without --override-managed`). Dropping a table or an environment is not guarded
+either: it takes the grants and policies of the object with it. Restoring one
+(`lakana table undrop`, `lakana env restore`) is not guarded, so that a recovery never waits
+for the file, and it re-adds the grants and policies the object had. In a managed scope the next
+plan lists them as removals (`-`), and the next apply removes them unless the file lists them. A
+call that changes nothing, such as revoking a grant that is already revoked, is not refused.
+
+### The override
+
+In an emergency an instance administrator can make the change anyway, by adding
+`--override-managed --reason "Incident 42: bob needs to read prod to debug the outage"` to the
+command. The CLI warns on stderr: `Overriding a scope an access file manages; the next apply
+reverts this unless the file lists it.` The override:
+
+- needs the `ADMIN` role on the instance, even where the change itself needs less (a row filter
+  needs only `MANAGE_POLICY`). Anyone else is refused with `403` (`Only an instance administrator
+  may override a scope an access file manages; ask one, or change the file`), and the refusal is
+  recorded in the audit log;
+- needs a reason of 10 to 500 characters on one line;
+- is recorded in the audit log as `MANAGED_SCOPE_OVERRIDDEN`, with the `scope`, the `change` and
+  the `reason`, in the same transaction as the change;
+- is listed by every plan as drift, for example `! drift in prod: grant VIEWER to bob (override)`
+  followed by who, when and why, until the next apply. That apply reverts the change unless the
+  file now lists it.
+
+`--override-managed` without `--reason`, or `--reason` without `--override-managed`, is refused
+before anything is sent. In a scope that no file manages the override is refused too
+(`` `staging` is not managed by an access file; repeat without `--override-managed` ``), so a
+script that still carries the flag does not hide its changes.
+
+Over REST the override is two query parameters of the guarded route,
+`?override_managed=true&override_reason=...`; one without the other is refused with `422`. In the
+SDK, each method that changes access takes `override_reason="..."`.
+
+When no active administrator is left, the server restores its bootstrap administrator when it
+starts (`LAKANA_BOOTSTRAP_ADMIN` in [Settings](settings.md)). That grant is the one change the
+guard lets through, so recovering from a lockout never depends on the file. It is recorded like
+an override, with the reason `Lockout recovery at server start: no active instance
+administrator`, and the next plan lists it as drift.
+
 ## Limits
 
 | Limit | Value |
@@ -153,8 +216,11 @@ would each undo the other.
 | Problems listed at once | 50, then a count of the rest. |
 | File name | The base name only, 1 to 255 characters, without `/` or `\`. |
 
-An export of a large instance can exceed the size or entry limit. Export and keep one file per
-environment instead: `lakana access export --scope prod -o prod.yaml`.
+An export of a large instance can exceed the size or entry limit; export one environment at a
+time to read it: `lakana access export --scope prod -o prod.yaml`. Keep one access file to
+apply, though: an apply stops managing every scope its file does not list, so applying
+`prod.yaml` and then `staging.yaml` leaves `prod` unmanaged. An instance whose access does not
+fit in one file cannot be managed by a file yet.
 
 ## Environment names
 
@@ -194,9 +260,11 @@ changes nothing. It prints:
 | `+ text  (grants[3])` | An entry the apply would create, and where the file lists it. |
 | `~ text  (ci_trust[0])` | A CI trust rule the apply would change in place; the text shows the rule before and after. |
 | `- text` | Access that exists in a managed scope and that the file does not list; the apply would remove it. |
-| `! drift in prod: text` | Access in a scope that no earlier apply of a file has managed yet, made outside any file; the apply would remove it, so look before you apply. The scope is the environment, or `instance`. When known, `— by, at: reason` follows: who made it, when (a timestamp) and why. These are printed only when known; a first apply has none. |
-| `No changes.` | The file and the live access agree. |
-| `Fingerprint: ...` | A hash of the live access of the managed scopes, which an apply checks again. |
+| `! drift in prod: text` | Access in a scope that no earlier apply of a file has managed yet, made outside any file; the apply would remove it, so look before you apply. The scope is the environment, or `instance`. When known, `— by, at: reason` follows: who made it, when (a timestamp) and why. These are printed only when known; a first apply has none. In a managed scope, drift is an override, and its text ends with `(override)` (see [The override](#the-override)). |
+| `starts managing prod` | The scope is not managed yet; applying the file starts managing it, and changes made by hand there are then refused (see [Changes outside the file](#changes-outside-the-file)). Not printed for an environment that a managed `instance` already covers. |
+| `stops managing prod` | An earlier apply managed the scope and the file no longer lists it; the apply releases it. |
+| `No changes.` | The file and the live access agree and the apply starts and stops managing no scope. |
+| `Fingerprint: ...` | A hash of the exact text of the file and of the live access of the managed scopes. An apply plans the file again and checks it: a different file, or access changed since, gives a different value. |
 
 The problems of the file are not changes. When there are any, `plan` prints all of them on
 stderr, each naming the file, the entry and its line, the cause and the next step, and exits with
@@ -224,11 +292,57 @@ Route: `POST /api/v1/access/plan` with `{"file_name": "access.yaml", "text": "..
 SDK: `client.access.plan(text, file_name="access.yaml", allow_lockout=False)` returns an
 `AccessPlan` with the same fields.
 
+## Apply
+
+`lakana access apply access.yaml` makes the file's changes in one transaction: all of them or
+none, with one `ACCESS_APPLIED` event in the audit log and every change linked to it by an apply
+id. It records the scopes the file manages, the file's hash and the commit, and from then on
+those scopes refuse changes made outside the file (see [Changes outside the
+file](#changes-outside-the-file)). A scope that an earlier apply managed and the file no longer
+lists is released: the plan shows `stops managing prod`, and the apply prints `Stopped managing:
+prod`. An environment that a managed `instance` still covers is not released, and the plan lists every open override the apply resolves, in the scopes managed before or after.
+
+| Option | Meaning |
+|---|---|
+| `--plan-fingerprint F` | The `Fingerprint:` of the plan you reviewed. The command then applies without asking, even without `--yes`, since that plan was the review; it is refused with `409` when the file or the access changed since: the apply does what the plan showed, for exactly that file text. |
+| `--source-commit SHA` | The commit the file came from (7 to 64 hex digits). Recorded with the apply and shown by `status`. |
+| `--yes` | Do not ask. |
+| `--allow-lockout` | As for `plan`. |
+
+Without `--plan-fingerprint` the command plans the file, prints the plan, asks `Apply these
+changes?` (unless `--yes`; it asks only when it plans itself), and applies exactly that plan. Without `--yes` and without a
+terminal it stops before anything changes, with a message that names `--yes`: in CI pass `--yes`,
+and `--plan-fingerprint` to apply the plan an earlier step showed. A plan with problems is never
+applied. The server makes the plan again under a lock and compares its fingerprint, so what you
+reviewed is what is applied. The command prints `Applied: 3 created, 0 changed, 1 removed.`;
+`--output json` prints the result as an object. With `--output json` the command shows no plan,
+so it does not ask either: without `--yes` or `--plan-fingerprint` it stops before anything
+changes. The SDK never repeats an apply request on its
+own.
+
+Route: `POST /api/v1/access/apply` with `{"file_name": "access.yaml", "text": "...",
+"plan_fingerprint": "64 hex digits", "source_commit": null, "allow_lockout": false}`, answering
+`200` with `apply_id`, `file_sha256`, `source_commit`, `created`, `changed`, `removed`,
+`released` and `applied_at`. SDK: `client.access.apply(text, plan_fingerprint=..., file_name=...,
+source_commit=..., allow_lockout=False)` returns an `AccessApplyResult`.
+
+## Status
+
+`lakana access status` lists each managed scope with the file, the commit, who applied it and
+when. Under `Open overrides (the next apply reverts them unless the file lists them):` it lists
+the changes made with `--override-managed` since the scope's last apply, with who, when and why.
+`--output json` prints both lists. Route: `GET /api/v1/access/status`, answering `{"scopes":
+[...], "overrides": [...]}`. SDK: `client.access.status()` returns an `AccessStatus`.
+
 ## Who may use it
 
-Both calls need the `ADMIN` role on the instance. They are refused with `403` for anyone else, and
-the refusal is recorded in the audit log. They take a personal access token: a CI token or a task
-token is refused, so a CI job cannot read or change who has access.
+All four commands need the `ADMIN` role on the instance. They are refused with `403` for anyone
+else, and the refusal is recorded in the audit log. They take a personal access token: a CI token
+or a task token is refused with `403` on all four routes, so a CI job cannot read or change who has
+access. A CI job that applies a file therefore holds an administrator's personal token as a
+secret; letting a CI token apply is a later option, tracked in
+[issue 455](https://github.com/lakana-labs/lakana/issues/455). The how-to describes the stricter
+way, where CI only plans.
 
 ## Errors
 
@@ -254,3 +368,10 @@ token is refused, so a CI job cannot read or change who has access.
 | `access.yaml: the file removes your own ADMIN role on the instance (MANAGE_GRANT); keep it, or repeat with --allow-lockout if another administrator applies from now on` | Pass `--allow-lockout` only when someone else will apply from now on. |
 | `file_name must be 1 to 255 characters without / or \ or a control character; send the file's base name, such as access.yaml` | `422`: send the base name only. |
 | `no environment X; lakana env list shows them` | `422`, for `export --scope`. |
+| `the file or the access changed since your plan (fingerprint 3fa9c1…); nothing was applied. Run lakana access plan again and review the changes` | `409`. The file or the access changed after your plan (a different file text, or someone changed access). Plan again, read the new plan, and apply with its fingerprint. |
+| `access.yaml: ...` (one line per problem, the same texts as above) | `422` from `apply`: the file has problems and nothing was applied. All are listed, at most 50 and then `and N more problems`. Fix them, then plan again. |
+| `the file removes your own ADMIN role in more than one change, so it would end before the rest of the changes can be made; nothing was applied. Apply in two steps: ...` | `409`. Your last way to administer is a group whose `ADMIN` grant and whose membership of you both go. Apply a first file that keeps one of them, then the file without it. |
+| `access.yaml: service_accounts: the file removes service:access-admin, the account applying it, which would end its access part-way through the apply; have another administrator apply this file` | A problem in the plan, so `422` on apply. The account applying the file cannot remove itself. Another administrator applies the file, or keep the account in `service_accounts`. |
+| `` `prod` is managed by an access file (last applied ...); change the file and run `lakana access apply`, or, in an emergency, repeat with `--override-managed --reason …` `` | `409`, from a command that changes access by hand. See [Changes outside the file](#changes-outside-the-file) and [The override](#the-override). |
+| `lakana access apply asks before it changes access; in CI pass --yes, with --plan-fingerprint from the plan step` | The CLI, exit 1: there is no terminal to ask on. Pass `--yes`. |
+| `lakana access apply --output json shows no plan to confirm; review it with lakana access plan, then pass --yes (or --plan-fingerprint from that plan)` | The CLI, exit 1: JSON output cannot show the plan, so the command does not ask. Plan first, then pass `--yes` or `--plan-fingerprint`. |

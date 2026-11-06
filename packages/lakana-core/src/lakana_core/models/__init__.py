@@ -1,6 +1,7 @@
 """SQLAlchemy models for the Lakana metadata schema."""
 
 from lakana_core.models.base import Base, TimestampMixin  # ruff: ignore[unsorted-imports]
+from lakana_core.models.access import AccessManagedScope, AccessOverride
 from lakana_core.models.column_description import ColumnDescription
 from lakana_core.models.column_mask import ColumnMask
 from lakana_core.models.credential import PersonalAccessToken, TaskToken
@@ -70,6 +71,8 @@ from lakana_core.models.run import (
 __all__ = [
     "LIVE_ENVIRONMENT",
     "OWN_TIP_NO_SNAPSHOT",
+    "AccessManagedScope",
+    "AccessOverride",
     "ArtifactBlob",
     "ArtifactUpload",
     "ArtifactVersion",

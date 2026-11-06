@@ -19,6 +19,7 @@ from lakana._http import HttpTransport
 from lakana._models import CiToken, CiTrustExplanation, CiTrustRule, CiTrustRuleExplanation
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
+from lakana.resources._override import override_params
 from lakana.resources.artifacts import _ODD_ANSWER, _array, _object
 
 
@@ -217,6 +218,7 @@ class CiTrustRules:
         conditions: Mapping[str, str],
         kinds: Sequence[str] = ("deploy",),
         start_on_deploy_jobs: bool = False,
+        override_reason: str | None = None,
     ) -> CiTrustRule:
         """Create an enabled CI trust rule.
 
@@ -238,6 +240,9 @@ class CiTrustRules:
         start_on_deploy_jobs
             Let a deploy under the rule start the project's `on_deploy` jobs; sent only when
             true, so a server that predates the setting accepts the request.
+        override_reason
+            Why, 10 to 500 characters on one line, to create the rule although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
@@ -259,7 +264,9 @@ class CiTrustRules:
         }
         if start_on_deploy_jobs:
             body["start_on_deploy_jobs"] = True
-        response = self._transport.request(ROUTES["ci_trust_rules.create"], json=body)
+        response = self._transport.request(
+            ROUTES["ci_trust_rules.create"], params=override_params(override_reason), json=body
+        )
         return _rule_from_json(_object(response, "a CI trust rule"))
 
     def list(self) -> _RuleList:
@@ -304,6 +311,7 @@ class CiTrustRules:
         kinds: Sequence[str] | None = None,
         conditions: Mapping[str, str] | None = None,
         start_on_deploy_jobs: bool | None = None,
+        override_reason: str | None = None,
     ) -> CiTrustRule:
         """Change a rule's principal, kinds, conditions or opt-in; the tokens issued under it end.
 
@@ -319,6 +327,9 @@ class CiTrustRules:
             New conditions, replacing all of the old ones.
         start_on_deploy_jobs
             Whether a deploy under the rule starts the project's `on_deploy` jobs.
+        override_reason
+            Why, 10 to 500 characters on one line, to change the rule although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
@@ -335,55 +346,87 @@ class CiTrustRules:
         if conditions is not None:
             changes["conditions"] = dict(conditions)
         response = self._transport.request(
-            ROUTES["ci_trust_rules.update"], path_params={"rule_id": rule_id}, json=changes
+            ROUTES["ci_trust_rules.update"],
+            params=override_params(override_reason),
+            path_params={"rule_id": rule_id},
+            json=changes,
         )
         return _rule_from_json(_object(response, "a CI trust rule"))
 
-    def enable(self, rule_id: str) -> CiTrustRule:
+    def _switch(self, route: str, rule_id: str, override_reason: str | None) -> CiTrustRule:
+        """Enable or disable a rule.
+
+        Parameters
+        ----------
+        route
+            The route's key: ``ci_trust_rules.enable`` or ``ci_trust_rules.disable``.
+        rule_id
+            The rule's id.
+        override_reason
+            The managed-scope override's reason, or `None`.
+
+        Returns
+        -------
+        CiTrustRule
+            The rule.
+        """
+        response = self._transport.request(
+            ROUTES[route], params=override_params(override_reason), path_params={"rule_id": rule_id}
+        )
+        return _rule_from_json(_object(response, "a CI trust rule"))
+
+    def enable(self, rule_id: str, *, override_reason: str | None = None) -> CiTrustRule:
         """Enable a rule.
 
         Parameters
         ----------
         rule_id
             The rule's id.
+        override_reason
+            Why, 10 to 500 characters on one line, to enable the rule although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
         CiTrustRule
             The rule.
         """
-        response = self._transport.request(
-            ROUTES["ci_trust_rules.enable"], path_params={"rule_id": rule_id}
-        )
-        return _rule_from_json(_object(response, "a CI trust rule"))
+        return self._switch("ci_trust_rules.enable", rule_id, override_reason)
 
-    def disable(self, rule_id: str) -> CiTrustRule:
+    def disable(self, rule_id: str, *, override_reason: str | None = None) -> CiTrustRule:
         """Disable a rule: it matches no exchange, and the tokens issued under it end.
 
         Parameters
         ----------
         rule_id
             The rule's id.
+        override_reason
+            Why, 10 to 500 characters on one line, to disable the rule although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
         CiTrustRule
             The rule.
         """
-        response = self._transport.request(
-            ROUTES["ci_trust_rules.disable"], path_params={"rule_id": rule_id}
-        )
-        return _rule_from_json(_object(response, "a CI trust rule"))
+        return self._switch("ci_trust_rules.disable", rule_id, override_reason)
 
-    def delete(self, rule_id: str) -> None:
+    def delete(self, rule_id: str, *, override_reason: str | None = None) -> None:
         """Delete a rule; the tokens issued under it end.
 
         Parameters
         ----------
         rule_id
             The rule's id.
+        override_reason
+            Why, 10 to 500 characters on one line, to delete the rule although an access file
+            manages its scope (an audited override, for an administrator of the instance).
         """
-        self._transport.request(ROUTES["ci_trust_rules.delete"], path_params={"rule_id": rule_id})
+        self._transport.request(
+            ROUTES["ci_trust_rules.delete"],
+            params=override_params(override_reason),
+            path_params={"rule_id": rule_id},
+        )
 
     def explain(
         self,

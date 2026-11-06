@@ -276,7 +276,9 @@ class PatService:
             .all()
         )
 
-    def revoke(self, p: PrincipalRef, principal_name: str, key_id: str) -> None:
+    def revoke(
+        self, p: PrincipalRef, principal_name: str, key_id: str, *, commit: bool = True
+    ) -> None:
         """Revoke a PAT before its natural expiry.
 
         Idempotent: revoking an already-revoked PAT is a no-op — it leaves
@@ -291,6 +293,8 @@ class PatService:
             The principal the PAT belongs to.
         key_id
             The PAT's key_id.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -319,7 +323,8 @@ class PatService:
             AuditEventType.PAT_REVOKED,
             detail={"actor": p.name, "subject": principal_name, "key_id": key_id},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
     def verify(self, key_id: str, secret: str) -> PrincipalRef:
         """Verify a presented PAT and resolve it to its principal.

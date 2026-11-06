@@ -98,8 +98,8 @@ def _service(
     )
 
 
-def test_an_unedited_export_plans_nothing(session: Session) -> None:
-    """Spec §4: export → plan is empty (no change, no drift, no problem)."""
+def test_an_unedited_export_plans_no_changes(session: Session) -> None:
+    """Spec §4: export → plan has no change, drift or problem; it only starts managing."""
     world = access_world(session)
     seed_every_kind(session, world)
     service = _service(session, world)
@@ -107,7 +107,7 @@ def test_an_unedited_export_plans_nothing(session: Session) -> None:
         text = service.export(world.admin, scopes)
         plan = service.plan(world.admin, text)
         assert (plan.changes, plan.drift, plan.problems) == ((), (), ()), text
-        assert plan.is_empty
+        assert plan.starts == tuple(scopes)
         assert plan.manages == tuple(scopes)
         assert len(plan.file_sha256) == 64
 
@@ -155,7 +155,8 @@ def test_removals_in_a_scope_not_yet_managed_are_drift(session: Session) -> None
     assert plan.fingerprint == fingerprint(
         AccessState(
             frozenset({GrantEntry(Subject("user", "bob"), "VIEWER", None, Target("staging"))})
-        )
+        ),
+        file_sha256=plan.file_sha256,
     )
 
 
@@ -596,6 +597,24 @@ def test_a_removal_in_a_managed_scope_is_not_drift() -> None:
     assert [d.scope for d in found] == ["staging"]
 
 
+def test_apply_order_creates_a_service_account_before_its_membership() -> None:
+    """A membership names its member: the service account the file creates comes first."""
+    account = ServiceAccountEntry("bot")
+    member = MembershipEntry("g", "bot")
+    changes = [
+        PlannedChange("create", member, "groups.g.members[0]"),
+        PlannedChange("create", account, "service_accounts[0]"),
+        PlannedChange("remove", ServiceAccountEntry("old"), None),
+        PlannedChange("remove", MembershipEntry("g", "old"), None),
+    ]
+    assert [c.entry for c in apply_order(changes)] == [
+        account,
+        member,
+        MembershipEntry("g", "old"),
+        ServiceAccountEntry("old"),
+    ]
+
+
 def test_apply_order_creates_first_and_removes_in_reverse() -> None:
     """Creates and changes in dependency order, then removals in reverse order."""
     account = ServiceAccountEntry("bot")
@@ -838,3 +857,13 @@ def test_the_plan_column_source_passes_policy_fields_through(session: Session) -
     assert columns.policy_fields(world.admin, table_id) == world.catalog.policy_fields(
         world.admin, table_id
     )
+
+
+def test_the_first_plan_of_an_unedited_export_starts_managing_the_scope(session: Session) -> None:
+    """Review: no changes, yet the apply starts guarding `instance`; `starts` says so."""
+    world = access_world(session)
+    service = _service(session, world)
+    plan = service.plan(world.admin, service.export(world.admin, ["instance"]))
+    assert not plan.changes
+    assert plan.starts == ("instance",)
+    assert not plan.is_empty

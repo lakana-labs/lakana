@@ -104,10 +104,10 @@ class _Services:
                     table=on.table,
                 )
             case RowFilterEntry(table=table, expression=expression):
-                self.row_filters.check_target(self.p, **_table(table), expression=expression)
+                self.row_filters.check_target(self.p, **policy_table(table), expression=expression)
             case ColumnMaskEntry(table=table, column=column, expression=expression):
                 self.column_masks.check_target(
-                    self.p, **_table(table), column=column, expression=expression
+                    self.p, **policy_table(table), column=column, expression=expression
                 )
             case CiTrustEntry():
                 self.ci_rules.check_rule(
@@ -119,7 +119,7 @@ class _Services:
                 )
 
 
-def _table(target: Target) -> dict[str, str]:
+def policy_table(target: Target) -> dict[str, str]:
     """Give a policy's table as the policy services take it.
 
     Parameters

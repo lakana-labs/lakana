@@ -8,6 +8,7 @@ from typing import Any
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
 from lakana._models import Permission, Permissions, PermissionVia, Principal, PrincipalPage, Scope
 from lakana._routes import ROUTES
+from lakana.resources._override import override_params
 
 
 def _principal_from_json(data: dict[str, Any]) -> Principal:
@@ -107,7 +108,7 @@ class Principals:
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
-    def create(self, name: str, type: str) -> Principal:
+    def create(self, name: str, type: str, *, override_reason: str | None = None) -> Principal:
         """Create a principal.
 
         Parameters
@@ -116,6 +117,9 @@ class Principals:
             The principal's unique name.
         type
             `"USER"` or `"SERVICE_ACCOUNT"`.
+        override_reason
+            Why, 10 to 500 characters on one line, to create a service account although an access
+            file manages its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
@@ -128,7 +132,9 @@ class Principals:
             If a principal of this name already exists.
         """
         response = self._transport.request(
-            ROUTES["principals.create"], json={"name": name, "type": type}
+            ROUTES["principals.create"],
+            params=override_params(override_reason),
+            json={"name": name, "type": type},
         )
         return _principal_from_json(response.json())
 
@@ -267,7 +273,7 @@ class Principals:
         )
         return _permissions_from_json(response.json())
 
-    def deactivate(self, name: str) -> None:
+    def deactivate(self, name: str, *, override_reason: str | None = None) -> None:
         """Deactivate a principal.
 
         Sets `is_active = False` rather than deleting the principal,
@@ -277,10 +283,19 @@ class Principals:
         ----------
         name
             The principal's name.
+        override_reason
+            To deactivate a service account although an access file manages its scope,
+            in an emergency: why, 10 to 500 characters on one line. Needs the `ADMIN`
+            role on the instance; audited, and the next apply reverts it unless the file
+            lists it.
 
         Raises
         ------
         lakana.errors.NotFound
             If no principal of this name exists.
         """
-        self._transport.request(ROUTES["principals.deactivate"], path_params={"name": name})
+        self._transport.request(
+            ROUTES["principals.deactivate"],
+            params=override_params(override_reason),
+            path_params={"name": name},
+        )

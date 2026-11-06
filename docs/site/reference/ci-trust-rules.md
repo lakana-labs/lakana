@@ -74,6 +74,10 @@ The principal, the kinds and the conditions can change; the issuer, the environm
 repository cannot (create another rule). Every change, and every disable or enable, ends the CI
 tokens issued under the rule before it at once. Enabling a rule again does not bring them back.
 
+In an environment an [access file](access-file.md#changes-outside-the-file) manages, rules are
+changed through the file: create, update, enable, disable and delete are refused with `409`, unless
+an instance administrator adds `--override-managed --reason "..."`.
+
 ## The exchange
 
 `POST /api/v1/auth/oidc/token`, with no `Authorization` header, a JSON body of at most 16 KiB:

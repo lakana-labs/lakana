@@ -1,4 +1,4 @@
-"""`lakana access export` and `lakana access plan`: access as a file (#46).
+"""`lakana access export`, `plan`, `apply` and `status`: access as a file (#46).
 
 The file is read by the server; the CLI only checks its size, so a file that cannot be
 accepted is refused before it is sent.
@@ -14,7 +14,7 @@ import typer
 
 from lakana._models import AccessPlan
 from lakana.cli import _output
-from lakana.cli._state import CliError, state_of
+from lakana.cli._state import CliError, confirm, state_of
 
 MAX_FILE_BYTES = 1024 * 1024
 """The most an access file may hold; the server refuses a larger request too."""
@@ -132,7 +132,9 @@ def _print_plan(plan: AccessPlan) -> None:
         typer.echo(_drift_line(drift.scope, drift.text, drift.by, drift.reason, at))
     for scope in plan.releases:
         typer.echo(f"stops managing {_output.inline(scope)}")
-    if not changes and not plan.releases:
+    for scope in plan.starts:
+        typer.echo(f"starts managing {_output.inline(scope)}")
+    if not changes and not plan.releases and not plan.starts:
         typer.echo("No changes.")
     typer.echo(f"Fingerprint: {plan.fingerprint}")
 
@@ -244,6 +246,153 @@ def plan(
         )
 
 
+def apply(
+    ctx: typer.Context,
+    file: Annotated[Path, typer.Argument(help="The access file, such as access.yaml.")],
+    plan_fingerprint: Annotated[
+        str | None,
+        typer.Option(
+            "--plan-fingerprint",
+            help="The fingerprint `lakana access plan` printed: applies without asking, since "
+            "that plan was the review. Without it the command plans first, shows the plan "
+            "and asks (the command asks only when it plans itself).",
+        ),
+    ] = None,
+    source_commit: Annotated[
+        str | None,
+        typer.Option(
+            "--source-commit",
+            help="The commit the file came from (7 to 64 hex digits), recorded with the apply.",
+        ),
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Do not ask before applying; for CI.")] = False,
+    allow_lockout: Annotated[
+        bool,
+        typer.Option(
+            "--allow-lockout",
+            help="Accept a file that drops your own ADMIN role while another administrator "
+            "remains.",
+        ),
+    ] = False,
+) -> None:
+    """Make an access file's changes in one audited transaction, or none of them.
+
+    Without `--plan-fingerprint` the command plans the file, shows the plan and asks before
+    it applies exactly that plan. With `--plan-fingerprint` it does not ask: that plan was the
+    review. With `--output json` it shows no plan and so does not ask: pass `--yes` or
+    `--plan-fingerprint`. In CI, pass `--yes` and the fingerprint of the plan step:
+    the apply is refused, with nothing changed, when the file or the access changed since that
+    plan. Needs the ADMIN role on the instance and a personal access token.
+
+    The file format: https://lakana-labs.github.io/lakana/reference/access-file/.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    file
+        The access file.
+    plan_fingerprint
+        The reviewed plan's fingerprint; planned first when omitted.
+    source_commit
+        The commit the file came from.
+    yes
+        Skip the question.
+    allow_lockout
+        Accept a file that drops the caller's own ADMIN role.
+
+    Raises
+    ------
+    CliError
+        If the file cannot be read or is too large, the plan has problems, or there is no
+        terminal to ask on, or the output is JSON, and neither `--yes` nor `--plan-fingerprint`
+        was given (exit 1).
+    """
+    state = state_of(ctx)
+    text = _read_file(file)
+    access = state.client().access
+    fingerprint = plan_fingerprint
+    if fingerprint is None:
+        reviewed = access.plan(text, file_name=file.name, allow_lockout=allow_lockout)
+        if reviewed.problems:
+            raise CliError(
+                "\n".join(_output.safe_text(problem) for problem in reviewed.problems)
+                + f"\nFix them and plan again. {_REFERENCE}",
+                1,
+            )
+        if not yes and not state.is_interactive():
+            raise CliError(
+                "lakana access apply asks before it changes access; in CI pass --yes, with "
+                "--plan-fingerprint from the plan step",
+                1,
+            )
+        if not yes and state.output == "json":
+            raise CliError(
+                "lakana access apply --output json shows no plan to confirm; review it with "
+                "lakana access plan, then pass --yes (or --plan-fingerprint from that plan)",
+                1,
+            )
+        if state.output != "json":
+            _print_plan(reviewed)
+        confirm(state, "Apply these changes?", yes)
+        fingerprint = reviewed.fingerprint
+    result = access.apply(
+        text,
+        plan_fingerprint=fingerprint,
+        file_name=file.name,
+        source_commit=source_commit,
+        allow_lockout=allow_lockout,
+    )
+    if state.output == "json":
+        _output.print_json(result)
+        return
+    typer.echo(
+        f"Applied: {result.created} created, {result.changed} changed, {result.removed} removed."
+    )
+    if result.released:
+        typer.echo("Stopped managing: " + ", ".join(_output.inline(x) for x in result.released))
+
+
+def status(ctx: typer.Context) -> None:
+    """Show the scopes access files manage and the changes made outside them.
+
+    Lists each managed scope with the file, commit, administrator and time of its last apply,
+    then the overrides no apply has taken into account yet. Needs the ADMIN role on the
+    instance.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    """
+    state = state_of(ctx)
+    answer = state.client().access.status()
+    if state.output == "json":
+        _output.print_json(answer)
+        return
+    if not answer.scopes:
+        typer.echo(
+            "No scope is managed by an access file. Write one with "
+            "`lakana access export -o access.yaml`, then `lakana access apply access.yaml`."
+        )
+    else:
+        _output.emit(
+            state,
+            answer.scopes,
+            columns=["scope", "file", "commit", "applied by", "applied at"],
+            derived={
+                "file": lambda x: x.file_name,
+                "commit": lambda x: x.source_commit,
+                "applied by": lambda x: x.applied_by,
+                "applied at": lambda x: x.applied_at,
+            },
+            whole=["applied at"],
+        )
+    if answer.overrides:
+        typer.echo("Open overrides (the next apply reverts them unless the file lists them):")
+        _output.emit(state, answer.overrides, columns=["scope", "change", "reason", "by", "at"])
+
+
 def register(app: typer.Typer) -> None:
     """Add the file commands to the `access` group.
 
@@ -254,3 +403,5 @@ def register(app: typer.Typer) -> None:
     """
     app.command("export")(export)
     app.command("plan")(plan)
+    app.command("apply")(apply)
+    app.command("status")(status)

@@ -3399,6 +3399,55 @@ when the process stops are not written (unlike `DenialAuditLimiter.drain`). Fail
 unchanged (`AuthAuditLimiter` above). `authenticate_before_body` already makes a request one
 `get_principal` call, so a body route is not counted twice.
 
+## Access as code: managed scopes and the override (#46)
+
+An applied access file makes its scopes *managed* (`access_managed_scopes`). From then on the file
+is the only way to change access there, so that what was reviewed in git is what holds.
+
+- **Deactivation takes the lock.** `PrincipalService.deactivate_principal` takes the shared access
+  lock for every principal type (skipped inside an apply, which holds the exclusive one), so it
+  cannot race an apply into zero admins.
+- **Guard placement.** `lakana_core.access.managed.guard_change` is called by each mutating
+  service method, right after the method's own authorization and once the row it changes is
+  loaded (so the environment of a revoke comes from the row, never from the request): `GrantService.grant`/`revoke`,
+  the four `GroupService` mutators, `PrincipalService.create_principal`/`deactivate_principal`
+  (service accounts only), `RowFilterService` and `ColumnMaskService` `create`/`revoke`, and
+  `CiTrustRuleService` `create`/`update`/`enable`/`disable`/`delete`. A call that changes nothing
+  (a revoked grant revoked again, an existing member added again, a disabled rule disabled) returns
+  before the guard. An environment-scoped change is guarded when that environment or `instance`
+  is managed; an instance-wide object only when `instance` is. The guard lives in the service,
+  not the route, so every caller — REST, SDK, CLI, an apply's own services — meets it (rule 2).
+- **Locks.** On Postgres the guard takes `pg_advisory_xact_lock_shared(ACCESS_LOCK_KEY)` and an
+  apply takes the exclusive one, both until the transaction ends. A single-route change therefore
+  waits for a running apply and cannot slip between its plan and its commit; guarded changes do
+  not wait for one another. Inside an apply (`ACCESS_APPLY_KEY` in `session.info`) the guard
+  returns at once: the apply already holds the exclusive lock and is the file.
+- **The override needs ADMIN.** `?override_managed=true&override_reason=...` (the server's
+  `get_managed_write_principal`; one without the other is 422) sets
+  `PrincipalRef.managed_override_reason`. The guard then asks `holds_instance_admin` itself, even
+  on routes whose own action is `MANAGE_POLICY` or `MANAGE_PRINCIPAL`: holding those must not let
+  a caller step around a reviewed file. A refusal is recorded as `AUTHORIZATION_DENIED` (reason
+  `managed_override_not_admin`) through the service's own `AuditingAuthorization` limiter. The
+  reason is checked like a break-glass reason (10–500 characters, one line, no control or
+  invisible characters). The override records `MANAGED_SCOPE_OVERRIDDEN` (`scope`, `change`,
+  `reason`) and an open `access_overrides` row in the change's own transaction, so a failed change
+  leaves neither. Every plan lists open overrides as drift; the next apply resolves them and
+  reverts each change the file does not list. An override in a scope no file manages is refused
+  (422), so a stale flag in a script never hides a change.
+- **The one exemption: lockout recovery.** `bootstrap_if_needed` grants the bootstrap principal
+  ADMIN when no active administrator exists. That grant runs inside `lockout_recovery(session)`,
+  which lets it pass the guard: recovering from a lockout must never depend on the file (a file
+  that removed the last admin path, or an admin deactivated by hand, would otherwise leave the
+  instance with no way in). It is still recorded as an override with a fixed reason, so the next
+  plan shows it as drift and an apply that does not list it reverts it. Nothing else sets the flag.
+- **Not guarded, by design.** PAT issue and revoke (tokens are never in a file), user principals
+  (people are not in a file; an override on their routes is refused with 422), the cascades of
+  dropping a table or an environment (`revoke_attached` removes what can no longer apply), their
+  restore (`undrop_table`, `restore_environment`), and deploy run-as. The drop cascades only take
+  access away. A restore is the exception: it re-adds the grants and policies the object had, so
+  that an operational recovery never depends on the file. In a managed scope the next plan lists
+  those as removals (`-`), and the next apply removes them unless the file lists them.
+
 ## Query isolation: credential scoping, not blacklisting (M2/M3)
 
 **This is running code, not a plan.** The query executor
@@ -5982,6 +6031,32 @@ matter for an operator deciding where to run it:
 - **Strict YAML.** No anchors, aliases, merge keys, tags or duplicate keys; `on`, `no`, `off`,
   `yes` are text (YAML 1.2 booleans). Each of the first four would hide what a file grants from
   its reviewer or expand the file's size beyond what the limit counts.
+- **Apply and status authorize like export and plan.** `AccessService.apply` and `status` call
+  `authorize_admin_only` for `MANAGE_GRANT` first; `apply` then requires `MANAGE_POLICY`,
+  `MANAGE_PRINCIPAL`, `MANAGE_GROUP` and `MANAGE_TOKEN` through `_authorize`, so no service call
+  inside the transaction can be denied half-way. A CI token and a task token get 403 on all four
+  routes (`test_a_ci_token_is_refused_on_the_access_routes`,
+  `test_a_task_token_is_refused_on_the_access_routes`). A CI job therefore applies with an
+  administrator's personal token stored as a secret; the stricter pattern is CI running only
+  `plan` and an administrator applying after the merge. A CI-token apply is a later option
+  (#455).
+- **Apply is atomic and compares, never trusts.** It takes the exclusive access lock, plans again
+  inside the lock and compares the fingerprint of that plan with the caller's (409 when they
+  differ, before any change). Every change then runs in one transaction through the services
+  with `ACCESS_APPLY_KEY` set, and the single `ACCESS_APPLIED` event carries the apply id that
+  links each change's own event. Any error rolls the whole transaction back, so no half-applied
+  state is committed; a denial is audited after the rollback. Two checks keep the caller from
+  ending its own access part-way: a file that removes the applying service account is a plan
+  problem (422), and a file whose last remaining ADMIN path for the caller is a group whose
+  grant and membership both go is refused with 409 "apply in two steps".
+  The SDK sends the request with `retry=False`, so a lost answer never becomes a second apply.
+- **The fingerprint binds the file.** It hashes the file's `file_sha256` as well as the live access
+  and the managed-scope records, so a fingerprint planned for file A never applies file B.
+- **The CLI confirms, the server decides.** `lakana access apply` without `--plan-fingerprint`
+  plans, prints and asks (`--yes` skips the question; no terminal and no `--yes` is refused
+  before anything is sent). The confirmation is a convenience: the authority is the fingerprint
+  the server compares, so a client that skips the question changes nothing a caller could not
+  already do with the REST route.
 
 ## Mutation testing
 

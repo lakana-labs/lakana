@@ -236,17 +236,22 @@ def _policies(
         namespace=ref.namespace.joined(),
         table=ref.name,
     )
-    common = {
-        "principal": subject,
-        "environment": ref.environment,
-        "namespace": ref.namespace.joined(),
-        "table": ref.name,
-    }
     row_filter = RowFilterService(session, allow, FakeColumnCatalog()).create(
-        admin, expression="region = 'eu'", **common
+        admin,
+        expression="region = 'eu'",
+        principal=subject,
+        environment=ref.environment,
+        namespace=ref.namespace.joined(),
+        table=ref.name,
     )
     mask = ColumnMaskService(session, allow, FakeColumnCatalog()).create(
-        admin, column="region", expression="'x'", **common
+        admin,
+        column="region",
+        expression="'x'",
+        principal=subject,
+        environment=ref.environment,
+        namespace=ref.namespace.joined(),
+        table=ref.name,
     )
     return grant, row_filter, mask
 

@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
 from core_test_helpers import FakeColumnCatalog, NoPolicyFields, ensure_table
@@ -642,15 +643,32 @@ class _DenyAuthz:
         return False
 
 
-def _mask_args(column: str) -> dict[str, str]:
-    return {
-        "principal": "alice",
-        "environment": "dev",
-        "namespace": "gold",
-        "table": "customers",
-        "column": column,
-        "expression": "NULL",
-    }
+class _MaskArgs(TypedDict):
+    """The keyword arguments of `create`, typed so that `**` unpacking checks."""
+
+    principal: str
+    environment: str
+    namespace: str
+    table: str
+    column: str
+    expression: str
+
+
+def _mask_args(column: str, **override: str) -> _MaskArgs:
+    return cast(
+        _MaskArgs,
+        {
+            **{
+                "principal": "alice",
+                "environment": "dev",
+                "namespace": "gold",
+                "table": "customers",
+                "column": column,
+                "expression": "NULL",
+            },
+            **override,
+        },
+    )
 
 
 def _ready(
@@ -936,7 +954,7 @@ def _create_error(session: Session, **override: str) -> Exception:
     """
     service, admin = _ready(session)
     with pytest.raises(LakanaError) as caught:
-        service.create(admin, **{**_mask_args("ssn"), **override})
+        service.create(admin, **_mask_args("ssn", **override))
     return caught.value
 
 
@@ -1004,7 +1022,7 @@ def test_a_mask_expression_that_qualifies_a_column_is_refused(session: Session) 
     """The same refusal as a filter's: write the bare column name."""
     service, admin = _ready(session, FakeColumnCatalog(names=["id", "ssn"]))
     with pytest.raises(ValidationError) as exc_info:
-        service.create(admin, **{**_mask_args("ssn"), "expression": "read_parquet.ssn"})
+        service.create(admin, **_mask_args("ssn", expression="read_parquet.ssn"))
     assert str(exc_info.value) == (
         "'read_parquet.ssn' is not a valid mask expression: the column 'read_parquet.ssn' is "
         "written with a qualifier. Write the bare column name, 'ssn'; a column mask always reads "
@@ -1166,7 +1184,7 @@ def test_a_new_column_mask_stores_its_column_field_id(session: Session) -> None:
     catalog = FakeColumnCatalog(names=["id", "name", "email"], schema_id=1)
     service, admin = _ready(session, catalog)
 
-    row = service.create(admin, **{**_mask_args("email"), "expression": "md5(email)"})
+    row = service.create(admin, **_mask_args("email", expression="md5(email)"))
 
     assert (row.binding, row.field_ids, row.column_field_id) == ("field_ids", {"email": 3}, 3)
 
@@ -1176,7 +1194,7 @@ def test_a_mask_reading_another_column_stores_both_ids(session: Session) -> None
     catalog = FakeColumnCatalog(names=["id", "ssn", "dept"], schema_id=1)
     service, admin = _ready(session, catalog)
 
-    row = service.create(admin, **{**_mask_args("ssn"), "expression": "dept"})
+    row = service.create(admin, **_mask_args("ssn", expression="dept"))
 
     assert (row.field_ids, row.column_field_id) == ({"dept": 3, "ssn": 2}, 2)
 
@@ -1218,7 +1236,7 @@ def test_a_mask_reading_a_missing_column_gets_the_type_check_message(session: Se
     service, admin = _ready(session, catalog)
 
     with pytest.raises(ValidationError) as exc_info:
-        service.create(admin, **{**_mask_args("ssn"), "expression": "md5(nope)"})
+        service.create(admin, **_mask_args("ssn", expression="md5(nope)"))
 
     assert "to bind the policy to" not in str(exc_info.value)
     assert "md5(nope)" in str(exc_info.value)

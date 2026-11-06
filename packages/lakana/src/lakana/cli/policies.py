@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Protocol
+from typing import Annotated, Any, Protocol
 
 import typer
 
 from lakana.cli import _output
-from lakana.cli._state import confirm, resolve_environment, split_table_name, state_of
+from lakana.cli._override import OVERRIDE_MANAGED, OVERRIDE_REASON, override_reason
+from lakana.cli._state import (
+    CliState,
+    confirm,
+    resolve_environment,
+    split_table_name,
+    state_of,
+)
 from lakana.cli.grants import exactly_one, subject_of
 
 row_filter_app = typer.Typer(help="Manage row filters.", no_args_is_help=True)
@@ -51,6 +58,53 @@ def _yes_no(item: _HasBound) -> str:
     return "?" if item.bound is None else "yes" if item.bound else "no"
 
 
+def _target(
+    state: CliState,
+    table: str,
+    principal: str | None,
+    group: str | None,
+    env: str | None,
+    why: str | None,
+) -> dict[str, Any]:
+    """Resolve what a new row filter or column mask applies to.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    table
+        The qualified table name.
+    principal
+        `--principal`.
+    group
+        `--group`.
+    env
+        `--env`, or `None` for the profile's environment.
+    why
+        The override reason, or `None`.
+
+    Returns
+    -------
+    dict
+        The keyword arguments the SDK's `create` takes for them.
+
+    Raises
+    ------
+    CliError
+        Unless exactly one of `principal` and `group` is given.
+    """
+    exactly_one(principal, group, "--principal or --group")
+    namespace, name = split_table_name(table)
+    return {
+        "principal": principal,
+        "group": group,
+        "environment": resolve_environment(state, env),
+        "namespace": namespace,
+        "table": name,
+        "override_reason": why,
+    }
+
+
 @row_filter_app.command("create")
 def create_row_filter(
     ctx: typer.Context,
@@ -59,6 +113,8 @@ def create_row_filter(
     principal: _PRINCIPAL = None,
     group: _GROUP = None,
     env: _ENV = None,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Restrict which rows of TABLE (namespace.table) a principal or group sees.
 
@@ -76,23 +132,18 @@ def create_row_filter(
         The group it applies to.
     env
         The environment.
+    override_managed
+        `--override-managed`: create the row filter although an access file manages its scope.
+    reason
+        `--reason`: why you create the row filter anyway.
     """
     state = state_of(ctx)
-    exactly_one(principal, group, "--principal or --group")
-    namespace, name = split_table_name(table)
-    environment = resolve_environment(state, env)
-    row_filter = state.client().row_filters.create(
-        principal=principal,
-        group=group,
-        environment=environment,
-        namespace=namespace,
-        table=name,
-        expression=expression,
-    )
+    target = _target(state, table, principal, group, env, override_reason(override_managed, reason))
+    row_filter = state.client().row_filters.create(**target, expression=expression)
     _output.done(
         state,
         f"Created row filter {row_filter.id} on "
-        f"{_output.inline(environment)}/{_output.inline(table)}",
+        f"{_output.inline(target['environment'])}/{_output.inline(table)}",
         row_filter,
     )
 
@@ -133,7 +184,13 @@ def list_row_filters(
 
 
 @row_filter_app.command("revoke")
-def revoke_row_filter(ctx: typer.Context, row_filter_id: str, yes: _YES = False) -> None:
+def revoke_row_filter(
+    ctx: typer.Context,
+    row_filter_id: str,
+    yes: _YES = False,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
+) -> None:
     """Revoke row filter ROW_FILTER_ID.
 
     Take the id from `row-filter list`; on a narrow terminal the table leaves it out, so widen the
@@ -147,10 +204,15 @@ def revoke_row_filter(ctx: typer.Context, row_filter_id: str, yes: _YES = False)
         The filter id.
     yes
         Skip the confirmation prompt.
+    override_managed
+        `--override-managed`: revoke the row filter although an access file manages its scope.
+    reason
+        `--reason`: why you revoke the row filter anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     confirm(state, f"Revoke row filter {row_filter_id}?", yes)
-    state.client().row_filters.revoke(row_filter_id)
+    state.client().row_filters.revoke(row_filter_id, override_reason=why)
     _output.done(state, f"Revoked row filter {row_filter_id}")
 
 
@@ -163,6 +225,8 @@ def create_column_mask(
     principal: _PRINCIPAL = None,
     group: _GROUP = None,
     env: _ENV = None,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Mask COLUMN of TABLE (namespace.table) for a principal or group.
 
@@ -182,24 +246,18 @@ def create_column_mask(
         The group it applies to.
     env
         The environment.
+    override_managed
+        `--override-managed`: create the column mask although an access file manages its scope.
+    reason
+        `--reason`: why you create the column mask anyway.
     """
     state = state_of(ctx)
-    exactly_one(principal, group, "--principal or --group")
-    namespace, name = split_table_name(table)
-    environment = resolve_environment(state, env)
-    mask = state.client().column_masks.create(
-        principal=principal,
-        group=group,
-        environment=environment,
-        namespace=namespace,
-        table=name,
-        column=column,
-        expression=expression,
-    )
+    target = _target(state, table, principal, group, env, override_reason(override_managed, reason))
+    mask = state.client().column_masks.create(**target, column=column, expression=expression)
     _output.done(
         state,
         f"Created column mask {mask.id} on "
-        f"{_output.inline(environment)}/{_output.inline(table)}.{_output.inline(column)}",
+        f"{_output.inline(target['environment'])}/{_output.inline(table)}.{_output.inline(column)}",
         mask,
     )
 
@@ -240,7 +298,13 @@ def list_column_masks(
 
 
 @column_mask_app.command("revoke")
-def revoke_column_mask(ctx: typer.Context, column_mask_id: str, yes: _YES = False) -> None:
+def revoke_column_mask(
+    ctx: typer.Context,
+    column_mask_id: str,
+    yes: _YES = False,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
+) -> None:
     """Revoke column mask COLUMN_MASK_ID.
 
     Take the id from `column-mask list`; on a narrow terminal the table leaves it out, so widen the
@@ -254,10 +318,15 @@ def revoke_column_mask(ctx: typer.Context, column_mask_id: str, yes: _YES = Fals
         The mask id.
     yes
         Skip the confirmation prompt.
+    override_managed
+        `--override-managed`: revoke the column mask although an access file manages its scope.
+    reason
+        `--reason`: why you revoke the column mask anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     confirm(state, f"Revoke column mask {column_mask_id}?", yes)
-    state.client().column_masks.revoke(column_mask_id)
+    state.client().column_masks.revoke(column_mask_id, override_reason=why)
     _output.done(state, f"Revoked column mask {column_mask_id}")
 
 

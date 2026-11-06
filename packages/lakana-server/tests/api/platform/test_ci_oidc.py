@@ -569,3 +569,6 @@ def test_a_ci_token_is_refused_on_the_access_routes(ci_client: TestClient) -> No
     assert (
         ci_client.post("/api/v1/access/plan", headers=header, json={"text": ""}).status_code == 403
     )
+    body = {"text": "", "plan_fingerprint": "0" * 64}
+    assert ci_client.post("/api/v1/access/apply", headers=header, json=body).status_code == 403
+    assert ci_client.get("/api/v1/access/status", headers=header).status_code == 403

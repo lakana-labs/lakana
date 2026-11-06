@@ -1,6 +1,6 @@
 {
-  "duplicated_lines": 1209,
-  "clones": 62,
+  "duplicated_lines": 1196,
+  "clones": 61,
   "pairs": {
     "lakana/_artifact_manifest.py ↔ lakana_core/artifacts/manifest.py": {
       "clones": 1,
@@ -95,8 +95,8 @@
       "lines": 11
     },
     "lakana_core/policy/column_masks.py ↔ lakana_core/policy/row_filters.py": {
-      "clones": 6,
-      "lines": 135
+      "clones": 5,
+      "lines": 122
     },
     "lakana_core/projects/checks.py ↔ lakana_core/projects/discovery.py": {
       "clones": 1,

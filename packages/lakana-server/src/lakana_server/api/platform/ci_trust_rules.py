@@ -21,7 +21,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_ci_trust_rule_service, get_principal
+from lakana_server.deps import get_ci_trust_rule_service, get_managed_write_principal, get_principal
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -47,13 +47,16 @@ def _out(view: CiTrustRuleView) -> CiTrustRuleOut:
     return CiTrustRuleOut.model_validate(view)
 
 
-@router.post("", response_model=CiTrustRuleOut, status_code=201, responses=errors(403, 404))
+@router.post("", response_model=CiTrustRuleOut, status_code=201, responses=errors(403, 404, 409))
 def create_ci_trust_rule(
     body: CiTrustRuleCreate,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: CiTrustRuleService = Depends(get_ci_trust_rule_service),
 ) -> CiTrustRuleOut:
     """Create a CI trust rule.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Creates an enabled rule that lets CI jobs whose ID-token claims match its conditions
     exchange them for a token that acts as a service account. Needs the `ADMIN` role on the
@@ -175,14 +178,17 @@ def get_ci_trust_rule(
     return _out(service.get(principal, rule_id))
 
 
-@router.patch("/{rule_id}", response_model=CiTrustRuleOut, responses=errors(403, 404))
+@router.patch("/{rule_id}", response_model=CiTrustRuleOut, responses=errors(403, 404, 409))
 def update_ci_trust_rule(
     rule_id: uuid.UUID,
     body: CiTrustRuleUpdate,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: CiTrustRuleService = Depends(get_ci_trust_rule_service),
 ) -> CiTrustRuleOut:
     """Change a CI trust rule.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Changes the rule's principal, kinds, conditions or `start_on_deploy_jobs`. The tokens issued
     under it end. Needs
@@ -217,13 +223,16 @@ def update_ci_trust_rule(
     )
 
 
-@router.post("/{rule_id}/enable", response_model=CiTrustRuleOut, responses=errors(403, 404))
+@router.post("/{rule_id}/enable", response_model=CiTrustRuleOut, responses=errors(403, 404, 409))
 def enable_ci_trust_rule(
     rule_id: uuid.UUID,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: CiTrustRuleService = Depends(get_ci_trust_rule_service),
 ) -> CiTrustRuleOut:
     """Enable a CI trust rule.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422
     when its conditions no longer meet the requirements of a new rule.
@@ -245,13 +254,16 @@ def enable_ci_trust_rule(
     return _out(service.enable(principal, rule_id))
 
 
-@router.post("/{rule_id}/disable", response_model=CiTrustRuleOut, responses=errors(403, 404))
+@router.post("/{rule_id}/disable", response_model=CiTrustRuleOut, responses=errors(403, 404, 409))
 def disable_ci_trust_rule(
     rule_id: uuid.UUID,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: CiTrustRuleService = Depends(get_ci_trust_rule_service),
 ) -> CiTrustRuleOut:
     """Disable a CI trust rule.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     A disabled rule matches no exchange, and the tokens issued under it end. Needs the
     `ADMIN` role on the instance. Answers 404 when there is no such rule.
@@ -273,13 +285,16 @@ def disable_ci_trust_rule(
     return _out(service.disable(principal, rule_id))
 
 
-@router.delete("/{rule_id}", status_code=204, responses=errors(403, 404))
+@router.delete("/{rule_id}", status_code=204, responses=errors(403, 404, 409))
 def delete_ci_trust_rule(
     rule_id: uuid.UUID,
-    principal: PrincipalRef = Depends(get_principal),
+    principal: PrincipalRef = Depends(get_managed_write_principal),
     service: CiTrustRuleService = Depends(get_ci_trust_rule_service),
 ) -> None:
     """Delete a CI trust rule.
+
+    Answers 409 when an access file manages the scope; `override_managed` with
+    `override_reason` overrides it (ADMIN on the instance; audited).
 
     The tokens issued under the rule end. Needs the `ADMIN` role on the instance. Answers
     404 when there is no such rule.

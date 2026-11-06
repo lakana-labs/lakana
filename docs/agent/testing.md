@@ -484,7 +484,7 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 | Name | Hides | Becomes |
 |---|---|---|
 | `uuid` | run, deploy and query identifiers | `<uuid>` |
-| `timestamp` | ISO 8601 date and time, with or without zone | `<timestamp>` |
+| `timestamp` | ISO 8601 date and time, with or without seconds and zone | `<timestamp>` |
 | `hash` | 40 to 64 hexadecimal digits: commits, SHA-256 digests | `<hash>` |
 | `alert time` | the time of a health alert, `05 Nov 00:33 UTC` | `<alert time>` |
 | `snapshot` | an Iceberg snapshot id, 16 to 19 digits | `<snapshot>` |

@@ -375,8 +375,9 @@ _GUARDED = {
     "identity/pats.py": ("MANAGE_TOKEN", 3),
     # A CI trust rule lets a CI job act as a service account: issuing it a token, in effect.
     "ci_oidc/rules.py": ("MANAGE_TOKEN", 8),
-    # An access file names every kind of access: only an administrator may export or plan it.
-    "access/service.py": ("MANAGE_GRANT", 2),
+    # An access file names every kind of access: only an administrator may export, plan or
+    # apply one, or read the status of the scopes files manage.
+    "access/service.py": ("MANAGE_GRANT", 4),
 }
 _SERVICES = {
     "grants/service.py": "GrantService",

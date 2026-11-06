@@ -3170,3 +3170,27 @@ def test_0066_on_postgres() -> None:
             names = {c["name"] for c in sqlalchemy.inspect(engine).get_columns(table)}
             assert not names & {"field_ids", "column_field_id", "binding"}
         engine.dispose()
+
+
+def test_0067_on_postgres() -> None:
+    """0067 creates the managed-scope tables, `applied_by` nulling; downgrade drops them."""
+    revision_0066 = "f8b2c4d6e0a1"
+    revision_0067 = "a9c3e5f7b1d2"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0067)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0067
+        inspector = sqlalchemy.inspect(engine)
+        assert "ix_access_overrides_scope" in {
+            i["name"] for i in inspector.get_indexes("access_overrides")
+        }
+        [key] = inspector.get_foreign_keys("access_managed_scopes")
+        assert (key["referred_table"], key["options"].get("ondelete")) == (
+            "principals",
+            "SET NULL",
+        )
+        migrate.downgrade(url, revision_0066)
+        tables = set(sqlalchemy.inspect(engine).get_table_names())
+        assert not tables & {"access_managed_scopes", "access_overrides"}
+        engine.dispose()

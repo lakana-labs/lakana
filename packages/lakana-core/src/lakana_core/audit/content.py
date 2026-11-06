@@ -70,6 +70,8 @@ only; a check's failure holds the count of rows, never the rows.
 
 SHOWN_FIELDS: frozenset[str] = frozenset(
     {
+        # the access apply a change belongs to (`lakana_core.access.managed`)
+        "access_apply_id",
         # who and what
         "action",
         "actor",
@@ -84,6 +86,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "asset",
         "asset_scope",
         "attempt",
+        # a change made by hand in a scope an access file manages (`MANAGED_SCOPE_OVERRIDDEN`)
+        "change",
         "check",
         "check_result_id",
         "checks",
@@ -102,6 +106,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "dropped_name",
         "environment",
         "event",
+        # an access file's name and hash, and the commit it came from (`lakana_core.access`)
+        "file_name",
+        "file_sha256",
         "grant_id",
         "group",
         "group_id",
@@ -137,9 +144,13 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "rule_ids",
         "run_as",
         "run_id",
+        # the scope an override changed, and the scopes an access file manages
+        "scope",
+        "scopes",
         # the name of the secret a connection uses, never a value
         "secret",
         "sha",
+        "source_commit",
         # a CI trust rule's opt-in to starting the `on_deploy` jobs of its deploys (#102)
         "start_on_deploy_jobs",
         "storage_root",
@@ -174,6 +185,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "protected",
         "purge",
         "reason",
+        # the scopes an access apply stopped managing
+        "released",
         "replaced",
         "request_trigger",
         "reset",
@@ -195,6 +208,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "closed_missing",
         "count",
         "counts",
+        "created",
         "days",
         "deleted_at",
         "diff",
@@ -222,6 +236,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "previous",
         "previous_days",
         "purge_after",
+        "removed",
         "restored_policies",
         "retention",
         "retention_cleared",

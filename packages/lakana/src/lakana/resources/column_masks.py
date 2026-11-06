@@ -13,6 +13,7 @@ from typing import Any
 from lakana._http import HttpTransport, query_params
 from lakana._models import ColumnMask
 from lakana._routes import ROUTES
+from lakana.resources._override import override_params
 
 
 def _column_mask_from_json(data: dict[str, Any]) -> ColumnMask:
@@ -74,6 +75,7 @@ class ColumnMasks:
         table: str,
         column: str,
         expression: str,
+        override_reason: str | None = None,
     ) -> ColumnMask:
         """Create a column mask.
 
@@ -100,6 +102,9 @@ class ColumnMasks:
             The masked column's name.
         expression
             The replacement value.
+        override_reason
+            Why, 10 to 500 characters on one line, to create the column mask although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
@@ -116,6 +121,7 @@ class ColumnMasks:
         """
         response = self._transport.request(
             ROUTES["column_masks.create"],
+            params=override_params(override_reason),
             json={
                 "principal": principal,
                 "group": group,
@@ -177,13 +183,16 @@ class ColumnMasks:
         )
         return [_column_mask_from_json(item) for item in response.json()]
 
-    def revoke(self, column_mask_id: str) -> None:
+    def revoke(self, column_mask_id: str, *, override_reason: str | None = None) -> None:
         """Revoke a column mask.
 
         Parameters
         ----------
         column_mask_id
             The column mask's id.
+        override_reason
+            Why, 10 to 500 characters on one line, to revoke the column mask although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Raises
         ------
@@ -191,5 +200,7 @@ class ColumnMasks:
             If no column mask of this id exists.
         """
         self._transport.request(
-            ROUTES["column_masks.revoke"], path_params={"column_mask_id": column_mask_id}
+            ROUTES["column_masks.revoke"],
+            params=override_params(override_reason),
+            path_params={"column_mask_id": column_mask_id},
         )

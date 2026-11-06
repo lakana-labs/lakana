@@ -1,4 +1,5 @@
 {
+ "access-file": 9,
  "bind-a-secret": 12.7,
  "check-your-data": 112,
  "connections": 14,
@@ -21,8 +22,8 @@
  "move-a-sql-project": 42,
  "notice-a-broken-pipeline": 32,
  "projects": 31,
- "python-sample": 26,
  "proprietary-db": 20,
+ "python-sample": 26,
  "run-a-job": 19,
  "run-after-deploy": 9,
  "see-a-tables-model": 56,

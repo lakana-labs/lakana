@@ -16,6 +16,7 @@ BLOCK = "<!-- output: demo#show -->\n```text\n{}```\n"
         ("Run 71ddefdc-6a57-4c5b-bac3-cbacc2fb4759 ok", "Run <uuid> ok"),
         ("at 2026-10-21T08:15:30Z", "at <timestamp>"),
         ("at 2026-10-21 08:15:30.123456+02:00", "at <timestamp>"),
+        ("(last applied 2026-11-06T02:49Z)", "(last applied <timestamp>)"),
         ("commit ca36c93fe2337b324df3ab8d03cac9b9d1ed1420 done", "commit <hash> done"),
         ("sha256:" + "ab" * 32, "sha256:<hash>"),
         ("lakana 0.8.1.dev6+g6af3c5d2a", "lakana <version>"),

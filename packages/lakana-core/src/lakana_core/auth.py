@@ -243,6 +243,10 @@ class PrincipalRef:
         The reason of a break-glass write, set per request by the write
         endpoints; `None` otherwise. Authorized and audited by
         `ProtectedWriteGuard`.
+    managed_override_reason
+        The reason for changing access in a scope an access file manages, set per request by
+        the guarded access endpoints (`?override_managed=true&override_reason=`); `None`
+        otherwise. Authorized and audited by `lakana_core.access.managed.guard_change`.
     write_fence
         Set only by the worker (`lakana_worker.pipeline._run_one`) for the run it executes;
         never taken from a request. The guard then refuses a table write unless that run is
@@ -262,6 +266,7 @@ class PrincipalRef:
     task_scope: TaskScope | None = None
     run_context: RunContext | None = None
     break_glass_reason: str | None = None
+    managed_override_reason: str | None = None
     write_fence: WriteFence | None = None
     ci_scope: CiScope | None = None
     language: str | None = None

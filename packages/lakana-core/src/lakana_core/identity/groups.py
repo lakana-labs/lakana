@@ -7,10 +7,12 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from lakana_core.access.managed import guard_change
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, SecurableKind
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.grants.roles import Role
 from lakana_core.grants.service import assert_admin_headroom
 from lakana_core.models import (
     AuditEventType,
@@ -87,7 +89,7 @@ class GroupService:
             raise NotFoundError(f"No principal named {name!r}.")
         return principal
 
-    def create_group(self, p: PrincipalRef, *, name: str) -> Group:
+    def create_group(self, p: PrincipalRef, *, name: str, commit: bool = True) -> Group:
         """Create a new group.
 
         Parameters
@@ -96,6 +98,8 @@ class GroupService:
             The acting principal.
         name
             Unique name for the new group.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -111,6 +115,7 @@ class GroupService:
             (`MANAGE_GROUP` works only with it).
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        guard_change(self._session, p, environment=None, change=f"create group {name}")
         existing = self._session.execute(
             select(Group).where(Group.name == name)
         ).scalar_one_or_none()
@@ -121,10 +126,11 @@ class GroupService:
         AuditService(self._session).record(
             p.id, AuditEventType.GROUP_CREATED, detail={"group": name}
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
         return group
 
-    def delete_group(self, p: PrincipalRef, name: str) -> None:
+    def delete_group(self, p: PrincipalRef, name: str, *, commit: bool = True) -> None:
         """Delete a group, along with its membership rows.
 
         Refused while any active grant, row filter, or column mask still
@@ -158,6 +164,8 @@ class GroupService:
             The acting principal.
         name
             Name of the group to delete.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -173,6 +181,7 @@ class GroupService:
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
         group = self._get_group(name)
+        guard_change(self._session, p, environment=None, change=f"delete group {name}")
         self._session.execute(
             select(Group).where(Group.id == group.id).with_for_update()
         ).scalar_one()
@@ -215,7 +224,8 @@ class GroupService:
             )
         audit.record(p.id, AuditEventType.GROUP_DELETED, detail={"group": name})
         self._session.delete(group)
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
     def list_groups(
         self,
@@ -269,7 +279,9 @@ class GroupService:
             cursor=cursor,
         )
 
-    def add_member(self, p: PrincipalRef, group_name: str, principal_name: str) -> None:
+    def add_member(
+        self, p: PrincipalRef, group_name: str, principal_name: str, *, commit: bool = True
+    ) -> None:
         """Add a principal to a group, idempotently.
 
         Matches the router's `PUT` semantics: adding an existing member is
@@ -283,6 +295,8 @@ class GroupService:
             The group to add to.
         principal_name
             The principal to add.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -303,15 +317,21 @@ class GroupService:
         ).scalar_one_or_none()
         if existing is not None:
             return
+        guard_change(
+            self._session, p, environment=None, change=f"add {principal_name} to {group_name}"
+        )
         self._session.add(GroupMembership(group_id=group.id, principal_id=principal.id))
         AuditService(self._session).record(
             p.id,
             AuditEventType.GROUP_MEMBER_ADDED,
             detail={"group": group_name, "principal": principal_name},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
-    def remove_member(self, p: PrincipalRef, group_name: str, principal_name: str) -> None:
+    def remove_member(
+        self, p: PrincipalRef, group_name: str, principal_name: str, *, commit: bool = True
+    ) -> None:
         """Remove a principal from a group.
 
         Parameters
@@ -322,6 +342,8 @@ class GroupService:
             The group to remove from.
         principal_name
             The principal to remove.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -346,14 +368,43 @@ class GroupService:
         ).scalar_one_or_none()
         if membership is None:
             raise NotFoundError(f"{principal_name!r} is not a member of {group_name!r}.")
-        assert_admin_headroom(self._session, excluding_principal_id=principal.id)
+        guard_change(
+            self._session, p, environment=None, change=f"remove {principal_name} from {group_name}"
+        )
+        if self._grants_instance_admin(group.id):
+            assert_admin_headroom(self._session, excluding_principal_id=principal.id)
         self._session.delete(membership)
         AuditService(self._session).record(
             p.id,
             AuditEventType.GROUP_MEMBER_REMOVED,
             detail={"group": group_name, "principal": principal_name},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
+
+    def _grants_instance_admin(self, group_id: uuid.UUID) -> bool:
+        """Say whether a group holds an active instance ADMIN grant.
+
+        Leaving a group without one cannot take the role from anyone, so the lockout guard is
+        not asked; an access apply revokes an admin group's grant before its memberships.
+
+        Parameters
+        ----------
+        group_id
+            The group.
+
+        Returns
+        -------
+        bool
+            True with an unrevoked ADMIN grant of kind INSTANCE to the group.
+        """
+        found = select(Grant.id).where(
+            Grant.group_id == group_id,
+            Grant.role == Role.ADMIN,
+            Grant.kind == SecurableKind.INSTANCE,
+            Grant.revoked_at.is_(None),
+        )
+        return self._session.execute(found.limit(1)).first() is not None
 
     def list_members(self, p: PrincipalRef, group_name: str) -> list[Principal]:
         """List every principal in a group.

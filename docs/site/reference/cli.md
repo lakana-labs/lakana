@@ -969,6 +969,8 @@ Create principal NAME.
 |---|---|---|---|
 | `NAME` | text | required |  |
 | `--type` | one of `user`, `service-account` | required | user or service-account |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana principal list`
 
@@ -1004,6 +1006,8 @@ Deactivate principal NAME; its credentials stop working.
 |---|---|---|---|
 | `NAME` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ## `lakana group`
 
@@ -1020,6 +1024,8 @@ Create group NAME.
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `NAME` | text | required |  |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana group list`
 
@@ -1045,6 +1051,8 @@ Delete group NAME.
 |---|---|---|---|
 | `NAME` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana group members`
 
@@ -1066,6 +1074,8 @@ Add PRINCIPAL to group NAME.
 |---|---|---|---|
 | `NAME` | text | required |  |
 | `PRINCIPAL` | text | required |  |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana group remove-member`
 
@@ -1078,6 +1088,8 @@ Remove PRINCIPAL from group NAME.
 | `NAME` | text | required |  |
 | `PRINCIPAL` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ## `lakana token`
 
@@ -1172,6 +1184,8 @@ Grant a role or action on a securable to a principal or group.
 | `--env` | text | none | Environment. |
 | `--ns` | text | none | Namespace (dotted). |
 | `--table` | text | none | Table name. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana grant list`
 
@@ -1208,6 +1222,8 @@ Take the id from `grant list`, which keeps it in the table even on a narrow term
 |---|---|---|---|
 | `GRANT_ID` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ## `lakana access`
 
@@ -1258,6 +1274,32 @@ The file format: https://lakana-labs.github.io/lakana/reference/access-file/.
 | `FILE` | path | required | The access file, such as access.yaml. |
 | `--allow-lockout` | flag | off | Accept a file that drops your own ADMIN role while another administrator remains. |
 
+### `lakana access apply`
+
+Usage: `lakana access apply [OPTIONS] {file}`
+
+Make an access file's changes in one audited transaction, or none of them.
+
+Without `--plan-fingerprint` the command plans the file, shows the plan and asks before it applies exactly that plan. With `--plan-fingerprint` it does not ask: that plan was the review. With `--output json` it shows no plan and so does not ask: pass `--yes` or `--plan-fingerprint`. In CI, pass `--yes` and the fingerprint of the plan step: the apply is refused, with nothing changed, when the file or the access changed since that plan. Needs the ADMIN role on the instance and a personal access token.
+
+The file format: https://lakana-labs.github.io/lakana/reference/access-file/.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `FILE` | path | required | The access file, such as access.yaml. |
+| `--plan-fingerprint` | text | none | The fingerprint `lakana access plan` printed: applies without asking, since that plan was the review. Without it the command plans first, shows the plan and asks (the command asks only when it plans itself). |
+| `--source-commit` | text | none | The commit the file came from (7 to 64 hex digits), recorded with the apply. |
+| `--yes` | flag | off | Do not ask before applying; for CI. |
+| `--allow-lockout` | flag | off | Accept a file that drops your own ADMIN role while another administrator remains. |
+
+### `lakana access status`
+
+Usage: `lakana access status [OPTIONS]`
+
+Show the scopes access files manage and the changes made outside them.
+
+Lists each managed scope with the file, commit, administrator and time of its last apply, then the overrides no apply has taken into account yet. Needs the ADMIN role on the instance.
+
 ## `lakana row-filter`
 
 Usage: `lakana row-filter [OPTIONS] COMMAND [ARGS]...`
@@ -1277,6 +1319,8 @@ Restrict which rows of TABLE (namespace.table) a principal or group sees.
 | `--principal` | text | none | Principal name. |
 | `--group` | text | none | Group name. |
 | `--env` | text | none | Environment (default: the profile's). |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana row-filter list`
 
@@ -1304,6 +1348,8 @@ Take the id from `row-filter list`; on a narrow terminal the table leaves it out
 |---|---|---|---|
 | `ROW_FILTER_ID` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ## `lakana column-mask`
 
@@ -1325,6 +1371,8 @@ Mask COLUMN of TABLE (namespace.table) for a principal or group.
 | `--principal` | text | none | Principal name. |
 | `--group` | text | none | Group name. |
 | `--env` | text | none | Environment (default: the profile's). |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana column-mask list`
 
@@ -1352,6 +1400,8 @@ Take the id from `column-mask list`; on a narrow terminal the table leaves it ou
 |---|---|---|---|
 | `COLUMN_MASK_ID` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ## `lakana secret`
 
@@ -1716,6 +1766,8 @@ Create a CI trust rule.
 | `--claim` | text, repeatable | required | NAME=VALUE the ID token's claim must equal exactly (repeatable). Must include repository_id (GitHub) or project_id (GitLab), ref or environment, and how the run was started: event_name or environment (GitHub); ref_protected, pipeline_source or environment (GitLab). |
 | `--kind` | text, repeatable | none | deploy (the default) or dry_run; repeat for both. |
 | `--start-on-deploy-jobs` | flag | off | Let a deploy under this rule start the project's jobs with on_deploy: true in its environment, as the CI identity (off by default). |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana ci-trust list`
 
@@ -1746,6 +1798,8 @@ Change CI trust rule RULE_ID; the tokens issued under it stop working at once.
 | `--claim` | text, repeatable | none | NAME=VALUE (repeatable); replaces all of the rule's conditions. |
 | `--kind` | text, repeatable | none | deploy or dry_run (repeatable). |
 | `--start-on-deploy-jobs` / `--no-start-on-deploy-jobs` | flag | none | Whether a deploy under this rule starts the project's on_deploy jobs. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana ci-trust enable`
 
@@ -1756,6 +1810,8 @@ Enable CI trust rule RULE_ID.
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `RULE_ID` | text | required |  |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana ci-trust disable`
 
@@ -1766,6 +1822,8 @@ Disable CI trust rule RULE_ID; the tokens issued under it stop working at once.
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `RULE_ID` | text | required |  |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana ci-trust delete`
 
@@ -1777,6 +1835,8 @@ Delete CI trust rule RULE_ID; the tokens issued under it stop working at once.
 |---|---|---|---|
 | `RULE_ID` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
+| `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
+| `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
 
 ### `lakana ci-trust explain`
 

@@ -7,7 +7,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.audit.service import AuditService
+from lakana_core.access.managed import guard_change, lock_access
+from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.service import assert_admin_headroom
@@ -32,7 +33,9 @@ class PrincipalService:
         self._session = session
         self._authz = authz
 
-    def create_principal(self, p: PrincipalRef, *, name: str, type: PrincipalType) -> Principal:
+    def create_principal(
+        self, p: PrincipalRef, *, name: str, type: PrincipalType, commit: bool = True
+    ) -> Principal:
         """Create a new principal.
 
         Parameters
@@ -46,6 +49,8 @@ class PrincipalService:
             both authenticate identically, via PAT — `type` is a label for
             display and audit until M7 gives `USER` a second, distinct
             authentication path.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Returns
         -------
@@ -65,6 +70,7 @@ class PrincipalService:
         ).scalar_one_or_none()
         if existing is not None:
             raise AlreadyExistsError(f"Principal {name!r} already exists.")
+        self._guard(p, type, f"create service account {name}")
         principal = Principal(id=uuid.uuid4(), type=type, name=name, is_active=True)
         self._session.add(principal)
         AuditService(self._session).record(
@@ -72,10 +78,47 @@ class PrincipalService:
             AuditEventType.PRINCIPAL_CREATED,
             detail={"principal": name, "type": type.value},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
         return principal
 
-    def deactivate_principal(self, p: PrincipalRef, name: str) -> None:
+    def _guard(self, p: PrincipalRef, type: PrincipalType, change: str) -> None:
+        """Pass a service account's change through the guard of the managed `instance` scope.
+
+        People are never in an access file, so only service accounts are guarded, and an
+        override asked for on a person is refused as a stale flag (as in a scope no file
+        manages).
+
+        Parameters
+        ----------
+        p
+            The acting principal, already authorized.
+        type
+            The type of the principal changed.
+        change
+            What is changed, for a service account.
+
+        Raises
+        ------
+        ValidationError
+            If `p` asks for an override and the principal is a person.
+        """
+        if type is not PrincipalType.SERVICE_ACCOUNT:
+            if p.managed_override_reason is not None:
+                raise ValidationError(
+                    "people are not managed by an access file; repeat without `--override-managed`"
+                )
+            return
+        guard_change(
+            self._session,
+            p,
+            environment=None,
+            change=change,
+            authz=self._authz,
+            action=Action.MANAGE_PRINCIPAL,
+        )
+
+    def deactivate_principal(self, p: PrincipalRef, name: str, *, commit: bool = True) -> None:
         """Deactivate a principal, revoking its access without deleting it.
 
         Idempotent: deactivating an already-inactive principal is a no-op
@@ -89,6 +132,8 @@ class PrincipalService:
             The acting principal.
         name
             Name of the principal to deactivate.
+        commit
+            If false, leave the change and its audit event in the session for the caller's commit.
 
         Raises
         ------
@@ -104,6 +149,9 @@ class PrincipalService:
         principal = self.get_principal_by_name(p, name)
         if not principal.is_active:
             return
+        self._guard(p, principal.type, f"deactivate service account {name}")
+        if ACCESS_APPLY_KEY not in self._session.info:
+            lock_access(self._session, shared=True)
         assert_admin_headroom(self._session, excluding_principal_id=principal.id)
         principal.is_active = False
         AuditService(self._session).record(
@@ -111,7 +159,8 @@ class PrincipalService:
             AuditEventType.PRINCIPAL_DEACTIVATED,
             detail={"principal": name, "type": principal.type.value},
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
 
     def get_principal_by_name(self, p: PrincipalRef, name: str) -> Principal:
         """Fetch a principal by name.

@@ -19,7 +19,9 @@ from lakana_core.access.model import (
     INSTANCE,
     CiTrustEntry,
     Entry,
+    GroupEntry,
     Scopes,
+    ServiceAccountEntry,
     describe,
     environment_of,
     sort_key,
@@ -107,6 +109,9 @@ class AccessPlan:
         Every change: creates, then changes, then removals, each sorted.
     releases
         Managed scopes the file no longer lists (from PR 2 on; none before).
+    starts
+        Scopes the file manages that no apply manages yet, without the environments a managed
+        ``instance`` already covers; from the apply on, changes made by hand there are refused.
     drift
         Access in the scopes that did not come from the file.
     problems
@@ -120,6 +125,7 @@ class AccessPlan:
     manages: tuple[str, ...]
     changes: tuple[PlannedChange, ...]
     releases: tuple[str, ...]
+    starts: tuple[str, ...]
     drift: tuple[Drift, ...]
     problems: tuple[str, ...]
     fingerprint: str
@@ -179,9 +185,9 @@ class AccessPlan:
         Returns
         -------
         bool
-            True without changes and releases.
+            True without changes, releases and starts.
         """
-        return not self.changes and not self.releases
+        return not self.changes and not self.releases and not self.starts
 
 
 def diff(desired: AccessFile, live: LiveAccess, scopes: Scopes) -> tuple[PlannedChange, ...]:
@@ -271,12 +277,37 @@ def apply_order(changes: Sequence[PlannedChange]) -> list[PlannedChange]:
     Returns
     -------
     list of PlannedChange
-        Creates and changes in `ENTRY_ORDER` (groups and service accounts before what names
-        them), then removals in reverse `ENTRY_ORDER` (what names a group before the group).
+        Creates and changes with groups and service accounts first, before the memberships and
+        grants that name them, then the rest in `ENTRY_ORDER`; removals in the reverse order
+        (what names a group or a service account before it).
     """
-    ups = sorted((c for c in changes if c.op != "remove"), key=lambda c: sort_key(c.entry))
+    ups = sorted((c for c in changes if c.op != "remove"), key=lambda c: _apply_key(c.entry))
     downs = sorted(
         (c for c in changes if c.op == "remove"),
-        key=lambda c: (-ENTRY_ORDER.index(type(c.entry)), sort_key(c.entry)[1]),
+        key=lambda c: (-_APPLY_ORDER.index(type(c.entry)), sort_key(c.entry)[1]),
     )
     return ups + downs
+
+
+_APPLY_ORDER: tuple[type, ...] = (
+    GroupEntry,
+    ServiceAccountEntry,
+    *(kind for kind in ENTRY_ORDER if kind not in (GroupEntry, ServiceAccountEntry)),
+)
+"""`ENTRY_ORDER` with service accounts moved before memberships, which may name them."""
+
+
+def _apply_key(entry: Entry) -> tuple[int, str]:
+    """Order an entry for creating it.
+
+    Parameters
+    ----------
+    entry
+        Any entry.
+
+    Returns
+    -------
+    tuple of (int, str)
+        Its kind's place in `_APPLY_ORDER` and its canonical JSON text.
+    """
+    return _APPLY_ORDER.index(type(entry)), sort_key(entry)[1]

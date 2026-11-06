@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
+_APPLY_BODY = {"text": "", "plan_fingerprint": "0" * 64}
+
 
 def _user_header(client: TestClient, name: str) -> dict[str, str]:
     """Create a user with a token and return its auth header.
@@ -97,6 +99,8 @@ def test_access_routes_refuse_a_non_admin(client: TestClient) -> None:
     header = _user_header(client, "alice")
     assert client.get("/api/v1/access/export", headers=header).status_code == 403
     assert client.post("/api/v1/access/plan", headers=header, json={"text": ""}).status_code == 403
+    assert client.post("/api/v1/access/apply", headers=header, json=_APPLY_BODY).status_code == 403
+    assert client.get("/api/v1/access/status", headers=header).status_code == 403
 
 
 def test_a_file_name_with_a_path_is_refused(client: TestClient) -> None:
@@ -125,3 +129,116 @@ def test_a_task_token_is_refused_on_the_access_routes(client: TestClient) -> Non
     header = {"Authorization": f"Bearer {minted.json()['token']}"}
     assert client.get("/api/v1/access/export", headers=header).status_code == 403
     assert client.post("/api/v1/access/plan", headers=header, json={"text": ""}).status_code == 403
+    assert client.post("/api/v1/access/apply", headers=header, json=_APPLY_BODY).status_code == 403
+    assert client.get("/api/v1/access/status", headers=header).status_code == 403
+
+
+def _plan(client: TestClient, text: str) -> dict[str, object]:
+    """Plan a file as the bootstrap administrator.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    text
+        The file's content.
+
+    Returns
+    -------
+    dict of str to object
+        The plan body.
+    """
+    response = client.post("/api/v1/access/plan", headers=AUTH_HEADER, json={"text": text})
+    assert response.status_code == 200, response.text
+    return dict(response.json())
+
+
+def test_apply_makes_the_planned_changes_and_the_next_plan_is_empty(client: TestClient) -> None:
+    """Export, add a group, plan, apply with the fingerprint, plan again: nothing left."""
+    text = client.get("/api/v1/access/export", headers=AUTH_HEADER).json()["text"]
+    text += "groups:\n  finance:\n    members: []\n"
+    plan = _plan(client, text)
+    applied = client.post(
+        "/api/v1/access/apply",
+        headers=AUTH_HEADER,
+        json={
+            "text": text,
+            "plan_fingerprint": plan["fingerprint"],
+            "source_commit": "0123abc",
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    body = applied.json()
+    assert (body["created"], body["changed"], body["removed"], body["released"]) == (1, 0, 0, [])
+    assert body["source_commit"] == "0123abc"
+    assert len(body["apply_id"]) == 36
+    assert len(body["file_sha256"]) == 64
+    assert body["applied_at"]
+    again = _plan(client, text)
+    assert (again["creates"], again["changed"], again["removals"]) == ([], [], [])
+
+
+def test_apply_with_a_stale_fingerprint_is_409_and_changes_nothing(client: TestClient) -> None:
+    """The text is not applied; the answer says to plan again."""
+    text = client.get("/api/v1/access/export", headers=AUTH_HEADER).json()["text"]
+    text += "groups:\n  finance:\n    members: []\n"
+    response = client.post(
+        "/api/v1/access/apply",
+        headers=AUTH_HEADER,
+        json={"text": text, "plan_fingerprint": "0" * 64},
+    )
+    assert response.status_code == 409
+    assert "plan again" in response.text
+    assert _plan(client, text)["creates"]
+
+
+def test_apply_lists_every_problem_with_422(client: TestClient) -> None:
+    """A file with problems is not applied; each problem is in the answer."""
+    text = "version: 1\nmanages: [instance]\nx: 1\ny: 2\n"
+    fingerprint = _plan(client, text)["fingerprint"]
+    response = client.post(
+        "/api/v1/access/apply",
+        headers=AUTH_HEADER,
+        json={"text": text, "plan_fingerprint": fingerprint},
+    )
+    assert response.status_code == 422, response.text
+    assert "access.yaml: x" in response.text
+    assert "access.yaml: y" in response.text
+
+
+def test_apply_rejects_a_fingerprint_that_is_not_64_hex_digits(client: TestClient) -> None:
+    """422 naming plan_fingerprint."""
+    response = client.post(
+        "/api/v1/access/apply", headers=AUTH_HEADER, json={"text": "", "plan_fingerprint": "abc"}
+    )
+    assert response.status_code == 422
+    assert "plan_fingerprint" in response.text
+
+
+def test_status_has_the_shape_the_sdk_reads(client: TestClient) -> None:
+    """Scopes after an apply, no overrides yet."""
+    assert client.get("/api/v1/access/status", headers=AUTH_HEADER).json() == {
+        "scopes": [],
+        "overrides": [],
+    }
+    text = client.get("/api/v1/access/export", headers=AUTH_HEADER).json()["text"]
+    fingerprint = _plan(client, text)["fingerprint"]
+    applied = client.post(
+        "/api/v1/access/apply",
+        headers=AUTH_HEADER,
+        json={"text": text, "plan_fingerprint": fingerprint, "source_commit": "0123abc"},
+    )
+    assert applied.status_code == 200, applied.text
+    scope = client.get("/api/v1/access/status", headers=AUTH_HEADER).json()["scopes"][0]
+    assert scope["scope"] == "instance"
+    assert scope["file_name"] == "access.yaml"
+    assert scope["source_commit"] == "0123abc"
+    assert scope["applied_by"] == "admin"
+    assert set(scope) == {
+        "scope",
+        "file_name",
+        "file_sha256",
+        "source_commit",
+        "applied_by",
+        "applied_at",
+    }

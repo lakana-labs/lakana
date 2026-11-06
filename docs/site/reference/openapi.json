@@ -8409,9 +8409,40 @@
           "principals"
         ],
         "summary": "Create a principal",
-        "description": "Creates a user or a service account. Needs `MANAGE_PRINCIPAL` on the instance. Answers 409 when the name is taken.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is managed by a file: for a person the override answers 422.\n\nCreates a user or a service account. Needs `MANAGE_PRINCIPAL` on the instance. Answers 409 when the name is taken.",
         "operationId": "create_principal_api_v1_principals_post",
         "parameters": [
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -8714,7 +8745,7 @@
           "principals"
         ],
         "summary": "Deactivate a principal",
-        "description": "Stops the principal from signing in. The record stays, with every grant, token and audit entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when there is no principal of that name and 409 when it is the last active administrator.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is managed by a file: for a person the override answers 422.\n\nStops the principal from signing in. The record stays, with every grant, token and audit entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when there is no principal of that name and 409 when it is the last active administrator.",
         "operationId": "deactivate_principal_api_v1_principals__name__delete",
         "parameters": [
           {
@@ -8726,6 +8757,37 @@
               "title": "Name"
             },
             "description": "Principal name."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -8955,9 +9017,40 @@
           "groups"
         ],
         "summary": "Create a group",
-        "description": "Needs the `ADMIN` role on the instance. Answers 409 when the name is taken.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 409 when the name is taken.",
         "operationId": "create_group_api_v1_groups_post",
         "parameters": [
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -9170,7 +9263,7 @@
           "groups"
         ],
         "summary": "Delete a group",
-        "description": "Needs the `ADMIN` role on the instance. Answers 404 when there is no such group and 409 while an active grant, row filter or column mask still names it.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such group and 409 while an active grant, row filter or column mask still names it.",
         "operationId": "delete_group_api_v1_groups__name__delete",
         "parameters": [
           {
@@ -9182,6 +9275,37 @@
               "title": "Name"
             },
             "description": "Group name."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -9361,7 +9485,7 @@
           "groups"
         ],
         "summary": "Add a principal to a group",
-        "description": "Adding a principal that is a member already changes nothing. Needs the `ADMIN` role on the instance. Answers 404 when the group or the principal does not exist.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nAdding a principal that is a member already changes nothing. Needs the `ADMIN` role on the instance. Answers 404 when the group or the principal does not exist.",
         "operationId": "add_member_api_v1_groups__name__members__principal_name__put",
         "parameters": [
           {
@@ -9383,6 +9507,37 @@
               "title": "Principal Name"
             },
             "description": "Principal to add."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -9429,6 +9584,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9454,7 +9619,7 @@
           "groups"
         ],
         "summary": "Remove a principal from a group",
-        "description": "Needs the `ADMIN` role on the instance. Answers 404 when the group or the principal does not exist.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when the group or the principal does not exist.",
         "operationId": "remove_member_api_v1_groups__name__members__principal_name__delete",
         "parameters": [
           {
@@ -9476,6 +9641,37 @@
               "title": "Principal Name"
             },
             "description": "Principal to remove."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -9522,6 +9718,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10017,9 +10223,40 @@
           "grants"
         ],
         "summary": "Grant a role or an action",
-        "description": "Gives a principal or a group a role or a single action on the instance, an environment, a namespace or a table. Needs the `ADMIN` role on the instance. Answers 404 when the principal, group or object does not exist and 422 when the grant is not valid for that object.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nGives a principal or a group a role or a single action on the instance, an environment, a namespace or a table. Needs the `ADMIN` role on the instance. Answers 404 when the principal, group or object does not exist and 422 when the grant is not valid for that object.",
         "operationId": "create_grant_api_v1_grants_post",
         "parameters": [
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -10082,6 +10319,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10332,7 +10579,7 @@
           "grants"
         ],
         "summary": "Revoke a grant",
-        "description": "Needs the `ADMIN` role on the instance. Answers 404 when there is no such grant and 409 when revoking it would leave the instance without an active administrator.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such grant and 409 when revoking it would leave the instance without an active administrator.",
         "operationId": "revoke_grant_api_v1_grants__grant_id__delete",
         "parameters": [
           {
@@ -10345,6 +10592,37 @@
               "title": "Grant Id"
             },
             "description": "The grant's id."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -10428,9 +10706,40 @@
           "row-filters"
         ],
         "summary": "Create a row filter",
-        "description": "Restricts which rows of a table a principal or group sees, by a SQL condition. The filter binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers 404 when the principal, group or table does not exist and 422 for a condition that is not valid or is longer than the server's statement limit.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nRestricts which rows of a table a principal or group sees, by a SQL condition. The filter binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers 404 when the principal, group or table does not exist and 422 for a condition that is not valid or is longer than the server's statement limit.",
         "operationId": "create_row_filter_api_v1_row_filters_post",
         "parameters": [
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -10493,6 +10802,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10689,7 +11008,7 @@
           "row-filters"
         ],
         "summary": "Revoke a row filter",
-        "description": "Needs `MANAGE_POLICY` on the instance. Answers 404 when there is no such row filter.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds `MANAGE_POLICY` on the instance. Answers 404 when there is no such row filter.",
         "operationId": "revoke_row_filter_api_v1_row_filters__row_filter_id__delete",
         "parameters": [
           {
@@ -10702,6 +11021,37 @@
               "title": "Row Filter Id"
             },
             "description": "The row filter's id."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -10756,6 +11106,16 @@
               }
             }
           },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -10775,9 +11135,40 @@
           "column-masks"
         ],
         "summary": "Create a column mask",
-        "description": "Hides or rewrites a column of a table for a principal or group, by a SQL expression. The mask binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers 404 when the principal, group or table does not exist and 422 for a column the table does not have, an expression that is not valid, or one longer than the server's statement limit.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nHides or rewrites a column of a table for a principal or group, by a SQL expression. The mask binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers 404 when the principal, group or table does not exist and 422 for a column the table does not have, an expression that is not valid, or one longer than the server's statement limit.",
         "operationId": "create_column_mask_api_v1_column_masks_post",
         "parameters": [
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -10840,6 +11231,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11036,7 +11437,7 @@
           "column-masks"
         ],
         "summary": "Revoke a column mask",
-        "description": "Needs `MANAGE_POLICY` on the instance. Answers 404 when there is no such column mask.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds `MANAGE_POLICY` on the instance. Answers 404 when there is no such column mask.",
         "operationId": "revoke_column_mask_api_v1_column_masks__column_mask_id__delete",
         "parameters": [
           {
@@ -11049,6 +11450,37 @@
               "title": "Column Mask Id"
             },
             "description": "The column mask's id."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -11095,6 +11527,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16735,9 +17177,40 @@
           "ci-trust-rules"
         ],
         "summary": "Create a CI trust rule",
-        "description": "Creates an enabled rule that lets CI jobs whose ID-token claims match its conditions exchange them for a token that acts as a service account. Needs the `ADMIN` role on the instance. Answers 404 when the principal, environment or repository does not exist and 422 when a field breaks the rules of a trust rule.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nCreates an enabled rule that lets CI jobs whose ID-token claims match its conditions exchange them for a token that acts as a service account. Needs the `ADMIN` role on the instance. Answers 404 when the principal, environment or repository does not exist and 422 when a field breaks the rules of a trust rule.",
         "operationId": "create_ci_trust_rule_api_v1_ci_trust_rules_post",
         "parameters": [
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
+          },
           {
             "name": "authorization",
             "in": "header",
@@ -16800,6 +17273,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17074,7 +17557,7 @@
           "ci-trust-rules"
         ],
         "summary": "Change a CI trust rule",
-        "description": "Changes the rule's principal, kinds, conditions or `start_on_deploy_jobs`. The tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule or principal and 422 when nothing is given or a field breaks the rules of a trust rule.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nChanges the rule's principal, kinds, conditions or `start_on_deploy_jobs`. The tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule or principal and 422 when nothing is given or a field breaks the rules of a trust rule.",
         "operationId": "update_ci_trust_rule_api_v1_ci_trust_rules__rule_id__patch",
         "parameters": [
           {
@@ -17087,6 +17570,37 @@
               "title": "Rule Id"
             },
             "description": "The CI trust rule's id."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -17158,6 +17672,16 @@
               }
             }
           },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -17175,7 +17699,7 @@
           "ci-trust-rules"
         ],
         "summary": "Delete a CI trust rule",
-        "description": "The tokens issued under the rule end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nThe tokens issued under the rule end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule.",
         "operationId": "delete_ci_trust_rule_api_v1_ci_trust_rules__rule_id__delete",
         "parameters": [
           {
@@ -17188,6 +17712,37 @@
               "title": "Rule Id"
             },
             "description": "The CI trust rule's id."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -17242,6 +17797,16 @@
               }
             }
           },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -17261,7 +17826,7 @@
           "ci-trust-rules"
         ],
         "summary": "Enable a CI trust rule",
-        "description": "Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422 when its conditions no longer meet the requirements of a new rule.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422 when its conditions no longer meet the requirements of a new rule.",
         "operationId": "enable_ci_trust_rule_api_v1_ci_trust_rules__rule_id__enable_post",
         "parameters": [
           {
@@ -17274,6 +17839,37 @@
               "title": "Rule Id"
             },
             "description": "The CI trust rule's id."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -17327,6 +17923,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17354,7 +17960,7 @@
           "ci-trust-rules"
         ],
         "summary": "Disable a CI trust rule",
-        "description": "A disabled rule matches no exchange, and the tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule.",
+        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nA disabled rule matches no exchange, and the tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule.",
         "operationId": "disable_ci_trust_rule_api_v1_ci_trust_rules__rule_id__disable_post",
         "parameters": [
           {
@@ -17367,6 +17973,37 @@
               "title": "Rule Id"
             },
             "description": "The CI trust rule's id."
+          },
+          {
+            "name": "override_managed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply.",
+              "default": false,
+              "title": "Override Managed"
+            },
+            "description": "Change access in a scope an access file manages anyway, in an emergency. Needs the ADMIN role on the instance and `override_reason`; audited, and shown as drift until the next apply."
+          },
+          {
+            "name": "override_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why, 10 to 500 characters on one line; with `override_managed=true`.",
+              "title": "Override Reason"
+            },
+            "description": "Why, 10 to 500 characters on one line; with `override_managed=true`."
           },
           {
             "name": "authorization",
@@ -17420,6 +18057,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17601,6 +18248,180 @@
           },
           "413": {
             "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/access/apply": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Make an access file's changes in one audited transaction, or none of them",
+        "description": "Needs the ADMIN role on the instance. The plan is made again under a lock: 409 when the file or access changed since the plan with `plan_fingerprint` (plan again), and 409 when the changes would end the caller's last way to administer (apply in two steps). 422 lists every problem of the file (at most 50).",
+        "operationId": "apply_access_api_v1_access_apply_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessApplyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessApplyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/access/status": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the scopes access files manage and the open overrides",
+        "description": "Needs the ADMIN role on the instance.",
+        "operationId": "access_status_api_v1_access_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessStatusOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token is missing, wrong, expired or revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17913,6 +18734,109 @@
   },
   "components": {
     "schemas": {
+      "AccessApplyIn": {
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "title": "File Name",
+            "default": "access.yaml"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "plan_fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Fingerprint"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commit"
+          },
+          "allow_lockout": {
+            "type": "boolean",
+            "title": "Allow Lockout",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "plan_fingerprint"
+        ],
+        "title": "AccessApplyIn",
+        "description": "Request body for applying an access file.\n\nParameters\n----------\nfile_name\n    The file's base name, which the messages and the record use.\ntext\n    The file's content.\nplan_fingerprint\n    The ``fingerprint`` of the plan the caller reviewed (64 hex digits); the apply is\n    refused with 409 when the file or access changed since.\nsource_commit\n    The commit the file came from, 7 to 64 hex digits; recorded with the apply.\nallow_lockout\n    Accept a file that drops the caller's own ``ADMIN`` role while another administrator\n    remains."
+      },
+      "AccessApplyOut": {
+        "properties": {
+          "apply_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Apply Id"
+          },
+          "file_sha256": {
+            "type": "string",
+            "title": "File Sha256"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commit"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "changed": {
+            "type": "integer",
+            "title": "Changed"
+          },
+          "removed": {
+            "type": "integer",
+            "title": "Removed"
+          },
+          "released": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Released"
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Applied At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "apply_id",
+          "file_sha256",
+          "source_commit",
+          "created",
+          "changed",
+          "removed",
+          "released",
+          "applied_at"
+        ],
+        "title": "AccessApplyOut",
+        "description": "What an apply did, as the REST answer of `AccessService.apply`.\n\nParameters\n----------\napply_id\n    Find the apply's audit events by it: each carries it as ``access_apply_id``.\nfile_sha256\n    SHA-256 of the applied text, 64 hex digits.\nsource_commit\n    `--source-commit` as sent, lower case, or `null`.\ncreated\n    Count of new entries.\nchanged\n    Count of CI trust rules updated in place.\nremoved\n    Count of entries taken away.\nreleased\n    Scopes that are no longer managed after this apply.\napplied_at\n    Commit time of the apply, UTC."
+      },
       "AccessChangeOut": {
         "properties": {
           "op": {
@@ -18039,6 +18963,48 @@
         "title": "AccessFileIn",
         "description": "Request body for planning an access file.\n\nThe text has no length limit here: the server names the limit in its answer (1 MiB) and\nthe request body limit bounds the request.\n\nParameters\n----------\nfile_name\n    The file's base name, which the messages use, such as ``access.yaml``.\ntext\n    The file's content.\nallow_lockout\n    Accept a file that drops the caller's own ``ADMIN`` role while another administrator\n    remains."
       },
+      "AccessOverrideOut": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "change": {
+            "type": "string",
+            "title": "Change"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "change",
+          "reason",
+          "by",
+          "at"
+        ],
+        "title": "AccessOverrideOut",
+        "description": "A change made by hand in a managed scope that no apply has taken into account yet.\n\nParameters\n----------\nscope\n    The managed scope.\nchange\n    What was changed.\nreason\n    Why.\nby\n    Who changed it; `null` once that principal is deleted.\nat\n    When."
+      },
       "AccessPlanOut": {
         "properties": {
           "file_name": {
@@ -18084,6 +19050,13 @@
             "type": "array",
             "title": "Releases"
           },
+          "starts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Starts"
+          },
           "drift": {
             "items": {
               "$ref": "#/components/schemas/AccessDriftOut"
@@ -18112,12 +19085,38 @@
           "changed",
           "removals",
           "releases",
+          "starts",
           "drift",
           "problems",
           "fingerprint"
         ],
         "title": "AccessPlanOut",
-        "description": "What applying an access file would change, and every problem that stops it.\n\nParameters\n----------\nfile_name\n    The base name the messages use.\nfile_sha256\n    Hash of the file's text.\nmanages\n    The scopes the file manages; empty when it did not parse.\ncreates\n    Entries the apply creates.\nchanged\n    CI trust rules the apply changes in place.\nremovals\n    Entries the apply removes.\nreleases\n    Managed scopes the file no longer lists.\ndrift\n    Access in the scopes that did not come from the file.\nproblems\n    Every problem; an apply refuses while there is one.\nfingerprint\n    Hash of the live state of the managed scopes, which an apply checks again."
+        "description": "What applying an access file would change, and every problem that stops it.\n\nParameters\n----------\nfile_name\n    The base name the messages use.\nfile_sha256\n    Hash of the file's text.\nmanages\n    The scopes the file manages; empty when it did not parse.\ncreates\n    Entries the apply creates.\nchanged\n    CI trust rules the apply changes in place.\nremovals\n    Entries the apply removes.\nreleases\n    Managed scopes the file no longer lists.\nstarts\n    Scopes the file manages that no apply manages yet; changes made by hand there are\n    refused once the file is applied.\ndrift\n    Access in the scopes that did not come from the file.\nproblems\n    Every problem; an apply refuses while there is one.\nfingerprint\n    Hash of the live state of the managed scopes, which an apply checks again."
+      },
+      "AccessStatusOut": {
+        "properties": {
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedScopeOut"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/AccessOverrideOut"
+            },
+            "type": "array",
+            "title": "Overrides"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scopes",
+          "overrides"
+        ],
+        "title": "AccessStatusOut",
+        "description": "The scopes access files manage, and the open overrides.\n\nParameters\n----------\nscopes\n    Every managed scope, sorted by name.\noverrides\n    Every open override, oldest first."
       },
       "Action": {
         "type": "string",
@@ -19006,7 +20005,9 @@
           "CI_TRUST_RULE_ENABLED",
           "CI_TRUST_RULE_DISABLED",
           "OIDC_TOKEN_EXCHANGED",
-          "OIDC_EXCHANGE_REFUSED"
+          "OIDC_EXCHANGE_REFUSED",
+          "ACCESS_APPLIED",
+          "MANAGED_SCOPE_OVERRIDDEN"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."
@@ -22632,6 +23633,60 @@
         "type": "object",
         "title": "MaintenanceIn",
         "description": "Request body for table maintenance.\n\nParameters\n----------\nkeep_days\n    Snapshots younger than this many days are kept.\nkeep_last\n    The most recent this many snapshots are always kept.\ndry_run\n    Report what would happen without changing anything.\nolder_than_hours\n    Unreferenced files younger than this many hours are never deleted;\n    1 to 87600 (ten years)."
+      },
+      "ManagedScopeOut": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "file_sha256": {
+            "type": "string",
+            "title": "File Sha256"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commit"
+          },
+          "applied_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied By"
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Applied At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "file_name",
+          "file_sha256",
+          "source_commit",
+          "applied_by",
+          "applied_at"
+        ],
+        "title": "ManagedScopeOut",
+        "description": "A scope an access file manages, and its last apply.\n\nParameters\n----------\nscope\n    ``instance`` or an environment's name.\nfile_name\n    The name of the file that last applied it.\nfile_sha256\n    That file's hash.\nsource_commit\n    The commit the file came from, when given.\napplied_by\n    Who applied it; `null` once that principal is deleted.\napplied_at\n    When."
       },
       "MeasureOut": {
         "properties": {

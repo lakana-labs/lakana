@@ -9,6 +9,7 @@ from typing import Annotated
 import typer
 
 from lakana.cli import _output
+from lakana.cli._override import OVERRIDE_MANAGED, OVERRIDE_REASON, override_reason
 from lakana.cli._paging import CURSOR, LIMIT, SEARCH, more_results
 from lakana.cli._state import confirm, state_of
 
@@ -29,6 +30,8 @@ def create(
     principal_type: Annotated[
         PrincipalType, typer.Option("--type", help="user or service-account")
     ],
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Create principal NAME.
 
@@ -40,10 +43,15 @@ def create(
         The principal name.
     principal_type
         User or service account.
+    override_managed
+        `--override-managed`: create a service account although an access file manages its scope.
+    reason
+        `--reason`: why you create a service account anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     api_type = principal_type.value.upper().replace("-", "_")
-    principal = state.client().principals.create(name, api_type)
+    principal = state.client().principals.create(name, api_type, override_reason=why)
     who = shlex.quote(_output.inline(name))
     _output.done(
         state,
@@ -106,6 +114,8 @@ def deactivate(
     ctx: typer.Context,
     name: str,
     yes: Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")] = False,
+    override_managed: OVERRIDE_MANAGED = False,
+    reason: OVERRIDE_REASON = None,
 ) -> None:
     """Deactivate principal NAME; its credentials stop working.
 
@@ -117,10 +127,15 @@ def deactivate(
         The principal name.
     yes
         Skip the confirmation prompt.
+    override_managed
+        `--override-managed`: deactivate a service account although an access file manages it.
+    reason
+        `--reason`: why you deactivate a service account anyway.
     """
+    why = override_reason(override_managed, reason)
     state = state_of(ctx)
     confirm(state, f"Deactivate principal {name!r}? Its tokens stop working.", yes)
-    state.client().principals.deactivate(name)
+    state.client().principals.deactivate(name, override_reason=why)
     _output.done(state, f"Deactivated principal {_output.inline(name)}")
 
 

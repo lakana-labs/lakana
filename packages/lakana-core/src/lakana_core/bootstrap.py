@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from lakana_core.access.managed import lockout_recovery
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import (
     AllowAllAuthorization,
@@ -323,7 +324,10 @@ def bootstrap_if_needed(
        PAT this call mints is the only working credential for it
        afterward.
     3. Grants it instance ADMIN (re-granting even if a prior grant was
-       revoked).
+       revoked). When an access file manages `instance`, this grant is the
+       one change outside the file the guard lets through
+       (`lakana_core.access.managed.lockout_recovery`); it is recorded as an
+       override (`MANAGED_SCOPE_OVERRIDDEN`), which the next plan lists as drift.
     4. Mints one fresh PAT, via `PatService.issue(..., commit=False)`
        — which itself records `PAT_ISSUED`. A random token is written to `token_file`
        (`write_token_file`) before the commit and never returned to be logged; the file is
@@ -417,7 +421,10 @@ def bootstrap_if_needed(
     ):
         pat.revoked_at = now
 
-    ensure_bootstrap_admin_grant(session, principal, authz, commit=False)
+    # The one change the access-file guard lets through: recovery must never depend on the
+    # file. It is recorded as an override, so the next plan shows the grant as drift.
+    with lockout_recovery(session):
+        ensure_bootstrap_admin_grant(session, principal, authz, commit=False)
 
     issued = PatService(session, authz).issue(
         principal,

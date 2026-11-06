@@ -14,6 +14,7 @@ from typing import Any, TypedDict, Unpack
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
 from lakana._models import Grant, GrantPage
 from lakana._routes import ROUTES
+from lakana.resources._override import override_params
 
 
 def _grant_from_json(data: dict[str, Any]) -> Grant:
@@ -88,6 +89,7 @@ class Grants:
         environment: str | None = None,
         namespace: str | None = None,
         table: str | None = None,
+        override_reason: str | None = None,
     ) -> Grant:
         """Create a grant.
 
@@ -119,6 +121,9 @@ class Grants:
             NAMESPACE/TABLE-scoped grant.
         table
             The table name, for a TABLE-scoped grant.
+        override_reason
+            Why, 10 to 500 characters on one line, to make the grant although an access file manages
+            its scope (an audited override, for an administrator of the instance).
 
         Returns
         -------
@@ -134,6 +139,7 @@ class Grants:
         """
         response = self._transport.request(
             ROUTES["grants.create"],
+            params=override_params(override_reason),
             json={
                 "principal": principal,
                 "group": group,
@@ -258,13 +264,16 @@ class Grants:
         """
         return every_page(lambda cursor: self.list_page(limit=page_size, cursor=cursor, **filters))
 
-    def revoke(self, grant_id: str) -> None:
+    def revoke(self, grant_id: str, *, override_reason: str | None = None) -> None:
         """Revoke a grant.
 
         Parameters
         ----------
         grant_id
             The grant's id.
+        override_reason
+            Why, 10 to 500 characters on one line, to revoke the grant although an access file
+            manages its scope (an audited override, for an administrator of the instance).
 
         Raises
         ------
@@ -273,4 +282,8 @@ class Grants:
         lakana.errors.Conflict
             If revoking this grant would leave zero active instance admins.
         """
-        self._transport.request(ROUTES["grants.revoke"], path_params={"grant_id": grant_id})
+        self._transport.request(
+            ROUTES["grants.revoke"],
+            params=override_params(override_reason),
+            path_params={"grant_id": grant_id},
+        )

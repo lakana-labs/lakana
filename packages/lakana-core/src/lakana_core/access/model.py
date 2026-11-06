@@ -546,8 +546,10 @@ def describe(entry: Entry) -> str:
             )
 
 
-def fingerprint(state: AccessState, managed: Sequence[tuple[str, str]] = ()) -> str:
-    """Hash a state and the managed-scope records, independent of order.
+def fingerprint(
+    state: AccessState, managed: Sequence[tuple[str, str]] = (), file_sha256: str = ""
+) -> str:
+    """Hash a state, the managed-scope records and the file planned, independent of order.
 
     Parameters
     ----------
@@ -555,6 +557,9 @@ def fingerprint(state: AccessState, managed: Sequence[tuple[str, str]] = ()) -> 
         The live entries of the scopes a plan covers.
     managed
         ``(scope, file_sha256)`` of each managed scope (empty before apply records any).
+    file_sha256
+        The hash of the exact text of the file planned, so a plan of one file never stands
+        for another.
 
     Returns
     -------
@@ -564,6 +569,7 @@ def fingerprint(state: AccessState, managed: Sequence[tuple[str, str]] = ()) -> 
     payload = {
         "entries": sorted(json.dumps(entry_json(e), sort_keys=True) for e in state.entries),
         "managed": sorted(managed),
+        "file": file_sha256,
     }
     text = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(text.encode()).hexdigest()
