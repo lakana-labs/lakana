@@ -5,8 +5,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from graph_test_helpers import KEY_IMPACT, Grants, StarWorld, asset_entry, point
+from graph_test_helpers import KEY_IMPACT, Grants, StarWorld, asset_entry, point, sales_manifest
 from graph_test_helpers import graph_service_for as _service
+from sqlalchemy import event
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.glossary import write_glossary
@@ -296,3 +297,34 @@ def test_impact_pages_like_the_other_questions(star: StarWorld, principal: Princ
     with pytest.raises(ValidationError) as caught:
         service.impact(principal, "dev", "gold.dim_store", cursor=lineage.next_cursor)
     assert "not valid for the `graph-impact` list" in str(caught.value)
+
+
+def test_column_readers_cost_one_preload_query_however_many_readers(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    manifest = sales_manifest()
+    for entry in manifest["assets"]:
+        if entry["table"] in {"gold.dim_date", "gold.fact_sales"}:
+            entry["lineage"] = {
+                c: [{"table": "silver.sales", "column": "store_id"}] for c in entry["columns"]
+            }
+    point(star.session, star.env_id, star.repos["sales"], manifest)
+    star.session.commit()
+    statements: list[str] = []
+
+    def record(conn: object, cursor: object, statement: str, *args: object) -> None:
+        if "table_columns" in statement:
+            statements.append(statement)
+
+    engine = star.session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        answers = _service(star).breakage(principal, "dev", ["column:silver.sales/store_id"])
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert {g.name for g, _ in answers["column:silver.sales/store_id"]} >= {
+        "gold.dim_date",
+        "gold.fact_sales",
+    }
+    # One for the start column's own table, one for both readers' built tables together.
+    assert len(statements) == 2, "\n---\n".join(statements)

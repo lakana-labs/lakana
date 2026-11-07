@@ -46,8 +46,10 @@ A deploy refuses a bad text with its field and the next step:
 
 An asset may call only the generator table functions `range`, `generate_series` and `unnest`,
 which read no data and are not inputs; every other table function (`read_parquet`, `iceberg_scan`,
-`glob`, anything unknown) fails the deploy with an issue at `path:line` (the line where the SQL body starts) — register the
-data as a table and reference it.
+`glob`, anything unknown) fails the deploy with an issue at `path:line` (the line where the SQL body starts). The next
+step is the one the message gives: load the data into a table first
+([Load data from a source](../how-to/load-data-from-a-source.md)) and read that table, or, for an
+unknown name, check the spelling.
 
 An asset is one `SELECT` (also with `WITH`, or a set operation such as `UNION`), or a `VALUES`
 list such as `VALUES (1, 'a'), (2, 'b')`. A statement that changes data or the session (`INSERT`, `UPDATE`,

@@ -66,6 +66,15 @@ RETYPE_UNCHECKED = (
 )
 """The computation failed or ran past its budget: the write went on, and this says so."""
 
+RETYPE_UNREADABLE = (
+    "This run changed the type of column `{column}` of `{table}`, whose name holds a control or "
+    "format character or is too long to look up in the metadata graph, so Lakana did not check "
+    "what other repositories use it; rename the column, or see what depends on its table with: "
+    "lakana graph impact --env {env} {command}"
+)
+"""The column's name is no graph node's: it alone goes unchecked, as in the deploy's
+`IMPACT_UNREADABLE`."""
+
 
 _SEEN = frozenset({Action.READ_TABLE, Action.READ_ENVIRONMENT})
 """What `_SeesTheGraph` permits: the two rights the graph's visibility asks besides policies."""
@@ -246,12 +255,13 @@ def retype_impact(
         return ()
     nodes = {column: f"column:{table}/{column}" for column in columns}
     readable = {}
+    unreadable = set()
     for column, node in nodes.items():
         try:
             parse_node(node)
             readable[column] = node
         except ValidationError:
-            continue
+            unreadable.add(column)
     try:
         with session.begin_nested():
             own = run_repository(session, p.run_context.task_run_id)
@@ -270,11 +280,17 @@ def retype_impact(
             shown(environment),
             type(exc).__name__,
         )
-        return tuple({"table": table, "column": c, "unchecked": True} for c in columns)
+        return tuple(
+            {"table": table, "column": c, "unchecked": True}
+            | ({"unreadable": True} if c in unreadable else {})
+            for c in columns
+        )
     entries: list[dict[str, object]] = []
     for column in columns:
         if column not in readable:
-            entries.append({"table": table, "column": column, "unchecked": True})
+            entries.append(
+                {"table": table, "column": column, "unchecked": True, "unreadable": True}
+            )
             continue
         uses = sorted(
             (USE_WORDS[g.kind.value], g.kind.value, g.name, g.repository, sorted({table, *tables}))
@@ -309,12 +325,16 @@ class _Entry:
         The use; `None` for an entry that says the impact could not be computed.
     tables
         The tables the entry names, the retyped one included.
+    unreadable
+        For an entry without a use: the column's name is no graph node's, rather than the check
+        having run out of time.
     """
 
     table: str
     column: str
     use: ImpactUseView | None
     tables: tuple[str, ...]
+    unreadable: bool = False
 
 
 def stored_entries(stored: object) -> list[_Entry]:
@@ -339,7 +359,7 @@ def stored_entries(stored: object) -> list[_Entry]:
         if not (isinstance(table, str) and isinstance(column, str)):
             continue
         if entry.get("unchecked") is True:
-            found.append(_Entry(table, column, None, (table,)))
+            found.append(_Entry(table, column, None, (table,), entry.get("unreadable") is True))
             continue
         kind, name, repository = entry.get("kind"), entry.get("name"), entry.get("repository")
         tables = entry.get("tables")
@@ -386,6 +406,7 @@ def impact_for_reader(
         return ()
     grouped: dict[tuple[str, str], list[ImpactUseView]] = {}
     unchecked: set[tuple[str, str]] = set()
+    unreadable: set[tuple[str, str]] = set()
     for entry in entries:
         if not all(may_read(t) for t in entry.tables):
             continue
@@ -393,6 +414,8 @@ def impact_for_reader(
         grouped.setdefault(key, [])
         if entry.use is None:
             unchecked.add(key)
+            if entry.unreadable:
+                unreadable.add(key)
         else:
             grouped[key].append(entry.use)
     views: list[ImpactWarningView] = []
@@ -400,7 +423,10 @@ def impact_for_reader(
         names = {"column": named(column), "table": named(table), "env": environment}
         command = typed(table, column)
         if (table, column) in unchecked:
-            message = RETYPE_UNCHECKED.format(command=command, **names)
+            if (table, column) in unreadable:
+                message = RETYPE_UNREADABLE.format(command=command, **names)
+            else:
+                message = RETYPE_UNCHECKED.format(command=command, **names)
             views.append(ImpactWarningView(table, column, (), message))
             continue
         items = ", ".join(f"{USE_WORDS[u.kind]} `{u.name}` ({u.repository})" for u in uses)

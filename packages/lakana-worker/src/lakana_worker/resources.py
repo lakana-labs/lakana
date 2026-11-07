@@ -104,6 +104,11 @@ class UsageCollector:
     """Collects the figures of every query child that runs while it is current.
 
     One collector belongs to one unit of work (one run); see `usage_collector`.
+
+    Parameters
+    ----------
+    unit
+        The query run the collector belongs to; `None` for one that belongs to no run.
     """
 
     def __init__(self, unit: uuid.UUID | None = None) -> None:
