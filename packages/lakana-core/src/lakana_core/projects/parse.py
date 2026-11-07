@@ -23,6 +23,7 @@ from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.project_config import AssetDefaults
 from lakana_core.projects.python_assets import parse_python_asset
 from lakana_core.query_rewrite import (
+    _ALLOWED_TABLE_FUNCTIONS,
     _from_item_function_name,
     check_blacklist,
     extract_table_refs,
@@ -125,8 +126,9 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
 
     ``FROM 'file.csv'``, ``FROM "a.b"`` (one quoted component containing a
     dot) and ``read_csv('x')`` all reach the parser's reference list as a
-    dotted-looking name; only the AST tells them from ``file.csv`` the table. A table
-    function (``range(3)``) is not a reference at all.
+    dotted-looking name; only the AST tells them from ``file.csv`` the table. A generator
+    (``range(3)``) is not a reference at all, and a reader without a path in its arguments
+    gives no name.
 
     Parameters
     ----------
@@ -147,15 +149,15 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
         return set(references)
     found: set[str] = set()
     for table in tree.find_all(exp.Table):
-        if _from_item_function_name(table) is not None:
-            # A table function has no name; `check_blacklist` refuses every one but the
-            # generators, which read no table and no file, before this runs.
-            continue
+        if _from_item_function_name(table) in _ALLOWED_TABLE_FUNCTIONS:
+            continue  # a generator reads no table and no file
         parts = [
             part for part in (table.args.get("catalog"), table.args.get("db"), table.this) if part
         ]
         if any(not isinstance(part, exp.Identifier) or "." in part.name for part in parts):
-            found.add(".".join(part.name for part in parts))
+            name = ".".join(part.name for part in parts)
+            if name:  # a reader with no path in its arguments has no name to report
+                found.add(name)
     return found
 
 
