@@ -20,6 +20,7 @@ from lakana_core.auth import (
     permits_each,
 )
 from lakana_core.catalog import CatalogService
+from lakana_core.catalog.identity import environment_ids_in
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.models import Environment, Grant, Principal, PrincipalType
 from lakana_core.models.group import Group, GroupMembership
@@ -344,3 +345,8 @@ def test_no_questions_cost_nothing(session: Session) -> None:
     reader = _reader(session)
     authz = GrantAuthorization(session)
     assert _statements(session, lambda: permits_each(authz, reader, [])) == 0
+
+
+def test_environment_ids_in_with_no_names_reads_nothing(session: Session) -> None:
+    assert _statements(session, lambda: environment_ids_in(session, [])) == 0
+    assert environment_ids_in(session, []) == {}
