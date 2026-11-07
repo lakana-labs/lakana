@@ -547,7 +547,15 @@ def test_a_source_name_longer_than_any_table_name_is_422_and_small(
     client: TestClient, method: str, name: str
 ) -> None:
     """A 60 KB `source` is refused without being echoed, before the body is read."""
-    _setup(client)
+    # Only the target table exists, so a 404 would show the name was looked up first; no
+    # source table and no rows: they are never reached, and each write is an Iceberg commit.
+    create_environment(client)
+    created = client.post(
+        _TABLES,
+        headers=AUTH_HEADER,
+        json={"name": "t", "schema": [{"name": "id", "type": "long", "nullable": False}]},
+    )
+    assert created.status_code == 201, created.text
     response = client.request(
         method,
         f"{_TABLES}/t/data",
