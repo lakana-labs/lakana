@@ -431,3 +431,22 @@ def test_a_statement_that_changes_data_inside_a_cte_fails_the_deploy_at_its_file
         "A query reads data and cannot change it: `DELETE` is not allowed, also not inside a "
         "CTE or subquery."
     )
+
+
+def test_a_generator_table_function_is_not_a_file_reference() -> None:
+    from lakana_core.projects.parse import sql_file_references
+
+    for sql in (
+        "SELECT i FROM range(1, 13) AS r(i)",
+        "SELECT i FROM generate_series(1, 3) AS g(i)",
+        "SELECT i FROM unnest([1, 2]) AS u(i)",
+    ):
+        assert sql_file_references(sql, []) == set(), sql
+
+
+def test_a_reading_table_function_is_still_refused_and_named() -> None:
+    from lakana_core.projects.parse import sql_file_references
+
+    found = sql_file_references("SELECT * FROM read_parquet('x.parquet')", [])
+    assert found == {"read_parquet()"}
+    assert "" not in sql_file_references("SELECT * FROM read_csv('a.csv') AS c", [])
