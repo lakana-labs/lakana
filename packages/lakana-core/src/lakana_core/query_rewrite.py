@@ -820,6 +820,47 @@ guard rather than something the current parser reaches.
 """
 
 
+_READER_PREFIXES = ("read_",)
+_READER_SUFFIXES = ("_scan",)
+_READER_NAMES = frozenset({"glob", "sniff_csv"})
+
+_LOAD_FIRST = (
+    'load the data into a table first (see "Load data from a source" in the user '
+    "documentation) and read that table."
+)
+
+
+def _refused_table_function(function: str) -> str:
+    """Say why a table function in `FROM` is refused and what to do next.
+
+    Parameters
+    ----------
+    function
+        The lowercase name `_from_item_function_name` found (or `rows from` / `lateral`).
+
+    Returns
+    -------
+    str
+        For a known file, URL or database reader, the cause (it reads outside the catalog's
+        access rules); for any other name, a line that asks to check the name.
+    """
+    known = (
+        function.startswith(_READER_PREFIXES)
+        or function.endswith(_READER_SUFFIXES)
+        or function in _READER_NAMES
+    )
+    if known:
+        return (
+            f"table function {function} is not allowed: it reads data directly (a file, a URL "
+            "or another database), outside the access rules of the catalog, so only range, "
+            f"generate_series and unnest may be called in FROM. {_LOAD_FIRST[0].upper()}{_LOAD_FIRST[1:]}"
+        )
+    return (
+        f"table function {function} is not allowed: only range, generate_series and unnest "
+        f"may be called in FROM; check the name, or {_LOAD_FIRST}"
+    )
+
+
 def _from_item_function_name(node: exp.Table | exp.Lateral) -> str | None:
     """Name the function a `FROM` item calls, if it calls one.
 
@@ -2518,13 +2559,7 @@ def check_blacklist(sql: str, dialect: str = "duckdb") -> None:
     for item in parsed.find_all(exp.Table, exp.Lateral):
         function = _from_item_function_name(item)
         if function is not None and function not in _ALLOWED_TABLE_FUNCTIONS:
-            raise ValidationError(
-                f"table function {function} is not allowed: it reads data directly (a file, a URL "
-                "or another database), outside the access rules of the catalog, so only range, "
-                "generate_series and unnest may be called in FROM. Load the data into a table "
-                'first (see "Load data from a source" in the user documentation) and read '
-                "that table."
-            )
+            raise ValidationError(_refused_table_function(function))
     for func in parsed.find_all(exp.Func):
         name = func.name.lower() if isinstance(func, exp.Anonymous) else func.sql_name().lower()
         if name in _NO_QUERY_USE_REASONS:

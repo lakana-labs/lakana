@@ -353,8 +353,8 @@ means a Lakana reader ran and found nothing. Its memory is the task process's ow
 has no attempts: the command says so and suggests starting the job. The command answers 404 only for a job or task name the project does
 not declare and no run has attempted: check both names (`lakana job list` shows the jobs).
 
-When a full page (`--last`, at most 200) comes back and older attempts exist, the command prints a
-`--cursor` that continues after them; with a smaller page it suggests a larger `--last`. With
+When you ask for the most (`--last 200`) and older attempts exist, the command prints a
+`--cursor` that continues after them; with a smaller `--last` it suggests a larger one. With
 `--output json` the `next_cursor` field carries it.
 
 ## A stuck run and why

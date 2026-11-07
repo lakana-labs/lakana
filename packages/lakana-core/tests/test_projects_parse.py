@@ -286,8 +286,7 @@ def test_other_table_functions_are_refused_with_path_and_line(function: str) -> 
     [issue] = caught.value.issues
     assert (issue.path, issue.line) == ("assets/silver/t.sql", 1)
     assert f"table function {function} is not allowed" in issue.message
-    assert "reads data directly" in issue.message
-    assert "Load the data into a table first" in issue.message
+    assert "load the data into a table first" in issue.message.lower()
     assert "Load data from a source" in issue.message
     assert "''" not in issue.message
 
@@ -455,3 +454,21 @@ def test_a_reading_table_function_is_never_reported_as_an_empty_name() -> None:
         "SELECT * FROM read_csv('a.csv') AS c",
     ):
         assert "" not in sql_file_references(sql, []), sql
+
+
+@pytest.mark.parametrize(
+    ("sql", "cause"),
+    [
+        ("SELECT * FROM read_parquet('x')", "reads data directly"),
+        ("SELECT * FROM read_csv('a.csv') AS c", "reads data directly"),
+        ("SELECT * FROM generate_serie(1, 3) AS g(i)", "check the name"),
+        ("SELECT * FROM ROWS FROM (range(3))", "check the name"),
+    ],
+)
+def test_the_refusal_of_a_table_function_names_the_right_cause(sql: str, cause: str) -> None:
+    with pytest.raises(ProjectValidationError) as caught:
+        parse_assets([_asset(f"-- c\n{sql}", table="silver.t")], defaults=AssetDefaults())
+    [issue] = caught.value.issues
+    assert cause in issue.message
+    assert "load the data into a table first" in issue.message.lower()
+    assert ("reads data directly" in issue.message) == (cause == "reads data directly")
