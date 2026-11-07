@@ -849,11 +849,12 @@ def _refused_table_function(function: str) -> str:
         or function.endswith(_READER_SUFFIXES)
         or function in _READER_NAMES
     )
+    load_first = _LOAD_FIRST[0].upper() + _LOAD_FIRST[1:]
     if known:
         return (
             f"table function {function} is not allowed: it reads data directly (a file, a URL "
             "or another database), outside the access rules of the catalog, so only range, "
-            f"generate_series and unnest may be called in FROM. {_LOAD_FIRST[0].upper()}{_LOAD_FIRST[1:]}"
+            f"generate_series and unnest may be called in FROM. {load_first}"
         )
     return (
         f"table function {function} is not allowed: only range, generate_series and unnest "
