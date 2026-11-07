@@ -825,7 +825,7 @@ def test_0011_backfills_external_claim_for_parseable_legacy_rows(
         )
     engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION_0011)
 
     engine = create_engine(f"sqlite:///{db_path}")
     tables_after = sa.table(
@@ -2025,7 +2025,7 @@ def test_0025_adds_the_note_of_a_kept_table(
     finally:
         engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION_0025)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -2098,7 +2098,7 @@ def test_0026_adds_the_binding_of_a_query_run(
     finally:
         engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION_0026)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -2170,7 +2170,7 @@ def test_0027_adds_the_set_back_columns_of_a_task_run(
     finally:
         engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION_0027)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         found = {c["name"]: c for c in inspect(engine).get_columns("task_runs")}
