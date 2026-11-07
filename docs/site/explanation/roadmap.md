@@ -116,7 +116,7 @@ certificate authority (#292). The helpers in `lakana[assets]` read files from di
 GCS, Azure and HTTPS (#26), PostgreSQL, SQLite, MariaDB and MySQL (#27) and REST APIs, with
 OAuth2 (#28); assets replace, append or merge. `lakana load` loads a local file into bronze
 (#29), and `lakana init --template` starts a project from a tested asset for files, SQL or REST,
-with a recipe for SQL Server (#56). The next elements are M8d data modelling, M7 web interface
+with a recipe for SQL Server (#56), or from a whole star schema, `--template medallion` (#254). The next elements are M8d data modelling, M7 web interface
 and sign-in, a small private test round on a hosted instance, M7c (the public beta, #33), M8,
 M8b, M8c, M9, M10 and v1.0.0.
 
@@ -167,7 +167,7 @@ beta ships with the ingestion helpers and named connections.
     gold) and Kimball-lite star schemas, with optional wide tables. The parts: model metadata in the
     asset header (#250); translated labels and descriptions with a main language (#251); layer
     rules, opt-in and enforced at deploy once declared (#252); the write mode `history` (SCD type 2)
-    (#253); `merge` (upsert) came earlier, with M6; a template and a guide (#254); and measures as
+    (#253); `merge` (upsert) came earlier, with M6; the template `medallion` and a guide, built (#254); and measures as
     metadata only, with no metrics layer (#255). Decided on 2026-10-28: the model metadata as a
     graph, with lineage, impact and join-path queries (#374), and a business glossary of terms
     linked to tables, columns and measures (#375). Done when a new team can start from the template,

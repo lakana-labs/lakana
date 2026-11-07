@@ -104,7 +104,7 @@ grep -Fq 'gold.fact_sales' <<<"$out"
 lakana table health gold.fact_sales --env dev
 # docs:end health
 out=$(lakana table health gold.fact_sales --env dev)
-grep -Fq 'volume' <<<"$out"
+grep -Eq '^│ volume +│ +│ no_history +│ warn +│' <<<"$out"
 
 # Gold may not read bronze.
 cp "$EXAMPLE_DIR/refused/assets/gold/raw_sales.sql" assets/gold/raw_sales.sql
