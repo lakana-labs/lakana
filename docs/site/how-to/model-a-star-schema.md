@@ -68,12 +68,34 @@ layers:
 # assets/gold/fact_sales.sql and https://lakana-labs.github.io/lakana/reference/table-health/
 ```
 
-A gold asset that reads bronze is refused, and the message names the fix:
+A gold asset that reads bronze is refused. Save this as `assets/gold/raw_sales.sql`, commit it, and
+check the deploy:
+
+<!-- source: docs/examples/medallion/refused/assets/gold/raw_sales.sql -->
+```sql
+/* lakana
+description: Sales straight from bronze.
+kind: fact
+grain: One row per sale.
+key: sale_id
+*/
+SELECT sale_id, store_id FROM bronze.sales
+```
 
 <!-- source: docs/examples/medallion/run.sh#refused -->
 ```bash
 lakana deploy --env dev --dry-run
 ```
+
+<!-- output: medallion#refused -->
+```text
+Queued dry run 8a1f9664-2e95-49e3-8852-53262f2492b3
+Error: assets/gold/raw_sales.sql:7: `gold.raw_sales` reads `bronze.sales`, which is in bronze, but
+layers.gold.reads allows only silver and gold. Read the data from silver or gold instead, or add
+bronze to layers.gold.reads in lakana.yaml
+```
+
+The message names the cause and the fix. Delete the file again to go on.
 
 ## Declare the grain
 
@@ -172,8 +194,31 @@ SELECT customer_id, name, city, changed_at FROM silver.customers
 
 The fact names the version it means with the sale's day (`at: sold_on`). Silver keeps only the
 latest row of each customer, so the first build gives `dim_customer` one version per customer, and
-every later change opens a new one. To see it, move Grace to Hamburg: add one row to
-`assets/bronze/customers.sql`, commit, deploy and run:
+every later change opens a new one. To see it, move Grace to Hamburg: replace
+`assets/bronze/customers.sql` with this file, which adds one row (a new `changed_at` for
+`C-002`), commit, deploy and run:
+
+<!-- source: docs/examples/medallion/changes/customers.sql -->
+```sql
+/* lakana
+description: The customers as the CRM exports them, with a row each time a customer changed.
+write: merge
+key: [customer_id, changed_at]
+columns:
+  customer_id: The customer's code.
+  name: The customer's name, as exported.
+  city: The city the customer lived in at that change.
+  changed_at: When the CRM recorded this row.
+*/
+SELECT * FROM (
+  VALUES
+    ('C-001', ' Ada ', 'Hamburg', TIMESTAMPTZ '2026-09-01 12:00:00+00'),
+    ('C-002', 'Grace', 'Berlin', TIMESTAMPTZ '2026-09-01 12:00:00+00'),
+    ('C-002', 'Grace', 'Hamburg', TIMESTAMPTZ '2026-10-06 12:00:00+00'),
+    ('C-003', 'Edsger', 'Dresden', TIMESTAMPTZ '2026-08-01 12:00:00+00'),
+    ('C-003', 'Edsger', 'Munich', TIMESTAMPTZ '2026-09-01 12:00:00+00')
+) AS crm(customer_id, name, city, changed_at)
+```
 
 <!-- source: docs/examples/medallion/run.sh#change -->
 ```bash
@@ -349,8 +394,8 @@ many values are null, whether the columns changed), and a signal that fires only
 lakana table health gold.fact_sales --env dev
 ```
 
-Right after the first build every volume and null signal reads `no_history`: there is nothing to
-compare with yet. To stop a run and set the table back when the row count falls outside its usual
+While a table has only a few writes, as here, its volume and null signals read `no_history`:
+there is nothing to compare with yet. To stop a run and set the table back when the row count falls outside its usual
 band, uncomment the line `# health: {volume: block}` in the header of `fact_sales.sql`. A signal
 that could not be computed yet (a table with too little history) never blocks. The signals,
 effects and messages are in [Table health](../reference/table-health.md).

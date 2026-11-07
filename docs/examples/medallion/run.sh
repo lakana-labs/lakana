@@ -110,12 +110,14 @@ grep -Eq '^│ volume +│ +│ no_history +│ warn +│' <<<"$out"
 cp "$EXAMPLE_DIR/refused/assets/gold/raw_sales.sql" assets/gold/raw_sales.sql
 git add -A
 git commit -q -m "Gold from bronze"
+trap - ERR
 set +e
 # docs:start refused
 lakana deploy --env dev --dry-run
 # docs:end refused
 status=$?
 set -e
+trap 'echo "run.sh line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 test "$status" -ne 0
 out=$(lakana deploy --env dev --dry-run 2>&1 || true)
 tr -s '\n ' ' ' <<<"$out" | grep -Fq 'reads `bronze.sales`, which is in bronze, but layers.gold.reads allows only silver and gold'
