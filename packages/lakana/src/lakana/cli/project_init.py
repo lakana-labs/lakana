@@ -1243,8 +1243,9 @@ def init(
             f"leave out {option}"
         )
     if template is not None and sample:
+        own = "assets" if template is Template.medallion else "asset"
         raise CliError(
-            f"--template {template.value} writes its own asset instead of the sample; "
+            f"--template {template.value} writes its own {own} instead of the sample; "
             "leave out --sample"
         )
     uv = "uv"

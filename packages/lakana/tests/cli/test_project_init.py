@@ -1693,6 +1693,7 @@ def test_the_medallion_template_takes_no_sample_flag_but_accepts_no_sample(tmp_p
         "--sample",
     )
     assert refused.exit_code == 2
+    assert "writes its own assets instead" in refused.output
     assert "leave out --sample" in refused.output
     assert not (tmp_path / "a").exists()
 
