@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.22.0](https://github.com/lakana-labs/lakana/compare/v0.21.0...v0.22.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **catalog:** a deploy now reads the repository's root `glossary` path as the business glossary. A root file named `glossary`, a root folder whose name differs only in case (`Glossary/`), or `.yml` files, subfolders, symlinks or YAML files that are not glossary terms under `glossary/`, now refuse the deploy. Rename or remove that content before upgrading.
+* **catalog:** every deploy now reads the path translations at the root of the repository, so a repository whose root already has a translations folder or file for something else is refused at deploy; rename it or move it out of the root before you deploy. A project that declares main_language, a label or a translation deploys manifest version 11, which needs workers of this release; upgrade the server and every worker first.
+* **core:** a hand-written check whose name the same table's header now generates (`key_unique`, `key_not_null` or `ref_<column>` on a table that declares `key:` or `references:`) is refused at deploy, and so is one whose name ends in ` (generated)`; rename it under `checks/`. Existing `write: merge` assets gain `key_unique` and `key_not_null` checks, which block unless `checks.on_failure` says `warn`; deduplicate the key columns, or set `checks: key: warn` in the asset's header. A merge keyed on a float or double column now fails its key checks; cast the key column to a decimal, integer or text type. Generated checks count toward the 50-check limit of a table, so a table close to it may be refused at deploy; remove or merge hand-written checks. A merge key of more than 8 columns is refused; shorten it to the columns that identify one row. Projects with `write: merge` or any model field write manifest version 9, which needs workers of this release; upgrade the server and the workers together. A blocked or failed referenced table now skips the tables that reference it (`upstream_failed`); fix the referenced table first.
+
+### Features
+
+* **catalog:** act on table health signals: block, off, notifications and freshness ([#456](https://github.com/lakana-labs/lakana/issues/456)) ([428cf89](https://github.com/lakana-labs/lakana/commit/428cf891975da159fa331df7f37cadc448844eb8)), closes [#340](https://github.com/lakana-labs/lakana/issues/340)
+* **catalog:** ask the metadata graph what a change breaks and how tables join ([#450](https://github.com/lakana-labs/lakana/issues/450)) ([82d3953](https://github.com/lakana-labs/lakana/commit/82d39538522f1f6245edde3584863bd8b5c90b86)), closes [#374](https://github.com/lakana-labs/lakana/issues/374) [#452](https://github.com/lakana-labs/lakana/issues/452)
+* **catalog:** commit a history write in one snapshot ([#429](https://github.com/lakana-labs/lakana/issues/429)) ([c0ce225](https://github.com/lakana-labs/lakana/commit/c0ce225d1bdd4140619c12eb9e5ae87943672406))
+* **catalog:** declare a table's measures in the asset header ([#414](https://github.com/lakana-labs/lakana/issues/414)) ([56a6b16](https://github.com/lakana-labs/lakana/commit/56a6b161a7b7b3985342d972e05a703ce3f53c89))
+* **catalog:** declare translated labels and descriptions for tables and columns ([c937745](https://github.com/lakana-labs/lakana/commit/c937745c1f00bcc2aad64ba2b3931bfab147c313))
+* **catalog:** find tables and columns by their labels in the reader's language ([#423](https://github.com/lakana-labs/lakana/issues/423)) ([ef446f8](https://github.com/lakana-labs/lakana/commit/ef446f876db13a38d742d4413f49e919691d1b4a)), closes [#251](https://github.com/lakana-labs/lakana/issues/251)
+* **catalog:** keep a business glossary in the project and check it at deploy ([dabfba0](https://github.com/lakana-labs/lakana/commit/dabfba0a39fcf8bae965fdf8a1c89014849f3d5b))
+* **catalog:** name what a removed table or retyped column breaks in other repositories ([#466](https://github.com/lakana-labs/lakana/issues/466)) ([9224b06](https://github.com/lakana-labs/lakana/commit/9224b06576cc2c5d9288c12c059433c5b50b56f3)), closes [#446](https://github.com/lakana-labs/lakana/issues/446) [#451](https://github.com/lakana-labs/lakana/issues/451)
+* **catalog:** read the glossary through REST, the SDK, the CLI, table get and search ([#444](https://github.com/lakana-labs/lakana/issues/444)) ([cac6af2](https://github.com/lakana-labs/lakana/commit/cac6af27b89a50fa7212f7a147d90dca711437d8)), closes [#375](https://github.com/lakana-labs/lakana/issues/375)
+* **catalog:** record and show table health signals ([#453](https://github.com/lakana-labs/lakana/issues/453)) ([56bc383](https://github.com/lakana-labs/lakana/commit/56bc383044f7d95300e2955cd261c5f08c5adaab))
+* **catalog:** show a table's measures in table get, REST, the SDK and search ([#420](https://github.com/lakana-labs/lakana/issues/420)) ([9a81cb0](https://github.com/lakana-labs/lakana/commit/9a81cb00c2f1519d56b31d16e56f360ee73752a5)), closes [#255](https://github.com/lakana-labs/lakana/issues/255)
+* **catalog:** show a table's model in table get, search and a references route ([#387](https://github.com/lakana-labs/lakana/issues/387)) ([b160e1f](https://github.com/lakana-labs/lakana/commit/b160e1fa0dd69758d1e6570ff0830af0a6124646)), closes [#250](https://github.com/lakana-labs/lakana/issues/250)
+* **catalog:** store, show and edit labels and descriptions per language ([#422](https://github.com/lakana-labs/lakana/issues/422)) ([e0f36a0](https://github.com/lakana-labs/lakana/commit/e0f36a08df2d7c0e4f56a3d746faf34850fafed7))
+* **catalog:** walk the model metadata as a graph: lineage and neighbours ([#447](https://github.com/lakana-labs/lakana/issues/447)) ([d87c8aa](https://github.com/lakana-labs/lakana/commit/d87c8aaa4f1f9351de67b1136da01c1c8e4aeccb))
+* **cli:** a medallion-and-star template for lakana init, and the star-schema guide ([#478](https://github.com/lakana-labs/lakana/issues/478)) ([0cb9ebd](https://github.com/lakana-labs/lakana/commit/0cb9ebd2f87f3589daceee8676d4180081a3b4c5)), closes [#254](https://github.com/lakana-labs/lakana/issues/254) [#249](https://github.com/lakana-labs/lakana/issues/249)
+* **core:** declare a table's kind, grain, key and references in the asset header ([#384](https://github.com/lakana-labs/lakana/issues/384)) ([944cb90](https://github.com/lakana-labs/lakana/commit/944cb905f4fd8851249175f6fc93e29008fdb440))
+* **core:** declare layer rules in lakana.yaml and enforce them at deploy ([#425](https://github.com/lakana-labs/lakana/issues/425)) ([821289d](https://github.com/lakana-labs/lakana/commit/821289d9bc5c17efd0830459bf62efd6ae41e3e2)), closes [#252](https://github.com/lakana-labs/lakana/issues/252)
+* **core:** generate key and reference checks from the asset header ([ea213ca](https://github.com/lakana-labs/lakana/commit/ea213ca4502a312be5afefbd47bc21b18c1c32b9))
+* **core:** write: history for SQL assets, with valid-at references ([#430](https://github.com/lakana-labs/lakana/issues/430)) ([7b6a210](https://github.com/lakana-labs/lakana/commit/7b6a2105a44c17ce47e84f7ed06ec1db05de2004))
+* **policy:** apply an access file, guard the scopes it manages, and show its status ([#464](https://github.com/lakana-labs/lakana/issues/464)) ([9277a5b](https://github.com/lakana-labs/lakana/commit/9277a5b87276695db449c7c7c0953b8a36a927ef)), closes [#46](https://github.com/lakana-labs/lakana/issues/46)
+* **policy:** bind row filters and column masks to field ids ([#461](https://github.com/lakana-labs/lakana/issues/461)) ([676e849](https://github.com/lakana-labs/lakana/commit/676e849fe08871740a4dce34bf8840284c8f8a99)), closes [#120](https://github.com/lakana-labs/lakana/issues/120)
+* **policy:** export access as a file and plan its changes ([#462](https://github.com/lakana-labs/lakana/issues/462)) ([84325cd](https://github.com/lakana-labs/lakana/commit/84325cd12023f72e1c46c59d3405b1a7ebe6e6d3))
+* **policy:** warn when a schema change breaks a row filter or column mask ([#402](https://github.com/lakana-labs/lakana/issues/402)) ([eeee12d](https://github.com/lakana-labs/lakana/commit/eeee12d0d63115db254e3c67915f78f5553b7822)), closes [#376](https://github.com/lakana-labs/lakana/issues/376)
+* **sdk:** read late files inside a lookback window ([#458](https://github.com/lakana-labs/lakana/issues/458)) ([a44a217](https://github.com/lakana-labs/lakana/commit/a44a2173482d6cddd9e701572e72931fe318a06e)), closes [#344](https://github.com/lakana-labs/lakana/issues/344)
+* **sdk:** write="history" for Python assets ([#432](https://github.com/lakana-labs/lakana/issues/432)) ([6d659d5](https://github.com/lakana-labs/lakana/commit/6d659d51394cbb05241a6cdc8609772a641bfbe5)), closes [#253](https://github.com/lakana-labs/lakana/issues/253)
+* **worker:** a setting that forbids DuckDB extension downloads, for offline sites ([#490](https://github.com/lakana-labs/lakana/issues/490)) ([84e566d](https://github.com/lakana-labs/lakana/commit/84e566db3cf0a69517686793d437c102a428d4b7))
+* **worker:** record peak memory, processor time and bytes read of each attempt ([#474](https://github.com/lakana-labs/lakana/issues/474)) ([5f1b2a5](https://github.com/lakana-labs/lakana/commit/5f1b2a515a3f870982c580c02148501c37a32989)), closes [#282](https://github.com/lakana-labs/lakana/issues/282)
+
+
+### Bug Fixes
+
+* **catalog:** accept range() in lineage and name why a table function is refused ([#483](https://github.com/lakana-labs/lakana/issues/483)) ([77115a8](https://github.com/lakana-labs/lakana/commit/77115a87600e31c2f5913718020fde8bb8cd4176)), closes [#477](https://github.com/lakana-labs/lakana/issues/477) [#467](https://github.com/lakana-labs/lakana/issues/467) [#476](https://github.com/lakana-labs/lakana/issues/476)
+* **catalog:** admin group leave, zero-count loads, mask links after renames, term search language ([#465](https://github.com/lakana-labs/lakana/issues/465)) ([835702d](https://github.com/lakana-labs/lakana/commit/835702d62589caf09d546e10182b8b956fba3242)), closes [#463](https://github.com/lakana-labs/lakana/issues/463) [#457](https://github.com/lakana-labs/lakana/issues/457) [#460](https://github.com/lakana-labs/lakana/issues/460) [#445](https://github.com/lakana-labs/lakana/issues/445)
+* **catalog:** M8d batch 1 — per-reader issue cap, history references, fewer folds ([#459](https://github.com/lakana-labs/lakana/issues/459)) ([04350ee](https://github.com/lakana-labs/lakana/commit/04350ee170e5fabd99b257392117f40272342d29)), closes [#442](https://github.com/lakana-labs/lakana/issues/442) [#431](https://github.com/lakana-labs/lakana/issues/431) [#433](https://github.com/lakana-labs/lakana/issues/433) [#434](https://github.com/lakana-labs/lakana/issues/434)
+* **core:** fail and announce a run whose check phase never finishes ([#424](https://github.com/lakana-labs/lakana/issues/424)) ([f06cb12](https://github.com/lakana-labs/lakana/commit/f06cb12c673f426cf03430ff6d4d56490d7289d7)), closes [#99](https://github.com/lakana-labs/lakana/issues/99) [#365](https://github.com/lakana-labs/lakana/issues/365)
+* honest messages and follow-ups for orphaned locations, schema mismatches and deploy job starts ([#404](https://github.com/lakana-labs/lakana/issues/404)) ([8d37e12](https://github.com/lakana-labs/lakana/commit/8d37e1249191506e8eb37f5e3699737a7948edaf)), closes [#371](https://github.com/lakana-labs/lakana/issues/371) [#377](https://github.com/lakana-labs/lakana/issues/377) [#368](https://github.com/lakana-labs/lakana/issues/368)
+* **security:** keep tables a reader may not read out of run views, notes, notifications and logs ([#401](https://github.com/lakana-labs/lakana/issues/401)) ([ff6d8d7](https://github.com/lakana-labs/lakana/commit/ff6d8d76286618873b536c2432294ca89b66bae9)), closes [#385](https://github.com/lakana-labs/lakana/issues/385)
+
+
+### Performance Improvements
+
+* **policy:** list environments with a constant number of authorization queries ([#489](https://github.com/lakana-labs/lakana/issues/489)) ([4b35c7c](https://github.com/lakana-labs/lakana/commit/4b35c7cc87a3ff518ea85d3abfcfceb9407652fc)), closes [#369](https://github.com/lakana-labs/lakana/issues/369)
+
+
+### Documentation
+
+* checks stay at block, warn and keep before v1.0.0 ([#382](https://github.com/lakana-labs/lakana/issues/382)) ([b0304b7](https://github.com/lakana-labs/lakana/commit/b0304b7171f4219d6338ffee21ab0fa37930f1c0))
+* drop graphify from the agent workflow ([#436](https://github.com/lakana-labs/lakana/issues/436)) ([bc8e3c1](https://github.com/lakana-labs/lakana/commit/bc8e3c171b1aca5cd9a2e1d7a04d8bd7a92f2ba5)), closes [#435](https://github.com/lakana-labs/lakana/issues/435)
+* keep tool output small, in CLAUDE.md ([#440](https://github.com/lakana-labs/lakana/issues/440)) ([1f34bda](https://github.com/lakana-labs/lakana/commit/1f34bda5df4bf3cc0febd9632000d09aa196167e)), closes [#439](https://github.com/lakana-labs/lakana/issues/439)
+* notes for 0.21.0, graphify in worktrees, and the M8d metadata graph and glossary ([#379](https://github.com/lakana-labs/lakana/issues/379)) ([f4fb004](https://github.com/lakana-labs/lakana/commit/f4fb0041fb21699f44f2fec78935e99f55a29489))
+* state the boundaries of the semantic-layer and plugin exclusions ([#381](https://github.com/lakana-labs/lakana/issues/381)) ([0d99306](https://github.com/lakana-labs/lakana/commit/0d993069b3e4f5d3ee69cd9373522bc4611fc43f))
+* upgrade notes for 0.22.0 ([#499](https://github.com/lakana-labs/lakana/issues/499)) ([cca7f9c](https://github.com/lakana-labs/lakana/commit/cca7f9c328bca1da69af0569636e2689c00160c1))
+* what leaves the machine, exporting the audit log, and installing without internet access ([#494](https://github.com/lakana-labs/lakana/issues/494)) ([36bbfe4](https://github.com/lakana-labs/lakana/commit/36bbfe48ebfe9b99f36685177bfe59af2f437cbd)), closes [#42](https://github.com/lakana-labs/lakana/issues/42)
+
+
+### Dependencies
+
+* bump alpine in the worker tests' sshd image ([#406](https://github.com/lakana-labs/lakana/issues/406)) ([74ace2f](https://github.com/lakana-labs/lakana/commit/74ace2f8b8b5ef43dc27841a16c23c715f7438d0))
+* bump astral-sh/uv from 0.13.5 to 0.13.6 in the images group ([#409](https://github.com/lakana-labs/lakana/issues/409)) ([fa2130d](https://github.com/lakana-labs/lakana/commit/fa2130d91f5178eb2063a5fc6f151a2a378a9141))
+* bump astral-sh/uv from 0.13.6 to 0.13.7 in the images group ([#470](https://github.com/lakana-labs/lakana/issues/470)) ([a4b2437](https://github.com/lakana-labs/lakana/commit/a4b2437764478f7da466bac24f6d02950d9a414e))
+* bump ruff from 0.17.1 to 0.17.3 ([#413](https://github.com/lakana-labs/lakana/issues/413)) ([25b9c97](https://github.com/lakana-labs/lakana/commit/25b9c9721f425feee051f9943d518db18eb20eeb))
+* bump the python group across 1 directory with 4 updates ([#418](https://github.com/lakana-labs/lakana/issues/418)) ([89274aa](https://github.com/lakana-labs/lakana/commit/89274aab8f5fa652df920264fce9cb3a9b7970fc))
+* bump the python group across 1 directory with 8 updates ([#496](https://github.com/lakana-labs/lakana/issues/496)) ([c48930c](https://github.com/lakana-labs/lakana/commit/c48930c55aa812df5d8a4adfeaae99cb3b6e9e3f))
+* bump ty from 0.0.89 to 0.0.92 ([#412](https://github.com/lakana-labs/lakana/issues/412)) ([194ebba](https://github.com/lakana-labs/lakana/commit/194ebba4001b179194d0874ac3dfaa7c4e6c7ba8))
+* bump ty from 0.0.92 to 0.0.97 ([#473](https://github.com/lakana-labs/lakana/issues/473)) ([d36ea10](https://github.com/lakana-labs/lakana/commit/d36ea108f3a87ca80e0c6f36daddfbb294016034))
+* hold sqlglot below 30.25 until the query rewrite is adapted ([#419](https://github.com/lakana-labs/lakana/issues/419)) ([85a89c7](https://github.com/lakana-labs/lakana/commit/85a89c769e31d3241fb72bcde1d6c7b7cc349462)), closes [#415](https://github.com/lakana-labs/lakana/issues/415)
+
 ## [0.21.0](https://github.com/lakana-labs/lakana/compare/v0.20.0...v0.21.0) (2026-10-28)
 
 
