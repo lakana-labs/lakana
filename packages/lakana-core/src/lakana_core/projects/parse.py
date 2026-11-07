@@ -23,7 +23,6 @@ from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.project_config import AssetDefaults
 from lakana_core.projects.python_assets import parse_python_asset
 from lakana_core.query_rewrite import (
-    _ALLOWED_TABLE_FUNCTIONS,
     _from_item_function_name,
     check_blacklist,
     extract_table_refs,
@@ -127,9 +126,7 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
     ``FROM 'file.csv'``, ``FROM "a.b"`` (one quoted component containing a
     dot) and ``read_csv('x')`` all reach the parser's reference list as a
     dotted-looking name; only the AST tells them from ``file.csv`` the table. A table
-    function that reads something (``read_csv('x')``) is reported as ``read_csv()``; a
-    generator that reads nothing (``range``, ``generate_series``, ``unnest``) is not a
-    reference at all.
+    function (``range(3)``) is not a reference at all.
 
     Parameters
     ----------
@@ -150,12 +147,9 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
         return set(references)
     found: set[str] = set()
     for table in tree.find_all(exp.Table):
-        function = _from_item_function_name(table)
-        if function is not None:
-            # A generator reads no table and no file; any other table function reads
-            # something a deploy cannot see, so it is refused under its own name.
-            if function not in _ALLOWED_TABLE_FUNCTIONS:
-                found.add(f"{function}()")
+        if _from_item_function_name(table) is not None:
+            # A table function has no name; `check_blacklist` refuses every one but the
+            # generators, which read no table and no file, before this runs.
             continue
         parts = [
             part for part in (table.args.get("catalog"), table.args.get("db"), table.this) if part

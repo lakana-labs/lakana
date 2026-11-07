@@ -2519,8 +2519,11 @@ def check_blacklist(sql: str, dialect: str = "duckdb") -> None:
         function = _from_item_function_name(item)
         if function is not None and function not in _ALLOWED_TABLE_FUNCTIONS:
             raise ValidationError(
-                f"table function {function} is not allowed; only range, generate_series "
-                "and unnest may be called in FROM. Register the data as a table and reference it."
+                f"table function {function} is not allowed: it reads data directly (a file, a URL "
+                "or another database), outside the access rules of the catalog, so only range, "
+                "generate_series and unnest may be called in FROM. Load the data into a table "
+                'first (see "Load data from a source" in the user documentation) and read '
+                "that table."
             )
     for func in parsed.find_all(exp.Func):
         name = func.name.lower() if isinstance(func, exp.Anonymous) else func.sql_name().lower()
