@@ -941,7 +941,10 @@ def check_limits(limits: QueryLimitsConfig) -> None:
                 "or 512MiB."
             ) from exc
         if "LAKANA_WORKER__EXTENSION_SOURCE" in field:
-            raise ValueError(field) from exc
+            # The reader of a start-up refusal is the operator, not a user whose query failed.
+            raise ValueError(
+                field.removeprefix("Query failed: ").replace("Tell the operator: ", "To fix it: ")
+            ) from exc
         raise ValueError(
             "The worker cannot run queries: its start-up check in a query process failed "
             f"({exc}). Check that the worker's Python environment is complete (the duckdb and "

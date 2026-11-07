@@ -1411,10 +1411,10 @@ WORKER_TAKES: tuple[str, ...] = ("all", "interactive", "pipeline")
 
 EXTENSION_SOURCE_ADVICE = (
     "LAKANA_WORKER__EXTENSION_SOURCE must be duckdb (DuckDB's own extension server, the "
-    "default) or none (never download an extension), got '{value}'. A mirror URL is not "
-    "supported: use the container image, which bundles httpfs, or copy the file in."
+    "default) or none (never download an extension). A mirror URL is not supported: use the "
+    "container image, which bundles httpfs, or copy the file in."
 )
-"""The refusal of a bad `LAKANA_WORKER__EXTENSION_SOURCE`; `{value}` is the shown value."""
+"""The refusal of a bad `LAKANA_WORKER__EXTENSION_SOURCE`; it never quotes the value."""
 
 
 def parse_extension_source(text: str) -> str:
@@ -1434,16 +1434,15 @@ def parse_extension_source(text: str) -> str:
     Raises
     ------
     ValueError
-        If it is anything else, a URL included. The message names the setting and both values;
-        the value is cut and escaped, and a value with a ``@`` or ``://`` is not echoed.
+        If it is anything else, a URL included. The message names the setting and both values
+        and never quotes the value, which may hold a credential.
     """
     lowered = text.strip().lower()
     if lowered in {"", "duckdb"}:
         return "duckdb"
     if lowered == "none":
         return "none"
-    echoed = "(not shown)" if "@" in text or "?" in text else shown(text)[:40]
-    raise ValueError(EXTENSION_SOURCE_ADVICE.format(value=echoed))
+    raise ValueError(EXTENSION_SOURCE_ADVICE)
 
 
 class WorkerConfig(BaseModel):

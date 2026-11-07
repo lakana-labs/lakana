@@ -1259,6 +1259,9 @@ def test_main_refuses_to_start_when_none_is_set_and_httpfs_is_missing(
     assert "httpfs" in text
     assert str(tmp_path / ".duckdb" / "extensions") in text
     assert "container image" in text
+    assert not text.startswith("Query failed")
+    assert "Tell the operator" not in text
+    assert "To fix it: run the worker from the Lakana container image" in text
 
 
 def test_main_installs_the_maintenance_timeout_from_the_environment(

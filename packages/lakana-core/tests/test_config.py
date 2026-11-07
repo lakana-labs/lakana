@@ -1288,5 +1288,7 @@ def test_any_other_extension_source_is_refused_without_echoing_secrets(
     text = str(caught.value)
     assert "\x1b" not in text
     assert "SECRET" not in text
+    assert "got '" not in text
+    assert value not in text
     assert "LAKANA_WORKER__EXTENSION_SOURCE must be duckdb" in text
     assert "or none" in text
