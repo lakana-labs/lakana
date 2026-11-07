@@ -40,7 +40,7 @@ cloud credential lookup under "What we could not verify", are not.
 
 | From | To | Set by |
 |---|---|---|
-| Worker (DuckDB) | DuckDB's extension repository, `extensions.duckdb.org`, to download the `httpfs` extension the first time a worker opens a connection on a machine that does not have it yet; if that server answers with a server error (HTTP 5xx), DuckDB asks its backup, `extensions.duckdb-backup.org`, for the same file. One download of one file; no query data is sent. | Not configurable in Lakana (see below) |
+| Worker (DuckDB) | DuckDB's extension repository, `extensions.duckdb.org`, to download the `httpfs` extension the first time a worker opens a connection on a machine that does not have it yet; if that server answers with a server error (HTTP 5xx), DuckDB asks its backup, `extensions.duckdb-backup.org`, for the same file. One download of one file; no query data is sent. | `LAKANA_WORKER__EXTENSION_SOURCE`: an `https://` mirror of the extension repository, or `none` to never download (see below) |
 
 The container image already contains the extension, because the image installs it when it is
 built, so a worker that runs from the image makes no such download. A worker installed with
@@ -107,6 +107,17 @@ DuckDB 2.0.0, the version in the lock file.
   On a machine without network access, `INSTALL httpfs` failed naming
   `http://extensions.duckdb.org/v2.0.0/linux_amd64/httpfs.duckdb_extension.gz`. We did not
   watch the request on the wire.
+- **Pointing the download elsewhere, or switching it off.** `LAKANA_WORKER__EXTENSION_SOURCE`
+  decides where the worker gets `httpfs` from. Unset (or `duckdb`), it is DuckDB's server, as
+  above. An `https://` URL is an internal mirror of DuckDB's extension repository: the worker
+  loads the extension from its extension directory when it is there and installs it from the
+  mirror, for that install only, when it is not. `none` never downloads: a query that needs a
+  missing `httpfs` fails with a message naming the extension, the directory
+  (`~/.duckdb/extensions` of the worker's user) and what to do next: run the worker from the
+  container image, which bundles the extension, copy `httpfs.duckdb_extension` into that
+  directory, or set a mirror. The container image already holds the extension, so with the
+  image a worker makes no extension request whatever the setting says. Other extensions are
+  never installed or loaded automatically.
 
 ## What we could not verify
 

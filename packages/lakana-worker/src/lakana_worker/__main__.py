@@ -57,7 +57,12 @@ from lakana_worker.connection_tests import ConnectionTestLoop, DockerCheck
 from lakana_worker.deploy import DeploySettings, platform_version
 from lakana_worker.deploy_sweep import DeploySweeper, sweep_deploy_checkouts
 from lakana_worker.docker_environments import DockerEnvironments
-from lakana_worker.executor import check_limits, install_drain, install_heartbeat
+from lakana_worker.executor import (
+    check_limits,
+    install_drain,
+    install_extension_source,
+    install_heartbeat,
+)
 from lakana_worker.heartbeat import WorkerHeartbeat
 from lakana_worker.launcher.settings import check_ingestion_roots
 from lakana_worker.launcher_client import LauncherClient, LauncherUnavailable, claim_owner
@@ -558,6 +563,14 @@ def main() -> None:
     drain = threading.Event()
     signal.signal(signal.SIGTERM, lambda signum, frame: drain.set())
     install_drain(drain, settings.run.drain_grace_seconds)
+    install_extension_source(settings.worker.extension_source)
+    if settings.worker.extension_source != "duckdb":
+        logger.info(
+            "DuckDB extensions: %s (LAKANA_WORKER__EXTENSION_SOURCE).",
+            "never downloaded"
+            if settings.worker.extension_source == "none"
+            else "installed from the configured mirror when missing",
+        )
     install_maintenance_timeout(settings.run.maintenance_timeout)
     install_history_cap(
         settings.run.max_history_open_versions, open_bytes=settings.run.max_history_open_bytes

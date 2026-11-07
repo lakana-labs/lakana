@@ -1249,3 +1249,51 @@ def test_health_keeps_ninety_days_and_refuses_less_than_seven(
     monkeypatch.setenv("LAKANA_DATABASE__URL", "sqlite:///x.db")
     monkeypatch.setenv("LAKANA_HEALTH__RETENTION_DAYS", "30")
     assert Settings().health.retention_days == 30
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", "duckdb"),
+        (" DuckDB ", "duckdb"),
+        ("None", "none"),
+        (" https://mirror.example/ext ", "https://mirror.example/ext"),
+    ],
+)
+def test_the_extension_source_reads_duckdb_none_or_an_https_mirror(
+    monkeypatch: pytest.MonkeyPatch, text: str, expected: str
+) -> None:
+    """`LAKANA_WORKER__EXTENSION_SOURCE` is `duckdb` by default."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", "sqlite:///x.db")
+    monkeypatch.delenv("LAKANA_WORKER__EXTENSION_SOURCE", raising=False)
+    assert Settings().worker.extension_source == "duckdb"
+    monkeypatch.setenv("LAKANA_WORKER__EXTENSION_SOURCE", text)
+    assert Settings().worker.extension_source == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "http://mirror.example",
+        "mirror.example",
+        "https://",
+        "https://u:p@m.example/x",
+        "https://m.example/a'b",
+        "https://m.example/a b",
+        "https://m.example/\x1b[31m",
+        "off",
+    ],
+)
+def test_a_bad_extension_source_is_refused_when_settings_load(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """The worker never starts with one; the message names the setting and the forms."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", "sqlite:///x.db")
+    monkeypatch.setenv("LAKANA_WORKER__EXTENSION_SOURCE", value)
+    with pytest.raises(PydanticValidationError) as caught:
+        Settings()
+    text = str(caught.value)
+    assert "\x1b" not in text
+    assert "LAKANA_WORKER__EXTENSION_SOURCE must be duckdb" in text
+    assert "none" in text
+    assert "https://" in text

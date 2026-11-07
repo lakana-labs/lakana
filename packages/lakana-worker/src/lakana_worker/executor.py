@@ -53,6 +53,7 @@ from lakana_worker.query_process import ChildFailed, StopReason, Stops
 from lakana_worker.query_protocol import (
     CHECK,
     DESCRIBE,
+    EXTENSION_SOURCE_DUCKDB,
     INTERNAL,
     INVALID,
     MAX_REQUEST_BYTES,
@@ -178,6 +179,9 @@ _DRAINING: Callable[[], bool] | None = None
 _WORKER_STALE: Callable[[], bool] | None = None
 """Says whether the worker's heartbeat is a lease old; set once by `install_heartbeat`."""
 
+_EXTENSION_SOURCE = EXTENSION_SOURCE_DUCKDB
+"""Where query children get DuckDB's ``httpfs`` from; set once by `install_extension_source`."""
+
 _ARGV: Sequence[str] | None = None
 """The command that starts a query child; `None` is the real one. Tests start a scripted one."""
 
@@ -276,6 +280,19 @@ def cancel_requests(requested: Callable[[], bool]) -> Generator[None, None, None
         yield
     finally:
         _CANCEL_REQUESTED.reset(token)
+
+
+def install_extension_source(source: str) -> None:
+    """Tell every query child where DuckDB may get its ``httpfs`` extension from.
+
+    Parameters
+    ----------
+    source
+        ``duckdb`` (DuckDB's own extension server, the default), ``none`` (never download) or an
+        ``https://`` mirror, as `lakana_core.config.parse_extension_source` returns it.
+    """
+    global _EXTENSION_SOURCE
+    _EXTENSION_SOURCE = source
 
 
 def install_drain(event: threading.Event, grace_seconds: float) -> None:
@@ -579,6 +596,7 @@ def _child(
             batch_rows=batch_rows,
             extension_directory=query_process.extension_directory(),
             parent_pid=os.getpid(),
+            extension_source=_EXTENSION_SOURCE,
         )
 
     cancel_event = _CANCEL.get()

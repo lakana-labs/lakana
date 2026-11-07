@@ -1228,6 +1228,24 @@ def test_main_installs_the_drain_for_running_queries(
     assert installed[0][1] == pytest.approx(7.0)
 
 
+def test_main_installs_the_extension_source_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`LAKANA_WORKER__EXTENSION_SOURCE` reaches the executor."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    monkeypatch.setenv("LAKANA_WORKER__EXTENSION_SOURCE", "none")
+    with (
+        mock.patch("lakana_worker.__main__.install_extension_source") as install,
+        mock.patch("lakana_worker.__main__.poll_forever"),
+        mock.patch("lakana_worker.__main__.SchedulerLoop") as scheduler_mock,
+        mock.patch("lakana_worker.__main__.signal.signal"),
+        mock.patch("lakana_worker.__main__.RunEngine"),
+    ):
+        scheduler_mock.return_value.start.return_value.is_alive.return_value = False
+        main()
+    install.assert_called_once_with("none")
+
+
 def test_main_installs_the_maintenance_timeout_from_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

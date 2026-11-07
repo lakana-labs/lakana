@@ -132,6 +132,8 @@ from lakana_worker.query_protocol import (
     EXIT_FAILED,
     EXIT_OK,
     EXIT_REFUSED,
+    EXTENSION_SOURCE_DUCKDB,
+    EXTENSION_SOURCE_NONE,
     INTERNAL,
     INTERRUPTED,
     INVALID,
@@ -618,6 +620,64 @@ def profiling_statements(output: str) -> list[str]:
     ]
 
 
+class ExtensionUnavailable(Exception):
+    """DuckDB's ``httpfs`` extension is neither installed nor allowed to be downloaded."""
+
+
+def load_httpfs(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
+    """Load ``httpfs``, installing it first where the request's extension source allows.
+
+    With the default source the extension is installed from DuckDB's own server (a no-op when
+    it is in the extension directory). With ``none`` or a mirror it is loaded from the
+    directory first, so an extension the container image bundled keeps working whatever the
+    setting says; only a missing one is installed, from the mirror (``INSTALL ... FROM`` applies
+    to this install alone and works under ``allow_extension_repositories = 'forbidden'``).
+
+    Parameters
+    ----------
+    connection
+        A fresh in-memory connection with its extension directory set.
+    request
+        Supplies ``extension_source`` and ``extension_directory``.
+
+    Raises
+    ------
+    ExtensionUnavailable
+        If the extension is missing and the source is ``none`` or its mirror does not have it.
+        The message names the extension, the directory and the next step.
+    """
+    source = request.extension_source
+    if source == EXTENSION_SOURCE_DUCKDB:
+        connection.execute("INSTALL httpfs")
+        connection.execute("LOAD httpfs")
+        return
+    try:
+        connection.execute("LOAD httpfs")
+        return
+    except duckdb.Error:
+        pass
+    where = f"the extension directory {request.extension_directory}"
+    if source == EXTENSION_SOURCE_NONE:
+        raise ExtensionUnavailable(
+            f"Query failed: the worker cannot load DuckDB's httpfs extension: it is not in "
+            f"{where} and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. Tell the "
+            "operator: run the worker from the Lakana container image, which bundles it, or "
+            "copy httpfs.duckdb_extension into that directory, or set "
+            "LAKANA_WORKER__EXTENSION_SOURCE to an internal https mirror."
+        )
+    try:
+        connection.execute(f"INSTALL httpfs FROM '{source}'")
+        connection.execute("LOAD httpfs")
+    except duckdb.Error as exc:
+        raise ExtensionUnavailable(
+            f"Query failed: the worker cannot load DuckDB's httpfs extension: it is not in "
+            f"{where} and the mirror LAKANA_WORKER__EXTENSION_SOURCE={source} did not provide it. "
+            "Tell the operator: check that the mirror is reachable from the worker and holds "
+            "httpfs for this DuckDB version, or run the worker from the Lakana container "
+            "image, which bundles it."
+        ) from exc
+
+
 def configure(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
     """Apply the isolation settings and the limits, in their required order, then lock them.
 
@@ -635,8 +695,7 @@ def configure(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
     connection.execute("SET extension_directories = ?", [[request.extension_directory]])
     connection.execute("SET allow_community_extensions = false")
     connection.execute("SET allow_extension_repositories = 'forbidden'")
-    connection.execute("INSTALL httpfs")
-    connection.execute("LOAD httpfs")
+    load_httpfs(connection, request)
     # The order matters: `tracked_metrics` needs profiling on, and without an output file DuckDB 2
     # prints the profile of every statement to standard error, where the error document goes.
     for statement in profiling_statements(os.path.join(request.temp_directory, PROFILE_FILE)):
@@ -1128,6 +1187,8 @@ def serve(
                 # gives a relation, so there is no `None` to handle here (an empty text was
                 # answered above).
                 reader = connection.sql(request.sql).to_arrow_reader(request.batch_rows)
+        except ExtensionUnavailable as exc:
+            return ErrorDocument(INVALID, str(exc))
         except (duckdb.Error, OSError) as exc:
             return classify(exc)
         document = _stream(reader, sink, asked, classify)

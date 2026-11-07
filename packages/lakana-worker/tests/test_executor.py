@@ -47,6 +47,7 @@ from lakana_worker.executor import (
     describe_query,
     execute_query,
     install_drain,
+    install_extension_source,
     install_heartbeat,
     stream_query,
 )
@@ -1633,3 +1634,15 @@ def test_the_worker_process_imports_no_duckdb() -> None:
         [sys.executable, "-I", "-c", code], capture_output=True, text=True, check=True, timeout=120
     )
     assert done.stdout.strip() == "False"
+
+
+def test_the_extension_source_reaches_the_query_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`none` with an empty extension directory fails the query with the operator's next step."""
+    install_extension_source("none")
+    assert execute_query("SELECT 42 AS a").to_pydict() == {"a": [42]}
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with pytest.raises(ValidationError, match="LAKANA_WORKER__EXTENSION_SOURCE=none") as caught:
+        execute_query("SELECT 1")
+    assert str(tmp_path / ".duckdb" / "extensions") in str(caught.value)

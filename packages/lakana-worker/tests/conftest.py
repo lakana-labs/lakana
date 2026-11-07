@@ -247,9 +247,11 @@ def _no_drain_leaks() -> Iterator[None]:
     """
     executor_module._DRAINING = None
     executor_module._WORKER_STALE = None
+    executor_module._EXTENSION_SOURCE = "duckdb"
     yield
     executor_module._DRAINING = None
     executor_module._WORKER_STALE = None
+    executor_module._EXTENSION_SOURCE = "duckdb"
     pipeline_module._MAINTENANCE_TIMEOUT = DEFAULT_MAINTENANCE_TIMEOUT
     pipeline_module._MAX_HISTORY_OPEN_VERSIONS = DEFAULT_MAX_HISTORY_OPEN_VERSIONS
     pipeline_module._MAX_HISTORY_OPEN_BYTES = DEFAULT_MAX_HISTORY_OPEN_BYTES
