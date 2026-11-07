@@ -249,8 +249,8 @@ under test with `unshare -rn` (a new network namespace with no route out; a requ
 - **Packages.** We ran `pip download "lakana[server]"` with the network, which fetched 73 files, 0.21.0 of Lakana among them, then, in the namespace, `pip install --no-index --find-links wheelhouse
   "lakana[server]==0.21.0"` into a new virtual environment, and `lakana --version`, which printed
   `lakana 0.21.0`.
-- **The extension.** With the code of this repository (the setting comes with the release after
-  0.21.0), in a fresh home directory we ran the worker's loader with
+- **The extension.** With the code of this repository (the setting exists from 0.22.0),
+  in a fresh home directory we ran the worker's loader with
   `LAKANA_WORKER__EXTENSION_SOURCE=none`: it refused and printed the message above with the path.
   We then copied `v2.0.0` from a home directory where `INSTALL httpfs` had run, and, in the
   namespace, the loader found `httpfs` and loaded it.
