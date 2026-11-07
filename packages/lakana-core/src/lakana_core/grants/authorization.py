@@ -28,7 +28,7 @@ from lakana_core.catalog.identity import (
 from lakana_core.errors import PermissionDenied, ValidationError
 from lakana_core.grants.roles import ROLE_ACTIONS
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, validate_path_component
-from lakana_core.models import Grant, GroupMembership
+from lakana_core.models import LIVE_ENVIRONMENT, Environment, Grant, GroupMembership
 
 TASK_TOKEN_ACTIONS: frozenset[Action] = frozenset(
     {
@@ -296,7 +296,7 @@ class GrantAuthorization:
 
         The same decision as `explain`, question by question, from one read of the principal's
         group memberships and grants, one read of each environment's tables (`table_ids_in`)
-        and each environment's id: four statements for questions about one environment,
+        and one of the environments' ids: four statements for questions about one environment,
         however many tables they name.
 
         Parameters
@@ -317,6 +317,9 @@ class GrantAuthorization:
         self._preload_table_ids(
             securable for _, securable in questions if securable.kind == SecurableKind.TABLE
         )
+        self._preload_environment_ids(
+            securable.environment for _, securable in questions if securable.environment
+        )
         grants = self._grants_of(principal)
         answers: list[bool] = []
         for action, securable in questions:
@@ -326,6 +329,29 @@ class GrantAuthorization:
                 decision = self._decide(principal, action, securable, env_id, table_id, grants)
             answers.append(decision.allowed)
         return answers
+
+    def _preload_environment_ids(self, names: Iterable[str]) -> None:
+        """Resolve the ids of many environments in one statement.
+
+        Parameters
+        ----------
+        names
+            Environment names; those already cached are skipped, and a name no live
+            environment has is cached as `None`, as `resolve_environment_id` answers it.
+        """
+        wanted = {n for n in names if n not in self._environment_id_cache}
+        if not wanted:
+            return
+        found = {
+            row[0]: row[1]
+            for row in self._session.execute(
+                select(Environment.name, Environment.id).where(
+                    Environment.name.in_(wanted), LIVE_ENVIRONMENT
+                )
+            )
+        }
+        for name in wanted:
+            self._environment_id_cache[name] = found.get(name)
 
     def _preload_table_ids(self, securables: Iterable[Securable]) -> None:
         """Resolve the ids of many tables, one statement per environment not yet read.
