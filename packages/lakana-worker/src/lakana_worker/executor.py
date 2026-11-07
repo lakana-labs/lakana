@@ -288,8 +288,8 @@ def install_extension_source(source: str) -> None:
     Parameters
     ----------
     source
-        ``duckdb`` (DuckDB's own extension server, the default), ``none`` (never download) or an
-        ``https://`` mirror, as `lakana_core.config.parse_extension_source` returns it.
+        ``duckdb`` (DuckDB's own extension server, the default) or ``none`` (never download), as
+        `lakana_core.config.parse_extension_source` returns it. A mirror URL is not supported.
     """
     global _EXTENSION_SOURCE
     _EXTENSION_SOURCE = source
