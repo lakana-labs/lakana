@@ -35,6 +35,7 @@ Nothing in here runs user code in the worker process.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import logging
 import os
 import posixpath
@@ -1514,9 +1515,12 @@ class PythonRuntime:
                 sink,
                 stop,
             )
-        return self._classify(
+        classified = self._classify(
             session, engine, claimed, keeper, prepared, before, outcome, ended, baseline
         )
+        if classified is None:
+            return None
+        return dataclasses.replace(classified, resources=outcome.resources)
 
     @staticmethod
     def _refuse_missing_self(claimed: ClaimedTask, state: _TargetState) -> None:

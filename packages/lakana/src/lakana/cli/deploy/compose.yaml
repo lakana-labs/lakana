@@ -138,8 +138,13 @@ services:
       # Host directories a task's `directory` and `sqlite-file` connections read, mounted
       # read-only (.env). Blank, as in a .env that predates the key, means none.
       LAKANA_LAUNCHER__INGESTION_ROOTS: ${LAKANA_INGESTION_ROOTS:-}
+      # Where the host's cgroup tree is mounted below: a task's peak memory and processor time.
+      LAKANA_LAUNCHER__CGROUP_ROOT: /host/cgroup
     volumes:
       - ${LAKANA_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      # Read-only, for the figures of each task container (`memory.peak`, `cpu.stat`). It adds no
+      # privilege beyond the Docker socket above, which already reaches everything on the host.
+      - /sys/fs/cgroup:/host/cgroup:ro
       - launcher-socket:/run/lakana-launcher
       - launcher-state:/var/lib/lakana-launcher
       - egress-key:/run/lakana-egress

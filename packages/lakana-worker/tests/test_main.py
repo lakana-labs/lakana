@@ -1228,6 +1228,42 @@ def test_main_installs_the_drain_for_running_queries(
     assert installed[0][1] == pytest.approx(7.0)
 
 
+def test_main_installs_the_extension_source_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`LAKANA_WORKER__EXTENSION_SOURCE` reaches the executor."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    monkeypatch.setenv("LAKANA_WORKER__EXTENSION_SOURCE", "none")
+    with (
+        mock.patch("lakana_worker.__main__.install_extension_source") as install,
+        mock.patch("lakana_worker.__main__.poll_forever"),
+        mock.patch("lakana_worker.__main__.SchedulerLoop") as scheduler_mock,
+        mock.patch("lakana_worker.__main__.signal.signal"),
+        mock.patch("lakana_worker.__main__.RunEngine"),
+    ):
+        scheduler_mock.return_value.start.return_value.is_alive.return_value = False
+        main()
+    install.assert_called_once_with("none")
+
+
+def test_main_refuses_to_start_when_none_is_set_and_httpfs_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The operator learns at start, with the extension, the directory and the next step."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    monkeypatch.setenv("LAKANA_WORKER__EXTENSION_SOURCE", "none")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with mock.patch("lakana_worker.__main__.RunEngine"), pytest.raises(SystemExit) as caught:
+        main()
+    text = str(caught.value)
+    assert "httpfs" in text
+    assert str(tmp_path / ".duckdb" / "extensions") in text
+    assert "container image" in text
+    assert not text.startswith("Query failed")
+    assert "Tell the operator" not in text
+    assert "To fix it: run the worker from the Lakana container image" in text
+
+
 def test_main_installs_the_maintenance_timeout_from_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

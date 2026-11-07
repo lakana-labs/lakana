@@ -19,6 +19,7 @@ from conftest import FakeApi, invoke, make_state, write_profile_file
 from typer.testing import Result
 
 from lakana import __version__
+from lakana.cli._medallion import MEDALLION_QUERY, MEDALLION_TEMPLATE, medallion_files
 from lakana.cli._sample import SAMPLE
 
 _SAMPLE = {
@@ -809,7 +810,7 @@ def test_an_unknown_template_lists_every_template(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     text = " ".join(result.output.split())
-    for name in [*_TEMPLATE_ASSETS, "python"]:
+    for name in [*_TEMPLATE_ASSETS, "python", "medallion"]:
         assert name in text
     assert not (tmp_path / "p").exists()
 
@@ -1534,3 +1535,175 @@ def test_a_lock_uv_left_unchanged_is_not_written_again(tmp_path: Path) -> None:
     _restore(lock, b"version = 1\n")
 
     assert lock.stat().st_mtime_ns == before.st_mtime_ns
+
+
+_MEDALLION_EXAMPLE = Path(__file__).resolve().parents[4] / "docs" / "examples" / "medallion"
+_HEADER = re.compile(r"\A/\* lakana\n(.*?)\*/", re.DOTALL)
+
+
+def _header(text: str) -> dict[str, Any]:
+    """Parse the `/* lakana */` block of an asset or check.
+
+    Parameters
+    ----------
+    text
+        The file's text.
+
+    Returns
+    -------
+    dict
+        The block's YAML.
+    """
+    match = _HEADER.match(text)
+    assert match, text[:80]
+    return yaml.safe_load(match.group(1))
+
+
+def test_the_medallion_files_are_the_ones_the_guide_shows() -> None:
+    """`docs/examples/medallion/project` holds exactly what `--template medallion` writes."""
+    texts = medallion_files("retail")
+    project = _MEDALLION_EXAMPLE / "project"
+    assert _files(project) == set(texts)
+    for name, text in texts.items():
+        assert (project / name).read_text() == text, name
+
+
+def test_the_query_the_next_steps_suggest_is_the_one_the_example_runs() -> None:
+    """`MEDALLION_QUERY` is the `lakana sql` command of region `star` in the example's run.sh."""
+    script = (_MEDALLION_EXAMPLE / "run.sh").read_text()
+    region = script.split("# docs:start star\n", 1)[1].split("# docs:end star", 1)[0]
+    assert region == f'lakana sql "{MEDALLION_QUERY}" --env dev\n'
+
+
+def test_the_medallion_glossary_is_the_glossary_example_unchanged() -> None:
+    """One glossary example, shown by two guides."""
+    example = (
+        Path(__file__).resolve().parents[4]
+        / "docs"
+        / "examples"
+        / "glossary"
+        / "project"
+        / "glossary"
+        / "sales.yaml"
+    )
+    assert MEDALLION_TEMPLATE["glossary/sales.yaml"] == example.read_text()
+
+
+def test_the_medallion_assets_obey_the_layer_rules_the_template_declares() -> None:
+    """Kind and write mode of every asset are allowed by its layer; every asset is described."""
+    texts = medallion_files("retail")
+    layers = yaml.safe_load(texts["lakana.yaml"])["layers"]
+    assets = [name for name in texts if name.startswith("assets/")]
+    assert len(assets) == 13
+    for name in assets:
+        layer = name.split("/")[1]
+        header = _header(texts[name])
+        assert header["description"], name
+        kinds = layers[layer]["kinds"]
+        if kinds == "none":
+            assert "kind" not in header, name
+        else:
+            assert header["kind"] in kinds, name
+        assert header.get("write", "replace") in layers[layer]["write"], name
+
+
+def test_every_medallion_bronze_asset_merges_on_a_key_the_default_rule_allows() -> None:
+    """Bronze follows the default rule: `write: merge` with a key, no relaxed layer rule."""
+    texts = medallion_files("retail")
+    layers = yaml.safe_load(texts["lakana.yaml"])["layers"]
+    assert layers["bronze"]["write"] == ["append", "merge"]
+    keys = {
+        "stores": "store_id",
+        "products": "product_id",
+        "customers": ["customer_id", "changed_at"],
+        "sales": ["sale_id", "exported_at"],
+    }
+    for name, key in keys.items():
+        header = _header(texts[f"assets/bronze/{name}.sql"])
+        assert header["write"] == "merge", name
+        assert header["key"] == key, name
+    assert "`replace`" not in texts["README.md"]
+
+
+def test_the_medallion_glossary_links_and_translations_resolve_to_header_text() -> None:
+    """Every linked column exists, and every translated text has its main-language text."""
+    texts = medallion_files("retail")
+    fact = _header(texts["assets/gold/fact_sales.sql"])
+    glossary = yaml.safe_load(texts["glossary/sales.yaml"])
+    assert set(glossary["net_revenue"]["links"]["gold.fact_sales"]) <= set(fact["columns"])
+    assert set(glossary["gross_revenue"]["links"]["gold.fact_sales"]) <= set(fact["columns"])
+    assert "gold.dim_store" in glossary["net_revenue"]["links"]
+    german = yaml.safe_load(texts["translations/de.yaml"])
+    assert set(german) == {f"gold.{p.split('/')[-1][:-4]}" for p in texts if "/gold/" in p}
+    for table, translated in german.items():
+        header = _header(texts[f"assets/gold/{table.removeprefix('gold.')}.sql"])
+        for key in ("label", "description", "grain"):
+            assert key in translated and header[key], (table, key)
+        assert set(translated["columns"]) == set(header["columns"]), table
+        assert set(translated.get("measures", {})) == set(header.get("measures", {})), table
+
+
+def test_init_writes_the_medallion_template_over_the_base_project(tmp_path: Path) -> None:
+    """The template's lakana.yaml replaces the base one; nothing needs a lock."""
+    target = tmp_path / "retail"
+    result = invoke(make_state(tmp_path, FakeApi()), "init", str(target), "--template", "medallion")
+
+    assert result.exit_code == 0, result.output
+    base = {
+        "tests/test_example.py",
+        "pyproject.toml",
+        ".github/workflows/lakana-deploy.yml",
+        ".gitlab-ci.yml",
+    }
+    texts = medallion_files("retail")
+    assert _files(target) == base | set(texts)
+    for name, text in texts.items():
+        assert (target / name).read_text() == text, name
+    assert yaml.safe_load((target / "lakana.yaml").read_text())["repo"] == "retail"
+    assert tomllib.loads((target / "pyproject.toml").read_text())["project"]["dependencies"] == []
+    assert "# retail\n" in (target / "README.md").read_text()
+    assert "lakana deploy --env dev" in result.stdout
+    assert "lakana run --env dev" in result.stdout
+    assert MEDALLION_QUERY in result.stdout
+    assert "lakana[assets]" not in result.stdout
+    assert "uv lock" not in result.stdout
+
+
+def test_the_medallion_template_refuses_to_overwrite_and_writes_nothing(tmp_path: Path) -> None:
+    """A glossary of the user's own stops the whole template."""
+    target = tmp_path / "retail"
+    (target / "glossary").mkdir(parents=True)
+    (target / "glossary" / "sales.yaml").write_text("mine: {}\n")
+
+    result = invoke(make_state(tmp_path, FakeApi()), "init", str(target), "--template", "medallion")
+
+    assert result.exit_code == 2
+    assert "glossary/sales.yaml" in result.output
+    assert _files(target) == {"glossary/sales.yaml"}
+
+
+def test_the_medallion_template_takes_no_sample_flag_but_accepts_no_sample(tmp_path: Path) -> None:
+    """`--sample` is refused like the other templates; `--no-sample` is what it does anyway."""
+    refused = invoke(
+        make_state(tmp_path, FakeApi()),
+        "init",
+        str(tmp_path / "a"),
+        "--template",
+        "medallion",
+        "--sample",
+    )
+    assert refused.exit_code == 2
+    assert "writes its own assets instead" in refused.output
+    assert "leave out --sample" in refused.output
+    assert not (tmp_path / "a").exists()
+
+    accepted = invoke(
+        make_state(tmp_path, FakeApi()),
+        "init",
+        str(tmp_path / "b"),
+        "--template",
+        "medallion",
+        "--no-sample",
+    )
+    assert accepted.exit_code == 0, accepted.output
+    assert not _files(tmp_path / "b") & _SAMPLE

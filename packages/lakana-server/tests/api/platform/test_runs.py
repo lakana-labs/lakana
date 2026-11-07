@@ -12,6 +12,11 @@ from sqlalchemy.orm import Session
 from lakana_core.models import Run, RunStatus, TaskRun, TaskStatus
 from lakana_core.runs.service import task_log_path
 from lakana_core.storage.resolver import StorageResolver
+from lakana_server.api.platform.schemas import (
+    QueryStatusOut,
+    TaskAttemptOut,
+    TaskAttemptResourcesOut,
+)
 from tests.api.platform.test_deployments_run_as import _deploy
 from tests.api.platform.test_deploys import _token_for
 from tests.conftest import AUTH_HEADER
@@ -946,3 +951,46 @@ def test_a_schema_change_shows_policy_details_only_to_an_administrator(client: T
         "region",
         "row_filter",
     )
+
+
+def test_the_run_detail_lists_each_attempts_resources(client: TestClient) -> None:
+    """Each task of the run detail lists its attempts with the three figures, `null` if unknown."""
+    from lakana_core.models import AttemptOutcome, TaskAttempt
+
+    _deploy(client)
+    started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
+    assert [t["attempts"] for t in started["tasks"]] == [[]]
+    with Session(client.app.state.engine) as session:
+        run = session.get(Run, uuid.UUID(started["id"]))
+        assert run is not None
+        task = session.query(TaskRun).filter(TaskRun.run_id == run.id).one()
+        for number, figures in ((1, (None, None, None)), (2, (432013312, 3.1, 1288490188))):
+            session.add(
+                TaskAttempt(
+                    id=uuid.uuid4(),
+                    task_run_id=task.id,
+                    attempt=number,
+                    worker="w1",
+                    started_at=run.created_at,
+                    outcome=AttemptOutcome.SUCCEEDED,
+                    peak_memory_bytes=figures[0],
+                    cpu_seconds=figures[1],
+                    bytes_read=figures[2],
+                )
+            )
+        session.commit()
+    shown = client.get(f"{_RUNS}/{started['id']}", headers=AUTH_HEADER).json()
+    keys = ("attempt", "peak_memory_bytes", "cpu_seconds", "bytes_read")
+    assert [tuple(a[k] for k in keys) for a in shown["tasks"][0]["attempts"]] == [
+        (1, None, None, None),
+        (2, 432013312, 3.1, 1288490188),
+    ]
+    log = client.get(f"{_RUNS}/{started['id']}/tasks/silver.clean/log", headers=AUTH_HEADER).json()
+    assert [a["bytes_read"] for a in log["attempts"]] == [None, 1288490188]
+
+
+def test_the_openapi_says_where_the_figures_come_from() -> None:
+    """`bytes_read` is documented as DuckDB's measured figure."""
+    for model in (TaskAttemptOut, TaskAttemptResourcesOut, QueryStatusOut):
+        description = model.model_json_schema()["properties"]["bytes_read"]["description"]
+        assert "DuckDB" in description, model.__name__

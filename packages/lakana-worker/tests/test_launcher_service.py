@@ -19,7 +19,7 @@ import time
 import types
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from launcher_fakes import FakeEngine, settings
@@ -236,7 +236,14 @@ def test_a_run_streams_output_and_removes_its_container_and_network(tmp_path: Pa
 
     result = launcher.run(_run(), emitted.append)
 
-    assert result == {"exit": 0, "oom_killed": False, "timed_out": False, "stopped": False}
+    assert result == {
+        "exit": 0,
+        "oom_killed": False,
+        "timed_out": False,
+        "stopped": False,
+        "peak_memory_bytes": None,
+        "cpu_seconds": None,
+    }
     assert _logs(emitted) == b"hello\n"
     assert engine.stdin == [b'{"v": 2}']
     assert seen[network] == {"Container": "c-server", "EndpointConfig": {"Aliases": ["server"]}}
@@ -253,6 +260,114 @@ def test_a_run_reports_an_out_of_memory_kill_and_the_exit_code(tmp_path: Path) -
     result = _started(engine, tmp_path).run(_run(), lambda line: None)
 
     assert (result["exit"], result["oom_killed"]) == (137, True)
+
+
+class _SamplerSpy:
+    """Stands in for `CgroupSampler`, recording when it starts and stops."""
+
+    order: ClassVar[list[str]] = []
+    made: ClassVar[list[tuple[str, Path]]] = []
+    reading = service_module.CgroupReading(536870912, 3.1)
+
+    def __init__(self, container_id: str, *, root: Path) -> None:
+        self.made.append((container_id, root))
+
+    def start(self) -> None:
+        self.order.append("start")
+
+    def sample(self) -> None:
+        self.order.append("sample")
+
+    def stop(self) -> service_module.CgroupReading:
+        self.order.append("stop")
+        return self.reading
+
+
+def _spied(engine: FakeEngine, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Put `_SamplerSpy` in and make the engine log its `/wait` call into the same order.
+
+    Parameters
+    ----------
+    engine
+        The fake engine.
+    monkeypatch
+        The fixture.
+
+    Returns
+    -------
+    list of str
+        The order of ``start``, ``wait`` and ``stop``.
+    """
+    order: list[str] = []
+    _SamplerSpy.order, _SamplerSpy.made = order, []
+    monkeypatch.setattr(service_module, "CgroupSampler", _SamplerSpy)
+    original = engine.request
+
+    def request(method: str, path: str, *args: Any, **kwargs: Any) -> tuple[int, Any]:
+        if path.endswith("/wait"):
+            order.append("wait")
+        return original(method, path, *args, **kwargs)
+
+    engine.request = request  # ty: ignore[invalid-assignment]
+    return order
+
+
+def test_a_run_reports_the_cgroup_figures_of_its_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It starts with the container, reads once as the output ends, stops after `/wait`."""
+    engine = FakeEngine()
+    order = _spied(engine, monkeypatch)
+    launcher = _started(engine, tmp_path, cgroup_root=tmp_path / "cg")
+    order.clear()
+
+    result = launcher.run(_run(), lambda line: None)
+
+    assert (result["peak_memory_bytes"], result["cpu_seconds"]) == (536870912, 3.1)
+    assert order == ["start", "sample", "wait", "stop"]
+    assert [root for _, root in _SamplerSpy.made] == [tmp_path / "cg"]
+    assert _SamplerSpy.made[0][0].startswith("c")
+
+
+def test_the_sampler_stops_when_waiting_for_the_container_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An engine error during `/wait` must not leave a thread sampling a removed container."""
+    engine = FakeEngine()
+    order = _spied(engine, monkeypatch)
+    launcher = _started(engine, tmp_path)
+    order.clear()
+    inner = engine.request
+
+    def failing(method: str, path: str, *args: Any, **kwargs: Any) -> tuple[int, Any]:
+        if path.endswith("/wait"):
+            raise EngineError("gone")
+        return inner(method, path, *args, **kwargs)
+
+    engine.request = failing  # ty: ignore[invalid-assignment]
+
+    with pytest.raises(EngineError):
+        launcher.run(_run(), lambda line: None)
+
+    assert order == ["start", "sample", "stop"]
+
+
+def test_the_sampler_stops_when_the_output_cannot_be_sent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller that left mid-output ends the run before `/wait`; the sampler still stops."""
+    engine = FakeEngine(output=[b"x"])
+    order = _spied(engine, monkeypatch)
+    launcher = _started(engine, tmp_path)
+    order.clear()
+
+    def gone(line: dict[str, object]) -> None:
+        raise BrokenPipeError
+
+    with pytest.raises(BrokenPipeError):
+        launcher.run(_run(), gone)
+
+    assert order == ["start", "stop"]
 
 
 @pytest.mark.parametrize(("code", "oom"), [(137, True), (143, False), (1, False)])
@@ -3846,3 +3961,28 @@ def test_a_relays_output_buffered_at_its_removal_still_reaches_the_caller(tmp_pa
     launcher.check(_check(relay=(_DB,)), emitted.append)
 
     assert first in _logs(emitted) and second in _logs(emitted)
+
+
+def test_a_sampler_that_cannot_start_does_not_fail_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thread pressure in the launcher costs the figures, never the task."""
+
+    def refuse() -> None:
+        raise RuntimeError("can't start new thread")
+
+    engine = FakeEngine()
+    launcher = _started(engine, tmp_path)
+    monkeypatch.setattr(
+        "lakana_worker.launcher.cgroup.threading",
+        types.SimpleNamespace(
+            Thread=lambda **kwargs: types.SimpleNamespace(start=refuse),
+            Event=threading.Event,
+            Lock=threading.Lock,
+        ),
+    )
+
+    result = launcher.run(_run(), lambda line: None)
+
+    assert result["exit"] == 0
+    assert (result["peak_memory_bytes"], result["cpu_seconds"]) == (None, None)

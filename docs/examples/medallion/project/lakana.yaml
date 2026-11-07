@@ -1,0 +1,28 @@
+# Lakana project. Reference: https://lakana-labs.github.io/lakana/how-to/projects/
+repo: retail
+# The language of the descriptions in the asset headers; translations/de.yaml translates the
+# gold tables into German.
+main_language: en
+defaults:
+  materialize: table
+requirements:
+  fields: [description]
+# Layer rules: how data may flow. Bronze reads only sources, silver reads bronze, gold reads
+# silver and gold. These are the medallion default; see
+# https://lakana-labs.github.io/lakana/how-to/keep-layers-apart/
+layers:
+  bronze:
+    reads: []
+    write: [append, merge]
+    kinds: none
+  silver:
+    reads: [bronze, silver]
+    write: [replace, append, merge, view]
+    kinds: [staging]
+  gold:
+    reads: [silver, gold]
+    write: [replace, append, merge, history, view]
+    kinds: [fact, dimension, wide]
+# Table health runs at its defaults: every signal warns and none stops a run. To stop a run
+# whose row count falls outside the usual band, see the commented line in
+# assets/gold/fact_sales.sql and https://lakana-labs.github.io/lakana/reference/table-health/

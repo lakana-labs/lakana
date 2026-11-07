@@ -40,7 +40,7 @@ cloud credential lookup under "What we could not verify", are not.
 
 | From | To | Set by |
 |---|---|---|
-| Worker (DuckDB) | DuckDB's extension repository, `extensions.duckdb.org`, to download the `httpfs` extension the first time a worker opens a connection on a machine that does not have it yet; if that server answers with a server error (HTTP 5xx), DuckDB asks its backup, `extensions.duckdb-backup.org`, for the same file. One download of one file; no query data is sent. | Not configurable in Lakana (see below) |
+| Worker (DuckDB) | DuckDB's extension repository, `extensions.duckdb.org`, to download the `httpfs` extension the first time a worker opens a connection on a machine that does not have it yet; if that server answers with a server error (HTTP 5xx), DuckDB asks its backup, `extensions.duckdb-backup.org`, for the same file. One download of one file; no query data is sent. | `LAKANA_WORKER__EXTENSION_SOURCE=none` never downloads (see below) |
 
 The container image already contains the extension, because the image installs it when it is
 built, so a worker that runs from the image makes no such download. A worker installed with
@@ -107,6 +107,14 @@ DuckDB 2.0.0, the version in the lock file.
   On a machine without network access, `INSTALL httpfs` failed naming
   `http://extensions.duckdb.org/v2.0.0/linux_amd64/httpfs.duckdb_extension.gz`. We did not
   watch the request on the wire.
+- **Switching the download off.** `LAKANA_WORKER__EXTENSION_SOURCE` is `duckdb` by default,
+  DuckDB's server as above, contacted only when the extension is not already in the worker's
+  extension directory. With `none` the worker never downloads: at start it loads `httpfs` from
+  `~/.duckdb/extensions` of the worker's user and refuses to start if it is not there, naming the
+  exact file (for example `~/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension`, with
+  the version and platform of that worker) and what to do: run the worker from the container
+  image, which bundles the extension, or copy that file there. A mirror URL is not supported.
+  Other extensions are never installed or loaded automatically.
 
 ## What we could not verify
 
@@ -115,9 +123,10 @@ DuckDB 2.0.0, the version in the lock file.
   looked at its settings and one behaviour, as above. For `uv`, which the worker runs to
   build environments, we know only from the code that it is run to install packages from an index. We did
   not check what else it does.
-- **Offline extension install.** Lakana has no setting to point DuckDB at a mirror or to
-  switch the download off. On a machine without internet access, put the extension in
-  DuckDB's extension directory before the first query, or use the container image.
+- **Offline extension install.** Lakana cannot point DuckDB at a mirror. On a machine without
+  internet access, use the container image or put the extension in DuckDB's extension directory
+  before the first query, and set `LAKANA_WORKER__EXTENSION_SOURCE=none` so that a missing file
+  stops the worker at start instead of a download attempt.
 - **Cloud credential lookup.** The S3 libraries Lakana uses can look for credentials at the cloud
   instance metadata address (`169.254.169.254`, in `botocore`) when an S3 environment is
   configured without access keys. We did not test when this happens in Lakana. Set

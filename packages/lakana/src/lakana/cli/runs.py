@@ -322,6 +322,27 @@ def _emit_failures(run: Run) -> None:
         typer.echo(f"  Next: {_output.inline(task.failure.next_step, _PROGRESS_REASON_LIMIT)}")
 
 
+def _emit_resources(run: Run) -> None:
+    """Print what each attempt used, one line per attempt; nothing without an attempt.
+
+    Parameters
+    ----------
+    run
+        The run.
+    """
+    lines = [
+        f"  {_output.inline(task.asset)} attempt {used.attempt}: "
+        + _output.resources_text(used.peak_memory_bytes, used.cpu_seconds, used.bytes_read)
+        for task in run.tasks
+        for used in task.attempts
+    ]
+    if lines:
+        typer.echo("")
+        typer.echo("Resources used (peak memory, processor time, bytes read):")
+        for line in lines:
+            typer.echo(line)
+
+
 _WARNING_LIMIT = 1000
 """The most characters of a warning `lakana runs show` keeps. A policy warning is shorter; an impact
 warning's list of uses has no bound, and its next step comes before the list, so a cut keeps it."""
@@ -875,6 +896,7 @@ def show(ctx: typer.Context, run_id: str, env: _ENV = None) -> None:
         return
     _output.emit(state, found, columns=_SHOW_COLUMNS)
     _emit_tasks(state, found)
+    _emit_resources(found)
     _emit_failures(found)
     _emit_schema_changes(found)
     _emit_checks(state, found)

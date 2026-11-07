@@ -127,6 +127,20 @@ def test_the_network_range_and_the_total_memory_can_be_set() -> None:
     assert settings.network_range == "192.168.64.0/24" and settings.max_total_memory_mb == 131072
 
 
+_CGROUP = "LAKANA_LAUNCHER__CGROUP_ROOT"
+
+
+def test_the_cgroup_root_defaults_to_the_hosts_and_can_be_moved() -> None:
+    """Compose mounts the host tree at `/host/cgroup` and says so; elsewhere the host default."""
+    base = {"LAKANA_LAUNCHER__STACK": "lakana", "LAKANA_LAUNCHER__IMAGES": _IMAGES}
+
+    assert load_settings(base).cgroup_root == Path("/sys/fs/cgroup")
+    assert load_settings({**base, _CGROUP: "/host/cgroup"}).cgroup_root == Path("/host/cgroup")
+    assert "CGROUP_ROOT" in KNOWN_SETTINGS
+    with pytest.raises(SettingsError, match="CGROUP_ROOT must be an absolute path"):
+        load_settings({**base, _CGROUP: "host/cgroup"})
+
+
 _REFUSED = "LAKANA_LAUNCHER__EGRESS_REFUSED"
 _REFUSED_FORMAT = (
     "list CIDR ranges or addresses separated by commas, such as 192.168.1.0/24,10.0.0.7."

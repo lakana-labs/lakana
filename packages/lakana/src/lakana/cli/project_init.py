@@ -21,6 +21,7 @@ from typing import Annotated
 import typer
 
 from lakana import __version__
+from lakana.cli._medallion import MEDALLION_QUERY, medallion_files
 from lakana.cli._sample import SAMPLE, SAMPLE_QUERY
 from lakana.cli._state import CliError, CliState, is_loopback_url, selected_url, state_of
 from lakana.errors import ConfigError
@@ -370,13 +371,15 @@ class Template(StrEnum):
     """A starting point `lakana init --template` writes.
 
     ``python`` is the sample with one Python asset and a lock; the others are one asset that
-    ingests from a source.
+    ingests from a source. ``medallion`` is a bronze, silver and gold star schema with generated
+    retail data.
     """
 
     python = "python"
     ingest_files = "ingest-files"
     ingest_sql = "ingest-sql"
     ingest_rest = "ingest-rest"
+    medallion = "medallion"
 
 
 _PYPROJECT_ASSETS = """\
@@ -1005,7 +1008,8 @@ def write_project(
     template
         A `Template` value: its asset and README, a pyproject with ``lakana[assets]`` and a
         test that parses Python assets; `None` for none. ``python`` adds the sample too and
-        locks the project with `uv lock`.
+        locks the project with `uv lock`. ``medallion`` writes the star schema over the base
+        files and needs no lock.
     uv
         The `uv` executable that locks the project of the ``python`` template.
     on_checked
@@ -1033,7 +1037,9 @@ def write_project(
     added: dict[str, str] = {}
     if sample or template == Template.python:
         texts.update(SAMPLE)
-    if template is not None:
+    if template == Template.medallion:
+        texts.update(medallion_files(repo))
+    elif template is not None:
         texts["pyproject.toml"] = _PYPROJECT_ASSETS.format(repo=repo, version=__version__)
         texts["tests/test_example.py"] = _TEST_PYTHON
         added = PYTHON_TEMPLATE if template == Template.python else INGEST_TEMPLATES[template]
@@ -1189,7 +1195,9 @@ def init(
             "--template",
             help="Start from a template. python: the sample plus one Python asset, locked with "
             "`uv lock` (needs network access and a few more minutes). ingest-files, ingest-sql or "
-            "ingest-rest: one asset that ingests from a source, instead of the sample.",
+            "ingest-rest: one asset that ingests from a source, instead of the sample. "
+            "medallion: a bronze, silver and gold star schema with generated retail data, layer "
+            "rules, German translations and a glossary (no source needed).",
         ),
     ] = None,
 ) -> None:
@@ -1212,7 +1220,8 @@ def init(
     ci_auth
         `--ci-auth`: ``oidc`` (the default) or ``pat``.
     template
-        `--template`: ``python``, ``ingest-files``, ``ingest-sql`` or ``ingest-rest``.
+        `--template`: ``python``, ``ingest-files``, ``ingest-sql``, ``ingest-rest`` or
+        ``medallion``.
 
     Raises
     ------
@@ -1234,8 +1243,9 @@ def init(
             f"leave out {option}"
         )
     if template is not None and sample:
+        own = "assets" if template is Template.medallion else "asset"
         raise CliError(
-            f"--template {template.value} writes its own asset instead of the sample; "
+            f"--template {template.value} writes its own {own} instead of the sample; "
             "leave out --sample"
         )
     uv = "uv"
@@ -1291,6 +1301,19 @@ def init(
             "  lakana run --env dev",
             "Then look at the Python asset's table:",
             f'  lakana sql "{PYTHON_QUERY}"',
+        ]
+    elif template is Template.medallion:
+        lines = [
+            f"Created a Lakana project in {target} from the template medallion: generated "
+            "retail data in bronze, cleaned in silver, and a star in gold (README.md says the "
+            "same).",
+            "Next:",
+            *setup,
+            "Then build the star:",
+            "  lakana deploy --env dev",
+            "  lakana run --env dev",
+            "Then look at the result:",
+            f'  lakana sql "{MEDALLION_QUERY}"',
         ]
     elif template is not None:
         lines = [
@@ -1353,7 +1376,7 @@ def init(
             "you use CI; then edit the pinned version in .github/workflows/lakana-deploy.yml "
             "and .gitlab-ci.yml, or set LAKANA_INDEX_URL to an index that has it."
         )
-        if template is not None and template is not Template.python:
+        if template not in (None, Template.python, Template.medallion):
             lines.append(
                 f"pyproject.toml pins lakana[assets]=={__version__} too, so `uv lock` fails "
                 "until it finds that version: add an index that has it to pyproject.toml "

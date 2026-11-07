@@ -8,8 +8,9 @@ from __future__ import annotations
 import dataclasses
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AuthorizationService, PrincipalRef
@@ -28,6 +29,8 @@ from lakana_server.api.platform.schemas import (
     RunOut,
     SchedulerOut,
     TaskAttemptOut,
+    TaskHistoryEntryOut,
+    TaskHistoryPage,
     TaskLogOut,
     TaskRunOut,
     WorkerCachesOut,
@@ -233,6 +236,64 @@ def list_runs(
     )
     set_next_cursor(response, next_cursor)
     return [run_out(v) for v in views]
+
+
+@router.get(
+    "/jobs/{job}/tasks/{task}/attempts",
+    response_model=TaskHistoryPage,
+    responses=errors(403, 404, 409),
+)
+def task_history(
+    env: str,
+    job: Annotated[str, Path(min_length=1, max_length=255)],
+    task: Annotated[str, Path(min_length=1, max_length=255)],
+    repository: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=20),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: RunService = Depends(get_run_service),
+) -> TaskHistoryPage:
+    """List a task's attempts across runs.
+
+    Lists the attempts of one task of one job over all its runs, newest first, with what each
+    used (peak memory, processor time, bytes read), to see which task needs the most memory
+    or whether it grows from run to run. Needs `RUN` or `READ_ENVIRONMENT`. Answers an empty
+    list for a task the project declares that has not run yet, 404 when the environment or
+    repository does not exist or the job or task is unknown (no deployed project declares it
+    and no run attempted it), 409 when several repositories ran a job of this name and none was
+    named, and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    job
+        The job's name.
+    task
+        The task's name (its table, such as `silver.orders`).
+    repository
+        The repository; needed only when several repositories ran a job of this name.
+    limit
+        Most attempts returned (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The run service.
+
+    Returns
+    -------
+    TaskHistoryPage
+        The attempts and the cursor of the next page.
+    """
+    entries, next_cursor = service.task_attempts(
+        principal, env, job, task, repository=repository, limit=limit, cursor=cursor
+    )
+    return TaskHistoryPage(
+        attempts=[TaskHistoryEntryOut(**dataclasses.asdict(e)) for e in entries],
+        next_cursor=next_cursor,
+    )
 
 
 @router.get("/runs/{run_id}", response_model=RunOut, responses=errors(403, 404))

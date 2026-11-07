@@ -274,7 +274,7 @@ def test_a_generator_beside_a_real_table_keeps_the_table_as_the_input() -> None:
 
 
 @pytest.mark.parametrize(
-    "function", ["read_parquet", "iceberg_scan", "sqlite_scan", "some_unknown_fn"]
+    "function", ["read_parquet", "read_csv", "iceberg_scan", "sqlite_scan", "some_unknown_fn"]
 )
 def test_other_table_functions_are_refused_with_path_and_line(function: str) -> None:
     """A file/foreign reader or an unknown table function fails the deploy at its file."""
@@ -286,7 +286,9 @@ def test_other_table_functions_are_refused_with_path_and_line(function: str) -> 
     [issue] = caught.value.issues
     assert (issue.path, issue.line) == ("assets/silver/t.sql", 1)
     assert f"table function {function} is not allowed" in issue.message
-    assert "Register the data as a table and reference it" in issue.message
+    assert "load the data into a table first" in issue.message.lower()
+    assert "Load data from a source" in issue.message
+    assert "''" not in issue.message
 
 
 @pytest.mark.parametrize(
@@ -431,3 +433,42 @@ def test_a_statement_that_changes_data_inside_a_cte_fails_the_deploy_at_its_file
         "A query reads data and cannot change it: `DELETE` is not allowed, also not inside a "
         "CTE or subquery."
     )
+
+
+def test_a_generator_table_function_is_not_a_file_reference() -> None:
+    from lakana_core.projects.parse import sql_file_references
+
+    for sql in (
+        "SELECT i FROM range(1, 13) AS r(i)",
+        "SELECT i FROM generate_series(1, 3) AS g(i)",
+        "SELECT i FROM unnest([1, 2]) AS u(i)",
+    ):
+        assert sql_file_references(sql, []) == set(), sql
+
+
+def test_a_reading_table_function_is_never_reported_as_an_empty_name() -> None:
+    from lakana_core.projects.parse import sql_file_references
+
+    for sql in (
+        "SELECT * FROM read_parquet('x.parquet')",
+        "SELECT * FROM read_csv('a.csv') AS c",
+    ):
+        assert "" not in sql_file_references(sql, []), sql
+
+
+@pytest.mark.parametrize(
+    ("sql", "cause"),
+    [
+        ("SELECT * FROM read_parquet('x')", "reads data directly"),
+        ("SELECT * FROM read_csv('a.csv') AS c", "reads data directly"),
+        ("SELECT * FROM generate_serie(1, 3) AS g(i)", "check the name"),
+        ("SELECT * FROM ROWS FROM (range(3))", "check the name"),
+    ],
+)
+def test_the_refusal_of_a_table_function_names_the_right_cause(sql: str, cause: str) -> None:
+    with pytest.raises(ProjectValidationError) as caught:
+        parse_assets([_asset(f"-- c\n{sql}", table="silver.t")], defaults=AssetDefaults())
+    [issue] = caught.value.issues
+    assert cause in issue.message
+    assert "load the data into a table first" in issue.message.lower()
+    assert ("reads data directly" in issue.message) == (cause == "reads data directly")

@@ -47,6 +47,7 @@ from lakana.cli import (
     secrets,
     server,
     tables,
+    tasks,
     terms,
     tokens,
 )
@@ -439,6 +440,7 @@ _REGISTRARS: tuple[Callable[[typer.Typer], None], ...] = (
     terms.register,
     graph.register,
     jobs.register,
+    tasks.register,
     checks.register,
     project_init.register,
     audit.register,

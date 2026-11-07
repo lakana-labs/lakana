@@ -126,6 +126,7 @@ from lakana_core.models import (
     Table,
     TableHealthSignal,
     TableType,
+    TaskAttempt,
     TaskRun,
     TaskStatus,
     TaskToken,
@@ -146,6 +147,7 @@ from lakana_core.runs.checks import (
     set_back_result_message,
 )
 from lakana_core.runs.failures import FailureCode
+from lakana_core.runs.resources import AttemptResources
 from lakana_core.runs.scheduler import LOST_MESSAGE
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService
@@ -8997,3 +8999,54 @@ def test_a_run_of_long_names_past_the_byte_budget_is_accepted_and_reads_nothing_
     assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
     assert _ids(py.world, "gold.scores") == [0, 1, 2, 3]
     assert py.runner.tasks[1].files_read_horizon is not None
+
+
+def _attempt_figures(py: PyWorld) -> tuple[int | None, float | None, int | None]:
+    """Read the figures stored with the attempt of the Python task.
+
+    Parameters
+    ----------
+    py
+        The world.
+
+    Returns
+    -------
+    tuple
+        Peak memory, processor seconds and bytes read.
+    """
+    task_run_id = _task(py.world, "gold.scores").id
+    with py.world.session() as session:
+        attempt = session.scalars(
+            select(TaskAttempt).where(TaskAttempt.task_run_id == task_run_id)
+        ).one()
+        return attempt.peak_memory_bytes, attempt.cpu_seconds, attempt.bytes_read
+
+
+def test_a_succeeded_python_attempt_stores_the_figures_of_its_process(py: PyWorld) -> None:
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        written = _upload(py.world, task, 1)
+        return RunOutcome(
+            succeeded=True,
+            snapshot_id=written.snapshot_id,
+            rows=written.rows,
+            resources=AttemptResources(123456, 1.5, 1000),
+        )
+
+    engine = py.engine(script)
+    run_claimed(engine, py.claim_python(engine))
+    assert _task(py.world, "gold.scores").status is TaskStatus.SUCCEEDED
+    assert _attempt_figures(py) == (123456, 1.5, 1000)
+
+
+def test_a_failed_python_attempt_stores_the_figures_of_its_process(py: PyWorld) -> None:
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        return RunOutcome(
+            succeeded=False,
+            error_message="ValueError: boom",
+            failure_code=FailureCode.BUILD_FAILED,
+            resources=AttemptResources(None, 0.25, 7),
+        )
+
+    engine = py.engine(script)
+    run_claimed(engine, py.claim_python(engine))
+    assert _attempt_figures(py) == (None, 0.25, 7)

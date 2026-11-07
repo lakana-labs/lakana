@@ -169,6 +169,14 @@ def main() -> None:
     out = sys.stdout.buffer
     if behaviour == "ok":
         out.write(_stream(10, 3))
+    elif behaviour in ("usage", "usage_symlink"):
+        # Like the real child's end: the figures it measured, in the file next to it (argv[2]).
+        if behaviour == "usage":
+            with open("usage.json", "w") as handle:
+                handle.write(sys.argv[2])
+        else:
+            os.symlink("/etc/hostname", "usage.json")
+        out.write(_stream(10, 3))
     elif behaviour == "echo_request":
         sys.stderr.write(json.dumps({"request": request, "env": dict(os.environ)}) + "\n")
         sys.stderr.write(json.dumps({"fds": [fd for fd in range(64) if _is_open(fd)]}) + "\n")

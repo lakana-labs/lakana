@@ -1,0 +1,16 @@
+net_revenue:
+  name: Net revenue
+  definition: >
+    Revenue after returns and discounts, before tax.
+  synonyms: [revenue, sales, turnover]
+  owner: finance
+  links:
+    gold.fact_sales: [net_amount]
+    gold.dim_store: []
+  related: [gross_revenue]
+gross_revenue:
+  name: Gross revenue
+  definition: Revenue before returns and discounts.
+  owner: finance
+  links:
+    gold.fact_sales: [gross_amount]

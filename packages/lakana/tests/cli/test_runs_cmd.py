@@ -15,6 +15,7 @@ from conftest import FakeApi, invoke, make_state
 from test_checks_cmd import result_body
 
 import lakana.cli.runs as runs_module
+from lakana.cli._output import resources_text
 
 _ID = "00000000-0000-0000-0000-0000000000cc"
 _CI = {"GITHUB_ACTIONS": "true"}
@@ -2081,3 +2082,93 @@ def test_runs_show_and_run_print_the_note_and_an_administrators_warnings(tmp_pat
 
     api.on("GET", _RUN_PATH, json=_run("succeeded", _task("gold.orders", "succeeded")))
     assert "warning" not in invoke(state, "runs", "show", _ID, "--env", "dev", env=_CI).stdout
+
+
+@pytest.mark.parametrize(
+    ("args", "text"),
+    [
+        ((432013312, 3.1, 1288490188), "412 MiB · 3.1 s CPU · 1.2 GiB read"),
+        ((None, None, None), "—"),
+        ((0, 0.0, 0), "0 B · 0.0 s CPU · 0 B read"),
+        ((None, 65.0, None), "1 m 5 s CPU"),
+        ((1023, None, 1024), "1023 B · 1.0 KiB read"),
+        ((None, None, 5 * 2**40), "5.0 TiB read"),
+        ((None, 59.96, None), "1 m 0 s CPU"),
+        ((104_806_000, None, None), "100 MiB"),
+        ((104_750_000, None, None), "99.9 MiB"),
+    ],
+)
+def test_resources_text(args: tuple[int | None, float | None, int | None], text: str) -> None:
+    """Binary units, unknown parts dropped, zero a measurement."""
+    assert resources_text(*args) == text
+
+
+def _with_attempts(*attempts: dict[str, object]) -> dict[str, object]:
+    """Build a `RunOut` body whose task has these attempts.
+
+    Parameters
+    ----------
+    *attempts
+        The `attempts` entries.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return _run("succeeded", {**_task("a.b", "succeeded", 2), "attempts": list(attempts)})
+
+
+_FIRST: dict[str, object] = {
+    "attempt": 1,
+    "peak_memory_bytes": 432013312,
+    "cpu_seconds": 3.1,
+    "bytes_read": 1288490188,
+}
+_SECOND: dict[str, object] = {
+    "attempt": 2,
+    "peak_memory_bytes": None,
+    "cpu_seconds": None,
+    "bytes_read": None,
+}
+
+
+def test_run_show_lists_resources_per_attempt(tmp_path: Path) -> None:
+    """One line per attempt: the figures of attempt 1 and a dash for attempt 2."""
+    api = FakeApi()
+    api.on("GET", _RUN_PATH, json=_with_attempts(_FIRST, _SECOND))
+
+    shown = _plain(
+        invoke(make_state(tmp_path, api), "runs", "show", _ID, "--env", "dev", env=_CI).stdout
+    )
+
+    assert "a.b attempt 1: 412 MiB · 3.1 s CPU · 1.2 GiB read" in shown
+    assert "a.b attempt 2: —" in shown
+
+
+def test_run_show_without_attempts_prints_no_resources_block(tmp_path: Path) -> None:
+    """A run from an older server, or before any attempt, prints no block."""
+    api = FakeApi()
+    api.on("GET", _RUN_PATH, json=_run("running", _task("a.b", "running")))
+
+    shown = invoke(make_state(tmp_path, api), "runs", "show", _ID, "--env", "dev").stdout
+
+    assert "attempt 1" not in shown and "Resources" not in shown
+
+
+def test_run_show_json_has_the_raw_numbers(tmp_path: Path) -> None:
+    """`--output json` keeps the figures as numbers."""
+    api = FakeApi()
+    api.on("GET", _RUN_PATH, json=_with_attempts(_FIRST, _SECOND))
+
+    result = invoke(
+        make_state(tmp_path, api), "--output", "json", "runs", "show", _ID, "--env", "dev"
+    )
+
+    first, second = json.loads(result.stdout)["tasks"][0]["attempts"]
+    assert (first["peak_memory_bytes"], first["cpu_seconds"], first["bytes_read"]) == (
+        432013312,
+        3.1,
+        1288490188,
+    )
+    assert second["bytes_read"] is None

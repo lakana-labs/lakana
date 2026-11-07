@@ -392,6 +392,11 @@ spill directory and, when the worker has a memory limit, two more `POLARS_*` set
 output and the output of the environment build are in `lakana runs logs`, up to 1 MiB per
 attempt (see [Run](../how-to/projects.md#run)).
 
+Each attempt also records its highest memory, its processor time and the bytes it read; see
+[`lakana task history`](../how-to/instance-health.md). The SDK counts the bytes read by its own
+readers (`lakana.ingest` and the table reads), so a task that reads with another library shows
+no bytes read.
+
 ## Failure, retry and cancel
 
 | Situation | What happens |

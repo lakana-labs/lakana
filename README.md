@@ -87,6 +87,9 @@ bronze table, and in the Compose bundle its task reaches only the sources it dec
 `lakana init --template ingest-files`, `ingest-sql` or `ingest-rest` writes a project that does
 it; `lakana load <file> <table>` loads a local file into bronze once, for exploring. See
 [Load data from a source](docs/site/how-to/load-data-from-a-source.md).
+`lakana init --template medallion` writes a small star schema from generated data (bronze, silver,
+a gold fact and dimensions with history, a wide table, a glossary); see
+[Model a star schema](docs/site/how-to/model-a-star-schema.md).
 
 ## Python assets
 

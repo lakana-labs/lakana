@@ -13,6 +13,7 @@ import pytest
 from fake_launcher import FakeLauncher, refusing
 
 from lakana_core.runs.failures import FailureCode
+from lakana_core.runs.resources import AttemptResources
 from lakana_worker.launcher.requests import EGRESS_MISSING, EGRESS_TOKEN_TOO_LONG
 from lakana_worker.launcher_client import (
     LauncherClient,
@@ -212,6 +213,108 @@ def test_a_run_reads_the_record_from_the_work_directory(tmp_path: Path) -> None:
     outcome, _, _ = _run(tmp_path, launcher)
 
     assert (outcome.succeeded, outcome.rows, outcome.failure_code) == (True, 3, None)
+
+
+def test_the_launchers_cgroup_figures_and_the_records_bytes_become_the_resources(
+    tmp_path: Path,
+) -> None:
+    """Peak memory and processor time come from the launcher, bytes read from the task's record."""
+    result = {**_DONE, "peak_memory_bytes": 536870912, "cpu_seconds": 3.1}
+    record = {"status": "succeeded", "rows": 3, "bytes_read": 4096}
+
+    outcome, _, _ = _run(tmp_path, FakeLauncher(scripts={"run": _writes(record, result)}))
+
+    assert outcome.resources == AttemptResources(536870912, 3.1, 4096)
+
+
+def test_a_failed_and_a_memory_stopped_container_still_report_their_figures(
+    tmp_path: Path,
+) -> None:
+    """The figures describe the container however it ended."""
+    result = {
+        "exit": 137,
+        "oom_killed": True,
+        "timed_out": False,
+        "stopped": False,
+        "peak_memory_bytes": 2147483648,
+        "cpu_seconds": 0.5,
+    }
+
+    outcome, _, _ = _run(tmp_path, FakeLauncher(scripts={"run": _writes(None, result)}))
+
+    assert outcome.failure_code is FailureCode.MEMORY
+    assert outcome.resources == AttemptResources(2147483648, 0.5, None)
+
+
+@pytest.mark.parametrize("bad", [-5, True, "9", float("nan"), float("inf"), None])
+def test_hostile_launcher_figures_are_dropped(tmp_path: Path, bad: object) -> None:
+    """Anything but a count and a finite non-negative duration is no figure."""
+    result = {**_DONE, "peak_memory_bytes": bad, "cpu_seconds": bad}
+    record = {"status": "succeeded", "rows": 3}
+
+    outcome, _, _ = _run(tmp_path, FakeLauncher(scripts={"run": _writes(record, result)}))
+
+    assert outcome.succeeded is True
+    assert outcome.resources == AttemptResources(None, None, None)
+
+
+def test_a_launcher_that_predates_the_figures_gives_none(tmp_path: Path) -> None:
+    """Release skew is tolerated: the keys are absent and the attempt shows nothing."""
+    record = {"status": "succeeded", "rows": 3, "bytes_read": 7}
+
+    outcome, _, _ = _run(tmp_path, FakeLauncher(scripts={"run": _writes(record, _DONE)}))
+
+    assert outcome.succeeded is True
+    assert outcome.resources == AttemptResources(None, None, 7)
+
+
+@pytest.mark.parametrize("record_status", ["succeeded", "failed"])
+def test_the_bytes_read_survive_a_launcher_that_timed_out(
+    tmp_path: Path, record_status: str
+) -> None:
+    """The record is read although the launcher did not answer; its bytes read stay."""
+    record: dict[str, object] = {"status": record_status, "bytes_read": 4096}
+    if record_status == "succeeded":
+        record["rows"] = 3
+    else:
+        record.update(error_type="E", message="x", retryable=False)
+    launcher = FakeLauncher()
+
+    def silent(request: dict[str, Any], on_log: Callable[[bytes], None]) -> dict[str, object]:
+        """Write the record, then never answer.
+
+        Parameters
+        ----------
+        request
+            The request.
+        on_log
+            The log sink.
+
+        Raises
+        ------
+        LauncherTimedOut
+            Always.
+        """
+        work = Path(request["_attempt_dir"]) / "task"
+        (work / "result.json").write_text(json.dumps(record))
+        raise LauncherTimedOut("no result")
+
+    launcher.scripts["run"] = silent
+
+    outcome, _, _ = _run(tmp_path, launcher)
+
+    assert outcome.resources == AttemptResources(None, None, 4096)
+
+
+def test_the_figures_survive_a_container_without_an_exit_status(tmp_path: Path) -> None:
+    """Docker gave no exit status: the launcher's figures and the record's bytes still show."""
+    result = {"exit": None, "oom_killed": False, "peak_memory_bytes": 7, "cpu_seconds": 0.25}
+    record = {"status": "succeeded", "rows": 1, "bytes_read": 9}
+
+    outcome, _, _ = _run(tmp_path, FakeLauncher(scripts={"run": _writes(record, result)}))
+
+    assert outcome.failure_code is FailureCode.INTERNAL
+    assert outcome.resources == AttemptResources(7, 0.25, 9)
 
 
 def test_a_stale_record_from_an_earlier_run_is_removed_first(tmp_path: Path) -> None:

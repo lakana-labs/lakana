@@ -57,7 +57,12 @@ from lakana_worker.connection_tests import ConnectionTestLoop, DockerCheck
 from lakana_worker.deploy import DeploySettings, platform_version
 from lakana_worker.deploy_sweep import DeploySweeper, sweep_deploy_checkouts
 from lakana_worker.docker_environments import DockerEnvironments
-from lakana_worker.executor import check_limits, install_drain, install_heartbeat
+from lakana_worker.executor import (
+    check_limits,
+    install_drain,
+    install_extension_source,
+    install_heartbeat,
+)
 from lakana_worker.heartbeat import WorkerHeartbeat
 from lakana_worker.launcher.settings import check_ingestion_roots
 from lakana_worker.launcher_client import LauncherClient, LauncherUnavailable, claim_owner
@@ -519,6 +524,7 @@ def main() -> None:
     configure_logging(settings.log.level)
     _check_process_supervision()
     _check_query_ca_bundle()
+    install_extension_source(settings.worker.extension_source)
     _check_query_limits(settings.query_limits)
     engine = create_engine(settings.database, lease_seconds=settings.run.lease_seconds)
     session_factory = functools.partial(Session, engine)
@@ -558,6 +564,8 @@ def main() -> None:
     drain = threading.Event()
     signal.signal(signal.SIGTERM, lambda signum, frame: drain.set())
     install_drain(drain, settings.run.drain_grace_seconds)
+    if settings.worker.extension_source == "none":
+        logger.info("DuckDB extensions: never downloaded (LAKANA_WORKER__EXTENSION_SOURCE=none).")
     install_maintenance_timeout(settings.run.maintenance_timeout)
     install_history_cap(
         settings.run.max_history_open_versions, open_bytes=settings.run.max_history_open_bytes

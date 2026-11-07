@@ -2077,6 +2077,9 @@ def test_a_sqlite_file_opens_read_only_or_is_named(tmp_path: Path) -> None:
     body = connection("sqlite-file", {"root": "shared", "path": "app.db"})
     routing = {"root": "shared", "root_dir": str(tmp_path)}
 
+    # A leak of an earlier test on this worker surfaces at the first collection: let it fail
+    # in that test (its own `ResourceWarning`), not here (#468).
+    gc.collect()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         ok = _check.check(body, {**routing, "path": "app.db"}, timeout=FAST)

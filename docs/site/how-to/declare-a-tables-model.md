@@ -152,6 +152,14 @@ lakana runs show "$RUN_ID" --env dev
 └──────────────────┴───────────┴─────────┴──────┴──────────────────────────────────────────┘
 Not shown: duration. Use --output json to see it.
 
+Resources used (peak memory, processor time, bytes read):
+  bronze.products attempt 1: 114 MiB · 0.3 s CPU · 0 B read
+  bronze.sales attempt 1: 152 MiB · 0.5 s CPU · 0 B read
+  bronze.stores attempt 1: 114 MiB · 0.3 s CPU · 0 B read
+  gold.dim_product attempt 1: 115 MiB · 0.3 s CPU · 1.1 KiB read
+  gold.dim_store attempt 1: 115 MiB · 0.3 s CPU · 1.1 KiB read
+  gold.fact_sales attempt 1: 117 MiB · 0.3 s CPU · 2.0 KiB read
+
 gold.dim_product           passed   2 of 2 checks passed
   key_not_null (generated) passed
   key_unique (generated)   passed

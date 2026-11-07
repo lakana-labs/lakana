@@ -138,7 +138,8 @@ aggregation or a reference.
   after each column and after building the paragraphs), so it can run past 2 seconds by the length
   of one step. When it cannot finish in time, or the graph cannot be read, the run still writes,
   and the paragraph says that Lakana could not check in time and names the `lakana graph impact`
-  command to run yourself.
+  command to run yourself. A retyped column whose name holds a control or format character, or is
+  too long to look up in the graph, gets its own paragraph saying so (rename the column) instead.
 - A write outside a run (`lakana query --evolve-schema`, an upload) is not checked: it has no run to
   show it on.
 

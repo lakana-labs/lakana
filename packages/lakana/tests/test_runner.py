@@ -27,7 +27,7 @@ import polars as pl
 import pyarrow as pa
 import pytest
 
-from lakana import assets, runner
+from lakana import _usage, assets, runner
 from lakana._artifact_manifest import (
     ManifestError,
     StoredManifestDamaged,
@@ -418,6 +418,20 @@ class _World:
         -------
         dict
             The record.
+        """
+        return {
+            key: value
+            for key, value in self.raw_record().items()
+            if key not in ("bytes_read", "peak_memory_bytes")
+        }
+
+    def raw_record(self) -> dict[str, Any]:
+        """Read the result record with the task's own figures.
+
+        Returns
+        -------
+        dict
+            The record as written.
         """
         return json.loads(self.result_path.read_text())
 
@@ -4859,3 +4873,31 @@ def test_a_function_whose_signature_cannot_be_read_is_called_without_ctx(world: 
     )
     assert world.run() == 0
     assert _uploaded(world).to_pydict() == {"id": [1, 2]}
+
+
+def test_a_succeeded_record_carries_the_bytes_the_readers_counted(world: _World) -> None:
+    world.result_path.parent.mkdir(exist_ok=True)
+    _usage.add_bytes_read(1000)
+    assert world.run() == 0
+    assert world.raw_record()["bytes_read"] == 1000
+
+
+def test_a_failed_record_carries_what_was_read_before_the_failure(world: _World) -> None:
+    world.result_path.parent.mkdir(exist_ok=True)
+    _usage.add_bytes_read(7)
+    _failing(world, "raise RuntimeError('boom')")
+    assert world.raw_record()["bytes_read"] == 7
+
+
+def test_a_task_that_counted_nothing_leaves_bytes_read_out(world: _World) -> None:
+    """Not counted is unknown (stored as NULL), which is not the same as 0 bytes."""
+    world.result_path.parent.mkdir(exist_ok=True)
+    assert world.run() == 0
+    assert "bytes_read" not in world.raw_record()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the peak comes from /proc")
+def test_every_record_carries_the_tasks_own_peak_memory_on_linux(world: _World) -> None:
+    world.result_path.parent.mkdir(exist_ok=True)
+    assert world.run() == 0
+    assert world.raw_record()["peak_memory_bytes"] > 0

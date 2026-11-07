@@ -4,7 +4,18 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, ForeignKey, Index, String, Text, Uuid, false
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Uuid,
+    false,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -131,6 +142,12 @@ class QueryRun(Base, TimestampMixin):
     watermark: Mapped[str | None] = mapped_column(String(255), nullable=True)
     """The type-tagged watermark an incremental append filtered on, e.g. ``long:42``."""
     rows_written: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    peak_memory_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """Peak resident memory in bytes, or null if it was not measured."""
+    cpu_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    """Processor time (user plus system) in seconds, or null if it was not measured."""
+    bytes_read: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """Bytes read from tables, files and sources, or null if they were not counted."""
     snapshot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     snapshot_before: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     """The target's current snapshot when the write was staged.

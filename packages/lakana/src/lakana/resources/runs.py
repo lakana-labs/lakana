@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param, query_params
 from lakana._models import (
+    AttemptResources,
     Failure,
     ImpactUse,
     ImpactWarning,
@@ -19,6 +20,8 @@ from lakana._models import (
     RunTask,
     SchedulerStatus,
     TaskAttempt,
+    TaskHistoryEntry,
+    TaskHistoryPage,
     TaskLog,
     WorkerCaches,
     WorkerInfo,
@@ -217,6 +220,15 @@ def run_from_json(data: dict[str, Any]) -> Run:
                 schema_note=note if isinstance(note := t.get("schema_note"), str) else None,
                 policy_warnings=policy_warnings_from_json(t.get("policy_warnings")),
                 impact_warnings=impact_warnings_from_json(t.get("impact_warnings")),
+                attempts=tuple(
+                    AttemptResources(
+                        attempt=a["attempt"],
+                        peak_memory_bytes=a.get("peak_memory_bytes"),
+                        cpu_seconds=a.get("cpu_seconds"),
+                        bytes_read=a.get("bytes_read"),
+                    )
+                    for a in t.get("attempts", ())
+                ),
             )
             for t in data["tasks"]
         ],
@@ -531,6 +543,76 @@ class Runs:
         )
         return run_from_json(response.json())
 
+    def task_history(
+        self,
+        environment: str,
+        job: str,
+        task: str,
+        *,
+        repository: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> TaskHistoryPage:
+        """List the attempts of one task of one job across runs, newest first.
+
+        Each entry carries what the attempt used, so a task whose memory climbs from run to
+        run shows up. A figure that was not measured is `None`.
+
+        Parameters
+        ----------
+        environment
+            Environment name.
+        job
+            The job's name.
+        task
+            The task's dotted table name.
+        repository
+            The repository; needed only when several repositories ran a job of this name.
+        limit
+            Most attempts returned (1 to 200); `None` leaves it to the server (20).
+        cursor
+            A previous page's `next_cursor`.
+
+        Returns
+        -------
+        TaskHistoryPage
+            The attempts, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.NotFoundError
+            If the job or task is unknown: no deployed project declares it and no run attempted it.
+            A declared task that has not run yet gives an empty page.
+        lakana.errors.ConflictError
+            If several repositories ran the job and none was named.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200 or `cursor` is not one the server issued.
+        """
+        response = self._transport.request(
+            ROUTES["runs.task_history"],
+            path_params={"env": environment, "job": job, "task": task},
+            params=query_params(repository=repository, limit=limit, cursor=cursor),
+        )
+        data = response.json()
+        return TaskHistoryPage(
+            items=[
+                TaskHistoryEntry(
+                    run_id=a["run_id"],
+                    attempt=a["attempt"],
+                    status=a["status"],
+                    started_at=datetime.fromisoformat(a["started_at"]),
+                    finished_at=_when(a["finished_at"]),
+                    duration_seconds=a["duration_seconds"],
+                    peak_memory_bytes=a.get("peak_memory_bytes"),
+                    cpu_seconds=a.get("cpu_seconds"),
+                    bytes_read=a.get("bytes_read"),
+                    failure_code=a.get("failure_code"),
+                )
+                for a in data["attempts"]
+            ],
+            next_cursor=data["next_cursor"],
+        )
+
     def log(self, environment: str, run_id: str, asset: str, offset: int | None = None) -> TaskLog:
         """Return a task's free-text log and attempts, all of it or from a byte offset.
 
@@ -578,6 +660,9 @@ class Runs:
                     rows_written=a["rows_written"],
                     error_message=a["error_message"],
                     failure=failure_from_json(a.get("failure")),
+                    peak_memory_bytes=a.get("peak_memory_bytes"),
+                    cpu_seconds=a.get("cpu_seconds"),
+                    bytes_read=a.get("bytes_read"),
                 )
                 for a in data["attempts"]
             ],

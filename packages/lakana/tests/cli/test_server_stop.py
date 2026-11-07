@@ -116,6 +116,8 @@ def holder(tmp_path: Path) -> Iterator[Holder]:
     for proc in procs:
         proc.kill()
         proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
 
 
 def test_stop_with_nothing_running_is_not_an_error(tmp_path: Path) -> None:

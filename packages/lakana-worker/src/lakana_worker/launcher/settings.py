@@ -86,6 +86,7 @@ KNOWN_SETTINGS = (
     "NETWORK_RANGE",
     "MAX_TOTAL_MEMORY_MB",
     "EGRESS_REFUSED",
+    "CGROUP_ROOT",
 )
 """The names after the prefix that the launcher reads."""
 MAX_REFUSED = 64
@@ -183,6 +184,10 @@ class LauncherSettings:
         Address ranges in CIDR form (an address as ``/32`` or ``/128``) that the egress proxy
         and the relays refuse, besides Docker's gateways and the built-in refusals: the Docker
         host's own LAN address or subnet, and any other network nothing Lakana starts may reach.
+    cgroup_root
+        Where the host's cgroup v2 tree is visible to the launcher, read-only: the container's
+        peak memory and processor time are read from it. ``/sys/fs/cgroup`` on a host; the Compose
+        bundle mounts the host's tree at ``/host/cgroup`` and sets this to it.
     work_volume
         The named volume of the worker's attempt directories; ``<stack>-task-work`` unless a
         test says otherwise. Not an environment variable.
@@ -221,6 +226,7 @@ class LauncherSettings:
     max_seconds: int = MAX_SECONDS
     keep_environments: int = KEEP_ENVIRONMENTS
     relay_reachable: tuple[str, ...] = ()
+    cgroup_root: Path = Path("/sys/fs/cgroup")
 
     def __post_init__(self) -> None:
         """Name the work volume after the stack when none is given."""
@@ -673,4 +679,5 @@ def load_settings(environ: Mapping[str, str]) -> LauncherSettings:
         network_range=_network_range(environ),
         max_total_memory_mb=max_total,
         egress_refused=_egress_refused(environ),
+        cgroup_root=_path(environ, "CGROUP_ROOT", LauncherSettings.cgroup_root),
     )

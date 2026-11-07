@@ -104,6 +104,7 @@ from lakana_core.models import (
 from lakana_core.projects.manifest import MANIFEST_VERSION
 from lakana_core.runs.checks import RUN_CANCELLED_MESSAGE, RUN_STOPPED_MESSAGE
 from lakana_core.runs.failures import FailureCode
+from lakana_core.runs.resources import AttemptResources
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService, task_log_path
 from lakana_core.runs.store import scheduler_tick
@@ -465,6 +466,7 @@ def test_the_keeper_is_stopped_before_the_outcome_is_recorded(
         on_committed: str | None = None,
         in_transaction: Callable[[Session], None] | None = None,
         check_message_state: dict[str, object] | None = None,
+        resources: AttemptResources | None = None,
     ) -> bool:
         alive.append(any(t.name == "lakana-lease" for t in threading.enumerate()))
         return real(
@@ -480,6 +482,7 @@ def test_the_keeper_is_stopped_before_the_outcome_is_recorded(
             on_committed=on_committed,
             in_transaction=in_transaction,
             check_message_state=check_message_state,
+            resources=resources,
         )
 
     monkeypatch.setattr(tasks_module, "record_attempt", spying)

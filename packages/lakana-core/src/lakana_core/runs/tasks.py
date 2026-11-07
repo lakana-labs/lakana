@@ -37,6 +37,7 @@ from lakana_core.models import (
 )
 from lakana_core.models.run import ACTIVE_RUN_STATUSES
 from lakana_core.runs.failures import FailureCode
+from lakana_core.runs.resources import AttemptResources
 from lakana_core.runs.scheduler import next_attempt_time
 from lakana_core.runs.store import awaiting_checks, may_have_written
 
@@ -697,6 +698,31 @@ def _stored_code(kind: FailureKind | None, code: FailureCode | None) -> str | No
     return (code or FailureCode.INTERNAL).value
 
 
+def _write_run_figures(session: Session, task: TaskRun) -> AttemptResources:
+    """Read the figures of the task's current write run.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    task
+        The task run.
+
+    Returns
+    -------
+    AttemptResources
+        The write run's figures; all unknown if the task has no write run.
+    """
+    if task.query_run_id is None:
+        return AttemptResources()
+    row = session.execute(
+        select(QueryRun.peak_memory_bytes, QueryRun.cpu_seconds, QueryRun.bytes_read).where(
+            QueryRun.id == task.query_run_id
+        )
+    ).one_or_none()
+    return AttemptResources() if row is None else AttemptResources(*row)
+
+
 def record_attempt(
     session: Session,
     task_run_id: uuid.UUID,
@@ -712,6 +738,7 @@ def record_attempt(
     stopped: bool = False,
     in_transaction: Callable[[Session], None] | None = None,
     check_message_state: Mapping[str, Any] | None = None,
+    resources: AttemptResources | None = None,
 ) -> bool:
     """Record how an attempt ended and move the task run on.
 
@@ -789,6 +816,11 @@ def record_attempt(
         (`CheckMessageState.to_json`), stored with the text on the task run and on the attempt;
         `None` for a text the check phase did not build. A release keeps the task run's, as it
         keeps its text; a text replaced by `on_committed` gets none.
+    resources
+        What the attempt used, stored on the attempt row. `None` means nobody measured the
+        attempt itself: the figures of the task's write run (`TaskRun.query_run_id`) are taken
+        instead, if it has one, else all three stay null. Figures given are stored as they are,
+        also when all three are unknown.
 
     Returns
     -------
@@ -841,6 +873,7 @@ def record_attempt(
             kind, error_message, rows_written = None, on_committed, written
             check_message_state = None
     attempt = task.attempt
+    figures = resources if resources is not None else _write_run_figures(session, task)
     now = db_now(session)
     stored_code = _stored_code(kind, failure_code)
     values: dict[str, object] = {
@@ -938,6 +971,9 @@ def record_attempt(
             error_message=error_message,
             failure_code=stored_code,
             check_message_state=check_message_state,
+            peak_memory_bytes=figures.peak_memory_bytes,
+            cpu_seconds=figures.cpu_seconds,
+            bytes_read=figures.bytes_read,
         )
         .execution_options(synchronize_session=False)
     )
