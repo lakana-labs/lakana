@@ -752,6 +752,7 @@ def _finish(
         on_committed=COMMITTED_BEFORE_RECORDED_MESSAGE,
         in_transaction=store_log_then,
         check_message_state=outcome.check_state,
+        resources=outcome.resources,
     )
 
 

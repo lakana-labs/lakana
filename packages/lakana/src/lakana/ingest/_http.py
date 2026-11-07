@@ -33,7 +33,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 import httpx
 
-from lakana import context
+from lakana import _usage, context
 from lakana.ingest._check import trust_context
 from lakana.ingest._errors import (
     IngestError,
@@ -428,7 +428,9 @@ def read_capped(response: httpx.Response, limit: int, name: str) -> bytes:
     if response.is_stream_consumed:
         # An answer built in memory (httpx's MockTransport) was decoded whole when it was built;
         # an answer from the network is a stream, decoded only here.
-        return _within(response.content, limit)
+        body = _within(response.content, limit)
+        _usage.add_bytes_read(len(body))
+        return body
     raw = _counted(response.iter_raw(), limit)
     chunks = _inflated(raw, encoding) if encoding in _WBITS else raw
     kept: list[bytes] = []
@@ -449,6 +451,7 @@ def read_capped(response: httpx.Response, limit: int, name: str) -> bytes:
         raise httpx.DecodingError(
             f"the {encoding} body ends before its compressed stream does", request=response.request
         ) from None
+    _usage.add_bytes_read(total)
     return b"".join(kept)
 
 

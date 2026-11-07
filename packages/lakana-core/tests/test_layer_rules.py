@@ -700,3 +700,12 @@ def test_a_name_with_plain_non_ascii_letters_shows_as_written() -> None:
     assert issue.withheld == (
         "`silver.umsätze` breaks layers.silver.reads with a read that is not shown to you"
     )
+
+
+def test_a_generator_in_from_is_no_file_and_no_layer_read() -> None:
+    header = "/* lakana\nkind: wide\ngrain: g\nkey: none\n*/\n"
+    asset = _sql("gold.f", f"{header}SELECT i FROM range(1, 13) AS r(i)\n")
+    # The deploy lists `file_references` as "table ... not found"; it must be empty (#477).
+    assert file_references(asset) == set()
+    assert asset.references == ()
+    assert _issues(asset) == []

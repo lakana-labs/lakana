@@ -14,6 +14,7 @@ SITE = ROOT / "docs" / "site"
 BASE = "https://lakana-labs.github.io/lakana/"
 LEAVING = (
     "packages/lakana/src/lakana/cli/project_init.py",
+    "packages/lakana/src/lakana/cli/_medallion.py",
     "packages/lakana/src/lakana/cli/server.py",
     "packages/lakana/src/lakana/cli/deploy/compose.yaml",
     "packages/lakana/src/lakana/cli/deploy/_init.py",

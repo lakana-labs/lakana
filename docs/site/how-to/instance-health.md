@@ -286,6 +286,77 @@ The first command lists every volume with its size. The second shows how full th
 the workers' cache is. Also look at the disk of the machine itself with `df -h` on the host.
 The documentation gives no figure for how much space your data needs; measure on your own data.
 
+## Which task needs the most memory
+
+Set a memory limit for a task, or find the one that grows, from what its attempts used.
+`lakana task history JOB TASK` lists the newest attempts of one task of one job across all its
+runs, newest first:
+
+<!-- source: docs/examples/run-a-job/run.sh#task-history -->
+```bash
+lakana task history hourly_bronze bronze.readings --env dev --last 10
+```
+
+<!-- output: run-a-job#task-history -->
+```text
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ run                                  ┃ attempt ┃ status    ┃ duration ┃ resources                      ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 59360000-116e-405f-8deb-a4768b0af24c │ 1       │ succeeded │ 1.0s     │ 153 MiB · 0.7 s CPU · 0 B read │
+└──────────────────────────────────────┴─────────┴───────────┴──────────┴────────────────────────────────┘
+```
+
+- **`run` and `attempt`**: the run the attempt belongs to (`lakana runs show RUN_ID` shows the
+  run) and its number; a task that was retried has several attempts in one run.
+- **`status`**: how the attempt ended. A failed attempt names why, as in `failed (memory)`
+  ([Why did it fail?](../reference/why-did-it-fail.md)); one that has not ended is `running`.
+- **`resources`**: the highest memory the attempt reached, its processor time and the bytes it
+  read, for example `412 MiB · 3.1 s CPU · 1.2 GiB read`. A part that was not measured is left
+  out, and a row with no part at all shows `—`. For a Python task in a container the memory and
+  processor time come from the container's cgroup, read by the launcher about four times a second:
+  they are at least that much (growth after the last reading is not counted), a task that ends
+  before the first reading can show `—`, and so does every task where the launcher cannot read the
+  host's cgroup tree
+  ([Peak memory and processor time of a task](run-python-tasks-in-containers.md#the-launcher)).
+
+A task whose memory climbs run over run reads from the bottom of the table upwards: the
+`resources` of each newer row is larger than the one before, while the data it reads grows too.
+That is the time to raise its limit, or to read less of the data per run, before an attempt
+fails with `memory`.
+
+`--last` sets how many attempts to show (1 to 200, 20 by default); when older ones exist the
+command says so. Name the repository with `--repo` when two repositories have a job with the
+same name, and the environment with `--env`. `--output json` prints every figure for a script.
+
+A `—`, or a missing part, means nobody measured it. Find the cause in this list; each has a
+next step:
+
+- **The attempt ran before the upgrade that brought the figures.** Older attempts stay `—`; there
+  is nothing to do.
+- **A Python task in a container, and the launcher is older than the worker.** The launcher
+  reports no figures. Upgrade the launcher together with the workers.
+- **A Python task in a container, and the launcher cannot read the host's cgroup tree.** The
+  launcher needs the read-only mount `/sys/fs/cgroup:/host/cgroup:ro` and
+  `LAKANA_LAUNCHER__CGROUP_ROOT=/host/cgroup`. A Compose bundle from an earlier release has
+  neither: add both ([Peak memory and processor time of a task](run-python-tasks-in-containers.md#the-launcher)).
+- **A Python task has no memory or bytes read, and its project was locked before this release.**
+  The task reports them through the `lakana` package locked in the project. Lock the project
+  again (`uv lock --upgrade-package lakana`, so that it names this release) and deploy it.
+- **The task was shorter than the first reading.** A container task that ends before the
+  launcher's first reading has no memory figure; a Python task that was killed has no count of
+  bytes read.
+
+For a Python task, `read` counts what it took in through `lakana`: the files, REST pages and
+database results of `lakana.ingest` and the tables it reads with the SDK. A task that reads with
+its own library (its own HTTP client, `pandas.read_csv` on a path) shows no bytes read, and `0 B`
+means a Lakana reader ran and found nothing. Its memory is the task process's own peak, on Linux and on macOS. A task the project declares that has not run yet
+has no attempts: the command says so and suggests starting the job. The command answers 404 only for a job or task name the project does
+not declare and no run has attempted: check both names (`lakana job list` shows the jobs).
+
+When you ask for the most (`--last 200`) and older attempts exist, the command prints a
+`--cursor` that continues after them; with a smaller `--last` it suggests a larger one. With
+`--output json` the `next_cursor` field carries it.
+
 ## A stuck run and why
 
 A query or a task that has not started says why, in one sentence, and a task that failed has a

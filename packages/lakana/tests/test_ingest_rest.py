@@ -16,7 +16,7 @@ import pyarrow as pa
 import pytest
 from sdk_tls_fixture import Answer, Authority, Exchange, make_authority, scripted
 
-from lakana import context
+from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
     FileShapeError,
@@ -1275,3 +1275,15 @@ def test_a_next_link_that_cannot_be_read_is_not_followed(
         _task(server.base, authority)
         with pytest.raises(SourceRefused, match="points to a URL that cannot be read"):
             rest.read("api", "items", paginate=rest.NextLink(field="next"))
+
+
+def test_a_paged_read_counts_the_body_of_every_page(authority: Authority, tmp_path: Path) -> None:
+    pages = [json.dumps({"data": [{"id": n}, {"id": n + 1}]}).encode() for n in (0, 2, 4)]
+    empty = json.dumps({"data": []}).encode()
+
+    with scripted(authority, tmp_path, _numbered(3)) as server:
+        _task(server.base, authority)
+        rest.read("api", "items", paginate=rest.PageNumber(size_param="per_page", size=2))
+
+    assert len(server.seen) == 4
+    assert _usage.bytes_read() == sum(len(page) for page in pages) + len(empty)

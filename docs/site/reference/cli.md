@@ -196,7 +196,7 @@ Nothing is overwritten: if a file it would write exists, or a folder inside the 
 | `--repo` | text | none | Repository name (default: the directory name). |
 | `--sample` / `--no-sample` | flag | none | Write a small sample to build and query (default: yes for a local instance). |
 | `--ci-auth` | one of `oidc`, `pat` | `oidc` | How the CI files sign in: oidc exchanges the CI job's ID token, so nothing secret is stored in CI; pat reads a stored Lakana token. |
-| `--template` | one of `python`, `ingest-files`, `ingest-sql`, `ingest-rest` | none | Start from a template. python: the sample plus one Python asset, locked with `uv lock` (needs network access and a few more minutes). ingest-files, ingest-sql or ingest-rest: one asset that ingests from a source, instead of the sample. |
+| `--template` | one of `python`, `ingest-files`, `ingest-sql`, `ingest-rest`, `medallion` | none | Start from a template. python: the sample plus one Python asset, locked with `uv lock` (needs network access and a few more minutes). ingest-files, ingest-sql or ingest-rest: one asset that ingests from a source, instead of the sample. medallion: a bronze, silver and gold star schema with generated retail data, layer rules, German translations and a glossary (no source needed). |
 
 ## `lakana me`
 
@@ -2220,6 +2220,29 @@ Show one notification delivery, such as the one `job notify-test` queued.
 |---|---|---|---|
 | `DELIVERY_ID` | text | required | The delivery id `job notify-test` printed. |
 | `--env` | text | none | Environment (default: the profile's). |
+
+## `lakana task`
+
+Usage: `lakana task [OPTIONS] COMMAND [ARGS]...`
+
+Tasks: the history of one task of a job, with what each attempt used.
+
+### `lakana task history`
+
+Usage: `lakana task history [OPTIONS] {job} {task}`
+
+List the newest attempts of TASK of JOB across runs: status, duration, memory, CPU, bytes.
+
+Use it to see which task needs the most memory, or whether a task's memory climbs from run to run. A dash means the figure was not measured.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `JOB` | text | required | The job's name, as in lakana.yaml. |
+| `TASK` | text | required | The task's table name, such as silver.orders. |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--repo` | text | none | Repository name; needed only when several repositories ran a job of this name. |
+| `--last` | whole number | `20` | How many of the newest attempts (1 to 200). |
+| `--cursor` | text | none | Continue after a page: the cursor the previous page printed. |
 
 ## `lakana check`
 

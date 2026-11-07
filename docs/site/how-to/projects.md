@@ -61,6 +61,11 @@ sample, one Python asset that reads a source system, a `pyproject.toml` that alr
 `lakana[assets]`, and a `README.md` with the steps for its connection:
 [Load data from a source](load-data-from-a-source.md).
 
+`lakana init --template medallion` writes, instead of the sample, a small retail star schema built
+from generated data (bronze, silver, a gold fact and dimensions with history, a wide table, layer
+rules, German translations, a glossary and a `README.md`). It needs no source and no lock;
+[Model a star schema](model-a-star-schema.md) explains it. `--sample` is refused with it.
+
 The generated `pyproject.toml` does not depend on `lakana`: a SQL-only project needs no lock. The CI files pin
 the version of the CLI that ran `lakana init` and install it from PyPI.
 To add a Python asset, follow the numbered steps in the comments of that `pyproject.toml`:

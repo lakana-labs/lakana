@@ -7,19 +7,14 @@ that clock so the tests can assert exact instants.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import datetime, timedelta
 
 import pytest
-from core_test_helpers import _prepared_catalog
+from core_test_helpers import NOW, Clock, half_jitter
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
-from test_projects_dag import make_asset
-from test_projects_deploys import _deployed, _repo
 
 import lakana_core.runs.tasks as tasks_module
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef
-from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     OWN_TIP_NO_SNAPSHOT,
     AttemptOutcome,
@@ -33,8 +28,6 @@ from lakana_core.models import (
 )
 from lakana_core.runs.checks import MAX_CHECK_CLAIMS, RUN_CANCELLED_MESSAGE, RUN_STOPPED_MESSAGE
 from lakana_core.runs.failures import FailureCode
-from lakana_core.runs.selection import Selection
-from lakana_core.runs.service import RunService
 from lakana_core.runs.store import scheduler_tick
 from lakana_core.runs.tasks import (
     Baseline,
@@ -54,89 +47,6 @@ from lakana_core.runs.tasks import (
     record_baseline,
     renew_lease,
 )
-
-NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
-_BRONZE = NamespacePath.from_parts(["bronze"])
-
-
-class Clock:
-    """A settable stand-in for the database clock."""
-
-    def __init__(self) -> None:
-        """Start at `NOW`."""
-        self.now = NOW
-
-
-@pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
-    """Pin `db_now` as seen by the task functions.
-
-    Parameters
-    ----------
-    monkeypatch
-        pytest's patcher.
-
-    Returns
-    -------
-    Clock
-        The clock; set `.now` to move time.
-    """
-    pinned = Clock()
-    monkeypatch.setattr(tasks_module, "db_now", lambda session: pinned.now)
-    return pinned
-
-
-def _half() -> float:
-    """No jitter.
-
-    Returns
-    -------
-    float
-        0.5.
-    """
-    return 0.5
-
-
-@pytest.fixture
-def run_id(session: Session, tmp_path: Path, principal: PrincipalRef, clock: Clock) -> uuid.UUID:
-    """Start a run whose two independent tasks are ready.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    tmp_path
-        Storage root.
-    principal
-        The admin.
-    clock
-        The pinned database clock.
-
-    Returns
-    -------
-    uuid.UUID
-        The run's id.
-    """
-    _prepared_catalog(
-        session,
-        tmp_path,
-        AllowAllAuthorization(),
-        namespaces=[_BRONZE],
-        tables=[TableRef("dev", _BRONZE, "events")],
-    )
-    _deployed(
-        session,
-        principal,
-        _repo(session),
-        "a" * 40,
-        make_asset("silver.a", ("bronze.events",)),
-        make_asset("silver.b", ("bronze.events",)),
-    )
-    run = RunService(session, AllowAllAuthorization()).start(
-        principal, "dev", "analytics", Selection()
-    )
-    scheduler_tick(session, clock.now, _half)
-    return run.id
 
 
 def _task(session: Session, task_run_id: uuid.UUID) -> TaskRun:
@@ -366,7 +276,12 @@ def test_a_zombie_attempt_cannot_renew_a_reclaimed_task(
     """Same worker id re-claimed the task: the old attempt's renewal is LOST."""
     claimed = _claimed(session)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.TRANSIENT, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.TRANSIENT,
+        rand=half_jitter,
     )
     _requeue(session, claimed.task_run_id)
     again = claim_task(session, "w1", 60)
@@ -381,7 +296,13 @@ def test_success_finishes_the_task_and_the_attempt(session: Session, run_id: uui
     """kind=None is success: succeeded, lease cleared, rows recorded."""
     claimed = _claimed(session)
     assert record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=_half, rows_written=3
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=None,
+        rand=half_jitter,
+        rows_written=3,
     )
     task = _task(session, claimed.task_run_id)
     assert (task.status, task.finished_at, task.lease_owner, task.error_message) == (
@@ -409,7 +330,7 @@ def test_transient_failure_retries_with_backoff_then_fails(
         "w1",
         claimed.claim,
         kind=FailureKind.TRANSIENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="storage hiccup",
     )
     task = _task(session, claimed.task_run_id)
@@ -428,7 +349,7 @@ def test_transient_failure_retries_with_backoff_then_fails(
         "w1",
         again.claim,
         kind=FailureKind.TIMEOUT,
-        rand=_half,
+        rand=half_jitter,
         error_message="too slow",
     )
     task = _task(session, claimed.task_run_id)
@@ -443,7 +364,12 @@ def test_a_transient_failure_backs_off_from_the_database_clock(
     claimed = _claimed(session)
     clock.now = NOW + timedelta(minutes=2)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.TRANSIENT, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.TRANSIENT,
+        rand=half_jitter,
     )
     assert _task(session, claimed.task_run_id).next_attempt_at == clock.now + timedelta(seconds=30)
 
@@ -457,7 +383,7 @@ def test_permanent_failure_is_never_retried(session: Session, run_id: uuid.UUID)
         "w1",
         claimed.claim,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="bad SQL",
     )
     assert _task(session, claimed.task_run_id).status is TaskStatus.FAILED
@@ -472,7 +398,7 @@ def test_conflict_gets_one_immediate_uncounted_retry(session: Session, run_id: u
         "w1",
         claimed.claim,
         kind=FailureKind.CONFLICT,
-        rand=_half,
+        rand=half_jitter,
         error_message="changed",
     )
     task = _task(session, claimed.task_run_id)
@@ -491,7 +417,7 @@ def test_conflict_gets_one_immediate_uncounted_retry(session: Session, run_id: u
         "w1",
         again.claim,
         kind=FailureKind.CONFLICT,
-        rand=_half,
+        rand=half_jitter,
         error_message="changed",
     )
     task = _task(session, claimed.task_run_id)
@@ -509,7 +435,12 @@ def test_release_is_uncounted_and_immediately_due(session: Session, run_id: uuid
     """A drained worker releases its task; the attempt is not counted."""
     claimed = _claimed(session)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.RELEASED, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.RELEASED,
+        rand=half_jitter,
     )
     task = _task(session, claimed.task_run_id)
     assert (task.status, task.attempt, task.next_attempt_at, task.lease_owner) == (
@@ -530,7 +461,7 @@ def test_cancelled_is_terminal(session: Session, run_id: uuid.UUID) -> None:
         "w1",
         claimed.claim,
         kind=FailureKind.CANCELLED,
-        rand=_half,
+        rand=half_jitter,
         error_message="cancelled",
     )
     task = _task(session, claimed.task_run_id)
@@ -545,11 +476,13 @@ def test_a_worker_that_lost_its_lease_records_nothing(session: Session, run_id: 
     task.lease_owner = "w2"
     session.commit()
     assert (
-        record_attempt(session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=_half)
+        record_attempt(
+            session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=half_jitter
+        )
         is False
     )
     assert _task(session, claimed.task_run_id).status is TaskStatus.RUNNING
-    assert record_attempt(session, uuid.uuid4(), "w1", 1, kind=None, rand=_half) is False
+    assert record_attempt(session, uuid.uuid4(), "w1", 1, kind=None, rand=half_jitter) is False
 
 
 def test_a_zombie_attempt_cannot_finish_a_reclaimed_task(
@@ -558,13 +491,20 @@ def test_a_zombie_attempt_cannot_finish_a_reclaimed_task(
     """Same worker re-claimed the task: the first attempt's late outcome is dropped."""
     claimed = _claimed(session)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.TRANSIENT, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.TRANSIENT,
+        rand=half_jitter,
     )
     _requeue(session, claimed.task_run_id)
     again = claim_task(session, "w1", 60)
     assert again is not None and again.attempt == claimed.attempt + 1
     assert (
-        record_attempt(session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=_half)
+        record_attempt(
+            session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=half_jitter
+        )
         is False
     )
     assert _task(session, claimed.task_run_id).status is TaskStatus.RUNNING
@@ -590,7 +530,7 @@ def test_an_outcome_is_dropped_when_the_lease_is_lost_mid_write(
             "w1",
             claimed.claim,
             kind=FailureKind.TRANSIENT,
-            rand=_half,
+            rand=half_jitter,
         )
         is False
     )
@@ -613,7 +553,7 @@ def test_the_waiting_tasks_of_a_run_failed_by_an_integrity_check_say_so(
 ) -> None:
     """The scheduler reads the run's own error message, so nobody is said to have cancelled."""
     fail_run(session, run_id, "code integrity check failed")
-    scheduler_tick(session, clock.now, _half)
+    scheduler_tick(session, clock.now, half_jitter)
     tasks = session.scalars(
         select(TaskRun).where(TaskRun.run_id == run_id).execution_options(populate_existing=True)
     ).all()
@@ -628,7 +568,7 @@ def test_the_waiting_tasks_of_a_cancelled_run_say_it_was_cancelled(
     """A cancel by a user sets only the flag, and its tasks read the cancel text."""
     session.execute(update(Run).where(Run.id == run_id).values(cancel_requested=True))
     session.commit()
-    scheduler_tick(session, clock.now, _half)
+    scheduler_tick(session, clock.now, half_jitter)
     tasks = session.scalars(
         select(TaskRun).where(TaskRun.run_id == run_id).execution_options(populate_existing=True)
     ).all()
@@ -646,7 +586,7 @@ def test_in_transaction_work_lands_with_the_attempt(session: Session, run_id: uu
         "w1",
         claimed.claim,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="code integrity check failed",
         in_transaction=lambda inner: fail_run(
             inner, run_id, "code integrity check failed", commit=False
@@ -678,7 +618,7 @@ def test_in_transaction_work_that_breaks_leaves_the_attempt_open(
             "w1",
             claimed.claim,
             kind=FailureKind.PERMANENT,
-            rand=_half,
+            rand=half_jitter,
             in_transaction=breaks,
         )
     run = session.get(Run, run_id)
@@ -701,7 +641,7 @@ def test_in_transaction_work_is_not_run_for_a_lost_claim(
         "someone-else",
         claimed.claim,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         in_transaction=lambda inner: called.append(True),
     )
     assert called == []
@@ -849,9 +789,9 @@ def test_drains_of_check_claims_do_not_use_up_the_bound(
         claimed = claim_task(session, "w1", 60)
         assert claimed is not None and claimed.task_run_id == task_id
         assert record_attempt(
-            session, task_id, "w1", claimed.claim, kind=FailureKind.RELEASED, rand=_half
+            session, task_id, "w1", claimed.claim, kind=FailureKind.RELEASED, rand=half_jitter
         )
-        scheduler_tick(session, clock.now, _half)
+        scheduler_tick(session, clock.now, half_jitter)
     task = _task(session, task_id)
     assert (task.check_claims, task.setting_back, task.status) == (0, False, TaskStatus.READY)
 
@@ -932,7 +872,12 @@ def test_a_drained_set_back_claim_keeps_the_attempt_and_the_flag_and_is_not_a_lo
     """A release is no loss: the claim added no attempt, so none is given back either."""
     claimed = _set_back_claim(session, run_id)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.RELEASED, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.RELEASED,
+        rand=half_jitter,
     )
     task = _task(session, claimed.task_run_id)
     assert (task.status, task.attempt, task.setting_back, task.set_back_claims) == (
@@ -960,7 +905,7 @@ def test_a_set_back_claim_ends_only_failed_or_cancelled(
         "w1",
         claimed.claim,
         kind=kind,
-        rand=_half,
+        rand=half_jitter,
         error_message="the set-back text",
     )
     task = _task(session, claimed.task_run_id)
@@ -985,7 +930,7 @@ def test_a_set_back_claim_is_not_turned_into_a_success_by_a_commit_that_was_foun
         "w1",
         claimed.claim,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="text",
         on_committed="committed",
     )
@@ -1006,7 +951,7 @@ def test_a_set_back_claim_stopped_by_the_memory_stop_records_nothing(
         "w1",
         claimed.claim,
         kind=kind,
-        rand=_half,
+        rand=half_jitter,
         error_message="memory",
         on_committed="committed",
         stopped=True,
@@ -1025,7 +970,12 @@ def test_a_drained_set_back_claim_keeps_the_text_the_task_was_handed_back_with(
     claimed = claim_task(session, _WORKER, 60)
     assert claimed is not None and claimed.setting_back
     assert record_attempt(
-        session, claimed.task_run_id, _WORKER, claimed.claim, kind=FailureKind.RELEASED, rand=_half
+        session,
+        claimed.task_run_id,
+        _WORKER,
+        claimed.claim,
+        kind=FailureKind.RELEASED,
+        rand=half_jitter,
     )
     stored = _reload(session, task.id)
     assert (stored.status, stored.setting_back, stored.error_message) == (
@@ -1044,7 +994,7 @@ def test_a_set_back_claim_ends_cancelled(session: Session, run_id: uuid.UUID) ->
         "w1",
         claimed.claim,
         kind=FailureKind.CANCELLED,
-        rand=_half,
+        rand=half_jitter,
         error_message="cancelled",
     )
     assert _task(session, claimed.task_run_id).status is TaskStatus.CANCELLED
@@ -1092,7 +1042,9 @@ def test_a_missing_open_attempt_row_fails_loudly(session: Session, run_id: uuid.
     session.execute(delete(TaskAttempt).where(TaskAttempt.task_run_id == claimed.task_run_id))
     session.commit()
     with pytest.raises(RuntimeError, match="open attempt"):
-        record_attempt(session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=_half)
+        record_attempt(
+            session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=half_jitter
+        )
     assert _task(session, claimed.task_run_id).status is TaskStatus.RUNNING
 
 
@@ -1118,7 +1070,12 @@ def test_a_zombie_of_an_uncounted_attempt_holds_nothing_after_the_re_claim(
     """
     claimed = _claimed(session)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.RELEASED, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.RELEASED,
+        rand=half_jitter,
     )
     _requeue(session, claimed.task_run_id)
     again = claim_task(session, "w1", 60)
@@ -1128,12 +1085,16 @@ def test_a_zombie_of_an_uncounted_attempt_holds_nothing_after_the_re_claim(
     assert renew_lease(session, claimed.task_run_id, "w1", claimed.claim, 60) is LeaseState.LOST
     assert _task(session, claimed.task_run_id).lease_expires_at == before
     assert (
-        record_attempt(session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=_half)
+        record_attempt(
+            session, claimed.task_run_id, "w1", claimed.claim, kind=None, rand=half_jitter
+        )
         is False
     )
     assert _task(session, claimed.task_run_id).status is TaskStatus.RUNNING
     assert renew_lease(session, claimed.task_run_id, "w1", again.claim, 60) is LeaseState.HELD
-    assert record_attempt(session, claimed.task_run_id, "w1", again.claim, kind=None, rand=_half)
+    assert record_attempt(
+        session, claimed.task_run_id, "w1", again.claim, kind=None, rand=half_jitter
+    )
 
 
 def _link_write(session: Session, claimed: ClaimedTask, rows: int | None) -> None:
@@ -1181,7 +1142,7 @@ def test_a_failure_of_an_attempt_whose_write_committed_is_recorded_as_success(
         "w1",
         claimed.claim,
         kind=kind,
-        rand=_half,
+        rand=half_jitter,
         error_message="boom",
         on_committed="it was committed",
     )
@@ -1213,7 +1174,7 @@ def test_without_the_evidence_or_the_message_a_failure_is_recorded_as_before(
         "w1",
         claimed.claim,
         kind=kind,
-        rand=_half,
+        rand=half_jitter,
         on_committed="it was committed",
     )
     assert _task(session, claimed.task_run_id).status is TaskStatus.PENDING
@@ -1226,7 +1187,12 @@ def test_evidence_alone_does_not_change_a_failure_recorded_without_the_message(
     claimed = _claimed(session)
     _link_write(session, claimed, 3)
     assert record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.TRANSIENT, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.TRANSIENT,
+        rand=half_jitter,
     )
     assert _task(session, claimed.task_run_id).status is TaskStatus.PENDING
 
@@ -1256,7 +1222,7 @@ def test_a_run_of_an_earlier_attempt_is_not_evidence_for_this_one(
         "w1",
         claimed.claim,
         kind=FailureKind.TRANSIENT,
-        rand=_half,
+        rand=half_jitter,
         on_committed="it was committed",
     )
     assert _task(session, claimed.task_run_id).status is TaskStatus.PENDING
@@ -1434,7 +1400,7 @@ def test_record_attempt_never_turns_a_failed_check_into_success(
         _WORKER,
         task.claim_count,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="Check `gold.orders/unique_id` failed: 3 rows",
         on_committed="recording failed after the commit",
     )
@@ -1458,7 +1424,7 @@ def test_a_task_without_checks_still_counts_a_committed_write(
         _WORKER,
         task.claim_count,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="boom",
         on_committed="recording failed after the commit",
     )
@@ -1481,7 +1447,7 @@ def test_a_retryable_failure_of_an_unchecked_task_never_fails_it(
     stamp = (task.written_table_id, task.written_snapshot_before, task.written_snapshot_after)
     assert task.attempt == task.max_attempts == 1
     assert record_attempt(
-        session, task.id, _WORKER, task.claim_count, kind=kind, rand=_half, error_message="x"
+        session, task.id, _WORKER, task.claim_count, kind=kind, rand=half_jitter, error_message="x"
     )
     stored = _reload(session, task.id)
     assert (stored.status, stored.attempt, stored.finished_at) == (TaskStatus.PENDING, 1, None)
@@ -1502,7 +1468,7 @@ def test_a_retryable_failure_of_a_task_without_checks_fails_it_on_its_last_attem
     """The same situation with `has_checks` false: out of attempts is a failure, as before."""
     task = _running_task(session, has_checks=False, written=True, max_attempts=1)
     assert record_attempt(
-        session, task.id, _WORKER, task.claim_count, kind=kind, rand=_half, error_message="x"
+        session, task.id, _WORKER, task.claim_count, kind=kind, rand=half_jitter, error_message="x"
     )
     assert _reload(session, task.id).status is TaskStatus.FAILED
 
@@ -1518,7 +1484,7 @@ def test_an_unwritten_task_with_checks_fails_on_its_last_attempt(
         _WORKER,
         task.claim_count,
         kind=FailureKind.TRANSIENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="x",
     )
     stored = _reload(session, task.id)
@@ -1539,7 +1505,7 @@ def test_the_evidence_never_succeeds_a_task_with_checks_whoever_asks(
         _WORKER,
         task.claim_count,
         kind=kind,
-        rand=_half,
+        rand=half_jitter,
         error_message="stopped",
         on_committed="it was committed",
     )
@@ -1572,7 +1538,7 @@ def test_a_cancel_and_a_release_of_an_unchecked_task(
         _WORKER,
         task.claim_count,
         kind=kind,
-        rand=_half,
+        rand=half_jitter,
         on_committed="it was committed",
     )
     stored = _reload(session, task.id)
@@ -1589,7 +1555,7 @@ def test_success_of_a_task_with_checks_is_the_workers_to_record(
     """The worker that ran the checks ends it with `kind=None`: that is still success."""
     task = _running_task(session, has_checks=True, written=True)
     assert record_attempt(
-        session, task.id, _WORKER, task.claim_count, kind=None, rand=_half, rows_written=4
+        session, task.id, _WORKER, task.claim_count, kind=None, rand=half_jitter, rows_written=4
     )
     assert _reload(session, task.id).status is TaskStatus.SUCCEEDED
 
@@ -1648,7 +1614,7 @@ def test_a_rolled_back_task_is_not_failed_or_succeeded_by_a_retryable_failure(
         _WORKER,
         task.claim_count,
         kind=kind,
-        rand=_half,
+        rand=half_jitter,
         error_message="x",
         on_committed="it was committed",
     )
@@ -1671,7 +1637,7 @@ def test_a_rolled_back_task_without_checks_twin_still_counts_the_write(
         _WORKER,
         task.claim_count,
         kind=FailureKind.TRANSIENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="x",
         on_committed="it was committed",
     )
@@ -1690,7 +1656,7 @@ def test_a_stopped_attempt_of_a_task_awaiting_its_checks_is_never_a_verdict(
         _WORKER,
         task.claim_count,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="stopped",
         on_committed="it was committed",
         stopped=True,
@@ -1711,7 +1677,7 @@ def test_a_stopped_attempt_of_a_task_not_awaiting_keeps_its_blame(
         _WORKER,
         task.claim_count,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="stopped",
         stopped=True,
     )
@@ -1745,7 +1711,7 @@ def _ended_by_the_stop(
         _WORKER,
         task.claim_count,
         kind=kind,
-        rand=_half,
+        rand=half_jitter,
         error_message=message,
         failure_code=FailureCode.MEMORY,
         on_committed="it was committed",
@@ -1822,7 +1788,7 @@ def test_a_cancel_seen_after_a_write_hands_the_task_back(
         _WORKER,
         task.claim_count,
         kind=FailureKind.CANCELLED,
-        rand=_half,
+        rand=half_jitter,
         error_message="cancelled",
     )
     stored = _reload(session, task.id)
@@ -1852,7 +1818,7 @@ def test_a_cancel_before_any_write_ends_the_task_cancelled(
         _WORKER,
         task.claim_count,
         kind=FailureKind.CANCELLED,
-        rand=_half,
+        rand=half_jitter,
         error_message="cancelled",
     )
     stored = _reload(session, task.id)
@@ -1870,7 +1836,7 @@ def test_a_stopped_attempt_of_a_task_without_checks_still_counts_a_committed_wri
         _WORKER,
         task.claim_count,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="stopped",
         on_committed="it was committed",
         stopped=True,
@@ -2004,7 +1970,7 @@ def test_a_failure_stores_its_code_on_the_task_and_on_the_attempt(
         "w1",
         claimed.claim,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="bad SQL",
         failure_code=FailureCode.QUERY_INVALID,
     )
@@ -2023,7 +1989,7 @@ def test_a_retried_failure_keeps_the_code_of_its_attempt(
         "w1",
         claimed.claim,
         kind=FailureKind.TIMEOUT,
-        rand=_half,
+        rand=half_jitter,
         error_message="too slow",
         failure_code=FailureCode.TIMEOUT,
     )
@@ -2041,7 +2007,7 @@ def test_a_later_success_clears_the_code(session: Session, run_id: uuid.UUID) ->
         "w1",
         claimed.claim,
         kind=None,
-        rand=_half,
+        rand=half_jitter,
         failure_code=FailureCode.INTERNAL,
     )
 
@@ -2057,7 +2023,7 @@ def test_a_failure_without_a_code_is_internal(session: Session, run_id: uuid.UUI
         "w1",
         claimed.claim,
         kind=FailureKind.PERMANENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="what",
     )
 
@@ -2068,7 +2034,12 @@ def test_a_cancel_is_always_the_cancelled_code(session: Session, run_id: uuid.UU
     """A cancel needs no code from the caller."""
     claimed = _claimed(session)
     record_attempt(
-        session, claimed.task_run_id, "w1", claimed.claim, kind=FailureKind.CANCELLED, rand=_half
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.CANCELLED,
+        rand=half_jitter,
     )
 
     assert _codes(session, claimed.task_run_id) == ("cancelled", "cancelled")
@@ -2083,7 +2054,7 @@ def test_a_release_is_no_failure_and_stores_no_code(session: Session, run_id: uu
         "w1",
         claimed.claim,
         kind=FailureKind.RELEASED,
-        rand=_half,
+        rand=half_jitter,
         failure_code=FailureCode.INTERNAL,
     )
 
@@ -2102,7 +2073,7 @@ def test_a_failure_whose_write_committed_stores_no_code(
         "w1",
         claimed.claim,
         kind=FailureKind.TRANSIENT,
-        rand=_half,
+        rand=half_jitter,
         error_message="boom",
         failure_code=FailureCode.INTERNAL,
         on_committed="it was committed",
@@ -2120,7 +2091,12 @@ def test_a_drained_set_back_claim_keeps_the_code_the_task_was_handed_back_with(
     claimed = claim_task(session, _WORKER, 60)
     assert claimed is not None and claimed.setting_back
     record_attempt(
-        session, claimed.task_run_id, _WORKER, claimed.claim, kind=FailureKind.RELEASED, rand=_half
+        session,
+        claimed.task_run_id,
+        _WORKER,
+        claimed.claim,
+        kind=FailureKind.RELEASED,
+        rand=half_jitter,
     )
 
     assert _reload(session, task.id).failure_code == "memory"

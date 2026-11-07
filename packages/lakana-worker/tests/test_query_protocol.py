@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -35,7 +36,7 @@ def _request(**overrides: object) -> Request:
     Request
         The request.
     """
-    fields: dict[str, object] = {
+    fields: dict[str, Any] = {
         "mode": WRITE,
         "sql": "SELECT * FROM read_parquet($u) WHERE k > $w",
         "parameters": {
@@ -94,6 +95,7 @@ def test_the_document_has_exactly_the_fields_the_child_is_given() -> None:
         "batch_rows",
         "extension_directory",
         "parent_pid",
+        "extension_source",
     }
 
 
@@ -317,3 +319,21 @@ def test_a_field_id_map_survives_the_round_trip() -> None:
 def test_a_malformed_field_id_map_is_refused(raw: object) -> None:
     with pytest.raises(ValueError, match="parameter 'p' has an unreadable value"):
         decode_request(_document(parameters={"p": {"field_ids": raw}}))
+
+
+def test_the_extension_source_survives_the_round_trip_and_defaults_to_duckdb() -> None:
+    assert decode_request(encode_request(_request())).extension_source == "duckdb"
+    assert decode_request(encode_request(_request(extension_source="none"))).extension_source == (
+        "none"
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "https://mirror.example/x", "http://m.example", "NONE", "off", "none ", 5, None],
+)
+def test_the_child_refuses_an_extension_source_that_is_not_duckdb_or_none(value: object) -> None:
+    document = json.loads(encode_request(_request()))
+    document["extension_source"] = value
+    with pytest.raises(ValueError, match="extension_source must be duckdb or none"):
+        decode_request(json.dumps(document).encode())

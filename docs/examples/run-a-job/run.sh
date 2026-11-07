@@ -104,6 +104,15 @@ capture_end
 grep -Fq '"job": "hourly_bronze"' "$captured"
 grep -Fq '"trigger": "manual"' "$captured"
 
+# The history of one task across the runs of its job, with what each attempt used.
+capture_start
+# docs:start task-history
+lakana task history hourly_bronze bronze.readings --env dev --last 10
+# docs:end task-history
+capture_end
+grep -Eq '^┃ run +┃ attempt +┃ status +┃ duration +┃ resources +┃' "$captured"
+grep -Eq '^│ [0-9a-f-]{36} +│ 1 +│ succeeded +│ [0-9.]+s +│ ' "$captured"
+
 # The pipeline's account: a service account that may start jobs, and its token. The token is
 # shown once, so the commands the page shows run in a capture and a second token is issued
 # for this script to use.

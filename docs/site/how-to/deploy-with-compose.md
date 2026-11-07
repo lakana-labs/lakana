@@ -143,7 +143,9 @@ names it.
 
 The `launcher` service is the only one that holds the Docker socket. The worker asks it, over a
 Unix socket in a volume only the two share, to start each Python task and each environment build
-in a container of its own; it has no network, no capabilities and a read-only filesystem. `egress`
+in a container of its own; it has no network, no capabilities and a read-only filesystem, and
+sees the host's `/sys/fs/cgroup` read-only to read each task's peak memory and processor time
+(see [Settings](run-python-tasks-in-containers.md#the-launcher)). `egress`
 is the only way out of a build container: it lets a build reach the hosts of the package indexes
 its project may use and nothing else. It is also the only way out of a task whose asset declares
 connections: such a task reaches exactly those connections' endpoints (see
@@ -1552,7 +1554,9 @@ docker volume ls -q --filter "label=lakana.launcher.stack=lakana" | xargs -r doc
   signal until the stop timeout expires.
 - **DuckDB's `httpfs` extension is preinstalled** at build time
   (`duckdb.connect().execute('INSTALL httpfs')`), so the worker never downloads an extension
-  the first time it runs a query.
+  the first time it runs a query. To forbid the download outright set
+  `LAKANA_WORKER__EXTENSION_SOURCE=none`: a worker without the file then refuses to start (see
+  [What leaves the machine](../explanation/what-leaves-the-machine.md)).
 - **Dependencies are locked.** The image is built from wheels pinned by `uv.lock`
   (`uv export --frozen ... -o dist/requirements.txt`, installed with `pip install
   --require-hashes` in the build), so an image build installs exactly the versions and files the

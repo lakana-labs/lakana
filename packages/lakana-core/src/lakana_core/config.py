@@ -1409,6 +1409,42 @@ WORKER_TAKES: tuple[str, ...] = ("all", "interactive", "pipeline")
 """What `LAKANA_WORKER__TAKES` may be: all work, ad-hoc queries only, or pipeline work only."""
 
 
+EXTENSION_SOURCE_ADVICE = (
+    "LAKANA_WORKER__EXTENSION_SOURCE must be duckdb (DuckDB's own extension server, the "
+    "default) or none (never download an extension). A mirror URL is not supported: use the "
+    "container image, which bundles httpfs, or copy the file in."
+)
+"""The refusal of a bad `LAKANA_WORKER__EXTENSION_SOURCE`; it never quotes the value."""
+
+
+def parse_extension_source(text: str) -> str:
+    """Parse `LAKANA_WORKER__EXTENSION_SOURCE`.
+
+    Parameters
+    ----------
+    text
+        ``duckdb`` or empty (DuckDB's own extension server) or ``none`` (never download), in any
+        letter case.
+
+    Returns
+    -------
+    str
+        ``duckdb`` or ``none``.
+
+    Raises
+    ------
+    ValueError
+        If it is anything else, a URL included. The message names the setting and both values
+        and never quotes the value, which may hold a credential.
+    """
+    lowered = text.strip().lower()
+    if lowered in {"", "duckdb"}:
+        return "duckdb"
+    if lowered == "none":
+        return "none"
+    raise ValueError(EXTENSION_SOURCE_ADVICE)
+
+
 class WorkerConfig(BaseModel):
     """Settings of the worker process itself.
 
@@ -1431,6 +1467,12 @@ class WorkerConfig(BaseModel):
         The work this worker takes (`LAKANA_WORKER__TAKES`): ``"all"`` (the default),
         ``"interactive"`` (ad-hoc queries) or ``"pipeline"`` (deploys, pipeline tasks and
         table maintenance), in any letter case. The worker says it when it registers.
+    extension_source
+        Where the worker's queries get DuckDB's ``httpfs`` extension from
+        (`LAKANA_WORKER__EXTENSION_SOURCE`): ``duckdb`` (the default) is DuckDB's own extension
+        server, contacted only when the extension is not already in the worker's extension
+        directory (the container image bundles it); ``none`` never downloads, and a worker whose
+        extension directory lacks ``httpfs`` refuses to start, naming the file to put there.
     package_cache_max_bytes
         The size, in bytes, above which the worker trims uv's package download cache in the
         ``uv`` directory of its cache (10 GiB by default; 0 never trims). The trim runs in the
@@ -1445,9 +1487,12 @@ class WorkerConfig(BaseModel):
         default), so that the builds of the day do not download the same packages again.
     """
 
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     memory_limit: str | None = None
     notifications: bool = True
     takes: str = "all"
+    extension_source: str = "duckdb"
     package_cache_max_bytes: int = Field(default=10 * 1024**3, ge=0)
     package_cache_min_age_hours: float = Field(default=24.0, ge=0)
 
@@ -1469,6 +1514,23 @@ class WorkerConfig(BaseModel):
         if value is not None:
             parse_memory_limit(value)
         return value
+
+    @field_validator("extension_source")
+    @classmethod
+    def _extension_source_parses(cls, value: str) -> str:
+        """Refuse a value `parse_extension_source` cannot read.
+
+        Parameters
+        ----------
+        value
+            The configured text.
+
+        Returns
+        -------
+        str
+            ``duckdb`` or ``none``.
+        """
+        return parse_extension_source(value)
 
     @field_validator("takes")
     @classmethod

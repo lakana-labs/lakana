@@ -33,6 +33,12 @@ simply stops, so the worker checks these bytes itself."""
 EXIT_OK = 0
 EXIT_REFUSED = 2
 """The child did not run: its request was unreadable or its worker was gone."""
+USAGE_FILE = "usage.json"
+"""What the child tells the worker about itself at its end (``bytes_read``, ``peak_memory_bytes``),
+written into its working directory; the worker reads at most `MAX_USAGE_BYTES` of it."""
+MAX_USAGE_BYTES = 256
+"""The most the worker reads of the usage file; a longer one is not trusted."""
+
 EXIT_FAILED = 3
 """The statement failed; an error document is the last line on standard error."""
 
@@ -122,6 +128,29 @@ def _is_field_entry(entry: object) -> bool:
     )
 
 
+EXTENSION_SOURCE_DUCKDB = "duckdb"
+"""`LAKANA_WORKER__EXTENSION_SOURCE` unset: DuckDB's own extension server."""
+
+EXTENSION_SOURCE_NONE = "none"
+"""`LAKANA_WORKER__EXTENSION_SOURCE=none`: never download an extension."""
+
+
+def valid_extension_source(text: str) -> bool:
+    """Say whether a request's extension source is one the child knows.
+
+    Parameters
+    ----------
+    text
+        The request's value.
+
+    Returns
+    -------
+    bool
+        Whether it is ``duckdb`` or ``none``, exactly.
+    """
+    return text in {EXTENSION_SOURCE_DUCKDB, EXTENSION_SOURCE_NONE}
+
+
 @dataclass(frozen=True)
 class Request:
     """Everything a query child is given.
@@ -159,6 +188,9 @@ class Request:
         Where the worker's installed DuckDB extensions are.
     parent_pid
         The worker's process id; a child whose parent is another process refuses to run.
+    extension_source
+        Where DuckDB may get the ``httpfs`` extension from (`EXTENSION_SOURCE_DUCKDB`
+        or `EXTENSION_SOURCE_NONE`), see `valid_extension_source`.
     """
 
     mode: str
@@ -174,6 +206,7 @@ class Request:
     batch_rows: int
     extension_directory: str
     parent_pid: int
+    extension_source: str = EXTENSION_SOURCE_DUCKDB
 
 
 @dataclass(frozen=True)
@@ -348,6 +381,7 @@ def encode_request(request: Request) -> bytes:
         "batch_rows": request.batch_rows,
         "extension_directory": request.extension_directory,
         "parent_pid": request.parent_pid,
+        "extension_source": request.extension_source,
     }
     return json.dumps(document).encode("utf-8")
 
@@ -406,13 +440,16 @@ def decode_request(data: bytes) -> Request:
     if not isinstance(document, dict):
         raise ValueError("query request: not a JSON object")
     known = {*_TEXT_FIELDS, "mode", "parameters", "read_prefixes", "spill", "threads"}
-    known |= {"batch_rows", "extension_directory", "parent_pid"}
+    known |= {"batch_rows", "extension_directory", "parent_pid", "extension_source"}
     unknown = sorted(set(document) - known)
     if unknown:
         raise ValueError(f"query request: unknown field {_name(unknown[0])}")
     for key in (*_TEXT_FIELDS, "extension_directory"):
         if not isinstance(document.get(key), str):
             raise ValueError(f"query request: {key} must be text")
+    source = document.get("extension_source")
+    if not isinstance(source, str) or not valid_extension_source(source):
+        raise ValueError("query request: extension_source must be duckdb or none")
     mode = document.get("mode")
     if not isinstance(mode, str) or mode not in MODES:
         raise ValueError("query request: mode must be read, write, describe or check")
@@ -438,6 +475,7 @@ def decode_request(data: bytes) -> Request:
         batch_rows=_positive(document, "batch_rows"),
         extension_directory=document["extension_directory"],
         parent_pid=_positive(document, "parent_pid"),
+        extension_source=source,
     )
 
 

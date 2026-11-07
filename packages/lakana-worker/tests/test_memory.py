@@ -750,9 +750,7 @@ def test_the_handler_start_watchdog_installs_stops_the_worker(
     monkeypatch.setattr(
         memory,
         "record_memory_failure",
-        lambda sf, limit, rand, worker_id, peak=False, earlier=(), earlier_tasks=(): (
-            recorded.append(limit)
-        ),
+        lambda sf, limit, rand, worker_id, peak=False, **_: recorded.append(limit),
     )
     start_watchdog("1GB", FAKE_SESSIONS, lambda: 0.5, "w1")
     handler = handlers[0]
@@ -970,9 +968,7 @@ def test_on_macos_the_measurement_is_a_peak_so_the_blame_is_never_certain(
     monkeypatch.setattr(
         memory,
         "record_memory_failure",
-        lambda sf, limit, rand, worker_id, peak=False, earlier=(), earlier_tasks=(): peaks.append(
-            peak
-        ),
+        lambda sf, limit, rand, worker_id, peak=False, **_: peaks.append(peak),
     )
     monkeypatch.setattr(memory, "stop_worker", lambda total, limit, **steps: steps["record"]())
     for platform in ("linux", "darwin"):
@@ -1062,6 +1058,7 @@ class _Consumer:
         self.asset = "sales.daily"
         self.task_run_id = uuid.uuid4()
         self.details: list[str] = []
+        self.unit: uuid.UUID | None = None
 
     def kill_for_memory(self, detail: str) -> bool:
         """End the scripted process, unless it has ended already.
@@ -1162,30 +1159,42 @@ def _stop(
 def test_a_query_larger_than_the_task_is_the_one_ended() -> None:
     query, task = _Consumer(10), _Consumer(20)
     ended = _stop([query], [task], {10: 900, 20: 100})
-    assert ended == memory.Ended(10, None)
+    assert ended == memory.Ended(10, None, 900)
     assert (query.alive, task.alive) == (False, True)
     assert query.details == [memory.query_child_message(LIMIT)]
+
+
+def test_an_ended_query_names_its_run() -> None:
+    query = _Consumer(10)
+    query.unit = uuid.uuid4()
+    assert _stop([query], [], {10: 900}) == memory.Ended(10, None, 900, query.unit)
 
 
 def test_a_task_larger_than_the_query_is_the_one_ended_with_its_own_message() -> None:
     query, task = _Consumer(10), _Consumer(20)
     ended = _stop([query], [task], {10: 100, 20: 900})
-    assert ended == memory.Ended(20, task.task_run_id)
+    assert ended == memory.Ended(20, task.task_run_id, 900)
     assert (query.alive, task.alive) == (True, False)
     assert task.details == [memory.task_ended_message(LIMIT)]
+
+
+def test_the_ended_consumer_carries_the_size_it_was_chosen_by() -> None:
+    query, task = _Consumer(10), _Consumer(20)
+    assert _stop([query], [task], {10: 100, 20: 900}) == memory.Ended(20, task.task_run_id, 900)
+    assert _stop([_Consumer(30)], [], {30: 7}) == memory.Ended(30, None, 7)
 
 
 def test_of_equal_sizes_the_query_comes_first_and_only_one_is_ended() -> None:
     query, task = _Consumer(10), _Consumer(20)
     ended = _stop([query], [task], {10: 500, 20: 500})
-    assert ended == memory.Ended(10, None)
+    assert ended == memory.Ended(10, None, 500)
     assert (query.alive, task.alive) == (False, True)
 
 
 def test_a_consumer_that_ended_since_the_measurement_is_passed_over_for_the_next() -> None:
     query, task = _Consumer(10, alive=False), _Consumer(20)
     ended = _stop([query], [task], {10: 900, 20: 100})
-    assert ended == memory.Ended(20, task.task_run_id)
+    assert ended == memory.Ended(20, task.task_run_id, 100)
     assert query.details == [] and task.alive is False
 
 
@@ -1193,7 +1202,7 @@ def test_with_more_than_two_consumers_the_largest_live_one_is_ended() -> None:
     first, second = _Consumer(1), _Consumer(2)
     third, fourth = _Consumer(3, alive=False), _Consumer(4)
     ended = _stop([first, second], [third, fourth], {1: 10, 2: 40, 3: 90, 4: 30})
-    assert ended == memory.Ended(2, None)
+    assert ended == memory.Ended(2, None, 40)
     assert [c.alive for c in (first, second, third, fourth)] == [True, False, False, True]
 
 
@@ -1243,7 +1252,7 @@ def test_ending_the_largest_consumer_waits_until_its_memory_is_gone() -> None:
         resident=lambda pid: next(sizes),
         wait=waits.append,
     )
-    assert ended == memory.Ended(4711, None)
+    assert ended == memory.Ended(4711, None, 300)
     assert waits == [0.01, 0.01]
 
 
@@ -1262,7 +1271,7 @@ def test_ending_the_largest_consumer_gives_up_waiting_after_two_seconds() -> Non
         wait=wait,
         clock=lambda: now[0],
     )
-    assert ended == memory.Ended(4711, None)
+    assert ended == memory.Ended(4711, None, 300)
     assert now[0] == memory.RELEASE_SECONDS
 
 
@@ -1348,6 +1357,8 @@ def test_a_growing_child_is_killed_alone_while_the_worker_and_a_task_live_on() -
         assert failure.stop is StopReason.OUT_OF_MEMORY
         assert failure.killed is True
         assert failure.detail == memory.query_child_message(LIMIT)
+        peak = child.resources.peak_memory_bytes  # the last size the watchdog saw it at
+        assert peak is not None and peak >= 150 * MB
         assert worker_stops == []
         assert bystander.poll() is None
     finally:
@@ -1539,3 +1550,15 @@ def test_when_every_child_has_exited_nothing_is_signalled_and_the_worker_must_st
         )
         assert dog.check_once() is True
         assert stops == [500] and signalled == []
+
+
+def test_a_hook_that_raises_never_stops_the_kill(caplog: pytest.LogCaptureFixture) -> None:
+    class Noting(_Consumer):
+        def note_resident(self, size: int) -> None:
+            raise RuntimeError("the hook broke")
+
+    consumer = Noting(4242)
+    with caplog.at_level(logging.WARNING):
+        ended = memory.kill_largest([(consumer, "over")], lambda _pid: 10)
+    assert ended is consumer and consumer.details == ["over"]
+    assert "note_resident" in caplog.text

@@ -15,6 +15,7 @@ import pyarrow as pa
 import pyarrow.ipc
 import pytest
 
+from lakana import _usage
 from lakana._arrow import (
     _arrow_type_to_json,
     cast_timestamp_ns_columns_to_us,
@@ -3538,3 +3539,20 @@ def test_tables_get_carries_the_health_effects_and_the_keys_naming_no_column() -
     assert full.health_never_judged == {"range.note": "a string column has no range"}
     assert (bare.health, bare.health_missing, bare.health_never_judged) == ({}, (), {})
     assert (odd.health, odd.health_missing, odd.health_never_judged) == ({}, (), {})
+
+
+def test_a_query_result_counts_the_bytes_it_downloaded() -> None:
+    table = pa.table({"id": [1, 2, 3]})
+    sink = pa.BufferOutputStream()
+    with pyarrow.ipc.new_file(sink, table.schema) as writer:
+        writer.write_table(table)
+    file_bytes = sink.getvalue().to_pybytes()
+
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(200, content=file_bytes)),
+        id="q1",
+        environment="dev",
+    )
+    run.result()
+
+    assert _usage.bytes_read() == len(file_bytes)

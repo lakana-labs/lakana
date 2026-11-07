@@ -587,11 +587,15 @@ jobs:
           key: wheelhouse-${{ runner.os }}-${{ hashFiles('uv.lock', '.python-version') }}
       - name: Build the wheel index for the Python-asset tests
         run: bash scripts/build_wheelhouse.sh "$RUNNER_TEMP/wheelhouse"
+      # Normally about 5 minutes. A test that hangs gets its stacks dumped after 5 minutes
+      # (faulthandler_timeout), and the step is cut at 12 so the dump is in the log before the
+      # job budget (scripts/time-budgets.toml) is spent; a cancelled job loses its log (#475).
       - name: Docker isolation tests
+        timeout-minutes: 12
         env:
           LAKANA_TEST_DOCKER: "1"
           LAKANA_TEST_WHEELHOUSE: ${{ runner.temp }}/wheelhouse
-        run: uv run pytest -m docker --basetemp "$RUNNER_TEMP/pytest-docker" packages/lakana-worker/tests
+        run: uv run pytest -m docker -o faulthandler_timeout=300 --basetemp "$RUNNER_TEMP/pytest-docker" packages/lakana-worker/tests
 
   # The Python-asset tests install from an offline wheel directory. Building it is the only step
   # that may ask a package index, and only for wheels the cache does not hold: the locked wheels

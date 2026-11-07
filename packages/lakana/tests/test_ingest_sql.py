@@ -22,7 +22,7 @@ import pyarrow as pa
 import pytest
 from pymysql import converters as real_converters
 
-from lakana import context
+from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
     SourceError,
@@ -2279,3 +2279,12 @@ def test_sqlite_binds_a_date_as_its_own_stored_text(lite: Path) -> None:
     table = sql.read("local-db", "SELECT a FROM t WHERE d = :d", params={"d": dt.date(2026, 1, 2)})
 
     assert table.column("a").to_pylist() == [1]
+
+
+def test_a_sql_read_counts_the_arrow_bytes_of_its_batches(lite: Path) -> None:
+    _sqlite(lite, ["CREATE TABLE t(a INTEGER)", "INSERT INTO t VALUES (1), (2), (3)"])
+
+    table = sql.read("local-db", "SELECT a FROM t")
+
+    assert table.num_rows == 3
+    assert _usage.bytes_read() == table.nbytes
