@@ -2048,9 +2048,22 @@ def test_the_docker_isolation_tests_have_a_step_of_their_own_that_needs_docker()
         "LAKANA_TEST_WHEELHOUSE": "${{ runner.temp }}/wheelhouse",
     }
     assert docker["run"] == (
-        'uv run pytest -m docker --basetemp "$RUNNER_TEMP/pytest-docker" '
-        "packages/lakana-worker/tests"
+        "uv run pytest -m docker -o faulthandler_timeout=300 "
+        '--basetemp "$RUNNER_TEMP/pytest-docker" packages/lakana-worker/tests'
     )
+
+
+def test_a_hanging_docker_test_dumps_its_stacks_before_the_step_is_cut() -> None:
+    """The step stops inside the job budget, after the stack dump, so the log survives (#475)."""
+    docker = next(
+        s
+        for s in _jobs("ci.yml")["integration-docker"]["steps"]
+        if s.get("name") == "Docker isolation tests"
+    )
+    dump = int(docker["run"].split("faulthandler_timeout=")[1].split()[0])
+
+    assert dump < docker["timeout-minutes"] * 60
+    assert docker["timeout-minutes"] < 15  # `integration (*)` in scripts/time-budgets.toml
 
 
 def test_every_integration_pytest_keeps_its_temp_files_off_the_runners_tmp() -> None:
