@@ -273,8 +273,9 @@ first two. Keep your additions when you replace `compose.yaml` on an upgrade.
 
 **Peak memory and processor time of a task.** The Compose bundle mounts the host's
 `/sys/fs/cgroup` read-only into the launcher at `/host/cgroup`, which the launcher reads
-(`memory.peak` and `cpu.stat`) for the containers it started; it can read nothing else from it
-and writes nothing. Where the launcher cannot read the tree, a task shows `—` for these two
+(`memory.peak` and `cpu.stat`) for the containers it started. The mount itself exposes the host's whole
+cgroup tree read-only; only the launcher's code limits what it reads (full 64-character container
+ids under its own containers), and it writes nothing. Where the launcher cannot read the tree, a task shows `—` for these two
 figures and runs as usual. That is the case with cgroup v1, a kernel before 5.19 (no
 `memory.peak`: only the processor time shows), a Docker that does not use the host's cgroup tree
 (some rootless setups), a bundle from before this mount (add the line below to the `launcher`

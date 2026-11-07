@@ -5971,7 +5971,8 @@ matter for an operator deciding where to run it:
   The launcher also mounts the host's `/sys/fs/cgroup` read-only at `/host/cgroup`
   (`LAKANA_LAUNCHER__CGROUP_ROOT`) to read `memory.peak` and `cpu.stat` of the containers it
   started (#282). That adds no privilege beyond the socket, which already reaches the whole host;
-  the read-only mount of kernel statistics grants no write. `launcher/cgroup.py` builds a path only
+  the read-only mount grants no write, but it exposes the host's whole cgroup tree: only the
+  launcher's code limits what it reads. `launcher/cgroup.py` builds a path only
   from a container id that matches `^[0-9a-f]{64}$`, reads at most 4 KiB of two files, and
   imports the standard library only; a figure it cannot read is unknown, never an error.
 - **The server binds to `127.0.0.1` by default.** `lakana bundle init`'s `--bind` defaults to
