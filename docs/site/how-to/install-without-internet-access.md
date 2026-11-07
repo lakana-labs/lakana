@@ -79,9 +79,9 @@ bring the file in yourself and forbid the download:
    keeping the `v…/<platform>/` folders.
 3. Set `LAKANA_WORKER__EXTENSION_SOURCE=none` for the worker (the setting is `duckdb` by default).
    With `none` the worker never downloads, and if the file is missing it stops at start instead of
-   trying. The message names the exact path it looked for, for example:
+   trying. The worker's start-up message names the exact path it looked for, for example (a query that finds the file gone later fails with the same text, which begins `Query failed:` and says `Tell the operator:` where this says `To fix it:`):
 
-   > Query failed: the worker cannot load DuckDB's httpfs extension: /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension is missing and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. Tell the operator: run the worker from the Lakana container image, which bundles it, or copy httpfs.duckdb_extension to /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension (inside /home/lakana/.duckdb/extensions), or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it.
+   > The worker cannot load DuckDB's httpfs extension: /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension is missing and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. To fix it: run the worker from the Lakana container image, which bundles it, or copy httpfs.duckdb_extension to /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension (inside /home/lakana/.duckdb/extensions), or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it.
 
    Use the path in that message, not this one. A new DuckDB release needs its own file: after you
    upgrade Lakana to a release with a new DuckDB, repeat steps 1 and 2.
@@ -165,7 +165,7 @@ such a lock with `LAKANA_RUN__INDEX_URL` set and refuses it without.
 
 With the Compose bundle's docker runner, a build reaches only the host of `LAKANA_RUN__INDEX_URL`
 instead of the public index, over `https`, on the port of the URL (443 unless the URL says
-otherwise); a mirror under `http://` is refused. A mirror with a certificate of a private authority
+otherwise); a mirror under `http://` is refused (`http` is accepted only for loopback addresses, which a build container cannot reach). A mirror with a certificate of a private authority
 needs `LAKANA_RUN__CA_BUNDLE` on the worker, with the file mounted into it. See
 [Package indexes and proxies](run-python-tasks-in-containers.md#package-indexes-and-proxies) for
 the proxy (`LAKANA_EGRESS_UPSTREAM_PROXY`), the private authority and the addresses a build never
@@ -191,6 +191,15 @@ they need, built for the platform of the worker, so this suits only a few projec
 **3. An index registered with a password.** If the internal index asks for one, register it as in
 [Use a private package index](private-package-index.md), which also shows the `explicit = true`
 and `[tool.uv.sources]` lines it needs; a build that uses a credential installs wheels only.
+
+## Starting a project from a template
+
+`lakana init --template python` runs `uv lock` on the machine where you type it, against the public
+package index, and stops with a message when it cannot reach it. On an isolated network, leave out
+`--template` (the SQL sample needs no network), or point `uv` at your mirror first: `uv` reads
+`UV_DEFAULT_INDEX` (an index URL) and `UV_FIND_LINKS` (a folder of wheels, which the command's own
+message also names), and the proxy variables of its environment. Then lock the project as in
+"Python assets" above. We did not run this command offline.
 
 ## Git repositories
 
@@ -222,7 +231,11 @@ These need no change; they are listed so that you can check:
 - **Job notifications** go to the webhook addresses you set; `LAKANA_WORKER__NOTIFICATIONS=false`
   stops a worker from sending any.
 - **Docker** pulls an image that is not on the host when you run `docker compose up` or
-  `docker compose pull`. Load every image first, as above, so that nothing is missing.
+  `docker compose pull`. The launcher also asks the Docker daemon to pull a task image the first
+  time a task needs it and the host does not have it (a project that names `python: "3.12"` needs
+  the `-py3.12` image). Load every task image your projects name, as above, or name a registry
+  inside your network with `--task-image`; a missing one is pulled from its registry, which an
+  isolated host cannot reach, and the task fails.
 - **This documentation** is plain files that load nothing from another host. It is built from a
   checkout of the repository with `uv run --group docs zensical build --strict` (output in
   `site-build/`); build it where the internet is and carry the folder in.

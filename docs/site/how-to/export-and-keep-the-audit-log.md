@@ -22,7 +22,7 @@ in the `AuditEventType` of `lakana_core.models`; in groups:
 | Access | `GRANT_CREATED`, `GRANT_REVOKED`, `GROUP_*`, `PRINCIPAL_*`, `PAT_*`, `TASK_TOKEN_*`, `ACCESS_APPLIED`, `MANAGED_SCOPE_OVERRIDDEN`, `BOOTSTRAP_ADMIN_RESTORED`, `CI_TRUST_RULE_*` |
 | Policies | `ROW_FILTER_*`, `COLUMN_MASK_*` |
 | Secrets and connections | `SECRET_*`, `CONNECTION_*`, `PACKAGE_INDEX_*`, `REPOSITORY_*` |
-| Environments and tables | `ENVIRONMENT_*`, `TABLE_WRITE`, `TABLE_APPENDED`, `TABLE_SCHEMA_CHANGED`, `TABLE_MAINTAINED`, `TABLE_DROPPED`, `TABLE_UNDROPPED`, `TABLE_PURGED`, `TABLE_ROLLED_BACK`, `TABLE_RETENTION_*`, `TABLE_KEPT*`, `TABLE_DESCRIBED`, `COLUMN_DESCRIBED`, `ORPHANED_LOCATIONS_DELETED` |
+| Environments and tables | `ENVIRONMENT_*`, `TABLE_WRITE`, `TABLE_APPENDED`, `TABLE_SCHEMA_CHANGED`, `TABLE_MAINTAINED`, `TABLE_DROPPED`, `TABLE_UNDROPPED`, `TABLE_PURGED`, `TABLE_ROLLED_BACK`, `TABLE_RETENTION_*`, `TABLE_KEPT*`, `TABLE_DESCRIBED`, `COLUMN_DESCRIBED`, `TABLE_LOCATION_ABANDONED`, `ORPHANED_LOCATIONS_DELETED` |
 | Code and runs | `DEPLOYED`, `DEPLOY_DRY_RUN`, `ROLLED_BACK`, `UNDEPLOYED`, `RUN_*`, `RUN_AS_*`, `BREAK_GLASS_WRITE`, `CHECK_FAILED`, `JOB_*`, `NOTIFICATION_*` |
 | Queries | `QUERY_COMPLETED` (also for a query that failed: `detail.status` says), `QUERY_CANCELLED` |
 | Artifacts | `ARTIFACT_*` |
@@ -32,7 +32,8 @@ What the log does **not** record:
 
 - **A table's rows read, by whom, row by row.** A query is one `QUERY_COMPLETED` event with the
   tables it touched and the number of rows it returned. Loading a table through the Iceberg REST
-  catalog is no event, and neither is listing tables, namespaces or environments.
+  catalog is no event, and neither is listing tables, namespaces or environments. A task's write
+  whose worker died without evidence of a commit ends failed and has no `QUERY_COMPLETED` event.
 - **Creating or renaming a table, creating, changing or dropping a namespace.** The code of these
   operations writes no event (the other changes in the table above do).
 - **A data commit by an Iceberg client** that Lakana did not make as a write of its own: there is
@@ -42,6 +43,8 @@ What the log does **not** record:
   `LAKANA_DENIAL_AUDIT__PER_PRINCIPAL_PER_MINUTE` (30 by default) per principal per minute is
   refused but not written to the table; it goes to the process log, and the next event says how
   many were left out. The first refusal of each action is always written.
+- **Reading other people's events, when switched off.** `LAKANA_VIEW_AUDIT__ENABLED=false` stops
+  the `ACTIVITY_VIEWED` events (`true` by default); the window is `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`.
 - **Each successful sign-in.** One per token every 15 minutes (`LAKANA_AUDIT__SIGN_IN_WINDOW_MINUTES`;
   `0` records every request), with the number of those left out in `detail.suppressed`.
 - **Query text, unless you keep it.** `LAKANA_AUDIT__QUERY_TEXT` is `full` by default; `hash` stores
@@ -73,7 +76,7 @@ lakana token issue auditor audit-export
 
 The last command prints the token once. Keep it where only the scheduled job can read it.
 
-Reading other people's events is itself recorded (`ACTIVITY_VIEWED`, once per person and view per
+Reading other people's events is itself recorded, unless `LAKANA_VIEW_AUDIT__ENABLED=false` (`ACTIVITY_VIEWED`, once per person and view per
 hour), and if that event cannot be written the read is refused. Take the right away from a person
 with `lakana grant revoke`. `lakana access explain NAME` shows what a principal may do.
 

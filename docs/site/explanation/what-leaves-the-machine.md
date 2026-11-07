@@ -31,6 +31,8 @@ cloud credential lookup under "What we could not verify", are not.
 | From | To | Set by |
 |---|---|---|
 | Worker (`git`) | The git remotes you registered, for `ls-remote` and `fetch`, over HTTPS or SSH. Nothing else: submodules, credential helpers and other protocols are off. | The repository's URL. For HTTPS: `LAKANA_GIT__HTTPS_PROXY`, `LAKANA_GIT__NO_PROXY`, `LAKANA_GIT__CA_BUNDLE` (see "Git network settings" in [Projects](../how-to/projects.md)) |
+| `lakana init --template python` (the CLI, on your machine) | A package index, once, to run `uv lock` for the new project: the public index unless your `uv` is configured otherwise (`UV_DEFAULT_INDEX`, `UV_FIND_LINKS`, a proxy in `HTTPS_PROXY`). The command stops with a message when it cannot connect. Without `--template` it makes no such request. | Do not use `--template python`; or configure `uv` on that machine |
+| The `lakana` CLI and SDK in a GitHub Actions job | The runner's ID token service, at the address in `ACTIONS_ID_TOKEN_REQUEST_URL` with the runner's own request token, to get an ID token for the audience of your Lakana server, only when the job signs in by OIDC. A GitLab job reads its token from an environment variable and makes no request. | The CI file you choose (`--ci-auth`, see [Deploy from GitHub Actions](../how-to/deploy-from-github-actions.md)) |
 | Worker (`uv`) | A package index, when it builds the environment of a project with Python assets: the default index (PyPI) and the files the project's `uv.lock` names, plus an extra index if you set one, plus each registered package index a project's lock names, with that index's credential from the environment's secret. The build connects to the hosts the lock names, follows the redirects those hosts send, and goes through the operator's proxy when one is set. A build without a credential may build a source distribution, whose build requirements can come from the index and whose build backend has network access; a build with a registered index's credential installs wheels only. It never downloads a Python interpreter. | `LAKANA_RUN__INDEX_URL` (an extra index), `lakana index add` (registered indexes), `LAKANA_RUN__HTTPS_PROXY`, `LAKANA_RUN__NO_PROXY`, `LAKANA_RUN__CA_BUNDLE` |
 | Server (CI OIDC) | The CI providers in `LAKANA_CI_OIDC__ISSUERS` (GitHub Actions, GitLab.com or your own GitLab), only when a CI job exchanges an ID token: the issuer's discovery document (`/.well-known/openid-configuration`) and its public signing keys, over `https` on port 443, at most once an hour per issuer (once a minute for an unknown key), from public addresses only unless the host is in `LAKANA_CI_OIDC__ALLOW_HOSTS`, with no redirect followed and at most 64 KiB read. Nothing about the job or the instance is sent. Off while `LAKANA_CI_OIDC__ISSUERS` is empty (the default). | `LAKANA_CI_OIDC__ISSUERS`, `LAKANA_CI_OIDC__ALLOW_HOSTS`, `LAKANA_CI_OIDC__PROXY`, `LAKANA_CI_OIDC__CA_BUNDLE` (see [CI trust rules and CI tokens](../reference/ci-trust-rules.md)) |
 | Python tasks, through the `egress` proxy and a relay of their own (docker runner) | The endpoints of the connections the task's asset declares, and nothing else: HTTPS to an `http`, `s3`, `gcs` or `azure` connection's host and port (and an `oauth2` connection's token endpoint, a `gcs` key's token endpoint), a database or `tcp` connection's host and port through the task's relay. Never the Lakana stack, another task, the cloud metadata address, the Docker host's loopback, gateways or names, or a range of `LAKANA_EGRESS_REFUSED`. | The connections (`lakana connection create`) and the asset's `connections`. `LAKANA_EGRESS_UPSTREAM_PROXY`, `LAKANA_EGRESS_REFUSED` (see [How a task reaches its connections](../reference/network-settings.md#how-a-task-reaches-its-connections)) |
@@ -58,16 +60,20 @@ A few more things you may see:
   [Projects](../how-to/projects.md).
 - **Docker** pulls the images of the Compose bundle (the Lakana image, Postgres and SeaweedFS)
   from their registries when you run `docker compose up`. Docker starts that, not Lakana.
+- **Task images.** With the docker runner, the launcher asks the Docker daemon of the host to pull
+  a task image (`lakana-task:<tag>-py3.X`) from its registry the first time a task or build needs
+  it and the host does not have it. Lakana starts that request; the daemon makes the connection.
+  Load the images you need beforehand, or point `LAKANA_TASK_IMAGE` at an internal registry (see
+  [Install without internet access](../how-to/install-without-internet-access.md#the-container-images)).
 - **Job notifications** go to the webhook a job's `notify:` names, and only there. A message
   carries the names of the job, the environment, the repository, the commit, the run, the failed
   tasks and the failed checks, the time, the status and a delivery id. It never carries table
   data, a secret, or the text of an error message. The address is a secret of the environment; it
   is never written to a log, the audit log or an answer. See
   [Get told when a job fails](../how-to/get-told-when-a-job-fails.md).
-- **Not built yet.** There is no OIDC login for people in the code today. When it arrives it
-  will make connections to the provider you configure, and this page will list them. (The CI
-  OIDC exchange above is for CI jobs only.)
-- **There is no web interface** in the repository today; it comes before the public beta.
+- **No OIDC login for people.** The code has none today; the CI OIDC exchange above is for CI
+  jobs only.
+- **There is no web interface** in the repository today.
 - **This documentation site** loads no font, script, image or style sheet from another host, so
   it also works on an internal network.
 
@@ -130,7 +136,9 @@ DuckDB 2.0.0, the version in the lock file.
 - **Our code.** We searched for HTTP clients, sockets, `urllib`, subprocesses, update checks,
   usage reporting and the host names of analytics services. The only HTTP client is `httpx`: in
   the SDK, which talks to the URL of the profile (and, with proxy settings from the
-  environment ignored, to the loopback address in local mode), and in `lakana_core.net`, which the
+  environment ignored, to the loopback address in local mode), to the GitHub Actions ID token
+  service in a job that signs in by OIDC, and, in the helpers that Python assets use to read
+  sources, to the endpoints of the connections they declare (listed above); and in `lakana_core.net`, which the
   worker uses for webhooks and the server for the CI providers' keys, both listed above. The only other request is the
   container's health check, to `127.0.0.1`. The only programs the code starts are `git`,
   `uv`, the task's own Python interpreter, and Lakana's own server and worker.
