@@ -149,7 +149,7 @@ beta ships with the ingestion helpers and named connections.
    only its package indexes, through an egress proxy. The Compose bundle uses the docker runner
    by default, and a protected environment runs Python tasks only in containers. See
    [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md).
-4. **M6, ingestion (built, next release).** An administrator registers a source once as a named connection (#85), per
+4. **M6, ingestion (built, 0.21.0).** An administrator registers a source once as a named connection (#85), per
    environment, with its address and credentials; a connection is managed through the CLI and the
    API, and in the web interface from M7. A Python asset declares the connections it uses in
    its header, and an ingestion task reaches only those connections and nothing else on the
