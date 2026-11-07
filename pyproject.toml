@@ -3,11 +3,11 @@ members = ["packages/*"]
 
 [dependency-groups]
 dev = [
-    "hypothesis>=6.170.12",
+    "hypothesis>=6.170.14",
     "polars>=2.1.0",
     "import-linter>=2",
     "pip-licenses>=5",
-    "pytest>=8",
+    "pytest>=9.2.0",
     "pytest-cov>=6",
     "testcontainers[postgres,minio]>=4.15.0",
     # The Docker isolation tests drive the engine with it; testcontainers depends on it too.
@@ -18,12 +18,12 @@ dev = [
     "ty==0.0.97",
     "uvicorn>=0.54.0",
     "httpx>=0.28",
-    "mutmut==3.8.0",
+    "mutmut==3.8.1",
     # Already an implicit PEP 517 build dependency of every package
     # (`[build-system].requires`); declared explicitly too so
     # `packages/lakana/hatch_build.py`'s metadata hook is importable from a
     # unit test without a full `uv build`. MIT.
-    "hatchling>=1.27",
+    "hatchling>=1.33.0",
     # Test-only here: parses the generated compose.yaml in test_deploy_init.py.
     # lakana-core declares its own runtime dependency on it. MIT.
     "pyyaml>=6",
@@ -33,13 +33,13 @@ dev = [
     "cryptography>=50.0.2",
     # Test-only: polars' `write_excel` makes the spreadsheets of the files helper's tests.
     # BSD-2-Clause.
-    "xlsxwriter>=3.2",
+    "xlsxwriter>=3.3.1",
     # Test-only here: the spreadsheet reader `lakana[assets]` brings to a task; the tests of
     # `lakana.ingest.files` run without that extra installed. MIT.
     "fastexcel>=0.21",
     # Test-only here: the object-store client `lakana[assets]` brings to a task; the tests of
     # `lakana.ingest.files` run without that extra installed. MIT.
-    "obstore>=0.12,<0.13",
+    "obstore>=0.12.1,<0.13",
     # Test-only here: the database drivers `lakana[assets]` brings to a task; the tests of
     # `lakana.ingest.sql` run without that extra installed. Apache-2.0 (ADBC), MIT (PyMySQL).
     "adbc-driver-manager>=1.13",
@@ -59,7 +59,7 @@ check = [
 ]
 # The documentation site (docs/site). Built in CI; published at the public beta.
 docs = [
-    "zensical>=0.0.73",
+    "zensical>=0.0.74",
 ]
 
 [tool.ruff]
