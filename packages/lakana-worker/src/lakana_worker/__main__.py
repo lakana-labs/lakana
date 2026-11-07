@@ -524,6 +524,7 @@ def main() -> None:
     configure_logging(settings.log.level)
     _check_process_supervision()
     _check_query_ca_bundle()
+    install_extension_source(settings.worker.extension_source)
     _check_query_limits(settings.query_limits)
     engine = create_engine(settings.database, lease_seconds=settings.run.lease_seconds)
     session_factory = functools.partial(Session, engine)
@@ -563,7 +564,6 @@ def main() -> None:
     drain = threading.Event()
     signal.signal(signal.SIGTERM, lambda signum, frame: drain.set())
     install_drain(drain, settings.run.drain_grace_seconds)
-    install_extension_source(settings.worker.extension_source)
     if settings.worker.extension_source != "duckdb":
         logger.info(
             "DuckDB extensions: %s (LAKANA_WORKER__EXTENSION_SOURCE).",

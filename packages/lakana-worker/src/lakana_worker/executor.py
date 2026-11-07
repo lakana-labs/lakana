@@ -911,7 +911,9 @@ def check_limits(limits: QueryLimitsConfig) -> None:
     Raises
     ------
     ValueError
-        If DuckDB cannot read one of the sizes (the message names the environment variable, cuts
+        If `httpfs` cannot be loaded under `LAKANA_WORKER__EXTENSION_SOURCE` (the message of
+        the query that would fail), if DuckDB cannot read one of the sizes (the message names
+        the environment variable, cuts
         and escapes the value it quotes, and shows two valid forms), or if no query child can be
         started or none answers (the message says the worker cannot run queries and what to
         check).
@@ -938,6 +940,8 @@ def check_limits(limits: QueryLimitsConfig) -> None:
                 f"{ascii(getattr(limits, field))[:60]}. Write a number and a unit, such as 1GB "
                 "or 512MiB."
             ) from exc
+        if "LAKANA_WORKER__EXTENSION_SOURCE" in field:
+            raise ValueError(field) from exc
         raise ValueError(
             "The worker cannot run queries: its start-up check in a query process failed "
             f"({exc}). Check that the worker's Python environment is complete (the duckdb and "

@@ -968,19 +968,30 @@ def _check(connection: duckdb.DuckDBPyConnection, request: Request) -> ErrorDocu
     connection
         A fresh in-memory connection.
     request
-        Supplies ``memory_limit`` and ``max_temp_directory_size``.
+        Supplies ``memory_limit`` and ``max_temp_directory_size``, and, unless its
+        ``extension_source`` is the default, ``extension_directory`` for the ``httpfs`` check.
 
     Returns
     -------
     ErrorDocument or None
         An `invalid` document whose message is the name of the first setting DuckDB cannot
-        read; `None` if both are accepted.
+        read, or the `load_httpfs` message; `None` if both are accepted and httpfs loads.
     """
     for field in ("memory_limit", "max_temp_directory_size"):
         try:
             connection.execute(f"SET {field} = ?", [getattr(request, field)])
         except duckdb.Error:
             return ErrorDocument(INVALID, field)
+    if request.extension_source != EXTENSION_SOURCE_DUCKDB:
+        # The default may download at the first query, as it always did; a worker told never to,
+        # or to use a mirror, learns at start that httpfs cannot be loaded.
+        connection.execute("SET extension_directories = ?", [[request.extension_directory]])
+        connection.execute("SET allow_community_extensions = false")
+        connection.execute("SET autoinstall_known_extensions = false")
+        try:
+            load_httpfs(connection, request)
+        except ExtensionUnavailable as exc:
+            return ErrorDocument(INVALID, str(exc))
     return None
 
 

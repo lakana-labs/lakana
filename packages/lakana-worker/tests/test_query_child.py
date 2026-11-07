@@ -2538,3 +2538,20 @@ def test_a_real_child_with_none_and_an_empty_extension_directory_answers_with_th
     assert error.kind == "invalid"
     assert str(tmp_path) in error.message
     assert "LAKANA_WORKER__EXTENSION_SOURCE=none" in error.message
+
+
+def test_a_check_with_none_and_an_empty_extension_directory_answers_with_the_message(
+    tmp_path: Path,
+) -> None:
+    error = _failed(
+        _request("", mode=CHECK, extension_directory=str(tmp_path), extension_source="none")
+    )
+    assert error.kind == "invalid"
+    assert str(tmp_path) in error.message
+    assert "LAKANA_WORKER__EXTENSION_SOURCE=none" in error.message
+
+
+def test_a_check_with_none_passes_when_httpfs_is_in_the_directory() -> None:
+    code, stream, stderr = _main(_request("", mode=CHECK, extension_source="none"))
+    assert (code, stderr) == (EXIT_OK, "")
+    assert _table(stream).num_columns == 0

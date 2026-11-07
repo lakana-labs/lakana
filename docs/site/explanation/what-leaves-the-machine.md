@@ -116,7 +116,9 @@ DuckDB 2.0.0, the version in the lock file.
   (`~/.duckdb/extensions` of the worker's user) and what to do next: run the worker from the
   container image, which bundles the extension, copy `httpfs.duckdb_extension` into that
   directory, or set a mirror. The container image already holds the extension, so with the
-  image a worker makes no extension request whatever the setting says. Other extensions are
+  image a worker makes no extension request whatever the setting says. With `none` or a mirror
+  the worker checks at start that it can load `httpfs` and refuses to start, with that message,
+  if it cannot. Other extensions are
   never installed or loaded automatically.
 
 ## What we could not verify
