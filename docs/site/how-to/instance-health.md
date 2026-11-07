@@ -349,12 +349,13 @@ next step:
 For a Python task, `read` counts what it took in through `lakana`: the files, REST pages and
 database results of `lakana.ingest` and the tables it reads with the SDK. A task that reads with
 its own library (its own HTTP client, `pandas.read_csv` on a path) shows no bytes read, and `0 B`
-means a Lakana reader ran and found nothing. Its memory is the task process's own peak on Linux. A task the project declares that has not run yet
+means a Lakana reader ran and found nothing. Its memory is the task process's own peak, on Linux and on macOS. A task the project declares that has not run yet
 has no attempts: the command says so and suggests starting the job. The command answers 404 only for a job or task name the project does
 not declare and no run has attempted: check both names (`lakana job list` shows the jobs).
 
-Past the newest `--last` attempts, the command prints a `--cursor` that continues after them;
-with `--output json` the `next_cursor` field carries it.
+When you ask for the most (`--last 200`) and older attempts exist, the command prints a
+`--cursor` that continues after them; with a smaller `--last` it suggests a larger one. With
+`--output json` the `next_cursor` field carries it.
 
 ## A stuck run and why
 

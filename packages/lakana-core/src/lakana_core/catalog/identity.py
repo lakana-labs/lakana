@@ -21,6 +21,7 @@ even though there is no id for `GrantAuthorization` to later match on.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -85,6 +86,37 @@ def resolve_table_id(
             Table.name == table,
         )
     ).scalar_one_or_none()
+
+
+def environment_ids_in(session: Session, names: Iterable[str]) -> dict[str, uuid.UUID]:
+    """Resolve many environment names to their ids in one statement.
+
+    The batch form of `resolve_environment_id`, with the same filter: a deleted environment
+    is not found, so authorization treats its name as one no environment has.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    names
+        Environment names.
+
+    Returns
+    -------
+    dict
+        The id of each live environment among `names`; a name no live environment has is absent.
+    """
+    wanted = set(names)
+    if not wanted:
+        return {}
+    return {
+        name: env_id
+        for name, env_id in session.execute(
+            select(Environment.name, Environment.id).where(
+                Environment.name.in_(wanted), LIVE_ENVIRONMENT
+            )
+        )
+    }
 
 
 def table_ids_in(session: Session, environment: str) -> dict[tuple[str, str], uuid.UUID]:

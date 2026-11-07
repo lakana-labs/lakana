@@ -454,8 +454,8 @@ Three things must be in place before the figures appear:
   `LAKANA_LAUNCHER__CGROUP_ROOT: /host/cgroup` and the read-only volume
   `/sys/fs/cgroup:/host/cgroup:ro`, or copy them from a fresh bundle
   ([Upgrading](../how-to/deploy-with-compose.md#upgrading) shows how to compare). Without them a
-  task in a container shows `—` for memory and processor time. The mount lets the launcher read
-  the cgroup files of the containers it started and nothing else
+  task in a container shows `—` for memory and processor time. The mount exposes the host's whole
+  cgroup tree read-only; the launcher's code reads only the files of the containers it started
   ([Peak memory and processor time of a task](../how-to/run-python-tasks-in-containers.md#the-launcher)).
 - **Upgrade the launcher together with the workers.** A worker that is newer than its launcher
   shows `—` for the container figures.

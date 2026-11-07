@@ -20,7 +20,7 @@ import time
 import urllib.parse
 from decimal import Decimal
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import duckdb
 import pyarrow as pa
@@ -84,7 +84,7 @@ def _request(sql: str = "SELECT 42 AS answer", **overrides: object) -> Request:
     Request
         The request.
     """
-    fields: dict[str, object] = {
+    fields: dict[str, Any] = {
         "mode": READ,
         "sql": sql,
         "parameters": {},
@@ -2456,3 +2456,78 @@ def test_a_real_child_through_the_workers_query_child_reports_its_figures() -> N
     if sys.platform.startswith("linux"):
         assert figures.peak_memory_bytes is not None and figures.peak_memory_bytes > 0
     assert figures.cpu_seconds is not None
+
+
+class _FakeConnection:
+    """Records the statements `load_httpfs` runs; `LOAD` fails while `installed` is false."""
+
+    def __init__(self, *, installed: bool) -> None:
+        self.statements: list[str] = []
+        self.installed = installed
+
+    def execute(self, statement: str) -> None:
+        self.statements.append(statement)
+        if statement == "LOAD httpfs" and not self.installed:
+            raise duckdb.IOException(
+                'IO Error: Extension "/ext/v2.0.0/linux_amd64/httpfs.duckdb_extension" not found.'
+            )
+
+
+def _load(connection: _FakeConnection, source: str) -> None:
+    query_child.load_httpfs(
+        cast("duckdb.DuckDBPyConnection", connection),
+        _request(extension_source=source, extension_directory="/ext"),
+    )
+
+
+def test_by_default_httpfs_is_installed_from_duckdbs_own_server_as_before() -> None:
+    connection = _FakeConnection(installed=True)
+    _load(connection, "duckdb")
+    assert connection.statements == ["INSTALL httpfs", "LOAD httpfs"]
+
+
+def test_none_never_installs_and_loads_what_is_there() -> None:
+    present = _FakeConnection(installed=True)
+    _load(present, "none")
+    assert "INSTALL httpfs" not in present.statements
+    assert present.statements[-1] == "LOAD httpfs"
+    missing = _FakeConnection(installed=False)
+    with pytest.raises(query_child.ExtensionUnavailable) as caught:
+        _load(missing, "none")
+    assert not any(s.startswith("INSTALL") for s in missing.statements)
+    assert str(caught.value) == (
+        "Query failed: the worker cannot load DuckDB's httpfs extension: "
+        "/ext/v2.0.0/linux_amd64/httpfs.duckdb_extension is missing and "
+        "LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. Tell the operator: run "
+        "the worker from the Lakana container image, which bundles it, or copy "
+        "httpfs.duckdb_extension to /ext/v2.0.0/linux_amd64/httpfs.duckdb_extension (inside /ext), "
+        "or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it."
+    )
+
+
+def test_a_real_child_with_none_and_an_empty_extension_directory_answers_with_the_message(
+    tmp_path: Path,
+) -> None:
+    error = _failed(_request(extension_directory=str(tmp_path), extension_source="none"))
+    assert error.kind == "invalid"
+    assert str(tmp_path) in error.message
+    assert "httpfs.duckdb_extension is missing" in error.message
+    assert "LAKANA_WORKER__EXTENSION_SOURCE=none" in error.message
+
+
+def test_a_check_with_none_and_an_empty_extension_directory_answers_with_the_message(
+    tmp_path: Path,
+) -> None:
+    error = _failed(
+        _request("", mode=CHECK, extension_directory=str(tmp_path), extension_source="none")
+    )
+    assert error.kind == "invalid"
+    assert str(tmp_path) in error.message
+    assert "httpfs.duckdb_extension is missing" in error.message
+    assert "LAKANA_WORKER__EXTENSION_SOURCE=none" in error.message
+
+
+def test_a_check_with_none_passes_when_httpfs_is_in_the_directory() -> None:
+    code, stream, stderr = _main(_request("", mode=CHECK, extension_source="none"))
+    assert (code, stderr) == (EXIT_OK, "")
+    assert _table(stream).num_columns == 0

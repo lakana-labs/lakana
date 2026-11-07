@@ -54,7 +54,14 @@ from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 from lakana_core.artifacts.store import current_version, version_row
 from lakana_core.audit.service import AuditService
 from lakana_core.audit.views import View, ViewDetail, record_view, sessions_like
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, RunContext, Securable
+from lakana_core.auth import (
+    Action,
+    AuthorizationService,
+    PrincipalRef,
+    RunContext,
+    Securable,
+    permits_each,
+)
 from lakana_core.catalog.append import (
     AppendResult,
     build_transaction,
@@ -1543,6 +1550,28 @@ class CatalogService:
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(name))
         return self._find_environment(name, p)
 
+    def _readable_environments(self, p: PrincipalRef, envs: list[Environment]) -> list[Environment]:
+        """Keep the environments `p` may read, asking the authorization service once.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        envs
+            The candidates, in the order to keep.
+
+        Returns
+        -------
+        list of Environment
+            Those `permits` allows `READ_ENVIRONMENT` on.
+        """
+        answers = permits_each(
+            self._authz,
+            p,
+            [(Action.READ_ENVIRONMENT, Securable.environment_scope(e.name)) for e in envs],
+        )
+        return [env for env, allowed in zip(envs, answers, strict=True) if allowed]
+
     def list_environments(self, p: PrincipalRef) -> list[Environment]:
         """List every environment `p` may read.
 
@@ -1560,19 +1589,14 @@ class CatalogService:
 
         Notes
         -----
-        Filtered through `permits`, not `authorize`. A hidden
+        Filtered through `permits`, not `authorize`, and in one batch
+        (`permits_each`), so the statements do not grow with the environments. A hidden
         environment is not a denied action and writes no audit event.
         """
         rows = self._session.execute(
             select(Environment).where(LIVE_ENVIRONMENT).order_by(Environment.created_at)
         )
-        return [
-            env
-            for env in rows.scalars()
-            if self._authz.permits(
-                p, Action.READ_ENVIRONMENT, Securable.environment_scope(env.name)
-            )
-        ]
+        return self._readable_environments(p, list(rows.scalars()))
 
     def delete_environment(self, p: PrincipalRef, name: str, *, purge: bool = False) -> Environment:
         """Delete an environment: its tables become tombstones for the undo period.
@@ -1763,13 +1787,7 @@ class CatalogService:
             .where(Environment.deleted_at.is_not(None))
             .order_by(Environment.deleted_at, Environment.name)
         )
-        return [
-            env
-            for env in rows.scalars()
-            if self._authz.permits(
-                p, Action.READ_ENVIRONMENT, Securable.environment_scope(env.name)
-            )
-        ]
+        return self._readable_environments(p, list(rows.scalars()))
 
     def environment_usage(self, p: PrincipalRef, name: str) -> EnvironmentUsage:
         """Report how much storage an environment uses, from the catalog database alone.

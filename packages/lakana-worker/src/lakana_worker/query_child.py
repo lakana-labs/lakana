@@ -132,6 +132,7 @@ from lakana_worker.query_protocol import (
     EXIT_FAILED,
     EXIT_OK,
     EXIT_REFUSED,
+    EXTENSION_SOURCE_NONE,
     INTERNAL,
     INTERRUPTED,
     INVALID,
@@ -618,6 +619,53 @@ def profiling_statements(output: str) -> list[str]:
     ]
 
 
+class ExtensionUnavailable(Exception):
+    """DuckDB's ``httpfs`` extension is neither installed nor allowed to be downloaded."""
+
+
+_MISSING_EXTENSION_FILE = re.compile(r'Extension "([^"]+)" not found')
+
+
+def load_httpfs(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
+    """Load ``httpfs``, installing it first unless the request's extension source is ``none``.
+
+    With the default source the extension is installed from DuckDB's own server (a no-op when
+    it is in the extension directory). With ``none`` it is only loaded from the directory, so an
+    extension the container image bundled works and nothing is ever downloaded.
+
+    Parameters
+    ----------
+    connection
+        A fresh in-memory connection with its extension directory set.
+    request
+        Supplies ``extension_source`` and ``extension_directory``.
+
+    Raises
+    ------
+    ExtensionUnavailable
+        If the source is ``none`` and the extension is missing. The message names the
+        extension, the file DuckDB looked for, the directory and the next step.
+    """
+    if request.extension_source != EXTENSION_SOURCE_NONE:
+        connection.execute("INSTALL httpfs")
+        connection.execute("LOAD httpfs")
+        return
+    connection.execute("SET autoinstall_known_extensions = false")
+    try:
+        connection.execute("LOAD httpfs")
+    except duckdb.Error as exc:
+        # DuckDB names the exact file it looked for, with its version and platform in the path.
+        found = _MISSING_EXTENSION_FILE.search(str(exc))
+        path = found.group(1) if found else f"{request.extension_directory}/<version>/<platform>"
+        raise ExtensionUnavailable(
+            f"Query failed: the worker cannot load DuckDB's httpfs extension: {path} is missing "
+            "and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. Tell the "
+            "operator: run the worker from the Lakana container image, which bundles it, or "
+            f"copy httpfs.duckdb_extension to {path} (inside {request.extension_directory}), "
+            "or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it."
+        ) from exc
+
+
 def configure(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
     """Apply the isolation settings and the limits, in their required order, then lock them.
 
@@ -635,8 +683,7 @@ def configure(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
     connection.execute("SET extension_directories = ?", [[request.extension_directory]])
     connection.execute("SET allow_community_extensions = false")
     connection.execute("SET allow_extension_repositories = 'forbidden'")
-    connection.execute("INSTALL httpfs")
-    connection.execute("LOAD httpfs")
+    load_httpfs(connection, request)
     # The order matters: `tracked_metrics` needs profiling on, and without an output file DuckDB 2
     # prints the profile of every statement to standard error, where the error document goes.
     for statement in profiling_statements(os.path.join(request.temp_directory, PROFILE_FILE)):
@@ -909,19 +956,30 @@ def _check(connection: duckdb.DuckDBPyConnection, request: Request) -> ErrorDocu
     connection
         A fresh in-memory connection.
     request
-        Supplies ``memory_limit`` and ``max_temp_directory_size``.
+        Supplies ``memory_limit`` and ``max_temp_directory_size``, and, unless its
+        ``extension_source`` is the default, ``extension_directory`` for the ``httpfs`` check.
 
     Returns
     -------
     ErrorDocument or None
         An `invalid` document whose message is the name of the first setting DuckDB cannot
-        read; `None` if both are accepted.
+        read, or the `load_httpfs` message; `None` if both are accepted and httpfs loads.
     """
     for field in ("memory_limit", "max_temp_directory_size"):
         try:
             connection.execute(f"SET {field} = ?", [getattr(request, field)])
         except duckdb.Error:
             return ErrorDocument(INVALID, field)
+    if request.extension_source == EXTENSION_SOURCE_NONE:
+        # The default may download at the first query, as it always did; a worker told never to
+        # learns at start that httpfs cannot be loaded.
+        connection.execute("SET extension_directories = ?", [[request.extension_directory]])
+        connection.execute("SET allow_community_extensions = false")
+        connection.execute("SET autoinstall_known_extensions = false")
+        try:
+            load_httpfs(connection, request)
+        except ExtensionUnavailable as exc:
+            return ErrorDocument(INVALID, str(exc))
     return None
 
 
@@ -1128,6 +1186,8 @@ def serve(
                 # gives a relation, so there is no `None` to handle here (an empty text was
                 # answered above).
                 reader = connection.sql(request.sql).to_arrow_reader(request.batch_rows)
+        except ExtensionUnavailable as exc:
+            return ErrorDocument(INVALID, str(exc))
         except (duckdb.Error, OSError) as exc:
             return classify(exc)
         document = _stream(reader, sink, asked, classify)

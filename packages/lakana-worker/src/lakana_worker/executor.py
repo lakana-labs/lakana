@@ -53,6 +53,7 @@ from lakana_worker.query_process import ChildFailed, StopReason, Stops
 from lakana_worker.query_protocol import (
     CHECK,
     DESCRIBE,
+    EXTENSION_SOURCE_DUCKDB,
     INTERNAL,
     INVALID,
     MAX_REQUEST_BYTES,
@@ -178,6 +179,9 @@ _DRAINING: Callable[[], bool] | None = None
 _WORKER_STALE: Callable[[], bool] | None = None
 """Says whether the worker's heartbeat is a lease old; set once by `install_heartbeat`."""
 
+_EXTENSION_SOURCE = EXTENSION_SOURCE_DUCKDB
+"""Where query children get DuckDB's ``httpfs`` from; set once by `install_extension_source`."""
+
 _ARGV: Sequence[str] | None = None
 """The command that starts a query child; `None` is the real one. Tests start a scripted one."""
 
@@ -276,6 +280,19 @@ def cancel_requests(requested: Callable[[], bool]) -> Generator[None, None, None
         yield
     finally:
         _CANCEL_REQUESTED.reset(token)
+
+
+def install_extension_source(source: str) -> None:
+    """Tell every query child where DuckDB may get its ``httpfs`` extension from.
+
+    Parameters
+    ----------
+    source
+        ``duckdb`` (DuckDB's own extension server, the default), ``none`` (never download) or an
+        ``https://`` mirror, as `lakana_core.config.parse_extension_source` returns it.
+    """
+    global _EXTENSION_SOURCE
+    _EXTENSION_SOURCE = source
 
 
 def install_drain(event: threading.Event, grace_seconds: float) -> None:
@@ -579,6 +596,7 @@ def _child(
             batch_rows=batch_rows,
             extension_directory=query_process.extension_directory(),
             parent_pid=os.getpid(),
+            extension_source=_EXTENSION_SOURCE,
         )
 
     cancel_event = _CANCEL.get()
@@ -893,7 +911,9 @@ def check_limits(limits: QueryLimitsConfig) -> None:
     Raises
     ------
     ValueError
-        If DuckDB cannot read one of the sizes (the message names the environment variable, cuts
+        If `httpfs` cannot be loaded under `LAKANA_WORKER__EXTENSION_SOURCE` (the message of
+        the query that would fail), if DuckDB cannot read one of the sizes (the message names
+        the environment variable, cuts
         and escapes the value it quotes, and shows two valid forms), or if no query child can be
         started or none answers (the message says the worker cannot run queries and what to
         check).
@@ -919,6 +939,11 @@ def check_limits(limits: QueryLimitsConfig) -> None:
                 f"LAKANA_QUERY_LIMITS__{field.upper()} is not a size DuckDB accepts: "
                 f"{ascii(getattr(limits, field))[:60]}. Write a number and a unit, such as 1GB "
                 "or 512MiB."
+            ) from exc
+        if "LAKANA_WORKER__EXTENSION_SOURCE" in field:
+            # The reader of a start-up refusal is the operator, not a user whose query failed.
+            raise ValueError(
+                field.removeprefix("Query failed: ").replace("Tell the operator: ", "To fix it: ")
             ) from exc
         raise ValueError(
             "The worker cannot run queries: its start-up check in a query process failed "

@@ -461,6 +461,7 @@ def test_the_child_gets_the_request_a_scrubbed_environment_and_only_its_pipes(
         "batch_rows",
         "extension_directory",
         "parent_pid",
+        "extension_source",
     }
     assert seen["request"]["temp_directory"] == seen["env"]["TMPDIR"]
     everything = lines[0]

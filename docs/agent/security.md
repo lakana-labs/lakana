@@ -3551,6 +3551,12 @@ own process opens no DuckDB connection and imports no `duckdb`.
   `allowed` at run time, `forbidden` may not and refuses `CREATE EXTENSION REPOSITORY`. All
   three read back in `test_the_connection_holds_no_credential_and_loads_nothing_by_itself`, and
   in a real child in `test_a_child_reads_back_the_settings_duckdb_2_names_differently`.
+  `LAKANA_WORKER__EXTENSION_SOURCE` (request field `extension_source`, `duckdb` or `none`) changes
+  only the install: `duckdb` is `INSTALL httpfs`; `none` sets `autoinstall_known_extensions =
+  false` and runs `LOAD httpfs` only, so nothing is downloaded, and a missing file is an
+  `ExtensionUnavailable` naming the path DuckDB looked for (also run by the start-up check, which
+  stops the worker). A mirror form was dropped: DuckDB 2.0 has no https client in core, and
+  `INSTALL ... FROM 'https://...'` fetched from DuckDB's own server.
 - **The child dies with the worker:** `PR_SET_PDEATHSIG` (Linux), and a `parent_pid` check at
   start that refuses to run for another parent.
 - **Allow-list mode.** The connection runs with `enable_external_access = false`,
@@ -4935,7 +4941,7 @@ exit criterion is being re-run after the M3f fixes above — see
   is looked up, so an unknown name is the same audited `403`. An administrator gets `404` for an
   unknown principal or object; a principal asking about itself is answered for a missing object
   as for one no grant names, so the route is no oracle for what exists.
-- **Many visibility questions at once: `permits_each` (#374).** `lakana_core.auth.permits_each(authz, principal, questions)` answers a list of `(action, securable)` pairs, each exactly as `permits` would. A service that implements `BatchAuthorization` (`GrantAuthorization`, and `AuditingAuthorization`, which delegates and records nothing) answers in one go; any other is asked question by question. `GrantAuthorization.permits_each` runs the same decision as `explain` (`_narrowed` for a task or CI scope, then `_decide` over the grants), from one read of the memberships and grants and one read of each environment's tables (`identity.table_ids_in`, the same joins as `resolve_table_id`). `test_permits_each_agrees_with_permits` runs it over every case of `test_permits_agrees_with_authorize`; table, namespace, environment, task-token, CI-token and refused questions mixed in one batch are pinned too.
+- **Many visibility questions at once: `permits_each` (#374).** `lakana_core.auth.permits_each(authz, principal, questions)` answers a list of `(action, securable)` pairs, each exactly as `permits` would. A service that implements `BatchAuthorization` (`GrantAuthorization`, and `AuditingAuthorization`, which delegates and records nothing) answers in one go; any other is asked question by question. `GrantAuthorization.permits_each` runs the same decision as `explain` (`_narrowed` for a task or CI scope, then `_decide` over the grants), from one read of the memberships and grants, one read of the environments' ids (`identity.environment_ids_in`, live environments only, as `resolve_environment_id`) and one read of each environment's tables (`identity.table_ids_in`, the same joins as `resolve_table_id`). `CatalogService.list_environments` and `list_deleted_environments` filter through it (#369), so their statements do not grow with the environments. `test_permits_each_agrees_with_permits` runs it over every case of `test_permits_agrees_with_authorize`; table, namespace, environment, task-token, CI-token and refused questions mixed in one batch are pinned too.
 - **Any new `AuthorizationService` implementation must implement both.** This includes test doubles and mocks. `permits` is defined as "`authorize` would not raise" — if `authorize()` raises on a call, `permits()` must return False for the same inputs.
 
 ## Query reads and submitter scope
@@ -5971,7 +5977,8 @@ matter for an operator deciding where to run it:
   The launcher also mounts the host's `/sys/fs/cgroup` read-only at `/host/cgroup`
   (`LAKANA_LAUNCHER__CGROUP_ROOT`) to read `memory.peak` and `cpu.stat` of the containers it
   started (#282). That adds no privilege beyond the socket, which already reaches the whole host;
-  the read-only mount of kernel statistics grants no write. `launcher/cgroup.py` builds a path only
+  the read-only mount grants no write, but it exposes the host's whole cgroup tree: only the
+  launcher's code limits what it reads. `launcher/cgroup.py` builds a path only
   from a container id that matches `^[0-9a-f]{64}$`, reads at most 4 KiB of two files, and
   imports the standard library only; a figure it cannot read is unknown, never an error.
 - **The server binds to `127.0.0.1` by default.** `lakana bundle init`'s `--bind` defaults to

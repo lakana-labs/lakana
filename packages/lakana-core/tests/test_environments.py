@@ -561,7 +561,8 @@ def test_every_public_catalog_method_calls_authorize() -> None:
     and a method that simply forgets to call `authorize()` would otherwise
     pass every other gate. Do not delete the precise test above thinking
     this one covers it — this one complements it, it does not replace it.
-    `list_environments` filters with `permits` instead, which counts.
+    `list_environments` and `list_deleted_environments` filter with `permits_each` (through
+    `_readable_environments`) instead, which counts.
     `append` delegates to `check_can_append` (a
     server-side caller needs to authorize before reading a request body,
     before `append` itself has anything to read) rather than calling
@@ -590,7 +591,9 @@ def test_every_public_catalog_method_calls_authorize() -> None:
             or "self._check_can_write_or_create(" in source
             or "self._may_see_state(" in source
             or "self._find_table_to_describe(" in source
+            or "self._readable_environments(" in source
         ), name
+    assert "permits_each(" in inspect.getsource(CatalogService._readable_environments)
     assert "self._authz.authorize" in inspect.getsource(CatalogService._check_can_write_or_create)
     assert "self._check_can_write_or_create(" in inspect.getsource(
         CatalogService._check_can_compare
