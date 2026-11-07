@@ -593,6 +593,7 @@ def test_every_public_catalog_method_calls_authorize() -> None:
             or "self._find_table_to_describe(" in source
             or "self._readable_environments(" in source
         ), name
+    assert "permits_each(" in inspect.getsource(CatalogService._readable_environments)
     assert "self._authz.authorize" in inspect.getsource(CatalogService._check_can_write_or_create)
     assert "self._check_can_write_or_create(" in inspect.getsource(
         CatalogService._check_can_compare

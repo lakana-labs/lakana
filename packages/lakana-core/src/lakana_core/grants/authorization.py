@@ -21,6 +21,7 @@ from lakana_core.auth import (
     TaskScope,
 )
 from lakana_core.catalog.identity import (
+    environment_ids_in,
     resolve_environment_id,
     resolve_table_id,
     table_ids_in,
@@ -28,7 +29,7 @@ from lakana_core.catalog.identity import (
 from lakana_core.errors import PermissionDenied, ValidationError
 from lakana_core.grants.roles import ROLE_ACTIONS
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, validate_path_component
-from lakana_core.models import LIVE_ENVIRONMENT, Environment, Grant, GroupMembership
+from lakana_core.models import Grant, GroupMembership
 
 TASK_TOKEN_ACTIONS: frozenset[Action] = frozenset(
     {
@@ -342,14 +343,7 @@ class GrantAuthorization:
         wanted = {n for n in names if n not in self._environment_id_cache}
         if not wanted:
             return
-        found = {
-            row[0]: row[1]
-            for row in self._session.execute(
-                select(Environment.name, Environment.id).where(
-                    Environment.name.in_(wanted), LIVE_ENVIRONMENT
-                )
-            )
-        }
+        found = environment_ids_in(self._session, wanted)
         for name in wanted:
             self._environment_id_cache[name] = found.get(name)
 

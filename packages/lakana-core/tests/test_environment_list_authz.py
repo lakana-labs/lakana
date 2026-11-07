@@ -5,7 +5,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
 from core_test_helpers import _config
 from sqlalchemy import delete, event
 from sqlalchemy.orm import Session
@@ -13,6 +12,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import (
     Action,
     AllowAllAuthorization,
+    CiScope,
     PrincipalRef,
     Securable,
     SecurableKind,
@@ -22,6 +22,7 @@ from lakana_core.auth import (
 from lakana_core.catalog import CatalogService
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.models import Environment, Grant, Principal, PrincipalType
+from lakana_core.models.group import Group, GroupMembership
 from lakana_core.storage.resolver import StorageResolver
 
 
@@ -229,30 +230,102 @@ def test_listing_deleted_environments_costs_the_same_statements(
 def test_batch_answers_equal_per_item_answers(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:
-    names = _make_envs(session, principal, tmp_path, 5)
+    names = _make_envs(session, principal, tmp_path, 6)
+    gone = names[4]
+    live = [n for n in names if n != gone]
+    gone_id = session.query(Environment.id).filter(Environment.name == gone).scalar()
+    CatalogService(session, StorageResolver(session), AllowAllAuthorization()).delete_environment(
+        principal, gone
+    )
     instance = _reader(session)
     _grant(session, instance, SecurableKind.INSTANCE)
     some = _reader(session)
     _grant(session, some, SecurableKind.ENVIRONMENT, names[0])
-    _grant(session, some, SecurableKind.NAMESPACE, names[4], namespace="gold")
+    _grant(session, some, SecurableKind.NAMESPACE, names[3], namespace="gold")
     nothing = _reader(session)
     inactive = _reader(session, active=False)
     _grant(session, inactive, SecurableKind.ENVIRONMENT, names[1])
+    # A grant still bound to the deleted environment's id (a deletion revokes them, but the
+    # batch lookup must not resolve the deleted name to that id, as `permits` does not).
+    bound = _reader(session)
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            principal_id=bound.id,
+            action=Action.READ_ENVIRONMENT,
+            kind=SecurableKind.ENVIRONMENT,
+            environment=gone,
+            environment_id=gone_id,
+            granted_by=bound.id,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    member = _reader(session)
+    group = Group(id=uuid.uuid4(), name="readers")
+    session.add(group)
+    session.flush()
+    session.add(GroupMembership(group_id=group.id, principal_id=member.id))
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            group_id=group.id,
+            action=Action.READ_ENVIRONMENT,
+            kind=SecurableKind.ENVIRONMENT,
+            environment=names[2],
+            environment_id=session.query(Environment.id)
+            .filter(Environment.name == names[2])
+            .scalar(),
+            granted_by=member.id,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
     task = PrincipalRef(
         id=some.id,
         name=some.name,
         type=some.type,
         task_scope=TaskScope(environment=names[0], asset_scope=["*"], token_id=uuid.uuid4()),
     )
-    authz = GrantAuthorization(session)
+    ci = PrincipalRef(
+        id=instance.id,
+        name=instance.name,
+        type=instance.type,
+        ci_scope=CiScope(
+            token_id=uuid.uuid4(),
+            rule_id=uuid.uuid4(),
+            environment=names[0],
+            environment_id=session.query(Environment.id)
+            .filter(Environment.name == names[0])
+            .scalar(),
+            repository="r",
+            repository_id=uuid.uuid4(),
+            kinds=frozenset({"deploy"}),
+            sha=None,
+        ),
+    )
     questions = [
         (Action.READ_ENVIRONMENT, Securable.environment_scope(n)) for n in [*names, "missing"]
     ]
-    for who in (instance, some, nothing, inactive, task):
-        expected = [authz.permits(who, a, s) for a, s in questions]
+    service = _service(session)
+    for who in (instance, some, nothing, inactive, bound, member, task, ci):
+        expected = [GrantAuthorization(session).permits(who, a, s) for a, s in questions]
         assert permits_each(GrantAuthorization(session), who, questions) == expected
-    assert [e.name for e in _service(session).list_environments(task)] == [names[0]]
-    assert _service(session).list_environments(nothing) == []
+        per_item = GrantAuthorization(session)
+        for listing, deleted in (
+            (service.list_environments, False),
+            (service.list_deleted_environments, True),
+        ):
+            pool = [gone] if deleted else live
+            want = [
+                n
+                for n in pool
+                if per_item.permits(who, Action.READ_ENVIRONMENT, Securable.environment_scope(n))
+            ]
+            assert sorted(e.name for e in listing(who)) == sorted(want)
+    assert [e.name for e in service.list_environments(task)] == [names[0]]
+    assert service.list_environments(nothing) == []
+    assert [e.name for e in service.list_deleted_environments(bound)] == []
+    assert [e.name for e in service.list_deleted_environments(instance)] == [gone]
 
 
 def test_a_grant_revoked_between_two_requests_is_seen_on_the_next(
@@ -267,6 +340,7 @@ def test_a_grant_revoked_between_two_requests_is_seen_on_the_next(
     assert _service(session).list_environments(reader) == []
 
 
-@pytest.mark.parametrize("count", [0])
-def test_no_questions_cost_nothing(session: Session, count: int) -> None:
-    assert permits_each(GrantAuthorization(session), _reader(session), []) == []
+def test_no_questions_cost_nothing(session: Session) -> None:
+    reader = _reader(session)
+    authz = GrantAuthorization(session)
+    assert _statements(session, lambda: permits_each(authz, reader, [])) == 0
