@@ -26,9 +26,10 @@ lakana run --env dev
 
 - **Bronze** holds data as the source delivered it. The template's bronze tables are generated
   SQL, with the faults real exports have: numbers and dates as text, stray spaces, a sale that
-  arrived twice. Each bronze table writes with `write: merge` on a key that includes the time of
-  the export or of the change, so running it again changes nothing, and a row delivered twice at
-  different times stays in bronze until silver keeps one. To use your own data, replace a bronze
+  arrived twice. Each bronze table writes with `write: merge`, so running it again changes
+  nothing. Customers and sales merge on a key that includes the time of the change or of the
+  export, so a row delivered twice at different times stays in bronze until silver keeps one;
+  stores and products merge on their id. To use your own data, replace a bronze
   file with an asset that reads a source ([Load data from a source](load-data-from-a-source.md)).
 - **Silver** cleans it: the right types, trimmed text, one row per key. Its tables are
   `kind: staging`, and each has one hand-written check under `checks/`.
@@ -95,7 +96,7 @@ layers.gold.reads allows only silver and gold. Read the data from silver or gold
 bronze to layers.gold.reads in lakana.yaml
 ```
 
-The message names the cause and the fix. Delete the file again to go on.
+The message names the cause and the fix. Delete the file and commit the deletion to go on; a deploy reads the commit.
 
 ## Declare the grain
 
@@ -316,7 +317,9 @@ lakana sql "SELECT sale_id, sold_on, customer_city FROM gold.sales_wide WHERE cu
 4 rows
 ```
 
-Two of Grace's sales kept Berlin and two have Hamburg.
+Two of Grace's sales kept Berlin and two have Hamburg. Sale 5 was sold on the day she moved
+and still shows Berlin: the move is recorded at noon, and a sale's day counts from midnight, so
+the sale falls before the Hamburg version starts.
 
 ## Name the measure and the terms
 

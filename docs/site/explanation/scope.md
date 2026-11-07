@@ -56,8 +56,8 @@ How the larger pieces are meant to work:
   REST APIs, and a load can replace, append or merge. More databases and SFTP follow after v1.0.0. For a
   quick start, `lakana load <file> <table>` loads a local file without writing code; it stays as a
   convenience for exploration and tests, and `lakana init --template` starts a project from a
-  tested asset for each kind of source, or a whole star schema (`--template medallion`). An administrator registers a source's address and
-  credentials once under a name in an environment (a named connection, #85); a Python asset
+  tested asset for each kind of source, or a whole star schema (`--template medallion`). An administrator registers a source's address
+  and credentials once under a name in an environment (a named connection, #85); a Python asset
   declares the connections it uses, fetches their credentials at run time, and an ingestion task
   reaches only those (#308). Connections are managed through the CLI and the API, and in the web
   interface once that exists. This is built (M6). The platform does not run connectors of its own: a connection
@@ -70,7 +70,8 @@ How the larger pieces are meant to work:
   main language (#251), and layer rules are opt-in, and enforced at every deploy once a project
   declares them (#252). The write mode `history` (SCD type 2) builds tables whose rows change
   (#253); `merge` (upsert) came earlier, with ingestion in M6, and a template and a guide start a
-  new team (`lakana init --template medallion`, #254). A measure is metadata on a column, not a computed metric (#255). The metadata
+  new team (`lakana init --template medallion`, #254). A measure is metadata on a column, not a
+  computed metric (#255). The metadata
   forms a graph with lineage, impact and join-path queries (#374), which the MCP server offers to
   agents, and a business glossary links terms to tables, columns and measures (#375). All of it
   comes before the web interface and the public beta (epic #249), so that nobody builds projects on
