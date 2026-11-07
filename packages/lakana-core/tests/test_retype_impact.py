@@ -232,7 +232,19 @@ def test_a_column_name_the_graph_cannot_read_is_recorded_as_unchecked(
     found = retype_impact_module.retype_impact(
         star.session, bound, "dev", _DIM, ["a‎b", "store_name"]
     )
-    assert found == ({"table": _DIM, "column": "a‎b", "unchecked": True},)
+    assert found == ({"table": _DIM, "column": "a‎b", "unchecked": True, "unreadable": True},)
+
+
+def test_an_unreadable_column_name_gets_its_own_line_not_the_timeout_one() -> None:
+    entries = retype_impact_module.stored_entries(
+        {"impact": [{"table": _DIM, "column": "a‎b", "unchecked": True, "unreadable": True}]}
+    )
+    (view,) = retype_impact_module.impact_for_reader(
+        entries, "dev", lambda _t: True, reads_environment=True
+    )
+    assert "could not check in time" not in view.message
+    assert "control or format character" in view.message
+    assert f"lakana graph impact --env dev {_DIM}" in view.message
 
 
 def test_stored_entries_skip_what_this_module_did_not_write() -> None:

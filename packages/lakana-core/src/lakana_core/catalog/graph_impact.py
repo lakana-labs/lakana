@@ -376,6 +376,34 @@ def _on_table(
             answer.add(other, 1, f"links {dotted}", False, edge)
 
 
+def _derived(ctx: _Context, asset: str, dotted: str, wanted: str) -> set[str]:
+    """Name the output columns of an asset whose lineage traces them to a column.
+
+    Parameters
+    ----------
+    ctx
+        The request's context.
+    asset
+        The asset's node id; a `reads` edge always starts at an asset
+        (`EnvironmentGraph.add_part`).
+    dotted
+        The source table's name.
+    wanted
+        The source column, casefolded.
+
+    Returns
+    -------
+    set of str
+        The casefolded output columns derived from it.
+    """
+    record = cast(AssetRecord, ctx.graph.records[asset])
+    return {
+        out.casefold()
+        for out, source, name in record.lineage
+        if source == dotted and name.casefold() == wanted
+    }
+
+
 def _readers(ctx: _Context, answer: _Answer, table: str, dotted: str, column: str | None) -> None:
     """Add the assets that read the start, for a warning (#451).
 
@@ -400,17 +428,22 @@ def _readers(ctx: _Context, answer: _Answer, table: str, dotted: str, column: st
     wanted = None if column is None else column.casefold()
     if wanted is not None and not ctx.graph.column_readers.get((dotted, wanted)):
         return  # no lineage reads it: the table's readers are not walked for nothing
-    for read, asset in ctx.around(table, (EdgeKind.READS,)):
-        # A `reads` edge always starts at an asset (`EnvironmentGraph.add_part`).
-        record = cast(AssetRecord, ctx.graph.records[asset])
+    readers = list(ctx.around(table, (EdgeKind.READS,)))
+    if wanted is not None:
+        # One query for the columns of every table a deriving reader builds, not one per reader.
+        ctx.graph.preload_columns(
+            [
+                table_part(built)
+                for _, asset in readers
+                if _derived(ctx, asset, dotted, wanted)
+                for _, built in ctx.around(asset, (EdgeKind.BUILDS,))
+            ]
+        )
+    for read, asset in readers:
         if wanted is None:
             answer.add(asset, 1, f"reads {dotted}", False, read)
             continue
-        derived = {
-            out.casefold()
-            for out, source, name in record.lineage
-            if source == dotted and name.casefold() == wanted
-        }
+        derived = _derived(ctx, asset, dotted, wanted)
         if not derived:
             continue
         answer.add(asset, 1, f"reads {dotted}.{column}", False, read)
