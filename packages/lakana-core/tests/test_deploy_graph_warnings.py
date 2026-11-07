@@ -756,7 +756,9 @@ def test_twenty_removals_with_much_downstream_report_the_declarations_well_withi
     monkeypatch.setattr(GraphService, "_nodes", counted)
     run = _deploy(star, p, _everything(), _stores_without(column=True))
     assert [e["warning"] for e in _stored(run)] == [_COLUMN]  # never the "could not check" line
-    assert spent[0] < 0.5  # a quarter of the 2 s budget, which the deploy's locks wait on
+    # Half the 2 s budget the deploy's locks wait on: about 0.1 s locally, 0.51 s once on a
+    # loaded CI runner, a quarter of the budget could not tell noise from a regression.
+    assert spent[0] < 1.0
     # Only the declarations naming `store_id` are built, nothing downstream: the three of other
     # repositories, and `stores`' own two key checks and term.
     assert built == [6, 6, 6]  # each of the three runs
