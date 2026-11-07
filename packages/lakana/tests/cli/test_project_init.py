@@ -1568,6 +1568,13 @@ def test_the_medallion_files_are_the_ones_the_guide_shows() -> None:
         assert (project / name).read_text() == text, name
 
 
+def test_the_query_the_next_steps_suggest_is_the_one_the_example_runs() -> None:
+    """`MEDALLION_QUERY` is the `lakana sql` command of region `star` in the example's run.sh."""
+    script = (_MEDALLION_EXAMPLE / "run.sh").read_text()
+    region = script.split("# docs:start star\n", 1)[1].split("# docs:end star", 1)[0]
+    assert region == f'lakana sql "{MEDALLION_QUERY}" --env dev\n'
+
+
 def test_the_medallion_glossary_is_the_glossary_example_unchanged() -> None:
     """One glossary example, shown by two guides."""
     example = (

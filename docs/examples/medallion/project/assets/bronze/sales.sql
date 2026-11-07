@@ -24,7 +24,7 @@ WITH generated AS (
     CAST(DATE '2026-10-01' + CAST(n AS INTEGER) AS VARCHAR) AS sold_on,
     CAST(n % 3 AS VARCHAR) || '.00' AS discount,
     '2026-10-20 08:00:00' AS exported_at
-  FROM range(1, 13) AS days(n)
+  FROM (VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10), (11), (12)) AS days(n)
 )
 SELECT * FROM generated
 UNION ALL
