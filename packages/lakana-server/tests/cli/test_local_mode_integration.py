@@ -165,11 +165,13 @@ def test_local_mode_start_query_and_stop(tmp_path: Path) -> None:
         stderr=subprocess.STDOUT,
         text=True,
     )
+    reader: threading.Thread | None = None
     try:
         assert proc.stdout is not None
         output: queue.Queue[str | None] = queue.Queue()
         lines: list[str] = []
-        threading.Thread(target=_read_lines, args=(proc.stdout, output), daemon=True).start()
+        reader = threading.Thread(target=_read_lines, args=(proc.stdout, output), daemon=True)
+        reader.start()
 
         deadline = time.monotonic() + 90
         ready = False
@@ -265,6 +267,12 @@ def test_local_mode_start_query_and_stop(tmp_path: Path) -> None:
                     continue
                 with contextlib.suppress(OSError):
                     os.kill(pid, signal.SIGKILL)
+        # The child has ended, so the reader has seen the end of the stream: close the pipe
+        # rather than leave it to the garbage collector (#468).
+        if reader is not None:
+            reader.join(timeout=10)
+        if proc.stdout is not None:
+            proc.stdout.close()
 
     assert code == 0
     assert not (data_dir / "server.pid").exists()

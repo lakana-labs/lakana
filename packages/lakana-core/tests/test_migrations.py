@@ -12,9 +12,10 @@ not reflected in a migration (or vice versa) fails here.
 
 import json
 import logging
+import shutil
 import sqlite3
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -25,6 +26,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from core_test_helpers import assert_loads_as_pre_m5a, seed_m5a_rows
 from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.engine import Engine
@@ -35,6 +37,8 @@ from lakana_core.models import Base
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 _REVISION_0010 = "a3f7c2e9b4d1"
+
+MigratedDb = Callable[[str], Path]
 
 
 def test_upgraded_schema_matches_the_orm_models(
@@ -825,7 +829,7 @@ def test_0011_backfills_external_claim_for_parseable_legacy_rows(
         )
     engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION_0011)
 
     engine = create_engine(f"sqlite:///{db_path}")
     tables_after = sa.table(
@@ -915,7 +919,7 @@ def test_0012_adds_the_m5a_schema_and_downgrades_cleanly(
 
 @pytest.mark.slow
 def test_0012_downgrade_leaves_nothing_the_previous_release_cannot_load(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Final review I2: a `MAINTAIN_TABLE` grant must not survive `downgrade -1`.
 
@@ -927,13 +931,11 @@ def test_0012_downgrade_leaves_nothing_the_previous_release_cannot_load(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0012)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0012)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         with engine.begin() as connection:
@@ -953,7 +955,7 @@ def test_0012_downgrade_leaves_nothing_the_previous_release_cannot_load(
 
 
 def test_0013_adds_the_m5b_schema_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0013` adds the four M5b tables and its downgrade removes them and M5b grants.
 
@@ -961,13 +963,11 @@ def test_0013_adds_the_m5b_schema_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0013)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0013)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         names = set(inspect(engine).get_table_names())
@@ -1010,7 +1010,7 @@ _M5C1_TABLES = {"runs", "task_runs", "task_attempts", "scheduler_lease"}
 
 
 def test_0014_adds_the_m5c1_schema_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0014` adds the run tables and columns; its downgrade removes them and RUN grants.
 
@@ -1018,13 +1018,11 @@ def test_0014_adds_the_m5c1_schema_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0014)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0014)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -1074,7 +1072,7 @@ _REVISION_0014 = "e7f2a9c4b1d3"
 
 @pytest.mark.slow
 def test_0015_adds_the_claim_counter_seeded_from_attempt_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0015` adds `task_runs.claim_count` (= `attempt` for existing rows).
 
@@ -1082,13 +1080,11 @@ def test_0015_adds_the_claim_counter_seeded_from_attempt_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0014)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0014)
     engine = create_engine(f"sqlite:///{db_path}")
     task_id = uuid.uuid4().hex
     try:
@@ -1152,7 +1148,7 @@ _REVISION_0015 = "f4b8d2a6c9e1"
 
 @pytest.mark.slow
 def test_0016_adds_the_bound_token_columns_and_its_downgrade_deletes_bound_tokens(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0016`: two nullable columns, a CHECK, and a downgrade that drops bound tokens.
 
@@ -1160,13 +1156,11 @@ def test_0016_adds_the_bound_token_columns_and_its_downgrade_deletes_bound_token
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0015)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0015)
     engine = create_engine(f"sqlite:///{db_path}")
 
     def columns() -> set[str]:
@@ -1233,7 +1227,7 @@ _REVISION_0016 = "a6c3e9d1f7b2"
 
 @pytest.mark.slow
 def test_0017_adds_the_nullable_error_cause_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0017`: `query_runs.error_cause` is nullable; existing rows keep `NULL`.
 
@@ -1241,13 +1235,11 @@ def test_0017_adds_the_nullable_error_cause_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0016)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0016)
     engine = create_engine(f"sqlite:///{db_path}")
     run_id = uuid.uuid4().hex
 
@@ -1466,13 +1458,11 @@ def _utc_text() -> str:
 
 @pytest.mark.slow
 def test_0020_adds_package_indexes_and_widens_the_action_column(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0020`: the registry of indexes, and room for `MANAGE_PACKAGE_INDEX`."""
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0019)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0019)
     engine = create_engine(f"sqlite:///{db_path}")
     principal = uuid.uuid4().hex
     grant = (
@@ -1570,7 +1560,7 @@ _REVISION_0020 = "c3f8a6d1e9b4"
 
 @pytest.mark.slow
 def test_0021_adds_cancel_requested_and_its_downgrade_turns_cancelled_runs_into_failed_ones(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0021`: `cancel_requested` is false for old rows; the downgrade maps `CANCELLED`.
 
@@ -1581,13 +1571,11 @@ def test_0021_adds_cancel_requested_and_its_downgrade_turns_cancelled_runs_into_
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0020)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0020)
     engine = create_engine(f"sqlite:///{db_path}")
     first, second = uuid.uuid4().hex, uuid.uuid4().hex
 
@@ -1653,7 +1641,7 @@ _REVISION_0021 = "e4b7d2a9c6f1"
 
 @pytest.mark.slow
 def test_0022_adds_workers_the_worker_ids_and_the_status_index_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0022`: the `workers` table, nullable `worker_id` columns and the status index.
 
@@ -1663,13 +1651,11 @@ def test_0022_adds_workers_the_worker_ids_and_the_status_index_and_downgrades_cl
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0021)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0021)
     engine = create_engine(f"sqlite:///{db_path}")
     query_id, deploy_id = uuid.uuid4().hex, uuid.uuid4().hex
 
@@ -1767,7 +1753,7 @@ _REVISION_0022 = "f6c1a8d3b5e2"
 
 @pytest.mark.slow
 def test_0023_adds_takes_and_a_worker_registered_before_it_reads_all(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0023`: `workers.takes`, string 16, not null, server default `all`.
 
@@ -1778,13 +1764,11 @@ def test_0023_adds_takes_and_a_worker_registered_before_it_reads_all(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0022)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0022)
     engine = create_engine(f"sqlite:///{db_path}")
     insert = sa.text(
         "INSERT INTO workers (id, host, started_at, version, heartbeat_at)"
@@ -1841,7 +1825,7 @@ _COLUMNS_0024_ADDS: dict[str, dict[str, tuple[str, bool]]] = {
 
 @pytest.mark.slow
 def test_0024_adds_what_checks_need_and_older_rows_read_as_no_checks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0024`: the checks of a deploy, the kind of a task, and `check_results`.
 
@@ -1852,13 +1836,11 @@ def test_0024_adds_what_checks_need_and_older_rows_read_as_no_checks(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0023)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0023)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "checks_json" not in {c["name"] for c in inspect(engine).get_columns("deploy_runs")}
@@ -1989,9 +1971,7 @@ _COLUMNS_0025_ADDS = {
 }
 
 
-def test_0025_adds_the_note_of_a_kept_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_0025_adds_the_note_of_a_kept_table(tmp_path: Path, migrated_db: MigratedDb) -> None:
     """Revision `0025`: the three columns of the note a table keeps after a failed check.
 
     The columns are nullable and have no foreign key; a `tables` row written before them reads
@@ -2001,13 +1981,11 @@ def test_0025_adds_the_note_of_a_kept_table(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0024)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0024)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert not _COLUMNS_0025_ADDS.keys() & {
@@ -2025,7 +2003,7 @@ def test_0025_adds_the_note_of_a_kept_table(
     finally:
         engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION_0025)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -2060,9 +2038,7 @@ _REVISION_0025 = "c9f3d6a8b2e5"
 
 
 @pytest.mark.usefixtures("_without_fsync")
-def test_0026_adds_the_binding_of_a_query_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_0026_adds_the_binding_of_a_query_run(tmp_path: Path, migrated_db: MigratedDb) -> None:
     """Revision `0026`: `query_runs.check_result_id`, nullable and without a foreign key.
 
     A query run written before it reads as bound to no check result. Without a foreign key a
@@ -2074,13 +2050,11 @@ def test_0026_adds_the_binding_of_a_query_run(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0025)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0025)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "check_result_id" not in {
@@ -2098,7 +2072,7 @@ def test_0026_adds_the_binding_of_a_query_run(
     finally:
         engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION_0026)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -2134,7 +2108,7 @@ _REVISION_0027 = "e2b5f8c1d4a7"
 
 
 def test_0027_adds_the_set_back_columns_of_a_task_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0027`: `task_runs.setting_back` and `set_back_claims`, both not null.
 
@@ -2145,13 +2119,11 @@ def test_0027_adds_the_set_back_columns_of_a_task_run(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0026)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0026)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         names = {c["name"] for c in inspect(engine).get_columns("task_runs")}
@@ -2170,7 +2142,7 @@ def test_0027_adds_the_set_back_columns_of_a_task_run(
     finally:
         engine.dispose()
 
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION_0027)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         found = {c["name"]: c for c in inspect(engine).get_columns("task_runs")}
@@ -2199,7 +2171,7 @@ _REVISION_0028 = "f3c6a9d2e5b8"
 
 
 def test_0028_adds_the_job_tables_and_the_run_columns_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0028`: `job_schedules`, `job_fires` and four columns of `runs`.
 
@@ -2210,13 +2182,11 @@ def test_0028_adds_the_job_tables_and_the_run_columns_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0027)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0027)
     engine = create_engine(f"sqlite:///{db_path}")
     new_columns = {"job", "trigger", "scheduled_for", "missed"}
     run_id = uuid.uuid4().hex
@@ -2315,7 +2285,7 @@ _DELIVERY_COLUMNS = {
 
 @pytest.mark.slow
 def test_0029_adds_the_notification_deliveries_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0029`: `notification_deliveries`, unique on (run, event), indexed for the loop.
 
@@ -2323,13 +2293,11 @@ def test_0029_adds_the_notification_deliveries_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0028)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0028)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "notification_deliveries" not in inspect(engine).get_table_names()
@@ -2368,7 +2336,7 @@ _REVISION_0030 = "b5e8c1f4a7d0"
 
 
 def test_0030_adds_the_unchecked_mark_of_a_kept_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0030`: `tables.kept_unchecked`, not null; an older note reads as a failed check.
 
@@ -2376,13 +2344,11 @@ def test_0030_adds_the_unchecked_mark_of_a_kept_table(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0029)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0029)
     engine = create_engine(f"sqlite:///{db_path}")
     table_id = uuid.uuid4().hex
     try:
@@ -2425,7 +2391,7 @@ _REVISION_0031 = "c6f9d2a5b8e1"
 
 
 def test_0031_adds_the_stack_of_earlier_marks_of_a_kept_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0031`: `tables.kept_earlier`, not null; an existing row starts with no entries.
 
@@ -2433,13 +2399,11 @@ def test_0031_adds_the_stack_of_earlier_marks_of_a_kept_table(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0030)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0030)
     engine = create_engine(f"sqlite:///{db_path}")
     table_id = uuid.uuid4().hex
     kept_run = uuid.uuid4().hex
@@ -2517,7 +2481,7 @@ _REVISION_0032 = "d7a0e3b6c9f2"
 
 
 def test_0032_adds_the_unknown_mark_of_a_kept_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0032`: `tables.kept_unknown`, not null; an older mark reads as a known one.
 
@@ -2525,13 +2489,11 @@ def test_0032_adds_the_unknown_mark_of_a_kept_table(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0031)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0031)
     engine = create_engine(f"sqlite:///{db_path}")
     table_id = uuid.uuid4().hex
     try:
@@ -2574,7 +2536,7 @@ _REVISION_0033 = "e8b1f4c7d0a3"
 
 
 def test_0033_records_the_schema_a_policy_was_written_against(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0033`: a nullable `schema_id` on row filters and column masks; old rows keep none.
 
@@ -2582,13 +2544,11 @@ def test_0033_records_the_schema_a_policy_was_written_against(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0032)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0032)
     engine = create_engine(f"sqlite:///{db_path}")
     filter_id, mask_id = uuid.uuid4().hex, uuid.uuid4().hex
     try:
@@ -2641,7 +2601,7 @@ _REVISION_0034 = "f1c4a8e2b6d9"
 
 
 def test_0034_binds_each_secret_named_by_exactly_one_index_or_repository(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0034`: `secrets.use_kind` and `use_target_id`; only unambiguous names are bound.
 
@@ -2649,13 +2609,11 @@ def test_0034_binds_each_secret_named_by_exactly_one_index_or_repository(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0033)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0033)
     engine = create_engine(f"sqlite:///{db_path}")
     index_id, repo_id = uuid.uuid4().hex, uuid.uuid4().hex
     secrets = {name: uuid.uuid4().hex for name in ("pypi", "git", "shared", "s3")}
@@ -2728,7 +2686,7 @@ def test_0034_binds_each_secret_named_by_exactly_one_index_or_repository(
 
 
 def test_0034_leaves_every_ambiguous_or_environment_used_secret_unbound(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0034` leaves ambiguous and environment-used secrets unbound.
 
@@ -2739,13 +2697,11 @@ def test_0034_leaves_every_ambiguous_or_environment_used_secret_unbound(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "ambiguous.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0033)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0033)
     when = "2026-10-17 00:00:00"
     env_one, env_two, env_three, who = (uuid.uuid4().hex for _ in range(4))
     index_ids = {
@@ -2924,7 +2880,7 @@ def test_0034_leaves_every_ambiguous_or_environment_used_secret_unbound(
     ids=["list", "string", "jobs-list", "notify-null", "job-string", "no-webhook", "webhook-int"],
 )
 def test_0034_reads_an_unusual_manifest_without_failing_or_inventing_a_webhook(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, odd: object
+    tmp_path: Path, migrated_db: MigratedDb, odd: object
 ) -> None:
     """Revision `0034` walks stored manifests defensively and a good one still counts.
 
@@ -2935,15 +2891,13 @@ def test_0034_reads_an_unusual_manifest_without_failing_or_inventing_a_webhook(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     odd
         The unusual manifest.
     """
-    db_path = tmp_path / "odd.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0033)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0033)
     when = "2026-10-17 00:00:00"
     env_id, repo_id, who = (uuid.uuid4().hex for _ in range(3))
     index_ids = {"plain": uuid.uuid4().hex, "hooked": uuid.uuid4().hex}
@@ -3052,7 +3006,7 @@ def _insert_secret(
 
 
 def test_0035_refuses_an_inconsistent_secret_use_and_its_downgrade_drops_the_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0035`: use_kind and use_target_id are set together; the environment has no target.
 
@@ -3060,13 +3014,11 @@ def test_0035_refuses_an_inconsistent_secret_use_and_its_downgrade_drops_the_che
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0035)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0035)
     engine = create_engine(f"sqlite:///{db_path}")
     target = uuid.uuid4().hex
     try:
@@ -3097,7 +3049,7 @@ def test_0035_refuses_an_inconsistent_secret_use_and_its_downgrade_drops_the_che
 
 
 def test_0035_names_the_secrets_that_break_the_rule_and_changes_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """An existing inconsistent secret stops the upgrade, with its id and the way out.
 
@@ -3105,13 +3057,11 @@ def test_0035_names_the_secrets_that_break_the_rule_and_changes_nothing(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0034)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0034)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         with engine.begin() as connection:
@@ -3168,7 +3118,7 @@ _REVISION_0036 = "b5e2d8f1a7c3"
 
 
 def test_0036_marks_existing_column_masks_as_not_type_checked(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0036`: `column_masks.type_checked`, false for every mask that already exists.
 
@@ -3176,13 +3126,11 @@ def test_0036_marks_existing_column_masks_as_not_type_checked(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0035)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0035)
     engine = create_engine(f"sqlite:///{db_path}")
     mask_id = uuid.uuid4().hex
     try:
@@ -3230,7 +3178,7 @@ _REVISION_0037 = "c6f3a9d2b8e4"
 
 
 def test_0037_adds_the_description_columns_and_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0037`: descriptions on `tables` and `column_descriptions`, undone on downgrade.
 
@@ -3238,13 +3186,11 @@ def test_0037_adds_the_description_columns_and_table(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0036)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0036)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "column_descriptions" not in inspect(engine).get_table_names()
@@ -3293,20 +3239,18 @@ def test_0037_adds_the_description_columns_and_table(
 _REVISION_0038 = "d7a4b0e3c9f5"
 
 
-def test_0038_adds_the_table_reads_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_0038_adds_the_table_reads_table(tmp_path: Path, migrated_db: MigratedDb) -> None:
     """Revision `0038`: `table_reads` with its keys and its day index, undone on downgrade.
 
     Parameters
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0037)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0037)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "table_reads" not in inspect(engine).get_table_names()
@@ -3349,20 +3293,18 @@ def test_0038_adds_the_table_reads_table(tmp_path: Path, monkeypatch: pytest.Mon
 _REVISION_0039 = "e8b5c1f4d0a6"
 
 
-def test_0039_adds_the_table_columns_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_0039_adds_the_table_columns_table(tmp_path: Path, migrated_db: MigratedDb) -> None:
     """Revision `0039`: `table_columns` with its keys and its name index, undone on downgrade.
 
     Parameters
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0038)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0038)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "table_columns" not in inspect(engine).get_table_names()
@@ -3398,20 +3340,18 @@ def test_0039_adds_the_table_columns_table(tmp_path: Path, monkeypatch: pytest.M
 _REVISION_0040 = "f9c6d2a5e1b7"
 
 
-def test_0040_adds_the_failure_codes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_0040_adds_the_failure_codes(tmp_path: Path, migrated_db: MigratedDb) -> None:
     """Revision `0040`: a nullable `failure_code` on `task_runs` and `task_attempts`, undone down.
 
     Parameters
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0039)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0039)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -3445,7 +3385,7 @@ _REVISION_0041 = "a0d7e3b6f2c8"
 
 
 def test_0041_adds_the_time_a_principal_is_passed_by_until(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0041`: a nullable `query_passed_by_until` on `principals`, undone down.
 
@@ -3453,13 +3393,11 @@ def test_0041_adds_the_time_a_principal_is_passed_by_until(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0040)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0040)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         names = {c["name"] for c in inspect(engine).get_columns("principals")}
@@ -3561,7 +3499,7 @@ def _seed_tables_for_0042(db_path: Path) -> dict[str, str]:
 
 
 def test_0042_adds_table_locations_with_a_live_record_for_every_managed_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0042`: `table_locations`, backfilled LIVE for managed tables only, undone down.
 
@@ -3572,13 +3510,11 @@ def test_0042_adds_table_locations_with_a_live_record_for_every_managed_table(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0041)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0041)
     ids = _seed_tables_for_0042(db_path)
 
     command.upgrade(config, _REVISION_0042)
@@ -3680,7 +3616,7 @@ _REVISION_0043 = "c2f9a5d8b4e0"
 
 
 def test_0043_adds_the_tombstone_columns_and_keeps_every_record(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0043`: nullable `purge_started_at` and `dropped_table`; nothing else changes.
 
@@ -3691,13 +3627,11 @@ def test_0043_adds_the_tombstone_columns_and_keeps_every_record(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0042)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0042)
     ids = _seed_tables_for_0042(db_path)
     engine = create_engine(f"sqlite:///{db_path}")
     record_id = uuid.uuid4().hex
@@ -3763,7 +3697,7 @@ _REVISION_0044 = "d3a0b6e9c5f1"
 
 
 def test_0044_adds_retention_columns_and_sets_no_retention_on_any_row(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0044`: retention columns on tables and environments, empty on every old row.
 
@@ -3774,13 +3708,11 @@ def test_0044_adds_retention_columns_and_sets_no_retention_on_any_row(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0042)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0042)
     ids = _seed_tables_for_0042(db_path)
     command.upgrade(config, _REVISION_0043)
     command.upgrade(config, _REVISION_0044)
@@ -3832,7 +3764,7 @@ _REVISION_0045 = "ca4f68b6e89a"
 
 
 def test_0045_adds_the_deletion_columns_and_deletes_no_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0045`: what a deleted environment keeps, empty on every existing row.
 
@@ -3843,13 +3775,11 @@ def test_0045_adds_the_deletion_columns_and_deletes_no_environment(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0042)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0042)
     ids = _seed_tables_for_0042(db_path)
     command.upgrade(config, _REVISION_0044)
     command.upgrade(config, _REVISION_0045)
@@ -3900,7 +3830,7 @@ _VIEW_INDEX = "ix_audit_events_event_type_principal_id_occurred_at"
 
 
 def test_0046_adds_the_index_of_the_view_audit_lookup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0046`: the composite index the `ACTIVITY_VIEWED` window lookup reads.
 
@@ -3908,13 +3838,11 @@ def test_0046_adds_the_index_of_the_view_audit_lookup(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0045)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0045)
 
     def indexes() -> dict[str | None, list[str | None]]:
         """Read the indexes of `audit_events`.
@@ -3944,7 +3872,7 @@ _CI_TABLES = {"ci_trust_rules", "ci_tokens", "ci_oidc_jtis"}
 
 
 def test_0047_adds_the_ci_oidc_tables_and_an_empty_ci_token_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0047`: three empty tables and `deploy_runs.ci_token_id`, empty on every run.
 
@@ -3952,13 +3880,11 @@ def test_0047_adds_the_ci_oidc_tables_and_an_empty_ci_token_id(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0046)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0046)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert not _CI_TABLES & set(inspect(engine).get_table_names())
@@ -4015,20 +3941,18 @@ _SIZE_COLUMNS = {
 }
 
 
-def test_0048_adds_empty_size_columns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_0048_adds_empty_size_columns(tmp_path: Path, migrated_db: MigratedDb) -> None:
     """Revision `0048`: the measured sizes of tables, code archives and worker caches, all empty.
 
     Parameters
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0047)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0047)
 
     def columns() -> dict[str, dict[str, bool]]:
         """Read the nullability of the size columns that exist.
@@ -4065,7 +3989,7 @@ _REVISION_0049 = "a7c3e9f1b2d4"
 
 
 def test_0049_adds_connections_and_the_connection_secret_use(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0049`: the connection tables, the secret use `CONNECTION`, `source_kind`.
 
@@ -4073,13 +3997,11 @@ def test_0049_adds_connections_and_the_connection_secret_use(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0048)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0048)
     engine = create_engine(f"sqlite:///{db_path}")
     edge = uuid.uuid4().hex
     try:
@@ -4168,7 +4090,7 @@ _REVISION_0050 = "b8d4f0a2c3e5"
 
 
 def test_0050_adds_the_merge_key_and_maps_merge_runs_down_to_append(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0050`: `query_runs.merge_key`; a downgrade leaves no `MERGE` the old code reads.
 
@@ -4176,13 +4098,11 @@ def test_0050_adds_the_merge_key_and_maps_merge_runs_down_to_append(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0049)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0049)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "merge_key" not in {c["name"] for c in inspect(engine).get_columns("query_runs")}
@@ -4262,9 +4182,93 @@ def _without_fsync() -> Iterator[None]:
     event.remove(Engine, "connect", _skip_fsync)
 
 
+@pytest.fixture(scope="session")
+def _migrated_files() -> dict[str, Path]:
+    """Hold the SQLite file of each revision, built the first time a test asks for it.
+
+    Returns
+    -------
+    dict of str to Path
+        Revision to the file, one dict per pytest-xdist worker.
+    """
+    return {}
+
+
+@pytest.fixture
+def migrated_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+    _migrated_files: dict[str, Path],
+) -> MigratedDb:
+    """Give a test a SQLite file migrated to a revision without migrating it again (#480).
+
+    The first test of a worker that asks for a revision pays for the upgrade; every later one
+    copies the file. Each test gets its own copy and `LAKANA_DATABASE__URL` pointing at it.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the copy.
+    monkeypatch
+        Points `lakana_core.config.Settings` at the copy.
+    tmp_path_factory
+        Holds the cached files.
+    _migrated_files
+        The files built so far.
+
+    Returns
+    -------
+    MigratedDb
+        `migrated_db(revision)` returns the path of a fresh copy migrated to `revision`.
+    """
+
+    def make(revision: str) -> Path:
+        """Copy the file migrated to a revision.
+
+        Parameters
+        ----------
+        revision
+            The Alembic revision.
+
+        Returns
+        -------
+        Path
+            The test's own copy.
+        """
+        if revision not in _migrated_files:
+            source = tmp_path_factory.mktemp("migrated") / "base.db"
+            # Start from the newest file already built below this revision: a worker that asks
+            # for 0011, then 0025, pays for the fourteen steps between, not for all twenty-five.
+            ancestors = ScriptDirectory.from_config(Config(str(ALEMBIC_INI))).iterate_revisions(
+                revision, "base"
+            )
+            start = next((a.revision for a in ancestors if a.revision in _migrated_files), None)
+            if start is not None:
+                shutil.copyfile(_migrated_files[start], source)
+            with pytest.MonkeyPatch.context() as env:
+                env.setenv("LAKANA_DATABASE__URL", f"sqlite:///{source}")
+                # The test may have turned it off already: leave its listener to it.
+                added = not event.contains(Engine, "connect", _skip_fsync)
+                if added:
+                    event.listen(Engine, "connect", _skip_fsync)
+                try:
+                    command.upgrade(Config(str(ALEMBIC_INI)), revision)
+                finally:
+                    if added:
+                        event.remove(Engine, "connect", _skip_fsync)
+            _migrated_files[revision] = source
+        copy = tmp_path / "migrated.db"
+        shutil.copyfile(_migrated_files[revision], copy)
+        monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{copy}")
+        return copy
+
+    return make
+
+
 @pytest.mark.usefixtures("_without_fsync")
 def test_0051_adds_the_job_starts_and_maps_deploy_runs_down_by_their_starter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0051`: `deploy_runs.job_starts_json`; a downgrade leaves no trigger `DEPLOY`.
 
@@ -4275,13 +4279,11 @@ def test_0051_adds_the_job_starts_and_maps_deploy_runs_down_by_their_starter(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0050)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0050)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "job_starts_json" not in {
@@ -4378,7 +4380,7 @@ _REVISION_0052 = "d1f6b2c4e5a7"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0052_adds_check_results_generated_false_on_old_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0052`: `check_results.generated`, false on a result recorded before it.
 
@@ -4386,13 +4388,11 @@ def test_0052_adds_check_results_generated_false_on_old_rows(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0051)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0051)
     engine = create_engine(f"sqlite:///{db_path}")
     result_id = uuid.uuid4().hex
     try:
@@ -4449,7 +4449,7 @@ _MODEL_COLUMNS = {"model_kind", "model_grain", "model_key"}
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0053_adds_the_table_model_and_the_references_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0053`: the model columns of `tables`, null on an old row, and `table_references`.
 
@@ -4457,13 +4457,11 @@ def test_0053_adds_the_table_model_and_the_references_table(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0052)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0052)
     engine = create_engine(f"sqlite:///{db_path}")
     table_id = uuid.uuid4().hex
     try:
@@ -4545,7 +4543,7 @@ _REVISION_0054 = "f4b8d6e0a2c3"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0054_adds_the_check_message_state_null_on_old_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0054`: `check_message_state` on task runs and attempts, and back.
 
@@ -4553,13 +4551,11 @@ def test_0054_adds_the_check_message_state_null_on_old_rows(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0053)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0053)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         for table in ("task_runs", "task_attempts"):
@@ -4594,7 +4590,7 @@ _REVISION_0055 = "a5c9e7f1b3d4"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0055_adds_the_withheld_lines_of_a_deploy_error_null_on_old_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0055`: `error_withheld_json` on deploy runs, and back.
 
@@ -4602,13 +4598,11 @@ def test_0055_adds_the_withheld_lines_of_a_deploy_error_null_on_old_rows(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0055)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0055)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         found = {c["name"]: c for c in inspect(engine).get_columns("deploy_runs")}
@@ -4630,7 +4624,7 @@ _REVISION_0056 = "b6d0f8a2c4e5"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0056_adds_the_schema_change_of_a_task_null_on_old_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0056`: `schema_change_json` on task runs, and back.
 
@@ -4638,13 +4632,11 @@ def test_0056_adds_the_schema_change_of_a_task_null_on_old_rows(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0056)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0056)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         found = {c["name"]: c for c in inspect(engine).get_columns("task_runs")}
@@ -4666,7 +4658,7 @@ _REVISION_0057 = "c8e2f4a6b0d1"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0057_adds_the_table_measures_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0057`: an empty `table_measures` with its keys; the downgrade drops it.
 
@@ -4674,13 +4666,11 @@ def test_0057_adds_the_table_measures_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0057)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0057)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -4722,7 +4712,7 @@ _REVISION_0058 = "d0f4a6c8e2b3"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0058_adds_the_texts_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0058`: `text_translations`, labels, the text languages and the profile language.
 
@@ -4730,13 +4720,11 @@ def test_0058_adds_the_texts_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0058)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0058)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -4777,22 +4765,18 @@ _REVISION_0059 = "e1a5b7c9d3f4"
 
 
 @pytest.mark.usefixtures("_without_fsync")
-def test_0059_adds_the_check_claims_of_a_task_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_0059_adds_the_check_claims_of_a_task_run(tmp_path: Path, migrated_db: MigratedDb) -> None:
     """Revision `0059`: `task_runs.check_claims`, not null, zero on a row written before it.
 
     Parameters
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0058)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0058)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         assert "check_claims" not in {c["name"] for c in inspect(engine).get_columns("task_runs")}
@@ -4836,7 +4820,7 @@ _REVISION_0060 = "f2b6c8d0e4a5"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0060_adds_how_a_history_run_writes_and_downgrades_it_to_a_merge(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0060`: `query_runs.history`, null on old rows; a downgrade calls the run a merge.
 
@@ -4844,13 +4828,11 @@ def test_0060_adds_how_a_history_run_writes_and_downgrades_it_to_a_merge(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0060)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0060)
     engine = create_engine(f"sqlite:///{db_path}")
     run_id = uuid.uuid4().hex
     now = datetime.now(UTC).isoformat()
@@ -4892,22 +4874,18 @@ _REVISION_0061 = "a3c7d9e1f5b6"
 
 
 @pytest.mark.usefixtures("_without_fsync")
-def test_0061_adds_the_time_column_of_a_reference(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_0061_adds_the_time_column_of_a_reference(tmp_path: Path, migrated_db: MigratedDb) -> None:
     """Revision `0061`: `table_references.at_column`, nullable, gone again after a downgrade.
 
     Parameters
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0061)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0061)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         found = {c["name"]: c for c in inspect(engine).get_columns("table_references")}
@@ -4929,7 +4907,7 @@ _REVISION_0062 = "b4d8e0f2a6c7"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0062_adds_the_glossary_tables_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0062`: four empty glossary tables, the link index; the downgrade drops them.
 
@@ -4937,13 +4915,11 @@ def test_0062_adds_the_glossary_tables_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0062)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0062)
     engine = create_engine(f"sqlite:///{db_path}")
     tables = (
         "glossary_terms",
@@ -4981,7 +4957,7 @@ _REVISION_0063 = "c5e9f1a3b7d8"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0063_adds_the_health_signals_table_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0063`: `table_health_signals` with its index; the downgrade drops it.
 
@@ -4989,13 +4965,11 @@ def test_0063_adds_the_health_signals_table_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0063)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0063)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -5036,7 +5010,7 @@ _REVISION_0064 = "d6f0a2b4c8e9"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0064`: `tables.health_effects`, `notification_deliveries.health_signal_id`.
 
@@ -5049,13 +5023,11 @@ def test_0064_adds_the_health_effects_and_the_signal_of_a_delivery(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0064)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0064)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -5106,7 +5078,7 @@ _REVISION_0065 = "e7a1b3c5d9f0"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0065_adds_the_files_read_table_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0065`: `incremental_files_read` with its index; the downgrade drops it.
 
@@ -5114,13 +5086,11 @@ def test_0065_adds_the_files_read_table_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0065)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0065)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -5156,7 +5126,7 @@ _REVISION_0066 = "f8b2c4d6e0a1"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0066_adds_the_field_id_binding_and_marks_existing_policies_pending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0066`: `field_ids`, `column_field_id`, `binding` (`pending` on old rows).
 
@@ -5164,13 +5134,11 @@ def test_0066_adds_the_field_id_binding_and_marks_existing_policies_pending(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0065)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0065)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         with engine.begin() as connection:
@@ -5220,7 +5188,7 @@ _REVISION_0067 = "a9c3e5f7b1d2"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0067_adds_the_managed_scope_tables_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0067`: `access_managed_scopes` and `access_overrides`; the downgrade drops them.
 
@@ -5228,13 +5196,11 @@ def test_0067_adds_the_managed_scope_tables_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0067)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0067)
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         inspector = inspect(engine)
@@ -5277,7 +5243,7 @@ _REVISION_0068 = "c4e6a8b0d2f1"
 
 @pytest.mark.usefixtures("_without_fsync")
 def test_0068_adds_the_attempt_resource_columns_and_downgrades_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
     """Revision `0068`: three nullable figures on attempts and query runs; the downgrade drops them.
 
@@ -5285,13 +5251,11 @@ def test_0068_adds_the_attempt_resource_columns_and_downgrades_cleanly(
     ----------
     tmp_path
         Holds the throwaway SQLite file.
-    monkeypatch
-        Points `lakana_core.config.Settings` at that file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
     """
-    db_path = tmp_path / "migrated.db"
-    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{db_path}")
+    db_path = migrated_db(_REVISION_0068)
     config = Config(str(ALEMBIC_INI))
-    command.upgrade(config, _REVISION_0068)
     figures = {"peak_memory_bytes", "cpu_seconds", "bytes_read"}
     engine = create_engine(f"sqlite:///{db_path}")
     try:
