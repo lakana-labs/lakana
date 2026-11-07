@@ -134,18 +134,27 @@ libraries in the lock file, and ran two small tests against DuckDB 1.5.5 and aga
 DuckDB 2.0.0, the version in the lock file.
 
 - **Our code.** We searched for HTTP clients, sockets, `urllib`, subprocesses, update checks,
-  usage reporting and the host names of analytics services. The only HTTP client is `httpx`: in
+  usage reporting and the host names of analytics services. The HTTP client of the four packages is `httpx`: in
   the SDK, which talks to the URL of the profile (and, with proxy settings from the
   environment ignored, to the loopback address in local mode), to the GitHub Actions ID token
-  service in a job that signs in by OIDC, and, in the helpers that Python assets use to read
-  sources, to the endpoints of the connections they declare (listed above); and in `lakana_core.net`, which the
+  service in a job that signs in by OIDC, and in `lakana_core.net`, which the
   worker uses for webhooks and the server for the CI providers' keys, both listed above. The only other request is the
-  container's health check, to `127.0.0.1`. The only programs the code starts are `git`,
+  container's health check, to `127.0.0.1`. The helpers that Python assets use to read sources
+  (`lakana.ingest`) are the exception: they read S3, GCS and Azure through `obstore`, whose HTTP
+  client is compiled Rust, not `httpx`, and databases through the drivers below. They connect to
+  the endpoints of the connections an asset declares (listed above). The only programs the code starts are `git`,
   `uv`, the task's own Python interpreter, and Lakana's own server and worker.
 - **Python libraries.** We searched the installed source of the libraries Lakana depends on
   (`pyiceberg`, `fsspec`, `s3fs`, `aiobotocore`, `fastapi`, `starlette`, `uvicorn`,
   `pydantic`, `sqlalchemy`, `alembic`, `pg8000`, `sqlglot`, `httpx`, `requests` and others)
   for telemetry, analytics, update-check and error-reporting code. We found none.
+- **The `lakana[assets]` extra.** It installs `polars`, `fastexcel`, `obstore`,
+  `adbc-driver-manager`, `adbc-driver-postgresql`, `adbc-driver-sqlite` and `PyMySQL`, for projects
+  with Python assets. We searched their installed Python source for telemetry, analytics and
+  error-reporting code and found none. We did not inspect their compiled code (`polars`,
+  `obstore` and the ADBC drivers are native). Each is used to read the source a user configures:
+  `obstore` to an S3, GCS or Azure endpoint, the ADBC drivers and `PyMySQL` to a database server.
+  We did not check whether the native parts open any other connection.
 - **DuckDB.** It has no setting for telemetry. Its extension settings are listed above: the
   worker turns off automatic installation and loading of extensions and refuses community
   extensions, so the `httpfs` download is the only extension traffic. We checked that

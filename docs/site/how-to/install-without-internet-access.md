@@ -81,7 +81,7 @@ bring the file in yourself and forbid the download:
    With `none` the worker never downloads, and if the file is missing it stops at start instead of
    trying. The worker's start-up message names the exact path it looked for, for example (a query that finds the file gone later fails with the same text, which begins `Query failed:` and says `Tell the operator:` where this says `To fix it:`):
 
-   > The worker cannot load DuckDB's httpfs extension: /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension is missing and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. To fix it: run the worker from the Lakana container image, which bundles it, or copy httpfs.duckdb_extension to /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension (inside /home/lakana/.duckdb/extensions), or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it.
+   > the worker cannot load DuckDB's httpfs extension: /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension is missing and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. To fix it: run the worker from the Lakana container image, which bundles it, or copy httpfs.duckdb_extension to /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension (inside /home/lakana/.duckdb/extensions), or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it.
 
    Use the path in that message, not this one. A new DuckDB release needs its own file: after you
    upgrade Lakana to a release with a new DuckDB, repeat steps 1 and 2.
@@ -165,7 +165,7 @@ such a lock with `LAKANA_RUN__INDEX_URL` set and refuses it without.
 
 With the Compose bundle's docker runner, a build reaches only the host of `LAKANA_RUN__INDEX_URL`
 instead of the public index, over `https`, on the port of the URL (443 unless the URL says
-otherwise); a mirror under `http://` is refused (`http` is accepted only for loopback addresses, which a build container cannot reach). A mirror with a certificate of a private authority
+otherwise); a mirror under `http://` is refused (with the docker runner `LAKANA_RUN__INDEX_URL` refuses every `http://` URL, loopback included, and the worker does not start; only `lakana index add` accepts `http` for `localhost` and loopback addresses). A mirror with a certificate of a private authority
 needs `LAKANA_RUN__CA_BUNDLE` on the worker, with the file mounted into it. See
 [Package indexes and proxies](run-python-tasks-in-containers.md#package-indexes-and-proxies) for
 the proxy (`LAKANA_EGRESS_UPSTREAM_PROXY`), the private authority and the addresses a build never

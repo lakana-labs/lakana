@@ -214,7 +214,7 @@ code offers no way to change or delete one (`AuditService` has no update or dele
 the API has no route for it. But the log is rows in a Postgres table: nothing in the database
 stops a person with the database password from changing or deleting rows, no event would record
 it, and nothing in the exported files would show it afterwards. Integrity protection, which would
-make a change detectable, is not part of v1.0.0; it is planned for after it. Until then:
+make a change detectable, is not part of v1.0.0; it is planned for after it ([#495](https://github.com/lakana-labs/lakana/issues/495)). Until then:
 
 - Restrict who holds the database password (`POSTGRES_PASSWORD` in the bundle's `.env`) and the
   machine's `docker` access, as you restrict the right to read the log.
