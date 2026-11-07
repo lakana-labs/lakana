@@ -135,7 +135,8 @@ DuckDB 2.0.0, the version in the lock file.
 
 - **Our code.** We listed every module of the four packages that imports a network client, with
 
-  ```text
+  <!-- not tested: run in a checkout of the repository, which the example runner does not have -->
+  ```bash
   git grep -n -E "^\s*(import|from) (httpx|http\.client|http\.server|urllib\.request|urllib3|requests|aiohttp|socket|socketserver|smtplib|obstore|botocore|aiobotocore|boto3|s3fs|gcsfs|adlfs|pyarrow\.fs|websockets|ftplib|xmlrpc|ssl|pymysql|adbc_driver_[a-z]+|pg8000|psycopg|paramiko|duckdb|uvicorn)\b" packages/*/src
   ```
 
