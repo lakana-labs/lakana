@@ -242,12 +242,16 @@ def test_the_default_prints_the_migration_progress() -> None:
 
 
 def test_a_real_migration_prints_its_steps_at_the_default(tmp_path: Path) -> None:
-    """`migrate.upgrade` after `configure_logging()` prints a "Running upgrade" line per step."""
+    """`migrate.upgrade` after `configure_logging()` prints a "Running upgrade" line per step.
+
+    Two real steps (to revision 0002) show it; running every migration to `head` would only
+    make the test slower with each new revision.
+    """
     done = _child(
         "from lakana_core import migrate\n"
         "from lakana_core.log_setup import configure_logging\n"
         "configure_logging()\n"
-        f"migrate.upgrade('sqlite:///{tmp_path}/m.db')\n"
+        f"migrate.upgrade('sqlite:///{tmp_path}/m.db', '7c957aaa4637')\n"
     )
     assert done.returncode == 0, done.stderr
-    assert "INFO alembic.runtime.migration: Running upgrade" in done.stderr
+    assert done.stderr.count("INFO alembic.runtime.migration: Running upgrade") == 2
