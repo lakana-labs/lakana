@@ -45,9 +45,36 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
     "EPL": ("eclipse public license", "epl"),
     "CDDL": ("common development and distribution license", "cddl"),
     "EUPL": ("european union public license", "european union public licence", "eupl"),
+    # The SIL Open Font License is font-level copyleft (a modified font must stay under
+    # the OFL). Accepted only for FONT_PACKAGES on the npm side; everywhere else it fails.
+    "OFL": ("open font license", "ofl"),
 }
 
-ALLOWLIST: frozenset[str] = frozenset({"hypothesis", "certifi", "pathspec"})
+# Bundled, unmodified, never subset: IBM Plex reserves the name "Plex" (OFL-1.1 with a
+# Reserved Font Name), so only the complete upstream woff2 files ship (M7 part-1 design).
+FONT_PACKAGES: frozenset[str] = frozenset({"@ibm/plex-sans", "@ibm/plex-mono"})
+
+ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "hypothesis",
+        "certifi",
+        "pathspec",
+        "axe-core",
+        "@axe-core/playwright",
+        "lightningcss",
+        "lightningcss-android-arm64",
+        "lightningcss-darwin-arm64",
+        "lightningcss-darwin-x64",
+        "lightningcss-freebsd-x64",
+        "lightningcss-linux-arm-gnueabihf",
+        "lightningcss-linux-arm64-gnu",
+        "lightningcss-linux-arm64-musl",
+        "lightningcss-linux-x64-gnu",
+        "lightningcss-linux-x64-musl",
+        "lightningcss-win32-arm64-msvc",
+        "lightningcss-win32-x64-msvc",
+    }
+)
 """Distributions explicitly permitted despite their licence. Each entry needs a
 comment justifying it, and adding one is a deliberate decision.
 
@@ -73,6 +100,12 @@ comment justifying it, and adding one is a deliberate decision.
   dependency of every package (`[build-system].requires`); declaring it (and
   therefore `pathspec`) explicitly in `dev` changes nothing about what ships —
   neither is a runtime dependency of any of the four packages.
+* ``axe-core`` and ``@axe-core/playwright`` — MPL-2.0, npm, test-time only (Playwright's
+  accessibility checks), unmodified, never in the built bundle (dependency-cruiser's
+  ``not-to-dev-dep`` rule keeps ``ui/src`` from importing them).
+* ``lightningcss`` (and its ``lightningcss-<platform>`` packages) — MPL-2.0, npm, Vite 8's
+  CSS transformer and minifier: a build tool used unmodified whose output is our own CSS;
+  it is never shipped.
 """
 
 
@@ -313,6 +346,8 @@ def find_npm_violations(
                 family = classify_expression(licence)
             except ValueError:
                 violations.append((name, licence, "UNPARSEABLE"))
+                continue
+            if family == "OFL" and name in FONT_PACKAGES:
                 continue
             if family is not None:
                 violations.append((name, licence, family))

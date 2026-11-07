@@ -58,6 +58,7 @@ DOCS = [
     "uv run --group docs zensical build --strict",
     "uv run pytest scripts/tests -q -p no:cacheprovider",
 ]
+UI = ["npm --prefix ui run check", "npm --prefix ui run e2e:smoke"]
 PYTEST = "uv run pytest -n 2 --dist loadfile -q -p no:cacheprovider"
 
 
@@ -71,10 +72,13 @@ class Selection:
         Test directories to run, or `EVERYTHING` (None) for the whole unit suite.
     docs
         Whether the documentation checks run.
+    ui
+        Whether a file under ``ui/`` changed, so the web interface's gates run.
     """
 
     tests: list[str] | None
     docs: bool
+    ui: bool = False
 
 
 def _package_of(path: str) -> tuple[str, str] | None:
@@ -327,17 +331,20 @@ def select(
     Returns
     -------
     Selection
-        The tests and whether the documentation checks run.
+        The tests, whether the documentation checks run and whether the ui gates run.
     """
     docs = any(is_docs_only([path]) for path in paths)
+    ui = any(path.startswith("ui/") for path in paths)
     changed: set[str] = set()
     chosen: set[str] = set()
     for path in paths:
         if is_docs_only([path]):
             continue
+        if path.startswith("ui/"):
+            continue
         package = _package_of(path)
         if package is None:
-            return Selection(tests=EVERYTHING, docs=docs)
+            return Selection(tests=EVERYTHING, docs=docs, ui=ui)
         changed.add(package[0])
         chosen.add(package[1])
     if changed:
@@ -348,7 +355,7 @@ def select(
                 chosen.add(test_file)
     # A file inside a selected test directory adds nothing.
     kept = [t for t in chosen if not any(t.startswith(o + "/") for o in chosen)]
-    return Selection(tests=sorted(kept), docs=docs)
+    return Selection(tests=sorted(kept), docs=docs, ui=ui)
 
 
 def commands(selection: Selection) -> list[str]:
@@ -371,6 +378,8 @@ def commands(selection: Selection) -> list[str]:
         lines.append(f"{PYTEST} {' '.join(selection.tests)}")
     if selection.docs:
         lines.extend(DOCS)
+    if selection.ui:
+        lines.extend(UI)
     return lines
 
 

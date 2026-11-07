@@ -26,7 +26,9 @@ import-linter enforces these boundaries; `uv run lint-imports` checks them.
    copyleft (MPL, EPL, CDDL, EUPL) only unmodified and only via a justified entry in
    `scripts/check_licenses.py`'s `ALLOWLIST` — CI fails otherwise. Covers Python **and npm**:
    any `package-lock.json` is checked (SPDX `OR` passes if any alternative is permissive;
-   a missing licence fails); pnpm/yarn lockfiles are refused until supported.
+   a missing licence fails); pnpm/yarn lockfiles are refused until supported. Fonts under the SIL OFL only from
+   `scripts/check_licenses.py`'s `FONT_PACKAGES`, bundled unmodified and never subset
+   (`docs/agent/conventions.md`).
 5. **Run the gates before claiming done.** Locally, before a push: `ruff check`,
    `ruff format --check`, `ty check packages`, `lint-imports`, and the changed packages' own tests
    plus every test that imports a changed package (`scripts/select_tests.py` reads the imports

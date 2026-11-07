@@ -1,11 +1,14 @@
 """Tests for the dependency licence check."""
 
+import ast
+import itertools
 import json
 from pathlib import Path
 
 import pytest
 
 from scripts.check_licenses import (
+    ALLOWLIST,
     classify,
     classify_expression,
     find_lockfiles,
@@ -437,3 +440,81 @@ def test_a_dependency_only_an_extra_pulls_in_is_judged(
 
     assert main() == 1
     assert "copyleftpkg" in capsys.readouterr().err
+
+
+def allowlist_docstring() -> str:
+    """Return the docstring literal that follows the ``ALLOWLIST`` assignment.
+
+    Returns
+    -------
+    str
+        The text of the string expression right after ``ALLOWLIST = ...``.
+
+    Raises
+    ------
+    AssertionError
+        If there is no ``ALLOWLIST`` assignment.
+    """
+    source = Path(__file__).resolve().parents[1] / "check_licenses.py"
+    body = ast.parse(source.read_text()).body
+    for node, following in itertools.pairwise(body):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "ALLOWLIST"
+        ):
+            assert isinstance(following, ast.Expr)
+            assert isinstance(following.value, ast.Constant)
+            return str(following.value.value)
+    raise AssertionError("ALLOWLIST not found")
+
+
+def test_the_plex_fonts_pass_under_ofl() -> None:
+    """The two bundled IBM Plex font packages pass under OFL-1.1."""
+    lock = _lock({"node_modules/@ibm/plex-sans": {"license": "OFL-1.1"}})
+    assert find_npm_violations(lock, ALLOWLIST) == []
+
+
+@pytest.mark.parametrize(
+    "licence",
+    ["OFL-1.1", "OFL-1.0", "OFL-1.1-RFN", "OFL-1.1-no-RFN", "SIL Open Font License 1.1"],
+)
+def test_ofl_outside_a_font_package_fails(licence: str) -> None:
+    """OFL is refused for any package that is not a listed font package."""
+    lock = _lock({"node_modules/left-pad": {"license": licence}})
+    assert find_npm_violations(lock, ALLOWLIST) == [("left-pad", licence, "OFL")]
+
+
+def test_ofl_as_one_alternative_of_a_permissive_or_passes() -> None:
+    """``MIT OR OFL-1.1`` passes: one permissive alternative is enough."""
+    lock = _lock({"node_modules/left-pad": {"license": "MIT OR OFL-1.1"}})
+    assert find_npm_violations(lock, ALLOWLIST) == []
+
+
+def test_a_font_package_is_exempt_from_ofl_only() -> None:
+    """Any other family on a font package still fails."""
+    lock = _lock({"node_modules/@ibm/plex-mono": {"license": "MPL-2.0"}})
+    assert find_npm_violations(lock, ALLOWLIST) == [("@ibm/plex-mono", "MPL-2.0", "MPL")]
+
+
+def test_python_metadata_gets_no_font_exemption() -> None:
+    """The Python side classifies OFL and exempts nothing."""
+    assert classify("SIL Open Font License 1.1 (OFL-1.1)") == "OFL"
+    entries = [{"Name": "@ibm/plex-sans", "License": "OFL-1.1"}]
+    assert find_violations(entries, ALLOWLIST) == [("@ibm/plex-sans", "OFL-1.1", "OFL")]
+
+
+@pytest.mark.parametrize(
+    "name", ["axe-core", "@axe-core/playwright", "lightningcss", "lightningcss-linux-x64-gnu"]
+)
+def test_the_dev_only_mpl_tools_pass_the_npm_check(name: str) -> None:
+    """The allowlisted dev-only MPL tools pass."""
+    lock = _lock({f"node_modules/{name}": {"license": "MPL-2.0"}})
+    assert find_npm_violations(lock, ALLOWLIST) == []
+
+
+def test_every_allowlist_entry_is_justified_in_the_docstring() -> None:
+    """Each entry has its own bullet; one covers lightningcss and its platform packages."""
+    doc = allowlist_docstring()
+    for name in ALLOWLIST:
+        assert f"``{name}``" in doc or name.startswith("lightningcss-")

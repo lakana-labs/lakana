@@ -200,7 +200,7 @@ build the same as strong copyleft. `scripts/check_licenses.py` runs in `security
 every PR, over an environment with every dependency group **and every extra of every
 workspace package** (`uv run --all-groups --all-extras --all-packages pip-licenses`): a
 dependency only `lakana[assets]` pulls in is judged like any other.
-It matches license metadata case-insensitively against nine copyleft families (short ids match
+It matches license metadata case-insensitively against ten copyleft families (short ids match
 as whole tokens, so `Simplified BSD` is not MPL), with
 each family's more specific needle checked before a more general one that would also match
 it (AGPL/LGPL before the bare GPL needle, since their names contain it).
@@ -215,13 +215,25 @@ allowlisted. Workspace members and `link` entries are first-party and skipped. `
 "unsupported lockfile" error rather than skipped. No lockfile means the npm part is a no-op.
 E.g. Shepherd.js and Intro.js (AGPL) are refused; Driver.js and react-joyride (MIT) pass.
 
-`ALLOWLIST` holds three entries today, each with its own justifying comment: `hypothesis`
+`ALLOWLIST` holds these entries today, each with its own justifying comment: `hypothesis`
 (MPL-2.0, `dev` dependency-group only, never shipped), `pathspec` (MPL-2.0, transitive dep of
 `hatchling`, `dev` only) and `certifi` (MPL-2.0, a direct dependency of `lakana-worker`,
 whose query process falls back to its CA bundle, and a transitive dependency of `requests`
 that `pyiceberg` requires — present in the default, shipped dependency set, allowlisted because MPL-2.0's share-alike obligation attaches only to
 modifications of certifi's own files, never to code that merely imports it, and certifi is
 used unmodified).
+The npm side adds `axe-core` and `@axe-core/playwright` (MPL-2.0, test-time only, never in the
+bundle) and `lightningcss` with its platform packages (MPL-2.0, Vite's CSS transformer, a build
+tool used unmodified, never shipped).
+
+### Fonts: SIL OFL 1.1
+
+The SIL Open Font License is a tenth family in the check (`OFL`). It is accepted only for the
+bundled, unmodified font files of the packages in `FONT_PACKAGES`
+(`@ibm/plex-sans`, `@ibm/plex-mono`) and only on the npm side; the same licence on any other
+package, or Python metadata, fails. Never subset a font with a Reserved Font Name: IBM Plex
+reserves "Plex", so only the `fonts/complete/woff2/` files are used. The OFL text ships beside
+the fonts.
 
 The design decision (architecture Constraint 8) is pg8000 (BSD-3) as the default Postgres
 driver, with psycopg2 (LGPL — forbidden outright, no allowlist possible under the rule
