@@ -452,6 +452,8 @@ name. In a script, pass `--yes` to skip the question.
 
 - [Build a table with Python](python-sample.md) adds a Python asset to this sample, with
   `lakana init --template python`.
+- [Model a star schema](../how-to/model-a-star-schema.md) starts from `lakana init --template medallion`:
+  bronze, silver and a gold star with generated data.
 - [Check your data](../how-to/check-your-data.md) writes more checks, shows a failing one and what
   it does to a table.
 - [Projects and deploys](../how-to/projects.md) covers Python assets, dry-run deploys, rollback, and

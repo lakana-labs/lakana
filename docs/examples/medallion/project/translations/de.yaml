@@ -1,0 +1,88 @@
+gold.dim_store:
+  label: Filialen
+  description: Die Filialen, eine Zeile je Filiale.
+  grain: Eine Zeile pro Filiale.
+  columns:
+    store_id:
+      description: Die Nummer der Filiale.
+    name:
+      description: Der Name der Filiale.
+    city:
+      description: Die Stadt, in der die Filiale liegt.
+gold.dim_product:
+  label: Produkte
+  description: Die Produkte, die wir verkaufen, mit ihrem aktuellen Preis.
+  grain: Eine Zeile pro Produkt.
+  columns:
+    product_id:
+      description: Der Code des Produkts, zum Beispiel P-100.
+    name:
+      description: Der Name des Produkts.
+    category:
+      description: Die Produktgruppe.
+    unit_price:
+      description: Der Preis einer Einheit in Euro.
+gold.dim_customer:
+  label: Kunden
+  description: Jede Version jedes Kunden; zieht ein Kunde um, entsteht eine neue Zeile, und alte Verkäufe behalten die Stadt von damals.
+  grain: Eine Zeile pro Kunde und Version seiner Angaben.
+  columns:
+    customer_id:
+      description: Der Code des Kunden.
+    name:
+      description: Der Name des Kunden.
+    city:
+      description: Die Stadt, in der der Kunde in dieser Version wohnte.
+gold.fact_sales:
+  label: Verkäufe
+  description: Eine Zeile pro Verkauf, mit Verweis auf Filiale, Produkt und Kunde, wie sie am Tag des Verkaufs waren.
+  grain: Eine Zeile pro Verkauf.
+  columns:
+    sale_id:
+      description: Die Nummer des Verkaufs.
+    store_id:
+      description: Die Filiale, die verkauft hat.
+    customer_id:
+      description: Der Kunde, der gekauft hat.
+    product_id:
+      description: Das verkaufte Produkt.
+    sold_on:
+      description: Der Tag des Verkaufs.
+    quantity:
+      description: Wie viele Einheiten verkauft wurden.
+    gross_amount:
+      description: Menge mal Einzelpreis in Euro, vor dem Rabatt.
+    net_amount:
+      description: Der Betrag in Euro nach dem Rabatt.
+  measures:
+    net_amount:
+      label: Nettoumsatz
+gold.sales_wide:
+  label: Verkäufe, breit
+  description: Eine Zeile pro Verkauf mit Filiale, Produkt und Kunde im Klartext, für Tabellenkalkulationen.
+  grain: Eine Zeile pro Verkauf.
+  columns:
+    sale_id:
+      description: Die Nummer des Verkaufs.
+    sold_on:
+      description: Der Tag des Verkaufs.
+    store:
+      description: Der Name der Filiale.
+    store_city:
+      description: Die Stadt, in der die Filiale liegt.
+    product:
+      description: Der Name des Produkts.
+    category:
+      description: Die Produktgruppe.
+    customer_id:
+      description: Der Kunde, der gekauft hat.
+    customer:
+      description: Der Name des Kunden.
+    customer_city:
+      description: Die Stadt, in der der Kunde am Tag des Verkaufs wohnte.
+    quantity:
+      description: Wie viele Einheiten verkauft wurden.
+    gross_amount:
+      description: Menge mal Einzelpreis in Euro, vor dem Rabatt.
+    net_amount:
+      description: Der Betrag in Euro nach dem Rabatt.
