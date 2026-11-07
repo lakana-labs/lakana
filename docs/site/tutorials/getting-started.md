@@ -24,6 +24,10 @@ pip install "lakana[server]"
 To check that a download is the one Lakana published, see
 [Verify a download](../how-to/deploy-with-compose.md#verify-a-download).
 
+To see which network connections Lakana makes, and how to turn each off, read
+[What leaves the machine](../explanation/what-leaves-the-machine.md). To install on a machine with
+no internet access, see [Install without internet access](../how-to/install-without-internet-access.md).
+
 To work on Lakana itself, or to try the development version, install from a checkout of the
 repository instead. You need [`uv`](https://docs.astral.sh/uv/), a Python package manager:
 

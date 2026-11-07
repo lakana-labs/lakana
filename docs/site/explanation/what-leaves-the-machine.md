@@ -8,7 +8,8 @@ where network access is controlled, start here.
 packages contains no usage reporting, no update check and no connection to a project server.
 That statement is about the code we ship and the Python libraries it uses. For the
 programs it starts and the container images of the Compose bundle, see "What we could not
-verify".
+verify". To run Lakana with no internet access at all, see
+[Install without internet access](../how-to/install-without-internet-access.md).
 
 ## The connections Lakana makes
 
@@ -70,13 +71,55 @@ A few more things you may see:
 - **This documentation site** loads no font, script, image or style sheet from another host, so
   it also works on an internal network.
 
+## Without storage keys: the cloud metadata address
+
+If an environment's storage is an `s3://` root and its options and secret hold no access key
+(`s3.access-key-id`), Lakana gives the S3 libraries no credentials, and they look for some the
+way the AWS tools do: environment variables, configuration files and, last, the instance
+metadata service of a cloud machine at `169.254.169.254`. The server and the worker both make
+storage calls (the server's readiness check, for one, is a metadata request to each environment's
+storage), so either may ask. An environment with keys, which is what the Compose bundle creates, never does, and neither
+does a local `file://` root. Lakana uses two S3 clients, and we checked both: `s3fs` (through
+`botocore`) and `pyarrow` (the AWS C++ library, through `pyiceberg`). With no keys, each sent
+requests to the metadata endpoint (we pointed `AWS_EC2_METADATA_SERVICE_ENDPOINT` at a listener
+on this machine to see them), and with `AWS_EC2_METADATA_DISABLED=true` in the environment, each
+sent none. Set the variable on the `server` and `worker` services if your environments have no
+keys and the machine is not a cloud machine. On a cloud machine where an instance role is how the
+storage is reached, do not set it: the role is that lookup.
+
+## Libraries and programs with a telemetry switch
+
+| Part | What we found | If you want to be sure |
+|---|---|---|
+| DuckDB 2.0.0 | No telemetry setting. The only traffic we know is the extension download above. Starting it and running `SELECT 42` made no network connection. | `LAKANA_WORKER__EXTENSION_SOURCE=none` |
+| `pyiceberg`, `fsspec`, `s3fs`, `aiobotocore`, `botocore` | No telemetry or update check in their source. `botocore` and the AWS C++ library of `pyarrow` look for credentials as the section above says; nothing else. | `AWS_EC2_METADATA_DISABLED=true` |
+| `pyarrow` | The installed wheel is built with OpenTelemetry support (`pyarrow.is_opentelemetry_enabled()` is `True`). We found no exporter that starts on its own: reading and writing a Parquet file in memory made no network connection. The library names an environment variable, `ARROW_TRACING_BACKEND`, for choosing an exporter; Lakana sets none. | Do not set `ARROW_TRACING_BACKEND` or `OTEL_*` variables on the server or the worker. |
+| `httpx`, `fastapi`, `starlette`, `uvicorn`, `pydantic`, `sqlalchemy`, `alembic`, `pg8000`, `sqlglot`, `cryptography`, `typer`, `rich` | No telemetry in their source. | |
+| `uv` | The worker runs it to build a project's environment, with `UV_PYTHON_DOWNLOADS=never`. We know of no telemetry setting of `uv`, and we did not inspect its binary. Its connections are the ones in the table above. | See "What we could not verify" |
+| `pip` | Lakana never runs it, except that the image build installs the locked wheels with it. When you run `pip install` yourself, `pip` may ask the package index whether a newer `pip` exists. | `--disable-pip-version-check`, or `PIP_DISABLE_PIP_VERSION_CHECK=1` |
+
+Importing the four Lakana packages and the libraries above made no network connection either: we
+ran the import under `strace` and looked for `connect` calls to an IP address.
+
 ## What is stored where
 
 - **The catalog database (Postgres):** environments, namespaces and table records, principals,
-  grants, row filters and column masks, the audit log, deploy and run records, and secrets,
-  which are stored encrypted. No API route returns a stored secret's value.
+  grants, row filters and column masks, the audit log (the table `audit_events`: see
+  [Export and keep the audit log](../how-to/export-and-keep-the-audit-log.md)), deploy and run
+  records, and secrets, which are stored encrypted. No API route returns a stored secret's value.
+  In local mode the catalog is a SQLite file in the instance's data directory
+  (`~/.local/share/lakana/local`, or under `XDG_DATA_HOME`).
 - **Object storage:** the table data and Iceberg metadata, query results, the code archive of
-  each deploy and the logs of task runs.
+  each deploy, the files of artifacts and the logs of task runs.
+- **The master key and the database password:** in the `.env` file of a Compose bundle. Whoever
+  holds the master key and the database can read every stored secret.
+- **The machines that run the server and the workers:** the process log (the output of each
+  container, `docker compose logs`), whose alert lines are in [the log events reference](../reference/log-events.md); and on each
+  worker its caches,
+  the downloaded packages of uv and the Python environments of projects.
+- **Where the CLI runs:** the profile file `~/.config/lakana/config.toml` (or under
+  `XDG_CONFIG_HOME`) with the server's URL and a token. The CLI refuses to read it when other
+  users can read it.
 
 ## How we checked
 
@@ -100,6 +143,12 @@ DuckDB 2.0.0, the version in the lock file.
   extensions, so the `httpfs` download is the only extension traffic. We checked that
   `INSTALL` contacts the extension repository when the extension is missing, and does not when
   it is already installed.
+- **At run time.** We ran the import of the four packages and their libraries, a DuckDB query
+  and a Parquet round trip in `pyarrow` under `strace`, and no `connect` call went to an IP
+  address. We pointed `AWS_EC2_METADATA_SERVICE_ENDPOINT` at a listener on this machine and made
+  each S3 client (`s3fs` and `pyiceberg`'s `pyarrow` one) call a bucket without keys, with and
+  without `AWS_EC2_METADATA_DISABLED=true`: they asked the listener in the first case and not
+  in the second.
 - **Where the extension download goes.** The repository setting is empty by default, so
   the host is DuckDB's own default. We read it in DuckDB 2.0.0's source
   (`extension_install_info.hpp`): `http://extensions.duckdb.org`, with
@@ -123,14 +172,12 @@ DuckDB 2.0.0, the version in the lock file.
   looked at its settings and one behaviour, as above. For `uv`, which the worker runs to
   build environments, we know only from the code that it is run to install packages from an index. We did
   not check what else it does.
-- **Offline extension install.** Lakana cannot point DuckDB at a mirror. On a machine without
-  internet access, use the container image or put the extension in DuckDB's extension directory
-  before the first query, and set `LAKANA_WORKER__EXTENSION_SOURCE=none` so that a missing file
-  stops the worker at start instead of a download attempt.
-- **Cloud credential lookup.** The S3 libraries Lakana uses can look for credentials at the cloud
-  instance metadata address (`169.254.169.254`, in `botocore`) when an S3 environment is
-  configured without access keys. We did not test when this happens in Lakana. Set
-  `AWS_EC2_METADATA_DISABLED=true` to turn it off.
+- **Offline extension install.** Lakana cannot point DuckDB at a mirror; see
+  [Install without internet access](../how-to/install-without-internet-access.md) for the image,
+  or the file to copy, and the setting that stops a download.
+- **Other cloud lookups.** We checked the instance metadata address only. The AWS libraries may
+  have other places to look for credentials; we did not test them. Lakana sets no `AWS_*`
+  variable for the server or the worker, so only what you set reaches them.
 - **Postgres and SeaweedFS images.** We did not check the images the Compose bundle starts for
   telemetry of their own. Check their documentation if it matters to you.
 - **Other versions.** This page describes the code in this repository at the time it was
