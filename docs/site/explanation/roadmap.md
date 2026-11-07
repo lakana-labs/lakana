@@ -183,7 +183,8 @@ beta ships with the ingestion helpers and named connections.
    first audience needs, and the private test round checks it before the public beta. After
    M7, a small private test round on a hosted instance comes before the beta.
 7. **M7c, public beta.** The repository is open and the packages are on PyPI as a pre-beta from
-   0.12.0; the beta is the 0.x release that says it is ready to try, planned for about early December 2026.
+   0.12.0; the beta is the 0.x release that says it is ready to try, planned for about early
+   January 2027. The web interface takes the time it needs, so this date is orientation.
    The beta includes the web interface (M7) with sign-in by OIDC, or by an invite link and a
    passkey for teams without an identity provider, and the data-modelling features of M8d, after a
    small private test round on a hosted instance. The CLI, the SDK and the REST API stay. Tokens
