@@ -3551,11 +3551,12 @@ own process opens no DuckDB connection and imports no `duckdb`.
   `allowed` at run time, `forbidden` may not and refuses `CREATE EXTENSION REPOSITORY`. All
   three read back in `test_the_connection_holds_no_credential_and_loads_nothing_by_itself`, and
   in a real child in `test_a_child_reads_back_the_settings_duckdb_2_names_differently`.
-  `LAKANA_WORKER__EXTENSION_SOURCE` (request field `extension_source`) changes only the install:
-  `duckdb` is `INSTALL httpfs`; `none` and an https mirror first `LOAD` from the directory, and a
-  mirror then runs `INSTALL httpfs FROM '<url>'` (per statement, so `allow_extension_repositories`
-  stays `forbidden`; the URL is checked in the worker's settings and again in `decode_request`
-  because it is written into SQL). Autoinstall and autoload stay off.
+  `LAKANA_WORKER__EXTENSION_SOURCE` (request field `extension_source`, `duckdb` or `none`) changes
+  only the install: `duckdb` is `INSTALL httpfs`; `none` sets `autoinstall_known_extensions =
+  false` and runs `LOAD httpfs` only, so nothing is downloaded, and a missing file is an
+  `ExtensionUnavailable` naming the path DuckDB looked for (also run by the start-up check, which
+  stops the worker). A mirror form was dropped: DuckDB 2.0 has no https client in core, and
+  `INSTALL ... FROM 'https://...'` fetched from DuckDB's own server.
 - **The child dies with the worker:** `PR_SET_PDEATHSIG` (Linux), and a `parent_pid` check at
   start that refuses to run for another parent.
 - **Allow-list mode.** The connection runs with `enable_external_access = false`,

@@ -1253,14 +1253,9 @@ def test_health_keeps_ninety_days_and_refuses_less_than_seven(
 
 @pytest.mark.parametrize(
     ("text", "expected"),
-    [
-        ("", "duckdb"),
-        (" DuckDB ", "duckdb"),
-        ("None", "none"),
-        (" https://mirror.example/ext ", "https://mirror.example/ext"),
-    ],
+    [("", "duckdb"), (" DuckDB ", "duckdb"), ("None", "none"), ("none", "none")],
 )
-def test_the_extension_source_reads_duckdb_none_or_an_https_mirror(
+def test_the_extension_source_reads_duckdb_or_none(
     monkeypatch: pytest.MonkeyPatch, text: str, expected: str
 ) -> None:
     """`LAKANA_WORKER__EXTENSION_SOURCE` is `duckdb` by default."""
@@ -1274,26 +1269,24 @@ def test_the_extension_source_reads_duckdb_none_or_an_https_mirror(
 @pytest.mark.parametrize(
     "value",
     [
+        "https://mirror.example",
         "http://mirror.example",
-        "mirror.example",
-        "https://",
-        "https://u:p@m.example/x",
-        "https://m.example/a'b",
-        "https://m.example/a b",
-        "https://m.example/\x1b[31m",
+        "https://u:SECRET@m.example/x",
+        "https://m.example/?t=SECRET",
         "off",
+        "x\x1b[31m",
     ],
 )
-def test_a_bad_extension_source_is_refused_when_settings_load(
+def test_any_other_extension_source_is_refused_without_echoing_secrets(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
-    """The worker never starts with one; the message names the setting and the forms."""
+    """The worker never starts with one; the message names the setting and both values."""
     monkeypatch.setenv("LAKANA_DATABASE__URL", "sqlite:///x.db")
     monkeypatch.setenv("LAKANA_WORKER__EXTENSION_SOURCE", value)
     with pytest.raises(PydanticValidationError) as caught:
         Settings()
     text = str(caught.value)
     assert "\x1b" not in text
+    assert "SECRET" not in text
     assert "LAKANA_WORKER__EXTENSION_SOURCE must be duckdb" in text
-    assert "none" in text
-    assert "https://" in text
+    assert "or none" in text

@@ -132,7 +132,6 @@ from lakana_worker.query_protocol import (
     EXIT_FAILED,
     EXIT_OK,
     EXIT_REFUSED,
-    EXTENSION_SOURCE_DUCKDB,
     EXTENSION_SOURCE_NONE,
     INTERNAL,
     INTERRUPTED,
@@ -624,14 +623,15 @@ class ExtensionUnavailable(Exception):
     """DuckDB's ``httpfs`` extension is neither installed nor allowed to be downloaded."""
 
 
+_MISSING_EXTENSION_FILE = re.compile(r'Extension "([^"]+)" not found')
+
+
 def load_httpfs(connection: duckdb.DuckDBPyConnection, request: Request) -> None:
-    """Load ``httpfs``, installing it first where the request's extension source allows.
+    """Load ``httpfs``, installing it first unless the request's extension source is ``none``.
 
     With the default source the extension is installed from DuckDB's own server (a no-op when
-    it is in the extension directory). With ``none`` or a mirror it is loaded from the
-    directory first, so an extension the container image bundled keeps working whatever the
-    setting says; only a missing one is installed, from the mirror (``INSTALL ... FROM`` applies
-    to this install alone and works under ``allow_extension_repositories = 'forbidden'``).
+    it is in the extension directory). With ``none`` it is only loaded from the directory, so an
+    extension the container image bundled works and nothing is ever downloaded.
 
     Parameters
     ----------
@@ -643,38 +643,26 @@ def load_httpfs(connection: duckdb.DuckDBPyConnection, request: Request) -> None
     Raises
     ------
     ExtensionUnavailable
-        If the extension is missing and the source is ``none`` or its mirror does not have it.
-        The message names the extension, the directory and the next step.
+        If the source is ``none`` and the extension is missing. The message names the
+        extension, the file DuckDB looked for, the directory and the next step.
     """
-    source = request.extension_source
-    if source == EXTENSION_SOURCE_DUCKDB:
+    if request.extension_source != EXTENSION_SOURCE_NONE:
         connection.execute("INSTALL httpfs")
         connection.execute("LOAD httpfs")
         return
+    connection.execute("SET autoinstall_known_extensions = false")
     try:
-        connection.execute("LOAD httpfs")
-        return
-    except duckdb.Error:
-        pass
-    where = f"the extension directory {request.extension_directory}"
-    if source == EXTENSION_SOURCE_NONE:
-        raise ExtensionUnavailable(
-            f"Query failed: the worker cannot load DuckDB's httpfs extension: it is not in "
-            f"{where} and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. Tell the "
-            "operator: run the worker from the Lakana container image, which bundles it, or "
-            "copy httpfs.duckdb_extension into that directory, or set "
-            "LAKANA_WORKER__EXTENSION_SOURCE to an internal https mirror."
-        )
-    try:
-        connection.execute(f"INSTALL httpfs FROM '{source}'")
         connection.execute("LOAD httpfs")
     except duckdb.Error as exc:
+        # DuckDB names the exact file it looked for, with its version and platform in the path.
+        found = _MISSING_EXTENSION_FILE.search(str(exc))
+        path = found.group(1) if found else f"{request.extension_directory}/<version>/<platform>"
         raise ExtensionUnavailable(
-            f"Query failed: the worker cannot load DuckDB's httpfs extension: it is not in "
-            f"{where} and the mirror LAKANA_WORKER__EXTENSION_SOURCE={source} did not provide it. "
-            "Tell the operator: check that the mirror is reachable from the worker and holds "
-            "httpfs for this DuckDB version, or run the worker from the Lakana container "
-            "image, which bundles it."
+            f"Query failed: the worker cannot load DuckDB's httpfs extension: {path} is missing "
+            "and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. Tell the "
+            "operator: run the worker from the Lakana container image, which bundles it, or "
+            f"copy httpfs.duckdb_extension to {path} (inside {request.extension_directory}), "
+            "or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it."
         ) from exc
 
 
@@ -982,9 +970,9 @@ def _check(connection: duckdb.DuckDBPyConnection, request: Request) -> ErrorDocu
             connection.execute(f"SET {field} = ?", [getattr(request, field)])
         except duckdb.Error:
             return ErrorDocument(INVALID, field)
-    if request.extension_source != EXTENSION_SOURCE_DUCKDB:
-        # The default may download at the first query, as it always did; a worker told never to,
-        # or to use a mirror, learns at start that httpfs cannot be loaded.
+    if request.extension_source == EXTENSION_SOURCE_NONE:
+        # The default may download at the first query, as it always did; a worker told never to
+        # learns at start that httpfs cannot be loaded.
         connection.execute("SET extension_directories = ?", [[request.extension_directory]])
         connection.execute("SET allow_community_extensions = false")
         connection.execute("SET autoinstall_known_extensions = false")

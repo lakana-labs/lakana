@@ -2461,19 +2461,16 @@ def test_a_real_child_through_the_workers_query_child_reports_its_figures() -> N
 class _FakeConnection:
     """Records the statements `load_httpfs` runs; `LOAD` fails while `installed` is false."""
 
-    def __init__(self, *, installed: bool, mirror_has_it: bool = True) -> None:
+    def __init__(self, *, installed: bool) -> None:
         self.statements: list[str] = []
         self.installed = installed
-        self.mirror_has_it = mirror_has_it
 
     def execute(self, statement: str) -> None:
         self.statements.append(statement)
         if statement == "LOAD httpfs" and not self.installed:
-            raise duckdb.IOException("httpfs not found")
-        if statement.startswith("INSTALL httpfs FROM"):
-            if not self.mirror_has_it:
-                raise duckdb.IOException("mirror unreachable")
-            self.installed = True
+            raise duckdb.IOException(
+                'IO Error: Extension "/ext/v2.0.0/linux_amd64/httpfs.duckdb_extension" not found.'
+            )
 
 
 def _load(connection: _FakeConnection, source: str) -> None:
@@ -2484,51 +2481,28 @@ def _load(connection: _FakeConnection, source: str) -> None:
 
 
 def test_by_default_httpfs_is_installed_from_duckdbs_own_server_as_before() -> None:
-    connection = _FakeConnection(installed=False)
-    connection.installed = True  # INSTALL is a no-op or a download; LOAD follows either way
+    connection = _FakeConnection(installed=True)
     _load(connection, "duckdb")
     assert connection.statements == ["INSTALL httpfs", "LOAD httpfs"]
-
-
-def test_a_mirror_is_used_for_the_install_only_when_the_extension_is_missing() -> None:
-    mirror = "https://mirror.example/duckdb-extensions"
-    missing = _FakeConnection(installed=False)
-    _load(missing, mirror)
-    assert missing.statements == [
-        "LOAD httpfs",
-        f"INSTALL httpfs FROM '{mirror}'",
-        "LOAD httpfs",
-    ]
-    present = _FakeConnection(installed=True)
-    _load(present, mirror)
-    assert present.statements == ["LOAD httpfs"]
-
-
-def test_a_mirror_that_does_not_have_it_fails_with_the_directory_and_the_next_step() -> None:
-    connection = _FakeConnection(installed=False, mirror_has_it=False)
-    with pytest.raises(query_child.ExtensionUnavailable) as caught:
-        _load(connection, "https://mirror.example/x")
-    text = str(caught.value)
-    assert "httpfs" in text
-    assert "/ext" in text
-    assert "LAKANA_WORKER__EXTENSION_SOURCE=https://mirror.example/x" in text
-    assert "container image" in text
 
 
 def test_none_never_installs_and_loads_what_is_there() -> None:
     present = _FakeConnection(installed=True)
     _load(present, "none")
-    assert present.statements == ["LOAD httpfs"]
+    assert "INSTALL httpfs" not in present.statements
+    assert present.statements[-1] == "LOAD httpfs"
     missing = _FakeConnection(installed=False)
     with pytest.raises(query_child.ExtensionUnavailable) as caught:
         _load(missing, "none")
-    assert missing.statements == ["LOAD httpfs"]
-    text = str(caught.value)
-    assert "httpfs" in text
-    assert "/ext" in text
-    assert "container image" in text
-    assert "copy httpfs.duckdb_extension" in text
-    assert "mirror" in text
+    assert not any(s.startswith("INSTALL") for s in missing.statements)
+    assert str(caught.value) == (
+        "Query failed: the worker cannot load DuckDB's httpfs extension: "
+        "/ext/v2.0.0/linux_amd64/httpfs.duckdb_extension is missing and "
+        "LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. Tell the operator: run "
+        "the worker from the Lakana container image, which bundles it, or copy "
+        "httpfs.duckdb_extension to /ext/v2.0.0/linux_amd64/httpfs.duckdb_extension (inside /ext), "
+        "or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it."
+    )
 
 
 def test_a_real_child_with_none_and_an_empty_extension_directory_answers_with_the_message(
@@ -2537,6 +2511,7 @@ def test_a_real_child_with_none_and_an_empty_extension_directory_answers_with_th
     error = _failed(_request(extension_directory=str(tmp_path), extension_source="none"))
     assert error.kind == "invalid"
     assert str(tmp_path) in error.message
+    assert "httpfs.duckdb_extension is missing" in error.message
     assert "LAKANA_WORKER__EXTENSION_SOURCE=none" in error.message
 
 
@@ -2548,6 +2523,7 @@ def test_a_check_with_none_and_an_empty_extension_directory_answers_with_the_mes
     )
     assert error.kind == "invalid"
     assert str(tmp_path) in error.message
+    assert "httpfs.duckdb_extension is missing" in error.message
     assert "LAKANA_WORKER__EXTENSION_SOURCE=none" in error.message
 
 

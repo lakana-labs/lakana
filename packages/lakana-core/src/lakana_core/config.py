@@ -1411,12 +1411,10 @@ WORKER_TAKES: tuple[str, ...] = ("all", "interactive", "pipeline")
 
 EXTENSION_SOURCE_ADVICE = (
     "LAKANA_WORKER__EXTENSION_SOURCE must be duckdb (DuckDB's own extension server, the "
-    "default), none (never download an extension) or the https:// URL of an internal mirror "
-    "without credentials, quotes or blanks (got '{value}')."
+    "default) or none (never download an extension), got '{value}'. A mirror URL is not "
+    "supported: use the container image, which bundles httpfs, or copy the file in."
 )
 """The refusal of a bad `LAKANA_WORKER__EXTENSION_SOURCE`; `{value}` is the shown value."""
-
-_EXTENSION_MIRROR = re.compile(r"https://[^\s'\"\\\x00-\x1f\x7f@]+")
 
 
 def parse_extension_source(text: str) -> str:
@@ -1425,30 +1423,27 @@ def parse_extension_source(text: str) -> str:
     Parameters
     ----------
     text
-        ``duckdb`` or empty (DuckDB's own extension server), ``none`` (never download), or the
-        ``https://`` URL of an internal mirror of DuckDB's extension repository. Any letter case
-        for the two words; the URL is kept as written.
+        ``duckdb`` or empty (DuckDB's own extension server) or ``none`` (never download), in any
+        letter case.
 
     Returns
     -------
     str
-        ``duckdb``, ``none`` or the mirror's URL.
+        ``duckdb`` or ``none``.
 
     Raises
     ------
     ValueError
-        If it is none of those: a plain ``http://`` URL, a URL with user information, a quote,
-        a blank or a control character. The message names the setting and the allowed forms.
+        If it is anything else, a URL included. The message names the setting and both values;
+        the value is cut and escaped, and a value with a ``@`` or ``://`` is not echoed.
     """
-    cleaned = text.strip()
-    lowered = cleaned.lower()
+    lowered = text.strip().lower()
     if lowered in {"", "duckdb"}:
         return "duckdb"
     if lowered == "none":
         return "none"
-    if _EXTENSION_MIRROR.fullmatch(cleaned) is None or urlsplit(cleaned).hostname is None:
-        raise ValueError(EXTENSION_SOURCE_ADVICE.format(value=shown(text)))
-    return cleaned
+    echoed = "(not shown)" if "@" in text or "?" in text else shown(text)[:40]
+    raise ValueError(EXTENSION_SOURCE_ADVICE.format(value=echoed))
 
 
 class WorkerConfig(BaseModel):
@@ -1477,9 +1472,8 @@ class WorkerConfig(BaseModel):
         Where the worker's queries get DuckDB's ``httpfs`` extension from
         (`LAKANA_WORKER__EXTENSION_SOURCE`): ``duckdb`` (the default) is DuckDB's own extension
         server, contacted only when the extension is not already in the worker's extension
-        directory (the container image bundles it); ``none`` never downloads, and a query that
-        needs a missing extension fails and names the directory; an ``https://`` URL is an
-        internal mirror of DuckDB's extension repository, used only for that install.
+        directory (the container image bundles it); ``none`` never downloads, and a worker whose
+        extension directory lacks ``httpfs`` refuses to start, naming the file to put there.
     package_cache_max_bytes
         The size, in bytes, above which the worker trims uv's package download cache in the
         ``uv`` directory of its cache (10 GiB by default; 0 never trims). The trim runs in the
@@ -1493,6 +1487,8 @@ class WorkerConfig(BaseModel):
         A package downloaded less than this many hours ago is never removed by the trim (24 by
         default), so that the builds of the day do not download the same packages again.
     """
+
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     memory_limit: str | None = None
     notifications: bool = True
@@ -1533,7 +1529,7 @@ class WorkerConfig(BaseModel):
         Returns
         -------
         str
-            ``duckdb``, ``none`` or the mirror's URL.
+            ``duckdb`` or ``none``.
         """
         return parse_extension_source(value)
 

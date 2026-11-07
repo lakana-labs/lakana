@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -135,15 +134,9 @@ EXTENSION_SOURCE_DUCKDB = "duckdb"
 EXTENSION_SOURCE_NONE = "none"
 """`LAKANA_WORKER__EXTENSION_SOURCE=none`: never download an extension."""
 
-_MIRROR = re.compile(r"https://[^\s'\"\\\x00-\x1f\x7f@]+")
-
 
 def valid_extension_source(text: str) -> bool:
-    """Say whether a request's extension source is one the child will use.
-
-    The mirror is written into an ``INSTALL ... FROM '<url>'`` statement, so it may hold no
-    quote, backslash, blank, control character or ``@`` (user information); the worker's own
-    settings check says more, and this is the second line on the child's side.
+    """Say whether a request's extension source is one the child knows.
 
     Parameters
     ----------
@@ -153,9 +146,9 @@ def valid_extension_source(text: str) -> bool:
     Returns
     -------
     bool
-        Whether it is ``duckdb``, ``none`` or an ``https://`` URL of that shape.
+        Whether it is ``duckdb`` or ``none``, exactly.
     """
-    return text in {EXTENSION_SOURCE_DUCKDB, EXTENSION_SOURCE_NONE} or bool(_MIRROR.fullmatch(text))
+    return text in {EXTENSION_SOURCE_DUCKDB, EXTENSION_SOURCE_NONE}
 
 
 @dataclass(frozen=True)
@@ -196,8 +189,8 @@ class Request:
     parent_pid
         The worker's process id; a child whose parent is another process refuses to run.
     extension_source
-        Where DuckDB may get the ``httpfs`` extension from (`EXTENSION_SOURCE_DUCKDB`,
-        `EXTENSION_SOURCE_NONE` or an ``https://`` mirror), see `valid_extension_source`.
+        Where DuckDB may get the ``httpfs`` extension from (`EXTENSION_SOURCE_DUCKDB`
+        or `EXTENSION_SOURCE_NONE`), see `valid_extension_source`.
     """
 
     mode: str
@@ -456,7 +449,7 @@ def decode_request(data: bytes) -> Request:
             raise ValueError(f"query request: {key} must be text")
     source = document.get("extension_source")
     if not isinstance(source, str) or not valid_extension_source(source):
-        raise ValueError("query request: extension_source must be duckdb, none or an https URL")
+        raise ValueError("query request: extension_source must be duckdb or none")
     mode = document.get("mode")
     if not isinstance(mode, str) or mode not in MODES:
         raise ValueError("query request: mode must be read, write, describe or check")

@@ -323,10 +323,6 @@ def test_a_malformed_field_id_map_is_refused(raw: object) -> None:
 
 def test_the_extension_source_survives_the_round_trip_and_defaults_to_duckdb() -> None:
     assert decode_request(encode_request(_request())).extension_source == "duckdb"
-    mirror = "https://mirror.example/duckdb-extensions"
-    assert decode_request(encode_request(_request(extension_source=mirror))).extension_source == (
-        mirror
-    )
     assert decode_request(encode_request(_request(extension_source="none"))).extension_source == (
         "none"
     )
@@ -334,23 +330,10 @@ def test_the_extension_source_survives_the_round_trip_and_defaults_to_duckdb() -
 
 @pytest.mark.parametrize(
     "value",
-    [
-        "",
-        "http://m.example/x",
-        "ftp://m.example",
-        "https://u:p@m.example",
-        "https://m/x'; --",
-        "https://m.example/a b",
-        "NONE",
-        "https://",
-        5,
-        None,
-    ],
+    ["", "https://mirror.example/x", "http://m.example", "NONE", "off", "none ", 5, None],
 )
-def test_the_child_refuses_an_extension_source_it_would_not_write_into_a_statement(
-    value: object,
-) -> None:
+def test_the_child_refuses_an_extension_source_that_is_not_duckdb_or_none(value: object) -> None:
     document = json.loads(encode_request(_request()))
     document["extension_source"] = value
-    with pytest.raises(ValueError, match="extension_source must be duckdb, none or an https URL"):
+    with pytest.raises(ValueError, match="extension_source must be duckdb or none"):
         decode_request(json.dumps(document).encode())

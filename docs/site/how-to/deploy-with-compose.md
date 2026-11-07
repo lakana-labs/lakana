@@ -1554,10 +1554,9 @@ docker volume ls -q --filter "label=lakana.launcher.stack=lakana" | xargs -r doc
   signal until the stop timeout expires.
 - **DuckDB's `httpfs` extension is preinstalled** at build time
   (`duckdb.connect().execute('INSTALL httpfs')`), so the worker never downloads an extension
-  the first time it runs a query. On a network with no outbound access, leave it so; to
-  forbid the download outright set `LAKANA_WORKER__EXTENSION_SOURCE=none`, or to fetch it from an
-  internal mirror set it to that mirror's `https://` URL (see [What leaves the
-  machine](../explanation/what-leaves-the-machine.md)).
+  the first time it runs a query. To forbid the download outright set
+  `LAKANA_WORKER__EXTENSION_SOURCE=none`: a worker without the file then refuses to start (see
+  [What leaves the machine](../explanation/what-leaves-the-machine.md)).
 - **Dependencies are locked.** The image is built from wheels pinned by `uv.lock`
   (`uv export --frozen ... -o dist/requirements.txt`, installed with `pip install
   --require-hashes` in the build), so an image build installs exactly the versions and files the

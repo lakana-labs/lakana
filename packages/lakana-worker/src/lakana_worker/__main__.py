@@ -564,13 +564,8 @@ def main() -> None:
     drain = threading.Event()
     signal.signal(signal.SIGTERM, lambda signum, frame: drain.set())
     install_drain(drain, settings.run.drain_grace_seconds)
-    if settings.worker.extension_source != "duckdb":
-        logger.info(
-            "DuckDB extensions: %s (LAKANA_WORKER__EXTENSION_SOURCE).",
-            "never downloaded"
-            if settings.worker.extension_source == "none"
-            else "installed from the configured mirror when missing",
-        )
+    if settings.worker.extension_source == "none":
+        logger.info("DuckDB extensions: never downloaded (LAKANA_WORKER__EXTENSION_SOURCE=none).")
     install_maintenance_timeout(settings.run.maintenance_timeout)
     install_history_cap(
         settings.run.max_history_open_versions, open_bytes=settings.run.max_history_open_bytes
