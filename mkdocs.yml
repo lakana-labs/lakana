@@ -43,6 +43,8 @@ nav:
       - how-to/deploy-with-compose.md
       - how-to/operate-for-others.md
       - how-to/instance-health.md
+      - how-to/export-and-keep-the-audit-log.md
+      - how-to/install-without-internet-access.md
       - how-to/give-a-second-person-access.md
       - how-to/keep-access-in-a-reviewed-file.md
       - how-to/why-may-someone-do-this.md

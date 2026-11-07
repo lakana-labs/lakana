@@ -1,5 +1,6 @@
 {
  "access-file": 9,
+ "audit-export": 9,
  "bind-a-secret": 12.7,
  "check-your-data": 112,
  "connections": 14,

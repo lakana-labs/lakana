@@ -17,7 +17,7 @@ EXEMPT = (
     "scripts/tests/test_docs_site.py",
     "scripts/tests/test_docs_only.py",
 )
-NOT_TESTED_CEILING = 54
+NOT_TESTED_CEILING = 59
 UNCHECKED_OUTPUT_CEILING = 80
 """Blocks marked as not tested; it only goes down, apart from the rises below.
 
@@ -123,6 +123,14 @@ since #200, which `compose-smoke` runs, so the count fell by one, to 52.
 The task-container release rose it by two, to 54: the four `.env` lines of the upgrade (input,
 checked by `test_deploy_init.py`) and the launcher's volume removal under "Starting over" (run by
 `scripts/compose_smoke_test.sh`).
+
+The pages "Export and keep the audit log" and "Install without internet access" rose it by four,
+to 58: the crontab line of the scheduled export (a scheduler of the operator's machine), and
+three blocks that need the internet, Docker and a second, isolated machine: the `pip download`
+and offline `pip install`, the extension download and copy, and `docker save` and `docker load`.
+The page says how each was checked by hand; "What leaves the machine" adds the `git grep` over
+a checkout of the repository that lists the network clients of our code (to 59); the example
+`audit-export` runs everything else.
 
 `UNCHECKED_OUTPUT_CEILING` rose from 77 to 78 with the Model block of `lakana table get` in
 "See a table's model" (`describe-a-table.md`): the page shows that block only, not the whole

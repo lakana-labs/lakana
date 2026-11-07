@@ -15,6 +15,9 @@ This is the "team" deployment path; for a single user on their own laptop, see l
   against it afterwards. Lakana is pre-beta: the API and the data layout may change between 0.x
   releases.
 - The image `ghcr.io/lakana-labs/lakana` is public; pulling it needs no login.
+- A network that lets Docker pull the images, or the steps of
+  [Install without internet access](install-without-internet-access.md). What the instance
+  connects to afterwards is listed in [What leaves the machine](../explanation/what-leaves-the-machine.md).
 
 ## Verify a download
 

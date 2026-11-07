@@ -16,6 +16,8 @@ Pages:
 - [Deploying with Compose (team mode)](deploy-with-compose.md): run a team instance with Docker Compose.
 - [Run Lakana for other people](operate-for-others.md): install, hand over, back up, upgrade, watch and separate instances, in the order an operator needs them.
 - [Is my instance healthy?](instance-health.md): what to look at (services, workers, queue, database, storage, disk), which log lines matter, and what to collect before you ask a question.
+- [Export and keep the audit log](export-and-keep-the-audit-log.md): what the log records and does not, how to export it on a schedule, who may read it, and that it has no tamper-evidence yet.
+- [Install without internet access](install-without-internet-access.md): packages, the container image, an internal package index for Python assets, git on an internal server and the DuckDB extension.
 - [Give a second person access](give-a-second-person-access.md): create a user, grant the smallest set to query one environment, issue a token, and take access away.
 - [Keep access in a reviewed file](keep-access-in-a-reviewed-file.md): export who has access to what as a file, review changes in a pull request, apply them from CI, and what a managed scope refuses.
 - [Why may (or may not) someone do this?](why-may-someone-do-this.md): see what a principal may do on an object, and through which grant, role or group.
