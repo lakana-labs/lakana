@@ -133,17 +133,41 @@ We read and searched the source of the four Lakana packages (`packages/*/src`) a
 libraries in the lock file, and ran two small tests against DuckDB 1.5.5 and again against
 DuckDB 2.0.0, the version in the lock file.
 
-- **Our code.** We searched for HTTP clients, sockets, `urllib`, subprocesses, update checks,
-  usage reporting and the host names of analytics services. The HTTP client of the four packages is `httpx`: in
-  the SDK, which talks to the URL of the profile (and, with proxy settings from the
-  environment ignored, to the loopback address in local mode), to the GitHub Actions ID token
-  service in a job that signs in by OIDC, and in `lakana_core.net`, which the
-  worker uses for webhooks and the server for the CI providers' keys, both listed above. The only other request is the
-  container's health check, to `127.0.0.1`. The helpers that Python assets use to read sources
-  (`lakana.ingest`) are the exception: they read S3, GCS and Azure through `obstore`, whose HTTP
-  client is compiled Rust, not `httpx`, and databases through the drivers below. They connect to
-  the endpoints of the connections an asset declares (listed above). The only programs the code starts are `git`,
-  `uv`, the task's own Python interpreter, and Lakana's own server and worker.
+- **Our code.** We listed every module of the four packages that imports a network client, with
+
+  ```text
+  git grep -n -E "^\s*(import|from) (httpx|http\.client|http\.server|urllib\.request|urllib3|requests|aiohttp|socket|socketserver|smtplib|obstore|botocore|aiobotocore|boto3|s3fs|gcsfs|adlfs|pyarrow\.fs|websockets|ftplib|xmlrpc|ssl|pymysql|adbc_driver_[a-z]+|pg8000|psycopg|paramiko|duckdb|uvicorn)\b" packages/*/src
+  ```
+
+  (test files excluded), and read each hit. The rest of this item is that result. `urllib` is
+  imported only as `urllib.parse`, for parsing. No module imports `requests`, `aiohttp`,
+  `urllib3`, `smtplib`, `websockets`, `botocore`, `boto3`, `s3fs`, `gcsfs`, `adlfs`, `ftplib`,
+  `xmlrpc`, `paramiko` or `psycopg`.
+
+  | Module | Connects to | Triggered by | Leaves the host? |
+  |---|---|---|---|
+  | `httpx` in `lakana.client`, `lakana.resources.*`, `lakana._http`, `lakana.errors` | The Lakana server of the profile | Any CLI or SDK call | Only if the server is on another host |
+  | `httpx` in `lakana.cli.server` and `lakana.cli.local._supervisor` | `/healthz` of the local instance, on loopback, ignoring proxy variables | `lakana server start/stop --local` | No |
+  | `httpx` in `lakana._ci_oidc` | The GitHub Actions ID token service, at the runner's `ACTIONS_ID_TOKEN_REQUEST_URL` | `lakana` in a GitHub Actions job that signs in by OIDC | Yes |
+  | `httpx` in `lakana_core.net` (`https_json`, `egress`) | The CI providers' discovery and key documents (server); webhook addresses (worker) | A CI token exchange; a job's `notify:` | Yes |
+  | `httpx` in `lakana_worker.egress` | The webhook address of a job's `notify:` | A job's notification | Yes |
+  | `httpx` in `lakana.ingest._http`, `files`, `rest` | The `http` and `rest` connections' endpoints (and token endpoints) an asset declares | A Python asset that reads through them | Yes, to the source |
+  | `obstore` in `lakana.ingest.files` and `_stores` | S3, GCS or Azure endpoints of the connections an asset declares; a compiled Rust HTTP client | A Python asset that reads files from them | Yes, to the source |
+  | `adbc_driver_postgresql`, `adbc_driver_sqlite`, `pymysql` and `socket` in `lakana.ingest.sql`, `_check` | The database server of a connection an asset declares (SQLite: a local file); `lakana connection test` also opens a TCP connection | A Python asset that reads a database; `lakana connection test` | Yes, to the source |
+  | `http.client` and `socket` in `lakana_worker.launcher.engine`; `socket` in `launcher_client`, `launcher.server` | The Docker Engine's Unix socket, and the launcher's own Unix socket | The launcher, with the docker runner | No (a Unix socket on the host) |
+  | `socket` in `lakana_worker.launcher.egress` and `relay` | Outbound: the hosts and ports of a build's package index or of a task's declared connection, through the `egress` proxy and the relay; the relay listens on the task's network | A build or a task with the docker runner | Yes, to those hosts only |
+  | `socket` in `lakana_core.net.egress` | Name resolution (`getaddrinfo`) and the address check before a webhook or CI request connects | The same requests | Resolver only |
+  | `socket.gethostname` in `lakana_worker.__main__`, `healthcheck`; `socket` in `lakana.cli.server` | None: the worker names itself by host name; the CLI tests a local port is free | Start-up | No |
+  | `uvicorn` in `lakana_server.__main__` | None outbound: it is the server that listens | `lakana-server` | No |
+  | `duckdb` in `lakana_worker.query_child` | The presigned object-storage URLs of the tables a query reads, and the extension download above | A query | Yes if the storage is remote |
+  | `fsspec` / `pyiceberg` in `lakana_core.storage`, `lakana_core.catalog` | The environment's object storage (`s3fs`, and `pyarrow` underneath) | Server and worker storage calls | Yes if the storage is remote |
+  | `ssl` in `lakana_core.db`, `lakana.ingest.*` | None itself: certificate settings for the connections above | | |
+
+  The Postgres catalog connection is made by `pg8000` through `sqlalchemy` from
+  `LAKANA_DATABASE__URL`; no module of ours opens it directly. The container's health check is
+  the `HEALTHCHECK` line of the `Dockerfile` (`urllib.request`, in a command, not in a package), to `127.0.0.1`. The only programs the code starts
+  are `git`, `uv`, the task's own Python interpreter, and Lakana's own server and worker. We read
+  the hits to say what each module connects to; we did not trace every call.
 - **Python libraries.** We searched the installed source of the libraries Lakana depends on
   (`pyiceberg`, `fsspec`, `s3fs`, `aiobotocore`, `fastapi`, `starlette`, `uvicorn`,
   `pydantic`, `sqlalchemy`, `alembic`, `pg8000`, `sqlglot`, `httpx`, `requests` and others)
