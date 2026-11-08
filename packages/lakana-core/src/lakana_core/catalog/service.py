@@ -308,6 +308,7 @@ from lakana_core.identifiers import (
     shown,
     validate_path_component,
 )
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.languages import DEFAULT_MAIN_LANGUAGE, canonical_language, language_problem
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import (
@@ -1475,8 +1476,11 @@ class CatalogService:
         `MANAGE_ENVIRONMENT` grant for a name that doesn't exist yet used to
         let its holder pre-emptively create — and so control the storage
         root of — an environment nobody meant to delegate to them.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        require_step_up(p)
         check_environment_name(name)
         check_root_scheme(storage.root, storage.scheme)
         check_storage_root(storage.root)
@@ -2097,8 +2101,11 @@ class CatalogService:
         an attacker-controlled location, which is exactly the privilege a
         merely-environment-scoped principal must not have. `MANAGE_SECRET`
         stays environment-scoped, unchanged.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        require_step_up(p)
         if secret_ref is not None:
             self._authz.authorize(p, Action.MANAGE_SECRET, Securable.environment_scope(name))
         env = self._lock_unprotected_environment(name)
@@ -2159,8 +2166,11 @@ class CatalogService:
             If no environment has that name.
         PermissionDenied
             If the principal may not manage environments.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        require_step_up(p)
         env = self._find_environment(name)
         env.is_protected = protected
         AuditService(self._session).record(

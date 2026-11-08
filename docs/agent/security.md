@@ -543,16 +543,28 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
     `PATCH`, `…/enable`, `…/disable`, `DELETE`), because a rule lets a CI job act as its service
     account; `PUT /api/v1/environments/{env}/deployments/{repo}/run-as`, because every run of the
     deployment then writes with that account's rights (clearing it removes rights: no step-up);
+  - credentials and sources: `POST /api/v1/environments`, `PATCH /api/v1/environments/{name}/storage`
+    (where data goes and with which storage credentials), `PATCH /api/v1/environments/{name}`
+    (protection decides who may write there); secrets in an environment: create, rotate
+    (`PATCH`) and `PUT …/secrets/{secret_name}/use` (binding hands the value to code);
+    connections: `POST`, `PATCH` (their credentials and address); package indexes and
+    repositories: `POST`, `PATCH /{name}` (where code and packages come from);
   - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
     passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
     (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.
 
   `STEP_UP_ROUTES` in `packages/lakana-server/tests/test_step_up_routes.py` is this list as a
   test: each route refuses a session touched 16 minutes ago and succeeds after a touch and for a
-  token. Every other write below the identity and rights paths sits in `NO_STEP_UP` with its
-  reason (revoking a token or withdrawing a link removes access; a new group is empty; the
-  registration answer is bound to the challenge of the step-up options route), so a new route
-  there fails the test until it is placed. Task tokens are absent: their routes are token-only
+  token. Every other write of `/api/v1` sits in `NO_STEP_UP` with a one-line reason, so a new
+  write route fails the test until it is placed. The rule: step-up when a write changes who or
+  what can act or read (identities, rights, run-as, CI trust), handles credentials or secrets, or
+  changes where code or data come from or go; none for removing access (revoking a token,
+  withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
+  one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
+  descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
+  is a data operation undone with restore; it joins with its screen in part 8 (spec). The
+  passkey registration answer needs no touch of its own: it answers the challenge of the step-up
+  options route. Task tokens are absent: their routes are token-only
   (`TOKEN_ONLY_ROUTES`) and a session never reaches them. The parity test's session has a fresh
   touch, so session and token still answer alike there.
 - **Removal** needs step-up; nobody removes their own last passkey that works at this address

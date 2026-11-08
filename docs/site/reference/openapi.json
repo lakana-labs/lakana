@@ -12,7 +12,7 @@
           "environments"
         ],
         "summary": "Create an environment",
-        "description": "Needs `MANAGE_ENVIRONMENT` on the instance. Answers 409 when an environment of that name exists.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nNeeds `MANAGE_ENVIRONMENT` on the instance. Answers 409 when an environment of that name exists.",
         "operationId": "create_environment_api_v1_environments_post",
         "parameters": [
           {
@@ -179,7 +179,7 @@
           "environments"
         ],
         "summary": "Change an environment's storage",
-        "description": "Replaces the environment's storage options and the secret that holds its storage credential. Needs `MANAGE_ENVIRONMENT` on the instance; while the environment has a storage secret, changing the options also needs `MANAGE_SECRET` in it. Answers 404 when there is no such environment.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nReplaces the environment's storage options and the secret that holds its storage credential. Needs `MANAGE_ENVIRONMENT` on the instance; while the environment has a storage secret, changing the options also needs `MANAGE_SECRET` in it. Answers 404 when there is no such environment.",
         "operationId": "update_environment_storage_api_v1_environments__name__storage_patch",
         "parameters": [
           {
@@ -281,7 +281,7 @@
           "environments"
         ],
         "summary": "Protect or unprotect an environment",
-        "description": "Sets the environment's protected flag. A protected environment refuses changes that would lose data (deleting it, a retention that expires tables) until the flag is cleared. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when there is no such environment.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nSets the environment's protected flag. A protected environment refuses changes that would lose data (deleting it, a retention that expires tables) until the flag is cleared. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when there is no such environment.",
         "operationId": "set_environment_protection_api_v1_environments__name__patch",
         "parameters": [
           {
@@ -11564,7 +11564,7 @@
           "secrets"
         ],
         "summary": "Create a secret",
-        "description": "Stores a secret value encrypted, for the environment's storage, a webhook, a package index or a repository. The value is never shown again. Needs `MANAGE_SECRET` in the environment. Answers 404 when the environment does not exist, 409 when a secret of that name exists, and 422 when the use names no target, or names one it must not. Answers 500 when the instance has no secrets master key; that is a deployment fault the operator fixes.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nStores a secret value encrypted, for the environment's storage, a webhook, a package index or a repository. The value is never shown again. Needs `MANAGE_SECRET` in the environment. Answers 404 when the environment does not exist, 409 when a secret of that name exists, and 422 when the use names no target, or names one it must not. Answers 500 when the instance has no secrets master key; that is a deployment fault the operator fixes.",
         "operationId": "create_secret_api_v1_environments__environment_name__secrets_post",
         "parameters": [
           {
@@ -11770,7 +11770,7 @@
           "secrets"
         ],
         "summary": "Rotate a secret",
-        "description": "Replaces the secret's value; what uses it picks the new value up. Needs `MANAGE_SECRET` in the environment. Answers 404 when the environment does not exist or has no active secret of that name (a revoked secret counts as missing), and 500 when the instance has no secrets master key.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nReplaces the secret's value; what uses it picks the new value up. Needs `MANAGE_SECRET` in the environment. Answers 404 when the environment does not exist or has no active secret of that name (a revoked secret counts as missing), and 500 when the instance has no secrets master key.",
         "operationId": "rotate_secret_api_v1_environments__environment_name__secrets__secret_name__patch",
         "parameters": [
           {
@@ -11975,7 +11975,7 @@
           "secrets"
         ],
         "summary": "Bind a secret to a package index, repository or environment",
-        "description": "Chooses what uses the secret: a package index or repository by name, or the environment itself. Needs `MANAGE_SECRET` in the environment. Answers 404 when the environment, the active secret (a revoked secret counts as missing) or the target does not exist and 422 for a name given for the environment use, none for an index or repository, or the environment's storage secret bound to an index or repository.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nChooses what uses the secret: a package index or repository by name, or the environment itself. Needs `MANAGE_SECRET` in the environment. Answers 404 when the environment, the active secret (a revoked secret counts as missing) or the target does not exist and 422 for a name given for the environment use, none for an index or repository, or the environment's storage secret bound to an index or repository.",
         "operationId": "bind_secret_api_v1_environments__environment_name__secrets__secret_name__use_put",
         "parameters": [
           {
@@ -12087,7 +12087,7 @@
           "connections"
         ],
         "summary": "Create a connection",
-        "description": "Creates a connection of the environment: its kind, address and settings, and its secret, either new values (stored as a new secret `<name>-connection`, or the next free `<name>-connection-N` when a secret holds that name, born bound to it, never shown again) or the name of an existing secret. Needs `MANAGE_CONNECTION` in the environment, checked before anything in the body; naming a secret that is not bound to this connection also needs `MANAGE_SECRET`. Answers 403 without the right, 404 when the environment or the named secret does not exist, 409 when the name is taken (or every secret name up to `<name>-connection-100` is), and 422 for a name, kind, address, settings or secret keys that are not valid, naming the field. Answers 500 when the instance has no secrets master key.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nCreates a connection of the environment: its kind, address and settings, and its secret, either new values (stored as a new secret `<name>-connection`, or the next free `<name>-connection-N` when a secret holds that name, born bound to it, never shown again) or the name of an existing secret. Needs `MANAGE_CONNECTION` in the environment, checked before anything in the body; naming a secret that is not bound to this connection also needs `MANAGE_SECRET`. Answers 403 without the right, 404 when the environment or the named secret does not exist, 409 when the name is taken (or every secret name up to `<name>-connection-100` is), and 422 for a name, kind, address, settings or secret keys that are not valid, naming the field. Answers 500 when the instance has no secrets master key.",
         "operationId": "create_connection_api_v1_environments__environment_name__connections_post",
         "parameters": [
           {
@@ -12420,7 +12420,7 @@
           "connections"
         ],
         "summary": "Change a connection",
-        "description": "Changes its address, settings or secret; its name and kind never change. New secret values set its own secret again (or create the next free `<name>-connection`); `clear` with `secret` stops using the secret and unbinds it. Needs `MANAGE_CONNECTION` in the environment, and also `MANAGE_SECRET` to name a secret not bound to it, or for a change that could send its secret somewhere new (its address, a weaker TLS, another CA certificate, another way of sending it) without new values. Answers 403 without the rights, 404 when the environment, the connection or the named secret does not exist, 409 when every secret name up to `<name>-connection-100` is taken or the connection changed at the same time, and 422 when nothing is given or the result is not valid, naming the field.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nChanges its address, settings or secret; its name and kind never change. New secret values set its own secret again (or create the next free `<name>-connection`); `clear` with `secret` stops using the secret and unbinds it. Needs `MANAGE_CONNECTION` in the environment, and also `MANAGE_SECRET` to name a secret not bound to it, or for a change that could send its secret somewhere new (its address, a weaker TLS, another CA certificate, another way of sending it) without new values. Answers 403 without the rights, 404 when the environment, the connection or the named secret does not exist, 409 when every secret name up to `<name>-connection-100` is taken or the connection changed at the same time, and 422 when nothing is given or the result is not valid, naming the field.",
         "operationId": "update_connection_api_v1_environments__environment_name__connections__connection_name__patch",
         "parameters": [
           {
@@ -12953,7 +12953,7 @@
           "repositories"
         ],
         "summary": "Register a git repository",
-        "description": "Registers a repository that environments can deploy, by name, URL and optionally a credential secret and known hosts. Deployers pick the name and never the URL. Needs `MANAGE_REPOSITORY` on the instance. Answers 409 when the name is taken and 422 for a field that is not valid.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nRegisters a repository that environments can deploy, by name, URL and optionally a credential secret and known hosts. Deployers pick the name and never the URL. Needs `MANAGE_REPOSITORY` on the instance. Answers 409 when the name is taken and 422 for a field that is not valid.",
         "operationId": "create_repository_api_v1_repositories_post",
         "parameters": [
           {
@@ -13209,7 +13209,7 @@
           "repositories"
         ],
         "summary": "Change a repository",
-        "description": "Changes its URL, credential secret, username, known hosts or default ref. Needs `MANAGE_REPOSITORY` on the instance; changing the URL of a repository whose secret is bound also needs `MANAGE_SECRET` in that environment. Answers 404 when no repository has that name and 422 when nothing is given or a field cannot be changed.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nChanges its URL, credential secret, username, known hosts or default ref. Needs `MANAGE_REPOSITORY` on the instance; changing the URL of a repository whose secret is bound also needs `MANAGE_SECRET` in that environment. Answers 404 when no repository has that name and 422 when nothing is given or a field cannot be changed.",
         "operationId": "update_repository_api_v1_repositories__name__patch",
         "parameters": [
           {
@@ -13404,7 +13404,7 @@
           "package-indexes"
         ],
         "summary": "Register a package index",
-        "description": "Registers an index that projects may install packages from, by name and URL, optionally with a credential secret. Only a registered URL is accepted. Needs `MANAGE_PACKAGE_INDEX` on the instance. Answers 409 when the name or URL is taken and 422 for a name, URL or secret name that is not valid.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nRegisters an index that projects may install packages from, by name and URL, optionally with a credential secret. Only a registered URL is accepted. Needs `MANAGE_PACKAGE_INDEX` on the instance. Answers 409 when the name or URL is taken and 422 for a name, URL or secret name that is not valid.",
         "operationId": "create_package_index_api_v1_package_indexes_post",
         "parameters": [
           {
@@ -13660,7 +13660,7 @@
           "package-indexes"
         ],
         "summary": "Change a package index",
-        "description": "Changes its URL or credential secret. Needs `MANAGE_PACKAGE_INDEX` on the instance. Answers 404 when no index has that name, 409 when the new URL belongs to another index, and 422 when nothing is given or a field cannot be changed.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nChanges its URL or credential secret. Needs `MANAGE_PACKAGE_INDEX` on the instance. Answers 404 when no index has that name, 409 when the new URL belongs to another index, and 422 when nothing is given or a field cannot be changed.",
         "operationId": "update_package_index_api_v1_package_indexes__name__patch",
         "parameters": [
           {

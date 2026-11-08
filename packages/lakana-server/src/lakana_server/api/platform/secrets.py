@@ -100,6 +100,9 @@ def create_secret(
 ) -> SecretOut:
     """Create a secret.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Stores a secret value encrypted, for the environment's storage, a webhook, a package
     index or a repository. The value is never shown again. Needs `MANAGE_SECRET` in the
     environment. Answers 404 when the environment does not exist, 409 when a secret of that
@@ -196,6 +199,9 @@ def rotate_secret(
 ) -> SecretOut:
     """Rotate a secret.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Replaces the secret's value; what uses it picks the new value up. Needs `MANAGE_SECRET`
     in the environment. Answers 404 when the environment does not exist or has no active
     secret of that name (a revoked secret counts as missing), and 500 when the instance has
@@ -243,6 +249,9 @@ def bind_secret(
     service: SecretService = Depends(get_secret_service),
 ) -> SecretOut:
     """Bind a secret to a package index, repository or environment.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Chooses what uses the secret: a package index or repository by name, or the environment
     itself. Needs `MANAGE_SECRET` in the environment. Answers 404 when the environment, the

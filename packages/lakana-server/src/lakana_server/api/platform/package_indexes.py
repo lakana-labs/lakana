@@ -59,6 +59,9 @@ def create_package_index(
 ) -> PackageIndexOut:
     """Register a package index.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Registers an index that projects may install packages from, by name and URL, optionally
     with a credential secret. Only a registered URL is accepted. Needs
     `MANAGE_PACKAGE_INDEX` on the instance. Answers 409 when the name or URL is taken and
@@ -144,6 +147,9 @@ def update_package_index(
     service: PackageIndexService = Depends(get_package_index_service),
 ) -> PackageIndexOut:
     """Change a package index.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Changes its URL or credential secret. Needs `MANAGE_PACKAGE_INDEX` on the instance.
     Answers 404 when no index has that name, 409 when the new URL belongs to another index,

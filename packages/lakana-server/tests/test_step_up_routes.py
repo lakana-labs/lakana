@@ -5,8 +5,13 @@ invites and recovery links, creating API tokens, granting or changing rights, an
 people's sessions. `STEP_UP_ROUTES` lists each operation with a request that succeeds; the
 dynamic test sends it with a session whose last touch is 16 minutes old (403
 `StepUpRequired`), with the same session after a touch, and with a token, which has no session
-and is never asked. `NO_STEP_UP` lists, with the reason, every other write below the prefixes
-that own identities and rights, so a new route there cannot skip the decision unnoticed.
+and is never asked. `NO_STEP_UP` lists, with the reason, every other write of `/api/v1`, so a
+new write route cannot skip the decision unnoticed.
+
+The rule: step-up when a write changes who or what can act or read (identities, rights,
+run-as, CI trust), handles credentials or secrets, or changes where code or data come from or
+go (repositories, package indexes, an environment's storage); none for operating on existing
+work under one's own rights, or for removing access.
 """
 
 from __future__ import annotations
@@ -254,6 +259,157 @@ def _deployment(client: TestClient, environment: str, repository: str) -> None:
             )
         )
         session.commit()
+
+
+def _index_url() -> str:
+    """Name a package index address no other index has.
+
+    Returns
+    -------
+    str
+        The address.
+    """
+    return f"https://{_unique('i')}.example.org/simple"
+
+
+def _environment_body(client: TestClient) -> dict[str, Any]:
+    """Build the body of a new environment under the app's temporary storage root.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    name = _unique("e")
+    root = cast(FastAPI, client.app).state.step_up_root
+    return {
+        "name": name,
+        "storage": {"scheme": "file", "root": f"file://{root}/{name}", "options": {}},
+    }
+
+
+def _environment(client: TestClient) -> str:
+    """Create an environment.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its name.
+    """
+    body = _environment_body(client)
+    _ok(client.post("/api/v1/environments", headers=AUTH_HEADER, json=body))
+    return str(body["name"])
+
+
+def _secret(client: TestClient) -> str:
+    """Create a secret in `dev`.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its name.
+    """
+    name = _unique("s")
+    body = {"name": name, "values": {"k": "v"}}
+    _ok(client.post("/api/v1/environments/dev/secrets", headers=AUTH_HEADER, json=body))
+    return name
+
+
+def _index(client: TestClient) -> str:
+    """Register a package index.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its name.
+    """
+    name = _unique("x")
+    body = {"name": name, "url": _index_url()}
+    _ok(client.post("/api/v1/package-indexes", headers=AUTH_HEADER, json=body))
+    return name
+
+
+def _connection_body() -> dict[str, Any]:
+    """Build the body of a new connection.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return {
+        "name": _unique("c"),
+        "kind": "postgresql",
+        "address": {"host": "db.example.com", "database": "crm"},
+        "settings": {"user": "reader"},
+    }
+
+
+def _connection(client: TestClient) -> str:
+    """Create a connection in `dev`.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its name.
+    """
+    body = _connection_body()
+    _ok(client.post("/api/v1/environments/dev/connections", headers=AUTH_HEADER, json=body))
+    return str(body["name"])
+
+
+def _repository_body() -> dict[str, Any]:
+    """Build the body of a new repository.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return {"name": _unique("r"), "kind": "https", "url": "https://github.com/o/a.git"}
+
+
+def _repository(client: TestClient) -> str:
+    """Register a repository.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its name.
+    """
+    body = _repository_body()
+    _ok(client.post("/api/v1/repositories", headers=AUTH_HEADER, json=body))
+    return str(body["name"])
 
 
 @dataclass(frozen=True)
@@ -521,31 +677,62 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
         ),
         200,
     ),
+    ("POST", "/api/v1/environments"): Case(
+        lambda c: ("/api/v1/environments", _environment_body(c)), 201
+    ),
+    ("PATCH", "/api/v1/environments/{name}/storage"): Case(
+        lambda c: (f"/api/v1/environments/{_environment(c)}/storage", {"options": {"a": "b"}}), 200
+    ),
+    ("PATCH", "/api/v1/environments/{name}"): Case(
+        lambda c: (f"/api/v1/environments/{_environment(c)}", {"is_protected": True}), 200
+    ),
+    ("POST", "/api/v1/environments/{environment_name}/secrets"): Case(
+        lambda c: (
+            "/api/v1/environments/dev/secrets",
+            {"name": _unique("s"), "values": {"k": "v"}},
+        ),
+        201,
+    ),
+    ("PATCH", "/api/v1/environments/{environment_name}/secrets/{secret_name}"): Case(
+        lambda c: (f"/api/v1/environments/dev/secrets/{_secret(c)}", {"values": {"k": "new"}}), 200
+    ),
+    ("PUT", "/api/v1/environments/{environment_name}/secrets/{secret_name}/use"): Case(
+        lambda c: (
+            f"/api/v1/environments/dev/secrets/{_secret(c)}/use",
+            {"kind": "package_index", "target": _index(c)},
+        ),
+        200,
+    ),
+    ("POST", "/api/v1/environments/{environment_name}/connections"): Case(
+        lambda c: ("/api/v1/environments/dev/connections", _connection_body()), 201
+    ),
+    ("PATCH", "/api/v1/environments/{environment_name}/connections/{connection_name}"): Case(
+        lambda c: (
+            f"/api/v1/environments/dev/connections/{_connection(c)}",
+            {"settings": {"user": "other"}},
+        ),
+        200,
+    ),
+    ("POST", "/api/v1/package-indexes"): Case(
+        lambda c: ("/api/v1/package-indexes", {"name": _unique("x"), "url": _index_url()}), 201
+    ),
+    ("PATCH", "/api/v1/package-indexes/{name}"): Case(
+        lambda c: (f"/api/v1/package-indexes/{_index(c)}", {"url": _index_url()}),
+        200,
+    ),
+    ("POST", "/api/v1/repositories"): Case(
+        lambda c: ("/api/v1/repositories", _repository_body()), 201
+    ),
+    ("PATCH", "/api/v1/repositories/{name}"): Case(
+        lambda c: (f"/api/v1/repositories/{_repository(c)}", {"url": "https://github.com/o/b.git"}),
+        200,
+    ),
 }
 """Each operation that needs a fresh passkey touch in a browser session (`require_step_up`),
 with a request it answers with success. `DELETE .../sessions` is another person's (one's own
 sessions end without step-up). Adding a passkey is a session-only ceremony: a token gets 409
 there for that reason, not for step-up; its second half (`POST .../passkeys`) needs no touch of
 its own because it answers a challenge only the options route hands out."""
-
-SENSITIVE_PREFIXES = (
-    "/api/v1/principals",
-    "/api/v1/grants",
-    "/api/v1/groups",
-    "/api/v1/access",
-    "/api/v1/ci-trust-rules",
-    "/api/v1/row-filters",
-    "/api/v1/column-masks",
-    "/api/v1/invites",
-    "/api/v1/recovery-links",
-    "/api/v1/settings/sign-in",
-    "/api/v1/task-tokens",
-    "/api/v1/sign-in",
-    "/api/v1/auth",
-    "/api/v1/whoami",
-)
-"""The paths that own identities, credentials and rights: every write below them is either in
-`STEP_UP_ROUTES` or in `NO_STEP_UP` with a reason."""
 
 NO_STEP_UP: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/groups"): "a new group is empty and grants nothing",
@@ -571,8 +758,134 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/task-tokens"): "token-only route: a session never reaches it",
     ("DELETE", "/api/v1/task-tokens/{key_id}"): "token-only route: a session never reaches it",
     ("POST", "/api/v1/auth/oidc/token"): "a CI provider's ID token, never a session",
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/deployments/{repo}/run-as",
+    ): "clearing a run-as account removes rights",
+    ("POST", "/api/v1/environments/{env}/deploys"): (
+        "runs code of a registered repository (its source needs step-up) as its bound account"
+    ),
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/deployments/{repo}",
+    ): "undeploying stops code; it hands out nothing",
+    (
+        "DELETE",
+        "/api/v1/environments/{environment_name}/secrets/{secret_name}",
+    ): "deleting a secret removes it",
+    ("DELETE", "/api/v1/environments/{environment_name}/connections/{connection_name}"): (
+        "deleting a connection removes its credentials"
+    ),
+    ("POST", "/api/v1/environments/{environment_name}/connections/{connection_name}/tests"): (
+        "tests an existing connection; changes nothing"
+    ),
+    ("DELETE", "/api/v1/package-indexes/{name}"): "removing an index removes a source",
+    ("DELETE", "/api/v1/repositories/{name}"): "removing a repository removes a source",
+    ("DELETE", "/api/v1/environments/{name}"): (
+        "data operation, undone with restore; joins step-up with its screen in part 8 (spec)"
+    ),
+    ("POST", "/api/v1/environments/{name}/restore"): "brings back a deleted environment as it was",
+    (
+        "PUT",
+        "/api/v1/environments/{name}/retention",
+    ): "how long dropped data is kept; data operation",
+    (
+        "POST",
+        "/api/v1/environments/{name}/orphaned-locations/delete",
+    ): "cleans up unreferenced files",
+    ("POST", "/api/v1/environments/{env}/jobs/{job}/runs"): "starts existing work",
+    ("POST", "/api/v1/environments/{env}/jobs/{job}/pause"): "operates existing work",
+    ("POST", "/api/v1/environments/{env}/jobs/{job}/resume"): "operates existing work",
+    (
+        "POST",
+        "/api/v1/environments/{env}/jobs/{job}/notify-test",
+    ): "sends a test message to the set webhook",
+    ("POST", "/api/v1/environments/{env}/runs"): "starts existing work",
+    ("POST", "/api/v1/environments/{env}/runs/{run_id}/cancel"): "operates existing work",
+    ("POST", "/api/v1/environments/{env}/runs/{run_id}/resume"): "operates existing work",
+    ("POST", "/api/v1/environments/{env}/runs/{run_id}/checks/rows"): "reads a run's failing rows",
+    ("POST", "/api/v1/environments/{env}/queries"): "a query runs with the caller's own rights",
+    ("POST", "/api/v1/environments/{env}/queries/{query_id}/cancel"): "operates existing work",
+    ("POST", "/api/v1/environments/{env}/namespaces"): "data operation under existing rights",
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/namespaces/{path}",
+    ): "data operation under existing rights",
+    (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/tables",
+    ): "data operation under existing rights",
+    ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/external"): (
+        "registers files already inside the environment's storage root"
+    ),
+    (
+        "PATCH",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
+    ): "a table's description and model; data operation",
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
+    ): "data operation, undone with undrop",
+    ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop"): "data operation",
+    (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/data",
+    ): "writes rows under existing rights",
+    (
+        "PUT",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/data",
+    ): "writes rows under existing rights",
+    (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge",
+    ): "writes rows under existing rights",
+    (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/load",
+    ): "writes rows under existing rights",
+    (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/history",
+    ): "reads or restores a table's own history",
+    (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/maintenance",
+    ): "maintenance of existing data",
+    (
+        "PUT",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention",
+    ): "how long dropped data is kept; data operation",
+    (
+        "PUT",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/columns/{column}/description",
+    ): "a description",
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}",
+    ): "data operation under existing rights",
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}",
+    ): "data operation under existing rights",
+    (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads",
+    ): "data operation under existing rights",
+    (
+        "PUT",
+        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}/blobs/{sha256}",
+    ): "data operation under existing rights",
+    (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}/commit",
+    ): "data operation under existing rights",
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}",
+    ): "data operation under existing rights",
 }
-"""Writes below `SENSITIVE_PREFIXES` that need no step-up, each with the reason."""
+"""Every other write of `/api/v1` and why it needs no step-up: it removes access, operates or
+writes existing work under the caller's own rights, or reads."""
 
 
 @pytest.fixture(scope="module")
@@ -623,6 +936,7 @@ def client(
                 )
             )
             _deployment(c, "dev", "analytics")
+            cast(FastAPI, c.app).state.step_up_root = root
             yield c
 
 
@@ -694,11 +1008,29 @@ def test_every_listed_route_exists() -> None:
     assert set(STEP_UP_ROUTES) & set(NO_STEP_UP) == set()
 
 
-def test_every_write_on_identities_and_rights_decides_on_step_up() -> None:
-    """A new write below the identity and rights prefixes must join one of the two lists."""
-    writes = {
-        (method, path)
-        for method, path in _all_operations(_route_app())
-        if method != "GET" and path.startswith(SENSITIVE_PREFIXES)
-    }
-    assert writes - set(STEP_UP_ROUTES) - set(NO_STEP_UP) == set()
+def _undecided(operations: list[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Find the writes that are in neither list.
+
+    Parameters
+    ----------
+    operations
+        ``(method, path)`` of every `/api/v1` operation.
+
+    Returns
+    -------
+    set of tuple of (str, str)
+        The writes without a step-up decision.
+    """
+    writes = {(method, path) for method, path in operations if method != "GET"}
+    return writes - set(STEP_UP_ROUTES) - set(NO_STEP_UP)
+
+
+def test_every_write_decides_on_step_up() -> None:
+    """Every state-changing `/api/v1` operation is in `STEP_UP_ROUTES` or `NO_STEP_UP`."""
+    assert _undecided(_all_operations(_route_app())) == set()
+
+
+def test_a_new_write_in_neither_list_is_caught() -> None:
+    """The guard names a write route nobody decided on."""
+    new = ("POST", "/api/v1/environments/{env}/something-new")
+    assert _undecided([*_all_operations(_route_app()), new]) == {new}

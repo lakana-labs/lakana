@@ -57,6 +57,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.identifiers import shown
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
     AuditEventType,
@@ -605,9 +606,12 @@ class ConnectionService:
             If the new secret's name was taken at the same time.
         LakanaError
             If no usable secrets master key is configured; nothing is kept.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         scope = Securable.environment_scope(environment)
         self._authz.authorize(p, Action.MANAGE_CONNECTION, scope)
+        require_step_up(p)
         env = self._environment(environment)
         if not isinstance(name, str) or not NAME.match(name):
             raise ValidationError(_NAME_RULE)
@@ -798,9 +802,12 @@ class ConnectionService:
             If the new secret's name was taken at the same time.
         LakanaError
             If no usable secrets master key is configured; nothing is kept.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         scope = Securable.environment_scope(environment)
         self._authz.authorize(p, Action.MANAGE_CONNECTION, scope)
+        require_step_up(p)
         env = self._environment(environment)
         clear = list(clear)
         if (
