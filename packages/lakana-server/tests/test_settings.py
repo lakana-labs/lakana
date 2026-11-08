@@ -326,10 +326,22 @@ def test_allowed_hosts_add_names_in_lower_case() -> None:
 
 
 @pytest.mark.parametrize(
-    "entry", ["*", "", "https://x.example", "x.example/a", "x.example:", "x.example:abc", "a b"]
+    "entry",
+    [
+        "*",
+        "",
+        "https://x.example",
+        "x.example/a",
+        "x.example:",
+        "x.example:abc",
+        "a b",
+        "10.0.0.5:8000",
+        "[::1]",
+        "127.1:8000",
+    ],
 )
 def test_allowed_hosts_refuse_what_is_not_a_host_and_port(entry: str) -> None:
-    """No wildcard, scheme, path or empty port: each entry is matched exactly."""
+    """No wildcard, scheme, path, empty port or IP address: each entry is a name, exactly."""
     with pytest.raises(pydantic.ValidationError, match="LAKANA_UI__ALLOWED_HOSTS"):
         UiConfig(allowed_hosts=[entry])
 
@@ -383,7 +395,9 @@ def test_trusted_proxies_default_to_none() -> None:
     assert Settings(database=DB).trusted_proxies == []
 
 
-@pytest.mark.parametrize("entry", ["*", "proxy.internal", "10.0.0.300", "", "10.1.0.5/16"])
+@pytest.mark.parametrize(
+    "entry", ["*", "proxy.internal", "10.0.0.300", "", "10.1.0.5/16", "0.0.0.0/0", "::/0"]
+)
 def test_trusted_proxies_refuse_what_is_not_an_address(entry: str) -> None:
     """Only IP addresses and networks: a wildcard would trust every client's own header."""
     with pytest.raises(pydantic.ValidationError, match="LAKANA_TRUSTED_PROXIES"):

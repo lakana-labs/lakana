@@ -173,9 +173,29 @@ def test_non_browser_traffic_skips_the_host_check(
 
 
 def test_bearer_request_skips_the_host_check(client: TestClient) -> None:
-    """A rebinding page cannot hold a token: a Bearer request passes untouched."""
-    r = client.get("/api/v1/whoami", headers={**AUTH_HEADER, "Host": "evil.example"})
+    """An ordinary API route with a Bearer passes at any name, as the Compose worker calls it."""
+    r = client.get("/api/v1/whoami", headers={**AUTH_HEADER, "Host": "server:8000"})
     assert r.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("method", "path"), [("POST", DESCRIBE), ("GET", "/"), ("GET", "/catalog")]
+)
+def test_a_fake_bearer_does_not_skip_the_host_check(
+    client: TestClient, method: str, path: str
+) -> None:
+    """A rebinding page can add any `Authorization`: sign-in routes and pages still check Host."""
+    r = client.request(
+        method, path, headers={"Authorization": "Bearer x", "Host": "evil.example:8000"}
+    )
+    assert r.status_code == 421
+    assert r.json()["type"] == "HostNotAllowed"
+
+
+def test_a_bearer_sign_in_request_needs_no_origin(client: TestClient) -> None:
+    """At an allowed name, a Bearer request (the CLI's local sign-in) skips the Origin rule."""
+    r = client.post(DESCRIBE, json={}, headers=AUTH_HEADER)
+    assert r.json().get("type") != "OriginNotAllowed"
 
 
 def test_bearer_request_with_a_cookie_skips_the_guard(client: TestClient) -> None:
@@ -247,13 +267,13 @@ def test_sec_fetch_site_same_site_is_not_enough(client: TestClient) -> None:
 def test_sec_fetch_site_same_origin_is_accepted(client: TestClient) -> None:
     """A browser that sends no Origin but `Sec-Fetch-Site: same-origin` passes."""
     r = client.post(DESCRIBE, json={}, headers={**COOKIE, "Sec-Fetch-Site": "same-origin"})
-    assert r.status_code != 403
+    assert r.json().get("type") != "OriginNotAllowed"
 
 
 def test_the_public_origin_passes(client: TestClient) -> None:
     """The exact public origin passes the guard (the route itself answers)."""
     r = client.post(DESCRIBE, json={}, headers={**COOKIE, "Origin": PUBLIC})
-    assert r.status_code != 403
+    assert r.json().get("type") != "OriginNotAllowed"
 
 
 @pytest.mark.parametrize(

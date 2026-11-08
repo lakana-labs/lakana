@@ -257,8 +257,8 @@ cookie set for another host.
 - **Host and Origin (`lakana_server.browser_guard.BrowserGuard`, part 1b).** A pure ASGI
   middleware, outermost and present only with the interface on, defends against DNS rebinding
   and cross-site requests before any route, credential or body is looked at. Order: (1) a
-  request whose first `Authorization` header is `Bearer <credential>` passes untouched (a
-  rebinding page cannot hold a token, and the Bearer header wins over the cookie; any other
+  request whose first `Authorization` header is `Bearer <credential>` skips the cookie test and
+  the Origin rule, never the Host check of pages and sign-in routes (see below; any other
   `Authorization` is checked like none); (2) *browser traffic* is a path of the interface (not
   `/api`, `/v1` or below, `/healthz`, `/readyz`; any other spelling, such as `/API/...` or
   `//api/...`, counts as the interface's), a request with a session cookie (any name starting
@@ -276,13 +276,20 @@ cookie set for another host.
   scoped:** engines, CI and the Compose worker reach open non-browser routes (`/v1/config`,
   `/api/v1/auth/oidc/token`) by internal names (`server:8000`) without a credential; DNS
   rebinding only matters where a page, a cookie or a sign-in route is involved, and a rebinding
-  page cannot hold a token. `LAKANA_UI__PUBLIC_URL` refuses an IP address (also `127.1`,
+  page cannot hold a real token. **A Bearer header does not skip the Host check** of pages and
+  sign-in routes: a rebinding page is same-origin with its own name, so it can add a fake
+  `Authorization: Bearer x` without a preflight and would otherwise reach the open sign-in routes
+  at any name. A Bearer only skips the cookie test of (2) (the Bearer wins over the cookie) and
+  the Origin rule (5) (a cross-site page cannot send it without a CORS preflight, which no route
+  answers; `lakana server start --local` posts to a sign-in route with a token and no `Origin`).
+  Ordinary API routes with a Bearer pass at any name, as the Compose worker calls them.
+  `LAKANA_UI__PUBLIC_URL` refuses an IP address (also `127.1`,
   `0x7f.0.0.1`: a last label that is a number), a path, query, fragment, user name, trailing dot
   or non-ASCII name, and, with the interface on, plain `http://` off `localhost`. A reverse proxy
-  must pass the browser's `Host` (nginx's default `$proxy_host` gets 421). The guard uses only the
+  must pass the browser's `Host` with its port (nginx `$http_host`; the default `$proxy_host` gets 421, and `$host` drops the port). The guard uses only the
   `Host` header, so an absolute-form request target (`GET http://localhost:8000/`) does not
   change the decision. No CORS headers are sent on any route. `test_browser_guard.py` tries other
-  ports, letter case, trailing dots, other loopback spellings, missing and repeated `Host` and
+  ports, letter case, trailing dots, other loopback spellings, a fake Bearer, missing and repeated `Host` and
   `Origin`, `Origin: null`, absolute-form targets and path prefixes.
 - **Not yet covered:** the Playwright suite runs against `vite preview`, not lakana-server.
   `packages/lakana-server/tests/test_ui_real_build.py` (CI `ui`, after the build) serves the

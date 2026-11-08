@@ -4,19 +4,22 @@
 defends browser traffic against DNS rebinding (a page whose name an attacker points at the
 server) and cross-site requests, before any route, credential or body is looked at:
 
-1. a request with a Bearer `Authorization` header passes untouched: a page an attacker serves
-   cannot hold a token, and the Bearer header wins over the session cookie;
+1. a Bearer `Authorization` header (first header, `Bearer <credential>`) skips only the
+   session-cookie test of rule 2 and the Origin rule 5: the Bearer header wins over the cookie,
+   and a cross-site page cannot send one without a CORS preflight, which no route answers. It
+   does not skip the Host check of pages and sign-in routes, because a DNS-rebinding page is
+   same-origin with its own name and can add a fake Bearer header freely;
 2. a request is browser traffic when its path is a page or file of the interface (not below
    `/api/` or `/v1/`, not `/healthz` or `/readyz`), when it carries a session cookie
-   (`lakana_session*`, `__Host-lakana_session`), or when it is a sign-in route
+   (`lakana_session*`, `__Host-lakana_session`; not with a Bearer), or when it is a sign-in route
    (`/api/v1/sign-in/...`); everything else passes untouched, so engines, CI and the worker
    keep reaching open routes such as `/v1/config` by internal names;
 3. browser traffic must name an allowed host in `Host` (`Settings.allowed_host_headers`), or it
    is refused with 421;
 4. a GET or HEAD of a page at `127.0.0.1` or `[::1]`, while the public address is `localhost`,
    is sent on (308) to the same path at the public address, where passkeys work;
-5. every other method of browser traffic needs `Origin` equal to the public origin, or no
-   `Origin` and `Sec-Fetch-Site: same-origin`, or it is refused with 403.
+5. every other method of browser traffic without a Bearer needs `Origin` equal to the public
+   origin, or no `Origin` and `Sec-Fetch-Site: same-origin`, or it is refused with 403.
 
 Every address the guard sends a browser to is built from `Settings.public_origin`, never from
 the request's `Host`. The security notes are in `docs/agent/security.md`, "The web interface's
@@ -48,7 +51,7 @@ HOST_NOT_ALLOWED = (
     "This server answers browsers only at its own addresses, and this request named another "
     "in its Host header. Open the interface at the address in LAKANA_UI__PUBLIC_URL, or add "
     "this name to LAKANA_UI__ALLOWED_HOSTS. Behind a reverse proxy, pass the browser's Host "
-    "header through (nginx: proxy_set_header Host $host;)."
+    "header through (nginx: proxy_set_header Host $http_host;)."
 )
 """The 421 detail; it never repeats the request's `Host`."""
 
@@ -211,17 +214,19 @@ class BrowserGuard:
         send
             The response's send channel.
         """
-        if scope["type"] not in {"http", "websocket"} or _has_bearer(scope):
+        if scope["type"] not in {"http", "websocket"}:
             await self.app(scope, receive, send)
             return
+        bearer = _has_bearer(scope)
         path = _app_path(scope)
         page = _is_page(path)
-        if not (page or _has_session_cookie(scope) or self._is_sign_in(path)):
+        cookie = not bearer and _has_session_cookie(scope)
+        if not (page or cookie or self._is_sign_in(path)):
             await self.app(scope, receive, send)
             return
         host = (_single(scope, b"host") or "").lower()
         if host not in self.allowed_hosts:
-            logger.info("Refused browser traffic at an unknown host: %.100r", host)
+            logger.debug("Refused browser traffic at an unknown host: %.100r", host)
             await self._refuse(scope, receive, send, 421, HOST_NOT_ALLOWED, "HostNotAllowed")
             return
         websocket = scope["type"] == "websocket"
@@ -229,7 +234,8 @@ class BrowserGuard:
         if page and not websocket and method in {"GET", "HEAD"} and host in self.aliases:
             await self._redirect(scope, receive, send)
             return
-        if (websocket or method not in _SAFE_METHODS) and not self._same_origin(scope):
+        unsafe = websocket or method not in _SAFE_METHODS
+        if unsafe and not bearer and not self._same_origin(scope):
             await self._refuse(scope, receive, send, 403, ORIGIN_NOT_ALLOWED, "OriginNotAllowed")
             return
         await self.app(scope, receive, send)

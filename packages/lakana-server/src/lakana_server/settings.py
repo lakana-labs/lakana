@@ -162,7 +162,7 @@ _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 _HOST_ENTRY = re.compile(
     r"(?P<host>\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::(?P<port>[0-9]{1,5}))?"
 )
-"""A `host[:port]` entry of `LAKANA_UI__ALLOWED_HOSTS`: a name, IPv4 or bracketed IPv6."""
+"""The shape of a `host[:port]` entry of `LAKANA_UI__ALLOWED_HOSTS` (IP addresses refused after)."""
 
 
 @dataclass(frozen=True)
@@ -296,14 +296,15 @@ class UiConfig(BaseModel):
         passkeys to a name. Every link the server makes (sign-in, invite, recovery) starts with
         this address. Browsers that reach the interface under another name are refused (421)
         unless it is in `LAKANA_UI__ALLOWED_HOSTS`. Behind a reverse proxy, the proxy must pass the
-        browser's `Host` header through (with nginx, `proxy_set_header Host $host;`). Changing the
-        public address invalidates every passkey: issue recovery links afterwards.
+        browser's `Host` header through (with nginx, `proxy_set_header Host $http_host;`, which
+        keeps a port). Changing the public address invalidates every passkey: issue recovery
+        links afterwards.
     allowed_hosts
         Further `host:port` names (`host` alone for port 80 or 443) the interface answers
         browsers at, as a JSON list, for example `["lakana.internal:8443"]`. Empty (the default):
         only the public address. Each entry is matched exactly, without letter case; there is no
-        wildcard. Signing in and every change still need the public address: a browser at an
-        extra name can open pages only.
+        wildcard and no IP address. Signing in and every change still need the public address:
+        a browser at an extra name can open pages only.
     local_sign_in
         Whether a person may sign in to the interface with a link they ask for with their own
         token, without a passkey touch (default false). `lakana server start --local` sets it for
@@ -366,11 +367,15 @@ class UiConfig(BaseModel):
         lowered = [entry.lower() for entry in value]
         for entry in lowered:
             match = _HOST_ENTRY.fullmatch(entry)
-            if match is None or int(match["port"] or 1) not in range(1, 65536):
+            if (
+                match is None
+                or int(match["port"] or 1) not in range(1, 65536)
+                or _is_ip_address(match["host"].strip("[]"))
+            ):
                 raise ValueError(
                     f"LAKANA_UI__ALLOWED_HOSTS entries are host names with an optional port, "
                     f"such as lakana.internal:8443, matched exactly; {entry!r} is not one "
-                    "(no scheme, path or wildcard)."
+                    "(no IP address, scheme, path or wildcard: passkeys need a name)."
                 )
         return lowered
 
@@ -490,7 +495,8 @@ class Settings(BaseSettings):
         `["10.0.0.2"]` or `["10.1.0.0/16"]`. Empty (the default): no forwarded header is
         believed, also not from `127.0.0.1`, and the client address in audit events and rate
         limits is the TCP peer's. Behind a reverse proxy, list it here, or every request looks
-        as if it came from the proxy. No wildcard: a client could then claim any address.
+        as if it came from the proxy. No wildcard and no network of every address (`0.0.0.0/0`,
+        `::/0`): a client could then claim any address.
     repo_roots
         Absolute directories that local repositories must lie under, as a JSON list, for example
         `["/repos"]`. Empty (the default) refuses every local repository.
@@ -600,13 +606,16 @@ class Settings(BaseSettings):
         """
         for entry in value:
             try:
-                ipaddress.ip_network(entry)
+                network = ipaddress.ip_network(entry)
             except ValueError:
+                network = None
+            if network is None or network.prefixlen == 0:
                 raise ValueError(
                     f"LAKANA_TRUSTED_PROXIES entries are IP addresses or networks of your "
                     f"reverse proxies, such as 10.0.0.2 or 10.1.0.0/16; {entry!r} is not one "
-                    "(no host names, no wildcard)."
-                ) from None
+                    "(no host names, no wildcard, no network of every address such as "
+                    "0.0.0.0/0)."
+                )
         return value
 
     @model_validator(mode="after")

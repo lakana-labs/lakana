@@ -352,7 +352,8 @@ should also keep out what the server would refuse anyway, so that it never reach
   browser only at its public address (`LAKANA_UI__PUBLIC_URL`, for example
   `https://lakana.example.com`) and refuses any other `Host` with 421 `HostNotAllowed`. Caddy passes
   it by default; nginx sends its upstream's name (`$proxy_host`) unless you add
-  `proxy_set_header Host $host;`.
+  `proxy_set_header Host $http_host;` (nginx's `$host` drops a port, so a public address on a port
+  other than 443 would still be refused).
 - **List the proxy in `LAKANA_TRUSTED_PROXIES`** so the server believes its `X-Forwarded-For` and
   `X-Forwarded-Proto`, as a JSON list of addresses or networks. Use the address the server sees the
   proxy connect from: for a proxy on the host in front of the bundle, Docker's gateway of the
@@ -536,7 +537,7 @@ server {
     proxy_read_timeout 300s;         # long-running queries
     location / {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;   # the web interface answers only its public name
+        proxy_set_header Host $http_host;   # the interface answers only its public name and port
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }

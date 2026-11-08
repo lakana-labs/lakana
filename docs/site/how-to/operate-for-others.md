@@ -42,7 +42,7 @@ space by the data you expect to store; the documentation names no figure.
 To let others reach it, do not publish the port to the network as it is: put a reverse proxy that
 handles TLS in front of it, and pass the public address to `bundle init`. The steps, two example
 proxy files and the limits a proxy must allow: [Exposing it](deploy-with-compose.md#exposing-it)
-and [A reverse proxy in front of the server](deploy-with-compose.md#a-reverse-proxy-in-front-of-the-server). The proxy passes the browser's `Host` header through (nginx: `proxy_set_header Host $host;`;
+and [A reverse proxy in front of the server](deploy-with-compose.md#a-reverse-proxy-in-front-of-the-server). The proxy passes the browser's `Host` header through (nginx: `proxy_set_header Host $http_host;`;
 otherwise the web interface answers 421) and is listed in `LAKANA_TRUSTED_PROXIES`, or the audit
 log shows the proxy's address for every client. Set `LAKANA_UI__PUBLIC_URL` to the address people
 open, such as `https://acme.lakana.example.org`.
