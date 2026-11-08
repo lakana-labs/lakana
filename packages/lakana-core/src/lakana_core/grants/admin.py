@@ -163,6 +163,31 @@ def authorize_admin_only(
     raise PermissionDenied(admin_only_message(action))
 
 
+def acts_as_instance_admin(session: Session, authz: AuthorizationService, p: PrincipalRef) -> bool:
+    """Say whether `p` counts as an instance administrator for the authorization in use.
+
+    For a rule that asks for the `ADMIN` role together with another action, which the caller
+    authorizes itself (`lakana_core.identity.sessions`: ending another person's sessions,
+    changing the session limits).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    authz
+        The authorization service of the calling service.
+    p
+        The acting principal.
+
+    Returns
+    -------
+    bool
+        `True` if `p` holds the `ADMIN` role at instance scope, or `authz` is
+        `AllowAllAuthorization` (the server's bootstrap, which asks for no role).
+    """
+    return isinstance(authz, AllowAllAuthorization) or holds_instance_admin(session, p.id)
+
+
 def may_see_grants(session: Session, authz: AuthorizationService, p: PrincipalRef) -> bool:
     """Say whether `p` may see who holds access: the same rule as the grants listing.
 

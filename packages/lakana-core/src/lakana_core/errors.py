@@ -43,6 +43,54 @@ class AuthenticationError(LakanaError):
     """
 
 
+_SESSION_ENDED = {
+    "idle": "Your session ended after a time without activity. Sign in again.",
+    "lifetime": "Your session reached its maximum length and ended. Sign in again.",
+    "sign_out": "You signed out. Sign in again.",
+    "sign_out_everywhere": "You signed out on every device. Sign in again.",
+    "ended_by_admin": "An administrator ended your session. Sign in again.",
+    "replaced": "A newer sign-in in this browser replaced this session. Sign in again.",
+    "deactivated": (
+        "Your account is deactivated, so your session ended. Ask an administrator to "
+        "reactivate it, then sign in again."
+    ),
+    "token_revoked": (  # nosec B105 -- a reason label and its message, not a credential
+        "The token this session was created with was revoked or expired, so the session ended. "
+        "Sign in again."
+    ),
+}
+"""The message for each reason a session ends; an unknown reason gets a general one."""
+
+
+class SessionEndedError(AuthenticationError):
+    """A browser session was valid once and has ended.
+
+    Distinct from a plain `AuthenticationError` (an unknown or forged cookie) so the interface
+    can say why: the server answers 401 with `reason`.
+
+    Parameters
+    ----------
+    reason
+        Why it ended: ``idle``, ``lifetime``, ``sign_out``, ``sign_out_everywhere``,
+        ``ended_by_admin``, ``replaced``, ``deactivated``, ``token_revoked``, or another
+        reason a caller of `SessionService.end_for_principal` gave.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(
+            _SESSION_ENDED.get(reason, f"Your session ended ({reason}). Sign in again.")
+        )
+
+
+class StepUpRequired(PermissionDenied):
+    """The action needs a fresh passkey touch in this browser session.
+
+    Raised by `lakana_core.identity.sessions.require_step_up` for a session whose last passkey
+    touch is missing or older than 15 minutes; a token caller never gets it.
+    """
+
+
 class StorageUnavailableError(LakanaError):
     """Storage could not be written or read right now (a full disk, an unreachable bucket).
 

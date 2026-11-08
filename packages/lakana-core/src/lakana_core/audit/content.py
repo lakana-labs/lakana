@@ -124,6 +124,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "kinds",
         # the language a description or label edit was made in: a tag, never the text
         "language",
+        # the sign-in link a browser session began with (`lakana_core.identity.sessions`)
+        "link_id",
         "location",
         "locations",
         "manifest_sha256",
@@ -131,6 +133,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "name",
         "operation",
         "path",
+        # the client's address and browser of a sign-in, as the server saw them
+        "peer",
         "principal",
         "principal_id",
         "project_version_id",
@@ -164,9 +168,12 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "type",
         "url",
         "use",
+        "user_agent",
         # the column a history write took each version's start from, or "run" for the run clock
         "valid_from",
         "version",
+        # how a browser session began: setup, invite, recovery, local or passkey
+        "via",
         "waits_for_run_id",
         # states, outcomes and fixed reasons
         "already_deleted",

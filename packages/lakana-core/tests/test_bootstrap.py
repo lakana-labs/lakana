@@ -254,6 +254,16 @@ def test_bootstrap_if_needed_creates_grants_and_mints_when_no_admin_exists(
     )
 
 
+def test_bootstrap_pat_is_marked(session: Session) -> None:
+    """The PAT `bootstrap_if_needed` mints is the operator's: `bootstrap` is true."""
+    bootstrap_if_needed(session, "admin", key_id="testkey", secret="testsecret")
+
+    pat = session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.key_id == "testkey")
+    ).scalar_one()
+    assert pat.bootstrap is True
+
+
 def test_bootstrap_if_needed_reactivates_an_inactive_principal(session: Session) -> None:
     """A deactivated bootstrap principal is reactivated as part of recovery."""
     admin = ensure_bootstrap_principal(session, "admin")

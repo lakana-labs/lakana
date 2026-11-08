@@ -10,7 +10,7 @@ one row (`lakana_core.identity.tokens.verify_secret`).
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, CheckConstraint, ForeignKey, Integer, String, Uuid
+from sqlalchemy import JSON, Boolean, CheckConstraint, ForeignKey, Integer, String, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, UTCDateTime
@@ -36,6 +36,10 @@ class PersonalAccessToken(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    bootstrap: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    """Whether this is the operator's token: the one `lakana_core.bootstrap.bootstrap_if_needed`
+    minted. Set by nothing else (the REST schema has no such field); migration 0069 marks an
+    earlier unrevoked PAT named ``bootstrap`` of the bootstrap principal."""
 
 
 class TaskToken(Base):

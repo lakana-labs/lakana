@@ -432,6 +432,7 @@ def bootstrap_if_needed(
         name="bootstrap",
         key_id=key_id,
         secret=secret,
+        bootstrap=True,
         commit=False,
     )
     written: Path | None = None

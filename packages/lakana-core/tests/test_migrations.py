@@ -5272,3 +5272,112 @@ def test_0068_adds_the_attempt_resource_columns_and_downgrades_cleanly(
             assert not figures & {c["name"] for c in inspect(engine).get_columns(table)}
     finally:
         engine.dispose()
+
+
+_REVISION_0069 = "d7f1b3c5e9a2"
+_SIGN_IN_TABLES = {
+    "sign_in_links",
+    "browser_sessions",
+    "passkeys",
+    "webauthn_challenges",
+    "sign_in_notices",
+    "instance_settings",
+}
+
+
+@pytest.mark.usefixtures("_without_fsync")
+@pytest.mark.parametrize("operator", [None, "ops"])
+def test_0069_adds_the_sign_in_tables_and_marks_only_the_operators_bootstrap_pat(
+    tmp_path: Path, migrated_db: MigratedDb, monkeypatch: pytest.MonkeyPatch, operator: str | None
+) -> None:
+    """Revision `0069`: the sign-in tables; only the bootstrap principal's PAT is the operator's.
+
+    Of the PATs that exist before the upgrade, `bootstrap` becomes true only for an unrevoked
+    one named ``bootstrap`` that belongs to the bootstrap principal (`LAKANA_BOOTSTRAP_ADMIN`,
+    default ``admin``); a ``bootstrap`` PAT of another principal, a revoked one, and one with
+    another name stay false. The downgrade drops the tables and both columns.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    monkeypatch
+        Sets `LAKANA_BOOTSTRAP_ADMIN`.
+    operator
+        The configured bootstrap principal's name; `None` leaves the default, ``admin``.
+    """
+    db_path = migrated_db(_REVISION_0068)
+    if operator is not None:
+        monkeypatch.setenv("LAKANA_BOOTSTRAP_ADMIN", operator)
+    bootstrap_name = operator or "admin"
+    other_name = "admin" if operator else "ops"
+    config = Config(str(ALEMBIC_INI))
+    owners = {bootstrap_name: uuid.uuid4().hex, other_name: uuid.uuid4().hex}
+    pats = {
+        "operator": (bootstrap_name, "bootstrap", None),
+        "operator_laptop": (bootstrap_name, "laptop", None),
+        "operator_revoked": (bootstrap_name, "bootstrap", "2026-11-01 00:00:00"),
+        "other_bootstrap": (other_name, "bootstrap", None),
+    }
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as connection:
+            for name, principal_id in owners.items():
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at, "
+                        "updated_at) VALUES (:id, 'USER', :name, 1, :t, :t)"
+                    ),
+                    {"id": principal_id, "name": name, "t": _utc_text()},
+                )
+            for key_id, (owner, name, revoked_at) in pats.items():
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO personal_access_tokens (id, principal_id, key_id, "
+                        "secret_hash, name, created_at, revoked_at) VALUES (:id, :owner, :key, "
+                        "'h', :name, :t, :revoked)"
+                    ),
+                    {
+                        "id": uuid.uuid4().hex,
+                        "owner": owners[owner],
+                        "key": key_id,
+                        "name": name,
+                        "t": _utc_text(),
+                        "revoked": revoked_at,
+                    },
+                )
+    finally:
+        engine.dispose()
+    command.upgrade(config, _REVISION_0069)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert set(inspector.get_table_names()) >= _SIGN_IN_TABLES
+        assert "webauthn_handle" in {c["name"] for c in inspector.get_columns("principals")}
+        with engine.connect() as connection:
+            flags = dict(
+                connection.execute(
+                    sa.text("SELECT key_id, bootstrap FROM personal_access_tokens")
+                ).all()
+            )
+        assert {key: bool(flag) for key, flag in flags.items()} == {
+            "operator": True,
+            "operator_laptop": False,
+            "operator_revoked": False,
+            "other_bootstrap": False,
+        }
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0068)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert not _SIGN_IN_TABLES & set(inspector.get_table_names())
+        assert "webauthn_handle" not in {c["name"] for c in inspector.get_columns("principals")}
+        assert "bootstrap" not in {
+            c["name"] for c in inspector.get_columns("personal_access_tokens")
+        }
+    finally:
+        engine.dispose()

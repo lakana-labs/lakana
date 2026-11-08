@@ -20180,7 +20180,16 @@
           "OIDC_TOKEN_EXCHANGED",
           "OIDC_EXCHANGE_REFUSED",
           "ACCESS_APPLIED",
-          "MANAGED_SCOPE_OVERRIDDEN"
+          "MANAGED_SCOPE_OVERRIDDEN",
+          "SESSION_STARTED",
+          "SESSION_ENDED",
+          "SIGN_IN_SETTINGS_CHANGED",
+          "SIGN_IN_LINK_ISSUED",
+          "SIGN_IN_LINK_WITHDRAWN",
+          "SIGN_IN_LINK_USED",
+          "PASSKEY_ADDED",
+          "PASSKEY_REMOVED",
+          "PASSKEY_DISABLED"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."

@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, String, Uuid
+from sqlalchemy import Boolean, Enum, LargeBinary, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, TimestampMixin, UTCDateTime
@@ -40,3 +40,8 @@ class Principal(Base, TimestampMixin):
     claim timed out on the principal's cap lock (`pools.pass_by`). `None` when none was. Read by
     the wait reason (`waiting.LOCK_TIMEOUT`); it ends by time only, and a past time means
     nothing."""
+    webauthn_handle: Mapped[bytes | None] = mapped_column(
+        LargeBinary(32), unique=True, nullable=True, default=None
+    )
+    """The WebAuthn user handle: 32 random bytes, set when the first passkey is registered,
+    never derived from the id or the name. `None` until then."""

@@ -55,6 +55,14 @@ from lakana_core.models.check_result import CheckOutcome, CheckResult, RollbackO
 from lakana_core.models.job import JobFire, JobSchedule
 from lakana_core.models.notification import NotificationDelivery, NotificationState
 from lakana_core.models.worker import Worker
+from lakana_core.models.sign_in import (
+    BrowserSession,
+    InstanceSetting,
+    Passkey,
+    SignInLink,
+    SignInNotice,
+    WebauthnChallenge,
+)
 from lakana_core.models.run import (
     OWN_TIP_NO_SNAPSHOT,
     AttemptOutcome,
@@ -80,6 +88,7 @@ __all__ = [
     "AuditEvent",
     "AuditEventType",
     "Base",
+    "BrowserSession",
     "CheckOutcome",
     "CheckResult",
     "CiOidcJti",
@@ -106,6 +115,7 @@ __all__ = [
     "Group",
     "GroupMembership",
     "IncrementalFileRead",
+    "InstanceSetting",
     "JobFire",
     "JobSchedule",
     "JobVersion",
@@ -114,6 +124,7 @@ __all__ = [
     "NotificationDelivery",
     "NotificationState",
     "PackageIndex",
+    "Passkey",
     "PersonalAccessToken",
     "Principal",
     "PrincipalType",
@@ -131,6 +142,8 @@ __all__ = [
     "SchedulerLease",
     "Secret",
     "SecretUseKind",
+    "SignInLink",
+    "SignInNotice",
     "Table",
     "TableColumn",
     "TableHealthSignal",
@@ -144,6 +157,7 @@ __all__ = [
     "TaskToken",
     "TextTranslation",
     "TimestampMixin",
+    "WebauthnChallenge",
     "Worker",
     "WriteMode",
 ]
