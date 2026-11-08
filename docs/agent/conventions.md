@@ -177,6 +177,14 @@ ratchet" in `docs/agent/testing.md`). The message lists the new blocks as
 wheel. It has no version of its own (rule 3): `package.json` is `private` and carries none. Its
 gates are in "The `ui/` gates" in `docs/agent/testing.md`.
 
+- **Every CLI command and REST route has an entry in `ui/parity.yaml`.** The key is the command
+  path (`table undrop`) or `METHOD /api/v1/path`; the value is `class: ui` or `read` with a
+  `part` 1-8 of the interface, or `class: git` with a `reason`. The principle: whatever a person
+  does by hand is in the UI; whatever a Git repository defines (assets, schedules, access files,
+  deploys) or local tooling does (`init`, `profile`, `load`) is Git. `exception` is reserved for
+  the two task-token minting entries. `scripts/tests/test_ui_parity.py` walks the live command
+  tree and reads the routes from the committed `docs/site/reference/openapi.json` (kept equal to the app
+  by CI's `generate_reference.py --check`) and fails on a missing, stale or invalid entry, naming it and the next step.
 - **Exact pins, one tool per pull request.** Every dependency is an exact version
   (`ui/.npmrc`: `save-exact`, `engine-strict`, `ignore-scripts`), Node is the `26` line
   (`ui/.nvmrc`, `engines.node`). Dependabot groups what ships (`ui-runtime`) and the few

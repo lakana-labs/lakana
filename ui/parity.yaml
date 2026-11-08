@@ -1,0 +1,380 @@
+# The place of every CLI command and REST route in the web interface.
+# Checked against the live command tree and the committed docs/site/reference/openapi.json by
+# scripts/tests/test_ui_parity.py (CI's generate_reference.py --check keeps that file equal to the app).
+# Key: CLI command path ("table undrop") or "METHOD /api/v1/path" as OpenAPI spells it.
+# class ui|read: part 1-8 of the interface (read = shown, not changed). class git|exception: reason.
+# Rule: docs/agent/conventions.md, "The ui/ project".
+
+"access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }
+"access explain": { class: ui, part: 7 }
+"access export": { class: ui, part: 7, note: "a download of the live access as an access file" }
+"access plan": { class: git, reason: "pre-commit validation of an access file" }
+"access status": { class: read, part: 7 }
+"artifact download": { class: ui, part: 3 }
+"artifact drop": { class: ui, part: 3 }
+"artifact list": { class: ui, part: 3 }
+"artifact upload": { class: git, reason: "local file/dir upload from code or terminal" }
+"artifact uploads abort": { class: ui, part: 3 }
+"artifact uploads list": { class: ui, part: 3 }
+"artifact versions delete": { class: ui, part: 3 }
+"artifact versions list": { class: ui, part: 3 }
+"audit list": { class: ui, part: 8 }
+"bundle init": { class: git, reason: "local deployment tooling (compose.yaml, .env)" }
+"check list": { class: read, part: 5 }
+"check rows": { class: ui, part: 5 }
+"ci-trust create": { class: ui, part: 7 }
+"ci-trust delete": { class: ui, part: 7 }
+"ci-trust disable": { class: ui, part: 7 }
+"ci-trust enable": { class: ui, part: 7 }
+"ci-trust explain": { class: ui, part: 7 }
+"ci-trust list": { class: ui, part: 7 }
+"ci-trust show": { class: ui, part: 7 }
+"ci-trust update": { class: ui, part: 7 }
+"column-mask create": { class: ui, part: 7 }
+"column-mask list": { class: ui, part: 7 }
+"column-mask revoke": { class: ui, part: 7 }
+"connection create": { class: ui, part: 6 }
+"connection delete": { class: ui, part: 6 }
+"connection list": { class: ui, part: 6 }
+"connection show": { class: ui, part: 6 }
+"connection test": { class: ui, part: 6 }
+"connection update": { class: ui, part: 6 }
+"deploy": { class: git, reason: "deploy of a new commit" }
+"deployments list": { class: read, part: 5 }
+"deployments set-run-as": { class: ui, part: 7 }
+"deploys list": { class: read, part: 5 }
+"deploys show": { class: read, part: 5 }
+"env create": { class: ui, part: 8 }
+"env delete": { class: ui, part: 8 }
+"env get": { class: ui, part: 8 }
+"env list": { class: ui, part: 8 }
+"env orphaned-locations": { class: ui, part: 8 }
+"env protect": { class: ui, part: 8 }
+"env restore": { class: ui, part: 8 }
+"env retention": { class: ui, part: 8 }
+"env set-storage": { class: ui, part: 8 }
+"env unprotect": { class: ui, part: 8 }
+"env usage": { class: ui, part: 8 }
+"grant create": { class: ui, part: 7 }
+"grant list": { class: ui, part: 7 }
+"grant revoke": { class: ui, part: 7 }
+"graph impact": { class: ui, part: 3 }
+"graph join-path": { class: ui, part: 3 }
+"graph lineage": { class: read, part: 3 }
+"graph neighbours": { class: read, part: 3 }
+"group add-member": { class: ui, part: 7 }
+"group create": { class: ui, part: 7 }
+"group delete": { class: ui, part: 7 }
+"group list": { class: ui, part: 7 }
+"group members": { class: ui, part: 7 }
+"group remove-member": { class: ui, part: 7 }
+"index add": { class: ui, part: 8 }
+"index list": { class: ui, part: 8 }
+"index remove": { class: ui, part: 8 }
+"index show": { class: ui, part: 8 }
+"index update": { class: ui, part: 8 }
+"init": { class: git, reason: "project init" }
+"job list": { class: read, part: 5 }
+"job notification": { class: ui, part: 5 }
+"job notify-test": { class: ui, part: 5 }
+"job pause": { class: ui, part: 5 }
+"job resume": { class: ui, part: 5 }
+"job run": { class: ui, part: 5 }
+"job show": { class: read, part: 5 }
+"load": { class: git, reason: "load of a local file; UI file load is #224/#29, optional in M7" }
+"login": { class: ui, part: 1 }
+"logout": { class: ui, part: 1 }
+"me set": { class: ui, part: 1 }
+"ns create": { class: ui, part: 3 }
+"ns delete": { class: ui, part: 3 }
+"ns get": { class: read, part: 3 }
+"ns list": { class: read, part: 3 }
+"orphans": { class: ui, part: 3 }
+"principal create": { class: ui, part: 7 }
+"principal deactivate": { class: ui, part: 7 }
+"principal get": { class: ui, part: 7 }
+"principal list": { class: ui, part: 7 }
+"profile list": { class: git, reason: "local CLI credential file" }
+"profile remove": { class: git, reason: "local CLI credential file" }
+"profile use": { class: git, reason: "local CLI credential file" }
+"project-version show": { class: ui, part: 5 }
+"query cancel": { class: ui, part: 4 }
+"query list": { class: ui, part: 4 }
+"query result": { class: ui, part: 4 }
+"query status": { class: ui, part: 4 }
+"query submit": { class: ui, part: 4 }
+"query wait": { class: ui, part: 4 }
+"repo add": { class: ui, part: 8 }
+"repo list": { class: ui, part: 8 }
+"repo remove": { class: ui, part: 8 }
+"repo show": { class: ui, part: 8 }
+"repo update": { class: ui, part: 8 }
+"rollback": { class: ui, part: 5 }
+"row-filter create": { class: ui, part: 7 }
+"row-filter list": { class: ui, part: 7 }
+"row-filter revoke": { class: ui, part: 7 }
+"run": { class: ui, part: 5 }
+"runs cancel": { class: ui, part: 5 }
+"runs list": { class: ui, part: 5 }
+"runs logs": { class: ui, part: 5 }
+"runs resume": { class: ui, part: 5 }
+"runs show": { class: ui, part: 5 }
+"scheduler status": { class: ui, part: 8 }
+"search": { class: ui, part: 1 }
+"secret bind": { class: ui, part: 7 }
+"secret create": { class: ui, part: 7 }
+"secret list": { class: ui, part: 7 }
+"secret revoke": { class: ui, part: 7 }
+"secret rotate": { class: ui, part: 7 }
+"server reset": { class: git, reason: "local dev tooling" }
+"server start": { class: git, reason: "local dev tooling" }
+"server status": { class: git, reason: "local dev tooling" }
+"server stop": { class: git, reason: "local dev tooling" }
+"sql": { class: ui, part: 4, note: "--into (write into a table) is Git, see table append" }
+"table append":
+  {
+    class: git,
+    reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
+  }
+"table create":
+  {
+    class: git,
+    reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
+  }
+"table create-external": { class: ui, part: 3 }
+"table delete": { class: ui, part: 3 }
+"table describe": { class: ui, part: 3 }
+"table expiring": { class: ui, part: 3 }
+"table get": { class: read, part: 3 }
+"table health": { class: read, part: 3 }
+"table lineage": { class: read, part: 3 }
+"table list": { class: ui, part: 3 }
+"table maintain": { class: ui, part: 3 }
+"table merge":
+  {
+    class: git,
+    reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
+  }
+"table references": { class: ui, part: 3 }
+"table replace":
+  {
+    class: git,
+    reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
+  }
+"table retention": { class: ui, part: 3 }
+"table undrop": { class: ui, part: 3 }
+"task history": { class: read, part: 5 }
+"task-token mint":
+  { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
+"task-token revoke": { class: ui, part: 7 }
+"term get": { class: read, part: 3 }
+"term list": { class: read, part: 3 }
+"token issue": { class: ui, part: 7 }
+"token list": { class: ui, part: 7 }
+"token revoke": { class: ui, part: 7 }
+"undeploy": { class: ui, part: 5 }
+"whoami": { class: read, part: 1 }
+"worker list": { class: ui, part: 8 }
+"DELETE /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
+"DELETE /api/v1/column-masks/{column_mask_id}": { class: ui, part: 7 }
+"DELETE /api/v1/environments/{environment_name}/connections/{connection_name}":
+  { class: ui, part: 6 }
+"DELETE /api/v1/environments/{environment_name}/secrets/{secret_name}": { class: ui, part: 7 }
+"DELETE /api/v1/environments/{env}/deployments/{repo}": { class: ui, part: 5 }
+"DELETE /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7 }
+"DELETE /api/v1/environments/{env}/namespaces/{path}": { class: ui, part: 3 }
+"DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}": { class: ui, part: 3 }
+"DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}":
+  { class: ui, part: 3 }
+"DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}":
+  { class: ui, part: 3 }
+"DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}": { class: ui, part: 3 }
+"DELETE /api/v1/environments/{name}": { class: ui, part: 8 }
+"DELETE /api/v1/grants/{grant_id}": { class: ui, part: 7 }
+"DELETE /api/v1/groups/{name}": { class: ui, part: 7 }
+"DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
+"DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
+"DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
+"DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7 }
+"DELETE /api/v1/repositories/{name}": { class: ui, part: 8 }
+"DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7 }
+"DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7 }
+"GET /api/v1/access/export":
+  { class: ui, part: 7, note: "a download of the live access as an access file" }
+"GET /api/v1/access/status": { class: read, part: 7 }
+"GET /api/v1/audit-events": { class: ui, part: 8 }
+"GET /api/v1/ci-trust-rules": { class: ui, part: 7 }
+"GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
+"GET /api/v1/column-masks": { class: ui, part: 7 }
+"GET /api/v1/environments": { class: ui, part: 8 }
+"GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
+"GET /api/v1/environments/{environment_name}/connections/{connection_name}": { class: ui, part: 6 }
+"GET /api/v1/environments/{environment_name}/connections/{connection_name}/tests/{test_id}":
+  { class: ui, part: 6 }
+"GET /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7 }
+"GET /api/v1/environments/{env}/artifacts": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/artifacts/uploads": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/checks": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/deployments": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/deploys": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/deploys/{deploy_id}": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/graph/impact": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/graph/join-path": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/graph/lineage": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/graph/neighbours": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/jobs": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/jobs/{job}": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/jobs/{job}/tasks/{task}/attempts": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/namespaces": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}":
+  { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}/blobs/{sha256}":
+  { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals":
+  { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/orphans": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/project-versions/{project_version_id}": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/queries": { class: ui, part: 4 }
+"GET /api/v1/environments/{env}/queries/{query_id}": { class: ui, part: 4 }
+"GET /api/v1/environments/{env}/queries/{query_id}/result": { class: ui, part: 4 }
+"GET /api/v1/environments/{env}/runs": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/runs/{run_id}": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/runs/{run_id}/checks": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/search": { class: ui, part: 1 }
+"GET /api/v1/environments/{env}/terms": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/terms/{key}": { class: read, part: 3 }
+"GET /api/v1/environments/{name}": { class: ui, part: 8 }
+"GET /api/v1/environments/{name}/orphaned-locations": { class: ui, part: 8 }
+"GET /api/v1/environments/{name}/usage": { class: ui, part: 8 }
+"GET /api/v1/grants": { class: ui, part: 7 }
+"GET /api/v1/groups": { class: ui, part: 7 }
+"GET /api/v1/groups/{name}/members": { class: ui, part: 7 }
+"GET /api/v1/info": { class: read, part: 8 }
+"GET /api/v1/package-indexes": { class: ui, part: 8 }
+"GET /api/v1/package-indexes/{name}": { class: ui, part: 8 }
+"GET /api/v1/principals": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}/permissions": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
+"GET /api/v1/repositories": { class: ui, part: 8 }
+"GET /api/v1/repositories/{name}": { class: ui, part: 8 }
+"GET /api/v1/row-filters": { class: ui, part: 7 }
+"GET /api/v1/scheduler": { class: ui, part: 8 }
+"GET /api/v1/tasks/self/connections/{name}":
+  { class: git, reason: "task-only (lakana.ingest inside asset code)" }
+"GET /api/v1/whoami": { class: read, part: 1 }
+"GET /api/v1/workers": { class: ui, part: 8 }
+"PATCH /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
+"PATCH /api/v1/environments/{environment_name}/connections/{connection_name}":
+  { class: ui, part: 6 }
+"PATCH /api/v1/environments/{environment_name}/secrets/{secret_name}": { class: ui, part: 7 }
+"PATCH /api/v1/environments/{env}/namespaces/{path}/tables/{name}": { class: ui, part: 3 }
+"PATCH /api/v1/environments/{name}": { class: ui, part: 8 }
+"PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8 }
+"PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
+"PATCH /api/v1/repositories/{name}": { class: ui, part: 8 }
+"PATCH /api/v1/whoami": { class: ui, part: 1 }
+"POST /api/v1/access/apply":
+  {
+    class: git,
+    reason: "Make an access file's changes in one audited transaction, or none of them",
+  }
+"POST /api/v1/access/plan":
+  {
+    class: git,
+    reason: "Say what applying an access file would change, and every problem that stops it",
+  }
+"POST /api/v1/auth/oidc/token":
+  { class: git, reason: "CI ID-token exchange (machine; CI workflow in Git)" }
+"POST /api/v1/ci-trust-rules": { class: ui, part: 7 }
+"POST /api/v1/ci-trust-rules/explain": { class: ui, part: 7 }
+"POST /api/v1/ci-trust-rules/{rule_id}/disable": { class: ui, part: 7 }
+"POST /api/v1/ci-trust-rules/{rule_id}/enable": { class: ui, part: 7 }
+"POST /api/v1/column-masks": { class: ui, part: 7 }
+"POST /api/v1/environments": { class: ui, part: 8 }
+"POST /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
+"POST /api/v1/environments/{environment_name}/connections/{connection_name}/tests":
+  { class: ui, part: 6 }
+"POST /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7 }
+"POST /api/v1/environments/{env}/deploys":
+  {
+    class: ui,
+    part: 5,
+    note: "only the rollback form is in the UI; the CLI deploy of a new commit is Git",
+  }
+"POST /api/v1/environments/{env}/jobs/{job}/notify-test": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/jobs/{job}/pause": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/jobs/{job}/resume": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/jobs/{job}/runs": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/namespaces": { class: ui, part: 3 }
+"POST /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads":
+  { class: git, reason: "artifact upload" }
+"POST /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}/commit":
+  { class: git, reason: "artifact upload" }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables":
+  {
+    class: git,
+    reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
+  }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/external": { class: ui, part: 3 }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/data":
+  {
+    class: git,
+    reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
+  }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/history":
+  { class: git, reason: "history mode write from asset code" }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/load":
+  { class: git, reason: "`lakana load` (UI file load #224 optional)" }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/maintenance":
+  { class: ui, part: 3 }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge":
+  {
+    class: git,
+    reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
+  }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop": { class: ui, part: 3 }
+"POST /api/v1/environments/{env}/queries": { class: ui, part: 4 }
+"POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4 }
+"POST /api/v1/environments/{env}/runs": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/runs/{run_id}/cancel": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5 }
+"POST /api/v1/environments/{name}/orphaned-locations/delete": { class: ui, part: 8 }
+"POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }
+"POST /api/v1/grants": { class: ui, part: 7 }
+"POST /api/v1/groups": { class: ui, part: 7 }
+"POST /api/v1/package-indexes": { class: ui, part: 8 }
+"POST /api/v1/principals": { class: ui, part: 7 }
+"POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
+"POST /api/v1/repositories": { class: ui, part: 8 }
+"POST /api/v1/row-filters": { class: ui, part: 7 }
+"POST /api/v1/task-tokens":
+  { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
+"PUT /api/v1/environments/{environment_name}/secrets/{secret_name}/use": { class: ui, part: 7 }
+"PUT /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7 }
+"PUT /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}/blobs/{sha256}":
+  { class: git, reason: "artifact upload" }
+"PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/columns/{column}/description":
+  { class: ui, part: 3 }
+"PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/data":
+  {
+    class: git,
+    reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
+  }
+"PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
+"PUT /api/v1/environments/{name}/retention": { class: ui, part: 8 }
+"PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
