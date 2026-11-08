@@ -36,6 +36,25 @@
   background: var(--color-surface);
 }
 
+.sidebar-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sidebar-toggle {
+  display: none;
+}
+
+.sidebar-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+}
+
 .sidebar-product {
   margin: 0;
   padding: 0 var(--space-3);
@@ -322,4 +341,62 @@
 .coming-soon-hint {
   min-height: var(--type-body-line);
   color: var(--color-text-muted);
+}
+
+/* Narrow screens (WCAG 1.4.10, reflow down to 320 px): the sidebar becomes a bar on top whose
+   Menu button shows the same panel; one column, no horizontal scroll. */
+@media (max-width: 639.98px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    padding: var(--space-2) var(--space-4);
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .sidebar-product {
+    padding: 0;
+  }
+
+  .sidebar-toggle {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-control);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .sidebar-toggle[aria-expanded="true"] {
+    background: var(--color-accent-bg);
+  }
+
+  .sidebar-panel[data-open="false"] {
+    display: none;
+  }
+
+  .sidebar-panel {
+    padding: var(--space-3) 0 var(--space-2);
+  }
+
+  .sidebar-nav {
+    overflow-y: visible;
+  }
+
+  .shell-main {
+    padding: var(--space-5) var(--space-4) var(--space-6);
+  }
+
+  .palette-overlay {
+    padding: var(--space-4);
+  }
 }

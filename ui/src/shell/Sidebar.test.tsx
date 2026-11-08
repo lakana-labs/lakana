@@ -48,4 +48,65 @@ describe("Sidebar", () => {
 
     expect(screen.getByRole("button", { name: "Search" })).toHaveTextContent("⌘ K");
   });
+
+  it("has a menu button that shows and hides the same area list on narrow screens", async () => {
+    const { user } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    const toggle = screen.getByRole("button", { name: "Menu" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(panel).not.toBeNull();
+    expect(panel).toHaveAttribute("data-open", "false");
+    expect(within(panel as HTMLElement).getByRole("navigation")).toBeInTheDocument();
+    expect(
+      within(panel as HTMLElement).getByRole("button", { name: "Search" }),
+    ).toBeInTheDocument();
+    expect(
+      within(panel as HTMLElement).getByRole("button", { name: "Not signed in" }),
+    ).toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(panel).toHaveAttribute("data-open", "true");
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("closes the narrow menu after choosing an area", async () => {
+    const { user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    const toggle = screen.getByRole("button", { name: "Menu" });
+
+    await user.click(toggle);
+    await user.click(screen.getByRole("link", { name: "Jobs" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("Escape closes the narrow menu and returns focus to its button", async () => {
+    const { user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    const toggle = screen.getByRole("button", { name: "Menu" });
+    await user.click(toggle);
+    await user.tab();
+
+    await user.keyboard("{Escape}");
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
+  });
+
+  it("Escape does nothing while the narrow menu is closed", async () => {
+    const { user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await user.click(screen.getByRole("link", { name: "Catalog" }));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("heading", { level: 1, name: "Catalog" })).toHaveFocus();
+  });
 });

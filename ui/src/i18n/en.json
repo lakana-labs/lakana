@@ -74,7 +74,8 @@
     "language": "Language",
     "languages": {
       "en": "English"
-    }
+    },
+    "menu": "Menu"
   },
   "palette": {
     "placeholder": "Go to a place or run a command",

@@ -34,6 +34,6 @@ export default [
     gzip: true,
     limit: ON_DEMAND_LIMIT,
   })),
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "2.8 kB" },
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "3.1 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

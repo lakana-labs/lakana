@@ -177,6 +177,99 @@ for (const theme of ["light", "dark"] as const) {
   }
 }
 
+for (const theme of ["light", "dark"] as const) {
+  test.describe(`320 px wide (WCAG 1.4.10 reflow), ${theme}`, () => {
+    test.use({ viewport: { width: 320, height: 640 } });
+
+    test.beforeEach(async ({ page }) => {
+      await page.addInitScript(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme, density: "roomy", language: "en" })],
+      );
+    });
+
+    test("no horizontal scroll and no axe violations on every area", async ({ page }) => {
+      for (const [name, path] of AREAS) {
+        await page.goto(path);
+        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow, path).toBeLessThanOrEqual(0);
+        expect(await violations(page), path).toEqual([]);
+      }
+      await page.getByRole("button", { name: "Menu" }).click();
+      await expect(page.getByRole("navigation")).toBeVisible();
+      expect(await violations(page), "menu open").toEqual([]);
+    });
+
+    test("the area list is reachable by keyboard, in a logical order", async ({ page }) => {
+      await page.goto("/");
+      await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+      await expect(page.getByRole("navigation")).toBeHidden();
+
+      await page.keyboard.press("Tab");
+      await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
+      await page.keyboard.press("Tab");
+      const toggle = page.getByRole("button", { name: "Menu" });
+      await expect(toggle).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+      const order: string[] = [];
+      for (let stop = 0; stop < 10; stop += 1) {
+        await page.keyboard.press("Tab");
+        order.push(await page.evaluate(() => document.activeElement?.textContent.trim() ?? ""));
+      }
+      expect(order).toEqual([
+        "SearchCtrl K",
+        "Home",
+        "Catalog",
+        "Queries",
+        "Jobs",
+        "Connections",
+        "Access",
+        "Settings",
+        "Not signed in",
+        "Copy command",
+      ]);
+      await expect(page.getByRole("link", { name: "Home" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+
+      await page.getByRole("link", { name: "Jobs" }).focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeFocused();
+      await expect(page.getByRole("navigation")).toBeHidden();
+    });
+
+    test("the user menu and the palette fit", async ({ page }) => {
+      await page.goto("/");
+      await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+
+      await page.getByRole("button", { name: "Menu" }).click();
+      await page.getByRole("button", { name: "Not signed in" }).click();
+      const menu = page.getByRole("menu", { name: "Preferences" });
+      await expect(menu).toBeVisible();
+      await expect(menu).toBeInViewport({ ratio: 1 });
+      await page.keyboard.press("Escape");
+
+      await page.keyboard.press("Control+k");
+      const dialog = page.getByRole("dialog", { name: "Search" });
+      await expect(dialog).toBeVisible();
+      await expect(dialog).toBeInViewport({ ratio: 1 });
+      expect(await violations(page), "palette").toEqual([]);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+  });
+}
+
 test("axe catches a missing alt text", async ({ page }) => {
   // The positive control: the checks above would pass vacuously if axe found nothing at all.
   await page.setContent('<img src="x.png">');
