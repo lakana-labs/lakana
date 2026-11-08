@@ -31,6 +31,7 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.ci_oidc.config import GITHUB_ISSUER, PRESETS
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
     AuditEventType,
@@ -758,8 +759,11 @@ class CiTrustRuleService:
             If the principal, environment or repository does not exist.
         ValidationError
             If a field breaks the rules of this module's docstring.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        require_step_up(p)
         guard_change(
             self._session,
             p,
@@ -892,8 +896,11 @@ class CiTrustRuleService:
             If there is no such rule or principal.
         ValidationError
             If nothing is given, or a field breaks the rules of `create`.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        require_step_up(p)
         row = self._rule(rule_id)
         self._guard_rule(p, row, "update")
         if (
@@ -998,8 +1005,11 @@ class CiTrustRuleService:
         ValidationError
             If its conditions do not meet the requirements of `create` (a rule written by an
             earlier build).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        require_step_up(p)
         return self._set_enabled(p, rule_id, True, commit=commit)
 
     def disable(
@@ -1027,8 +1037,11 @@ class CiTrustRuleService:
             Without the `ADMIN` role on the instance (checked first).
         NotFoundError
             If there is no such rule.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        require_step_up(p)
         return self._set_enabled(p, rule_id, False, commit=commit)
 
     def delete(self, p: PrincipalRef, rule_id: uuid.UUID, *, commit: bool = True) -> None:
@@ -1049,8 +1062,11 @@ class CiTrustRuleService:
             Without the `ADMIN` role on the instance (checked first).
         NotFoundError
             If there is no such rule.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        require_step_up(p)
         row = self._rule(rule_id)
         self._guard_rule(p, row, "delete")
         view = self._view(row)

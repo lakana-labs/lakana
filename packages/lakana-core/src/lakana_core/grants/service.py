@@ -17,6 +17,7 @@ from lakana_core.grants.admin import ADMIN_ONLY_ACTIONS, authorize_admin_only
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import AuditEventType, Grant, Group, GroupMembership, Principal
 from lakana_core.pagination import Page, newest_first
 
@@ -366,8 +367,11 @@ class GrantService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GRANT` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
+        require_step_up(p)
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
         guard_change(
@@ -592,8 +596,11 @@ class GrantService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GRANT` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
+        require_step_up(p)
         grant = self._session.get(Grant, grant_id)
         if grant is None:
             raise NotFoundError(f"No grant {grant_id}.")

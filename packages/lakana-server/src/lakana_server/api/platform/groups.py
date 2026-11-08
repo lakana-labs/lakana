@@ -103,6 +103,9 @@ def delete_group(
 ) -> None:
     """Delete a group.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -170,6 +173,9 @@ def add_member(
 ) -> None:
     """Add a principal to a group.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -203,6 +209,9 @@ def remove_member(
     service: GroupService = Depends(get_group_service),
 ) -> None:
     """Remove a principal from a group.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).

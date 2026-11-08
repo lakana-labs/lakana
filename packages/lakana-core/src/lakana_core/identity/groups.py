@@ -14,6 +14,7 @@ from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import assert_admin_headroom
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AuditEventType,
     ColumnMask,
@@ -178,8 +179,11 @@ class GroupService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        require_step_up(p)
         group = self._get_group(name)
         guard_change(self._session, p, environment=None, change=f"delete group {name}")
         self._session.execute(
@@ -305,8 +309,11 @@ class GroupService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        require_step_up(p)
         group = self._get_group(group_name)
         principal = self._get_member_principal(principal_name)
         existing = self._session.execute(
@@ -356,8 +363,11 @@ class GroupService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        require_step_up(p)
         group = self._get_group(group_name)
         principal = self._get_member_principal(principal_name)
         membership = self._session.execute(

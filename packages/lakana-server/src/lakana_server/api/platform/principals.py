@@ -36,6 +36,9 @@ def create_principal(
 ) -> PrincipalOut:
     """Create a principal.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is
     managed by a file: for a person the override answers 422.
@@ -194,6 +197,9 @@ def deactivate_principal(
     service: PrincipalService = Depends(get_principal_service),
 ) -> None:
     """Deactivate a principal.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is

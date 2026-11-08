@@ -8409,7 +8409,7 @@
           "principals"
         ],
         "summary": "Create a principal",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is managed by a file: for a person the override answers 422.\n\nCreates a user or a service account. Needs `MANAGE_PRINCIPAL` on the instance. Answers 409 when the name is taken.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is managed by a file: for a person the override answers 422.\n\nCreates a user or a service account. Needs `MANAGE_PRINCIPAL` on the instance. Answers 409 when the name is taken.",
         "operationId": "create_principal_api_v1_principals_post",
         "parameters": [
           {
@@ -8745,7 +8745,7 @@
           "principals"
         ],
         "summary": "Deactivate a principal",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is managed by a file: for a person the override answers 422.\n\nStops the principal from signing in. The record stays, with every grant, token and audit entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when there is no principal of that name and 409 when it is the last active administrator.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is managed by a file: for a person the override answers 422.\n\nStops the principal from signing in. The record stays, with every grant, token and audit entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when there is no principal of that name and 409 when it is the last active administrator.",
         "operationId": "deactivate_principal_api_v1_principals__name__delete",
         "parameters": [
           {
@@ -9263,7 +9263,7 @@
           "groups"
         ],
         "summary": "Delete a group",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such group and 409 while an active grant, row filter or column mask still names it.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such group and 409 while an active grant, row filter or column mask still names it.",
         "operationId": "delete_group_api_v1_groups__name__delete",
         "parameters": [
           {
@@ -9485,7 +9485,7 @@
           "groups"
         ],
         "summary": "Add a principal to a group",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nAdding a principal that is a member already changes nothing. Needs the `ADMIN` role on the instance. Answers 404 when the group or the principal does not exist.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nAdding a principal that is a member already changes nothing. Needs the `ADMIN` role on the instance. Answers 404 when the group or the principal does not exist.",
         "operationId": "add_member_api_v1_groups__name__members__principal_name__put",
         "parameters": [
           {
@@ -9619,7 +9619,7 @@
           "groups"
         ],
         "summary": "Remove a principal from a group",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when the group or the principal does not exist.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when the group or the principal does not exist.",
         "operationId": "remove_member_api_v1_groups__name__members__principal_name__delete",
         "parameters": [
           {
@@ -9755,7 +9755,7 @@
           "tokens"
         ],
         "summary": "Issue a personal access token",
-        "description": "Issues a token that signs in as the principal. The answer holds the token's full value, which is shown this once and cannot be read again. Needs the `ADMIN` role on the instance. Answers 404 when there is no such principal.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nIssues a token that signs in as the principal. The answer holds the token's full value, which is shown this once and cannot be read again. Needs the `ADMIN` role on the instance. Answers 404 when there is no such principal.",
         "operationId": "issue_token_api_v1_principals__name__tokens_post",
         "parameters": [
           {
@@ -10223,7 +10223,7 @@
           "grants"
         ],
         "summary": "Grant a role or an action",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nGives a principal or a group a role or a single action on the instance, an environment, a namespace or a table. Needs the `ADMIN` role on the instance. Answers 404 when the principal, group or object does not exist and 422 when the grant is not valid for that object.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nGives a principal or a group a role or a single action on the instance, an environment, a namespace or a table. Needs the `ADMIN` role on the instance. Answers 404 when the principal, group or object does not exist and 422 when the grant is not valid for that object.",
         "operationId": "create_grant_api_v1_grants_post",
         "parameters": [
           {
@@ -10579,7 +10579,7 @@
           "grants"
         ],
         "summary": "Revoke a grant",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such grant and 409 when revoking it would leave the instance without an active administrator.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such grant and 409 when revoking it would leave the instance without an active administrator.",
         "operationId": "revoke_grant_api_v1_grants__grant_id__delete",
         "parameters": [
           {
@@ -10706,7 +10706,7 @@
           "row-filters"
         ],
         "summary": "Create a row filter",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nRestricts which rows of a table a principal or group sees, by a SQL condition. The filter binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers 404 when the principal, group or table does not exist and 422 for a condition that is not valid or is longer than the server's statement limit.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nRestricts which rows of a table a principal or group sees, by a SQL condition. The filter binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers 404 when the principal, group or table does not exist and 422 for a condition that is not valid or is longer than the server's statement limit.",
         "operationId": "create_row_filter_api_v1_row_filters_post",
         "parameters": [
           {
@@ -11008,7 +11008,7 @@
           "row-filters"
         ],
         "summary": "Revoke a row filter",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds `MANAGE_POLICY` on the instance. Answers 404 when there is no such row filter.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds `MANAGE_POLICY` on the instance. Answers 404 when there is no such row filter.",
         "operationId": "revoke_row_filter_api_v1_row_filters__row_filter_id__delete",
         "parameters": [
           {
@@ -11135,7 +11135,7 @@
           "column-masks"
         ],
         "summary": "Create a column mask",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nHides or rewrites a column of a table for a principal or group, by a SQL expression. The mask binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers 404 when the principal, group or table does not exist and 422 for a column the table does not have, an expression that is not valid, or one longer than the server's statement limit.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nHides or rewrites a column of a table for a principal or group, by a SQL expression. The mask binds to the table, not its name. Needs `MANAGE_POLICY` on the instance. Answers 404 when the principal, group or table does not exist and 422 for a column the table does not have, an expression that is not valid, or one longer than the server's statement limit.",
         "operationId": "create_column_mask_api_v1_column_masks_post",
         "parameters": [
           {
@@ -11437,7 +11437,7 @@
           "column-masks"
         ],
         "summary": "Revoke a column mask",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds `MANAGE_POLICY` on the instance. Answers 404 when there is no such column mask.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds `MANAGE_POLICY` on the instance. Answers 404 when there is no such column mask.",
         "operationId": "revoke_column_mask_api_v1_column_masks__column_mask_id__delete",
         "parameters": [
           {
@@ -17350,7 +17350,7 @@
           "ci-trust-rules"
         ],
         "summary": "Create a CI trust rule",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nCreates an enabled rule that lets CI jobs whose ID-token claims match its conditions exchange them for a token that acts as a service account. Needs the `ADMIN` role on the instance. Answers 404 when the principal, environment or repository does not exist and 422 when a field breaks the rules of a trust rule.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nCreates an enabled rule that lets CI jobs whose ID-token claims match its conditions exchange them for a token that acts as a service account. Needs the `ADMIN` role on the instance. Answers 404 when the principal, environment or repository does not exist and 422 when a field breaks the rules of a trust rule.",
         "operationId": "create_ci_trust_rule_api_v1_ci_trust_rules_post",
         "parameters": [
           {
@@ -17730,7 +17730,7 @@
           "ci-trust-rules"
         ],
         "summary": "Change a CI trust rule",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nChanges the rule's principal, kinds, conditions or `start_on_deploy_jobs`. The tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule or principal and 422 when nothing is given or a field breaks the rules of a trust rule.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nChanges the rule's principal, kinds, conditions or `start_on_deploy_jobs`. The tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule or principal and 422 when nothing is given or a field breaks the rules of a trust rule.",
         "operationId": "update_ci_trust_rule_api_v1_ci_trust_rules__rule_id__patch",
         "parameters": [
           {
@@ -17872,7 +17872,7 @@
           "ci-trust-rules"
         ],
         "summary": "Delete a CI trust rule",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nThe tokens issued under the rule end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nThe tokens issued under the rule end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule.",
         "operationId": "delete_ci_trust_rule_api_v1_ci_trust_rules__rule_id__delete",
         "parameters": [
           {
@@ -17999,7 +17999,7 @@
           "ci-trust-rules"
         ],
         "summary": "Enable a CI trust rule",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422 when its conditions no longer meet the requirements of a new rule.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422 when its conditions no longer meet the requirements of a new rule.",
         "operationId": "enable_ci_trust_rule_api_v1_ci_trust_rules__rule_id__enable_post",
         "parameters": [
           {
@@ -18133,7 +18133,7 @@
           "ci-trust-rules"
         ],
         "summary": "Disable a CI trust rule",
-        "description": "Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nA disabled rule matches no exchange, and the tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nA disabled rule matches no exchange, and the tokens issued under it end. Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule.",
         "operationId": "disable_ci_trust_rule_api_v1_ci_trust_rules__rule_id__disable_post",
         "parameters": [
           {
@@ -18448,7 +18448,7 @@
           "access"
         ],
         "summary": "Make an access file's changes in one audited transaction, or none of them",
-        "description": "Needs the ADMIN role on the instance. The plan is made again under a lock: 409 when the file or access changed since the plan with `plan_fingerprint` (plan again), and 409 when the changes would end the caller's last way to administer (apply in two steps). 422 lists every problem of the file (at most 50).",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nNeeds the ADMIN role on the instance. The plan is made again under a lock: 409 when the file or access changed since the plan with `plan_fingerprint` (plan again), and 409 when the changes would end the caller's last way to administer (apply in two steps). 422 lists every problem of the file (at most 50).",
         "operationId": "apply_access_api_v1_access_apply_post",
         "parameters": [
           {

@@ -55,6 +55,9 @@ def create_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Create a CI trust rule.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -187,6 +190,9 @@ def update_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Change a CI trust rule.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -231,6 +237,9 @@ def enable_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Enable a CI trust rule.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -262,6 +271,9 @@ def disable_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Disable a CI trust rule.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -292,6 +304,9 @@ def delete_ci_trust_rule(
     service: CiTrustRuleService = Depends(get_ci_trust_rule_service),
 ) -> None:
     """Delete a CI trust rule.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).

@@ -15,6 +15,7 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef
 from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.identity.tokens import generate_token, hash_secret, verify_secret
 from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
 
@@ -162,8 +163,11 @@ class PatService:
         sqlalchemy.exc.IntegrityError
             If the commit fails for any reason other than a key_id collision
             — e.g. the acting principal's audit foreign key.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        require_step_up(p)
         principal = self._get_principal(principal_name)
         fixed_credential = key_id is not None and secret is not None
         if fixed_credential:

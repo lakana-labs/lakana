@@ -18,7 +18,7 @@ from lakana_core.identity.links import (
     name_unavailable,
     withdraw_open_links,
 )
-from lakana_core.identity.sessions import SessionService, utc_now
+from lakana_core.identity.sessions import SessionService, require_step_up, utc_now
 from lakana_core.languages import canonical_language, language_problem
 from lakana_core.models import AuditEventType, Principal, PrincipalType
 from lakana_core.pagination import Page, name_contains, newest_first
@@ -77,8 +77,11 @@ class PrincipalService:
             (`lakana_core.identity.links.invisible_character_problem`).
         PermissionDenied
             If the acting principal may not manage principals.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
+        require_step_up(p)
         existing = self._session.execute(
             select(Principal).where(Principal.name == name)
         ).scalar_one_or_none()
@@ -168,8 +171,11 @@ class PrincipalService:
             instance admins.
         PermissionDenied
             If the acting principal may not manage principals.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
+        require_step_up(p)
         principal = self.get_principal_by_name(p, name)
         if not principal.is_active:
             return

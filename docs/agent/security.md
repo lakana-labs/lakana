@@ -529,6 +529,31 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   its holder could do the same with the CLI. In-session ceremony failures are 403
   (`PasskeyRefused`) so the interface keeps its session; a failed passkey sign-in is 401 and
   audited as `AUTHENTICATION_FAILED` (`credential: passkey`, nothing of the answer).
+- **The step-up actions** (the spec's core set: whatever hands out access). A session whose
+  last touch is older than 15 minutes gets 403 `StepUpRequired` ("Confirm with your passkey and
+  try again"); a token never does, because it has no session. `require_step_up(p)` is called in
+  the core service right after authorization, so a route and the access file's apply share it:
+  - API tokens and the accounts they act for: `POST /api/v1/principals/{name}/tokens` (personal
+    and service-account tokens), `POST /api/v1/principals` (a new service account is the first
+    step to a token for it), `DELETE /api/v1/principals/{name}` (deactivating a person);
+  - rights: `POST /api/v1/grants`, `DELETE /api/v1/grants/{grant_id}`,
+    `PUT|DELETE /api/v1/groups/{name}/members/{principal_name}`, `DELETE /api/v1/groups/{name}`
+    (removes its members' rights), `POST /api/v1/access/apply`; row filters and column masks
+    (`POST`, `DELETE`), because removing one widens what a person reads; CI trust rules (`POST`,
+    `PATCH`, `…/enable`, `…/disable`, `DELETE`), because a rule lets a CI job act as its service
+    account;
+  - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
+    passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
+    (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.
+
+  `STEP_UP_ROUTES` in `packages/lakana-server/tests/test_step_up_routes.py` is this list as a
+  test: each route refuses a session touched 16 minutes ago and succeeds after a touch and for a
+  token. Every other write below the identity and rights paths sits in `NO_STEP_UP` with its
+  reason (revoking a token or withdrawing a link removes access; a new group is empty; the
+  registration answer is bound to the challenge of the step-up options route), so a new route
+  there fails the test until it is placed. Task tokens are absent: their routes are token-only
+  (`TOKEN_ONLY_ROUTES`) and a session never reaches them. The parity test's session has a fresh
+  touch, so session and token still answer alike there.
 - **Removal** needs step-up; nobody removes their own last passkey that works at this address
   (one of an earlier public address does not count; 409: add another, or
   ask for a recovery link); an administrator removing another person's passkey ends all that
