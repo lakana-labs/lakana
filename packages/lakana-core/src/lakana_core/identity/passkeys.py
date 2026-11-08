@@ -102,6 +102,10 @@ CHALLENGE_LIFETIME = timedelta(minutes=5)
 FIRST_PASSKEY_WINDOW = timedelta(minutes=15)
 """How long after a link sign-in the first passkey may be added without a touch."""
 
+CLOCK_SKEW = timedelta(seconds=30)
+"""How much later than `CHALLENGE_LIFETIME` from now a sign-in challenge's expiry may be, for
+server processes whose clocks differ a little."""
+
 CHALLENGE_KEY = "sign_in.challenge_key"
 """The instance setting holding the key that signs sign-in challenges (32 random bytes, base64).
 
@@ -712,7 +716,8 @@ class PasskeyService:
         ------
         AuthenticationError
             If the challenge was not issued here for sign-in at this address, has expired,
-            belongs to another ceremony, or was used.
+            expires later than five minutes (and `CLOCK_SKEW`) from now, belongs to another
+            ceremony, or was used.
         """
         gone = AuthenticationError(_CHALLENGE_GONE)
         try:
@@ -725,7 +730,10 @@ class PasskeyService:
         if opened is None:
             raise gone
         nonce, expires = opened
-        if expires <= now.timestamp() or uuid.UUID(bytes=nonce[:16]) != ceremony_id:
+        latest = now.timestamp() + (CHALLENGE_LIFETIME + CLOCK_SKEW).total_seconds()
+        if not now.timestamp() < expires <= latest or uuid.UUID(bytes=nonce[:16]) != ceremony_id:
+            # Never later than this server would have set it: whoever could forge one (a reader
+            # of the key) gets nothing that outlives five minutes.
             raise gone
         self._session.execute(
             delete(WebauthnChallenge)

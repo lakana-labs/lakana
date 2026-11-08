@@ -479,7 +479,13 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
     first use: every server process and replica accepts a challenge another issued, and a
     restart does not break a sign-in in progress (a per-process key would fail behind a load
     balancer). It is never logged or returned; a database reader could forge a challenge, which
-    still needs a passkey's signature to sign in.
+    still needs a passkey's signature to sign in. A challenge whose expiry is later than now +
+    5 minutes + `CLOCK_SKEW` (30 s) is refused, so a forged one never outlives five minutes.
+  - **Rotating the key**: delete the row (`DELETE FROM instance_settings WHERE key =
+    'sign_in.challenge_key';`); no restart is needed, since each request reads the key, and the
+    next options call creates a new one. Challenges issued with the old one stop working at once (a person mid-sign-in
+    clicks "Sign in" again); sessions and passkeys are unaffected. Do it after anyone may have
+    read the database.
   - `POST /api/v1/sign-in/passkey/options` is limited per client address (IPv6: per /64,
     `client_bucket`) by `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` (default 60) and per
     network (IPv4 /24, IPv6 /48, `network_bucket`) by

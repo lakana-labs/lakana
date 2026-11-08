@@ -645,7 +645,9 @@ def _tampered(challenge: str) -> str:
     return b64url(bytes(raw))
 
 
-@pytest.mark.parametrize("fault", ["tampered", "expired", "wrong_purpose", "wrong_rp", "ceremony"])
+@pytest.mark.parametrize(
+    "fault", ["tampered", "expired", "wrong_purpose", "wrong_rp", "ceremony", "ten_years"]
+)
 def test_a_forged_or_stale_sign_in_challenge_is_refused(
     world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey], fault: str
 ) -> None:
@@ -663,6 +665,14 @@ def test_a_forged_or_stale_sign_in_challenge_is_refused(
             key, "step_up", RP_ID, raw[1:33], int(world.clock.now.timestamp()) + 300
         )
         options = {**options, "challenge": b64url(forged)}
+    elif fault == "ten_years":
+        key = world.passkeys._challenge_key()
+        raw = unb64url(options["challenge"])
+        later = int(world.clock.now.timestamp()) + 10 * 365 * 24 * 3600
+        options = {
+            **options,
+            "challenge": b64url(sign_challenge(key, "sign_in", RP_ID, raw[1:33], later)),
+        }
     elif fault == "wrong_rp":
         moved = world.service(rp_id="lakana.example.org", origin="https://lakana.example.org")
         ceremony, options = moved.sign_in_options()
