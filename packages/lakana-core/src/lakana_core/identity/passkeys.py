@@ -951,8 +951,8 @@ class PasskeyService:
         """Remove a passkey: one's own, or, for an administrator, anyone's.
 
         Needs a fresh passkey touch in a browser session. A person cannot remove their own last
-        active passkey. An administrator removing another person's passkey ends all of that
-        person's sessions.
+        passkey that works at this address (one of an earlier public address does not count).
+        An administrator removing another person's passkey ends all of that person's sessions.
 
         Parameters
         ----------
@@ -972,7 +972,7 @@ class PasskeyService:
         NotFoundError
             If the person has no passkey with that id.
         ConflictError
-            If it is the caller's own last active passkey.
+            If it is the caller's own last passkey that works at this address.
         """
         if principal_name != p.name:
             self._require_admin(p)
@@ -986,12 +986,15 @@ class PasskeyService:
                 f"{principal_name!r} has no passkey with this id. List the passkeys to see them."
             )
         own = target.id == p.id
-        if own and row.disabled_at is None:
+        if own and row.disabled_at is None and row.rp_id == self._rp_id:
+            # Only passkeys that can sign in at this address count: one of an earlier public
+            # address is no way back in.
             others = self._session.execute(
                 select(Passkey.id).where(
                     Passkey.principal_id == target.id,
                     Passkey.id != row.id,
                     Passkey.disabled_at.is_(None),
+                    Passkey.rp_id == self._rp_id,
                 )
             ).first()
             if others is None:

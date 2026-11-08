@@ -496,7 +496,8 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   its holder could do the same with the CLI. In-session ceremony failures are 403
   (`PasskeyRefused`) so the interface keeps its session; a failed passkey sign-in is 401 and
   audited as `AUTHENTICATION_FAILED` (`credential: passkey`, nothing of the answer).
-- **Removal** needs step-up; nobody removes their own last active passkey (409: add another, or
+- **Removal** needs step-up; nobody removes their own last passkey that works at this address
+  (one of an earlier public address does not count; 409: add another, or
   ask for a recovery link); an administrator removing another person's passkey ends all that
   person's sessions (`reason: passkey_removed`). No answer carries a public key or credential
   id; neither the browser's answer nor a challenge is logged (tested with `caplog`).

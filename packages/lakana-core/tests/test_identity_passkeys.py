@@ -743,6 +743,27 @@ def test_removing_ones_last_passkey_is_refused(
     assert len(world.events(AuditEventType.PASSKEY_REMOVED)) == 1
 
 
+def test_a_passkey_of_an_earlier_address_does_not_count_as_another_one(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    """After an address change the old passkey cannot sign in, so the new one is the last."""
+    alice, auth, stored = enrolled
+    old = world.service(rp_id="old.example", origin="https://old.example")
+    ceremony, options = old.registration_options(world.ref(alice))
+    earlier = old.register(
+        world.ref(alice),
+        ceremony,
+        SoftAuthenticator(origin="https://old.example").create(options),
+        name="old laptop",
+        user_agent="u",
+    )
+    world.step_up(alice, auth)
+    with pytest.raises(ConflictError, match="Add another passkey first"):
+        world.passkeys.remove(world.ref(alice), "alice", stored.id)
+    world.passkeys.remove(world.ref(alice), "alice", earlier.id)
+    assert world.passkeys.has_usable_passkey(alice.row.id)
+
+
 def test_removing_a_passkey_needs_step_up(
     world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
 ) -> None:
