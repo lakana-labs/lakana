@@ -82,17 +82,15 @@ BROWSER_ONLY: dict[tuple[str, str], str] = {
 
 @pytest.mark.slow
 def test_every_server_route_has_an_sdk_method(settings: Settings) -> None:
-    """Every platform route is reachable through the SDK, except the browser-only ones."""
+    """Every platform route is reachable through the SDK, except the browser-only ones.
+
+    No exemption is stale: each is a real route, and none is also in the SDK's table.
+    """
     sdk = {(r.method, r.path) for r in ROUTES.values()}
-    uncovered = _server_routes(settings) - sdk - set(BROWSER_ONLY)
+    server = _server_routes(settings)
+    uncovered = server - sdk - set(BROWSER_ONLY)
     assert not uncovered, f"Platform routes without an SDK method: {sorted(uncovered)}"
-
-
-@pytest.mark.slow
-def test_every_browser_only_route_exists_and_has_no_sdk_method(settings: Settings) -> None:
-    """No stale exemption: each is a real route, and none is also in the SDK's table."""
-    sdk = {(r.method, r.path) for r in ROUTES.values()}
-    assert set(BROWSER_ONLY) - _server_routes(settings) == set()
+    assert set(BROWSER_ONLY) - server == set()
     assert set(BROWSER_ONLY) & sdk == set()
 
 

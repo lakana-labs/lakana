@@ -458,6 +458,16 @@ def test_a_local_link_signs_in_without_a_passkey_and_ends_with_its_token(
     assert ended.json()["reason"] == "token_revoked"
 
 
+def test_the_first_run_bootstrap_token_mints_a_local_link(local_client: TestClient) -> None:
+    """`lakana server start --local`'s first run asks with the bootstrap PAT it just minted."""
+    r = local_client.post("/api/v1/sign-in/local-link", headers=AUTH_HEADER)
+    assert r.status_code == 200, r.text
+    redeemed = _redeem(local_client, r.json()["url"])
+    assert redeemed.status_code == 200, redeemed.text
+    assert redeemed.json()["name"] == "admin"
+    assert (redeemed.json()["needs_passkey"], redeemed.json()["offer_passkey"]) == (False, True)
+
+
 def test_a_local_link_is_not_used_over_an_open_session(local_client: TestClient) -> None:
     """A browser that is signed in gets 409, and the link stays usable."""
     alice = _person(local_client, "alice")
