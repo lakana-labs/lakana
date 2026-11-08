@@ -499,6 +499,9 @@ passkeys (M7 1b)"; the design is `docs/superpowers/specs/2026-11-08-m7-part1b-si
   A session ends after its idle timeout (12 hours by default) and its absolute lifetime (7 days),
   which background polls do not extend.
 - **A session minting a task token.** The task-token routes refuse the cookie.
+- **A copied passkey.** A signature counter that goes backwards, after the signature verified,
+  disables that passkey and ends every session of its person at once (any of them may be the
+  copy's); the person and every administrator get a notice, and it is audited.
 - **Fixation.** A presented session id is never adopted; every sign-in issues a fresh one.
 - **Probing.** A refused cookie is audited, rate-limited per client address; another person's
   sessions answer 403 to a non-administrator whether the name exists or not.

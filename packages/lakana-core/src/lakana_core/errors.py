@@ -64,6 +64,11 @@ _SESSION_ENDED = {
         "Your account was recovered with a recovery link, which ended every earlier session. "
         "Sign in again with your new passkey."
     ),
+    "passkey_copied": (
+        "A copy of one of your passkeys was detected; it is disabled and every session of your "
+        "account was ended. Sign in with another passkey, or ask an administrator for a recovery "
+        "link."
+    ),
     "passkey_removed": (
         "An administrator removed one of your passkeys, which ended your sessions. Sign in "
         "again with another passkey, or ask an administrator for a recovery link."

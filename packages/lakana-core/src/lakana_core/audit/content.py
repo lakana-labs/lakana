@@ -263,6 +263,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "rows_updated",
         "run_started_at",
         "scheduled_for",
+        "sessions_ended",
         "size_bytes",
         "snapshot_id",
         "snapshots_expired",

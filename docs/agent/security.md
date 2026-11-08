@@ -483,8 +483,12 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   name) in constant time. Its counter check raises the same exception as a bad signature, so
   the service passes a stored count of 0 and applies the clone rule itself after the signature
   verified: `if not (stored == 0 and new == 0) and new <= stored` the passkey is disabled
-  (`disabled_reason = possible_clone`), audited `PASSKEY_DISABLED` and a notice goes to the
-  person and every active administrator; the attempt is refused. A forged assertion with a low
+  (`disabled_reason = possible_clone`), every session of the person ends (`reason:
+  passkey_copied`; nothing records which passkey a session began with, so all go), it is
+  audited `PASSKEY_DISABLED` (with `sessions_ended`) and a notice ("a copy of a passkey was
+  detected; it is disabled and every session of NAME was ended") goes to the person and every
+  active administrator; the attempt is refused. This is a detected clone, not the removal of a
+  last passkey, which by the spec ends no session. A forged assertion with a low
   counter is refused by the signature and can never disable a passkey (tested). Two zero
   counters (synced passkeys) are accepted. The new counter is written by a conditional update
   on the counter just read, so of two uses at once only one passes. A `clientDataJSON` with

@@ -737,16 +737,24 @@ def test_counter_going_down_disables_the_passkey_and_tells_admins(
 ) -> None:
     """A counter at or below the stored one means a copy: disable, audit, tell everyone."""
     alice, auth, stored = enrolled
-    world.sign_in(auth, sign_count=5)
+    signed_in = world.sign_in(auth, sign_count=5)
     with pytest.raises(AuthenticationError, match="copied"):
         world.sign_in(auth, sign_count=4)
     world.session.refresh(stored)
     assert stored.disabled_at is not None and stored.disabled_reason == "possible_clone"
-    assert [e.detail["passkey_id"] for e in world.events(AuditEventType.PASSKEY_DISABLED)] == [
-        str(stored.id)
-    ]
-    assert [n.kind for n in world.notices(alice.row)] == ["passkey_disabled"]
-    assert [n.kind for n in world.notices(world.admin)] == ["passkey_disabled"]
+    [disabled] = world.events(AuditEventType.PASSKEY_DISABLED)
+    assert disabled.detail["passkey_id"] == str(stored.id)
+    assert disabled.detail["sessions_ended"] == 2
+    for cookie in (alice.started.cookie_value, signed_in.cookie_value):
+        with pytest.raises(SessionEndedError) as ended:
+            world.sessions.verify(cookie, extend=False)
+        assert ended.value.reason == "passkey_copied"
+    message = (
+        "A copy of a passkey was detected; it is disabled and every session of alice was ended."
+    )
+    for person in (alice.row, world.admin):
+        [notice] = world.notices(person)
+        assert notice.kind == "passkey_disabled" and notice.detail["message"] == message
     with pytest.raises(AuthenticationError, match="disabled"):
         world.sign_in(auth, sign_count=9)
     assert not world.passkeys.has_usable_passkey(alice.row.id)

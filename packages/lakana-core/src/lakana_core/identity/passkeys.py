@@ -128,8 +128,8 @@ _NOT_VERIFIED = (
 )
 _CLONE = (
     "This passkey was just disabled: its signature counter went backwards, which means it may "
-    "have been copied. Sign in with another passkey, or ask an administrator for a recovery link. "
-    "Your administrators were told."
+    "have been copied. Every session of its account was ended. Sign in with another passkey, or "
+    "ask an administrator for a recovery link. Your administrators were told."
 )
 
 
@@ -614,7 +614,10 @@ class PasskeyService:
     def _disable_as_clone(
         self, row: Passkey, principal: Principal, stored_count: int, new_count: int
     ) -> None:
-        """Disable a passkey whose counter fell, audit it, tell its person and every admin.
+        """Disable a copied passkey, end every session of its person, audit, tell everyone.
+
+        Strict on purpose: any session of the person may be the copy's, and nothing records
+        which passkey a session began with, so all of them end (``passkey_copied``).
 
         Parameters
         ----------
@@ -629,6 +632,7 @@ class PasskeyService:
         """
         row.disabled_at = self._clock()
         row.disabled_reason = "possible_clone"
+        ended = self._sessions.end_for_principal(principal.id, "passkey_copied")
         AuditService(self._session).record(
             principal.id,
             AuditEventType.PASSKEY_DISABLED,
@@ -638,9 +642,18 @@ class PasskeyService:
                 "reason": "possible_clone",
                 "stored_count": stored_count,
                 "presented_count": new_count,
+                "sessions_ended": ended,
             },
         )
-        detail = {"name": principal.name, "passkey": row.name, "passkey_id": str(row.id)}
+        detail = {
+            "name": principal.name,
+            "passkey": row.name,
+            "passkey_id": str(row.id),
+            "message": (
+                "A copy of a passkey was detected; it is disabled and every session of "
+                f"{principal.name} was ended."
+            ),
+        }
         for recipient in sorted({principal.id, *active_instance_admin_ids(self._session)}, key=str):
             self._notices.add(recipient, "passkey_disabled", principal.id, detail)
         self._session.commit()
