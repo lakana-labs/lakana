@@ -1145,11 +1145,13 @@ first failure; CI's `ui` job runs them one step each.
 - **`prove-gates`** (`ui/scripts/prove-gates.mjs`) copies `ui/` and the build into a scratch
   directory (`$GATE_PROBE_DIR`, default `~/.cache/lakana-ui-gate-probe`; CI uses
   `$RUNNER_TEMP/gate-probe`), writes one violation per gate (an unsafe `any`, a conditional hook,
-  an image without alt text, an undocumented export, a `fetch` outside `src/api/`, bad
-  formatting, three type errors, an import out of `src/api/` and a cycle, an unused file, an
+  an image without alt text, an undocumented export, a `fetch`, `window.fetch`,
+  `navigator.sendBeacon` or `axios` outside `src/api/`, bad formatting, three type errors, an import out of `src/api/` and a cycle, an unused file, an
   untested branch, a size limit of 1 B, an 80-token copy), runs the gate and requires it to fail
-  with the expected message. It prints one line per gate and fails naming every gate that let its
-  violation through: fix the gate, not the probe. It needs a build (`npm --prefix ui run build`)
+  with the expected message; one probe checks the other way round, that a `fetch` inside
+  `src/api/` is accepted. It prints one line per probe and fails naming every gate that got its
+  probe wrong: fix the gate, not the probe. It refuses a `$GATE_PROBE_DIR` that is not empty and
+  lacks its marker file `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm --prefix ui run build`)
   and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof is the smoke test's
   positive control (an image without alt text must be found); the audits prove themselves in
   `security.yml` on a lock generated at run time with `lodash@4.17.20`.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { browserTargets } from "./targets";
+import { browserTargets, oldestVersions } from "./targets";
 
 describe("browserTargets", () => {
   it("maps browserslist entries to build targets", () => {
@@ -23,5 +23,15 @@ describe("browserTargets", () => {
 
   it("takes the oldest version of a range, so the build supports all of it", () => {
     expect(browserTargets(["safari 15.2-15.3"])).toEqual(["safari15.2"]);
+  });
+});
+
+describe("oldestVersions", () => {
+  it("compares versions part by part, not as decimals", () => {
+    expect(oldestVersions(["safari 18.10", "safari 18.9", "safari 18.11"])).toEqual(["safari18.9"]);
+  });
+
+  it("counts a missing part as zero", () => {
+    expect(oldestVersions(["safari 18.1", "safari 18"])).toEqual(["safari18"]);
   });
 });

@@ -11,13 +11,14 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const UI = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -28,6 +29,8 @@ const SCRATCH = resolve(
 );
 const PROBE_UI = join(SCRATCH, "ui");
 const JSCPD_REPORT = join(SCRATCH, "jscpd-report-ui");
+// Marks a directory this script made, so it never empties one it did not.
+const MARKER = join(SCRATCH, ".lakana-ui-gate-probe");
 const TIMEOUT_MS = 180_000;
 const NOT_COPIED = new Set(["node_modules", "coverage", "test-results", "playwright-report"]);
 
@@ -60,7 +63,8 @@ export function summarise(values: readonly number[]): { total: number; largest: 
  * @property {Record<string, string>} files - files to write, relative to the scratch ui/
  * @property {Record<string, (text: string) => string>} [edits] - files to change, the same way
  * @property {Command[]} [before] - commands to run first, whatever their exit
- * @property {Command} run - the gate; it must fail
+ * @property {Command} run - the gate; it must fail, or pass when `accept` is set
+ * @property {boolean} [accept] - the gate must accept this file (an allowed exception)
  * @property {string[]} expect - texts its output must contain; a text listed twice must appear twice
  */
 
@@ -117,6 +121,28 @@ const PROBES = [
     files: { "src/shell/probe.ts": 'void fetch("/api/v1/whoami");\n' },
     run: npmRun("lint"),
     expect: ["no-restricted-globals"],
+  },
+  {
+    gate: "ESLint fetch rule (properties)",
+    files: {
+      "src/shell/beacon.ts":
+        'navigator.sendBeacon("/v1/audit");\nvoid window.fetch("/api/v1/whoami");\n',
+    },
+    run: npmRun("lint"),
+    expect: ["no-restricted-properties", "no-restricted-properties"],
+  },
+  {
+    gate: "ESLint HTTP client packages",
+    files: { "src/shell/client.ts": 'import axios from "axios";\n\nexport const probe = axios;\n' },
+    run: npmRun("lint"),
+    expect: ["no-restricted-imports"],
+  },
+  {
+    gate: "ESLint fetch rule (src/api/ exempt)",
+    files: { "src/api/whoami.ts": 'void fetch("/api/v1/whoami");\n' },
+    run: npmRun("lint"),
+    accept: true,
+    expect: [],
   },
   {
     gate: "Prettier",
@@ -254,16 +280,23 @@ function prepareScratch() {
     process.exit(1);
   }
   const inside = relative(REPO, SCRATCH);
-  if (inside === "" || !inside.startsWith("..")) {
+  if (!(isAbsolute(inside) || inside === ".." || inside.startsWith(`..${sep}`))) {
     console.error(
       `GATE_PROBE_DIR (${SCRATCH}) is inside the repository; choose a scratch directory outside it.`,
     );
     process.exit(1);
   }
-  for (const made of [PROBE_UI, join(SCRATCH, "packages"), JSCPD_REPORT]) {
+  if (existsSync(SCRATCH) && readdirSync(SCRATCH).length > 0 && !existsSync(MARKER)) {
+    console.error(
+      `GATE_PROBE_DIR (${SCRATCH}) is not empty and was not made by this script; choose an empty or new directory.`,
+    );
+    process.exit(1);
+  }
+  for (const made of [PROBE_UI, join(SCRATCH, DIST), JSCPD_REPORT]) {
     rmSync(made, { recursive: true, force: true });
   }
   mkdirSync(SCRATCH, { recursive: true });
+  writeFileSync(MARKER, "Scratch copy of ui/scripts/prove-gates.mjs; safe to delete.\n");
   cpSync(UI, PROBE_UI, {
     recursive: true,
     filter: (source) => !NOT_COPIED.has(relative(UI, source).split("/")[0] ?? ""),
@@ -295,6 +328,11 @@ function prove(probe) {
       execute(command);
     }
     const { status, output } = execute(probe.run);
+    if (probe.accept === true) {
+      return status === 0
+        ? null
+        : `it refused an allowed file (exit ${String(status)}): ${output.slice(-600)}`;
+    }
     if (status === 0) {
       return "it exited 0";
     }
@@ -322,19 +360,21 @@ prepareScratch();
 const leaks = [];
 for (const probe of PROBES) {
   const leak = prove(probe);
-  if (leak === null) {
+  if (leak === null && probe.accept === true) {
+    console.log(`ok   ${probe.gate}: accepted its allowed file, as it should`);
+  } else if (leak === null) {
     console.log(
       `ok   ${probe.gate}: failed on its violation, as it should (${[...new Set(probe.expect)].join(", ")})`,
     );
   } else {
-    console.log(`LEAK ${probe.gate}: let its violation through, ${leak}`);
+    console.log(`LEAK ${probe.gate}: wrong verdict, ${leak}`);
     leaks.push(probe.gate);
   }
 }
 if (leaks.length > 0) {
   console.error(
-    `\nThese gates no longer fail on a violation: ${leaks.join(", ")}. Fix the gate, not the probe.`,
+    `\nThese gates no longer judge their probe right: ${leaks.join(", ")}. Fix the gate, not the probe.`,
   );
   process.exit(1);
 }
-console.log(`\nAll ${String(PROBES.length)} gates fail on a violation.`);
+console.log(`\nAll ${String(PROBES.length)} gate probes got the verdict they should.`);

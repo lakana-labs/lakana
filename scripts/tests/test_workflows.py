@@ -633,7 +633,11 @@ def test_osv_scanner_is_the_checksummed_binary() -> None:
     env = next(s["env"] for s in job["steps"] if "OSV_SCANNER_SHA256" in s.get("env", {}))
     assert env["OSV_SCANNER_VERSION"] == "2.7.0"
     assert re.fullmatch(r"[0-9a-f]{64}", env["OSV_SCANNER_SHA256"])
-    assert set(job.get("permissions", {"contents": "read"})) == {"contents"}
+    # No permissions of its own: it keeps the workflow's read-only token.
+    assert "permissions" not in job
+    assert yaml.safe_load((WORKFLOWS / "security.yml").read_text())["permissions"] == {
+        "contents": "read"
+    }
 
 
 UI_LOCKSTEP = {
