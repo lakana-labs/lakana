@@ -127,7 +127,6 @@ function Gate({ ready }: GateProps): JSX.Element {
  */
 function useAccess(session: SessionValue): AccessOut | null {
   const signedIn = session.state === "signed-in" ? session.session : undefined;
-  const name = signedIn?.name ?? "";
   const key =
     signedIn === undefined || signedIn.needs_passkey
       ? null
@@ -137,7 +136,7 @@ function useAccess(session: SessionValue): AccessOut | null {
     if (key === null) {
       return;
     }
-    myAccess(name).then(
+    myAccess().then(
       (access) => {
         setFound({ key, access });
       },
@@ -145,16 +144,17 @@ function useAccess(session: SessionValue): AccessOut | null {
         setFound({ key, access: NO_KNOWN_RIGHTS });
       },
     );
-  }, [key, name]);
+  }, [key]);
   return found !== null && found.key === key ? found.access : null;
 }
 
 /**
- * Keeps one router at a time: each new route tree gets a new router at the old one's location.
+ * Makes routers: each new route tree gets a new router at the location the router on screen
+ * shows. Which router is on screen is recorded after React shows it, never during a render.
  */
 class RouterHost {
   readonly #create: RouterFactory;
-  #router: DataRouter | null = null;
+  #shown: DataRouter | null = null;
 
   /**
    * Builds the host.
@@ -166,16 +166,23 @@ class RouterHost {
   }
 
   /**
-   * Replaces the router with one for a new route tree.
+   * Makes the router for a new route tree, at the shown router's location.
    *
    * @param routes - The route tree.
    * @returns The new router.
    */
   routerFor(routes: RouteObject[]): DataRouter {
-    const at = this.#router === null ? undefined : createPath(this.#router.state.location);
-    this.#router?.dispose();
-    this.#router = this.#create(routes, at);
-    return this.#router;
+    const at = this.#shown === null ? undefined : createPath(this.#shown.state.location);
+    return this.#create(routes, at);
+  }
+
+  /**
+   * Records the router React now shows.
+   *
+   * @param router - The router.
+   */
+  shown(router: DataRouter): void {
+    this.#shown = router;
   }
 }
 
@@ -216,6 +223,13 @@ function Routed({ createRouter, pages, link, onLinkDone }: RoutedProps): JSX.Ele
     [access, pages, link, onLinkDone],
   );
   const router = useMemo(() => host.routerFor(routes), [host, routes]);
+  useEffect(() => {
+    host.shown(router);
+    // The old router is disposed only once the new one is on screen.
+    return () => {
+      router.dispose();
+    };
+  }, [host, router]);
   if (session.state === "loading") {
     return <Loading />;
   }

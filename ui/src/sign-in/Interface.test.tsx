@@ -6,13 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Interface, type RouterFactory } from "./Interface";
 
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
-import {
-  ADMIN_SESSION,
-  type FakeRoute,
-  type FakeServer,
-  fakeServer,
-  permissions,
-} from "../test/server";
+import { ADMIN_SESSION, type FakeRoute, type FakeServer, fakeServer, whoami } from "../test/server";
 import { MemoryStorage } from "../test/storage";
 import { fakeWebAuthn } from "../test/webauthn";
 
@@ -47,7 +41,7 @@ function renderInterface(
 ): Rendered {
   const server = fakeServer({
     "GET /api/v1/sign-in/notices": { status: 200, body: [] },
-    "GET /api/v1/principals/admin/permissions": { status: 200, body: permissions(true) },
+    "GET /api/v1/whoami": { status: 200, body: whoami("admin", true) },
     ...routes,
   });
   let newest: ReturnType<typeof createMemoryRouter> | null = null;
@@ -203,7 +197,10 @@ describe("Interface", () => {
       },
       "POST /api/v1/sign-in/links/redeem": {
         status: 409,
-        body: { detail: "Already signed in.", type: "ConflictError" },
+        body: {
+          detail: "This browser is already signed in, so the local sign-in link was not used.",
+          type: "ConflictError",
+        },
       },
     });
 
@@ -353,7 +350,7 @@ describe("Interface", () => {
   it("hides Access and Settings from a person without admin rights", async () => {
     renderInterface("/", {
       "GET /api/v1/sign-in/session": { status: 200, body: { ...ADMIN_SESSION, name: "kim" } },
-      "GET /api/v1/principals/kim/permissions": { status: 200, body: permissions(false, true) },
+      "GET /api/v1/whoami": { status: 200, body: whoami("kim", false, true) },
     });
 
     const navigation = await screen.findByRole("navigation");
@@ -376,8 +373,7 @@ describe("Interface", () => {
   it("shows 'You have no access yet; ask an administrator' on an empty Home", async () => {
     renderInterface("/", {
       "GET /api/v1/sign-in/session": { status: 200, body: { ...ADMIN_SESSION, name: "kim" } },
-      "GET /api/v1/principals/kim/permissions": { status: 200, body: permissions(false) },
-      "GET /api/v1/environments": { status: 200, body: [] },
+      "GET /api/v1/whoami": { status: 200, body: whoami("kim", false, false) },
     });
 
     expect(
@@ -388,7 +384,7 @@ describe("Interface", () => {
   it("hides the administration areas when the rights cannot be read", async () => {
     renderInterface("/", {
       "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
-      "GET /api/v1/principals/admin/permissions": {
+      "GET /api/v1/whoami": {
         status: 503,
         body: { detail: "Busy.", type: "Busy" },
       },
@@ -397,5 +393,29 @@ describe("Interface", () => {
     const navigation = await screen.findByRole("navigation");
     await screen.findByRole("heading", { level: 1, name: "Home" });
     expect(within(navigation).queryByRole("link", { name: "Access" })).not.toBeInTheDocument();
+  });
+
+  it("disposes the old router once the new one shows", async () => {
+    const routers: { router: ReturnType<typeof createMemoryRouter>; dispose: unknown }[] = [];
+    fakeServer({
+      "GET /api/v1/sign-in/notices": { status: 200, body: [] },
+      "GET /api/v1/whoami": { status: 200, body: whoami("admin", true) },
+      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+    });
+    const createRouter: RouterFactory = (tree, at) => {
+      const router = createMemoryRouter(tree, { initialEntries: [at ?? "/jobs"] });
+      routers.push({ router, dispose: vi.spyOn(router, "dispose") });
+      return router;
+    };
+    render(<Interface createRouter={createRouter} storage={new MemoryStorage()} />);
+
+    await screen.findByRole("heading", { level: 1, name: "Jobs" });
+
+    expect(routers.length).toBeGreaterThan(1);
+    const newest = routers.at(-1);
+    for (const made of routers) {
+      expect(made.dispose).toHaveBeenCalledTimes(made === newest ? 0 : 1);
+    }
+    expect(newest?.router.state.location.pathname).toBe("/jobs");
   });
 });

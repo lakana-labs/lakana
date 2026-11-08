@@ -66,10 +66,12 @@ for (const theme of ["light", "dark"] as const) {
         for (const [name, path] of AREAS) {
           await page.goto(path);
           await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+          // An administrator has access: Home never tells them to ask for it.
+          await expect(page.getByText(/no access yet/)).toHaveCount(0);
           expect(await violations(page), path).toEqual([]);
         }
         await page.getByRole("button", { name: "Signed in as admin" }).click();
-        await expect(page.getByRole("menu", { name: "Preferences" })).toBeVisible();
+        await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
         expect(await violations(page), "user menu").toEqual([]);
         await page.keyboard.press("Escape");
         await page.getByRole("button", { name: "Search" }).click();
@@ -115,7 +117,7 @@ for (const theme of ["light", "dark"] as const) {
         }
         // The floating surfaces: React Aria inserts its own styles for them.
         await page.getByRole("button", { name: "Signed in as admin" }).click();
-        await expect(page.getByRole("menu", { name: "Preferences" })).toBeVisible();
+        await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
         await page.keyboard.press("Escape");
         await page.getByRole("button", { name: "Search" }).click();
         await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
@@ -260,7 +262,7 @@ for (const theme of ["light", "dark"] as const) {
 
       await page.getByRole("button", { name: "Menu" }).click();
       await page.getByRole("button", { name: "Signed in as admin" }).click();
-      const menu = page.getByRole("menu", { name: "Preferences" });
+      const menu = page.getByRole("menu", { name: "Preferences and account" });
       await expect(menu).toBeVisible();
       await expect(menu).toBeInViewport({ ratio: 1 });
       await page.keyboard.press("Escape");

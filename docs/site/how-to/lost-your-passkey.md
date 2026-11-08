@@ -19,7 +19,9 @@ so a recovery nobody asked for does not go unnoticed.
    **Add a passkey** and follow your browser.
 
 If the page says the link was already used, has expired or was withdrawn, ask for a new one:
-each link works once.
+each link works once. The interface removes the link from the address bar as soon as the page
+opens, but the browser may still keep it in its own history; once used or expired, a link there
+is useless.
 
 ## You are the administrator who issues the link
 

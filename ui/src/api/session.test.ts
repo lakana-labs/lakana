@@ -10,7 +10,7 @@ import {
   signOutEverywhere,
 } from "./session";
 
-import { ADMIN_SESSION, fakeServer, permissions } from "../test/server";
+import { ADMIN_SESSION, fakeServer, whoami } from "../test/server";
 
 describe("session", () => {
   it("keeps one CSRF token across two loads of the session", async () => {
@@ -58,37 +58,18 @@ describe("session", () => {
     });
   });
 
-  it("finds an administrator by the ADMIN-only grant right", async () => {
-    const server = fakeServer({
-      "GET /api/v1/principals/admin/permissions": { status: 200, body: permissions(true) },
-    });
-
-    await expect(myAccess("admin")).resolves.toEqual({ admin: true, noAccessYet: false });
-    expect(server.sent).toHaveLength(1);
-  });
-
-  it("finds a person with some right on the instance", async () => {
-    fakeServer({
-      "GET /api/v1/principals/kim/permissions": { status: 200, body: permissions(false, true) },
-    });
-
-    await expect(myAccess("kim")).resolves.toEqual({ admin: false, noAccessYet: false });
-  });
-
   it.each([
-    [[], true],
-    [[{ name: "dev" }], false],
-  ])(
-    "a person without instance rights and environments %j has no access yet: %s",
-    async (environments, empty) => {
-      fakeServer({
-        "GET /api/v1/principals/kim/permissions": { status: 200, body: permissions(false) },
-        "GET /api/v1/environments": { status: 200, body: environments },
-      });
+    [true, true, { admin: true, noAccessYet: false }],
+    [false, true, { admin: false, noAccessYet: false }],
+    [false, false, { admin: false, noAccessYet: true }],
+  ])("reads admin %s and access %s from whoami alone", async (admin, has, expected) => {
+    const server = fakeServer({
+      "GET /api/v1/whoami": { status: 200, body: whoami("kim", admin, has) },
+    });
 
-      await expect(myAccess("kim")).resolves.toEqual({ admin: false, noAccessYet: empty });
-    },
-  );
+    await expect(myAccess()).resolves.toEqual(expected);
+    expect(server.sent.map((request) => request.path)).toEqual(["/api/v1/whoami"]);
+  });
 
   it("lists notices in the background and dismisses one", async () => {
     const notice = {

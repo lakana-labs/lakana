@@ -57,7 +57,7 @@
       "mac": "⌘ K",
       "other": "Ctrl K"
     },
-    "preferences": "Preferences",
+    "preferences": "Preferences and account",
     "theme": "Theme",
     "themes": {
       "system": "System",
@@ -146,7 +146,6 @@
     "joinIntro": "This invitation creates your account. Continue only if you expected it.",
     "confirm": "Continue",
     "signingIn": "Signing you in…",
-    "alreadySignedIn": "This browser is already signed in, so the local sign-in link was not used. Keep working as you are, or sign out first and open the link again.",
     "toSignIn": "Go to sign-in",
     "toHome": "Go to Home",
     "used": {
@@ -164,7 +163,9 @@
     "unknown": {
       "title": "This link does not work",
       "body": "Check that you opened all of it, including everything after #, or ask whoever sent it for a new link."
-    }
+    },
+    "tryAgain": "Try again",
+    "replaces": "This browser is signed in as {{name}}; continuing signs that session out."
   },
   "addPasskey": {
     "title": "Add a passkey",
@@ -185,7 +186,7 @@
       "other": "A recovery link was used on the account of {{subject}} on {{date}}."
     },
     "passkey_disabled": {
-      "self": "One of your passkeys was disabled on {{date}} because a copy of it was detected. Add a new passkey, and tell an administrator if you did not copy it.",
+      "self": "One of your passkeys was disabled on {{date}} because a copy of it was detected. Sign in with another passkey, or ask an administrator for a recovery link, and tell an administrator if you did not copy it.",
       "other": "A passkey of {{subject}} was disabled on {{date}} because a copy of it was detected."
     },
     "passkey_added": {

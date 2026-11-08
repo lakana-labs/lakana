@@ -8,12 +8,14 @@ const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 // reached by its loopback name.
 const ORIGIN = "http://localhost:4173";
 const KIM = { ...ADMIN_SESSION, name: "kim" };
-const KIM_RIGHTS = {
-  principal: "kim",
-  active: true,
-  scope: { kind: "INSTANCE", environment: null, namespace: null, table: null },
-  permissions: [{ action: "MANAGE_GRANT", allowed: false, via: [], reason: null }],
-  note: null,
+const KIM_WHOAMI = {
+  name: "kim",
+  type: "USER",
+  task_token: null,
+  ci_token: null,
+  language: null,
+  admin: false,
+  has_access: false,
 };
 
 /**
@@ -60,9 +62,7 @@ async function fakeServer(page: Page): Promise<{ sent: Request[] }> {
       : route.fulfill({ json: session }),
   );
   await page.route("**/api/v1/sign-in/notices", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/v1/principals/kim/permissions", (route) =>
-    route.fulfill({ json: KIM_RIGHTS }),
-  );
+  await page.route("**/api/v1/whoami", (route) => route.fulfill({ json: KIM_WHOAMI }));
   await page.route("**/api/v1/sign-in/links/describe", (route) =>
     route.fulfill({ json: { kind: "invite", name: "kim", display_name: null, state: "open" } }),
   );
@@ -175,6 +175,7 @@ test.describe("signing in", () => {
     expect(credentials).toHaveLength(1);
     expect(credentials[0]?.isResidentCredential).toBe(true);
     await expect(page.getByRole("link", { name: "Access" })).toHaveCount(0);
+    await expect(page.getByText("You have no access yet; ask an administrator.")).toBeVisible();
 
     await page.getByRole("button", { name: "Signed in as kim" }).click();
     await page.getByRole("menuitem", { name: "Sign out everywhere" }).click();

@@ -79,9 +79,7 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
           setPhase(refused);
           return "";
         }
-        return error instanceof ApiError && error.status === 409
-          ? t("link.alreadySignedIn")
-          : problemText(t, error);
+        return problemText(t, error);
       },
     );
   };
@@ -95,6 +93,7 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
   const refused = useEffectEvent((error: unknown) => {
     setPhase(unusable(error) ?? { kind: "failed", text: problemText(t, error) });
   });
+  const [round, setRound] = useState(0);
   useEffect(() => {
     if (!complete) {
       return;
@@ -115,7 +114,7 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
     return () => {
       live = false;
     };
-  }, [complete, link.linkId]);
+  }, [complete, link.linkId, round]);
 
   const leave = (
     <Button className="button" onPress={onDone}>
@@ -138,9 +137,23 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
           {phase.kind === "checking" ? t("link.checking") : ""}
         </p>
         {phase.kind === "failed" && (
-          <p className="step-error" role="alert">
-            {phase.text}
-          </p>
+          <>
+            <p className="step-error" role="alert">
+              {phase.text}
+            </p>
+            <div className="step-actions">
+              <Button
+                className="button button-primary"
+                onPress={() => {
+                  setPhase({ kind: "checking" });
+                  setRound((previous) => previous + 1);
+                }}
+              >
+                {t("link.tryAgain")}
+              </Button>
+              {leave}
+            </div>
+          </>
         )}
       </Step>
     );
@@ -150,6 +163,9 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
   return (
     <Step title={invite ? t("link.joinAs", { name: shown }) : t("link.signInAs", { name: shown })}>
       <p>{invite ? t("link.joinIntro") : t("link.signInIntro")}</p>
+      {session.state === "signed-in" && phase.link.kind !== "local" && (
+        <p className="step-notice">{t("link.replaces", { name: session.session?.name })}</p>
+      )}
       <div className="step-actions">
         <Button className="button button-primary" isDisabled={attempt.busy} onPress={use}>
           {t("link.confirm")}

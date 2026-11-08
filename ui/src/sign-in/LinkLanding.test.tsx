@@ -165,4 +165,66 @@ describe("LinkLanding", () => {
     expect(server.sent.map((request) => request.path)).toEqual(["/api/v1/sign-in/links/describe"]);
     expect(onDone).not.toHaveBeenCalled();
   });
+
+  it.each([
+    "This browser is already signed in, so the local sign-in link was not used. Sign out first.",
+    "That name was taken meanwhile; ask for a new invite.",
+    "The web interface is off on this server; ask the operator to turn it on.",
+  ])("shows the server's own reason for a 409: %s", async (detail) => {
+    fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: { kind: "invite", name: "kim", display_name: null, state: "open" },
+      },
+      "POST /api/v1/sign-in/links/redeem": {
+        status: 409,
+        body: { detail, type: "ConflictError" },
+      },
+    });
+    const { user } = renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(detail);
+  });
+
+  it("offers to check the link again after the server could not be reached", async () => {
+    let calls = 0;
+    fakeServer({
+      "POST /api/v1/sign-in/links/describe": () => {
+        calls += 1;
+        return calls === 1
+          ? { status: 503, body: { detail: "Busy; try again.", type: "Busy" } }
+          : {
+              status: 200,
+              body: { kind: "recovery", name: "kim", display_name: null, state: "open" },
+            };
+      },
+    });
+    const { user } = renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Busy; try again.");
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Sign in as kim" }),
+    ).toBeInTheDocument();
+    expect(calls).toBe(2);
+  });
+
+  it("says that continuing ends the session this browser has", async () => {
+    fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: { kind: "recovery", name: "kim", display_name: null, state: "open" },
+      },
+    });
+    renderLanding({ linkId: "pub-1", secret: "sec-1" }, signedIn());
+
+    expect(
+      await screen.findByText(
+        "This browser is signed in as admin; continuing signs that session out.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

@@ -20,11 +20,7 @@ export const ADMIN_SESSION = {
 };
 
 /** The paths the stubs answer; any other request to the API is a test failure. */
-export const STUBBED = [
-  "/api/v1/sign-in/session",
-  "/api/v1/sign-in/notices",
-  "/api/v1/principals/admin/permissions",
-];
+export const STUBBED = ["/api/v1/sign-in/session", "/api/v1/sign-in/notices", "/api/v1/whoami"];
 
 /**
  * Answers the session routes as for a signed-in administrator without notices.
@@ -34,14 +30,16 @@ export const STUBBED = [
 export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route("**/api/v1/sign-in/session", (route) => route.fulfill({ json: ADMIN_SESSION }));
   await page.route("**/api/v1/sign-in/notices", (route) => route.fulfill({ json: [] }));
-  await page.route("**/api/v1/principals/admin/permissions", (route) =>
+  await page.route("**/api/v1/whoami", (route) =>
     route.fulfill({
       json: {
-        principal: "admin",
-        active: true,
-        scope: { kind: "INSTANCE", environment: null, namespace: null, table: null },
-        permissions: [{ action: "MANAGE_GRANT", allowed: true, via: [], reason: null }],
-        note: null,
+        name: "admin",
+        type: "USER",
+        task_token: null,
+        ci_token: null,
+        language: null,
+        admin: true,
+        has_access: true,
       },
     }),
   );

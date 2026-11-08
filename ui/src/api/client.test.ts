@@ -135,6 +135,19 @@ describe("send", () => {
     });
   });
 
+  it("names an answer that is not JSON as the server's failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response("<html>proxy page</html>", { status: 200 }))),
+    );
+
+    await expect(send("GET", "/api/v1/things")).rejects.toMatchObject({
+      status: 200,
+      type: "HttpError",
+      detail: "The server answered 200 with something that is not JSON.",
+    });
+  });
+
   it("names an unreachable server as a network error", async () => {
     vi.stubGlobal(
       "fetch",
@@ -180,6 +193,70 @@ describe("api.request", () => {
     expect(answer).toEqual({ id: "i-1" });
     expect(ceremony).toHaveBeenCalledTimes(1);
     expect(server.sent.map((request) => request.body)).toEqual([{ name: "kim" }, { name: "kim" }]);
+  });
+
+  it("sends the CSRF token on the retry too", async () => {
+    let calls = 0;
+    const server = fakeServer({
+      "POST /api/v1/invites": () => {
+        calls += 1;
+        return calls === 1 ? STEP_UP : { status: 201, body: {} };
+      },
+    });
+    setCsrfToken("csrf-7");
+    setStepUp(() => Promise.resolve());
+
+    await api.request("POST", "/api/v1/invites", {});
+
+    expect(server.sent.map((request) => request.headers["x-lakana-csrf"])).toEqual([
+      "csrf-7",
+      "csrf-7",
+    ]);
+  });
+
+  it("asks for one passkey touch when two actions need it at once", async () => {
+    const seen = new Map<string, number>();
+    const server = fakeServer({
+      "POST /api/v1/a": (request) => {
+        seen.set(request.path, (seen.get(request.path) ?? 0) + 1);
+        return seen.get(request.path) === 1 ? STEP_UP : { status: 200, body: "a" };
+      },
+      "POST /api/v1/b": (request) => {
+        seen.set(request.path, (seen.get(request.path) ?? 0) + 1);
+        return seen.get(request.path) === 1 ? STEP_UP : { status: 200, body: "b" };
+      },
+    });
+    let touch: () => void = () => undefined;
+    const ceremony = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          touch = resolve;
+        }),
+    );
+    setStepUp(ceremony);
+
+    const both = Promise.all([
+      api.request("POST", "/api/v1/a", {}),
+      api.request("POST", "/api/v1/b", {}),
+    ]);
+    await vi.waitFor(() => {
+      expect(server.sent).toHaveLength(2);
+    });
+    // Both refusals have arrived and both requests wait for the one touch.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    touch();
+
+    await expect(both).resolves.toEqual(["a", "b"]);
+    expect(ceremony).toHaveBeenCalledTimes(1);
+
+    // The next action that needs a touch asks again.
+    seen.clear();
+    const third = api.request("POST", "/api/v1/a", {});
+    await vi.waitFor(() => {
+      expect(ceremony).toHaveBeenCalledTimes(2);
+    });
+    touch();
+    await expect(third).resolves.toBe("a");
   });
 
   it("retries only once", async () => {

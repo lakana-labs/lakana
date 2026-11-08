@@ -87,6 +87,23 @@ export function onUnauthorized(listener: (error: ApiError) => void): () => void 
 
 let stepUpCeremony: (() => Promise<void>) | null = null;
 
+/** The step-up ceremony under way, shared by every request that waits for it. */
+let stepUpUnderWay: Promise<void> | null = null;
+
+/**
+ * Runs the step-up ceremony, or joins the one under way, so actions that need a passkey touch
+ * at the same time ask the person once.
+ *
+ * @param ceremony - The step-up ceremony.
+ * @returns When the touch is done.
+ */
+function sharedStepUp(ceremony: () => Promise<void>): Promise<void> {
+  stepUpUnderWay ??= ceremony().finally(() => {
+    stepUpUnderWay = null;
+  });
+  return stepUpUnderWay;
+}
+
 /**
  * Sets the passkey touch that {@link api}.request runs when an action needs a fresh one.
  *
@@ -94,6 +111,7 @@ let stepUpCeremony: (() => Promise<void>) | null = null;
  */
 export function setStepUp(ceremony: () => Promise<void>): void {
   stepUpCeremony = ceremony;
+  stepUpUnderWay = null;
 }
 
 /** The body of a refusal, as far as the interface reads it. */
@@ -210,7 +228,15 @@ export async function send<T>(
   if (response.status === 204) {
     return undefined as T;
   }
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new ApiError(
+      response.status,
+      "HttpError",
+      `The server answered ${String(response.status)} with something that is not JSON.`,
+    );
+  }
 }
 
 /**
@@ -227,7 +253,8 @@ function needsStepUp(error: unknown): boolean {
 export const api = {
   /**
    * Sends a request. When the action needs a fresh passkey touch (403 `StepUpRequired`), runs
-   * the step-up ceremony and sends the request once more; a background request never asks.
+   * the step-up ceremony (one for all requests waiting at once) and sends the request once
+   * more; a background request never asks.
    *
    * @template T - The JSON the route answers.
    * @param method - The HTTP method.
@@ -249,7 +276,7 @@ export const api = {
       if (!needsStepUp(error) || options.background === true || stepUpCeremony === null) {
         throw error;
       }
-      await stepUpCeremony();
+      await sharedStepUp(stepUpCeremony);
       return send<T>(method, path, body, options);
     }
   },

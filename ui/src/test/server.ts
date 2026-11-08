@@ -51,22 +51,22 @@ export const ADMIN_SESSION = {
 };
 
 /**
- * The instance permissions report of a person.
+ * What `GET /api/v1/whoami` answers about a person.
  *
+ * @param name - The principal name.
  * @param admin - Whether the person holds the ADMIN role on the instance.
- * @param any - Whether any instance action is allowed at all.
- * @returns The body of `GET /api/v1/principals/{name}/permissions`.
+ * @param hasAccess - Whether the person has any grant at all.
+ * @returns The body.
  */
-export function permissions(admin: boolean, any = admin): unknown {
+export function whoami(name: string, admin: boolean, hasAccess = admin): unknown {
   return {
-    principal: "admin",
-    active: true,
-    scope: { kind: "INSTANCE", environment: null, namespace: null, table: null },
-    permissions: [
-      { action: "MANAGE_GRANT", allowed: admin, via: [], reason: null },
-      { action: "READ_AUDIT_LOG", allowed: any, via: [], reason: null },
-    ],
-    note: null,
+    name,
+    type: "USER",
+    task_token: null,
+    ci_token: null,
+    language: null,
+    admin,
+    has_access: hasAccess,
   };
 }
 

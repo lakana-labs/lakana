@@ -48,18 +48,12 @@ export interface NoticeOut {
   readonly created_at: string;
 }
 
-/** One action of a permissions report. */
-interface PermissionOut {
-  /** The action. */
-  readonly action: string;
-  /** Whether the person may do it. */
-  readonly allowed: boolean;
-}
-
-/** A permissions report on the instance. */
-interface PermissionsOut {
-  /** One entry per action. */
-  readonly permissions: readonly PermissionOut[];
+/** What `GET /api/v1/whoami` answers about access. */
+interface WhoamiOut {
+  /** True for a holder of the ADMIN role on the instance. */
+  readonly admin: boolean;
+  /** True when the person has any grant at all, at any scope. */
+  readonly has_access: boolean;
 }
 
 /**
@@ -91,28 +85,14 @@ export async function signOutEverywhere(name: string): Promise<void> {
 }
 
 /**
- * Finds out what the person may use: administrators see Access and Settings, and a person with
- * no right anywhere is told to ask for one.
+ * Finds out what the signed-in person may use: administrators see Access and Settings, and a
+ * person with no grant anywhere is told to ask for one.
  *
- * @remarks
- * Granting is for holders of the ADMIN role only, so `MANAGE_GRANT` on the instance names an
- * administrator. The instance report does not list rights inside an environment; a person
- * without instance rights has some when they may read an environment.
- * @param name - The person's own principal name.
- * @returns The access.
+ * @returns The access, from `GET /api/v1/whoami`.
  */
-export async function myAccess(name: string): Promise<AccessOut> {
-  const report = await api.request<PermissionsOut>(
-    "GET",
-    `/api/v1/principals/${encodeURIComponent(name)}/permissions`,
-  );
-  const allowed = report.permissions.filter((permission) => permission.allowed);
-  const admin = allowed.some((permission) => permission.action === "MANAGE_GRANT");
-  if (allowed.length > 0) {
-    return { admin, noAccessYet: false };
-  }
-  const environments = await api.request<readonly unknown[]>("GET", "/api/v1/environments");
-  return { admin, noAccessYet: environments.length === 0 };
+export async function myAccess(): Promise<AccessOut> {
+  const me = await api.request<WhoamiOut>("GET", "/api/v1/whoami");
+  return { admin: me.admin, noAccessYet: !me.has_access };
 }
 
 /**

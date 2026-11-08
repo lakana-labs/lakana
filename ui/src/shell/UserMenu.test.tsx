@@ -36,7 +36,7 @@ async function openMenuWith(
   const shell = renderShell("/", { session });
   await screen.findByRole("heading", { level: 1, name: "Home" });
   await shell.user.click(screen.getByRole("button", { name: "Signed in as admin" }));
-  await screen.findByRole("menu", { name: "Preferences" });
+  await screen.findByRole("menu", { name: "Preferences and account" });
   return shell;
 }
 
@@ -49,7 +49,7 @@ async function openMenu(): Promise<ReturnType<typeof renderShell>> {
   const shell = renderShell("/");
   await screen.findByRole("heading", { level: 1, name: "Home" });
   await shell.user.click(screen.getByRole("button", { name: "Signed in as admin" }));
-  await screen.findByRole("menu", { name: "Preferences" });
+  await screen.findByRole("menu", { name: "Preferences and account" });
   return shell;
 }
 
