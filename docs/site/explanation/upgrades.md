@@ -149,6 +149,21 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   interface must pass the browser's `Host` header through (nginx: `proxy_set_header Host $http_host;`).
   Engines, CI and workers that call the API with a token are not affected.
 
+### The Compose bundle's web interface settings
+
+- A new bundle's `.env` has two more keys, which `compose.yaml` passes to `server`:
+  `LAKANA_UI__ENABLED` (`false` unless `lakana bundle init --ui`) and `LAKANA_UI__PUBLIC_URL`, the
+  address people open the interface at (`--public-url` when its host is a name, otherwise
+  `http://localhost:<LAKANA_PORT>`) ([The `.env` file](../reference/compose-bundle.md#the-env-file)).
+- An existing bundle needs no change: with this release's `compose.yaml` and an `.env` without
+  the keys, the interface stays off. To turn it on, replace `compose.yaml`, add
+  `LAKANA_UI__ENABLED=true` and `LAKANA_UI__PUBLIC_URL=https://<the DNS name people open>` to
+  `.env`, run `docker compose up -d --wait` and then `lakana sign-in setup-link`
+  ([Sign in to the web interface](../how-to/deploy-with-compose.md#sign-in-to-the-web-interface)).
+- `lakana server start --local` sets `LAKANA_UI__PUBLIC_URL` itself, to
+  `http://localhost:<port>`: a value in your shell (for example from a bundle's `.env`) is ignored
+  with one line saying so.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header
