@@ -157,7 +157,7 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.locator("html")).toHaveAttribute("data-theme", other.toLowerCase());
         await expect(page.locator("html")).toHaveAttribute("data-density", density);
         const ground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-        expect(ground).toBe(other === "Dark" ? "rgb(15, 23, 28)" : "rgb(245, 248, 249)");
+        expect(ground).toBe(other === "Dark" ? "rgb(15, 23, 28)" : "rgb(232, 238, 241)");
       });
 
       test("no horizontal scroll at 768 px and at 1280 px", async ({ page }) => {
