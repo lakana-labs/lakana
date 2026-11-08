@@ -13,8 +13,9 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ConflictError
+from lakana_core.identity.links import has_passkey
 from lakana_core.identity.sessions import STEP_UP_WINDOW, SessionService, csrf_token_for
-from lakana_core.models import BrowserSession
+from lakana_core.models import BrowserSession, Principal
 from lakana_server.api.platform.schemas import BrowserSessionOut, SessionOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -105,18 +106,19 @@ def describe_session(
     assert context is not None  # nosec B101 -- _own_session refused a token caller
     row = session.get(BrowserSession, context.session_id)
     assert row is not None  # nosec B101 -- get_principal just read it
-    has_passkey = False  # Passkeys arrive with the next step of sign-in; until then none.
+    usable = has_passkey(session, principal.id)
+    person = session.get(Principal, principal.id)
     return SessionOut(
         name=principal.name,
-        display_name=None,
+        display_name=person.display_name if person is not None else None,
         type=principal.type.value,
         via=context.via,
         csrf_token=csrf_token_for(cookie),
         step_up_until=(
             context.last_touch_at + STEP_UP_WINDOW if context.last_touch_at is not None else None
         ),
-        needs_passkey=not has_passkey and context.via in LINK_VIAS,
-        offer_passkey=not has_passkey and context.via == "local",
+        needs_passkey=not usable and context.via in LINK_VIAS,
+        offer_passkey=not usable and context.via == "local",
         absolute_expires_at=row.absolute_expires_at,
     )
 

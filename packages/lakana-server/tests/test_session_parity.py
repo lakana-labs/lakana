@@ -70,6 +70,12 @@ CREDENTIAL_SPECIFIC_ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/principals/{name}/sessions"): (
         "ending one's own sessions from a browser also clears that browser's cookie"
     ),
+    ("POST", "/api/v1/sign-in/setup-link"): (
+        "PAT only: the operator's / local person's own token mints the link"
+    ),
+    ("POST", "/api/v1/sign-in/local-link"): (
+        "PAT only: the operator's / local person's own token mints the link"
+    ),
     **{
         route: "token-only: the cookie is refused (403 TokenOnlyRoute)"
         for route in TOKEN_ONLY_ROUTES
@@ -109,6 +115,7 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}")
 _TOKEN = re.compile(r"^lakana_(pat|task|ci)_")
 _KEY_ID = re.compile(r"^[0-9a-f]{16}$|^[0-9a-f]{32}$")
+_SIGN_IN_LINK = re.compile(r"^https?://[^#]+/sign-in#l=[\w-]+&s=[\w-]+$")
 
 _BY_SEGMENT = {
     "environments": ENV,
@@ -378,8 +385,9 @@ def _request_for(document: dict[str, Any], method: str, path: str) -> _Request:
 def _normalised(value: Any) -> Any:  # ruff: ignore[any-type]
     """Replace what two identical requests made at different moments answer differently.
 
-    A created object's id, a timestamp and a newly issued token's text differ between the two
-    worlds even when the credential plays no part; everything else is compared as it is.
+    A created object's id, a timestamp, a newly issued token's text and a new sign-in link's
+    random halves differ between the two worlds even when the credential plays no part;
+    everything else is compared as it is.
 
     Parameters
     ----------
@@ -389,7 +397,8 @@ def _normalised(value: Any) -> Any:  # ruff: ignore[any-type]
     Returns
     -------
     Any
-        The value with ids, key ids, times and token texts replaced by placeholders, and
+        The value with ids, key ids, times, token texts and sign-in links replaced by
+        placeholders, and
         `request_id` dropped.
     """
     if isinstance(value, dict):
@@ -403,6 +412,8 @@ def _normalised(value: Any) -> Any:  # ruff: ignore[any-type]
             return "<time>"
         if _TOKEN.match(value):
             return "<token>"
+        if _SIGN_IN_LINK.match(value):
+            return "<sign-in link>"
         if _KEY_ID.match(value):
             return "<key-id>"
     return value

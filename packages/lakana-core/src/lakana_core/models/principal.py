@@ -45,3 +45,6 @@ class Principal(Base, TimestampMixin):
     )
     """The WebAuthn user handle: 32 random bytes, set when the first passkey is registered,
     never derived from the id or the name. `None` until then."""
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    """A person's name as the interface shows it (an invite's optional display name); `None`
+    shows the principal name. Never used to sign in or to look a principal up."""

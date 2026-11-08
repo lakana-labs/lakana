@@ -58,8 +58,8 @@ def _fk(table: str, column: str, referred: str) -> str:
 def upgrade() -> None:
     """Upgrade schema.
 
-    Six new, empty tables, a nullable WebAuthn user handle on principals, and the
-    `bootstrap` mark on personal access tokens. The mark is set on every unrevoked PAT
+    Six new, empty tables, a nullable WebAuthn user handle and display name on principals, and
+    the `bootstrap` mark on personal access tokens. The mark is set on every unrevoked PAT
     named ``bootstrap`` of the bootstrap principal (`LAKANA_BOOTSTRAP_ADMIN`): the name
     `bootstrap_if_needed` has always given the token it mints, so an upgraded operator's token
     keeps counting as the operator's. A PAT named ``bootstrap`` of any other principal does
@@ -67,6 +67,7 @@ def upgrade() -> None:
     """
     with op.batch_alter_table("principals") as batch:
         batch.add_column(sa.Column("webauthn_handle", sa.LargeBinary(length=32), nullable=True))
+        batch.add_column(sa.Column("display_name", sa.String(length=255), nullable=True))
         batch.create_unique_constraint("uq_principals_webauthn_handle", ["webauthn_handle"])
     with op.batch_alter_table("personal_access_tokens") as batch:
         batch.add_column(
@@ -285,8 +286,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema.
 
-    Drops every sign-in table and both columns: sessions, links and passkeys are gone, and the
-    previous release signs in with tokens only.
+    Drops every sign-in table and the three new columns: sessions, links and passkeys are gone,
+    and the previous release signs in with tokens only.
     """
     op.drop_table("instance_settings")
     op.drop_index("ix_sign_in_notices_recipient_id", table_name="sign_in_notices")
@@ -304,4 +305,5 @@ def downgrade() -> None:
         batch.drop_column("bootstrap")
     with op.batch_alter_table("principals") as batch:
         batch.drop_constraint("uq_principals_webauthn_handle", type_="unique")
+        batch.drop_column("display_name")
         batch.drop_column("webauthn_handle")

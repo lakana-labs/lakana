@@ -125,7 +125,7 @@ def test_errors_document_each_status_once_with_the_error_body() -> None:
     assert responses["404"]["description"] == ERROR_MEANING[404]
     schema = responses["409"]["content"]["application/json"]["schema"]
     assert schema == {"$ref": "#/components/schemas/ErrorOut"}
-    assert set(ErrorOut.model_fields) == {"detail", "type", "reason"}
+    assert set(ErrorOut.model_fields) == {"detail", "type", "reason", "state"}
 
 
 def test_an_unknown_status_is_refused() -> None:

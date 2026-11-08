@@ -5355,7 +5355,9 @@ def test_0069_adds_the_sign_in_tables_and_marks_only_the_operators_bootstrap_pat
     try:
         inspector = inspect(engine)
         assert set(inspector.get_table_names()) >= _SIGN_IN_TABLES
-        assert "webauthn_handle" in {c["name"] for c in inspector.get_columns("principals")}
+        assert {"webauthn_handle", "display_name"} <= {
+            c["name"] for c in inspector.get_columns("principals")
+        }
         with engine.connect() as connection:
             flags = dict(
                 connection.execute(
@@ -5375,7 +5377,9 @@ def test_0069_adds_the_sign_in_tables_and_marks_only_the_operators_bootstrap_pat
     try:
         inspector = inspect(engine)
         assert not _SIGN_IN_TABLES & set(inspector.get_table_names())
-        assert "webauthn_handle" not in {c["name"] for c in inspector.get_columns("principals")}
+        assert not {"webauthn_handle", "display_name"} & {
+            c["name"] for c in inspector.get_columns("principals")
+        }
         assert "bootstrap" not in {
             c["name"] for c in inspector.get_columns("personal_access_tokens")
         }

@@ -32,6 +32,8 @@ from lakana_core.errors import AuthenticationError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
+from lakana_core.identity.links import LinkService
+from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService, utc_now
@@ -231,6 +233,84 @@ def get_session_service(
         A service using real authorization and the app's clock.
     """
     return SessionService(session, authz, clock=get_clock(request))
+
+
+def get_link_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> LinkService:
+    """Build a LinkService for the current request.
+
+    Links are built from the configured public address (`Settings.public_origin`), never
+    from the request; local links are issued only with `LAKANA_UI__LOCAL_SIGN_IN`.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the settings and the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    LinkService
+        A service using real authorization and the app's clock.
+    """
+    settings = request.app.state.settings
+    clock = get_clock(request)
+    return LinkService(
+        session,
+        authz,
+        SessionService(session, authz, clock=clock),
+        origin=settings.public_origin().origin,
+        local_mode=settings.ui.local_sign_in,
+        bootstrap_name=settings.bootstrap_admin,
+        clock=clock,
+    )
+
+
+def get_notice_service(request: Request, session: Session = Depends(get_session)) -> NoticeService:
+    """Build a NoticeService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the app's clock.
+    session
+        The current request's database session.
+
+    Returns
+    -------
+    NoticeService
+        A service using the app's clock.
+    """
+    return NoticeService(session, clock=get_clock(request))
+
+
+def record_failed_link(request: Request, session: Session, public_id: str) -> None:
+    """Record a refused use of a sign-in link, if the per-address limit admits it.
+
+    The same limiter as a failed token (`app.state.auth_audit_limiter`), so a client probing
+    links writes no more rows than one probing tokens. The secret is never recorded.
+
+    Parameters
+    ----------
+    request
+        The current request.
+    session
+        The current request's database session.
+    public_id
+        The link's public id as presented, cut to 64 characters.
+    """
+    _record_failure(
+        request,
+        AuditService(session),
+        None,
+        {"credential": "link", "link_id": public_id[:64]},
+    )
 
 
 def get_principal(

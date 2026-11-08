@@ -18977,6 +18977,1042 @@
         }
       }
     },
+    "/api/v1/sign-in/links/describe": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Describe a sign-in link before it is used",
+        "description": "Needs no credential and never uses the link: the sign-in page shows \"Sign in as X\" (or \"Join as X\") from this, so a link preview or a mail scanner opening the page cannot use it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired, withdrawn or unknown link answers 410 with `state` and what to do next.",
+        "operationId": "describe_link_api_v1_sign_in_links_describe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkIdIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkDescriptionOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The sign-in link cannot be used: `state` says whether it was used, expired, withdrawn or is not known; ask for a new link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/links/redeem": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Sign in with a link",
+        "description": "Needs no credential: the link is the proof, and it works once. Starts a browser session with a fresh id (a session the browser had is ended) and sets its cookie. An invite creates the account first, with no rights. After a setup, invite or recovery link on an account without a passkey, `needs_passkey` is true: register one now. After a local link `offer_passkey` may be true instead. A local link is not used while the browser is signed in (409); a used, expired, withdrawn or unknown link, or a wrong secret, answers 410 with `state`.",
+        "operationId": "redeem_link_api_v1_sign_in_links_redeem_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkRedeemIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The sign-in link cannot be used: `state` says whether it was used, expired, withdrawn or is not known; ask for a new link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/setup-link": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Issue the setup link that signs the first administrator in",
+        "description": "Only the server operator's bootstrap token (the one the server wrote to `LAKANA_BOOTSTRAP_TOKEN_FILE` or was given) may ask, and only while the first administrator has no passkey; afterwards 409 names a recovery link instead. The link works once, for 10 minutes; earlier open setup links are withdrawn.",
+        "operationId": "issue_setup_link_api_v1_sign_in_setup_link_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedLinkOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/local-link": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Issue a sign-in link for yourself, with your own token, on your own machine",
+        "description": "Only while local sign-in is on (`LAKANA_UI__LOCAL_SIGN_IN`, which `lakana server start --local` sets; 404 otherwise), only with a person's own personal access token (never a task, CI or service-account token, and never a browser session). The link works once, for 10 minutes, signs in without a passkey touch, and its session ends when the token is revoked.",
+        "operationId": "issue_local_link_api_v1_sign_in_local_link_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedLinkOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/notices": {
+      "get": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "List your sign-in notices that you have not dismissed, newest first",
+        "description": "A notice tells you about a sign-in event: `recovery_used` when a recovery link was used on your account or, for an administrator, on another person's. Dismiss one when you have read it.",
+        "operationId": "list_notices_api_v1_sign_in_notices_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SignInNoticeOut"
+                  },
+                  "title": "Response List Notices Api V1 Sign In Notices Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/notices/{notice_id}": {
+      "delete": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Dismiss one of your sign-in notices",
+        "description": "404 for a notice that is not yours or is dismissed already.",
+        "operationId": "dismiss_notice_api_v1_sign_in_notices__notice_id__delete",
+        "parameters": [
+          {
+            "name": "notice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Notice Id"
+            },
+            "description": "The notice's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/invites": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Invite a new person",
+        "description": "Answers the link to send them, shown only here: it works once, for 7 days, and creates their account with no rights; grant roles after you have confirmed who signed up. Needs the ADMIN role and, in a browser, a passkey touch in the last 15 minutes (403 `StepUpRequired`). 409 when a principal (active or not) or another open invite has the name in any letter case, or it is the first administrator's name.",
+        "operationId": "create_invite_api_v1_invites_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "List the open invites, oldest first",
+        "description": "Without their links, which are shown only when issued. Needs the ADMIN role.",
+        "operationId": "list_invites_api_v1_invites_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OpenInviteOut"
+                  },
+                  "title": "Response List Invites Api V1 Invites Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/invites/{invite_id}": {
+      "delete": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Withdraw an open invite; its link stops working and its name is free again",
+        "description": "Needs the ADMIN role. 409 when it was used or withdrawn already.",
+        "operationId": "withdraw_invite_api_v1_invites__invite_id__delete",
+        "parameters": [
+          {
+            "name": "invite_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Invite Id"
+            },
+            "description": "The invite's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/recovery-link": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Issue a recovery link for a person who lost their passkeys",
+        "description": "Answers the link to send them, shown only here: it works once, for 1 hour. Using it removes their passkeys, ends their sessions and tells them and every administrator. Needs the ADMIN role and, in a browser, a passkey touch in the last 15 minutes. 403 for an administrator unless you are the server operator (run `lakana recovery create <name>` with the bootstrap token where the server runs); 409 for yourself (use Add passkey), a service account or a deactivated account.",
+        "operationId": "create_recovery_link_api_v1_principals__name__recovery_link_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "The person's principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryLinkOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recovery-links": {
+      "get": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "List the open recovery links, oldest first, without the links themselves",
+        "description": "Needs the ADMIN role.",
+        "operationId": "list_recovery_links_api_v1_recovery_links_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OpenRecoveryLinkOut"
+                  },
+                  "title": "Response List Recovery Links Api V1 Recovery Links Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recovery-links/{link_id}": {
+      "delete": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Withdraw an open recovery link; it stops working at once",
+        "description": "Needs the ADMIN role. 409 when it was used or withdrawn already.",
+        "operationId": "withdraw_recovery_link_api_v1_recovery_links__link_id__delete",
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Link Id"
+            },
+            "description": "The link's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/principals/{name}/sessions": {
       "get": {
         "tags": [
@@ -22875,6 +23911,18 @@
             ],
             "title": "Reason",
             "description": "Why a browser session ended (`idle`, `lifetime`, `sign_out`, ...); only with `SessionEndedError`."
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "Why a sign-in link cannot be used (`used`, `expired`, `withdrawn`, `unknown`); only with `LinkUnusableError`."
           }
         },
         "type": "object",
@@ -22883,7 +23931,7 @@
           "type"
         ],
         "title": "ErrorOut",
-        "description": "The body of an error answer of the platform API.\n\nParameters\n----------\ndetail\n    What went wrong and, where there is one, what to do next.\ntype\n    The name of the kind of error, for a client that wants to tell them apart.\nreason\n    Why a browser session ended (``idle``, ``lifetime``, ``sign_out``, ...), only on the 401\n    of an ended session (`SessionEndedError`); absent otherwise."
+        "description": "The body of an error answer of the platform API.\n\nParameters\n----------\ndetail\n    What went wrong and, where there is one, what to do next.\ntype\n    The name of the kind of error, for a client that wants to tell them apart.\nreason\n    Why a browser session ended (``idle``, ``lifetime``, ``sign_out``, ...), only on the 401\n    of an ended session (`SessionEndedError`); absent otherwise.\nstate\n    Why a sign-in link cannot be used (``used``, ``expired``, ``withdrawn``, ``unknown``),\n    only on the 410 of `LinkUnusableError`; absent otherwise."
       },
       "ExternalTableCreate": {
         "properties": {
@@ -23702,6 +24750,98 @@
         "title": "InfoOut",
         "description": "Response body for `GET /api/v1/info`.\n\nParameters\n----------\nversion\n    The platform version the server runs. A project's `lakana[assets]` pin must be\n    compatible with it.\nartifact_limits\n    The artifact limits the operator set, so a client can check a tree against them before\n    it sends a byte. An older server does not send it.\nupload_max_bytes\n    The largest Arrow body one append, replace, merge or load may send\n    (`LAKANA_APPEND__MAX_BYTES`), so `lakana load` can refuse a file before it reads or\n    sends it. An older server does not send it."
       },
+      "InviteIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "InviteIn",
+        "description": "Request body of `POST /api/v1/invites`.\n\nParameters\n----------\nname\n    The new person's principal name; refused if any principal or open invite has it in\n    any letter case.\ndisplay_name\n    The person's name as the interface shows it; optional."
+      },
+      "InviteOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "url",
+          "expires_at"
+        ],
+        "title": "InviteOut",
+        "description": "Response body of `POST /api/v1/invites`: the invite with its link, shown only here.\n\nParameters\n----------\nid\n    The invite's id, to withdraw it by.\nname\n    The principal name the invite creates.\ndisplay_name\n    The display name, if one was given.\nurl\n    The link to send to the person; valid for 7 days, once.\nexpires_at\n    When it stops working."
+      },
+      "IssuedLinkOut": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "expires_at"
+        ],
+        "title": "IssuedLinkOut",
+        "description": "Response body of `POST /api/v1/sign-in/setup-link` and `/local-link`.\n\nParameters\n----------\nurl\n    The link, shown only here: whoever has it can sign in once until it expires.\nexpires_at\n    When it stops working."
+      },
       "JobOut": {
         "properties": {
           "name": {
@@ -24324,6 +25464,83 @@
         "title": "LineageOut",
         "description": "Response body for a table's lineage.\n\nParameters\n----------\nroot_id\n    The table asked about.\ndirection\n    `upstream` or `downstream`.\ndepth\n    The hops walked.\nnodes\n    Every node the caller may read.\nedges\n    One edge per source/target pair, the most recent.\nhidden_nodes\n    Nodes omitted because the caller can't read them.\ntruncated\n    Whether the walk stopped at the node cap with a readable node left\n    out. A node the caller can't read never sets it."
       },
+      "LinkDescriptionOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "name",
+          "display_name",
+          "state"
+        ],
+        "title": "LinkDescriptionOut",
+        "description": "Response body of `POST /api/v1/sign-in/links/describe`: what the sign-in page shows.\n\nParameters\n----------\nkind\n    ``setup``, ``invite``, ``recovery`` or ``local``.\nname\n    The principal name the link signs in as (an invite: the account it creates).\ndisplay_name\n    The person's display name, if one is known.\nstate\n    Always ``open`` here; a link that cannot be used answers 410 with its state."
+      },
+      "LinkIdIn": {
+        "properties": {
+          "link_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Link Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "link_id"
+        ],
+        "title": "LinkIdIn",
+        "description": "Request body of `POST /api/v1/sign-in/links/describe`: the link's public id only.\n\nParameters\n----------\nlink_id\n    The public id, the ``l=`` part after the ``#`` of the link."
+      },
+      "LinkRedeemIn": {
+        "properties": {
+          "link_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Link Id"
+          },
+          "secret": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Secret"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "link_id",
+          "secret"
+        ],
+        "title": "LinkRedeemIn",
+        "description": "Request body of `POST /api/v1/sign-in/links/redeem`: the link's two halves.\n\nParameters\n----------\nlink_id\n    The public id, the ``l=`` part after the ``#`` of the link.\nsecret\n    The secret, the ``s=`` part. Never logged and never stored."
+      },
       "LoadOut": {
         "properties": {
           "snapshot_id": {
@@ -24777,6 +25994,82 @@
         "type": "object",
         "title": "OnDemandTriggerOut",
         "description": "The trigger every job has: a start through the API, the SDK or the CLI.\n\nParameters\n----------\nkind\n    Always ``on_demand``."
+      },
+      "OpenInviteOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "display_name",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "OpenInviteOut",
+        "description": "One open invite in `GET /api/v1/invites`; without its link, which is shown only once.\n\nParameters\n----------\nid\n    The invite's id.\nname\n    The principal name it creates.\ndisplay_name\n    The display name, if one was given.\ncreated_at\n    When it was issued.\nexpires_at\n    When it stops working."
+      },
+      "OpenRecoveryLinkOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "OpenRecoveryLinkOut",
+        "description": "One open recovery link in `GET /api/v1/recovery-links`; without the link itself.\n\nParameters\n----------\nid\n    The link's id.\nname\n    The person it recovers.\ncreated_at\n    When it was issued.\nexpires_at\n    When it stops working."
       },
       "OrphanOut": {
         "properties": {
@@ -25681,6 +26974,37 @@
         ],
         "title": "ReaderOut",
         "description": "A principal's use of a table over the window.\n\nParameters\n----------\nprincipal\n    The principal's name.\nread_count\n    How many of its succeeded queries named the table.\nlast_read_at\n    When the last of them completed."
+      },
+      "RecoveryLinkOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "expires_at"
+        ],
+        "title": "RecoveryLinkOut",
+        "description": "Response body of `POST /api/v1/principals/{name}/recovery-link`, shown only here.\n\nParameters\n----------\nid\n    The link's id, to withdraw it by.\nname\n    The person it recovers.\nurl\n    The link to send to the person; valid for 1 hour, once.\nexpires_at\n    When it stops working."
       },
       "RelatedTermOut": {
         "properties": {
@@ -27086,6 +28410,73 @@
         ],
         "title": "SignInBoundsOut",
         "description": "The limits an administrator may choose the session lengths between.\n\nParameters\n----------\nidle_timeout_minutes_min\n    The shortest idle timeout, in minutes.\nidle_timeout_minutes_max\n    The longest idle timeout, in minutes.\nabsolute_lifetime_minutes_min\n    The shortest absolute lifetime, in minutes.\nabsolute_lifetime_minutes_max\n    The longest absolute lifetime, in minutes."
+      },
+      "SignInNoticeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "subject",
+          "created_at"
+        ],
+        "title": "SignInNoticeOut",
+        "description": "One sign-in notice of the caller, in `GET /api/v1/sign-in/notices`.\n\nParameters\n----------\nid\n    The notice's id, to dismiss it by.\nkind\n    What happened, such as ``recovery_used`` (a recovery link was used).\nsubject\n    The name of the person it is about, if any.\ncreated_at\n    When it happened."
+      },
+      "SignInOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "needs_passkey": {
+            "type": "boolean",
+            "title": "Needs Passkey"
+          },
+          "offer_passkey": {
+            "type": "boolean",
+            "title": "Offer Passkey"
+          },
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "needs_passkey",
+          "offer_passkey",
+          "csrf_token"
+        ],
+        "title": "SignInOut",
+        "description": "Response body of `POST /api/v1/sign-in/links/redeem`; the session comes as a cookie.\n\nParameters\n----------\nname\n    The principal name now signed in.\nneeds_passkey\n    Whether the person must register a passkey now (setup, invite and recovery links on an\n    account without one).\noffer_passkey\n    Whether the interface offers, never forces, a passkey (a local link on an account\n    without one).\ncsrf_token\n    The session's CSRF token, for `X-Lakana-CSRF` on every change."
       },
       "SignInSettingsIn": {
         "properties": {

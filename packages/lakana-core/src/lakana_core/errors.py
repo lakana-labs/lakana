@@ -4,6 +4,8 @@ These carry no HTTP knowledge; the server layer is responsible for mapping
 them onto status codes and response bodies.
 """
 
+from typing import Literal
+
 
 class LakanaError(Exception):
     """Base class for every error raised by lakana-core."""
@@ -58,6 +60,14 @@ _SESSION_ENDED = {
         "The token this session was created with was revoked or expired, so the session ended. "
         "Sign in again."
     ),
+    "recovery": (
+        "Your account was recovered with a recovery link, which ended every earlier session. "
+        "Sign in again with your new passkey."
+    ),
+    "reactivated": (
+        "Your account was reactivated, which ended every earlier session and removed its "
+        "passkeys. Ask the server operator for a new sign-in link."
+    ),
 }
 """The message for each reason a session ends; an unknown reason gets a general one."""
 
@@ -89,6 +99,44 @@ class StepUpRequired(PermissionDenied):
     Raised by `lakana_core.identity.sessions.require_step_up` for a session whose last passkey
     touch is missing or older than 15 minutes; a token caller never gets it.
     """
+
+
+_LINK_UNUSABLE = {
+    "used": (
+        "This sign-in link was already used, and each link works once. Sign in with your "
+        "passkey, or ask whoever sent it for a new link."
+    ),
+    "expired": (
+        "This sign-in link has expired. Ask whoever sent it for a new link, or sign in with "
+        "your passkey."
+    ),
+    "withdrawn": (
+        "This sign-in link was withdrawn. Ask whoever sent it for a new link, or sign in with "
+        "your passkey."
+    ),
+    "unknown": (
+        "This sign-in link is not known: check that you opened all of it, or ask whoever sent "
+        "it for a new link."
+    ),
+}
+"""The message for each state of a link that cannot be used."""
+
+
+class LinkUnusableError(LakanaError):
+    """A sign-in link cannot be used: it was used, expired, withdrawn, or is not known.
+
+    A wrong secret is reported as ``unknown``, exactly like a public id that names no link, so
+    a secret cannot be probed. The server answers 410 with `state`.
+
+    Parameters
+    ----------
+    state
+        ``used``, ``expired``, ``withdrawn`` or ``unknown``.
+    """
+
+    def __init__(self, state: Literal["used", "expired", "withdrawn", "unknown"]) -> None:
+        self.state = state
+        super().__init__(_LINK_UNUSABLE[state])
 
 
 class StorageUnavailableError(LakanaError):

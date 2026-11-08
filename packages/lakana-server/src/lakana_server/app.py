@@ -42,11 +42,14 @@ from lakana_server.api.platform.grants import router as grants_router
 from lakana_server.api.platform.graph import router as graph_router
 from lakana_server.api.platform.groups import router as groups_router
 from lakana_server.api.platform.info import router as info_router
+from lakana_server.api.platform.invites import router as invites_router
 from lakana_server.api.platform.jobs import router as jobs_router
 from lakana_server.api.platform.namespaces import router as namespaces_router
 from lakana_server.api.platform.package_indexes import router as package_indexes_router
 from lakana_server.api.platform.principals import router as principals_router
 from lakana_server.api.platform.queries import router as queries_router
+from lakana_server.api.platform.recovery_links import links_router as recovery_links_router
+from lakana_server.api.platform.recovery_links import router as recovery_link_router
 from lakana_server.api.platform.repositories import router as repositories_router
 from lakana_server.api.platform.row_filters import router as row_filters_router
 from lakana_server.api.platform.runs import router as runs_router
@@ -55,6 +58,8 @@ from lakana_server.api.platform.search import router as search_router
 from lakana_server.api.platform.secrets import router as secrets_router
 from lakana_server.api.platform.sessions import router as sessions_router
 from lakana_server.api.platform.sessions import sign_in_router
+from lakana_server.api.platform.sign_in import router as sign_in_links_router
+from lakana_server.api.platform.sign_in_notices import router as sign_in_notices_router
 from lakana_server.api.platform.sign_in_settings import router as sign_in_settings_router
 from lakana_server.api.platform.tables import dropped_router as dropped_tables_router
 from lakana_server.api.platform.tables import expiring_router as expiring_tables_router
@@ -112,6 +117,11 @@ ROUTERS = (
     ci_oidc_router,
     whoami_router,
     sign_in_router,
+    sign_in_links_router,
+    sign_in_notices_router,
+    invites_router,
+    recovery_link_router,
+    recovery_links_router,
     sessions_router,
     sign_in_settings_router,
     info_router,

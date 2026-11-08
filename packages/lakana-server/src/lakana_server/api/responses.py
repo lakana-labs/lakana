@@ -24,6 +24,9 @@ class ErrorOut(BaseModel):
     reason
         Why a browser session ended (``idle``, ``lifetime``, ``sign_out``, ...), only on the 401
         of an ended session (`SessionEndedError`); absent otherwise.
+    state
+        Why a sign-in link cannot be used (``used``, ``expired``, ``withdrawn``, ``unknown``),
+        only on the 410 of `LinkUnusableError`; absent otherwise.
     """
 
     detail: str = Field(description="What went wrong and, where there is one, what to do next.")
@@ -33,6 +36,13 @@ class ErrorOut(BaseModel):
         description=(
             "Why a browser session ended (`idle`, `lifetime`, `sign_out`, ...); only with "
             "`SessionEndedError`."
+        ),
+    )
+    state: str | None = Field(
+        default=None,
+        description=(
+            "Why a sign-in link cannot be used (`used`, `expired`, `withdrawn`, `unknown`); "
+            "only with `LinkUnusableError`."
         ),
     )
 
@@ -47,6 +57,10 @@ ERROR_MEANING: dict[int, str] = {
     404: "What the request names does not exist, or the caller may not know that it does.",
     408: "No part of the request body arrived within the read timeout.",
     409: "The request conflicts with the current state; the message says what to change.",
+    410: (
+        "The sign-in link cannot be used: `state` says whether it was used, expired, withdrawn "
+        "or is not known; ask for a new link."
+    ),
     413: "The request body is larger than the server accepts.",
     502: (
         "A service behind the server, such as the environment's storage, refused it; the message "

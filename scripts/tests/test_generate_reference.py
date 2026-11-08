@@ -419,11 +419,19 @@ def test_no_route_description_shows_maintainer_text() -> None:
 
 @pytest.mark.slow
 def test_every_route_that_needs_a_caller_documents_the_refusal_of_a_missing_one() -> None:
-    """Every route answers 401 for a missing or wrong credential, and says so."""
+    """Every route answers 401 for a missing or wrong credential, and says so.
+
+    Except the two sign-in link routes, which take no credential: the link is the proof, and a
+    link that cannot be used answers 410.
+    """
+    no_credential = {
+        "POST /api/v1/sign-in/links/describe",
+        "POST /api/v1/sign-in/links/redeem",
+    }
     missing = [
         f"{method} {path}"
         for method, path, operation in _operations()
-        if "401" not in operation["responses"]
+        if "401" not in operation["responses"] and f"{method} {path}" not in no_credential
     ]
     assert missing == []
 

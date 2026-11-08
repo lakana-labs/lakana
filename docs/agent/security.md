@@ -185,8 +185,10 @@ including `IcebergRoute`) runs `get_principal` first for a route that has a body
 and stores the principal on `request.state` under the private name `PRINCIPAL_STATE_KEY`;
 `get_principal` returns it, if it is a `PrincipalRef`, instead of verifying and auditing the
 credential a second time. `test_body_limit.py` reads the running app (`create_app`), not the `ROUTERS`
-tuple: every route with a body is an `AuthenticateFirstRoute`, and every route but `/healthz`, `/readyz` and
-`/v1/config` depends on `get_principal`, however it got into the app. A request with no credential, or a wrong one, is 401 and is
+tuple: every route with a body is an `AuthenticateFirstRoute`, and every route but `/healthz`, `/readyz`,
+`/v1/config` and the open routes of `_OPEN_ROUTES` (the CI token exchange, and
+`POST /api/v1/sign-in/links/describe` and `/links/redeem`, whose link is the proof) depends on
+`get_principal`, however it got into the app. A request with no credential, or a wrong one, is 401 and is
 audited and rate-limited as before. The limit above bounds what a caller *with* a credential can make
 the server decode.
 
@@ -196,8 +198,10 @@ secrets bodies validate `values` with `SecretValues` (`api/platform/schemas.py`)
 no key and no value. The storage `options` of an environment (`StorageConfigIn.options` on create,
 `EnvironmentStorageUpdate.options` on `PATCH .../storage`) can carry inline S3 credentials too, so
 both use `StorageOptions` / `OptionalStorageOptions`, which refuse a bad shape with one message that
-names no key and no value. No other request body carries a credential: tokens and secrets are in
-headers or are only ever returned. The application logs no request body.
+names no key and no value. One other request body carries a credential: a sign-in link's secret
+(`POST /api/v1/sign-in/links/redeem`, a plain string field, so a validation error names the field
+and never the value). Tokens and secrets are otherwise in headers or are only ever returned. The
+application logs no request body (`test_the_secret_appears_in_no_log_record`).
 
 ## The web interface's files (M7)
 
@@ -368,6 +372,80 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   ending another person's sessions checks the ADMIN role before the name is looked up, so a
   non-administrator gets 403 for every name and learns none. The lengths live in the database
   (`GET`/`PATCH /api/v1/settings/sign-in`, in minutes), never in the environment.
+
+### Links: setup, invite, recovery, local
+
+Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automation`,
+`name_unavailable`), `lakana_core.identity.notices`; server: `api/platform/sign_in.py`,
+`invites.py`, `recovery_links.py`, `sign_in_notices.py`.
+
+- **A link is `<public address>/sign-in#l=<public id>&s=<secret>`**, always built from
+  `Settings.public_origin()`, never from a request. Both halves travel after the `#`, so no
+  request line, access log or `Referer` carries them. Only the secret's SHA-256 is stored and
+  compared in constant time; `IssuedLink` leaves the URL out of its `repr`; no audit event
+  holds the secret, its hash or the URL (tested). The public id is a lookup key, not a secret.
+- **Opening a link never uses it.** `POST /api/v1/sign-in/links/describe` takes the public id
+  only and shows "Sign in as X"; `POST /links/redeem` with both halves uses it. Both need no
+  credential (the link is the proof), are Host- and Origin-checked by `BrowserGuard`, answer
+  409 with the interface off, and audit a refusal as `AUTHENTICATION_FAILED`
+  (`credential: link`, the public id) through `auth_audit_limiter`. A wrong secret answers
+  exactly like an unknown public id (410, `state: unknown`), so a secret cannot be probed
+  against a known id; a used, expired or withdrawn link answers 410 with that `state` and the
+  next step.
+- **Single use is one conditional update** (`UPDATE … SET used_at = now WHERE used_at IS NULL
+  AND withdrawn_at IS NULL AND expires_at > now RETURNING`) in the transaction that also
+  creates the invitee's account and the session; any failure after it rolls all of it back, so
+  the link stays usable. Two concurrent uses: exactly one wins (SQLite file test and a Postgres
+  two-connection test). Withdrawing shares the `used_at IS NULL` guard, so a link is used or
+  withdrawn, never both. Expired means `expires_at <= now`. Lifetimes: setup and local 10
+  minutes, recovery 1 hour, invite 7 days.
+- **Links are for people.** `refuse_automation` is the first call of every `issue_*`: a task or
+  CI token and a service account's token never issue a link (and never start a session).
+- **The operator** is the holder of the bootstrap PAT itself: `is_operator` needs
+  `credential == "pat"`, a `token_id` naming an unrevoked, unexpired PAT with `bootstrap = true`
+  owned by the caller, and the caller named `LAKANA_BOOTSTRAP_ADMIN`. A PAT an administrator
+  issues for the bootstrap principal, even one named `bootstrap`, a session and every other
+  token are not. Only the operator issues the setup link (only while the bootstrap principal
+  has no passkey at all) and a recovery link for an administrator (ADMIN directly or through a
+  group, `active_instance_admin_ids`); an ordinary administrator gets 403 naming
+  `lakana recovery create <name>` where the server runs.
+- **Recovery** is for another person (oneself: "use Add passkey"), except that the operator
+  may recover the bootstrap principal itself, which has no other way back in. Issuing an invite
+  or a recovery link needs the ADMIN role and, from a browser, step-up. A new recovery link
+  withdraws the person's previous open one. Using it deletes the person's passkeys, ends every
+  session (`reason: recovery`) and writes a sign-in notice (`recovery_used`) for the person and
+  every active administrator, in the same transaction.
+- **Invites** create a new USER with no grants when used (the administrator confirms the person
+  before granting roles). The name is refused, compared with `str.casefold`, when any principal
+  (active or deactivated) or another open invite has it, and for the bootstrap name; the open
+  invite reserves it (`sign_in_links.reserved_name`, unique), and principal creation
+  (`create_principal`: `POST /api/v1/principals`, `lakana principal create`, access apply)
+  refuses a case variant of an existing name and a reserved name too (F25). Using an invite
+  whose name was taken meanwhile fails ("ask for a new invite").
+- **A local link** (`POST /api/v1/sign-in/local-link`) exists only with
+  `LAKANA_UI__LOCAL_SIGN_IN` (404 otherwise), is minted with the person's own PAT (never a
+  session), records that PAT, and its session ends when the PAT is revoked or expires
+  (`token_revoked`, tested over HTTP). It signs in without a passkey touch (the token holder
+  could do everything the session can), so its session has `needs_passkey = false` and only
+  *offers* a passkey. It is never used while the browser presents an open session (409; the
+  link stays usable), so a page cannot sign a signed-in person in as someone else.
+- **Reactivation and deactivation.** Deactivating a person withdraws their open links in the
+  same commit; reactivating the bootstrap principal (`bootstrap_if_needed`) removes its
+  passkeys, ends its sessions (`reactivated`) and withdraws its links.
+
+### Residuals of sign-in
+
+- **A link is a bearer secret for its lifetime.** Whoever reads it (a forwarded mail, a shared
+  screen) can use it once until it expires or is withdrawn; lifetimes are short except the
+  invite's 7 days, and an administrator lists and withdraws open invites and recovery links.
+- **The READ COMMITTED window in `SessionService.verify`.** On Postgres, a request that read
+  the session row just before a concurrent end (sign out, deactivation, recovery) commits may
+  still be served once; the next request fails. Ending is one conditional update, so the end
+  itself is never lost or doubled.
+- **A pre-upgrade bootstrap PAT.** Migration 0069 marks as the operator's only unrevoked PATs
+  named `bootstrap` owned by the bootstrap principal. A PAT an administrator issued before the
+  upgrade for the bootstrap principal and named `bootstrap` would also be marked; revoke such a
+  token after upgrading (`lakana token list admin`), or the next lockout recovery revokes it.
 
 ## Local files `lakana load` reads: a capped child process (#353)
 

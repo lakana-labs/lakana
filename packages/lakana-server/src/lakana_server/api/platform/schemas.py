@@ -5341,3 +5341,222 @@ class SignInSettingsIn(BaseModel):
 
     idle_timeout_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
     absolute_lifetime_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
+
+
+class LinkIdIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/links/describe`: the link's public id only.
+
+    Parameters
+    ----------
+    link_id
+        The public id, the ``l=`` part after the ``#`` of the link.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    link_id: str = Field(min_length=1, max_length=64)
+
+
+class LinkRedeemIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/links/redeem`: the link's two halves.
+
+    Parameters
+    ----------
+    link_id
+        The public id, the ``l=`` part after the ``#`` of the link.
+    secret
+        The secret, the ``s=`` part. Never logged and never stored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    link_id: str = Field(min_length=1, max_length=64)
+    secret: str = Field(min_length=1, max_length=128)
+
+
+class LinkDescriptionOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/links/describe`: what the sign-in page shows.
+
+    Parameters
+    ----------
+    kind
+        ``setup``, ``invite``, ``recovery`` or ``local``.
+    name
+        The principal name the link signs in as (an invite: the account it creates).
+    display_name
+        The person's display name, if one is known.
+    state
+        Always ``open`` here; a link that cannot be used answers 410 with its state.
+    """
+
+    kind: str
+    name: str
+    display_name: str | None
+    state: str
+
+
+class SignInOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/links/redeem`; the session comes as a cookie.
+
+    Parameters
+    ----------
+    name
+        The principal name now signed in.
+    needs_passkey
+        Whether the person must register a passkey now (setup, invite and recovery links on an
+        account without one).
+    offer_passkey
+        Whether the interface offers, never forces, a passkey (a local link on an account
+        without one).
+    csrf_token
+        The session's CSRF token, for `X-Lakana-CSRF` on every change.
+    """
+
+    name: str
+    needs_passkey: bool
+    offer_passkey: bool
+    csrf_token: str
+
+
+class IssuedLinkOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/setup-link` and `/local-link`.
+
+    Parameters
+    ----------
+    url
+        The link, shown only here: whoever has it can sign in once until it expires.
+    expires_at
+        When it stops working.
+    """
+
+    url: str
+    expires_at: datetime
+
+
+class InviteIn(BaseModel):
+    """Request body of `POST /api/v1/invites`.
+
+    Parameters
+    ----------
+    name
+        The new person's principal name; refused if any principal or open invite has it in
+        any letter case.
+    display_name
+        The person's name as the interface shows it; optional.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+
+
+class InviteOut(BaseModel):
+    """Response body of `POST /api/v1/invites`: the invite with its link, shown only here.
+
+    Parameters
+    ----------
+    id
+        The invite's id, to withdraw it by.
+    name
+        The principal name the invite creates.
+    display_name
+        The display name, if one was given.
+    url
+        The link to send to the person; valid for 7 days, once.
+    expires_at
+        When it stops working.
+    """
+
+    id: uuid.UUID
+    name: str
+    display_name: str | None
+    url: str
+    expires_at: datetime
+
+
+class OpenInviteOut(BaseModel):
+    """One open invite in `GET /api/v1/invites`; without its link, which is shown only once.
+
+    Parameters
+    ----------
+    id
+        The invite's id.
+    name
+        The principal name it creates.
+    display_name
+        The display name, if one was given.
+    created_at
+        When it was issued.
+    expires_at
+        When it stops working.
+    """
+
+    id: uuid.UUID
+    name: str
+    display_name: str | None
+    created_at: datetime
+    expires_at: datetime
+
+
+class RecoveryLinkOut(BaseModel):
+    """Response body of `POST /api/v1/principals/{name}/recovery-link`, shown only here.
+
+    Parameters
+    ----------
+    id
+        The link's id, to withdraw it by.
+    name
+        The person it recovers.
+    url
+        The link to send to the person; valid for 1 hour, once.
+    expires_at
+        When it stops working.
+    """
+
+    id: uuid.UUID
+    name: str
+    url: str
+    expires_at: datetime
+
+
+class OpenRecoveryLinkOut(BaseModel):
+    """One open recovery link in `GET /api/v1/recovery-links`; without the link itself.
+
+    Parameters
+    ----------
+    id
+        The link's id.
+    name
+        The person it recovers.
+    created_at
+        When it was issued.
+    expires_at
+        When it stops working.
+    """
+
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class SignInNoticeOut(BaseModel):
+    """One sign-in notice of the caller, in `GET /api/v1/sign-in/notices`.
+
+    Parameters
+    ----------
+    id
+        The notice's id, to dismiss it by.
+    kind
+        What happened, such as ``recovery_used`` (a recovery link was used).
+    subject
+        The name of the person it is about, if any.
+    created_at
+        When it happened.
+    """
+
+    id: uuid.UUID
+    kind: str
+    subject: str | None
+    created_at: datetime

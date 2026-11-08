@@ -23,6 +23,7 @@ from lakana_core.errors import (
     GraphBusyError,
     KeptAfterCheckError,
     LakanaError,
+    LinkUnusableError,
     NoCheckedSnapshotError,
     NotFoundError,
     NotPublishedError,
@@ -103,6 +104,7 @@ class TokenOnlyRoute(PermissionDenied):
 
 _STATUS_CODES: dict[type[LakanaError], int] = {
     AuthenticationError: 401,
+    LinkUnusableError: 410,
     NotFoundError: 404,
     AlreadyExistsError: 409,
     ConflictError: 409,
@@ -186,7 +188,9 @@ def install_exception_handlers(app: FastAPI) -> None:
             `Retry-After` header attached for the one error type that needs
             one (`_RETRY_AFTER_SECONDS`). A `SessionEndedError` (401) adds
             `reason` (``idle``, ``lifetime``, ``sign_out``, ...), so the interface can
-            say why the person has to sign in again.
+            say why the person has to sign in again. A `LinkUnusableError` (410) adds `state`
+            (``used``, ``expired``, ``withdrawn``, ``unknown``), so the sign-in page can say
+            which.
 
         Notes
         -----
@@ -207,6 +211,8 @@ def install_exception_handlers(app: FastAPI) -> None:
         content = {"detail": str(exc), "type": type(exc).__name__}
         if isinstance(exc, SessionEndedError):
             content["reason"] = exc.reason
+        if isinstance(exc, LinkUnusableError):
+            content["state"] = exc.state
         return JSONResponse(status_code=status_code, content=content, headers=headers)
 
     def handle_validation_error(request: Request, exc: Exception) -> JSONResponse:

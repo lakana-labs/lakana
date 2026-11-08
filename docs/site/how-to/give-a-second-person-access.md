@@ -30,6 +30,11 @@ It can do nothing yet. Next:
 
 A principal can do nothing until it has a grant. The command prints the two steps that follow.
 
+Names are compared in any letter case: while `alice` exists, even deactivated, `Alice` and `ALICE`
+are refused, so two look-alike accounts cannot exist. A name an open invite of the web interface
+holds is refused too, until the invite is used, withdrawn or expires. Choose another name, or
+withdraw the invite first.
+
 ## Grant the smallest set
 
 The role `ANALYST` on one environment lets a person read every table in it and run queries. It

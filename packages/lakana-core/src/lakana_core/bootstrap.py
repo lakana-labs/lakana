@@ -24,7 +24,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -40,8 +40,17 @@ from lakana_core.auth import (
 from lakana_core.errors import ConflictError, ValidationError
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService, active_instance_admin_ids
+from lakana_core.identity.links import withdraw_open_links
 from lakana_core.identity.pats import PatService
-from lakana_core.models import AuditEventType, Grant, PersonalAccessToken, Principal, PrincipalType
+from lakana_core.identity.sessions import SessionService, utc_now
+from lakana_core.models import (
+    AuditEventType,
+    Grant,
+    Passkey,
+    PersonalAccessToken,
+    Principal,
+    PrincipalType,
+)
 
 
 def _lookup_principal(session: Session, name: str) -> Principal | None:
@@ -315,7 +324,8 @@ def bootstrap_if_needed(
     retry on the next restart either):
 
     1. Ensures the principal named `name` exists, reactivating it if it
-       was deactivated. **This is the principal `Settings.bootstrap_admin`
+       was deactivated; reactivation removes its passkeys, ends its browser sessions and
+       withdraws its open sign-in links. **This is the principal `Settings.bootstrap_admin`
        names, not necessarily a freshly created one** — recovery grants
        instance ADMIN to whoever already holds that name, so an operator
        must never point `bootstrap_admin` at the name of an existing,
@@ -407,6 +417,11 @@ def bootstrap_if_needed(
         )
     if not principal_row.is_active:
         principal_row.is_active = True
+        # Reactivating an account removes its passkeys, ends its sessions and withdraws its
+        # links: whoever held them while it was deactivated must not get back in with them.
+        session.execute(delete(Passkey).where(Passkey.principal_id == principal.id))
+        SessionService(session, authz).end_for_principal(principal.id, "reactivated")
+        withdraw_open_links(session, principal.id, now=utc_now(), reason="reactivated")
 
     now = datetime.now(UTC)
     for pat in (

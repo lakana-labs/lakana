@@ -193,12 +193,15 @@
 "DELETE /api/v1/grants/{grant_id}": { class: ui, part: 7 }
 "DELETE /api/v1/groups/{name}": { class: ui, part: 7 }
 "DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
+"DELETE /api/v1/invites/{invite_id}": { class: ui, part: 1 }
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
 "DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7 }
+"DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1 }
 "DELETE /api/v1/repositories/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7 }
+"DELETE /api/v1/sign-in/notices/{notice_id}": { class: ui, part: 1 }
 "DELETE /api/v1/sign-in/session": { class: ui, part: 1 }
 "DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7 }
 "GET /api/v1/access/export":
@@ -265,6 +268,7 @@
 "GET /api/v1/groups": { class: ui, part: 7 }
 "GET /api/v1/groups/{name}/members": { class: ui, part: 7 }
 "GET /api/v1/info": { class: read, part: 8 }
+"GET /api/v1/invites": { class: ui, part: 1 }
 "GET /api/v1/package-indexes": { class: ui, part: 8 }
 "GET /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "GET /api/v1/principals": { class: ui, part: 7 }
@@ -272,11 +276,13 @@
 "GET /api/v1/principals/{name}/permissions": { class: ui, part: 7 }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
+"GET /api/v1/recovery-links": { class: ui, part: 1 }
 "GET /api/v1/repositories": { class: ui, part: 8 }
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
 "GET /api/v1/row-filters": { class: ui, part: 7 }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
 "GET /api/v1/settings/sign-in": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"GET /api/v1/sign-in/notices": { class: ui, part: 1 }
 "GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
@@ -363,11 +369,19 @@
 "POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }
 "POST /api/v1/grants": { class: ui, part: 7 }
 "POST /api/v1/groups": { class: ui, part: 7 }
+"POST /api/v1/invites": { class: ui, part: 1 }
 "POST /api/v1/package-indexes": { class: ui, part: 8 }
 "POST /api/v1/principals": { class: ui, part: 7 }
+"POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "POST /api/v1/repositories": { class: ui, part: 8 }
 "POST /api/v1/row-filters": { class: ui, part: 7 }
+"POST /api/v1/sign-in/links/describe": { class: ui, part: 1 }
+"POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }
+"POST /api/v1/sign-in/local-link":
+  { class: git, reason: "local tooling: server start --local signs the browser in" }
+"POST /api/v1/sign-in/setup-link":
+  { class: git, reason: "local deployment tooling: the Compose set-up prints the first link" }
 "POST /api/v1/task-tokens":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
 "PUT /api/v1/environments/{environment_name}/secrets/{secret_name}/use": { class: ui, part: 7 }
