@@ -314,10 +314,22 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   `reason` (`idle`, `lifetime`, `sign_out`, `ended_by_admin`, `deactivated`, `token_revoked`, ...)
   and "Sign in again". A refused cookie is audited as `AUTHENTICATION_FAILED` through
   `auth_audit_limiter`, with `credential: session` and the cookie's key id; a success through
-  `sign_in_audit_limiter` keyed `("session", key_id)`. `test_session_parity.py` sends every
-  `/api/v1` operation of the running app once with a session and once with the same person's
-  token and compares status and body; `CREDENTIAL_SPECIFIC_ROUTES` lists the exceptions with a
-  reason, and a test fails when one of them no longer exists.
+  `sign_in_audit_limiter` keyed `("session", key_id)`. `test_session_parity.py` holds parity
+  two ways. Statically, no module under `lakana_server/api/` reads a principal's `.session`,
+  `.credential` or `.token_id` except those in `CREDENTIAL_READERS`, each tied to operations
+  in `CREDENTIAL_SPECIFIC_ROUTES` (today only `api/platform/sessions.py`); core rules that look
+  at the session (`require_step_up`) are outside this guard and tested in core. Dynamically,
+  every other `/api/v1` operation of the running app is sent once with a session and once with
+  the same person's token, from the same database state (snapshot and restore), with path
+  parameters naming real objects of the person (environment, namespace, table, the person) and
+  a minimal body and query built from the OpenAPI document; status, body (ids, times, key ids
+  and new token texts normalised) and `Set-Cookie` must match. About 149 of 154 cases run
+  their handler (`test_most_cases_reach_their_handler` requires nine in ten). What it does not
+  prove: the person holds ADMIN with a fresh passkey touch, so it does not compare a
+  non-administrator's refusals or a session without step-up, and a handler path the minimal
+  request does not reach is unseen. Each exception list (`CREDENTIAL_SPECIFIC_ROUTES`,
+  `STATEFUL_READS`, `OPEN_OPERATIONS`) carries its reason and a test fails when an entry no
+  longer exists.
 - **Any `Authorization` header wins, valid or not.** With one present, the cookie is not read
   and no CSRF token is asked for; an invalid Bearer beside a valid cookie is 401, never the
   session's principal (`test_any_authorization_header_never_falls_back_to_the_cookie`).
