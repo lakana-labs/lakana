@@ -271,7 +271,7 @@ def test_each_package_publishes_to_production_pypi_from_its_own_environment() ->
     }
 
 
-_BEFORE_THE_GATE = {"release-please", "build", "ui-browsers", "sbom", "approve"}
+_BEFORE_THE_GATE = {"release-please", "ui-build", "build", "ui-browsers", "sbom", "approve"}
 _APPROVE_KEYS = {"needs", "if", "runs-on", "timeout-minutes", "environment", "permissions", "steps"}
 _STATUS_FUNCTIONS = re.compile(r"\b(always|cancelled|failure|success)\s*\(")
 """Any status function in an ``if`` drops the implicit ``success() &&``.
@@ -347,7 +347,7 @@ def _gate_violations(jobs: dict) -> list[str]:
 
 
 def test_one_approval_job_gates_a_release() -> None:
-    """Only release-please, build, ui-browsers and sbom run before ``approve``.
+    """Only release-please, ui-build, build, ui-browsers and sbom run before ``approve``.
 
     None runs after a rejection.
     """
@@ -374,6 +374,10 @@ def test_one_approval_job_gates_a_release() -> None:
         (
             lambda j: j["build"].update(permissions={"contents": "write"}),
             "`build` runs before the gate with a write permission",
+        ),
+        (
+            lambda j: j["ui-build"].update(permissions={"contents": "read", "id-token": "write"}),
+            "`ui-build` runs before the gate with a write permission",
         ),
         (
             lambda j: j["sbom"]["steps"].append({"run": "x", "env": {"T": "${{ secrets.T }}"}}),
@@ -460,15 +464,69 @@ def test_ci_and_the_release_take_node_from_the_same_action() -> None:
     assert any(str(s.get("uses", "")).startswith(_SETUP_NODE) for s in steps)
 
 
-def test_the_release_builds_the_interface_before_the_wheels() -> None:
-    """The wheel ships the built interface, and the job fails when it does not."""
-    steps = _jobs("release.yml")["build"]["steps"]
-    checkout = _step_index(
-        steps, lambda s: str(s.get("uses", "")).startswith("actions/checkout@"), "checkout"
-    )
+_UI_DIST = "packages/lakana-server/src/lakana_server/ui_dist"
+
+
+def _is(action: str) -> Callable[[dict], bool]:
+    """Match a step that uses a pinned action.
+
+    Parameters
+    ----------
+    action
+        The action's name, without the pin (e.g. ``actions/checkout``).
+
+    Returns
+    -------
+    Callable
+        The predicate for ``_step_index``.
+    """
+    return lambda step: str(step.get("uses", "")).startswith(f"{action}@")
+
+
+def test_the_release_builds_the_interface_in_a_read_only_job() -> None:
+    """The npm build runs in a job of its own, which can sign and publish nothing.
+
+    Only the built interface leaves it, as an artifact, so a compromised build tool can
+    change nothing but ``ui_dist``.
+    """
+    job = _jobs("release.yml")["ui-build"]
+    assert job["needs"] == "release-please"
+    assert job["if"] == "needs.release-please.outputs.released == 'true'"
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["permissions"] == {"contents": "read"}
+    assert "secrets" not in str(job)
+    steps = job["steps"]
+    checkout = _step_index(steps, _is("actions/checkout"), "checkout")
+    assert steps[checkout]["with"] == {
+        "persist-credentials": False,
+        "ref": "${{ needs.release-please.outputs.tag }}",
+    }
     node = _step_index(steps, _node_from_the_nvmrc, "setup-node from ui/.nvmrc")
+    assert "cache" not in steps[node]["with"]
     install = _step_index(steps, _runs("npm ci --ignore-scripts --prefix ui"), "npm ci")
     build_ui = _step_index(steps, _runs("npm --prefix ui run build"), "the interface's build")
+    upload = _step_index(steps, _is("actions/upload-artifact"), "the upload of the build")
+    assert steps[upload]["with"] == {
+        "name": "ui-dist",
+        "path": f"{_UI_DIST}/",
+        "if-no-files-found": "error",
+    }
+    assert checkout < node < install < build_ui < upload
+
+
+def test_the_release_builds_the_interface_before_the_wheels() -> None:
+    """The wheel ships the built interface, and the job fails when it does not.
+
+    The job that builds every wheel runs no npm: it downloads the interface ``ui-build`` made.
+    """
+    job = _jobs("release.yml")["build"]
+    assert set(job["needs"]) == {"release-please", "ui-build"}
+    steps = job["steps"]
+    assert not any("npm" in str(s.get("run", "")) for s in steps), "build runs npm"
+    assert not any(_is("actions/setup-node")(s) for s in steps), "build sets up Node"
+    checkout = _step_index(steps, _is("actions/checkout"), "checkout")
+    download = _step_index(steps, _is("actions/download-artifact"), "the interface's download")
+    assert steps[download]["with"] == {"name": "ui-dist", "path": _UI_DIST}
     wheels = _step_index(steps, _runs("uv build --all-packages -o dist"), "uv build")
     check = _step_index(
         steps,
@@ -482,8 +540,7 @@ def test_the_release_builds_the_interface_before_the_wheels() -> None:
         "unzip -l dist/lakana_server-*.whl"
         " | grep -q 'lakana_server/ui_dist/licenses/THIRD-PARTY-NOTICES.md'"
     )(steps[check]), "the wheel's check misses the bundled packages' licence notices"
-    assert checkout < node < install < build_ui < wheels < check
-    assert "cache" not in steps[node]["with"]
+    assert checkout < download < wheels < check
 
 
 def test_the_release_runs_every_browser_before_the_approval() -> None:

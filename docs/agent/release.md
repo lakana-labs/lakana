@@ -197,15 +197,15 @@ both. Register the four as pending publishers before the first release (account 
 
 ## One approval before anything is published
 
-The job **`approve`** is the release's only gate. It `needs` `release-please`, `build` and
-`ui-browsers`,
+The job **`approve`** is the release's only gate. It `needs` `release-please`, `build` (and
+through it `ui-build`) and `ui-browsers`,
 runs in the environment `release-approval`, has `permissions: {}`, checks nothing out and runs
 one `echo`. The run stops there until the maintainer approves it (Actions run page, "Review
 deployments"). Every job that publishes or signs depends on it, directly or through its
 `needs`: the four PyPI jobs, `publish-image` and `attest-image`, `attest-dist` and
 `provenance-release`, `openapi` and `sbom-release`, `pages` and `pages-deploy`. `release-please` (tag and
-GitHub release), `build`, `ui-browsers` and `sbom` run before the gate: they upload nothing but
-workflow artifacts (`dist`, the SBOM), which logged-in users can download from a public
+GitHub release), `ui-build`, `build`, `ui-browsers` and `sbom` run before the gate: they upload nothing but
+workflow artifacts (`ui-dist`, `dist`, the SBOM), which logged-in users can download from a public
 repository. The
 two smoke jobs follow the publish jobs, so they run after it too.
 **Rejecting publishes nothing**: PyPI, the registry, the release page and the docs site stay
@@ -218,9 +218,9 @@ approve or reject promptly.
 
 `scripts/tests/test_workflows.py` pins the job (its full key set, so it can gain no
 `continue-on-error`, permission or `uses:`) and that every job apart from `release-please`,
-`build`, `ui-browsers` and `sbom` reaches it through `needs` with no status function
+`ui-build`, `build`, `ui-browsers` and `sbom` reaches it through `needs` with no status function
 (`always()`, `cancelled()`, `failure()`, `success()`, negated or not) in its `if`, and that
-`build`, `ui-browsers` and `sbom` hold no write permission and read no secret. A new job after the gate needs no test change; a new job before it
+`ui-build`, `build`, `ui-browsers` and `sbom` hold no write permission and read no secret. A new job after the gate needs no test change; a new job before it
 has to be added to the test's list on purpose.
 
 **Maintainer setup, before the next release.** The workflow cannot create the environment's
@@ -244,8 +244,16 @@ build` builds the wheel from the sdist, so an `artifacts` line under `targets.wh
 not reach it (a target's own `artifacts` would replace the shared one;
 `test_the_sdist_and_the_wheel_carry_the_built_interface` refuses both).
 
-- **`build`** sets up Node from `ui/.nvmrc` (the setup-node pin of `ci.yml`, no npm cache), runs
-  `npm ci --ignore-scripts --prefix ui` and `npm --prefix ui run build`, then `uv build
+- **`ui-build`** sets up Node from `ui/.nvmrc` (the setup-node pin of `ci.yml`, no npm cache),
+  runs `npm ci --ignore-scripts --prefix ui` and `npm --prefix ui run build`, and uploads
+  `ui_dist` as the artifact `ui-dist`. It is a job of its own, read-only (`contents: read`, no
+  `id-token`, no secret, `persist-credentials: false`), because npm runs the code of about 370
+  build-time packages (Vite, Rolldown, Lightning CSS, plugins). In the job that builds the
+  wheels, a compromised version of one of them, in the lock and without an advisory yet, could
+  rewrite `packages/*/src` and poison all four wheels, the image built from them and the
+  attestations that then sign them. In its own job it can change only the interface.
+- **`build`** runs no npm and sets up no Node: it downloads `ui-dist` into
+  `packages/lakana-server/src/lakana_server/ui_dist`, then runs `uv build
   --all-packages`, then fails unless `lakana_server/ui_dist/index.html`, `csp.txt` (the policy the server
   sends; without it the server refuses to start with the interface on) and
   `licenses/THIRD-PARTY-NOTICES.md` (the bundled packages' licence notices) are in the server
