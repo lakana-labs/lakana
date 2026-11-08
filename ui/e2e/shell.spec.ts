@@ -335,6 +335,27 @@ test.describe("the theme switch", () => {
   });
 });
 
+for (const width of [1280, 600]) {
+  test(`the palette opens centred over the whole window, in its upper third, at ${String(width)} px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+
+    await page.keyboard.press("Control+k");
+    const dialog = page.getByRole("dialog", { name: "Search" });
+    await expect(dialog).toBeVisible();
+    const box = await dialog.boundingBox();
+
+    expect(box, "the palette").not.toBeNull();
+    const centre = (box?.x ?? 0) + (box?.width ?? 0) / 2;
+    expect(Math.abs(centre - width / 2)).toBeLessThanOrEqual(2);
+    expect(box?.y ?? 0).toBeLessThan(800 / 3);
+    expect(await violations(page), "palette").toEqual([]);
+  });
+}
+
 test("the narrow top bar keeps its height and the content starts right below it", async ({
   page,
 }) => {
