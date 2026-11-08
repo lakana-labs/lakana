@@ -249,8 +249,8 @@ every missing output of it means "run everything".
 
 | Event | Runs |
 |---|---|
-| Pull request, **draft** | `lint`, `docs`, `docs-examples` (with its three shards), the 3.14 `unit` shards and `test (3.14)` (with coverage and the ratchets), `quarantined tests`, `time budgets` |
-| Pull request, **ready for review** (also the moment it leaves draft) | everything: the above plus the 3.11 shards and `test (3.11)`, the macOS shards and `test (macos)` (they test only if the pull request touches `packages/`), the `integration` jobs, `five-minute`, `compose-smoke` |
+| Pull request, **draft** | `lint`, `ui`, `docs`, `docs-examples` (with its three shards), the 3.14 `unit` shards and `test (3.14)` (with coverage and the ratchets), `quarantined tests`, `time budgets` |
+| Pull request, **ready for review** (also the moment it leaves draft) | everything (`ui` included): the above plus the 3.11 shards and `test (3.11)`, the macOS shards and `test (macos)` (they test only if the pull request touches `packages/`), the `integration` jobs, `five-minute`, `compose-smoke` |
 | Dependabot's pull requests | everything (they are never drafts) |
 | Documentation-only pull request | see the section above; a draft also lacks `test (3.11)` |
 | Push to `main`: the squash merge of an up-to-date pull request whose last run was complete | `lint`, `docs` (the rest was just tested on the same tree), the macOS jobs, `time budgets` |
@@ -266,7 +266,7 @@ every missing output of it means "run everything".
 - **The merge to `main`.** After a squash merge of an up-to-date pull request, the tree on `main`
   is the tree of the pull request's head commit, which CI has just tested. On a push to `main`
   the `changes` job runs `scripts/ci_already_tested.py` (fetched from the pushed commit), and if
-  it proves that, `unit`, `test`, the `integration` jobs, `five-minute`, `compose-smoke`,
+  it proves that, `unit`, `test`, `ui`, the `integration` jobs, `five-minute`, `compose-smoke`,
   `docs-examples` (with its shards) and `quarantined tests` skip. It says "already tested" only if the commit has exactly one pull request, merged with
   this very commit into the repository's default branch, whose base was never changed (no
   `base_ref_changed` or `base_ref_force_pushed` event: a run made against another branch
@@ -274,14 +274,14 @@ every missing output of it means "run everything".
   found by head commit, so another pull request's run would be taken for this one's), one
   parent that the head contains, the head's tree equals this tree, and
   the latest `pull_request` run of `ci.yml` for the head completed with `test (3.11)`,
-  `test (3.14)`, `integration`, `five-minute`, `compose-smoke` and `docs-examples` all
+  `test (3.14)`, `integration`, `five-minute`, `compose-smoke`, `docs-examples` and `ui` all
   `success` (a `skipped` job, as on a draft or a documentation-only change, is a no; "latest"
   is by run number, so a failed re-run of an older run does not override a newer green run).
   The first lookup of the pull request is retried once after 10 s, for the API's lag right after
   a merge. Every
   doubt, API error, timeout, missing `gh`, or truncated page says "not tested" and runs
   everything; the job log has one line with the reason. A pull request event never skips this
-  way. If you rename one of the six jobs, change `REQUIRED_JOBS` in the script too: until then
+  way. If you rename one of the seven jobs, change `REQUIRED_JOBS` in the script too: until then
   it says "not tested" (safe, but the saving is gone). The job has `actions: read` and
   `pull-requests: read` for this.
 - **Agents keep their pull requests in draft while they iterate** (`gh pr create --draft`) and
@@ -309,8 +309,9 @@ every missing output of it means "run everything".
 - **`quarantined tests`** runs the tests in quarantine and never fails the run (see "Flaky tests:
   the same-day rule").
 - **Duplication** is measured by the `lint` job: `jscpd`, pinned in `tools/jscpd`, scans
-  `packages/*/src` (not the tests) and `scripts/duplication_ratchet.py` fails when the duplicated
-  lines or the clones rise (see "The duplication ratchet" below).
+  `packages/*/src` and `ui/src` (not the tests) and `scripts/duplication_ratchet.py` fails when
+  the duplicated lines or the clones rise (see "The duplication ratchet" below).
+- **`ui`** runs every gate of the web interface (see "The `ui/` gates" below).
 - **`test (macos)`** (job `test-macos`) is the macOS check: Lakana's local mode supports macOS
   (Python 3.13 and later), and the three shards it collects, `unit (macos, 1/3)` to `(macos, 3/3)`
   (job `unit-macos`), run what a macOS user runs, on GitHub's `macos-latest`
@@ -707,6 +708,10 @@ maintainer who wants to run CI on a runner of their own.
   nobody has looked at yet, and a self-hosted runner runs a job with its owner's rights.
 - `scripts/tests/test_workflows.py` pins all four rules; a new job must use the same
   `runs-on` expression.
+- **A self-hosted runner needs Playwright's system libraries installed beforehand.** The `ui` job
+  runs `playwright install --with-deps chromium`, which installs them with `sudo apt`; on
+  GitHub's runners that works, on a runner of your own install them once (`sudo npx playwright
+  install-deps chromium`) or give the runner's user that `sudo` right.
 
 `scorecard.yml` is the exception to the switch: OpenSSF Scorecard publishes its results (for the
 README badge) only from a GitHub-hosted job, so its one job is on `ubuntu-latest`.
@@ -1098,6 +1103,89 @@ uv run python scripts/duplication_ratchet.py --update # lower the baseline after
 `--update` never records a rise. To regenerate `tools/jscpd/package-lock.json` use npm 11 or
 later: older npm versions leave out the `license` fields that the licence check needs.
 How to handle a finding: "Duplicated code" in `docs/agent/conventions.md`.
+
+The interface gets a second run in `lint`, over `ui/src` with its tests left out, and its own
+baseline, `scripts/duplication-baseline-ui.json` (names relative to `ui/src`):
+
+```bash
+tools/jscpd/node_modules/.bin/jscpd ui/src --format typescript,tsx --ignore "**/*.test.ts,**/*.test.tsx" \
+  --min-tokens 70 --reporters json --output jscpd-report-ui --silent
+uv run python scripts/duplication_ratchet.py --report jscpd-report-ui/jscpd-report.json \
+  --baseline scripts/duplication-baseline-ui.json          # add --update after a fall
+```
+
+## The `ui/` gates
+
+The web interface (`ui/`, see "The `ui/` project" in `docs/agent/conventions.md`) has its own
+gates. Locally, `npm --prefix ui run check` runs the first eight in this order and stops at the
+first failure; CI's `ui` job runs them one step each.
+
+| Gate | Command | Where it runs |
+|---|---|---|
+| ESLint (strict type-checked, react-hooks, jsx-a11y strict, TSDoc, the server-only-through-`src/api/` rule), no warning allowed | `npm --prefix ui run lint` | `check`, CI `ui` |
+| Prettier | `npm --prefix ui run format:check` (`format` rewrites) | `check`, CI `ui` |
+| tsc (strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`) | `npm --prefix ui run typecheck` | `check`, CI `ui` |
+| dependency-cruiser (no cycles, no orphans, `src/api/` a leaf, no dev dependency or test in shipped code) | `npm --prefix ui run depcruise` | `check`, CI `ui` |
+| knip (unused files, exports, dependencies) | `npm --prefix ui run knip` | `check`, CI `ui` |
+| Vitest with coverage (thresholds 90 %) | `npm --prefix ui run test:coverage` | `check`, CI `ui` |
+| build | `npm --prefix ui run build` | `check`, CI `ui` |
+| size-limit (gzipped JavaScript; a raised limit needs a sentence in its pull request) | `npm --prefix ui run size` | `check`, CI `ui` |
+| UI coverage ratchet | `python3 -m scripts.ui_coverage_ratchet` | CI `ui` |
+| Playwright smoke test on Chromium, axe (WCAG 2.2 AA tags), no request to the API, no console error | `npm --prefix ui run e2e:smoke` | locally after `check`, CI `ui` |
+| every gate fails on a violation | `npm --prefix ui run prove-gates` | CI `ui` |
+| copied code (jscpd + ratchet) | see "The duplication ratchet" | CI `lint` |
+| npm audit and osv-scanner over `ui/` and `tools/jscpd` locks, level `low` | `npm audit --audit-level=low --prefix ui` | `security.yml` `npm audit` |
+| licences of the npm locks | `uv run python scripts/check_licenses.py` | `security.yml` `static` |
+
+- **The UI coverage ratchet.** `scripts/ui_coverage_ratchet.py` combines lines and branches of
+  Vitest's `ui/coverage/coverage-summary.json` into one number, with a floor of 90 %, against
+  `ui/.coverage-baseline` (100.00 from the start). It refuses a report older than `ui/src`.
+  After a passing run that raised coverage, record it with `python3 -m scripts.ui_coverage_ratchet
+  --update`; never lower the baseline or add a coverage exclusion to fit.
+- **`prove-gates`** (`ui/scripts/prove-gates.mjs`) copies `ui/` and the build into a scratch
+  directory (`$GATE_PROBE_DIR`, default `~/.cache/lakana-ui-gate-probe`; CI uses
+  `$RUNNER_TEMP/gate-probe`), writes one violation per gate (an unsafe `any`, a conditional hook,
+  an image without alt text, an undocumented export, a `fetch` outside `src/api/`, bad
+  formatting, three type errors, an import out of `src/api/` and a cycle, an unused file, an
+  untested branch, a size limit of 1 B, an 80-token copy), runs the gate and requires it to fail
+  with the expected message. It prints one line per gate and fails naming every gate that let its
+  violation through: fix the gate, not the probe. It needs a build (`npm --prefix ui run build`)
+  and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof is the smoke test's
+  positive control (an image without alt text must be found); the audits prove themselves in
+  `security.yml` on a lock generated at run time with `lodash@4.17.20`.
+- **Playwright.** Pull requests that touch `ui/` run the smoke test on Chromium; the full
+  three-browser suite (`npm --prefix ui run e2e:all`) runs on release. The tests run against
+  `vite preview` of the production build, which sends the content security policy of
+  `ui/csp.ts`, so a CSP violation shows as a console error.
+- **When it runs.** The `ui` job runs on drafts too, and skips its steps when a pull request
+  provably changes nothing under `ui/`, `tools/jscpd/`, the three ratchet scripts, the UI
+  duplication baseline or `ci.yml`. Its time budget is 10 minutes (`scripts/time-budgets.toml`).
+- **Locally.** Use Node 26: `~/.local/share/node/current/bin` first on `PATH`, or any Node 26
+  (`node --version` must print `v26.*`). Run npm under the memory cap with `TMPDIR` off `/tmp`:
+
+  ```bash
+  export PATH="$HOME/.local/share/node/current/bin:$PATH"
+  mkdir -p ~/.cache/lakana-ui-tmp
+  systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 \
+    env PATH="$PATH" TMPDIR=$HOME/.cache/lakana-ui-tmp npm --prefix ui run check
+  npx --prefix ui playwright install chromium   # once; no --with-deps locally
+  npm --prefix ui run e2e:smoke
+  ```
+
+### Reviewing a part of the interface
+
+The maintainer reviews each part of the interface in a locally running instance and records it
+in the pull request, in this form:
+
+```markdown
+### Review of part N — YYYY-MM-DD   (the first one is "part 1a")
+- Browser and version:
+- Operating system:
+- Window size and zoom:
+- Theme (light, dark, system):
+- Density (roomy, compact):
+- Findings (area — what — must fix / should fix / later):
+```
 
 ## Time budgets
 

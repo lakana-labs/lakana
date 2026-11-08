@@ -170,6 +170,46 @@ ratchet" in `docs/agent/testing.md`). The message lists the new blocks as
 3. **Never** raise `scripts/duplication-baseline.json` by hand. If duplication fell, lower it in
    the same pull request: `uv run python scripts/duplication_ratchet.py --update`.
 
+## The `ui/` project
+
+`ui/` is the web interface: a standalone npm project (React, TypeScript, Vite) whose build lands in
+`packages/lakana-server/src/lakana_server/ui_dist/` (git-ignored) and ships inside the server
+wheel. It has no version of its own (rule 3): `package.json` is `private` and carries none. Its
+gates are in "The `ui/` gates" in `docs/agent/testing.md`.
+
+- **Exact pins, one tool per pull request.** Every dependency is an exact version
+  (`ui/.npmrc`: `save-exact`, `engine-strict`, `ignore-scripts`), Node is the `26` line
+  (`ui/.nvmrc`, `engines.node`). Dependabot groups what ships (`ui-runtime`) and the few
+  development pins that only work together (`ui-vitest`, `ui-size-limit`, `ui-react-types`,
+  `ui-testing-library`); every other tool upgrades alone, like ruff and ty above.
+- **ESLint 9 and TypeScript 6.0, on purpose.** ESLint 10 exists, but `eslint-plugin-jsx-a11y`
+  6.10.2 supports ESLint 9 at most. TypeScript 7 is stable, but `typescript-eslint` 8.72.1
+  declares `typescript <6.1.0`; `typescript` and `typescript-eslint` stay in separate Dependabot
+  pull requests, and TypeScript 7 comes in its own pull request once typescript-eslint supports it.
+- **One override, tracked for removal.** `ui/package.json` has
+  `"overrides": {"minimatch@^10": "11.0.5"}`: advisory GHSA-g3hv-75wg-m249 (a denial of service
+  in minimatch below 11.0.1) reaches the lock through `typescript-eslint`, whose
+  `@typescript-eslint/typescript-estree` still asks for `minimatch ^10`. The use is dev-only and
+  lint-time (it matches the repository's own globs, nothing in the build contains it), but
+  `npm audit --audit-level=low` would fail, rightly. Remove the override when typescript-eslint
+  allows minimatch 11 (issue #507); `scripts/tests/test_ui_project.py` pins it so that the removal
+  is deliberate. No other override without an entry here.
+- **TSDoc on every export and every props member.** ESLint's `jsdoc` rules (TypeScript mode,
+  TSDoc tags accepted) fail an undocumented exported function, class, interface, type, enum or
+  interface member. Inline comments follow "Inline comments" above.
+- **Only `ui/src/api/` talks to the server** (rule 2: the REST API is the only way in). ESLint
+  refuses `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `window.fetch`,
+  `globalThis.fetch` and `navigator.sendBeacon` everywhere else, and HTTP client packages
+  (`axios`, `ky`, `ofetch`, `superagent`) everywhere. dependency-cruiser keeps `src/api/` a leaf:
+  it imports only itself and npm packages. (`fetch` is a global, not an import, so
+  dependency-cruiser cannot see it; ESLint guards it.)
+- **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
+  stylesheet and string on (part 1a, Task 3).
+- **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools
+  (`axe-core`, `@axe-core/playwright`, `lightningcss` and its platform packages) and the OFL-1.1
+  fonts are the only exceptions; see "Copyleft rule: none strong, weak only via a justified
+  allowlist entry" below and its "Fonts: SIL OFL 1.1".
+
 ## Upper bounds on the deeply used dependencies
 
 `sqlglot` and `pyiceberg` (`lakana-core`) and `duckdb` (`lakana-worker`) carry an upper bound:

@@ -1,0 +1,126 @@
+"""Tests for the configuration of the ``ui/`` project (the web interface)."""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+UI = ROOT / "ui"
+
+BROWSERS = [
+    "last 2 Chrome versions",
+    "last 2 Edge versions",
+    "last 2 Firefox versions",
+    "Firefox ESR",
+    "last 2 Safari versions",
+]
+
+
+def _package() -> dict:
+    """Load ``ui/package.json``.
+
+    Returns
+    -------
+    dict
+        The parsed manifest.
+    """
+    return json.loads((UI / "package.json").read_text())
+
+
+def _npmrc() -> dict[str, str]:
+    """Parse ``ui/.npmrc`` into its settings.
+
+    Returns
+    -------
+    dict of str to str
+        Each ``key=value`` line, comments and blank lines left out.
+    """
+    settings = {}
+    for line in (UI / ".npmrc").read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith(("#", ";")):
+            key, _, value = line.partition("=")
+            settings[key.strip()] = value.strip()
+    return settings
+
+
+def test_every_ui_dependency_is_pinned_exactly() -> None:
+    """No range anywhere: each tool upgrades in its own pull request."""
+    package = _package()
+    pins = {**package.get("dependencies", {}), **package["devDependencies"]}
+    assert pins
+    loose = {name: v for name, v in pins.items() if not re.fullmatch(r"\d+\.\d+\.\d+", v)}
+    assert loose == {}
+
+
+def test_node_is_the_lts_line_in_both_places() -> None:
+    """CI reads ``.nvmrc``; npm refuses another Node through ``engines``."""
+    assert (UI / ".nvmrc").read_text().strip() == "26"
+    assert _package()["engines"] == {"node": "^26.0.0"}
+
+
+def test_npmrc_pins_saves_and_refuses_scripts() -> None:
+    """Exact saves, a refused wrong Node, and no install script of any package runs."""
+    settings = _npmrc()
+    assert settings["save-exact"] == "true"
+    assert settings["engine-strict"] == "true"
+    assert settings["ignore-scripts"] == "true"
+
+
+def test_browserslist_is_the_supported_browser_list() -> None:
+    """The browsers of the build target and the docs' supported list."""
+    assert _package()["browserslist"] == BROWSERS
+
+
+def test_the_lock_records_a_licence_for_every_package() -> None:
+    """``scripts/check_licenses.py`` reads the licences from the lock; npm 11 writes them."""
+    lock = json.loads((UI / "package-lock.json").read_text())
+    assert lock["lockfileVersion"] == 3
+    packages = {k: v for k, v in lock["packages"].items() if k.startswith("node_modules/")}
+    assert packages
+    assert [name for name, entry in packages.items() if "license" not in entry] == []
+
+
+def test_vite_builds_into_the_server_package() -> None:
+    """The build lands where the server wheel picks it up, and is never committed."""
+    assert "lakana_server/ui_dist" in (UI / "vite.config.ts").read_text()
+    ignored = (ROOT / ".gitignore").read_text().splitlines()
+    assert "packages/lakana-server/src/lakana_server/ui_dist/" in ignored
+
+
+def test_the_ui_package_has_no_version_of_its_own() -> None:
+    """Rule 3: the one version comes from git tags, so the manifest carries none."""
+    package = _package()
+    assert "version" not in package
+    assert package["private"] is True
+
+
+def test_the_only_override_lifts_minimatch_10_past_its_advisory() -> None:
+    """One override, on purpose: remove it with #507, once typescript-eslint allows minimatch 11.
+
+    GHSA-g3hv-75wg-m249 affects minimatch below 11.0.1; typescript-eslint 8.72.1 still asks for
+    ``^10.2.2``. The override reaches only that range, never ESLint's own minimatch 3.
+    """
+    assert _package()["overrides"] == {"minimatch@^10": "11.0.5"}  # remove with #507
+    lock = json.loads((UI / "package-lock.json").read_text())
+    versions = {
+        entry["version"]
+        for name, entry in lock["packages"].items()
+        if name.endswith("node_modules/minimatch")
+    }
+    assert versions == {"3.1.5", "11.0.5"}
+
+
+def test_vite_inlines_no_asset() -> None:
+    """The content security policy has no ``data:`` source, so no asset becomes one."""
+    assert "assetsInlineLimit: 0" in (UI / "vite.config.ts").read_text()
+
+
+def test_the_ui_sources_are_not_git_ignored() -> None:
+    """``build/`` is ignored for Python builds; ``ui/build/`` holds source and must be committed."""
+    for path in ("ui/build/targets.ts", "ui/scripts/prove-gates.mjs", "ui/src/App.tsx"):
+        done = subprocess.run(["git", "check-ignore", "-q", path], cwd=ROOT, check=False)
+        assert done.returncode == 1, path

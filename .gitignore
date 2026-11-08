@@ -26,3 +26,12 @@ site-build/
 # Wheels downloaded to compute hashes never belong in the tree.
 /*.whl
 jscpd-report/
+
+# The web interface: its build lands in the server package; its reports stay local.
+packages/lakana-server/src/lakana_server/ui_dist/
+ui/coverage/
+ui/test-results/
+ui/playwright-report/
+jscpd-report-ui/
+# ui/build/ holds source (the build targets), not a Python build: keep it.
+!ui/build/

@@ -75,12 +75,12 @@ schema conventional-changelog uses):
 | `perf` | Performance Improvements | yes |
 | `revert` | Reverts | yes |
 | `docs` | Documentation | yes |
-| `deps` | Dependencies (Dependabot's `uv` updates) | yes |
+| `deps` | Dependencies (Dependabot's `uv` updates and the interface's runtime npm packages) | yes |
 | `refactor`, `test`, `ci`, `build`, `chore` | — | hidden |
 
 A breaking change is listed under **⚠ BREAKING CHANGES** with its footer text, so write
 the footer for the reader who has to migrate. Dependabot's GitHub Actions updates use the
-`ci` prefix and stay hidden. release-please titles its own PR `chore(release): release
+`ci` prefix and the interface's development tools the `build` prefix; both stay hidden. release-please titles its own PR `chore(release): release
 <version>` (`pull-request-title-pattern`), which passes the same lint.
 
 We use release-please rather than conventional-changelog's own CLI: it already parses

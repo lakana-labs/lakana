@@ -6078,7 +6078,8 @@ matter for an operator deciding where to run it:
 
 ## Process
 
-Every PR runs bandit, gitleaks, pip-audit, and the license check (`security.yml`).
+Every PR runs bandit, gitleaks, pip-audit, npm audit and osv-scanner (over the npm locks of `ui/`
+and `tools/jscpd`), and the license check (`security.yml`).
 gitleaks uses its default rules plus the allowlist in `.gitleaks.toml`, which may hold only
 exact literals — test-fixture token values, or a specific code line the generic-api-key rule
 misreads (e.g. `token=token, …` in `lakana login`) — never a pattern broad enough to hide a real

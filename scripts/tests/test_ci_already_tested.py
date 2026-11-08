@@ -30,6 +30,7 @@ JOBS = (
     "five-minute",
     "compose-smoke",
     "docs-examples",
+    "ui",
     "docs",
 )
 
@@ -247,6 +248,11 @@ def decide_now(get: Callable[[str], object]) -> cat.Verdict:
     """
     SLEPT.clear()
     return cat.decide(REPO, SHA, get, sleep=SLEPT.append)
+
+
+def test_the_interface_s_gates_are_part_of_the_proof() -> None:
+    """``main`` skips the ``ui`` job only when the pull request's ``ui`` job succeeded."""
+    assert "ui" in cat.REQUIRED_JOBS
 
 
 def test_a_squash_merged_pull_request_whose_last_run_succeeded_is_already_tested() -> None:
