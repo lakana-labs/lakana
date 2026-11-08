@@ -270,6 +270,26 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
+test("the narrow top bar keeps its height and the content starts right below it", async ({
+  page,
+}) => {
+  const heights: number[] = [];
+  for (const height of [500, 900, 1400]) {
+    await page.setViewportSize({ width: 600, height });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    const bar = await page.getByRole("banner").boundingBox();
+    const main = await page.getByRole("main").boundingBox();
+    expect(bar, "the top bar").not.toBeNull();
+    expect(main, "the content").not.toBeNull();
+    const barBottom = (bar?.y ?? 0) + (bar?.height ?? 0);
+    const gap = Math.abs((main?.y ?? 0) - barBottom);
+    expect(gap, `at ${String(height)} px high`).toBeLessThanOrEqual(1);
+    heights.push(Math.round(bar?.height ?? 0));
+  }
+  expect(new Set(heights).size, heights.join(", ")).toBe(1);
+});
+
 test("axe catches a missing alt text", async ({ page }) => {
   // The positive control: the checks above would pass vacuously if axe found nothing at all.
   await page.setContent('<img src="x.png">');
