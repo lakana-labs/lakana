@@ -44,7 +44,12 @@ export function AppShell({ access }: AppShellProps): JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "k"
+      ) {
         event.preventDefault();
         setPaletteOpen(true);
       }

@@ -19,6 +19,9 @@ export default defineConfig({
     cssTarget: targets,
     // The content security policy allows no data: URL, so no asset is inlined as one.
     assetsInlineLimit: 0,
+    // size-limit (.size-limit.mjs) is the gate on gzipped sizes; Vite's own warning on the raw
+    // size would only repeat it on every build.
+    chunkSizeWarningLimit: 700,
   },
   preview: {
     host: "127.0.0.1",

@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useRef, useState } from "react";
+import { type JSX, useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -16,6 +16,9 @@ export interface ComingSoonProps {
 }
 
 type CopyState = "idle" | "copied" | "select";
+
+// How long the button says "Copied" before it offers to copy again.
+const COPIED_FOR_MS = 2000;
 
 /**
  * Names the part, shows the command line and offers one action: copy it. Without the
@@ -31,6 +34,18 @@ export function ComingSoon({ part, cli }: ComingSoonProps): JSX.Element {
   const { t } = useTranslation();
   const line = useRef<HTMLElement>(null);
   const [state, setState] = useState<CopyState>("idle");
+
+  useEffect(() => {
+    if (state !== "copied") {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setState("idle");
+    }, COPIED_FOR_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [state]);
 
   const copy = async (): Promise<void> => {
     try {

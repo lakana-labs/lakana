@@ -42,11 +42,15 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("searchbox")).toHaveFocus();
   });
 
-  it("ignores K without a modifier, and other keys with one", async () => {
+  it("ignores K without a modifier, with Shift or Alt, and other keys", async () => {
     await shellAtHome();
 
     expect(fireEvent.keyDown(document.body, { key: "k" })).toBe(true);
     expect(fireEvent.keyDown(document.body, { key: "j", ctrlKey: true })).toBe(true);
+    expect(fireEvent.keyDown(document.body, { key: "K", ctrlKey: true, shiftKey: true })).toBe(
+      true,
+    );
+    expect(fireEvent.keyDown(document.body, { key: "k", ctrlKey: true, altKey: true })).toBe(true);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -87,7 +91,34 @@ describe("CommandPalette", () => {
 
     await user.keyboard("zz");
     expect(screen.queryAllByRole("menuitem", { name: /^Go to/ })).toEqual([]);
-    expect(screen.getByText("Nothing matches “connzz”.")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("menu", { name: "Places" })).getByText("Nothing matches “connzz”."),
+    ).toBeInTheDocument();
+  });
+
+  it("announces how many places match, or that none does", async () => {
+    const { user } = await shellAtHome();
+    await user.keyboard("{Control>}k{/Control}");
+    const dialog = await screen.findByRole("dialog", { name: "Search" });
+    const status = within(dialog).getByRole("status");
+    expect(status).toHaveTextContent(/^$/);
+    expect(status).toHaveClass("visually-hidden");
+
+    await user.keyboard("go");
+    expect(status).toHaveTextContent("7 places");
+    await user.keyboard("{Backspace}{Backspace}conn");
+    expect(status).toHaveTextContent("1 place");
+    await user.keyboard("zz");
+    expect(within(dialog).getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent("Nothing matches “connzz”.");
+  });
+
+  it("names the list of places apart from the dialog and the field", async () => {
+    const { user } = await shellAtHome();
+    await user.keyboard("{Control>}k{/Control}");
+
+    expect(await screen.findByRole("menu", { name: "Places" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search" })).toBeInTheDocument();
   });
 
   it("Enter goes to the area and closes; Escape closes and returns focus", async () => {

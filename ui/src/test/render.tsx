@@ -9,7 +9,7 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
 import { ALL_SHIPPED, type AreaAccess } from "../shell/areas";
-import { appRoutes } from "../shell/routes";
+import { type AreaPages, appRoutes } from "../shell/routes";
 import { MemoryStorage } from "./storage";
 
 /** What {@link renderShell} hands back. */
@@ -28,6 +28,8 @@ export interface ShellOptions {
   readonly access?: AreaAccess;
   /** The storage to keep preferences in; an empty in-memory one by default. */
   readonly storage?: Storage;
+  /** Area pages loaded on demand; none by default. */
+  readonly pages?: AreaPages;
 }
 
 /**
@@ -39,7 +41,7 @@ export interface ShellOptions {
  */
 export function renderShell(path = "/", options: ShellOptions = {}): RenderedShell {
   const storage = options.storage ?? new MemoryStorage();
-  const router = createMemoryRouter(appRoutes(options.access ?? ALL_SHIPPED), {
+  const router = createMemoryRouter(appRoutes(options.access ?? ALL_SHIPPED, options.pages), {
     initialEntries: [path],
   });
   const user = userEvent.setup();

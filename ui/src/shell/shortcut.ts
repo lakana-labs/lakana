@@ -20,6 +20,7 @@ const APPLE = /mac|iphone|ipad|ipod|ios/i;
  * @returns `"mac"` on macOS, iPadOS and iOS, otherwise `"other"`.
  */
 export function shortcutLabel(nav: PlatformHints): "mac" | "other" {
-  const platform = nav.userAgentData?.platform ?? (nav.platform || nav.userAgent);
+  // `||`, not `??`: Chromium reports an empty client hints platform on some systems.
+  const platform = nav.userAgentData?.platform || nav.platform || nav.userAgent;
   return APPLE.test(platform) ? "mac" : "other";
 }

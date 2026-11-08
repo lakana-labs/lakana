@@ -1129,7 +1129,7 @@ first failure; CI's `ui` job runs them one step each.
 | knip (unused files, exports, dependencies) | `npm --prefix ui run knip` | `check`, CI `ui` |
 | Vitest with coverage (thresholds 90 %) | `npm --prefix ui run test:coverage` | `check`, CI `ui` |
 | build | `npm --prefix ui run build` | `check`, CI `ui` |
-| size-limit (gzipped JavaScript; a raised limit needs a sentence in its pull request) | `npm --prefix ui run size` | `check`, CI `ui` |
+| size-limit (`ui/.size-limit.mjs`: the gzipped entry chunk, each chunk loaded on demand on its own, CSS, fonts; a raised limit needs a sentence in its pull request) | `npm --prefix ui run size` | `check`, CI `ui` |
 | UI coverage ratchet | `python3 -m scripts.ui_coverage_ratchet` | CI `ui` |
 | Playwright on Chromium (`e2e/shell.spec.ts` in light and dark, roomy and compact: axe with WCAG 2.2 AA tags on every area, the menu and the palette, no request to the API, no console error, deep link styled, theme without a flash, no horizontal scroll; `e2e/glyphs.spec.ts`) | `npm --prefix ui run e2e:smoke` | locally after `check`, CI `ui` |
 | every gate fails on a violation | `npm --prefix ui run prove-gates` | CI `ui` |

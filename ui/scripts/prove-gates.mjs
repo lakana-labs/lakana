@@ -210,7 +210,9 @@ const PROBES = [
   {
     gate: "size-limit",
     files: {},
-    edits: { ".size-limit.json": (text) => text.replace(/"limit": "[^"]*"/g, '"limit": "1 B"') },
+    edits: {
+      ".size-limit.mjs": (text) => text.replace(/limit: "[^"]*"/g, 'limit: "1 B"'),
+    },
     run: npmRun("size"),
     expect: ["exceeded"],
   },

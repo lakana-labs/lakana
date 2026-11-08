@@ -224,7 +224,7 @@
   align-items: flex-start;
   justify-content: flex-start;
   padding: var(--space-8) var(--space-4) var(--space-4) calc(var(--sidebar-width) + var(--space-6));
-  background: rgba(20, 36, 46, 0.24);
+  background: var(--color-scrim);
 }
 
 .palette {
@@ -322,11 +322,4 @@
 .coming-soon-hint {
   min-height: var(--type-body-line);
   color: var(--color-text-muted);
-}
-
-/* React Aria's pressable rule (it would add it as an inline <style>; see index.html). */
-@layer {
-  [data-react-aria-pressable] {
-    touch-action: pan-x pan-y pinch-zoom;
-  }
 }

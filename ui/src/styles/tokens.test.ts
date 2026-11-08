@@ -136,6 +136,10 @@ describe("tokens", () => {
     expect(Object.keys(DARK).length).toBeGreaterThan(15);
   });
 
+  it.each(modes)("defines the scrim behind a modal (%s)", (mode) => {
+    expect(PALETTES[mode]?.["--color-scrim"]).toMatch(/^rgba\(/);
+  });
+
   it("has no font size below 12 px", () => {
     const sizes = [...tokens.matchAll(/(?:--type-[\w-]+-size|font-size)\s*:\s*([\d.]+)px/g)];
     expect(sizes.length).toBeGreaterThanOrEqual(7);

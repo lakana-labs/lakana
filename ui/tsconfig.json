@@ -29,6 +29,7 @@
     "scripts",
     "csp.ts",
     ".dependency-cruiser.cjs",
+    ".size-limit.mjs",
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts"

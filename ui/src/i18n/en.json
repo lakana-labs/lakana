@@ -78,7 +78,10 @@
   },
   "palette": {
     "placeholder": "Go to a place or run a command",
+    "places": "Places",
     "goTo": "Go to {{area}}",
+    "results_one": "{{count}} place",
+    "results_other": "{{count}} places",
     "empty": "Nothing matches “{{query}}”."
   },
   "notFound": {

@@ -49,6 +49,17 @@ function PaletteContent({
   const navigate = useNavigate();
   const { contains } = useFilter({ sensitivity: "base" });
   const [query, setQuery] = useState("");
+  const commands = areas.map((area) => ({
+    area,
+    label: t("palette.goTo", { area: t(`areas.${area.id}.name`) }),
+  }));
+  const matches = commands.filter((command) => contains(command.label, query)).length;
+  let status = "";
+  if (matches === 0) {
+    status = t("palette.empty", { query });
+  } else if (query !== "") {
+    status = t("palette.results", { count: matches });
+  }
 
   return (
     <Autocomplete filter={contains} inputValue={query} onInputChange={setQuery}>
@@ -59,10 +70,10 @@ function PaletteContent({
       </SearchField>
       <Menu
         className="menu palette-menu"
-        aria-label={t("shell.search")}
+        aria-label={t("palette.places")}
         renderEmptyState={() => <p className="palette-empty">{t("palette.empty", { query })}</p>}
       >
-        {areas.map((area) => (
+        {commands.map(({ area, label }) => (
           <MenuItem
             className="menu-item"
             key={area.id}
@@ -72,10 +83,14 @@ function PaletteContent({
               void navigate(area.path);
             }}
           >
-            {t("palette.goTo", { area: t(`areas.${area.id}.name`) })}
+            {label}
           </MenuItem>
         ))}
       </Menu>
+      {/* Mounted with the dialog, so screen readers announce every change (WCAG 4.1.3). */}
+      <p className="visually-hidden" role="status">
+        {status}
+      </p>
     </Autocomplete>
   );
 }

@@ -1,5 +1,8 @@
 import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { Page } from "./Page";
+import type { AreaModule } from "./routes";
 
 import { renderShell } from "../test/render";
 
@@ -99,5 +102,51 @@ describe("appRoutes", () => {
     await user.keyboard("{Enter}");
 
     expect(screen.getByRole("main")).toHaveFocus();
+  });
+
+  it("an area's page can be loaded on demand, in its own chunk", async () => {
+    const load = vi.fn(() =>
+      Promise.resolve({
+        AreaScreen: () => (
+          <Page title="Jobs">
+            <p>Loaded on demand</p>
+          </Page>
+        ),
+      }),
+    );
+    const { user } = renderShell("/", { pages: { jobs: load } });
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    expect(load).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("link", { name: "Jobs" }));
+
+    expect(await screen.findByText("Loaded on demand")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("a deep link to an on-demand page loads it", async () => {
+    let arrive: (module: AreaModule) => void = () => undefined;
+    const arriving = new Promise<AreaModule>((resolve) => {
+      arrive = resolve;
+    });
+    renderShell("/jobs", { pages: { jobs: () => arriving } });
+
+    // The shell is there while the screen loads; only the working area waits.
+    expect(await screen.findByRole("navigation")).toBeInTheDocument();
+    expect(screen.queryByText("Loaded on demand")).not.toBeInTheDocument();
+    arrive({ AreaScreen: () => <p>Loaded on demand</p> });
+
+    expect(await screen.findByText("Loaded on demand")).toBeInTheDocument();
+  });
+
+  it("never loads the page of an area outside the user's access", async () => {
+    const load = vi.fn(() => Promise.resolve({ AreaScreen: () => <p>Loaded on demand</p> }));
+    renderShell("/jobs", { access: new Set(["home"]), pages: { jobs: load } });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "You cannot use Jobs" }),
+    ).toBeInTheDocument();
+    expect(load).not.toHaveBeenCalled();
   });
 });

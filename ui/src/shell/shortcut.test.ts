@@ -34,4 +34,10 @@ describe("shortcutLabel", () => {
       }),
     ).toBe("other");
   });
+
+  it("falls back to the platform when the client hints platform is empty", () => {
+    expect(
+      shortcutLabel({ platform: "MacIntel", userAgent: "", userAgentData: { platform: "" } }),
+    ).toBe("mac");
+  });
 });

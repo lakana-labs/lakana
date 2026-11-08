@@ -25,6 +25,7 @@
   --color-bad-bg: #fae6e3;
   --color-float: #ffffff;
   --shadow-float: 0 4px 16px rgba(20, 36, 46, 0.14);
+  --color-scrim: rgba(20, 36, 46, 0.24);
   --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
@@ -95,6 +96,7 @@
     --color-bad-bg: #3a1d1a;
     --color-float: #1c2a33;
     --shadow-float: none;
+    --color-scrim: rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -119,6 +121,7 @@
   --color-bad-bg: #3a1d1a;
   --color-float: #1c2a33;
   --shadow-float: none;
+  --color-scrim: rgba(0, 0, 0, 0.5);
 }
 
 /* The compact density is a preference; roomy is the default. */

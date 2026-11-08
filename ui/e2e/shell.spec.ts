@@ -106,6 +106,13 @@ for (const theme of ["light", "dark"] as const) {
           await page.goto(path);
           await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
         }
+        // The floating surfaces: React Aria inserts its own styles for them.
+        await page.getByRole("button", { name: "Not signed in" }).click();
+        await expect(page.getByRole("menu", { name: "Preferences" })).toBeVisible();
+        await page.keyboard.press("Escape");
+        await page.getByRole("button", { name: "Search" }).click();
+        await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
+        await page.keyboard.press("Escape");
         await page.waitForLoadState("networkidle");
 
         expect(errors).toEqual([]);

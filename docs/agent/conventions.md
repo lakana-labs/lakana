@@ -206,12 +206,15 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
 - **No Node globals in browser code.** `globals.node` is on for the config files and scripts, so
   ESLint refuses `process` and `Buffer` inside `ui/src/` (`src/api/` included): Vite does not
   polyfill them, so they would fail only in the browser. Use `import.meta.env` and `Uint8Array`.
-- **The content security policy stays strict** (`ui/csp.ts`: no inline script or style). The
-  stored theme is applied before the first paint by a file, `ui/public/theme-boot.js`, not an
-  inline script; React Aria's one injected `<style>` (`react-aria-pressable-style`) is
-  pre-empted by an element with that id in `ui/index.html`, and its rule lives in
-  `ui/src/shell/shell.css`. A React Aria upgrade that injects another one shows up as a console
-  error in `e2e/shell.spec.ts`.
+- **The content security policy stays strict** (`ui/csp.ts`: no inline script, no inline
+  style but the exact texts it hashes). The stored theme is applied before the first paint by a
+  file, `ui/public/theme-boot.js`, not an inline script. React Aria inserts two `<style>`
+  elements at run time (`usePress`: `touch-action` on pressable elements; `usePreventScroll`:
+  `overscroll-behavior` while a modal is open on iOS and iPadOS); `style-src` lists the
+  `sha256` hash of each exact text (`LIBRARY_STYLE_HASHES`), never `'unsafe-inline'`.
+  `ui/build/csp.test.ts` counts the places React Aria, React Aria Components, React Stately and
+  React Router insert a `<style>` and hashes their texts, so an upgrade that changes or adds one
+  fails there; `e2e/shell.spec.ts` "no console error" opens the menu and the palette too.
 - **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
   stylesheet and string on (part 1a, Task 3).
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools

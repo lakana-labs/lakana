@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,7 @@ function setClipboard(value: unknown): void {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   window.getSelection()?.removeAllRanges();
 });
@@ -41,6 +42,47 @@ describe("ComingSoon", () => {
 
     expect(writeText).toHaveBeenCalledWith(CLI);
     expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
+  it("says Copy command again after two seconds, so a second copy is confirmed too", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      setClipboard({ writeText: vi.fn(() => Promise.resolve()) });
+      render(<ComingSoon part={3} cli={CLI} />);
+
+      // fireEvent, not user-event: user-event waits on timers that are fake here.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+        await Promise.resolve();
+      });
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(1999));
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(1));
+
+      expect(screen.getByRole("button", { name: "Copy command" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops its timer when it goes away", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      setClipboard({ writeText: vi.fn(() => Promise.resolve()) });
+      const { unmount } = render(<ComingSoon part={3} cli={CLI} />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+        await Promise.resolve();
+      });
+      expect(vi.getTimerCount()).toBe(1);
+
+      unmount();
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("selects the line and says so when the Clipboard API is missing", async () => {
