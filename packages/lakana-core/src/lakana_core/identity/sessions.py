@@ -22,7 +22,7 @@ import re
 import secrets
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import ColumnElement, select, update
@@ -124,7 +124,7 @@ STEP_UP_MESSAGE = (
     "This needs a fresh passkey touch (within 15 minutes). Confirm with your passkey and try again."
 )
 
-_COOKIE = re.compile(r"^([0-9a-f]{32})_(.+)$")
+_COOKIE = re.compile(r"([0-9a-f]{32})_(.+)", re.DOTALL)
 _CSRF_MESSAGE = b"lakana-csrf"
 
 
@@ -148,9 +148,9 @@ class StartedSession:
     key_id
         The public lookup key: 32 hexadecimal characters, no ``_``.
     cookie_value
-        ``<key_id>_<secret>``, the cookie's value.
+        ``<key_id>_<secret>``, the cookie's value. Left out of the `repr`.
     csrf_token
-        The session's CSRF token (`csrf_token_for(cookie_value)`).
+        The session's CSRF token (`csrf_token_for(cookie_value)`). Left out of the `repr`.
     principal
         The principal, as `SessionService.verify` would return it now.
     absolute_expires_at
@@ -158,8 +158,8 @@ class StartedSession:
     """
 
     key_id: str
-    cookie_value: str
-    csrf_token: str
+    cookie_value: str = field(repr=False)
+    csrf_token: str = field(repr=False)
     principal: PrincipalRef
     absolute_expires_at: datetime
 
@@ -177,7 +177,7 @@ def _split(cookie_value: str) -> tuple[str, str] | None:
     tuple of (str, str), or None
         ``(key_id, secret)``, or `None` when the value does not have that shape.
     """
-    match = _COOKIE.match(cookie_value)
+    match = _COOKIE.fullmatch(cookie_value)
     return (match.group(1), match.group(2)) if match else None
 
 
@@ -387,7 +387,14 @@ class SessionService:
             raise NotFoundError(f"No principal named {name!r}. Check the name and try again.")
         return row
 
-    def _end_rows(self, condition: ColumnElement[bool], reason: str) -> int:
+    def _end_rows(
+        self,
+        condition: ColumnElement[bool],
+        reason: str,
+        *,
+        actor: PrincipalRef | None = None,
+        subject: str | None = None,
+    ) -> int:
         """End every open session that matches, each with one audit event.
 
         One conditional ``UPDATE … WHERE ended_at IS NULL … RETURNING``: a session two
@@ -399,6 +406,12 @@ class SessionService:
             A SQL condition on `BrowserSession`.
         reason
             The stored `end_reason`.
+        actor
+            The administrator ending another person's sessions: each event is then
+            attributed to them, with the person in ``subject``. `None` attributes each event
+            to the session's own person.
+        subject
+            The name of the person whose sessions end; required with `actor`.
 
         Returns
         -------
@@ -414,11 +427,23 @@ class SessionService:
         ).all()
         audit = AuditService(self._session)
         for key_id, principal_id in sorted(ended):
-            audit.record(
-                principal_id,
-                AuditEventType.SESSION_ENDED,
-                detail={"key_id": key_id, "reason": reason},
-            )
+            if actor is None:
+                audit.record(
+                    principal_id,
+                    AuditEventType.SESSION_ENDED,
+                    detail={"key_id": key_id, "reason": reason},
+                )
+            else:
+                audit.record(
+                    actor.id,
+                    AuditEventType.SESSION_ENDED,
+                    detail={
+                        "key_id": key_id,
+                        "reason": reason,
+                        "actor": actor.name,
+                        "subject": subject,
+                    },
+                )
         return len(ended)
 
     def get_limits(self) -> SessionLimits:
@@ -694,10 +719,8 @@ class SessionService:
             reason = "idle"
         elif principal is None or not principal.is_active:
             reason = "deactivated"
-        elif row.source_pat_id is not None:
-            pat = self._session.get(PersonalAccessToken, row.source_pat_id)
-            if pat is None or not _pat_valid(pat, now):
-                reason = "token_revoked"
+        elif not self._source_valid(row, now):
+            reason = "token_revoked"
         if reason is not None:
             self._end_rows(BrowserSession.id == row.id, reason)
             self._session.commit()
@@ -801,14 +824,21 @@ class SessionService:
         )
         if row is None:
             raise missing
-        if row.principal_id != p.id:
+        if row.principal_id == p.id:
+            self._end_rows(BrowserSession.id == row.id, reason)
+        else:
             try:
                 self._require_admin(p)
             except PermissionDenied:
                 raise missing from None
             require_step_up(p, now=self._clock())
-            reason = "ended_by_admin"
-        self._end_rows(BrowserSession.id == row.id, reason)
+            owner = self._session.get(Principal, row.principal_id)
+            self._end_rows(
+                BrowserSession.id == row.id,
+                "ended_by_admin",
+                actor=p,
+                subject=owner.name if owner is not None else None,
+            )
         self._session.commit()
 
     def end_all(self, p: PrincipalRef, principal_name: str, *, reason: str | None = None) -> int:
@@ -841,13 +871,13 @@ class SessionService:
             If an administrator acts without a fresh passkey touch.
         """
         target = self._principal_named(principal_name)
+        condition = BrowserSession.principal_id == target.id
         if target.id == p.id:
-            stored = reason or "sign_out_everywhere"
+            count = self._end_rows(condition, reason or "sign_out_everywhere")
         else:
             self._require_admin(p)
             require_step_up(p, now=self._clock())
-            stored = "ended_by_admin"
-        count = self._end_rows(BrowserSession.principal_id == target.id, stored)
+            count = self._end_rows(condition, "ended_by_admin", actor=p, subject=target.name)
         self._session.commit()
         return count
 
@@ -881,8 +911,9 @@ class SessionService:
     def list_sessions(self, p: PrincipalRef, principal_name: str) -> list[BrowserSession]:
         """List a person's open sessions, oldest first.
 
-        A session past its idle timeout or lifetime is left out even before a request ends
-        it.
+        A session past its idle timeout or lifetime, one whose token was revoked or expired,
+        and every session of a deactivated person are left out even before a request ends
+        them.
 
         Parameters
         ----------
@@ -920,7 +951,35 @@ class SessionService:
             .scalars()
             .all()
         )
-        return [r for r in rows if now < r.last_seen_at + timedelta(seconds=r.idle_seconds)]
+        if not target.is_active:
+            return []
+        return [
+            r
+            for r in rows
+            if now < r.last_seen_at + timedelta(seconds=r.idle_seconds)
+            and self._source_valid(r, now)
+        ]
+
+    def _source_valid(self, row: BrowserSession, now: datetime) -> bool:
+        """Say whether the token a session was created through still works.
+
+        Parameters
+        ----------
+        row
+            The session.
+        now
+            The time to check at.
+
+        Returns
+        -------
+        bool
+            `True` for a session made without a token, or one whose token is neither revoked
+            nor expired.
+        """
+        if row.source_pat_id is None:
+            return True
+        pat = self._session.get(PersonalAccessToken, row.source_pat_id)
+        return pat is not None and _pat_valid(pat, now)
 
 
 def _pat_valid(pat: PersonalAccessToken, now: datetime) -> bool:

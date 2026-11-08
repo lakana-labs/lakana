@@ -532,6 +532,20 @@ def test_end_all_of_another_person_needs_admin_and_step_up(session: Session, clo
             svc.verify(started.cookie_value, extend=True)
         assert e.value.reason == "ended_by_admin"
     assert svc.verify(carols.cookie_value, extend=True).id == carol.id
+    ended = (
+        session.execute(
+            select(AuditEvent).where(
+                AuditEvent.event_type == AuditEventType.SESSION_ENDED,
+                AuditEvent.detail["reason"].as_string() == "ended_by_admin",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert sorted(e.detail["key_id"] for e in ended) == sorted(b.key_id for b in bobs)
+    for event in ended:
+        assert event.principal_id == admin.id
+        assert event.detail["subject"] == "bob"
 
 
 def test_end_all_of_ones_own_sessions_needs_no_step_up(
@@ -749,3 +763,40 @@ def test_a_single_action_grant_is_not_enough_to_act_on_others(
     _start(svc, bob)
     with pytest.raises(PermissionDenied, match="Only an administrator"):
         svc.end_all(_ref(dana), "bob")
+
+
+def test_started_session_hides_its_credentials_in_repr(
+    svc: SessionService, alice: Principal
+) -> None:
+    """A logged or printed `StartedSession` shows neither the cookie nor the CSRF token."""
+    started = _start(svc, alice)
+    text = repr(started)
+    assert started.cookie_value not in text
+    assert started.csrf_token not in text
+
+
+def test_a_cookie_with_a_trailing_newline_is_refused(svc: SessionService, alice: Principal) -> None:
+    """The cookie's shape is checked exactly: a trailing newline is not the same value."""
+    started = _start(svc, alice)
+    with pytest.raises(AuthenticationError):
+        svc.verify(started.cookie_value + "\n", extend=False)
+
+
+def test_list_sessions_leaves_out_sessions_that_can_no_longer_be_used(
+    svc: SessionService, alice: Principal, session: Session
+) -> None:
+    """A revoked token's session, or a deactivated person's, is not listed before its next use."""
+    admin = _principal(session, "root")
+    issued = PatService(session, AllowAllAuthorization()).issue(_ref(admin), "alice", name="l")
+    pat = session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.key_id == issued.key_id)
+    ).scalar_one()
+    from_token = _start(svc, alice, via="local", source_pat_id=pat.id, touched=False)
+    plain = _start(svc, alice)
+    PatService(session, AllowAllAuthorization()).revoke(_ref(admin), "alice", issued.key_id)
+    listed = [s.key_id for s in svc.list_sessions(_ref(alice), "alice")]
+    assert listed == [plain.key_id]
+    assert from_token.key_id not in listed
+    alice.is_active = False
+    session.commit()
+    assert svc.list_sessions(_ref(admin), "alice") == []

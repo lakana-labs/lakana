@@ -3259,12 +3259,18 @@ def test_0069_on_postgres() -> None:
         engine.dispose()
 
 
-def test_0069_marks_the_bootstrap_pat() -> None:
+def test_0069_marks_the_bootstrap_pat(monkeypatch: pytest.MonkeyPatch) -> None:
     """Only the bootstrap principal's unrevoked PAT named ``bootstrap`` is marked.
 
     A ``bootstrap`` PAT of another principal, a revoked one and one with another name stay
     unmarked (`LAKANA_BOOTSTRAP_ADMIN` unset: the bootstrap principal is ``admin``).
+
+    Parameters
+    ----------
+    monkeypatch
+        Unsets `LAKANA_BOOTSTRAP_ADMIN`, whatever the environment running the test says.
     """
+    monkeypatch.delenv("LAKANA_BOOTSTRAP_ADMIN", raising=False)
     revision_0068 = "c4e6a8b0d2f1"
     revision_0069 = "d7f1b3c5e9a2"
     with PostgresContainer("postgres:16", driver="pg8000") as pg:
