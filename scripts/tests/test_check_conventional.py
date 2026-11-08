@@ -1,5 +1,8 @@
 """Tests for the pull-request convention check (branch name, footers, issue references)."""
 
+import re
+from pathlib import Path
+
 import pytest
 
 from scripts.check_conventional import (
@@ -161,3 +164,19 @@ def test_code_in_the_description_is_ignored() -> None:
 
     assert main({"HEAD_REF": "ci/x", "PR_TITLE": "ci: x", "PR_BODY": body}) == 0
     assert strip_non_prose("a `Closes #1, #2` b") == "a  b"
+
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_commitlint_and_claude_md_list_the_same_scopes() -> None:
+    """The scopes commitlint accepts are the ones CLAUDE.md rule 7 names, ``ui`` among them."""
+    config = (_ROOT / "commitlint.config.mjs").read_text()
+    enum = re.search(r'"scope-enum":\s*\[\s*2,\s*"always",\s*\[(.*?)\]', config, re.S)
+    assert enum, "commitlint.config.mjs has no scope-enum"
+    linted = re.findall(r'"([a-z-]+)"', enum.group(1))
+    rule = re.search(r"Optional scope from: (.*?)\.\n", (_ROOT / "CLAUDE.md").read_text(), re.S)
+    assert rule, "CLAUDE.md names no scopes"
+    named = re.findall(r"`([a-z-]+)`", rule.group(1))
+    assert linted == named
+    assert "ui" in linted

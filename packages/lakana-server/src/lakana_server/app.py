@@ -24,6 +24,7 @@ from lakana_core.grants.admin import ineffective_grants_warning
 from lakana_core.readiness import probe_storage, read_database
 from lakana_core.secrets.crypto import ACCEPT_FORMAT_1_WARNING
 from lakana_core.secrets.keys import EnvKeyProvider
+from lakana_server import ui
 from lakana_server.api.iceberg.router import router as iceberg_router
 from lakana_server.api.platform.access_file import router as access_file_router
 from lakana_server.api.platform.artifacts import MANIFEST_DECODE_SLOTS, MAX_CONCURRENT_DOWNLOADS
@@ -307,6 +308,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     for router in ROUTERS:
         app.include_router(router)
+    if resolved_settings.ui.enabled:
+        # `ui.UI_DIST`, read now: the tests point it at a stand-in build.
+        ui.mount_ui(app, ui.UI_DIST)
     app.add_middleware(
         BodyLimitMiddleware,
         max_bytes=resolved_settings.request_body.max_bytes,

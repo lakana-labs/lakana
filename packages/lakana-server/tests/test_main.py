@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import sqlalchemy
 
+import lakana_server.ui
 from lakana_server import __main__ as server_main
 from lakana_server.log_config import uvicorn_log_config
 
@@ -112,3 +113,24 @@ def test_an_unknown_subcommand_is_a_usage_error() -> None:
         server_main.main(["nope"])
 
     assert caught.value.code == 2
+
+
+def test_an_interface_that_is_not_built_stops_the_server_with_its_message_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No traceback: the cause and the next steps on stderr, exit code 1, nothing served."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    monkeypatch.setenv("LAKANA_UI__ENABLED", "true")
+    monkeypatch.setattr(lakana_server.ui, "UI_DIST", tmp_path / "ui_dist")
+    calls: list[object] = []
+    monkeypatch.setattr(server_main.uvicorn, "run", lambda app, **kw: calls.append(app))
+
+    with pytest.raises(SystemExit) as caught:
+        server_main.main([])
+
+    assert caught.value.code == 1
+    assert calls == []
+    err = capsys.readouterr().err
+    assert err.startswith("lakana-server: LAKANA_UI__ENABLED is true, but this installation")
+    assert "LAKANA_UI__ENABLED=false" in err
+    assert "Traceback" not in err

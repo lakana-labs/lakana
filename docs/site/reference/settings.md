@@ -189,6 +189,12 @@ Compose](../how-to/deploy-with-compose.md).
 | `LAKANA_READINESS__CACHE_SECONDS` | number, 1 or more, 300 or less | `5` | server | How long one answer of `/readyz` is reused, in seconds (default 5; 1 to 300). However often the route is asked, the server checks at most once in this time, so the route, which needs no sign-in, cannot be used to load the database or the storage. |
 | `LAKANA_READINESS__ENVIRONMENTS` | list | empty | server | The environments whose storage `/readyz` checks, as a JSON list, for example `["dev", "prod"]`. Empty (the default): every environment, at most the first 5 by name. Name the ones that must work when another environment's storage is out of reach on purpose; a name no environment has fails the check. |
 
+## `LAKANA_UI__*`
+
+| Variable | Type | Default | Read by | Description |
+|---|---|---|---|---|
+| `LAKANA_UI__ENABLED` | true or false | `false` | server | Whether the server serves the web interface at `/` (default false while the interface is being built; turn it on to try it). The interface's files come with a released server; in a source checkout, build them first: `npm --prefix ui ci && npm --prefix ui run build`. The interface calls only the REST API, with the user's own credential. Until sign-in exists it reads no data. |
+
 ## `LAKANA_GIT__*`
 
 | Variable | Type | Default | Read by | Description |

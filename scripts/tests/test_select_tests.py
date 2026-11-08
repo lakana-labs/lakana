@@ -344,3 +344,31 @@ def test_main_names_a_failing_git_and_the_way_around_it(
     err = capsys.readouterr().err
     assert "git fetch origin" in err
     assert "unknown revision" in err
+
+
+def test_a_ui_change_selects_the_ui_gates_and_no_python_tests() -> None:
+    """A ui/ file runs the ui gates and no Python test."""
+    assert select(["ui/src/App.tsx"], imports={}) == Selection(tests=[], docs=False, ui=True)
+    assert "npm --prefix ui run check" in commands(select(["ui/src/App.tsx"], imports={}))
+    assert "npm --prefix ui run e2e:smoke" in commands(select(["ui/src/App.tsx"], imports={}))
+
+
+def test_a_python_change_does_not_select_the_ui_gates() -> None:
+    """Without a ui/ path no npm command appears."""
+    assert not any("npm" in line for line in commands(select(["scripts/x.py"], imports={})))
+
+
+def test_a_ui_and_a_server_change_select_both() -> None:
+    """Both a ui/ and a package path give the package tests and the ui gates."""
+    selection = select(
+        ["ui/src/App.tsx", "packages/lakana-server/src/lakana_server/app.py"], imports={}
+    )
+    assert selection.ui is True
+    assert selection.tests == ["packages/lakana-server/tests"]
+
+
+def test_a_ui_change_beside_a_script_keeps_the_ui_gates() -> None:
+    """The early everything-return still carries the ui flag."""
+    assert select(["ui/src/App.tsx", "scripts/select_tests.py"], imports={}) == Selection(
+        tests=EVERYTHING, docs=False, ui=True
+    )

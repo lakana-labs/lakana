@@ -199,6 +199,67 @@ both use `StorageOptions` / `OptionalStorageOptions`, which refuse a bad shape w
 names no key and no value. No other request body carries a credential: tokens and secrets are in
 headers or are only ever returned. The application logs no request body.
 
+## The web interface's files (M7)
+
+`lakana_server.ui` serves the built interface at `/`, only with `LAKANA_UI__ENABLED=true`
+(default false). It is the same origin as the API, so the interface needs no CORS and no
+cookie set for another host.
+
+- **No privileged way in (rule 2).** The interface calls only the public REST API, with the
+  user's own credential. The server gives it no endpoint of its own and no route besides its
+  static files; it has nothing an API client lacks. Part 1 has no sign-in and calls no route at
+  all; sign-in and sessions get their own design and security review before any code lands.
+- **No joined request path.** Hashed files under `/assets/` go through Starlette's
+  `StaticFiles`, which normalises the path and refuses an absolute one, a NUL byte and any path
+  whose real path (symlinks resolved) leaves `assets/`. Every other file (`theme-boot.js`, the
+  favicon, `licenses/...`) is looked up by name in a dictionary built when the app starts from
+  the files whose real path is inside the build; the request's path is only ever a key. A
+  symlink out of the build is never listed. `test_ui_serving.py` tries encoded `..`
+  (`%2e%2e`, `..%2f`), backslashes, absolute and doubled slashes, NUL and symlinked files and
+  directories.
+- **The API keeps its answers.** Every other GET or HEAD answers `index.html`, so a deep link
+  (`/catalog/sales.orders`: table names have dots, so there is no "has a dot, so it is a file"
+  rule) loads the app. That fallback route never matches a path whose first segment belongs to
+  the API (`reserved_segments`: the first segment of every route registered before it, plus
+  `api`, compared in any letter case), so an unknown `/api/v1/...` or `/v1/...` path stays the
+  API's JSON 404 and a wrong method its 405, never a page a client would parse as success. Nor
+  does it match a path with a `.` or `..` segment, an empty segment before the end (a doubled
+  slash: `//api/...`) or a backslash (`/./api/...`), which no browser sends. It is not in the OpenAPI document.
+  `test_turning_the_interface_on_changes_no_api_answer` compares status, type and body with the
+  interface on and off, and `test_an_unnormalised_api_path_answers_as_without_the_interface`
+  does so with raw ASGI paths a client would have normalised.
+- **Registered last.** `mount_ui` runs after every router, and the pages are the last route: a
+  route added later would be shadowed by them when the interface is on, and a route whose first
+  segment is a path parameter (`/{tenant}/...`) makes `reserved_segments` refuse to start. Both
+  are pinned by tests. FastAPI 0.141's `app.frontend()` (low-priority routes tried after all
+  others) would lift the ordering rule, but it is no drop-in: its fallback keys on
+  `Accept: text/html` and has no reserved segments, so a browser opening `/api/v1/nope` would get
+  the page. Revisit it at the next FastAPI-related change.
+- **Strict headers.** Every response of the interface (page, files, its 404s) carries
+  `Content-Security-Policy`, with one source: `ui/csp.ts`. The build writes it to `csp.txt`
+  (`ui/build/csp-file.ts`), the server reads that file at start-up (`ui.read_policy`) and sends
+  it, and `vite preview`, so every Playwright run, sends the same constant. The header therefore
+  always matches the build actually served. A missing policy file, a `csp.txt` that is a link (it could point outside the build), or one
+  the server could not
+  send as one header (empty, a line break or other control character, not ASCII, no
+  `default-src`), refuses the start. The other headers are
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY`.
+  The policy allows only the own origin, no inline script, inline style only for the two
+  hashed library texts, no `data:` URL, no frames. Content types come from a fixed table, not
+  the machine's MIME database; an unknown suffix is `application/octet-stream`. API responses
+  get none of these headers. An addition to the policy or a relaxed header needs its reason in
+  the pull request that makes it.
+- **Caching.** Only `/assets/` (names carry a content hash) is `immutable` for a year; the page,
+  the root files and the licences are `no-cache`, and a 404 is never cached for good.
+- **Fail at start.** Turned on without a built interface (no `index.html`, no `assets/`, or a
+  missing or malformed `csp.txt`), the server refuses to start (`UiNotBuiltError`) instead of
+  serving errors.
+- **Not yet covered:** the Playwright suite runs against `vite preview`, not lakana-server.
+  `packages/lakana-server/tests/test_ui_real_build.py` (CI `ui`, after the build) serves the
+  real build through `create_app` and checks the policy header and every file the page loads,
+  but runs no browser. One smoke run against `lakana server start` is due once the interface
+  calls the API.
+
 ## Local files `lakana load` reads: a capped child process (#353)
 
 A small Parquet or Arrow file can decode to far more than its size (one value repeated by a
@@ -6078,7 +6139,8 @@ matter for an operator deciding where to run it:
 
 ## Process
 
-Every PR runs bandit, gitleaks, pip-audit, and the license check (`security.yml`).
+Every PR runs bandit, gitleaks, pip-audit, npm audit and osv-scanner (over the npm locks of `ui/`
+and `tools/jscpd`), and the license check (`security.yml`).
 gitleaks uses its default rules plus the allowlist in `.gitleaks.toml`, which may hold only
 exact literals — test-fixture token values, or a specific code line the generic-api-key rule
 misreads (e.g. `token=token, …` in `lakana login`) — never a pattern broad enough to hide a real

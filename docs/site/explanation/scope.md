@@ -147,8 +147,10 @@ These are choices, not gaps. Each keeps the platform small enough to understand 
 - **Hosting notebooks.** See the notebook rule below.
 - **Languages other than SQL and Python.** Two languages keep the tooling and the lineage
   tractable.
-- **Custom roles.** Users cannot define their own roles; the built-in roles and grants stay
-  easy to audit.
+- **Custom roles, before v1.0.0.** Users cannot define their own roles; the built-in roles and
+  single-action grants stay easy to audit. Custom roles are not built before v1.0.0. When M7
+  designs its access screens, a review either keeps them out or brings them into scope, and then
+  this page and the [roadmap](roadmap.md) change in the same pull request (#443).
 - **A plugin ecosystem and registry.** One proven way beats many unvetted ones. An extension is
   a separate package that talks to Lakana only through the public REST API, like any other
   client, under the same authorization and audit. There is no plugin registry, no in-process

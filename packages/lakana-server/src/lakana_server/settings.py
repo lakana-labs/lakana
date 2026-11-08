@@ -146,6 +146,22 @@ class ReadinessConfig(BaseModel):
     environments: list[str] = []
 
 
+class UiConfig(BaseModel):
+    """The web interface (`LAKANA_UI__*`).
+
+    Parameters
+    ----------
+    enabled
+        Whether the server serves the web interface at `/` (default false while the interface
+        is being built; turn it on to try it). The interface's files come with a released
+        server; in a source checkout, build them first:
+        `npm --prefix ui ci && npm --prefix ui run build`. The interface calls only the REST API,
+        with the user's own credential. Until sign-in exists it reads no data.
+    """
+
+    enabled: bool = False
+
+
 class Settings(BaseSettings):
     """Configuration for the control plane.
 
@@ -224,6 +240,8 @@ class Settings(BaseSettings):
         How `/readyz` checks the database, the storages and the workers
         (`LAKANA_READINESS__TIMEOUT_SECONDS`, `LAKANA_READINESS__CACHE_SECONDS`,
         `LAKANA_READINESS__ENVIRONMENTS`).
+    ui
+        The web interface, `UiConfig`.
     host
         Address the server listens on. `127.0.0.1` (the default) accepts connections from this
         machine only; the Compose bundle publishes the port through `LAKANA_BIND`.
@@ -267,6 +285,7 @@ class Settings(BaseSettings):
     log: LogConfig = LogConfig()
     ci_oidc: CiOidcConfig = CiOidcConfig()
     readiness: ReadinessConfig = ReadinessConfig()
+    ui: UiConfig = UiConfig()
     host: str = "127.0.0.1"
     port: int = 8000
     repo_roots: list[str] = []

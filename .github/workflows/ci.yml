@@ -134,6 +134,96 @@ jobs:
             --format python --min-tokens 70 --reporters json --output jscpd-report --silent
       - name: duplication (ratchet)
         run: uv run python scripts/duplication_ratchet.py
+      # The same for the interface's source, with its own baseline.
+      - name: duplication of ui/ (jscpd)
+        run: |
+          tools/jscpd/node_modules/.bin/jscpd ui/src --format typescript,tsx --ignore "**/*.test.ts,**/*.test.tsx" \
+            --min-tokens 70 --reporters json --output jscpd-report-ui --silent
+      - name: duplication of ui/ (ratchet)
+        run: uv run python scripts/duplication_ratchet.py --report jscpd-report-ui/jscpd-report.json --baseline scripts/duplication-baseline-ui.json
+
+  # The web interface (ui/): every gate of `npm --prefix ui run check`, the coverage ratchet, the
+  # Playwright smoke test on Chromium, and `prove-gates`, which shows each gate still fails on a
+  # violation. It runs on drafts too, and only when the interface, a tool its gates run or this
+  # workflow changed. See docs/agent/testing.md, "The ui/ gates".
+  ui:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Did the interface change?
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Anything but a pull request that provably changes nothing relevant runs the job.
+          if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null \
+            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|packages/lakana-server/(src/lakana_server/ui|tests/test_ui_real_build)\.py|\.github/workflows/ci\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change to ui/ or its gates: skipping the interface's gates."
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - if: steps.scope.outputs.run == 'true'
+        name: install
+        run: npm ci --ignore-scripts --prefix ui
+      - if: steps.scope.outputs.run == 'true'
+        name: ESLint
+        run: npm --prefix ui run lint
+      - if: steps.scope.outputs.run == 'true'
+        name: Prettier
+        run: npm --prefix ui run format:check
+      - if: steps.scope.outputs.run == 'true'
+        name: tsc
+        run: npm --prefix ui run typecheck
+      - if: steps.scope.outputs.run == 'true'
+        name: dependency-cruiser
+        run: npm --prefix ui run depcruise
+      - if: steps.scope.outputs.run == 'true'
+        name: knip
+        run: npm --prefix ui run knip
+      - if: steps.scope.outputs.run == 'true'
+        name: Vitest with coverage
+        run: npm --prefix ui run test:coverage
+      - if: steps.scope.outputs.run == 'true'
+        name: coverage ratchet
+        run: python3 -m scripts.ui_coverage_ratchet
+      - if: steps.scope.outputs.run == 'true'
+        name: build
+        run: npm --prefix ui run build
+      - if: steps.scope.outputs.run == 'true'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      # The real build served by the real lakana-server: the page's policy, everything it loads.
+      - if: steps.scope.outputs.run == 'true'
+        name: the build served by lakana-server
+        run: |
+          uv sync --all-packages --locked
+          uv run pytest packages/lakana-server/tests/test_ui_real_build.py -q -p no:cacheprovider
+      - if: steps.scope.outputs.run == 'true'
+        name: size-limit
+        run: npm --prefix ui run size
+      - if: steps.scope.outputs.run == 'true'
+        name: Playwright smoke test (Chromium)
+        run: |
+          npx --prefix ui playwright install --with-deps chromium
+          npm --prefix ui run e2e:smoke
+      - if: steps.scope.outputs.run == 'true'
+        name: every gate fails on a violation
+        env:
+          GATE_PROBE_DIR: ${{ runner.temp }}/gate-probe
+        run: |
+          npm ci --ignore-scripts --prefix tools/jscpd
+          npm --prefix ui run prove-gates
 
   # The unit suite in three shards per Python version, side by side. `LAKANA_TEST_SHARD=I/N`
   # (scripts/pytest_selection.py) keeps whole test files, spread by the seconds in
@@ -750,7 +840,7 @@ jobs:
   # "Time budgets".
   budgets:
     name: time budgets
-    needs: [lint, test, test-macos, docs, docs-examples, integration, five-minute, compose-smoke, quarantine]
+    needs: [lint, ui, test, test-macos, docs, docs-examples, integration, five-minute, compose-smoke, quarantine]
     if: ${{ !cancelled() }}
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5

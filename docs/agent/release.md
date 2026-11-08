@@ -75,12 +75,12 @@ schema conventional-changelog uses):
 | `perf` | Performance Improvements | yes |
 | `revert` | Reverts | yes |
 | `docs` | Documentation | yes |
-| `deps` | Dependencies (Dependabot's `uv` updates) | yes |
+| `deps` | Dependencies (Dependabot's `uv` updates and the interface's runtime npm packages) | yes |
 | `refactor`, `test`, `ci`, `build`, `chore` | — | hidden |
 
 A breaking change is listed under **⚠ BREAKING CHANGES** with its footer text, so write
 the footer for the reader who has to migrate. Dependabot's GitHub Actions updates use the
-`ci` prefix and stay hidden. release-please titles its own PR `chore(release): release
+`ci` prefix and the interface's development tools the `build` prefix; both stay hidden. release-please titles its own PR `chore(release): release
 <version>` (`pull-request-title-pattern`), which passes the same lint.
 
 We use release-please rather than conventional-changelog's own CLI: it already parses
@@ -197,14 +197,16 @@ both. Register the four as pending publishers before the first release (account 
 
 ## One approval before anything is published
 
-The job **`approve`** is the release's only gate. It `needs` `release-please` and `build`,
+The job **`approve`** is the release's only gate. It `needs` `release-please`, `build` (and
+through it `ui-build`) and `ui-browsers`,
 runs in the environment `release-approval`, has `permissions: {}`, checks nothing out and runs
 one `echo`. The run stops there until the maintainer approves it (Actions run page, "Review
 deployments"). Every job that publishes or signs depends on it, directly or through its
 `needs`: the four PyPI jobs, `publish-image` and `attest-image`, `attest-dist` and
 `provenance-release`, `openapi` and `sbom-release`, `pages` and `pages-deploy`. `release-please` (tag and
-GitHub release), `build` and `sbom` run before the gate: they upload nothing but workflow
-artifacts (`dist`, the SBOM), which logged-in users can download from a public repository. The
+GitHub release), `ui-build`, `build`, `ui-browsers` and `sbom` run before the gate: they upload nothing but
+workflow artifacts (`ui-dist`, `dist`, the SBOM), which logged-in users can download from a public
+repository. The
 two smoke jobs follow the publish jobs, so they run after it too.
 **Rejecting publishes nothing**: PyPI, the registry, the release page and the docs site stay
 as they were. The tag and the GitHub release already exist. To retry, use **"Re-run failed jobs"** on the
@@ -216,9 +218,9 @@ approve or reject promptly.
 
 `scripts/tests/test_workflows.py` pins the job (its full key set, so it can gain no
 `continue-on-error`, permission or `uses:`) and that every job apart from `release-please`,
-`build` and `sbom` reaches it through `needs` with no status function (`always()`, `cancelled()`,
-`failure()`, `success()`, negated or not) in its `if`, and that `build` and `sbom` hold no write
-permission and read no secret. A new job after the gate needs no test change; a new job before it
+`ui-build`, `build`, `ui-browsers` and `sbom` reaches it through `needs` with no status function
+(`always()`, `cancelled()`, `failure()`, `success()`, negated or not) in its `if`, and that
+`ui-build`, `build`, `ui-browsers` and `sbom` hold no write permission and read no secret. A new job after the gate needs no test change; a new job before it
 has to be added to the test's list on purpose.
 
 **Maintainer setup, before the next release.** The workflow cannot create the environment's
@@ -230,6 +232,40 @@ release PR, so nobody could approve. "Allow administrators to bypass" stays on (
 which is acceptable for a sole maintainer. Then remove the required reviewer from `pypi-lakana`, which asked on its own until now; keep
 its branch rule and that of the other three PyPI environments (the trusted publishers name
 them).
+
+## The web interface in the wheel
+
+The web interface (`ui/`) reaches users inside the `lakana-server` wheel, and the container
+image through it: `npm --prefix ui run build` writes it to
+`packages/lakana-server/src/lakana_server/ui_dist/`, which is git-ignored, so hatch would leave
+it out. `[tool.hatch.build] artifacts = ["src/lakana_server/ui_dist/**"]` in
+`packages/lakana-server/pyproject.toml` brings it back, for the sdist **and** the wheel: `uv
+build` builds the wheel from the sdist, so an `artifacts` line under `targets.wheel` alone would
+not reach it (a target's own `artifacts` would replace the shared one;
+`test_the_sdist_and_the_wheel_carry_the_built_interface` refuses both).
+
+- **`ui-build`** sets up Node from `ui/.nvmrc` (the setup-node pin of `ci.yml`, no npm cache),
+  runs `npm ci --ignore-scripts --prefix ui` and `npm --prefix ui run build`, and uploads
+  `ui_dist` as the artifact `ui-dist`. It is a job of its own, read-only (`contents: read`, no
+  `id-token`, no secret, `persist-credentials: false`), because npm runs the code of about 370
+  build-time packages (Vite, Rolldown, Lightning CSS, plugins). In the job that builds the
+  wheels, a compromised version of one of them, in the lock and without an advisory yet, could
+  rewrite `packages/*/src` and poison all four wheels, the image built from them and the
+  attestations that then sign them. In its own job it can change only the interface.
+- **`build`** runs no npm and sets up no Node: it downloads `ui-dist` into
+  `packages/lakana-server/src/lakana_server/ui_dist`, then runs `uv build
+  --all-packages`, then fails unless `lakana_server/ui_dist/index.html`, `csp.txt` (the policy the server
+  sends; without it the server refuses to start with the interface on) and
+  `licenses/THIRD-PARTY-NOTICES.md` (the bundled packages' licence notices) are in the server
+  wheel. The image installs that wheel, so it carries the same files.
+- **`ui-browsers`** runs the interface's whole Playwright suite (`e2e:all`) in Chromium, Firefox
+  and WebKit on the tag, read-only, before the approval; a pull request runs Chromium only (the
+  `ui` job of `ci.yml`). A failure there stops the release before anything is published.
+- A wheel built without the interface (CI's, a source checkout's) serves it only after
+  `npm --prefix ui ci && npm --prefix ui run build`; with `LAKANA_UI__ENABLED=true` and no build,
+  the server refuses to start and says so.
+
+`scripts/tests/test_workflows.py` pins the order of these steps and the job.
 
 ## Publishing in dependency order
 

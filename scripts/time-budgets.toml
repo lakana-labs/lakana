@@ -15,6 +15,7 @@
 "compose-smoke" = 15
 "five-minute" = 10
 "lint" = 10
+"ui" = 10
 "docs" = 10
 "changes" = 5
 "quarantined tests" = 10

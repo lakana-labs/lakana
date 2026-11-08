@@ -7,6 +7,7 @@ metadata database migrations and exits. Both read `LAKANA_*` settings.
 from __future__ import annotations
 
 import argparse
+import sys
 
 import uvicorn
 
@@ -15,6 +16,7 @@ from lakana_core.log_setup import configure_logging
 from lakana_server.app import create_app
 from lakana_server.log_config import uvicorn_log_config
 from lakana_server.settings import Settings
+from lakana_server.ui import UiNotBuiltError
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -25,6 +27,13 @@ def main(argv: list[str] | None = None) -> None:
     argv
         Command-line arguments without the program name; `sys.argv[1:]` when
         `None`.
+
+    Raises
+    ------
+    SystemExit
+        With code 1 when `LAKANA_UI__ENABLED` is true and the installation has no usable
+        build of the interface; the message (cause and next steps) goes to stderr alone,
+        without a traceback.
 
     Notes
     -----
@@ -44,8 +53,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "migrate":
         migrate.upgrade(settings.database.url)
         return
+    try:
+        app = create_app(settings)
+    except UiNotBuiltError as error:
+        print(f"lakana-server: {error}", file=sys.stderr)
+        raise SystemExit(1) from None
     uvicorn.run(
-        create_app(settings),
+        app,
         host=settings.host,
         port=settings.port,
         log_level=settings.log.level.lower(),

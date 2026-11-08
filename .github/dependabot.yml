@@ -61,3 +61,30 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "ci"            # a tool of CI, hidden from the changelog
+
+  - package-ecosystem: "npm"
+    directory: "/ui"              # the web interface: exact pins, see docs/agent/conventions.md
+    schedule:
+      interval: "weekly"
+    groups:
+      ui-runtime:                     # what ships: one pull request per week
+        dependency-type: "production"
+        patterns: ["*"]
+      # Development tools upgrade one per pull request (the pinned-tool rule), except these exact
+      # pins, which only work together. typescript and typescript-eslint stay apart on purpose:
+      # TypeScript 7 is held back until typescript-eslint supports it.
+      ui-vitest:
+        dependency-type: "development"
+        patterns: ["vitest", "@vitest/*"]
+      ui-size-limit:
+        dependency-type: "development"
+        patterns: ["size-limit", "@size-limit/*"]
+      ui-react-types:
+        dependency-type: "development"
+        patterns: ["@types/react", "@types/react-dom"]
+      ui-testing-library:
+        dependency-type: "development"
+        patterns: ["@testing-library/*"]
+    commit-message:
+      prefix: "deps"                  # runtime: the "Dependencies" section of the changelog
+      prefix-development: "build"     # a tool: hidden from the changelog

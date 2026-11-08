@@ -13,6 +13,7 @@ and plan: `docs/site/explanation/scope.md` and `docs/site/explanation/roadmap.md
 | `packages/lakana-server` | `lakana_server` | FastAPI control plane and Iceberg REST catalog. **Never imports pyiceberg or fsspec** — it calls core. |
 | `packages/lakana-worker` | `lakana_worker` | The DuckDB query executor and dequeue loop. **The only package allowed to import `duckdb`.** Never imports `lakana-server`. |
 | `packages/lakana` | `lakana` | SDK and CLI. Depends on none of the above. |
+| `ui/` | — | The web interface (React, TypeScript, Vite). Calls only the public REST API; its build ships inside the `lakana-server` wheel. |
 
 import-linter enforces these boundaries; `uv run lint-imports` checks them.
 
@@ -26,7 +27,9 @@ import-linter enforces these boundaries; `uv run lint-imports` checks them.
    copyleft (MPL, EPL, CDDL, EUPL) only unmodified and only via a justified entry in
    `scripts/check_licenses.py`'s `ALLOWLIST` — CI fails otherwise. Covers Python **and npm**:
    any `package-lock.json` is checked (SPDX `OR` passes if any alternative is permissive;
-   a missing licence fails); pnpm/yarn lockfiles are refused until supported.
+   a missing licence fails); pnpm/yarn lockfiles are refused until supported. Fonts under the SIL OFL only from
+   `scripts/check_licenses.py`'s `FONT_PACKAGES`, bundled unmodified and never subset
+   (`docs/agent/conventions.md`).
 5. **Run the gates before claiming done.** Locally, before a push: `ruff check`,
    `ruff format --check`, `ty check packages`, `lint-imports`, and the changed packages' own tests
    plus every test that imports a changed package (`scripts/select_tests.py` reads the imports
@@ -35,7 +38,9 @@ import-linter enforces these boundaries; `uv run lint-imports` checks them.
    `pytest --cov --cov-report=json` with `scripts/coverage_ratchet.py`, and Python 3.11, 3.13
    and macOS. A local pytest is not a ratchet result and must never be presented as one — the
    ratchet refuses a report older than the code rather than lie
-   (`docs/agent/testing.md`, "Local gates").
+   (`docs/agent/testing.md`, "Local gates"). For `ui/`: `npm --prefix ui run check` and
+   `npm --prefix ui run e2e:smoke` (Node 26; `docs/agent/testing.md`, "The `ui/` gates"); the UI
+   coverage ratchet, npm audit and osv-scanner run in CI.
 6. **When you change a rule, a config, or a licence, grep the docs for what asserted the
    old behaviour and fix it in the same commit.**
 7. **Conventional everything** — CI's `conventional` check enforces all of it:
@@ -46,7 +51,7 @@ import-linter enforces these boundaries; `uv run lint-imports` checks them.
      against `commitlint.config.mjs`). Types: `feat`, `fix`, `perf`, `revert`, `docs`,
      `deps` (Dependabot) — these appear in the changelog — and `refactor`, `test`, `ci`,
      `build`, `chore`, which don't. Optional scope from: `core`, `server`, `worker`, `sdk`,
-     `cli`, `catalog`, `query`, `policy`, `secrets`, `audit`, `security`, `release`, `ci`,
+     `cli`, `ui`, `catalog`, `query`, `policy`, `secrets`, `audit`, `security`, `release`, `ci`,
      `docs`, `deps`.
    - **PR description** (the squash commit's body) ends with a footer paragraph: one
      `Closes #N` **per issue**, and — when the title has `!` — a

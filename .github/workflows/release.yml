@@ -31,6 +31,36 @@ jobs:
           # GITHUB_TOKEN start no workflow runs, so the release PR would get no CI.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
+  # The web interface goes into the lakana-server wheel (hatch `artifacts`). `ui-build` builds
+  # it in a job of its own, so npm and the ~370 packages of its build tools never run in the
+  # checkout the wheels are built from: a compromised build tool can change only `ui_dist`,
+  # never packages/*/src (docs/agent/release.md, "The web interface in the wheel").
+  ui-build:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.tag }}
+      # No npm cache: nothing a cache could hold reaches a release.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+      - name: Install the interface's dependencies
+        run: npm ci --ignore-scripts --prefix ui
+      - name: Build the interface
+        run: npm --prefix ui run build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: ui-dist
+          path: packages/lakana-server/src/lakana_server/ui_dist/
+          if-no-files-found: error
+
   # Four packages, one atomic publish: lakana-server and lakana-worker each
   # pin lakana-core to this exact release, and lakana's `server` extra pins both
   # of those in turn (see docs/agent/release.md), so a partial publish would
@@ -39,7 +69,7 @@ jobs:
   # publish-sdk gate on each other via `needs` so a failed upload stops
   # everything downstream of it instead of leaving a dangling pin.
   build:
-    needs: release-please
+    needs: [release-please, ui-build]
     if: needs.release-please.outputs.released == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -49,9 +79,20 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.release-please.outputs.tag }}
+      - name: Put the built interface where hatch takes it from
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: ui-dist
+          path: packages/lakana-server/src/lakana_server/ui_dist
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
       - name: Build all packages
         run: uv build --all-packages -o dist
+      # The image installs this wheel (Dockerfile), so it carries the same three files.
+      - name: Verify the server wheel carries the interface, its policy and its licence notices
+        run: |
+          unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/index.html'
+          unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/csp.txt'
+          unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/licenses/THIRD-PARTY-NOTICES.md'
       - name: Verify the version carries no local segment
         run: |
           if compgen -G "dist/*+*.whl" > /dev/null; then
@@ -63,11 +104,37 @@ jobs:
           name: dist
           path: dist/
 
+  # The interface's full end-to-end suite in Chromium, Firefox and WebKit, on the release's tag
+  # (a pull request runs Chromium only). Read-only; the approval waits for it.
+  ui-browsers:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.tag }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+      - name: Install the interface's dependencies
+        run: npm ci --ignore-scripts --prefix ui
+      - name: Build the interface
+        run: npm --prefix ui run build
+      - name: Install the three browsers
+        run: npx --prefix ui playwright install --with-deps chromium firefox webkit
+      - name: Every end-to-end test in every browser
+        run: npm --prefix ui run e2e:all
+
   # The one approval of a release: every job that publishes or signs anything waits for it, so
   # rejecting it publishes nothing. It runs no code and holds no permission; the reviewer is set
   # on the `release-approval` environment (Settings > Environments, see docs/agent/release.md).
   approve:
-    needs: [release-please, build]
+    needs: [release-please, build, ui-browsers]
     if: needs.release-please.outputs.released == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5

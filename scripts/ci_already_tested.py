@@ -51,6 +51,7 @@ REQUIRED_JOBS = (
     "five-minute",
     "compose-smoke",
     "docs-examples",
+    "ui",
 )
 """The jobs `main`'s CI skips for a tested commit; each must have succeeded in the pull request."""
 

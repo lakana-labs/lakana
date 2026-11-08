@@ -204,3 +204,22 @@ def test_health_settings_have_defaults_and_read_the_environment(
     assert Settings().health == HealthConfig(retention_days=90)
     monkeypatch.setenv("LAKANA_HEALTH__RETENTION_DAYS", "30")
     assert Settings().health == HealthConfig(retention_days=30)
+
+
+def test_ui_enabled_reads_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`LAKANA_UI__ENABLED=true` turns the web interface on; it is off without it."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/p.db")
+    monkeypatch.delenv("LAKANA_UI__ENABLED", raising=False)
+    assert Settings().ui.enabled is False
+    monkeypatch.setenv("LAKANA_UI__ENABLED", "true")
+    assert Settings().ui.enabled is True
+
+
+def test_ui_enabled_refuses_a_word_that_is_not_a_boolean(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A value that is neither true nor false stops the start, naming the setting."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/p.db")
+    monkeypatch.setenv("LAKANA_UI__ENABLED", "maybe")
+    with pytest.raises(pydantic.ValidationError, match=r"ui\.enabled"):
+        Settings()

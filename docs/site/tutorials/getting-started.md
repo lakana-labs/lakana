@@ -7,7 +7,10 @@ Docker or a database server.
 
 Lakana is pre-beta: the API and the data layout may change between 0.x releases, so do not put
 production data in it yet. It has no web interface yet: everything in this tutorial is done in a
-terminal with the CLI, and the interface is planned before the public beta.
+terminal with the CLI, and the interface is planned before the public beta. A first preview of
+it, which shows no data yet, is off by default: set `LAKANA_UI__ENABLED` to `true` in the
+environment you start the instance from, then open the address it prints in a browser (see the
+[settings reference](../reference/settings.md)).
 
 You need Python 3.11 or newer (on macOS: Python 3.13 or newer) and git. With an older Python on macOS, `lakana server start --local` stops before it starts anything and says so. Once Lakana is installed, plan on ten minutes.
 

@@ -271,7 +271,7 @@ def test_each_package_publishes_to_production_pypi_from_its_own_environment() ->
     }
 
 
-_BEFORE_THE_GATE = {"release-please", "build", "sbom", "approve"}
+_BEFORE_THE_GATE = {"release-please", "ui-build", "build", "ui-browsers", "sbom", "approve"}
 _APPROVE_KEYS = {"needs", "if", "runs-on", "timeout-minutes", "environment", "permissions", "steps"}
 _STATUS_FUNCTIONS = re.compile(r"\b(always|cancelled|failure|success)\s*\(")
 """Any status function in an ``if`` drops the implicit ``success() &&``.
@@ -326,8 +326,8 @@ def _gate_violations(jobs: dict) -> list[str]:
     steps = approve.get("steps", [])
     if len(steps) != 1 or set(steps[0]) - {"run", "env"} or "run" not in steps[0]:
         problems.append("approve runs more than one plain `run` step")
-    if set(approve.get("needs", [])) != {"release-please", "build"}:
-        problems.append("approve does not need release-please and build")
+    if set(approve.get("needs", [])) != {"release-please", "build", "ui-browsers"}:
+        problems.append("approve does not need release-please, build and ui-browsers")
     for name, job in jobs.items():
         if name in _BEFORE_THE_GATE:
             if name in {"release-please", "approve"}:
@@ -347,7 +347,10 @@ def _gate_violations(jobs: dict) -> list[str]:
 
 
 def test_one_approval_job_gates_a_release() -> None:
-    """Only release-please, build and sbom run before ``approve``; none runs after a rejection."""
+    """Only release-please, ui-build, build, ui-browsers and sbom run before ``approve``.
+
+    None runs after a rejection.
+    """
     jobs = _jobs("release.yml")
     assert _gate_violations(jobs) == []
     assert jobs["approve"]["if"] == "needs.release-please.outputs.released == 'true'"
@@ -373,6 +376,10 @@ def test_one_approval_job_gates_a_release() -> None:
             "`build` runs before the gate with a write permission",
         ),
         (
+            lambda j: j["ui-build"].update(permissions={"contents": "read", "id-token": "write"}),
+            "`ui-build` runs before the gate with a write permission",
+        ),
+        (
             lambda j: j["sbom"]["steps"].append({"run": "x", "env": {"T": "${{ secrets.T }}"}}),
             "`sbom` runs before the gate and reads a secret",
         ),
@@ -391,6 +398,180 @@ def test_the_gate_check_catches_a_broken_workflow(
     assert any(expected in problem for problem in _gate_violations(jobs))
 
 
+_SETUP_NODE = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
+
+
+def _step_index(steps: list[dict], predicate: Callable[[dict], bool], what: str) -> int:
+    """Find the first step that matches, failing with its description when none does.
+
+    Parameters
+    ----------
+    steps
+        A job's steps.
+    predicate
+        Tells whether a step is the one looked for.
+    what
+        What the step is, for the failure message.
+
+    Returns
+    -------
+    int
+        The step's position.
+    """
+    found = [i for i, step in enumerate(steps) if predicate(step)]
+    assert found, f"no step: {what}"
+    return found[0]
+
+
+def _runs(command: str) -> Callable[[dict], bool]:
+    """Match a step whose ``run`` script has a line that is exactly ``command``.
+
+    Parameters
+    ----------
+    command
+        The command line.
+
+    Returns
+    -------
+    callable
+        The predicate.
+    """
+    return lambda step: command in _commands(step)
+
+
+def _node_from_the_nvmrc(step: dict) -> bool:
+    """Tell whether a step is ``ci.yml``'s setup-node, taking Node from ``ui/.nvmrc``.
+
+    Parameters
+    ----------
+    step
+        A workflow step.
+
+    Returns
+    -------
+    bool
+        ``True`` for that step.
+    """
+    return (
+        str(step.get("uses", "")).startswith(_SETUP_NODE)
+        and step.get("with", {}).get("node-version-file") == "ui/.nvmrc"
+    )
+
+
+def test_ci_and_the_release_take_node_from_the_same_action() -> None:
+    """The pinned setup-node of the release is the one ``ci.yml`` uses."""
+    steps = _jobs("ci.yml")["ui"]["steps"]
+    assert any(str(s.get("uses", "")).startswith(_SETUP_NODE) for s in steps)
+
+
+_UI_DIST = "packages/lakana-server/src/lakana_server/ui_dist"
+
+
+def _is(action: str) -> Callable[[dict], bool]:
+    """Match a step that uses a pinned action.
+
+    Parameters
+    ----------
+    action
+        The action's name, without the pin (e.g. ``actions/checkout``).
+
+    Returns
+    -------
+    Callable
+        The predicate for ``_step_index``.
+    """
+    return lambda step: str(step.get("uses", "")).startswith(f"{action}@")
+
+
+def test_the_release_builds_the_interface_in_a_read_only_job() -> None:
+    """The npm build runs in a job of its own, which can sign and publish nothing.
+
+    Only the built interface leaves it, as an artifact, so a compromised build tool can
+    change nothing but ``ui_dist``.
+    """
+    job = _jobs("release.yml")["ui-build"]
+    assert job["needs"] == "release-please"
+    assert job["if"] == "needs.release-please.outputs.released == 'true'"
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["permissions"] == {"contents": "read"}
+    assert "secrets" not in str(job)
+    steps = job["steps"]
+    checkout = _step_index(steps, _is("actions/checkout"), "checkout")
+    assert steps[checkout]["with"] == {
+        "persist-credentials": False,
+        "ref": "${{ needs.release-please.outputs.tag }}",
+    }
+    node = _step_index(steps, _node_from_the_nvmrc, "setup-node from ui/.nvmrc")
+    assert "cache" not in steps[node]["with"]
+    install = _step_index(steps, _runs("npm ci --ignore-scripts --prefix ui"), "npm ci")
+    build_ui = _step_index(steps, _runs("npm --prefix ui run build"), "the interface's build")
+    upload = _step_index(steps, _is("actions/upload-artifact"), "the upload of the build")
+    assert steps[upload]["with"] == {
+        "name": "ui-dist",
+        "path": f"{_UI_DIST}/",
+        "if-no-files-found": "error",
+    }
+    assert checkout < node < install < build_ui < upload
+
+
+def test_the_release_builds_the_interface_before_the_wheels() -> None:
+    """The wheel ships the built interface, and the job fails when it does not.
+
+    The job that builds every wheel runs no npm: it downloads the interface ``ui-build`` made.
+    """
+    job = _jobs("release.yml")["build"]
+    assert set(job["needs"]) == {"release-please", "ui-build"}
+    steps = job["steps"]
+    assert not any("npm" in str(s.get("run", "")) for s in steps), "build runs npm"
+    assert not any(_is("actions/setup-node")(s) for s in steps), "build sets up Node"
+    checkout = _step_index(steps, _is("actions/checkout"), "checkout")
+    download = _step_index(steps, _is("actions/download-artifact"), "the interface's download")
+    assert steps[download]["with"] == {"name": "ui-dist", "path": _UI_DIST}
+    wheels = _step_index(steps, _runs("uv build --all-packages -o dist"), "uv build")
+    check = _step_index(
+        steps,
+        _runs("unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/index.html'"),
+        "the check of the wheel",
+    )
+    assert _runs("unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/csp.txt'")(
+        steps[check]
+    ), "the wheel's check misses the policy file the server needs"
+    assert _runs(
+        "unzip -l dist/lakana_server-*.whl"
+        " | grep -q 'lakana_server/ui_dist/licenses/THIRD-PARTY-NOTICES.md'"
+    )(steps[check]), "the wheel's check misses the bundled packages' licence notices"
+    assert checkout < download < wheels < check
+
+
+def test_the_release_runs_every_browser_before_the_approval() -> None:
+    """The full Playwright suite runs in Chromium, Firefox and WebKit on the release's tag."""
+    jobs = _jobs("release.yml")
+    job = jobs["ui-browsers"]
+    assert job["needs"] == "release-please"
+    assert job["if"] == "needs.release-please.outputs.released == 'true'"
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["permissions"] == {"contents": "read"}
+    steps = job["steps"]
+    checkout = _step_index(
+        steps, lambda s: str(s.get("uses", "")).startswith("actions/checkout@"), "checkout"
+    )
+    assert steps[checkout]["with"]["ref"] == "${{ needs.release-please.outputs.tag }}"
+    order = [
+        checkout,
+        _step_index(steps, _node_from_the_nvmrc, "setup-node from ui/.nvmrc"),
+        _step_index(steps, _runs("npm ci --ignore-scripts --prefix ui"), "npm ci"),
+        _step_index(steps, _runs("npm --prefix ui run build"), "the interface's build"),
+        _step_index(
+            steps,
+            _runs("npx --prefix ui playwright install --with-deps chromium firefox webkit"),
+            "the three browsers",
+        ),
+        _step_index(steps, _runs("npm --prefix ui run e2e:all"), "the full suite"),
+    ]
+    assert order == sorted(order)
+    assert "ui-browsers" in jobs["approve"]["needs"]
+
+
 def test_no_release_step_points_at_the_test_index() -> None:
     """Production PyPI is the default; no step overrides it with a repository or index URL."""
     text = (WORKFLOWS / "release.yml").read_text()
@@ -401,7 +582,9 @@ def test_no_release_step_points_at_the_test_index() -> None:
 def test_dependabot_groups_its_updates_and_keeps_the_pinned_tools_apart() -> None:
     """One pull request per ecosystem and week; ruff and ty upgrade in their own."""
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
-    updates = {entry["package-ecosystem"]: entry for entry in config["updates"]}
+    # The interface's own entry has its own rules: see the test after the next one.
+    rest = [entry for entry in config["updates"] if entry["directory"] != "/ui"]
+    updates = {entry["package-ecosystem"]: entry for entry in rest}
     assert set(updates) == {"uv", "github-actions", "docker", "pip", "npm"}
     for ecosystem, entry in updates.items():
         groups = entry["groups"]
@@ -415,8 +598,9 @@ def test_dependabot_groups_its_updates_and_keeps_the_pinned_tools_apart() -> Non
 def test_dependabot_watches_the_pinned_jscpd() -> None:
     """The lockfile of the duplication check is updated by Dependabot, as a hidden `ci` change."""
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
-    (npm,) = (entry for entry in config["updates"] if entry["package-ecosystem"] == "npm")
-    assert npm["directory"] == "/tools/jscpd"
+    npm = {e["directory"]: e for e in config["updates"] if e["package-ecosystem"] == "npm"}
+    assert set(npm) == {"/tools/jscpd", "/ui"}
+    npm = npm["/tools/jscpd"]
     assert npm["commit-message"]["prefix"] == "ci"
     assert (ROOT / "tools" / "jscpd" / "package-lock.json").is_file()
 
@@ -458,6 +642,212 @@ def test_lint_keeps_the_read_only_token_while_it_runs_jscpd() -> None:
     workflow = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())
     assert workflow["permissions"] == {"contents": "read"}
     assert "permissions" not in workflow["jobs"]["lint"]
+
+
+UI_GATES = (
+    "npm ci --ignore-scripts --prefix ui",
+    "run lint",
+    "run format:check",
+    "run typecheck",
+    "run depcruise",
+    "run knip",
+    "run test:coverage",
+    "scripts.ui_coverage_ratchet",
+    "run build",
+    "pytest packages/lakana-server/tests/test_ui_real_build.py",
+    "run size",
+    "playwright install --with-deps chromium",
+    "run e2e:smoke",
+    "run prove-gates",
+)
+
+
+def test_the_ui_job_runs_every_gate() -> None:
+    """Every gate of the interface, in the order ``npm --prefix ui run check`` runs them.
+
+    The coverage ratchet reads the report the coverage run has just written, the size check
+    measures the build, the smoke test serves it, and ``prove-gates`` shows that each gate
+    still fails on a violation.
+    """
+    job = _jobs("ci.yml")["ui"]
+    commands = [command for step in job["steps"] for command in _commands(step)]
+    found = []
+    for gate in UI_GATES:
+        found.append(next(i for i, c in enumerate(commands) if gate in c))
+    assert found == sorted(found)
+    jscpd = next(i for i, c in enumerate(commands) if "--prefix tools/jscpd" in c)
+    assert jscpd < found[-1]
+    probe = next(s for s in job["steps"] if "run prove-gates" in str(s.get("run")))
+    assert probe["env"]["GATE_PROBE_DIR"] == "${{ runner.temp }}/gate-probe"
+    assert job["timeout-minutes"] == 15
+    assert job["needs"] == "changes"
+
+
+def test_the_ui_job_takes_node_from_the_nvmrc() -> None:
+    """One Node version, written once: ``ui/.nvmrc``; the npm cache keys on the lock."""
+    steps = _jobs("ci.yml")["ui"]["steps"]
+    node = next(s for s in steps if str(s.get("uses", "")).startswith("actions/setup-node"))
+    assert node["with"]["node-version-file"] == "ui/.nvmrc"
+    assert node["with"]["cache-dependency-path"] == "ui/package-lock.json"
+    assert "node-version" not in node["with"]
+
+
+def _run_ui_scope_step(tmp_path: Path, changed: str) -> str:
+    """Run the ``scope`` step of the ``ui`` job over a pull request that changes one file.
+
+    Parameters
+    ----------
+    tmp_path
+        Directory for the scratch repository and the output file.
+    changed
+        The file the pull request's one commit adds.
+
+    Returns
+    -------
+    str
+        The content the step wrote to ``GITHUB_OUTPUT``.
+    """
+    steps = _jobs("ci.yml")["ui"]["steps"]
+    step = next(s for s in steps if s.get("id") == "scope")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    out = tmp_path / "out"
+    out.write_text("")
+    env = {**os.environ, "GITHUB_OUTPUT": str(out), "GIT_CONFIG_GLOBAL": os.devnull}
+
+    def git(*args: str) -> str:
+        done = subprocess.run(
+            ["git", *args], cwd=repo, env=env, check=True, capture_output=True, text=True
+        )
+        return done.stdout.strip()
+
+    def commit(name: str) -> None:
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text("x")
+        git("add", "-A")
+        git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", name)
+
+    git("init", "-q")
+    commit("README.md")
+    base = git("rev-parse", "HEAD")
+    commit(changed)
+    env |= {"EVENT": "pull_request", "BASE_SHA": base}
+    assert set(step["env"]) == {"EVENT", "BASE_SHA"}
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True)
+    return out.read_text()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "ui/src/App.tsx",
+        "ui/package-lock.json",
+        "tools/jscpd/package.json",
+        ".github/workflows/ci.yml",
+        "scripts/ui_coverage_ratchet.py",
+        "packages/lakana-server/src/lakana_server/ui.py",
+        "packages/lakana-server/tests/test_ui_real_build.py",
+    ],
+)
+def test_the_ui_job_runs_for_a_ui_change(path: str, tmp_path: Path) -> None:
+    """A change to the interface, to a tool its gates run, to its serving or to this workflow."""
+    assert "run=true" in _run_ui_scope_step(tmp_path, path)
+
+
+@pytest.mark.parametrize("path", ["packages/lakana/src/lakana/cli.py", "docs/site/index.md"])
+def test_the_ui_job_skips_a_change_outside_ui(path: str, tmp_path: Path) -> None:
+    """A pull request that provably touches nothing of the interface skips its gates."""
+    assert _run_ui_scope_step(tmp_path, path) == ""
+
+
+def test_every_ui_step_after_the_scope_waits_for_it() -> None:
+    """A skipped scope skips everything but the checkout and the scope step itself."""
+    steps = _jobs("ci.yml")["ui"]["steps"]
+    scope = next(i for i, s in enumerate(steps) if s.get("id") == "scope")
+    assert all(s["if"] == "steps.scope.outputs.run == 'true'" for s in steps[scope + 1 :])
+
+
+def test_lint_measures_duplication_in_ui_too() -> None:
+    """A second jscpd run over ``ui/src``, tests left out, with its own baseline."""
+    commands = [c for step in _jobs("ci.yml")["lint"]["steps"] for c in _commands(step)]
+    scan = next(i for i, c in enumerate(commands) if "jscpd ui/src" in c)
+    ratchet = next(i for i, c in enumerate(commands) if "duplication-baseline-ui.json" in c)
+    assert scan < ratchet
+    assert "--format typescript,tsx" in commands[scan]
+    assert "--min-tokens 70" in commands[scan]
+    assert "--output jscpd-report-ui" in commands[scan]
+    assert '--ignore "**/*.test.ts,**/*.test.tsx"' in commands[scan]
+    assert "--report jscpd-report-ui/jscpd-report.json" in commands[ratchet]
+    assert "--baseline scripts/duplication-baseline-ui.json" in commands[ratchet]
+    assert (ROOT / "scripts" / "duplication-baseline-ui.json").is_file()
+
+
+def test_the_npm_audit_job_audits_both_locks_and_proves_it_fails() -> None:
+    """Both npm locks are audited at the lowest level, and the audit is proved to fail.
+
+    ``npm audit`` and osv-scanner read the locks of ``ui/`` and ``tools/jscpd``; the last step
+    generates a lock with a known advisory at run time (never committed) and requires both to fail.
+    """
+    job = _jobs("security.yml")["npm-audit"]
+    assert job["name"] == "npm audit"
+    assert job["needs"] == "changes"
+    assert job["if"] == _jobs("security.yml")["static"]["if"]
+    commands = [c for step in job["steps"] for c in _commands(step)]
+    text = "\n".join(commands)
+    for prefix in ("ui", "tools/jscpd"):
+        assert f"npm audit --audit-level=low --prefix {prefix}" in text
+    scan = next(c for c in commands if 'osv-scanner" scan source' in c)
+    assert "--lockfile ui/package-lock.json" in scan
+    assert "--lockfile tools/jscpd/package-lock.json" in scan
+    probe = next(s for s in job["steps"] if "known advisory" in s.get("name", ""))
+    assert "npm install --package-lock-only --ignore-scripts lodash@4.17.20" in probe["run"]
+    assert "$RUNNER_TEMP/audit-probe" in probe["run"]
+    assert probe is job["steps"][-1]
+    node = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-node"))
+    assert node["with"]["node-version-file"] == "ui/.nvmrc"
+    assert "audit-level=low" in text and "audit-level=moderate" not in text
+
+
+def test_osv_scanner_is_the_checksummed_binary() -> None:
+    """One pinned osv-scanner release (Apache-2.0), refused unless its SHA-256 matches."""
+    job = _jobs("security.yml")["npm-audit"]
+    commands = "\n".join(c for s in job["steps"] for c in _commands(s))
+    assert "sha256sum -c" in commands
+    assert "releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64" in commands
+    env = next(s["env"] for s in job["steps"] if "OSV_SCANNER_SHA256" in s.get("env", {}))
+    assert env["OSV_SCANNER_VERSION"] == "2.7.0"
+    assert re.fullmatch(r"[0-9a-f]{64}", env["OSV_SCANNER_SHA256"])
+    # No permissions of its own: it keeps the workflow's read-only token.
+    assert "permissions" not in job
+    assert yaml.safe_load((WORKFLOWS / "security.yml").read_text())["permissions"] == {
+        "contents": "read"
+    }
+
+
+UI_LOCKSTEP = {
+    "ui-vitest": ["vitest", "@vitest/*"],
+    "ui-size-limit": ["size-limit", "@size-limit/*"],
+    "ui-react-types": ["@types/react", "@types/react-dom"],
+    "ui-testing-library": ["@testing-library/*"],
+}
+
+
+def test_dependabot_watches_ui_and_keeps_the_gate_tools_apart() -> None:
+    """Runtime packages move together; each gate tool moves alone, except exact lockstep pins.
+
+    ``typescript`` and ``typescript-eslint`` stay apart on purpose: TypeScript 7 is held back
+    until typescript-eslint supports it.
+    """
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
+    (ui,) = (e for e in config["updates"] if e["directory"] == "/ui")
+    assert ui["package-ecosystem"] == "npm"
+    assert ui["schedule"]["interval"] == "weekly"
+    assert ui["commit-message"] == {"prefix": "deps", "prefix-development": "build"}
+    groups = dict(ui["groups"])
+    runtime = groups.pop("ui-runtime")
+    assert runtime == {"dependency-type": "production", "patterns": ["*"]}
+    assert {name: group["patterns"] for name, group in groups.items()} == UI_LOCKSTEP
+    assert all(group["dependency-type"] == "development" for group in groups.values())
 
 
 def _test_steps(job: str = "test") -> dict[str, dict]:
@@ -764,6 +1154,7 @@ HEAVY_ON_READY = (
 )
 DRAFT_RUNS = (
     "lint",
+    "ui",
     "unit",
     "docs-examples",
     "docs-examples-shard",
@@ -816,6 +1207,7 @@ ALREADY_TESTED_OUTPUT = (
 )
 SKIPPED_WHEN_TESTED = (
     "unit",
+    "ui",
     "test",
     "integration",
     "integration-services",
@@ -959,6 +1351,7 @@ EVENTS = {
 }
 _FULL_RUN = {
     "lint",
+    "ui",
     "unit",
     "test",
     "unit-macos",
@@ -978,6 +1371,7 @@ _FULL_RUN = {
 WHAT_RUNS = {
     "push to a draft": {
         "lint",
+        "ui",
         "unit",
         "test",
         "docs",

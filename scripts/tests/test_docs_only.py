@@ -14,6 +14,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 SKIPPED_JOBS = {
     "ci.yml": (
         "lint",
+        "ui",
         "unit",
         "integration",
         "integration-services",
@@ -27,7 +28,7 @@ SKIPPED_JOBS = {
         "test-macos",
         "quarantine",
     ),
-    "security.yml": ("static",),
+    "security.yml": ("static", "npm-audit"),
 }
 ALWAYS_RUN = {
     "ci.yml": ("changes", "test", "docs", "budgets"),

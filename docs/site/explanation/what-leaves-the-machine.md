@@ -73,7 +73,9 @@ A few more things you may see:
   [Get told when a job fails](../how-to/get-told-when-a-job-fails.md).
 - **No OIDC login for people.** The code has none today; the CI OIDC exchange above is for CI
   jobs only.
-- **There is no web interface** in the repository today.
+- **The web interface** (a preview, off by default: `LAKANA_UI__ENABLED`) comes from the server
+  itself, at the same address as the API, and loads nothing from another host: its content
+  security policy allows scripts, styles, fonts, images and requests only from that address.
 - **This documentation site** loads no font, script, image or style sheet from another host, so
   it also works on an internal network.
 

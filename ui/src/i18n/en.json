@@ -1,0 +1,98 @@
+{
+  "status": {
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "warning": "Warning",
+    "running": "Running",
+    "queued": "Queued",
+    "upstream-failed": "Upstream failed",
+    "cancelled": "Cancelled"
+  },
+  "areas": {
+    "home": {
+      "name": "Home",
+      "purpose": "Your instance at a glance: what needs your attention, what you opened recently, and your work."
+    },
+    "catalog": {
+      "name": "Catalog",
+      "purpose": "Find tables, their columns, health and lineage."
+    },
+    "queries": {
+      "name": "Queries",
+      "purpose": "Write SQL, run one query and download its result."
+    },
+    "jobs": {
+      "name": "Jobs",
+      "purpose": "See jobs and their runs; start, cancel and resume them."
+    },
+    "connections": {
+      "name": "Connections",
+      "purpose": "The databases and services your assets load from."
+    },
+    "experiments": {
+      "name": "Experiments"
+    },
+    "access": {
+      "name": "Access",
+      "purpose": "People, groups, grants, tokens and secrets."
+    },
+    "settings": {
+      "name": "Settings",
+      "purpose": "Instance status, environments and how this server is set up."
+    }
+  },
+  "comingSoon": {
+    "part": "This screen comes in part {{part}} of the interface.",
+    "useCli": "Until then, use the command line:",
+    "copy": "Copy command",
+    "copied": "Copied",
+    "selectAndCopy": "Select the line and copy it."
+  },
+  "shell": {
+    "product": "Lakana",
+    "documentTitle": "{{page}} · Lakana",
+    "skip": "Skip to content",
+    "search": "Search",
+    "searchShortcut": {
+      "mac": "⌘ K",
+      "other": "Ctrl K"
+    },
+    "notSignedIn": "Not signed in",
+    "preview": "Preview: sign-in comes later, and nothing here reads your data yet.",
+    "preferences": "Preferences",
+    "theme": "Theme",
+    "themes": {
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "density": "Density",
+    "densities": {
+      "roomy": "Roomy",
+      "compact": "Compact"
+    },
+    "language": "Language",
+    "languages": {
+      "en": "English"
+    },
+    "menu": "Menu"
+  },
+  "palette": {
+    "placeholder": "Go to a place or run a command",
+    "places": "Places",
+    "goTo": "Go to {{area}}",
+    "results_one": "{{count}} place",
+    "results_other": "{{count}} places",
+    "empty": "Nothing matches “{{query}}”."
+  },
+  "notFound": {
+    "title": "This page does not exist",
+    "body": "Check the address, or start again from Home.",
+    "action": "Go to Home"
+  },
+  "notAvailable": {
+    "title": "You cannot use {{area}}",
+    "body": "Ask an administrator if you need it.",
+    "action": "Go to Home"
+  }
+}

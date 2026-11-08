@@ -63,6 +63,60 @@ jobs:
       - name: Dependency licences
         run: uv run python scripts/check_licenses.py
 
+  # The npm locks of the interface (ui/) and of the duplication check (tools/jscpd), audited by
+  # npm and by osv-scanner at the lowest level: a finding of any severity fails. The last step
+  # proves both tools fail on a lock with a known advisory, generated here and never committed.
+  npm-audit:
+    name: npm audit
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+      # The lock is enough: nothing is installed.
+      - name: npm audit
+        run: |
+          npm audit --audit-level=low --prefix ui
+          npm audit --audit-level=low --prefix tools/jscpd
+      # The osv-scanner command line (Apache-2.0): one pinned release, refused unless its SHA-256
+      # matches; raise both together from the release's osv-scanner_SHA256SUMS file.
+      - name: Install osv-scanner
+        env:
+          OSV_SCANNER_VERSION: "2.7.0"
+          OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+        run: |
+          if [ "$(uname -m)" != "x86_64" ]; then
+            echo "This job installs the linux_amd64 build of osv-scanner; the runner is $(uname -m)." >&2
+            exit 1
+          fi
+          curl -fsSL -o "$RUNNER_TEMP/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "$OSV_SCANNER_SHA256  $RUNNER_TEMP/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+      - name: osv-scanner
+        run: |
+          "$RUNNER_TEMP/osv-scanner" scan source --lockfile ui/package-lock.json --lockfile tools/jscpd/package-lock.json
+      - name: Prove the audit fails on a known advisory
+        run: |
+          mkdir -p "$RUNNER_TEMP/audit-probe"
+          cd "$RUNNER_TEMP/audit-probe"
+          echo '{"name": "audit-probe", "private": true}' > package.json
+          npm install --package-lock-only --ignore-scripts lodash@4.17.20
+          if npm audit --audit-level=low; then
+            echo "npm audit passed a lock with lodash 4.17.20, which has known advisories." >&2
+            exit 1
+          fi
+          if "$RUNNER_TEMP/osv-scanner" scan source --lockfile package-lock.json; then
+            echo "osv-scanner passed a lock with lodash 4.17.20, which has known advisories." >&2
+            exit 1
+          fi
+          echo "Both npm audit and osv-scanner fail on a known advisory, as they should."
+
   secrets:
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
     permissions:
