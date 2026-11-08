@@ -102,13 +102,66 @@ export function writePreferences(storage: Storage | null, value: Preferences): v
 }
 
 /**
+ * How long the colours fade after a theme change: the 200 ms motion step of `--motion-panel` in
+ * `tokens.css`, while `data-theme-fade` is on the root and `base.css` fades them.
+ */
+export const THEME_FADE_MS = 200;
+
+const fades = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+
+/**
+ * Marks the root with `data-theme-fade` for a little over {@link THEME_FADE_MS}, restarting a
+ * running fade.
+ *
+ * @param root - The `<html>` element.
+ */
+function fadeTheme(root: HTMLElement): void {
+  clearTimeout(fades.get(root));
+  root.setAttribute("data-theme-fade", "");
+  fades.set(
+    root,
+    // A little longer than the transition, so a late last frame does not snap.
+    setTimeout(() => {
+      root.removeAttribute("data-theme-fade");
+    }, THEME_FADE_MS + 50),
+  );
+}
+
+/**
+ * Fades the colours when the operating system switches between light and dark while the
+ * system theme is in use (no `data-theme` on the root); a chosen theme does not follow it.
+ *
+ * @param root - The `<html>` element.
+ * @param media - The `prefers-color-scheme` query; undefined where `matchMedia` is missing.
+ * @returns A function that stops listening.
+ */
+export function fadeOnSystemThemeChange(
+  root: HTMLElement,
+  media: MediaQueryList | undefined,
+): () => void {
+  const onChange = (): void => {
+    if (!root.hasAttribute("data-theme")) {
+      fadeTheme(root);
+    }
+  };
+  media?.addEventListener("change", onChange);
+  return () => {
+    media?.removeEventListener("change", onChange);
+  };
+}
+
+/**
  * Applies the preferences to the document root: `data-theme` only for a chosen light or dark
- * theme (the system theme leaves it to `prefers-color-scheme`), `data-density` and `lang`.
+ * theme (the system theme leaves it to `prefers-color-scheme`), `data-density` and `lang`. A
+ * change of `data-theme` fades the colours; the first paint and an unchanged theme do not.
  *
  * @param root - The `<html>` element.
  * @param value - The preferences.
  */
 export function applyPreferences(root: HTMLElement, value: Preferences): void {
+  if (root.getAttribute("data-theme") !== (value.theme === "system" ? null : value.theme)) {
+    fadeTheme(root);
+  }
   if (value.theme === "system") {
     root.removeAttribute("data-theme");
   } else {

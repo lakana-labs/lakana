@@ -5,16 +5,16 @@
  */
 
 :root {
-  --color-ground: #f5f8f9;
-  --color-surface: #ffffff;
-  --color-sunk: #edf2f4;
-  --color-line: #d3dce1;
+  --color-ground: #e8eef1;
+  --color-surface: #f2f6f8;
+  --color-sunk: #dde5e9;
+  --color-line: #c8d2d8;
   --color-edge: #72848f;
   --color-text: #14242e;
   --color-text-muted: #465a66;
   --color-text-faint: #566873;
   --color-accent: #1f5e86;
-  --color-accent-bg: #e0edf4;
+  --color-accent-bg: #d6e6ef;
   --color-on-accent: #ffffff;
   --color-knockout: #ffffff;
   --color-ok: #1f6b48;
@@ -23,7 +23,7 @@
   --color-warn-bg: #f8edd6;
   --color-bad: #b0362c;
   --color-bad-bg: #fae6e3;
-  --color-float: #ffffff;
+  --color-float: #f2f6f8;
   --shadow-float: 0 4px 16px rgba(20, 36, 46, 0.14);
   --color-scrim: rgba(20, 36, 46, 0.24);
   --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

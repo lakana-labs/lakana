@@ -9,6 +9,7 @@ import {
   type ReactNode,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useState,
@@ -17,6 +18,7 @@ import {
 import {
   applyPreferences,
   browserStorage,
+  fadeOnSystemThemeChange,
   type Preferences,
   readPreferences,
   writePreferences,
@@ -51,6 +53,17 @@ export function PreferencesProvider({
   useLayoutEffect(() => {
     applyPreferences(document.documentElement, preferences);
   }, [preferences]);
+
+  useEffect(
+    () =>
+      fadeOnSystemThemeChange(
+        document.documentElement,
+        typeof window.matchMedia === "function"
+          ? window.matchMedia("(prefers-color-scheme: dark)")
+          : undefined,
+      ),
+    [],
+  );
 
   const update = useCallback(
     (next: Partial<Preferences>) => {

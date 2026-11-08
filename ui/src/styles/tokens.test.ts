@@ -129,6 +129,32 @@ describe("tokens", () => {
     }
   });
 
+  it("keeps the light ground and surfaces soft, pale and cool", () => {
+    // Not glaring (no pure white, a few steps below it), still pale, and blue-leaning rather
+    // than grey-beige or cream: blue ≥ green ≥ red.
+    for (const name of ["--color-ground", "--color-surface", "--color-sunk", "--color-float"]) {
+      const hex = LIGHT[name] ?? "";
+      expect(luminance(hex), name).toBeLessThanOrEqual(0.92);
+      expect(luminance(hex), name).toBeGreaterThanOrEqual(0.75);
+      const [red = 0, green = 0, blue = 0] = [1, 3, 5].map((at) =>
+        parseInt(hex.slice(at, at + 2), 16),
+      );
+      expect(blue, name).toBeGreaterThanOrEqual(green);
+      expect(green, name).toBeGreaterThanOrEqual(red);
+    }
+    expect(luminance(LIGHT["--color-ground"] ?? "")).toBeLessThan(
+      luminance(LIGHT["--color-surface"] ?? ""),
+    );
+  });
+
+  it("keeps the dark palette as reviewed", () => {
+    expect([DARK["--color-ground"], DARK["--color-surface"], DARK["--color-text"]]).toEqual([
+      "#0f171c",
+      "#151f26",
+      "#e3eaee",
+    ]);
+  });
+
   it("defines the dark palette under both the media query and data-theme", () => {
     const media = block(tokens, "@media (prefers-color-scheme: dark)");
     const guarded = properties(block(media, ':root:not([data-theme="light"])'));

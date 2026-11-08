@@ -157,7 +157,7 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.locator("html")).toHaveAttribute("data-theme", other.toLowerCase());
         await expect(page.locator("html")).toHaveAttribute("data-density", density);
         const ground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-        expect(ground).toBe(other === "Dark" ? "rgb(15, 23, 28)" : "rgb(245, 248, 249)");
+        expect(ground).toBe(other === "Dark" ? "rgb(15, 23, 28)" : "rgb(232, 238, 241)");
       });
 
       test("no horizontal scroll at 768 px and at 1280 px", async ({ page }) => {
@@ -269,6 +269,112 @@ for (const theme of ["light", "dark"] as const) {
     });
   });
 }
+
+/**
+ * Switches the theme in the user menu and reads the page's transitions as the switch applies.
+ *
+ * @param page - A page showing the shell in the dark theme.
+ * @returns The transition of `<body>` and of the sidebar while the colours change.
+ */
+async function transitionsDuringSwitch(page: Page): Promise<string[]> {
+  // A mutation observer reads the styles in the same task as the change, before any timer.
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    Object.assign(window, { seenTransitions: seen });
+    new MutationObserver(() => {
+      if (document.documentElement.getAttribute("data-theme") !== "light") return;
+      for (const node of [document.body, document.querySelector(".sidebar")]) {
+        const style = getComputedStyle(node ?? document.body);
+        seen.push(`${style.transitionProperty} ${style.transitionDuration}`);
+      }
+    }).observe(document.documentElement, { attributeFilter: ["data-theme"] });
+  });
+  await page.getByRole("button", { name: "Not signed in" }).click();
+  await page.getByRole("menuitemradio", { name: "Light", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  return page.evaluate(() => (window as unknown as { seenTransitions: string[] }).seenTransitions);
+}
+
+test.describe("the theme switch", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme: "dark", density: "roomy", language: "en" })],
+    );
+  });
+
+  test("fades the colours over 200 ms, and nothing on first paint", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    const atRest = await page.evaluate(() => getComputedStyle(document.body).transitionDuration);
+    expect(atRest).toBe("0s");
+
+    const during = await transitionsDuringSwitch(page);
+
+    expect(during.length).toBeGreaterThan(0);
+    for (const transition of during) {
+      expect(transition).toMatch(/^background-color, color, border-color, fill, stroke 0\.2s/);
+    }
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme-fade");
+  });
+
+  test("does not fade under reduced motion", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+
+    const during = await transitionsDuringSwitch(page);
+
+    expect(during.length).toBeGreaterThan(0);
+    for (const transition of during) {
+      // The fade rule applies, but reduced motion holds its duration at zero.
+      expect(transition).toBe("background-color, color, border-color, fill, stroke 0s");
+    }
+  });
+});
+
+for (const width of [1280, 600]) {
+  test(`the palette opens centred over the whole window, in its upper third, at ${String(width)} px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+
+    await page.keyboard.press("Control+k");
+    const dialog = page.getByRole("dialog", { name: "Search" });
+    await expect(dialog).toBeVisible();
+    const box = await dialog.boundingBox();
+
+    expect(box, "the palette").not.toBeNull();
+    const centre = (box?.x ?? 0) + (box?.width ?? 0) / 2;
+    expect(Math.abs(centre - width / 2)).toBeLessThanOrEqual(2);
+    expect(box?.y ?? 0).toBeLessThan(800 / 3);
+    expect(await violations(page), "palette").toEqual([]);
+  });
+}
+
+test("the narrow top bar keeps its height and the content starts right below it", async ({
+  page,
+}) => {
+  const heights: number[] = [];
+  for (const height of [500, 900, 1400]) {
+    await page.setViewportSize({ width: 600, height });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    const bar = await page.getByRole("banner").boundingBox();
+    const main = await page.getByRole("main").boundingBox();
+    expect(bar, "the top bar").not.toBeNull();
+    expect(main, "the content").not.toBeNull();
+    const barBottom = (bar?.y ?? 0) + (bar?.height ?? 0);
+    const gap = Math.abs((main?.y ?? 0) - barBottom);
+    expect(gap, `at ${String(height)} px high`).toBeLessThanOrEqual(1);
+    heights.push(Math.round(bar?.height ?? 0));
+  }
+  expect(new Set(heights).size, heights.join(", ")).toBe(1);
+});
 
 test("axe catches a missing alt text", async ({ page }) => {
   // The positive control: the checks above would pass vacuously if axe found nothing at all.

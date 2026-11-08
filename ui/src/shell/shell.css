@@ -234,15 +234,15 @@
   color: var(--color-accent);
 }
 
-/* Command palette */
+/* Command palette: centred over the whole window, in its upper third, the page dimmed behind. */
 .palette-overlay {
   position: fixed;
   inset: 0;
   z-index: 10;
   display: flex;
   align-items: flex-start;
-  justify-content: flex-start;
-  padding: var(--space-8) var(--space-4) var(--space-4) calc(var(--sidebar-width) + var(--space-6));
+  justify-content: center;
+  padding: var(--space-8) var(--space-4) var(--space-4);
   background: var(--color-scrim);
 }
 
@@ -346,8 +346,10 @@
 /* Narrow screens (WCAG 1.4.10, reflow down to 320 px): the sidebar becomes a bar on top whose
    Menu button shows the same panel; one column, no horizontal scroll. */
 @media (max-width: 639.98px) {
+  /* The bar keeps its own height; the content row takes whatever the window adds. */
   .shell {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
   }
 
   .sidebar {
@@ -397,6 +399,6 @@
   }
 
   .palette-overlay {
-    padding: var(--space-4);
+    padding-top: var(--space-4);
   }
 }

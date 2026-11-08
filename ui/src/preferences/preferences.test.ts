@@ -4,9 +4,11 @@ import { MemoryStorage } from "../test/storage";
 import {
   applyPreferences,
   browserStorage,
+  fadeOnSystemThemeChange,
   DEFAULT_PREFERENCES,
   PREFERENCES_KEY,
   readPreferences,
+  THEME_FADE_MS,
   writePreferences,
 } from "./preferences";
 
@@ -106,5 +108,71 @@ describe("preferences", () => {
 
     expect(root.getAttribute("data-theme")).toBe(theme);
     expect(root.getAttribute("data-density")).toBe("compact");
+  });
+
+  it("fades the colours while the theme changes, and only then", () => {
+    vi.useFakeTimers();
+    try {
+      const root = document.createElement("html");
+      root.setAttribute("data-theme", "dark");
+
+      applyPreferences(root, { theme: "light", density: "roomy", language: "en" });
+      expect(root.hasAttribute("data-theme-fade")).toBe(true);
+
+      vi.advanceTimersByTime(THEME_FADE_MS - 1);
+      applyPreferences(root, { theme: "dark", density: "roomy", language: "en" });
+      // A second change restarts the fade; the attribute outlasts the transition by 50 ms.
+      vi.advanceTimersByTime(THEME_FADE_MS + 49);
+      expect(root.hasAttribute("data-theme-fade")).toBe(true);
+
+      vi.advanceTimersByTime(1);
+      expect(root.hasAttribute("data-theme-fade")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fades an operating-system theme change while the system theme is in use", () => {
+    vi.useFakeTimers();
+    try {
+      const root = document.createElement("html");
+      const media = new EventTarget() as MediaQueryList;
+      const stop = fadeOnSystemThemeChange(root, media);
+
+      media.dispatchEvent(new Event("change"));
+      expect(root.hasAttribute("data-theme-fade")).toBe(true);
+      vi.advanceTimersByTime(THEME_FADE_MS + 50);
+      expect(root.hasAttribute("data-theme-fade")).toBe(false);
+
+      // A chosen theme does not follow the system, so nothing fades.
+      root.setAttribute("data-theme", "dark");
+      media.dispatchEvent(new Event("change"));
+      expect(root.hasAttribute("data-theme-fade")).toBe(false);
+
+      root.removeAttribute("data-theme");
+      stop();
+      media.dispatchEvent(new Event("change"));
+      expect(root.hasAttribute("data-theme-fade")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("has nothing to follow without matchMedia", () => {
+    expect(fadeOnSystemThemeChange(document.createElement("html"), undefined)).not.toThrow();
+  });
+
+  it.each([
+    ["the same theme", "dark", "dark"],
+    ["the system theme, still unset", null, "system"],
+  ] as const)("does not fade on %s", (_case, before, theme) => {
+    const root = document.createElement("html");
+    if (before !== null) {
+      root.setAttribute("data-theme", before);
+    }
+
+    applyPreferences(root, { theme, density: "compact", language: "en" });
+
+    expect(root.hasAttribute("data-theme-fade")).toBe(false);
   });
 });
