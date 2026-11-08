@@ -2180,17 +2180,20 @@ def test_local_run_sets_local_sign_in_and_prints_localhost(
     assert "127.0.0.1" not in run.result.stdout + run.result.stderr
 
 
-def test_an_inherited_public_url_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A public address the person set is passed on unchanged (the server judges it)."""
+def test_an_inherited_public_url_of_this_instance_is_kept_quietly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The same address the local start would set: no notice."""
     from typing import cast
 
     data_dir = cast(
         "DataDir",
         SimpleNamespace(database_url="sqlite:///x.db", bootstrap_token_path=Path("/d/t")),
     )
-    monkeypatch.setenv("LAKANA_UI__PUBLIC_URL", "http://localhost:4174")
+    monkeypatch.setenv("LAKANA_UI__PUBLIC_URL", "http://localhost:8765")
     env = server._child_env(data_dir, 8765, "k", key_id=None, secret=None)
-    assert env["LAKANA_UI__PUBLIC_URL"] == "http://localhost:4174"
+    assert env["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8765"
+    assert capsys.readouterr().err == ""
 
 
 def test_hand_off_file_is_deleted_after_a_minute(
@@ -2444,6 +2447,25 @@ def test_without_a_browser_a_terminal_still_gets_the_link(
     )
     assert started == []
     assert _LOCAL_LINK in capsys.readouterr().out
+
+
+def test_an_inherited_public_url_off_localhost_is_replaced_with_a_notice(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A shell that sourced a bundle's .env still starts locally; one line names the variable."""
+    from typing import cast
+
+    data_dir = cast(
+        "DataDir",
+        SimpleNamespace(database_url="sqlite:///x.db", bootstrap_token_path=Path("/d/t")),
+    )
+    monkeypatch.setenv("LAKANA_UI__PUBLIC_URL", "https://lakana.example.com")
+    env = server._child_env(data_dir, 8765, "k", key_id=None, secret=None)
+    assert env["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8765"
+    err = capsys.readouterr().err
+    assert len(err.splitlines()) == 1
+    assert "LAKANA_UI__PUBLIC_URL=https://lakana.example.com" in err
+    assert "http://localhost:8765" in err
 
 
 def test_a_stale_hand_off_file_is_removed_at_every_start(

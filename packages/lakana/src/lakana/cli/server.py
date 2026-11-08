@@ -730,11 +730,12 @@ def _child_env(
         run that has to mint a token (a first run whose migration failed); an inherited value wins.
         `LAKANA_RUN__SERVER_URL` defaults to this instance's own address, so the
         local worker can run Python assets when `uv` is on the `PATH`; an
-        inherited value wins. `LAKANA_UI__PUBLIC_URL` defaults to
-        `http://localhost:<port>`, the address browsers open (an inherited value wins), and
+        inherited value wins. `LAKANA_UI__PUBLIC_URL` is always `http://localhost:<port>`, the
+        address browsers open (an inherited other value, such as one a bundle's `.env` left in
+        the shell, is replaced, with one line on stderr naming it), and
         `LAKANA_UI__LOCAL_SIGN_IN` is always `true`, so the person's own token can ask for a
-        sign-in link; the server refuses it unless it binds a loopback address and the public
-        address is on `localhost`.
+        sign-in link; the server accepts it only with a loopback bind and a `localhost` public
+        address, which these two values guarantee.
     """
     env = {
         **os.environ,
@@ -754,7 +755,16 @@ def _child_env(
     if not log_requests:
         env.setdefault("LAKANA_LOG__ACCESS", "false")
     env.setdefault("LAKANA_RUN__SERVER_URL", f"http://127.0.0.1:{port}")
-    env.setdefault("LAKANA_UI__PUBLIC_URL", shown_url(port))
+    inherited = env.get("LAKANA_UI__PUBLIC_URL")
+    if inherited is not None and inherited != shown_url(port):
+        sys.stderr.write(
+            _output.safe_text(
+                f"Ignoring LAKANA_UI__PUBLIC_URL={inherited} from your shell: a local instance "
+                f"is opened at {shown_url(port)}."
+            )
+            + "\n"
+        )
+    env["LAKANA_UI__PUBLIC_URL"] = shown_url(port)
     env["LAKANA_UI__LOCAL_SIGN_IN"] = "true"
     env.setdefault("LAKANA_REPO_ROOTS", json.dumps([os.path.realpath(Path.home())]))
     return env
