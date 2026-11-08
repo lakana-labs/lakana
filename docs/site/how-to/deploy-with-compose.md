@@ -348,6 +348,17 @@ should also keep out what the server would refuse anyway, so that it never reach
 - **A long timeout for a drop.** `lakana artifact drop` removes files inside the request and can run
   for minutes (the client waits up to ten). A proxy that ends it sooner shows the user a 504 for a
   drop that still finishes.
+- **Pass the browser's `Host` header through.** With the web interface on, the server answers a
+  browser only at its public address (`LAKANA_UI__PUBLIC_URL`, for example
+  `https://lakana.example.com`) and refuses any other `Host` with 421 `HostNotAllowed`. Caddy passes
+  it by default; nginx sends its upstream's name (`$proxy_host`) unless you add
+  `proxy_set_header Host $host;`.
+- **List the proxy in `LAKANA_TRUSTED_PROXIES`** so the server believes its `X-Forwarded-For` and
+  `X-Forwarded-Proto`, as a JSON list of addresses or networks. Use the address the server sees the
+  proxy connect from: for a proxy on the host in front of the bundle, Docker's gateway of the
+  bundle's network (`docker network inspect` shows it), for example `'["172.18.0.1"]'`. Unlisted,
+  the audit log and the failed sign-in limit see every client as the proxy. No proxy is trusted by
+  default, also not one on the same machine.
 
 ### Interrupted uploads on an object store
 
@@ -525,12 +536,17 @@ server {
     proxy_read_timeout 300s;         # long-running queries
     location / {
         proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;   # the web interface answers only its public name
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
 Then pass `--public-url https://lakana.example.com` to `lakana bundle init` so the saved profile
-(and the URL `init` prints for operators) points at the proxy, not the bind address. A
+(and the URL `init` prints for operators) points at the proxy, not the bind address. For the web
+interface, also set `LAKANA_UI__PUBLIC_URL` to that address and list the proxy in
+`LAKANA_TRUSTED_PROXIES` ([A reverse proxy in front of the server](#a-reverse-proxy-in-front-of-the-server)). A
 non-loopback `--public-url` with an `http://` scheme gets the same plain-HTTP warning.
 
 ### `--bind` and the profile URL

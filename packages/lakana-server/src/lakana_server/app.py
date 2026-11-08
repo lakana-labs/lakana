@@ -63,6 +63,7 @@ from lakana_server.api.platform.whoami import router as whoami_router
 from lakana_server.api.routing import describe_openapi
 from lakana_server.auth_rate_limit import AuthAuditLimiter
 from lakana_server.body_limit import BodyLimitMiddleware, streaming_routes
+from lakana_server.browser_guard import BrowserGuard
 from lakana_server.concurrency import AppendConcurrencyLimiter
 from lakana_server.deprecation import DeprecationHeaders
 from lakana_server.errors import install_exception_handlers
@@ -318,5 +319,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         iceberg=iceberg_router.routes,
     )
     app.add_middleware(DeprecationHeaders)
+    if resolved_settings.ui.enabled:
+        # Outermost: Host and Origin are checked before any route, credential or body.
+        app.add_middleware(BrowserGuard, settings=resolved_settings)
     describe_openapi(app, ROUTERS)
     return app

@@ -196,8 +196,8 @@ def get_principal(
     `app.state.auth_audit_limiter` (`lakana_server.auth_rate_limit.
     AuthAuditLimiter`) admits it for the requesting client
     (`request.client.host`, or `"unknown"` if unavailable; `X-Forwarded-For`
-    is deliberately not trusted, so a proxied deployment rate-limits by the
-    proxy's address, not the original client's — see the threat model). This
+    counts only from `LAKANA_TRUSTED_PROXIES`, so behind an unlisted proxy the
+    limit applies per proxy address — see the threat model). This
     bounds how many rows a client retrying a bad credential can cause to be
     written; the response is still 401 either way. The recorded
     `key_id` is truncated to 64 characters, and the count of attempts

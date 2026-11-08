@@ -1,8 +1,13 @@
 """Runtime settings for lakana-server."""
 
+import ipaddress
+import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from lakana_core.ci_oidc.config import CiOidcConfig
@@ -146,6 +151,130 @@ class ReadinessConfig(BaseModel):
     environments: list[str] = []
 
 
+LOCALHOST = "localhost"
+"""The only loopback name the interface's public address may use: passkeys need a name."""
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+"""One DNS label, lower case, as a browser sends it in `Host` (an IDN in its `xn--` form)."""
+
+_HOST_ENTRY = re.compile(
+    r"(?P<host>\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::(?P<port>[0-9]{1,5}))?"
+)
+"""A `host[:port]` entry of `LAKANA_UI__ALLOWED_HOSTS`: a name, IPv4 or bracketed IPv6."""
+
+
+@dataclass(frozen=True)
+class PublicOrigin:
+    """The address browsers reach the interface at (`LAKANA_UI__PUBLIC_URL`).
+
+    Parameters
+    ----------
+    scheme
+        `http` or `https`.
+    host
+        The host name, lower case; never an IP address.
+    port
+        The port, also when it is the scheme's default.
+    origin
+        `scheme://host[:port]` exactly as a browser sends it in `Origin`: the default port
+        left out.
+    loopback
+        Whether the host is `localhost`.
+    """
+
+    scheme: str
+    host: str
+    port: int
+    origin: str
+    loopback: bool
+
+    @property
+    def host_header(self) -> str:
+        """The `Host` header a browser sends to this address.
+
+        Returns
+        -------
+        str
+            `host`, with `:port` unless the port is the scheme's default.
+        """
+        return self.origin.split("://", 1)[1]
+
+
+def _public_url_problem(url: str) -> str | None:
+    """Explain why a public address cannot be used, if it cannot.
+
+    Parameters
+    ----------
+    url
+        `LAKANA_UI__PUBLIC_URL` as given.
+
+    Returns
+    -------
+    str or None
+        The message naming the setting and the fix, or None when `url` is a bare origin with a
+        host name.
+    """
+    shape = (
+        "LAKANA_UI__PUBLIC_URL must be the bare address browsers open, such as "
+        "https://lakana.example.com or http://localhost:8000: a scheme, a host name and an "
+        "optional port, with no path, query, fragment or user name."
+    )
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return shape
+    if parts.scheme not in _DEFAULT_PORTS or parts.path not in {"", "/"}:
+        return shape
+    if parts.query or parts.fragment or "?" in url or "#" in url or parts.username is not None:
+        return shape
+    host = parts.hostname or ""
+    if port == 0 or not host:
+        return shape
+    if _is_ip_address(host):
+        return (
+            f"LAKANA_UI__PUBLIC_URL must use a host name, not an IP address: browsers tie "
+            f"passkeys to a name. Locally use http://localhost:{port or '<port>'}; on a team "
+            "server use the DNS name people open."
+        )
+    if not host.isascii():
+        return (
+            "LAKANA_UI__PUBLIC_URL must spell an international host name in its ASCII form "
+            "(xn--...), as browsers send it."
+        )
+    labels = host.split(".")
+    if not all(_LABEL.fullmatch(label) for label in labels):
+        return (
+            shape + " The host name has an empty label (a trailing dot) or a character a host"
+            " name cannot hold."
+        )
+    return None
+
+
+def _is_ip_address(host: str) -> bool:
+    """Tell whether a browser would read a host as an IP address.
+
+    Parameters
+    ----------
+    host
+        The host name of a URL, lower case, without brackets.
+
+    Returns
+    -------
+    bool
+        True for an IPv6 or IPv4 address, and for any name whose last label is a number
+        (`127.1`, `0x7f.1`), which browsers read as IPv4 too.
+    """
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        last = host.rstrip(".").rsplit(".", 1)[-1]
+        return last.isdigit() or bool(re.fullmatch(r"0x[0-9a-f]*", last))
+    return True
+
+
 class UiConfig(BaseModel):
     """The web interface (`LAKANA_UI__*`).
 
@@ -157,9 +286,117 @@ class UiConfig(BaseModel):
         server; in a source checkout, build them first:
         `npm --prefix ui ci && npm --prefix ui run build`. The interface calls only the REST API,
         with the user's own credential. Until sign-in exists it reads no data.
+    public_url
+        The address people open the interface at, such as `https://lakana.example`: a
+        scheme, a host name and an optional port, nothing more. Unset (the default), it is
+        `http://localhost:<LAKANA_PORT>`, for one person on their own machine; there the server
+        also answers at `127.0.0.1` and `[::1]` and sends a browser that opens a page there on to
+        `localhost`. Team use needs a DNS name and HTTPS: with the interface on, plain `http://` is
+        refused except on `localhost`, and an IP address is always refused, because browsers tie
+        passkeys to a name. Every link the server makes (sign-in, invite, recovery) starts with
+        this address. Browsers that reach the interface under another name are refused (421)
+        unless it is in `LAKANA_UI__ALLOWED_HOSTS`. Behind a reverse proxy, the proxy must pass the
+        browser's `Host` header through (with nginx, `proxy_set_header Host $host;`). Changing the
+        public address invalidates every passkey: issue recovery links afterwards.
+    allowed_hosts
+        Further `host:port` names (`host` alone for port 80 or 443) the interface answers
+        browsers at, as a JSON list, for example `["lakana.internal:8443"]`. Empty (the default):
+        only the public address. Each entry is matched exactly, without letter case; there is no
+        wildcard. Signing in and every change still need the public address: a browser at an
+        extra name can open pages only.
+    local_sign_in
+        Whether a person may sign in to the interface with a link they ask for with their own
+        token, without a passkey touch (default false). `lakana server start --local` sets it for
+        one person's own machine; it needs `LAKANA_HOST` on a loopback address and the public
+        address on `localhost`, or the server does not start. On a team server leave it unset.
     """
 
     enabled: bool = False
+    public_url: str | None = None
+    allowed_hosts: list[str] = []
+    local_sign_in: bool = False
+
+    @field_validator("public_url")
+    @classmethod
+    def _public_url_is_an_origin(cls, value: str | None) -> str | None:
+        """Refuse a public address browsers could not sign in at.
+
+        Parameters
+        ----------
+        value
+            `LAKANA_UI__PUBLIC_URL`, or None.
+
+        Returns
+        -------
+        str or None
+            `value`, unchanged.
+
+        Raises
+        ------
+        ValueError
+            Naming the setting and what to write instead.
+        """
+        if value is None:
+            return None
+        problem = _public_url_problem(value)
+        if problem is not None:
+            raise ValueError(problem)
+        return value
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _allowed_hosts_are_host_and_port(cls, value: list[str]) -> list[str]:
+        """Refuse an entry that is not an exact `host[:port]`; lower its letters.
+
+        Parameters
+        ----------
+        value
+            `LAKANA_UI__ALLOWED_HOSTS`.
+
+        Returns
+        -------
+        list of str
+            The entries in lower case.
+
+        Raises
+        ------
+        ValueError
+            Naming the setting and the entry's expected shape.
+        """
+        lowered = [entry.lower() for entry in value]
+        for entry in lowered:
+            match = _HOST_ENTRY.fullmatch(entry)
+            if match is None or int(match["port"] or 1) not in range(1, 65536):
+                raise ValueError(
+                    f"LAKANA_UI__ALLOWED_HOSTS entries are host names with an optional port, "
+                    f"such as lakana.internal:8443, matched exactly; {entry!r} is not one "
+                    "(no scheme, path or wildcard)."
+                )
+        return lowered
+
+    @model_validator(mode="after")
+    def _team_address_uses_https(self) -> Self:
+        """Refuse plain HTTP off `localhost` while the interface is on.
+
+        Returns
+        -------
+        UiConfig
+            This configuration, unchanged.
+
+        Raises
+        ------
+        ValueError
+            Naming `LAKANA_UI__PUBLIC_URL` and the `https://` form.
+        """
+        if self.enabled and self.public_url is not None:
+            parts = urlsplit(self.public_url)
+            if parts.scheme == "http" and parts.hostname != LOCALHOST:
+                raise ValueError(
+                    "LAKANA_UI__PUBLIC_URL must start with https:// on a team server: browsers "
+                    "keep passkeys and the sign-in cookie safe only on a secure address. Plain "
+                    "http:// works only at http://localhost:<port>."
+                )
+        return self
 
 
 class Settings(BaseSettings):
@@ -247,6 +484,13 @@ class Settings(BaseSettings):
         machine only; the Compose bundle publishes the port through `LAKANA_BIND`.
     port
         Port the server listens on (default 8000).
+    trusted_proxies
+        IP addresses or networks of reverse proxies whose `X-Forwarded-For` and
+        `X-Forwarded-Proto` headers the server believes, as a JSON list, for example
+        `["10.0.0.2"]` or `["10.1.0.0/16"]`. Empty (the default): no forwarded header is
+        believed, also not from `127.0.0.1`, and the client address in audit events and rate
+        limits is the TCP peer's. Behind a reverse proxy, list it here, or every request looks
+        as if it came from the proxy. No wildcard: a client could then claim any address.
     repo_roots
         Absolute directories that local repositories must lie under, as a JSON list, for example
         `["/repos"]`. Empty (the default) refuses every local repository.
@@ -288,6 +532,7 @@ class Settings(BaseSettings):
     ui: UiConfig = UiConfig()
     host: str = "127.0.0.1"
     port: int = 8000
+    trusted_proxies: list[str] = []
     repo_roots: list[str] = []
     main_language: str = DEFAULT_MAIN_LANGUAGE
 
@@ -332,3 +577,119 @@ class Settings(BaseSettings):
         if problem is not None:
             raise ValueError(problem)
         return value
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def _trusted_proxies_are_addresses(cls, value: list[str]) -> list[str]:
+        """Refuse a trusted proxy that is not an IP address or network.
+
+        Parameters
+        ----------
+        value
+            `LAKANA_TRUSTED_PROXIES`.
+
+        Returns
+        -------
+        list of str
+            `value`, unchanged.
+
+        Raises
+        ------
+        ValueError
+            Naming the setting and the entry.
+        """
+        for entry in value:
+            try:
+                ipaddress.ip_network(entry)
+            except ValueError:
+                raise ValueError(
+                    f"LAKANA_TRUSTED_PROXIES entries are IP addresses or networks of your "
+                    f"reverse proxies, such as 10.0.0.2 or 10.1.0.0/16; {entry!r} is not one "
+                    "(no host names, no wildcard)."
+                ) from None
+        return value
+
+    @model_validator(mode="after")
+    def _local_sign_in_is_local(self) -> Self:
+        """Refuse local sign-in anywhere but one person's own machine.
+
+        Returns
+        -------
+        Settings
+            These settings, unchanged.
+
+        Raises
+        ------
+        ValueError
+            Naming `LAKANA_UI__LOCAL_SIGN_IN` and `lakana server start --local`.
+        """
+        if self.ui.local_sign_in and not (
+            _is_loopback_bind(self.host) and self.public_origin().loopback
+        ):
+            raise ValueError(
+                "LAKANA_UI__LOCAL_SIGN_IN is only for one person's own machine: it needs "
+                "LAKANA_HOST on a loopback address and the public address on localhost. It is "
+                "set by `lakana server start --local`; on a team server leave it unset."
+            )
+        return self
+
+    def public_origin(self) -> PublicOrigin:
+        """Read the address browsers reach the interface at.
+
+        Returns
+        -------
+        PublicOrigin
+            From `LAKANA_UI__PUBLIC_URL`, or `http://localhost:<LAKANA_PORT>` when it is unset.
+        """
+        if self.ui.public_url is None:
+            scheme, host, port = "http", LOCALHOST, self.port
+        else:
+            parts = urlsplit(self.ui.public_url)
+            scheme, host = parts.scheme, parts.hostname or ""
+            port = parts.port or _DEFAULT_PORTS[scheme]
+        shown = host if port == _DEFAULT_PORTS[scheme] else f"{host}:{port}"
+        return PublicOrigin(
+            scheme=scheme,
+            host=host,
+            port=port,
+            origin=f"{scheme}://{shown}",
+            loopback=host == LOCALHOST,
+        )
+
+    def allowed_host_headers(self) -> frozenset[str]:
+        """List the `Host` headers browser traffic may carry.
+
+        Returns
+        -------
+        frozenset of str
+            The public address as browsers send it; on `localhost` also `127.0.0.1` and
+            `[::1]` with the same port, if any (the guard sends their pages on to `localhost`); and
+            `LAKANA_UI__ALLOWED_HOSTS`.
+        """
+        public = self.public_origin()
+        headers = {public.host_header, *self.ui.allowed_hosts}
+        if public.loopback:
+            port = public.host_header.removeprefix(LOCALHOST)
+            headers |= {f"127.0.0.1{port}", f"[::1]{port}"}
+        return frozenset(headers)
+
+
+def _is_loopback_bind(host: str) -> bool:
+    """Tell whether the server's listening address accepts this machine only.
+
+    Parameters
+    ----------
+    host
+        `LAKANA_HOST`.
+
+    Returns
+    -------
+    bool
+        True for `localhost` and any loopback IP address.
+    """
+    if host == LOCALHOST:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False

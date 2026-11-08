@@ -254,6 +254,36 @@ cookie set for another host.
 - **Fail at start.** Turned on without a built interface (no `index.html`, no `assets/`, or a
   missing or malformed `csp.txt`), the server refuses to start (`UiNotBuiltError`) instead of
   serving errors.
+- **Host and Origin (`lakana_server.browser_guard.BrowserGuard`, part 1b).** A pure ASGI
+  middleware, outermost and present only with the interface on, defends against DNS rebinding
+  and cross-site requests before any route, credential or body is looked at. Order: (1) a
+  request whose first `Authorization` header is `Bearer <credential>` passes untouched (a
+  rebinding page cannot hold a token, and the Bearer header wins over the cookie; any other
+  `Authorization` is checked like none); (2) *browser traffic* is a path of the interface (not
+  `/api`, `/v1` or below, `/healthz`, `/readyz`; any other spelling, such as `/API/...` or
+  `//api/...`, counts as the interface's), a request with a session cookie (any name starting
+  `lakana_session` or `__Host-lakana_session`, any letter case), or `/api/v1/sign-in/...`;
+  anything else passes; (3) browser traffic needs exactly one `Host`, equal without letter case
+  to one of `Settings.allowed_host_headers()` (the public `host[:port]` as browsers send it; on
+  `localhost` also `127.0.0.1:<port>` and `[::1]:<port>`; plus `LAKANA_UI__ALLOWED_HOSTS`),
+  else 421 `HostNotAllowed`, which never repeats the `Host`; (4) a GET or HEAD of a page at
+  `127.0.0.1` or `[::1]` is sent (308, `no-store`) to `localhost`, the location built from
+  `public_origin()` and the decoded, re-encoded path, never from `Host` or the raw request
+  target; (5) every method but GET, HEAD and OPTIONS needs exactly one `Origin` equal to
+  `public_origin().origin`, or no `Origin` and `Sec-Fetch-Site: same-origin` (`same-site` is not
+  enough: on loopback other ports are the same site), else 403 `OriginNotAllowed`. A WebSocket of
+  browser traffic always needs the Origin and is closed (1008) otherwise. **Why the Host check is
+  scoped:** engines, CI and the Compose worker reach open non-browser routes (`/v1/config`,
+  `/api/v1/auth/oidc/token`) by internal names (`server:8000`) without a credential; DNS
+  rebinding only matters where a page, a cookie or a sign-in route is involved, and a rebinding
+  page cannot hold a token. `LAKANA_UI__PUBLIC_URL` refuses an IP address (also `127.1`,
+  `0x7f.0.0.1`: a last label that is a number), a path, query, fragment, user name, trailing dot
+  or non-ASCII name, and, with the interface on, plain `http://` off `localhost`. A reverse proxy
+  must pass the browser's `Host` (nginx's default `$proxy_host` gets 421). The guard uses only the
+  `Host` header, so an absolute-form request target (`GET http://localhost:8000/`) does not
+  change the decision. No CORS headers are sent on any route. `test_browser_guard.py` tries other
+  ports, letter case, trailing dots, other loopback spellings, missing and repeated `Host` and
+  `Origin`, `Origin: null`, absolute-form targets and path prefixes.
 - **Not yet covered:** the Playwright suite runs against `vite preview`, not lakana-server.
   `packages/lakana-server/tests/test_ui_real_build.py` (CI `ui`, after the build) serves the
   real build through `create_app` and checks the policy header and every file the page loads,
@@ -3432,8 +3462,10 @@ nonzero), so the flood stays visible in aggregate rather than one row per attemp
 recorded `key_id` is truncated to 64 characters, regardless of how long the caller's
 presented `key_id` was. The limiter's client dictionary is bounded at 10 000 entries
 (oldest evicted first) and guarded by a lock, since FastAPI runs `get_principal` in a
-threadpool. `X-Forwarded-For` is not trusted for the client key — see the threat model's
-"Explicitly not defended" for what that means for a proxied deployment.
+threadpool. `X-Forwarded-For` is trusted only from the proxies in `LAKANA_TRUSTED_PROXIES`
+(uvicorn's `proxy_headers`, `lakana_server.__main__`); unset, the client key is the TCP peer —
+uvicorn's own default of trusting 127.0.0.1 is turned off. See the threat model's "Explicitly
+not defended" for what an unlisted proxy means.
 
 **Bounding successful-authentication audit writes (#217).** `get_principal` records
 `AUTHENTICATION_SUCCEEDED` only when `lakana_server.sign_in_audit.SignInAuditLimiter`
