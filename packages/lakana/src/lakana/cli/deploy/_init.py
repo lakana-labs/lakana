@@ -53,6 +53,14 @@ _ENV_COMMENTS = {
     "LAKANA_WORKERS_PIPELINE": (
         "Workers that take pipeline work only: deploys, tasks, maintenance (0: none)."
     ),
+    "LAKANA_UI__ENABLED": (
+        "true serves the web interface at LAKANA_UI__PUBLIC_URL; sign in first with "
+        "`lakana sign-in setup-link`."
+    ),
+    "LAKANA_UI__PUBLIC_URL": (
+        "The address people open the web interface at: https:// and a DNS name for a team "
+        "(passkeys are tied to the name; changing it later invalidates every passkey)."
+    ),
 }
 _RELEASE_VERSION = re.compile(r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?")
 
@@ -126,7 +134,14 @@ def task_image_for(image: str) -> str:
 
 
 def generate_env(
-    *, image: str, task_image: str, bind: str, port: int, workers: int
+    *,
+    image: str,
+    task_image: str,
+    bind: str,
+    port: int,
+    workers: int,
+    public_url: str | None = None,
+    ui: bool = False,
 ) -> dict[str, str]:
     """Generate every `.env` value, with fresh secrets.
 
@@ -144,6 +159,11 @@ def generate_env(
         Host port.
     workers
         Worker replicas.
+    public_url
+        The web interface's address (`LAKANA_UI__PUBLIC_URL`); `http://localhost:<port>` when
+        None.
+    ui
+        Whether the server serves the web interface (`LAKANA_UI__ENABLED`).
 
     Returns
     -------
@@ -164,6 +184,8 @@ def generate_env(
         "LAKANA_WORKERS_INTERACTIVE": "0",
         "LAKANA_WORKERS_PIPELINE": "0",
         "LAKANA_WORKER_MEMORY": WORKER_MEMORY,
+        "LAKANA_UI__ENABLED": "true" if ui else "false",
+        "LAKANA_UI__PUBLIC_URL": public_url or f"http://localhost:{port}",
         "POSTGRES_PASSWORD": secrets.token_hex(24),
         "LAKANA_S3_ACCESS_KEY": secrets.token_hex(10),
         "LAKANA_S3_SECRET_KEY": secrets.token_urlsafe(30),

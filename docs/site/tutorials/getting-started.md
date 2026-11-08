@@ -63,8 +63,12 @@ line like this one:
 
 <!-- output -->
 ```text
-Lakana is running at http://127.0.0.1:8765 — profile 'local', environment 'dev'. Try: lakana sql "SELECT 42"
+Lakana is running at http://localhost:8765 — profile 'local', environment 'dev'. Try: lakana sql "SELECT 42"
 ```
+
+The line above it says the web interface is off. With `LAKANA_UI__ENABLED=true` in front of the
+command, the instance instead opens `http://localhost:8765` in your browser, signed in as you
+(`--no-browser` leaves the browser alone).
 
 To see a line for every request the server answers, start with the option `--log-requests`. To
 see more or fewer of the other lines, set `LAKANA_LOG__LEVEL` (for example to `DEBUG`) in front of

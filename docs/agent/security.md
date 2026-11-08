@@ -586,6 +586,18 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   acts as the page: it can run a ceremony the person then confirms with a touch. Another
   process of the same OS user can read the browser's cookies. On loopback another
   `localhost` port receives the non-`Secure` local cookie (see "The cookie").
+- **A deploy needs no fresh touch.** `POST /api/v1/environments/{env}/deploys` is in
+  `NO_STEP_UP` (`test_step_up_routes.py`): registering the repository's source and binding the
+  run-as account need step-up, but a deploy afterwards does not. A stale session (a browser
+  left signed in) of a person with DEPLOY can therefore run any branch or tag of the registered
+  repository as the bound account, until the session's idle timeout or lifetime ends it.
+- **The local sign-in hand-off.** `lakana server start --local` writes the local link to
+  `<data dir>/sign-in.html` (0600, in the 0700 data directory, `O_EXCL | O_NOFOLLOW`) and gives
+  the browser only that file's path, so the secret is never on a command line another OS user
+  can read; the file is removed after 60 seconds or at shutdown. Until then another process of
+  the same OS user can read it, as it can read the profile's token. A Snap or Flatpak browser
+  cannot read the data directory: a terminal then also gets the link printed (never a pipe or a
+  file), which stays in the terminal's scrollback until it is used or expires (10 minutes).
 - **A pre-upgrade bootstrap PAT.** Migration 0069 marks as the operator's only unrevoked PATs
   named `bootstrap` owned by the bootstrap principal. A PAT an administrator issued before the
   upgrade for the bootstrap principal and named `bootstrap` would also be marked; revoke such a

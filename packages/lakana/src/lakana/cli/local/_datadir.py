@@ -123,6 +123,17 @@ class DataDir:
         return self.root / "bootstrap-token"
 
     @property
+    def sign_in_path(self) -> Path:
+        """The page that hands a local sign-in link to the browser, for at most a minute.
+
+        Returns
+        -------
+        Path
+            `<root>/sign-in.html` (mode 0600, inside the 0700 data directory).
+        """
+        return self.root / "sign-in.html"
+
+    @property
     def server_pid(self) -> Path:
         """The server pidfile.
 

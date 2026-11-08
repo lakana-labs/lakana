@@ -52,6 +52,14 @@ from lakana.resources.repositories import Repositories
 from lakana.resources.row_filters import RowFilters
 from lakana.resources.runs import Runs, Scheduler, Workers
 from lakana.resources.secrets import Secrets
+from lakana.resources.sign_in import (
+    Invites,
+    Passkeys,
+    RecoveryLinks,
+    Sessions,
+    SignIn,
+    SignInSettingsResource,
+)
 from lakana.resources.tables import Tables
 from lakana.resources.task_connections import TaskConnections
 from lakana.resources.task_tokens import TaskTokens
@@ -107,6 +115,12 @@ class Client:
         self.groups = Groups(self._transport)
         self.tokens = Tokens(self._transport)
         self.task_tokens = TaskTokens(self._transport)
+        self.sign_in = SignIn(self._transport)
+        self.invites = Invites(self._transport)
+        self.recovery_links = RecoveryLinks(self._transport)
+        self.sessions = Sessions(self._transport)
+        self.passkeys = Passkeys(self._transport)
+        self.sign_in_settings = SignInSettingsResource(self._transport)
         self.grants = Grants(self._transport)
         self.row_filters = RowFilters(self._transport)
         self.column_masks = ColumnMasks(self._transport)

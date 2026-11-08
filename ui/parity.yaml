@@ -74,6 +74,9 @@
 "index show": { class: ui, part: 8 }
 "index update": { class: ui, part: 8 }
 "init": { class: git, reason: "project init" }
+"invite create": { class: ui, part: 1 }
+"invite list": { class: ui, part: 1 }
+"invite withdraw": { class: ui, part: 1 }
 "job list": { class: read, part: 5 }
 "job notification": { class: ui, part: 5 }
 "job notify-test": { class: ui, part: 5 }
@@ -90,6 +93,8 @@
 "ns get": { class: read, part: 3 }
 "ns list": { class: read, part: 3 }
 "orphans": { class: ui, part: 3 }
+"passkey list": { class: ui, part: 1 }
+"passkey remove": { class: ui, part: 1 }
 "principal create": { class: ui, part: 7 }
 "principal deactivate": { class: ui, part: 7 }
 "principal get": { class: ui, part: 7 }
@@ -104,6 +109,9 @@
 "query status": { class: ui, part: 4 }
 "query submit": { class: ui, part: 4 }
 "query wait": { class: ui, part: 4 }
+"recovery create": { class: ui, part: 1 }
+"recovery list": { class: ui, part: 1 }
+"recovery withdraw": { class: ui, part: 1 }
 "repo add": { class: ui, part: 8 }
 "repo list": { class: ui, part: 8 }
 "repo remove": { class: ui, part: 8 }
@@ -130,6 +138,11 @@
 "server start": { class: git, reason: "local dev tooling" }
 "server status": { class: git, reason: "local dev tooling" }
 "server stop": { class: git, reason: "local dev tooling" }
+"session end": { class: ui, part: 1 }
+"session list": { class: ui, part: 1 }
+"sign-in settings": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"sign-in setup-link":
+  { class: git, reason: "local deployment tooling: prints the first administrator's link" }
 "sql": { class: ui, part: 4, note: "--into (write into a table) is Git, see table append" }
 "table append":
   {

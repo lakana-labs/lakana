@@ -1229,3 +1229,105 @@ def test_the_launcher_is_healthy_only_while_it_listens(
         live.bind("h.sock")
         live.listen(1)
         assert healthy()
+
+
+def test_bundle_writes_the_public_url_and_names_the_setup_link_step(
+    tmp_path: Path, released: None
+) -> None:
+    """A host-name `--public-url` is the interface's address; the next steps sign in."""
+    state = make_state(tmp_path, FakeApi())
+    target = tmp_path / "b"
+    result = invoke(
+        state, "bundle", "init", str(target), "--public-url", "https://lakana.example.com", "--ui"
+    )
+
+    assert result.exit_code == 0, result.stderr
+    env = _env(target / ".env")
+    assert env["LAKANA_UI__PUBLIC_URL"] == "https://lakana.example.com"
+    assert env["LAKANA_UI__ENABLED"] == "true"
+    server = yaml.safe_load((target / "compose.yaml").read_text())["services"]["server"]
+    assert server["environment"]["LAKANA_UI__PUBLIC_URL"].startswith("${LAKANA_UI__PUBLIC_URL")
+    assert server["environment"]["LAKANA_UI__ENABLED"].startswith("${LAKANA_UI__ENABLED")
+    assert "lakana sign-in setup-link" in result.stdout
+
+
+def test_bundle_without_public_url_uses_localhost(tmp_path: Path, released: None) -> None:
+    """No `--public-url`: the interface is at `http://localhost:<port>`, and one line says so.
+
+    The interface stays off unless `--ui` asks for it, as on a server started by hand.
+    """
+    state = make_state(tmp_path, FakeApi())
+    target = tmp_path / "b"
+    result = invoke(state, "bundle", "init", str(target))
+
+    assert result.exit_code == 0, result.stderr
+    env = _env(target / ".env")
+    assert env["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8000"
+    assert env["LAKANA_UI__ENABLED"] == "false"
+    said = [line for line in result.stderr.splitlines() if "http://localhost:8000" in line]
+    assert len(said) == 1 and "LAKANA_UI__PUBLIC_URL" in said[0]
+    assert _profiles.load(state.profile_path())["profiles"]["team"]["url"] == (
+        "http://127.0.0.1:8000"
+    )
+
+
+@pytest.mark.parametrize("url", ["http://localhost:9000", "http://127.0.0.1:9000"])
+def test_a_loopback_public_url_gives_the_interface_localhost_on_the_bundle_port(
+    tmp_path: Path, released: None, url: str
+) -> None:
+    """A loopback `--public-url` still serves the CLI profile; the interface uses `localhost`."""
+    state = make_state(tmp_path, FakeApi())
+    target = tmp_path / "b"
+    result = invoke(state, "bundle", "init", str(target), "--public-url", url, "--ui")
+
+    assert result.exit_code == 0, result.stderr
+    assert _env(target / ".env")["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8000"
+    assert _profiles.load(state.profile_path())["profiles"]["team"]["url"] == url
+
+
+def test_bundle_refuses_an_ip_public_url_with_the_interface_on(
+    tmp_path: Path, released: None
+) -> None:
+    """Passkeys need a name: an IP address is refused with `--ui`, and nothing is written."""
+    state = make_state(tmp_path, FakeApi())
+    target = tmp_path / "b"
+    result = invoke(
+        state, "bundle", "init", str(target), "--public-url", "https://10.0.0.5", "--ui"
+    )
+
+    assert result.exit_code == 1
+    assert (
+        "--public-url must use a host name for the web interface (passkeys are tied to a name): "
+        "use a DNS name, or leave it out for http://localhost:8000."
+    ) in " ".join(result.stderr.split())
+    assert not target.exists()
+
+
+def test_an_ip_public_url_without_the_interface_keeps_the_profile_and_uses_localhost(
+    tmp_path: Path, released: None
+) -> None:
+    """With the interface off an IP address still serves the CLI; the server gets `localhost`."""
+    state = make_state(tmp_path, FakeApi())
+    target = tmp_path / "b"
+    result = invoke(state, "bundle", "init", str(target), "--public-url", "https://10.0.0.5")
+
+    assert result.exit_code == 0, result.stderr
+    assert _env(target / ".env")["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8000"
+    assert _profiles.load(state.profile_path())["profiles"]["team"]["url"] == "https://10.0.0.5"
+
+
+def test_the_interface_refuses_plain_http_off_localhost_and_a_host_that_is_no_name(
+    tmp_path: Path, released: None
+) -> None:
+    """With `--ui`: `http://` off localhost exits 1 naming https; a bad host name exits 2."""
+    state = make_state(tmp_path, FakeApi())
+    plain = invoke(
+        state, "bundle", "init", str(tmp_path / "a"), "--ui", "--public-url", "http://lakana.ex"
+    )
+    odd = invoke(
+        state, "bundle", "init", str(tmp_path / "b"), "--public-url", "https://lak_ana.example"
+    )
+
+    assert plain.exit_code == 1 and "https://" in plain.stderr
+    assert odd.exit_code == 2 and "host" in odd.stderr
+    assert not (tmp_path / "a").exists() and not (tmp_path / "b").exists()

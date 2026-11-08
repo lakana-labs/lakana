@@ -1162,6 +1162,165 @@ Revoke task token KEY_ID.
 | `KEY_ID` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
 
+## `lakana invite`
+
+Usage: `lakana invite [OPTIONS] COMMAND [ARGS]...`
+
+Invite people by a link that creates their account (ADMIN).
+
+### `lakana invite create`
+
+Usage: `lakana invite create [OPTIONS] {name}`
+
+Invite a new person as NAME; prints the link to send them.
+
+The link works once, for 7 days, and creates the account NAME with no rights. Confirm with the person that they signed up before you grant roles. Only the link goes to stdout.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--display-name` | text | none | The person's name as the interface shows it. |
+
+### `lakana invite list`
+
+Usage: `lakana invite list [OPTIONS]`
+
+List the open invites (never their links).
+
+### `lakana invite withdraw`
+
+Usage: `lakana invite withdraw [OPTIONS] {ID}`
+
+Withdraw the open invite ID; its link stops working and its name is free again.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `ID` | text | required |  |
+
+## `lakana recovery`
+
+Usage: `lakana recovery [OPTIONS] COMMAND [ARGS]...`
+
+Recovery links for people who lost their passkeys (ADMIN).
+
+### `lakana recovery create`
+
+Usage: `lakana recovery create [OPTIONS] {name}`
+
+Issue a recovery link for NAME, who lost their passkeys; prints the link to send them.
+
+The link works once, for 1 hour. Using it removes NAME's passkeys, ends their sessions and tells them and every administrator. Recovering an administrator is for the server operator only: run this where the server runs, with the profile that holds the bootstrap token (the one 'lakana bundle init' or 'lakana server start --local' saved). Only the link goes to stdout.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+
+### `lakana recovery list`
+
+Usage: `lakana recovery list [OPTIONS]`
+
+List the open recovery links (never the links themselves).
+
+### `lakana recovery withdraw`
+
+Usage: `lakana recovery withdraw [OPTIONS] {ID}`
+
+Withdraw the open recovery link ID; it stops working at once.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `ID` | text | required |  |
+
+## `lakana session`
+
+Usage: `lakana session [OPTIONS] COMMAND [ARGS]...`
+
+List and end browser sessions.
+
+### `lakana session list`
+
+Usage: `lakana session list [OPTIONS] [name]`
+
+List the open browser sessions of NAME, or your own.
+
+Another person's sessions need the ADMIN role.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | none | The person (default: you). |
+
+### `lakana session end`
+
+Usage: `lakana session end [OPTIONS] {name}`
+
+End every browser session of NAME; they have to sign in again.
+
+Your own (sign out everywhere), or anyone's with the ADMIN role. Each ended session is recorded in the audit log.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--yes` | flag | off | Don't ask for confirmation. |
+
+## `lakana passkey`
+
+Usage: `lakana passkey [OPTIONS] COMMAND [ARGS]...`
+
+List and remove passkeys; add one in the web interface.
+
+### `lakana passkey list`
+
+Usage: `lakana passkey list [OPTIONS] [name]`
+
+List the passkeys of NAME, or your own.
+
+Another person's passkeys need the ADMIN role. A passkey that is not usable here was registered for an earlier public address (LAKANA_UI__PUBLIC_URL).
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | none | The person (default: you). |
+
+### `lakana passkey remove`
+
+Usage: `lakana passkey remove [OPTIONS] {name} {ID}`
+
+Remove passkey ID of NAME.
+
+Your own, or anyone's with the ADMIN role; removing another person's passkey also ends their browser sessions. Your own last working passkey cannot be removed: add another one first.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `ID` | text | required |  |
+| `--yes` | flag | off | Don't ask for confirmation. |
+
+## `lakana sign-in`
+
+Usage: `lakana sign-in [OPTIONS] COMMAND [ARGS]...`
+
+Sign in to the web interface: the setup link and session lengths.
+
+### `lakana sign-in setup-link`
+
+Usage: `lakana sign-in setup-link [OPTIONS]`
+
+Print the link that signs the first administrator in to the web interface.
+
+Run it as the server operator, with the profile 'lakana bundle init' saved (it holds the bootstrap token). The link works once, for 10 minutes, and only until the first administrator has a passkey; after that, use 'lakana recovery create'. Only the link goes to stdout.
+
+### `lakana sign-in settings`
+
+Usage: `lakana sign-in settings [OPTIONS]`
+
+Show or change how long browser sessions last, in minutes.
+
+Without options it shows the idle timeout and the absolute lifetime with their bounds. Changing them needs the ADMIN role and applies to new sessions; open sessions keep their lengths.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `--idle-timeout` | whole number, 1 or more | none | End a session after this many minutes without use (15 to 1440). |
+| `--absolute-lifetime` | whole number, 1 or more | none | End a session this many minutes after sign-in at the latest (60 to 43200). |
+
 ## `lakana grant`
 
 Usage: `lakana grant [OPTIONS] COMMAND [ARGS]...`
@@ -2327,7 +2486,7 @@ Usage: `lakana server start [OPTIONS]`
 
 Start Lakana on this machine: migrate, then the server and worker.
 
-Stop it with Ctrl-C, or from another terminal with 'lakana server stop'.
+With the web interface on (LAKANA_UI__ENABLED=true) it then opens http://localhost:<port> in your browser, signed in as you. Stop it with Ctrl-C, or from another terminal with 'lakana server stop'.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -2335,6 +2494,7 @@ Stop it with Ctrl-C, or from another terminal with 'lakana server stop'.
 | `--data-dir` | path | none | Data directory (default: XDG). |
 | `--port` | whole number | `8765` | Port to bind on 127.0.0.1 (default 8765). |
 | `--log-requests` | flag | off | Print a line for every request the server answers (default: none). |
+| `--no-browser` | flag | off | Don't open the web interface signed in (it opens when LAKANA_UI__ENABLED=true). |
 
 ### `lakana server status`
 
@@ -2395,3 +2555,4 @@ Generate compose.yaml and .env for a team deployment, and save a profile.
 | `--workers` | whole number | `2` | Worker replicas. |
 | `--image` | text | none | Override the Lakana image reference. |
 | `--task-image` | text | none | Override the task images' reference (without -py3.X). |
+| `--ui` | flag | off | Turn the web interface on; --public-url must then be an https DNS name. |

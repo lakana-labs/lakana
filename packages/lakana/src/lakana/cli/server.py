@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import html
 import json
 import os
 import re
@@ -9,12 +11,15 @@ import secrets
 import signal
 import socket
 import sys
+import threading
 import time
-from collections.abc import Callable, Iterable
+import webbrowser
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 from typing import Annotated, NoReturn, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 import typer
@@ -58,6 +63,10 @@ _STOP_TIMEOUT_SECONDS = 30.0
 _STOP_POLL_SECONDS = 0.1
 _BOOTSTRAP_ENV_VARS = ("LAKANA_BOOTSTRAP_PAT_KEY_ID", "LAKANA_BOOTSTRAP_PAT_SECRET")
 _LOOPBACK_URL_RE = re.compile(r"http://127\.0\.0\.1:\d+")
+_HAND_OFF_SECONDS = 60.0
+"""How long the browser hand-off file may exist at most."""
+_TRUE_WORDS = frozenset({"1", "true", "t", "yes", "y", "on"})
+"""The spellings of true the server's settings accept for a boolean, in lower case."""
 
 _SignalHandler = Callable[[int, FrameType | None], object] | int | None
 """A signal disposition as `signal.signal` accepts and returns it.
@@ -148,6 +157,209 @@ def port_free(port: int) -> bool:
         except OSError:
             return False
         return True
+
+
+def shown_url(port: int) -> str:
+    """Name the address a person opens this machine's instance at.
+
+    The server binds `127.0.0.1`, but browsers tie passkeys to a name, so every address shown to
+    a person is `localhost` (the server sends a browser at `127.0.0.1` on to it).
+
+    Parameters
+    ----------
+    port
+        The instance's port.
+
+    Returns
+    -------
+    str
+        `http://localhost:<port>`.
+    """
+    return f"http://localhost:{port}"
+
+
+def _ui_enabled(env: Mapping[str, str]) -> bool:
+    """Tell whether the server will serve the web interface, as its settings read the variable.
+
+    Parameters
+    ----------
+    env
+        The children's environment.
+
+    Returns
+    -------
+    bool
+        True when `LAKANA_UI__ENABLED` is a spelling of true.
+    """
+    return env.get("LAKANA_UI__ENABLED", "").strip().lower() in _TRUE_WORDS
+
+
+def _schedule(seconds: float, action: Callable[[], None]) -> Callable[[], None]:
+    """Run an action once after a delay, on a daemon thread (a seam for tests).
+
+    Parameters
+    ----------
+    seconds
+        The delay.
+    action
+        What to run.
+
+    Returns
+    -------
+    Callable
+        Cancels the action if it has not run yet.
+    """
+    timer = threading.Timer(seconds, action)
+    timer.daemon = True
+    timer.start()
+    return timer.cancel
+
+
+def _stdout_is_terminal() -> bool:
+    """Tell whether stdout is a terminal (a seam for tests).
+
+    Returns
+    -------
+    bool
+        `sys.stdout.isatty()`.
+    """
+    return sys.stdout.isatty()
+
+
+class _HandOff:
+    """The file that hands the local sign-in link to the browser, removed once.
+
+    Parameters
+    ----------
+    path
+        The file.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.cancel: Callable[[], None] = lambda: None
+
+    def remove(self) -> None:
+        """Delete the file if it is still there; safe to call more than once."""
+        with contextlib.suppress(OSError):
+            self.path.unlink(missing_ok=True)
+
+
+def _hand_off_page(url: str) -> str:
+    """Build the page that sends the browser on to the sign-in link at once.
+
+    Parameters
+    ----------
+    url
+        The link.
+
+    Returns
+    -------
+    str
+        A small HTML page with a refresh to `url` and a link for a browser that ignores it.
+    """
+    target = html.escape(url, quote=True)
+    return (
+        "<!doctype html>\n"
+        '<meta charset="utf-8">\n'
+        '<meta name="referrer" content="no-referrer">\n'
+        f'<meta http-equiv="refresh" content="0;url={target}">\n'
+        "<title>Signing in to Lakana</title>\n"
+        f'<p>Signing in to Lakana… <a href="{target}">Continue</a></p>\n'
+    )
+
+
+def _write_hand_off(path: Path, url: str) -> None:
+    """Write the hand-off page readable by this user only, never through a symlink.
+
+    Parameters
+    ----------
+    path
+        The file, inside the 0700 data directory.
+    url
+        The sign-in link.
+    """
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(_hand_off_page(url))
+
+
+def _sign_the_browser_in(
+    state: CliState,
+    data_dir: DataDir,
+    port: int,
+    token: str | None,
+    env: Mapping[str, str],
+) -> _HandOff | None:
+    """Open the browser signed in, with a link asked for with the person's own token.
+
+    The link never appears on a command line: it is written to `sign-in.html` in the data
+    directory (mode 0600), and the browser is given that file's path. The file is removed after
+    a minute, or at shutdown if that comes first. Snap and Flatpak browsers cannot read the data
+    directory, so a terminal also gets the link to open by hand; a pipe or a file never does.
+    Every failure is a warning: the instance keeps running.
+
+    Parameters
+    ----------
+    state
+        The CLI state, for `login_client_factory`.
+    data_dir
+        The data directory.
+    port
+        The instance's port.
+    token
+        The `local` profile's token; `None` when there is no usable one (nothing happens).
+    env
+        The children's environment, for `LAKANA_UI__ENABLED`.
+
+    Returns
+    -------
+    _HandOff or None
+        The hand-off file to remove at shutdown, or None when none was written.
+    """
+    if not _ui_enabled(env):
+        sys.stdout.write(
+            "The web interface is off; to open it signed in, start again with "
+            "LAKANA_UI__ENABLED=true.\n"
+        )
+        return None
+    if token is None:
+        return None
+    try:
+        with state.login_client_factory(f"http://127.0.0.1:{port}", token) as client:
+            link = client.sign_in.local_link()
+    except LakanaError as exc:
+        sys.stderr.write(
+            f"Couldn't open the browser signed in: {exc}. Open {shown_url(port)} and sign in "
+            "with your passkey, or ask an administrator for a recovery link.\n"
+        )
+        return None
+    if urlsplit(link.url).scheme not in {"http", "https"}:
+        sys.stderr.write(
+            f"Couldn't open the browser signed in: the server answered a link that is not a web "
+            f"address. Open {shown_url(port)} and sign in with your passkey.\n"
+        )
+        return None
+    hand_off = _HandOff(data_dir.sign_in_path)
+    try:
+        _write_hand_off(hand_off.path, link.url)
+    except OSError as exc:
+        sys.stderr.write(
+            f"Couldn't write {hand_off.path} to open the browser signed in ({exc}); open "
+            f"{shown_url(port)} and sign in with your passkey.\n"
+        )
+        return None
+    hand_off.cancel = _schedule(_HAND_OFF_SECONDS, hand_off.remove)
+    with contextlib.suppress(webbrowser.Error):
+        webbrowser.open(hand_off.path.as_uri())
+    if _stdout_is_terminal():
+        sys.stdout.write(
+            f"If the browser did not open signed in, open this link within 10 minutes: {link.url}\n"
+        )
+    return hand_off
 
 
 def _probe_health(url: str) -> bool:
@@ -361,7 +573,7 @@ def _raise_already_running(data_dir: DataDir) -> NoReturn:
     info = _read_pidfile_or_fail(data_dir.server_pid)
     message = f"Lakana is already running from {data_dir.root}"
     if info is not None and info[1] is not None:
-        message += f" at http://127.0.0.1:{info[1]}"
+        message += f" at {shown_url(info[1])}"
     raise CliError(message)
 
 
@@ -463,7 +675,11 @@ def _child_env(
         run that has to mint a token (a first run whose migration failed); an inherited value wins.
         `LAKANA_RUN__SERVER_URL` defaults to this instance's own address, so the
         local worker can run Python assets when `uv` is on the `PATH`; an
-        inherited value wins.
+        inherited value wins. `LAKANA_UI__PUBLIC_URL` defaults to
+        `http://localhost:<port>`, the address browsers open (an inherited value wins), and
+        `LAKANA_UI__LOCAL_SIGN_IN` is always `true`, so the person's own token can ask for a
+        sign-in link; the server refuses it unless it binds a loopback address and the public
+        address is on `localhost`.
     """
     env = {
         **os.environ,
@@ -483,6 +699,8 @@ def _child_env(
     if not log_requests:
         env.setdefault("LAKANA_LOG__ACCESS", "false")
     env.setdefault("LAKANA_RUN__SERVER_URL", f"http://127.0.0.1:{port}")
+    env.setdefault("LAKANA_UI__PUBLIC_URL", shown_url(port))
+    env["LAKANA_UI__LOCAL_SIGN_IN"] = "true"
     env.setdefault("LAKANA_REPO_ROOTS", json.dumps([os.path.realpath(Path.home())]))
     return env
 
@@ -547,7 +765,7 @@ def _first_run_setup(
     return url
 
 
-def _later_run_profile_check(state: CliState, data_dir: DataDir, url: str) -> None:
+def _later_run_profile_check(state: CliState, data_dir: DataDir, url: str) -> str | None:
     """Reconcile the `local` profile on a later run: recovery hint, URL update, or a warning.
 
     A `local` profile missing its `token` is treated exactly like a
@@ -578,6 +796,12 @@ def _later_run_profile_check(state: CliState, data_dir: DataDir, url: str) -> No
         The data directory, named in the recovery hint.
     url
         This run's platform URL (`--port` may differ from an earlier run's).
+
+    Returns
+    -------
+    str or None
+        The profile's token once the profile is confirmed to be this instance's own; None
+        otherwise (no profile, no token, or a profile of another instance).
     """
     profiles = _profiles.load(state.profile_path()).get("profiles", {})
     local_profile = profiles.get("local")
@@ -587,7 +811,7 @@ def _later_run_profile_check(state: CliState, data_dir: DataDir, url: str) -> No
             "No 'local' profile found; to start fresh, stop Lakana and run "
             f"'lakana server reset --local --data-dir {data_dir.root}'\n"
         )
-        return
+        return None
     old_url = local_profile.get("url")
     if old_url != url:
         if old_url is None or not _LOOPBACK_URL_RE.fullmatch(old_url):
@@ -595,12 +819,13 @@ def _later_run_profile_check(state: CliState, data_dir: DataDir, url: str) -> No
                 f"Profile 'local' points at {old_url!r}, not this machine's loopback address; "
                 "leaving it unchanged.\n"
             )
-            return
+            return None
         _profiles.set_profile(
             state.profile_path(), "local", url=url, token=token, default_environment=None
         )
         sys.stderr.write(f"Updated profile 'local': {old_url} -> {url} (--port changed)\n")
     _ensure_dev_environment(state, data_dir, url, token)
+    return token
 
 
 def _ensure_dev_environment(state: CliState, data_dir: DataDir, url: str, token: str) -> None:
@@ -713,10 +938,19 @@ def start(
             help="Print a line for every request the server answers (default: none).",
         ),
     ] = False,
+    no_browser: Annotated[
+        bool,
+        typer.Option(
+            "--no-browser",
+            help="Don't open the web interface signed in (it opens when LAKANA_UI__ENABLED=true).",
+        ),
+    ] = False,
 ) -> None:
     """Start Lakana on this machine: migrate, then the server and worker.
 
-    Stop it with Ctrl-C, or from another terminal with 'lakana server stop'.
+    With the web interface on (LAKANA_UI__ENABLED=true) it then opens http://localhost:<port>
+    in your browser, signed in as you. Stop it with Ctrl-C, or from another terminal with
+    'lakana server stop'.
 
     Parameters
     ----------
@@ -730,6 +964,8 @@ def start(
         The port `lakana-server` binds to on `127.0.0.1`.
     log_requests
         Keep the server's request log.
+    no_browser
+        `--no-browser`: neither open the browser nor print a sign-in link.
 
     Raises
     ------
@@ -766,7 +1002,7 @@ def start(
         clear_lock_owner(root.lock_path)
         try:
             _record_lock_owner(root)
-            _run_locked(state, root, port, log_requests)
+            _run_locked(state, root, port, log_requests, open_browser=not no_browser)
         finally:
             clear_lock_owner(root.lock_path)
 
@@ -814,7 +1050,13 @@ def _process_cmdline(pid: int) -> str | None:
     return raw.replace(b"\0", b" ").decode(errors="replace")
 
 
-def _run_locked(state: CliState, root: DataDir, port: int, log_requests: bool = False) -> None:
+def _run_locked(
+    state: CliState,
+    root: DataDir,
+    port: int,
+    log_requests: bool = False,
+    open_browser: bool = True,
+) -> None:
     """Run the local instance; the caller holds the data directory's lock.
 
     Parameters
@@ -827,6 +1069,8 @@ def _run_locked(state: CliState, root: DataDir, port: int, log_requests: bool = 
         The port `lakana-server` binds to on `127.0.0.1`.
     log_requests
         Keep the server's request log (see `_child_env`).
+    open_browser
+        Open the web interface signed in once the instance is ready (`_sign_the_browser_in`).
 
     Raises
     ------
@@ -869,20 +1113,24 @@ def _run_locked(state: CliState, root: DataDir, port: int, log_requests: bool = 
     )
 
     previous_handlers = _install_shutdown_handlers()
+    hand_off: _HandOff | None = None
     try:
         try:
             sup.migrate()
             server = sup.start_server()
             _write_pidfile_or_fail(root.server_pid, server.pid, port)
             sup.wait_ready(server)
+            token: str | None
             if key_id is not None and secret is not None:
-                url = _first_run_setup(state, root, port, key_id, secret)
+                _first_run_setup(state, root, port, key_id, secret)
+                token = f"lakana_pat_{key_id}_{secret}"
             else:
-                url = f"http://127.0.0.1:{port}"
-                _later_run_profile_check(state, root, url)
+                token = _later_run_profile_check(state, root, f"http://127.0.0.1:{port}")
             worker = sup.start_worker()
             _write_pidfile_or_fail(root.worker_pid, worker.pid)
-            sys.stdout.write(_ready_line(url) + "\n")
+            if open_browser:
+                hand_off = _sign_the_browser_in(state, root, port, token, env)
+            sys.stdout.write(_ready_line(shown_url(port)) + "\n")
             # Flush explicitly: stdout is block-buffered, not line-buffered,
             # whenever it isn't a tty (piped to a file, `tee`, or a
             # subprocess reading it) -- a caller blocked in `readline()`
@@ -902,6 +1150,9 @@ def _run_locked(state: CliState, root: DataDir, port: int, log_requests: bool = 
             raise typer.Exit(1) from exc
     finally:
         _ignore_signals(previous_handlers)
+        if hand_off is not None:
+            hand_off.cancel()
+            hand_off.remove()
         try:
             sup.stop()
         finally:
@@ -984,7 +1235,7 @@ def status(
         and pid_alive(server_pid)
         and _probe_health(f"http://127.0.0.1:{port}")
     )
-    url = f"http://127.0.0.1:{port}" if running and port is not None else None
+    url = shown_url(port) if running and port is not None else None
     _output.emit(
         state,
         ServerStatus(
@@ -1046,7 +1297,7 @@ def stop(
     root = DataDir(resolve_data_dir(data_dir or default_data_dir()))
     info = _read_pidfile_or_fail(root.server_pid)
     port = info[1] if info is not None else None
-    where = f"at http://127.0.0.1:{port}" if port is not None else f"in {root.root}"
+    where = f"at {shown_url(port)}" if port is not None else f"in {root.root}"
     if not _lock_held(root):
         _stop_without_lock(root, info)
         return
@@ -1110,7 +1361,7 @@ def _stop_without_lock(root: DataDir, info: tuple[int, int | None] | None) -> No
         pid, port = info
         if port is not None and pid_alive(pid) and _probe_health(f"http://127.0.0.1:{port}"):
             raise CliError(
-                f"Lakana is running from {root.root} at http://127.0.0.1:{port}, but this "
+                f"Lakana is running from {root.root} at {shown_url(port)}, but this "
                 "instance did not record which process to stop (it was started by an older "
                 "lakana)",
                 hint="stop it with Ctrl-C in its terminal",
@@ -1237,8 +1488,7 @@ def reset(
             and _probe_health(f"http://127.0.0.1:{info[1]}")
         ):
             raise CliError(
-                f"Lakana is running from {root.root} at http://127.0.0.1:{info[1]}; "
-                "nothing was deleted",
+                f"Lakana is running from {root.root} at {shown_url(info[1])}; nothing was deleted",
                 hint="stop it with 'lakana server stop' (or Ctrl-C in its terminal), then run the "
                 "reset again",
             )

@@ -1440,6 +1440,225 @@ class Token:
 
 
 @dataclass(frozen=True)
+class IssuedLink:
+    """A sign-in link the server just issued (setup or local), shown here exactly once.
+
+    Parameters
+    ----------
+    url
+        The link: whoever has it can sign in once until it expires. `repr=False`, so it never
+        appears in a stray `repr()` or log line.
+    expires_at
+        When it stops working.
+    """
+
+    url: str = field(repr=False)
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class Invite:
+    """A new invite and its link, shown here exactly once.
+
+    Parameters
+    ----------
+    id
+        The invite's id, to withdraw it by.
+    name
+        The principal name the invite creates when it is used.
+    display_name
+        The person's name as the interface shows it, if one was given.
+    url
+        The link to send to the person; it works once, for 7 days. `repr=False`.
+    expires_at
+        When it stops working.
+    """
+
+    id: str
+    name: str
+    display_name: str | None
+    url: str = field(repr=False)
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class OpenInvite:
+    """An invite neither used, withdrawn nor expired, as listed: without its link.
+
+    Parameters
+    ----------
+    id
+        The invite's id.
+    name
+        The principal name it creates.
+    display_name
+        The display name, if one was given.
+    created_at
+        When it was issued.
+    expires_at
+        When it stops working.
+    """
+
+    id: str
+    name: str
+    display_name: str | None
+    created_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class RecoveryLink:
+    """A new recovery link, shown here exactly once.
+
+    Parameters
+    ----------
+    id
+        The link's id, to withdraw it by.
+    name
+        The person it lets back in.
+    url
+        The link to send to the person; it works once, for 1 hour. `repr=False`.
+    expires_at
+        When it stops working.
+    """
+
+    id: str
+    name: str
+    url: str = field(repr=False)
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class OpenRecoveryLink:
+    """A recovery link neither used, withdrawn nor expired, as listed: without the link.
+
+    Parameters
+    ----------
+    id
+        The link's id.
+    name
+        The person it lets back in.
+    created_at
+        When it was issued.
+    expires_at
+        When it stops working.
+    """
+
+    id: str
+    name: str
+    created_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class BrowserSession:
+    """One open browser session of a person. Carries no secret.
+
+    Parameters
+    ----------
+    id
+        The session's id.
+    via
+        How it began: `setup`, `invite`, `recovery`, `local` or `passkey`.
+    created_at
+        When it began.
+    last_seen_at
+        About when the person last used it.
+    absolute_expires_at
+        When it ends at the latest.
+    user_agent
+        The browser it began in, as the browser named itself.
+    peer
+        The address it began from, as the server saw it.
+    current
+        Whether it is the session of the request that asked (never, from a token).
+    """
+
+    id: str
+    via: str
+    created_at: datetime
+    last_seen_at: datetime
+    absolute_expires_at: datetime
+    user_agent: str
+    peer: str
+    current: bool
+
+
+@dataclass(frozen=True)
+class Passkey:
+    """One of a person's passkeys.
+
+    Parameters
+    ----------
+    id
+        The passkey's id, for removing it.
+    name
+        What its person called it.
+    created_at
+        When it was added.
+    last_used_at
+        When it last signed in or confirmed a step-up; `None` for never.
+    backup_eligible
+        Whether it is a synced passkey, which may exist on several devices.
+    disabled_reason
+        `possible_clone` when it was disabled because its signature counter went backwards;
+        `None` while it works.
+    usable_here
+        Whether it was registered for the server's current public address
+        (`LAKANA_UI__PUBLIC_URL`); changing the address leaves earlier passkeys unusable.
+    """
+
+    id: str
+    name: str
+    created_at: datetime
+    last_used_at: datetime | None
+    backup_eligible: bool
+    disabled_reason: str | None
+    usable_here: bool
+
+
+@dataclass(frozen=True)
+class SignInBounds:
+    """The limits an administrator may set the session lengths between, in minutes.
+
+    Parameters
+    ----------
+    idle_timeout_minutes_min
+        The shortest idle timeout.
+    idle_timeout_minutes_max
+        The longest idle timeout.
+    absolute_lifetime_minutes_min
+        The shortest absolute lifetime.
+    absolute_lifetime_minutes_max
+        The longest absolute lifetime.
+    """
+
+    idle_timeout_minutes_min: int
+    idle_timeout_minutes_max: int
+    absolute_lifetime_minutes_min: int
+    absolute_lifetime_minutes_max: int
+
+
+@dataclass(frozen=True)
+class SignInSettings:
+    """How long browser sessions last, in minutes.
+
+    Parameters
+    ----------
+    idle_timeout_minutes
+        How long a session lasts without a request the person started.
+    absolute_lifetime_minutes
+        How long a session lasts at most.
+    bounds
+        The limits both may be set between.
+    """
+
+    idle_timeout_minutes: int
+    absolute_lifetime_minutes: int
+    bounds: SignInBounds
+
+
+@dataclass(frozen=True)
 class MintedTaskToken:
     """A freshly minted task token, shown here exactly once.
 

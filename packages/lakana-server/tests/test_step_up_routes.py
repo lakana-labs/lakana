@@ -763,7 +763,9 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
         "/api/v1/environments/{env}/deployments/{repo}/run-as",
     ): "clearing a run-as account removes rights",
     ("POST", "/api/v1/environments/{env}/deploys"): (
-        "runs code of a registered repository (its source needs step-up) as its bound account"
+        "runs code of a registered repository (its source needs step-up) as its bound account; "
+        "residual: a stale session with DEPLOY can run any branch or tag of the registered "
+        "repository as the bound account"
     ),
     (
         "DELETE",

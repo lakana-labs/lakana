@@ -153,7 +153,7 @@ def test_stop_ends_a_running_instance_and_confirms(
     result = _stop(tmp_path, tmp_path / "data")
 
     assert result.exit_code == 0, result.output
-    assert "Stopped the local instance at http://127.0.0.1:8765" in result.stdout
+    assert "Stopped the local instance at http://localhost:8765" in result.stdout
     assert proc.wait(timeout=5) == 0
 
 
@@ -455,7 +455,7 @@ def test_a_live_instance_without_a_lock_owner_is_refused(
 
     output = " ".join(result.output.split())
     assert result.exit_code == 2
-    assert "http://127.0.0.1:8765" in output
+    assert "http://localhost:8765" in output
     assert "did not record which process to stop" in output
     assert "Ctrl-C" in output
 

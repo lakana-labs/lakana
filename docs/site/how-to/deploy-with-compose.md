@@ -62,6 +62,40 @@ it, and none should be added (a separate `docker compose wait setup` step here u
 `setup`'s own exit on a restart, where it sends two quick `GET`s and exits in under a
 second).
 
+## Sign in to the web interface
+
+The web interface is off unless you ask for it:
+
+1. Generate the bundle with `--ui` and the address people open, an `https://` DNS name behind
+   your reverse proxy ([Exposing it](#exposing-it)):
+   `lakana bundle init --ui --public-url https://lakana.example.com`.
+2. Start it as in the [Quickstart](#quickstart).
+3. Run `lakana sign-in setup-link`.
+
+`lakana sign-in setup-link` prints a link for the first administrator (the bootstrap account,
+`admin`) and nothing else on stdout. Open it within 10 minutes in the browser you will use: it
+works once, signs you in and asks you to register a passkey (a fingerprint, a face or a
+security key); every later sign-in is one touch. Only the bootstrap token in the `team`
+profile may ask for it, and only until the first administrator has a passkey; after that it
+answers with `lakana recovery create`.
+
+Then invite your team with `lakana invite create NAME`, which prints a link to send that
+person yourself (it works once, for 7 days, and creates an account with no rights): confirm
+with them that they signed up before you grant roles. A person who lost their passkeys gets a
+recovery link, `lakana recovery create NAME` (1 hour); recovering an administrator works only
+with the bootstrap token, so run it where `bundle init` saved the `team` profile.
+
+- `--public-url` is the interface's address (`LAKANA_UI__PUBLIC_URL` in `.env`) only when its
+  host is a name. With `--ui`, an IP address (`https://10.0.0.5`) or plain `http://` off
+  `localhost` is refused: browsers tie passkeys to a name and keep them safe only on HTTPS.
+  Without `--public-url` the address is `http://localhost:<port>`, which works only in a
+  browser on the same machine; `init` says so in one line.
+- Changing the address later leaves every passkey unusable: issue recovery links afterwards.
+- To turn the interface on in an existing bundle, set `LAKANA_UI__ENABLED=true` and
+  `LAKANA_UI__PUBLIC_URL` in `.env`, then `docker compose up -d --wait`.
+- Sessions last 12 hours without use and 7 days at most; see and change both with
+  `lakana sign-in settings` (in minutes).
+
 ## Local repositories
 
 `lakana bundle init` creates `repos/` next to `compose.yaml`; the server and the workers see it
@@ -545,9 +579,10 @@ server {
 ```
 
 Then pass `--public-url https://lakana.example.com` to `lakana bundle init` so the saved profile
-(and the URL `init` prints for operators) points at the proxy, not the bind address. For the web
-interface, also set `LAKANA_UI__PUBLIC_URL` to that address and list the proxy in
-`LAKANA_TRUSTED_PROXIES` ([A reverse proxy in front of the server](#a-reverse-proxy-in-front-of-the-server)). A
+(and the URL `init` prints for operators) points at the proxy, not the bind address. `init` also
+writes it as the web interface's address (`LAKANA_UI__PUBLIC_URL`); for the interface, list the
+proxy in `LAKANA_TRUSTED_PROXIES` too
+([A reverse proxy in front of the server](#a-reverse-proxy-in-front-of-the-server)). A
 non-loopback `--public-url` with an `http://` scheme gets the same plain-HTTP warning.
 
 ### `--bind` and the profile URL
