@@ -1131,7 +1131,8 @@ first failure; CI's `ui` job runs them one step each.
 | build | `npm --prefix ui run build` | `check`, CI `ui` |
 | size-limit (`ui/.size-limit.mjs`: the gzipped entry chunk, each chunk loaded on demand on its own, CSS, fonts; a raised limit needs a sentence in its pull request) | `npm --prefix ui run size` | `check`, CI `ui` |
 | UI coverage ratchet | `python3 -m scripts.ui_coverage_ratchet` | CI `ui` |
-| Playwright on Chromium (`e2e/shell.spec.ts` in light and dark, roomy and compact: axe with WCAG 2.2 AA tags on every area, the menu and the palette, no request to the API, no console error, deep link styled, theme without a flash, no horizontal scroll at 768 and 1280 px; at 320 px (WCAG 1.4.10 reflow) no horizontal scroll, axe, the folded menu by keyboard; `e2e/glyphs.spec.ts`) | `npm --prefix ui run e2e:smoke` | locally after `check`, CI `ui` |
+| the real build served by lakana-server (`test_ui_real_build.py`: `/` carries `csp.txt` byte for byte, every `src`/`href` of the page and `url()` of its CSS answers 200 with its type, the licence notices are plain text; skipped without a build) | `uv run pytest packages/lakana-server/tests/test_ui_real_build.py` | after `build`: locally, CI `ui` |
+| Playwright on Chromium (`e2e/shell.spec.ts` in light and dark, roomy and compact: axe with WCAG 2.2 AA tags on every area, the menu and the palette, no request to the API, no console error, deep link styled, theme without a flash, no horizontal scroll at 768 and 1280 px; at 320 px (WCAG 1.4.10 reflow) no horizontal scroll, axe, the folded menu by keyboard; `e2e/glyphs.spec.ts`; `e2e/notices.spec.ts`: every runtime dependency's licence notice in the build) | `npm --prefix ui run e2e:smoke` | locally after `check`, CI `ui` |
 | every gate fails on a violation | `npm --prefix ui run prove-gates` | CI `ui` |
 | copied code (jscpd + ratchet) | see "The duplication ratchet" | CI `lint` |
 | npm audit and osv-scanner over `ui/` and `tools/jscpd` locks, level `low` | `npm audit --audit-level=low --prefix ui` | `security.yml` `npm audit` |
@@ -1161,7 +1162,7 @@ first failure; CI's `ui` job runs them one step each.
   `ui/csp.ts`, so a CSP violation shows as a console error.
 - **When it runs.** The `ui` job runs on drafts too, and skips its steps when a pull request
   provably changes nothing under `ui/`, `tools/jscpd/`, the three ratchet scripts, the UI
-  duplication baseline or `ci.yml`. Its time budget is 10 minutes (`scripts/time-budgets.toml`).
+  duplication baseline, lakana-server's `ui.py` and `test_ui_real_build.py`, or `ci.yml`. Its time budget is 10 minutes (`scripts/time-budgets.toml`).
 - **Locally.** Use Node 26: `~/.local/share/node/current/bin` first on `PATH`, or any Node 26
   (`node --version` must print `v26.*`). Run npm under the memory cap with `TMPDIR` off `/tmp`:
 

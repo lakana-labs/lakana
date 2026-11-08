@@ -51,7 +51,7 @@ import-linter enforces these boundaries; `uv run lint-imports` checks them.
      against `commitlint.config.mjs`). Types: `feat`, `fix`, `perf`, `revert`, `docs`,
      `deps` (Dependabot) — these appear in the changelog — and `refactor`, `test`, `ci`,
      `build`, `chore`, which don't. Optional scope from: `core`, `server`, `worker`, `sdk`,
-     `cli`, `catalog`, `query`, `policy`, `secrets`, `audit`, `security`, `release`, `ci`,
+     `cli`, `ui`, `catalog`, `query`, `policy`, `secrets`, `audit`, `security`, `release`, `ci`,
      `docs`, `deps`.
    - **PR description** (the squash commit's body) ends with a footer paragraph: one
      `Closes #N` **per issue**, and — when the title has `!` — a

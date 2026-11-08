@@ -163,7 +163,7 @@ jobs:
         run: |
           # Anything but a pull request that provably changes nothing relevant runs the job.
           if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null \
-            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|\.github/workflows/ci\.yml)'; then
+            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|packages/lakana-server/(src/lakana_server/ui|tests/test_ui_real_build)\.py|\.github/workflows/ci\.yml)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "No change to ui/ or its gates: skipping the interface's gates."
@@ -201,6 +201,14 @@ jobs:
       - if: steps.scope.outputs.run == 'true'
         name: build
         run: npm --prefix ui run build
+      - if: steps.scope.outputs.run == 'true'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      # The real build served by the real lakana-server: the page's policy, everything it loads.
+      - if: steps.scope.outputs.run == 'true'
+        name: the build served by lakana-server
+        run: |
+          uv sync --all-packages --locked
+          uv run pytest packages/lakana-server/tests/test_ui_real_build.py -q -p no:cacheprovider
       - if: steps.scope.outputs.run == 'true'
         name: size-limit
         run: npm --prefix ui run size

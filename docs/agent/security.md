@@ -254,9 +254,11 @@ cookie set for another host.
 - **Fail at start.** Turned on without a built interface (no `index.html`, no `assets/`, or a
   missing or malformed `csp.txt`), the server refuses to start (`UiNotBuiltError`) instead of
   serving errors.
-- **Not yet covered:** the Playwright suite runs against `vite preview`, not lakana-server, so
-  the server's header path is pinned by Python tests only. One smoke run against
-  `lakana server start` is due once the interface calls the API.
+- **Not yet covered:** the Playwright suite runs against `vite preview`, not lakana-server.
+  `packages/lakana-server/tests/test_ui_real_build.py` (CI `ui`, after the build) serves the
+  real build through `create_app` and checks the policy header and every file the page loads,
+  but runs no browser. One smoke run against `lakana server start` is due once the interface
+  calls the API.
 
 ## Local files `lakana load` reads: a capped child process (#353)
 

@@ -14,7 +14,7 @@ export default {
       2,
       "always",
       [
-        "core", "server", "worker", "sdk", "cli", "catalog", "query", "policy",
+        "core", "server", "worker", "sdk", "cli", "ui", "catalog", "query", "policy",
         "secrets", "audit", "security", "release", "ci", "docs", "deps",
       ],
     ],

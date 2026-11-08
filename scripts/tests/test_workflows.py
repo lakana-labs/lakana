@@ -654,6 +654,7 @@ UI_GATES = (
     "run test:coverage",
     "scripts.ui_coverage_ratchet",
     "run build",
+    "pytest packages/lakana-server/tests/test_ui_real_build.py",
     "run size",
     "playwright install --with-deps chromium",
     "run e2e:smoke",
@@ -744,10 +745,12 @@ def _run_ui_scope_step(tmp_path: Path, changed: str) -> str:
         "tools/jscpd/package.json",
         ".github/workflows/ci.yml",
         "scripts/ui_coverage_ratchet.py",
+        "packages/lakana-server/src/lakana_server/ui.py",
+        "packages/lakana-server/tests/test_ui_real_build.py",
     ],
 )
 def test_the_ui_job_runs_for_a_ui_change(path: str, tmp_path: Path) -> None:
-    """A change to the interface, to a tool its gates run or to this workflow runs the job."""
+    """A change to the interface, to a tool its gates run, to its serving or to this workflow."""
     assert "run=true" in _run_ui_scope_step(tmp_path, path)
 
 
