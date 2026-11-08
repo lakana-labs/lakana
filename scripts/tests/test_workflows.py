@@ -478,6 +478,10 @@ def test_the_release_builds_the_interface_before_the_wheels() -> None:
     assert _runs("unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/csp.txt'")(
         steps[check]
     ), "the wheel's check misses the policy file the server needs"
+    assert _runs(
+        "unzip -l dist/lakana_server-*.whl"
+        " | grep -q 'lakana_server/ui_dist/licenses/THIRD-PARTY-NOTICES.md'"
+    )(steps[check]), "the wheel's check misses the bundled packages' licence notices"
     assert checkout < node < install < build_ui < wheels < check
     assert "cache" not in steps[node]["with"]
 

@@ -221,6 +221,11 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   (`axe-core`, `@axe-core/playwright`, `lightningcss` and its platform packages) and the OFL-1.1
   fonts are the only exceptions; see "Copyleft rule: none strong, weak only via a justified
   allowlist entry" below and its "Fonts: SIL OFL 1.1".
+- **Licence notices ship with the bundle.** The minifier strips the bundled packages' licence
+  headers, so `vite.config.ts` sets `build.license` and the build writes every bundled package's
+  name, version and licence text to `ui_dist/licenses/THIRD-PARTY-NOTICES.md` (served at
+  `/licenses/THIRD-PARTY-NOTICES.md`); `e2e/notices.spec.ts` fails when a runtime dependency of
+  `package.json` is missing from it, and the release's wheel check fails without the file.
 
 ## Upper bounds on the deeply used dependencies
 

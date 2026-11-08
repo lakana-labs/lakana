@@ -61,10 +61,12 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
       - name: Build all packages
         run: uv build --all-packages -o dist
-      - name: Verify the server wheel carries the interface and its policy
+      # The image installs this wheel (Dockerfile), so it carries the same three files.
+      - name: Verify the server wheel carries the interface, its policy and its licence notices
         run: |
           unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/index.html'
           unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/csp.txt'
+          unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/licenses/THIRD-PARTY-NOTICES.md'
       - name: Verify the version carries no local segment
         run: |
           if compgen -G "dist/*+*.whl" > /dev/null; then

@@ -69,6 +69,7 @@ def ui_dist(tmp_path: Path) -> Path:
     (dist / "assets" / "plex-9z8y.woff2").write_bytes(b"wOF2font")
     (dist / "theme-boot.js").write_text("document.documentElement.dataset.theme='light';")
     (dist / "licenses" / "IBM-Plex-OFL-1.1.txt").write_text("SIL Open Font License 1.1")
+    (dist / "licenses" / "THIRD-PARTY-NOTICES.md").write_text("# Licenses\n\n## react - 19 (MIT)\n")
     (tmp_path / "secret.txt").write_text(SECRET)
     (tmp_path / "ui.py").write_text(SECRET)
     (tmp_path / "settings.py").write_text(SECRET)
@@ -233,7 +234,10 @@ def test_a_font_has_its_own_content_type(ui_client: TestClient) -> None:
     assert response.headers["content-type"] == "font/woff2"
 
 
-@pytest.mark.parametrize("path", ["/theme-boot.js", "/licenses/IBM-Plex-OFL-1.1.txt"])
+@pytest.mark.parametrize(
+    "path",
+    ["/theme-boot.js", "/licenses/IBM-Plex-OFL-1.1.txt", "/licenses/THIRD-PARTY-NOTICES.md"],
+)
 def test_a_file_outside_assets_is_revalidated(ui_client: TestClient, path: str) -> None:
     """Root files and licences keep their names across builds, so a browser asks again."""
     response = ui_client.get(path)
@@ -294,7 +298,8 @@ def test_a_build_without_licences_serves_none(
     ui_dist: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The licences directory is optional; without it every licence path is 404."""
-    (ui_dist / "licenses" / "IBM-Plex-OFL-1.1.txt").unlink()
+    for licence in (ui_dist / "licenses").iterdir():
+        licence.unlink()
     (ui_dist / "licenses").rmdir()
     with _ui_client(settings, monkeypatch, ui_dist) as c:
         assert c.get("/licenses/IBM-Plex-OFL-1.1.txt").status_code == 404

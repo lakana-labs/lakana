@@ -51,6 +51,8 @@ _CONTENT_TYPES = {
     ".mjs": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".txt": "text/plain; charset=utf-8",
+    # The third-party notices (Markdown): plain text, so a browser shows them, not saves them.
+    ".md": "text/plain; charset=utf-8",
     ".json": "application/json",
     ".map": "application/json",
     ".webmanifest": "application/manifest+json",
