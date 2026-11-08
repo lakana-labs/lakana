@@ -31,7 +31,14 @@ from lakana_core.auth import AllowAllAuthorization
 from lakana_core.ci_oidc.config import CiOidcConfig
 from lakana_core.config import DatabaseConfig, SecretsConfig
 from lakana_core.identity.sessions import SessionService
-from lakana_core.models import Passkey, Principal
+from lakana_core.models import (
+    Environment,
+    EnvironmentDeployment,
+    JobVersion,
+    Passkey,
+    Principal,
+    Repository,
+)
 from lakana_server.app import create_app
 from lakana_server.settings import Settings, UiConfig
 from tests.conftest import _TEST_MASTER_KEY, AUTH_HEADER, PUBLIC, write_ui_dist
@@ -210,6 +217,43 @@ def _passkey(client: TestClient) -> str:
         session.add(row)
         session.commit()
         return f"/api/v1/principals/{name}/passkeys/{row.id}"
+
+
+def _deployment(client: TestClient, environment: str, repository: str) -> None:
+    """Record a current deployment of a repository, as a finished deploy would.
+
+    Parameters
+    ----------
+    client
+        The client.
+    environment
+        The environment's name.
+    repository
+        The repository's name.
+    """
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        env = session.execute(
+            select(Environment).where(Environment.name == environment)
+        ).scalar_one()
+        repo = session.execute(select(Repository).where(Repository.name == repository)).scalar_one()
+        version = JobVersion(
+            id=uuid.uuid4(),
+            repository_id=repo.id,
+            environment_id=env.id,
+            commit_sha="a" * 40,
+            manifest_json={"version": 1, "assets": [], "edges": [], "external_inputs": []},
+            code_uri="s3://b/x.tar.gz",
+            code_sha256="0" * 64,
+        )
+        session.add(version)
+        session.flush()
+        session.add(
+            EnvironmentDeployment(
+                environment_id=env.id, repository_id=repo.id, current_job_version_id=version.id
+            )
+        )
+        session.commit()
 
 
 @dataclass(frozen=True)
@@ -470,6 +514,13 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
     ("DELETE", "/api/v1/principals/{name}/passkeys/{passkey_id}"): Case(
         lambda c: (_passkey(c), None), 204
     ),
+    ("PUT", "/api/v1/environments/{env}/deployments/{repo}/run-as"): Case(
+        lambda c: (
+            "/api/v1/environments/dev/deployments/analytics/run-as",
+            {"principal": _principal(c, "SERVICE_ACCOUNT")},
+        ),
+        200,
+    ),
 }
 """Each operation that needs a fresh passkey touch in a browser session (`require_step_up`),
 with a request it answers with success. `DELETE .../sessions` is another person's (one's own
@@ -571,6 +622,7 @@ def client(
                     },
                 )
             )
+            _deployment(c, "dev", "analytics")
             yield c
 
 

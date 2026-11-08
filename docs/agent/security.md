@@ -541,7 +541,8 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
     (removes its members' rights), `POST /api/v1/access/apply`; row filters and column masks
     (`POST`, `DELETE`), because removing one widens what a person reads; CI trust rules (`POST`,
     `PATCH`, `…/enable`, `…/disable`, `DELETE`), because a rule lets a CI job act as its service
-    account;
+    account; `PUT /api/v1/environments/{env}/deployments/{repo}/run-as`, because every run of the
+    deployment then writes with that account's rights (clearing it removes rights: no step-up);
   - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
     passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
     (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.

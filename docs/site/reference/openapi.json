@@ -14299,7 +14299,7 @@
           "deploys"
         ],
         "summary": "Set the service account a deployment runs as",
-        "description": "Binds the service account whose rights the runs of this deployment use to write. Needs `MANAGE_ENVIRONMENT` on the environment. Answers 404 when the environment, repository, deployment or service account does not exist (one message for a missing or non-service account) and 422 when the service account is deactivated.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nBinds the service account whose rights the runs of this deployment use to write. Needs `MANAGE_ENVIRONMENT` on the environment. Answers 404 when the environment, repository, deployment or service account does not exist (one message for a missing or non-service account) and 422 when the service account is deactivated.",
         "operationId": "set_run_as_api_v1_environments__env__deployments__repo__run_as_put",
         "parameters": [
           {
