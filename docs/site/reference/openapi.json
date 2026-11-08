@@ -19162,7 +19162,7 @@
           "settings"
         ],
         "summary": "Show how long browser sessions last",
-        "description": "The idle timeout (default 12 hours) and the absolute lifetime (default 7 days), with the bounds an administrator may choose between. Anyone signed in may read them.",
+        "description": "The idle timeout (default 12 hours, 720 minutes) and the absolute lifetime (default 7 days, 10080 minutes), in minutes, with the bounds an administrator may choose between. Anyone signed in may read them.",
         "operationId": "get_sign_in_settings_api_v1_settings_sign_in_get",
         "parameters": [
           {
@@ -19222,7 +19222,7 @@
           "settings"
         ],
         "summary": "Change how long browser sessions last",
-        "description": "Needs the ADMIN role on the instance and, from the web interface, a passkey touch within the last 15 minutes. The idle timeout may be 15 minutes to 24 hours, the absolute lifetime 1 to 30 days and not shorter than the idle timeout; a value outside answers 422 naming the bound. Sessions already open keep their lengths. Recorded in the audit log.",
+        "description": "Needs the ADMIN role on the instance and, from the web interface, a passkey touch within the last 15 minutes. Both are in minutes: the idle timeout 15 to 1440 (24 hours), the absolute lifetime 60 (1 hour) to 43200 (30 days) and not shorter than the idle timeout; a value outside answers 422 naming the bound. Sessions already open keep their lengths. Recorded in the audit log.",
         "operationId": "set_sign_in_settings_api_v1_settings_sign_in_patch",
         "parameters": [
           {
@@ -27068,24 +27068,24 @@
             "type": "integer",
             "title": "Idle Timeout Minutes Max"
           },
-          "absolute_lifetime_days_min": {
+          "absolute_lifetime_minutes_min": {
             "type": "integer",
-            "title": "Absolute Lifetime Days Min"
+            "title": "Absolute Lifetime Minutes Min"
           },
-          "absolute_lifetime_days_max": {
+          "absolute_lifetime_minutes_max": {
             "type": "integer",
-            "title": "Absolute Lifetime Days Max"
+            "title": "Absolute Lifetime Minutes Max"
           }
         },
         "type": "object",
         "required": [
           "idle_timeout_minutes_min",
           "idle_timeout_minutes_max",
-          "absolute_lifetime_days_min",
-          "absolute_lifetime_days_max"
+          "absolute_lifetime_minutes_min",
+          "absolute_lifetime_minutes_max"
         ],
         "title": "SignInBoundsOut",
-        "description": "The limits an administrator may choose the session lengths between.\n\nParameters\n----------\nidle_timeout_minutes_min\n    The shortest idle timeout, in minutes.\nidle_timeout_minutes_max\n    The longest idle timeout, in minutes.\nabsolute_lifetime_days_min\n    The shortest absolute lifetime, in whole days.\nabsolute_lifetime_days_max\n    The longest absolute lifetime, in whole days."
+        "description": "The limits an administrator may choose the session lengths between.\n\nParameters\n----------\nidle_timeout_minutes_min\n    The shortest idle timeout, in minutes.\nidle_timeout_minutes_max\n    The longest idle timeout, in minutes.\nabsolute_lifetime_minutes_min\n    The shortest absolute lifetime, in minutes.\nabsolute_lifetime_minutes_max\n    The longest absolute lifetime, in minutes."
       },
       "SignInSettingsIn": {
         "properties": {
@@ -27093,7 +27093,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 100000.0,
+                "maximum": 10000000.0,
                 "minimum": 1.0
               },
               {
@@ -27102,24 +27102,24 @@
             ],
             "title": "Idle Timeout Minutes"
           },
-          "absolute_lifetime_days": {
+          "absolute_lifetime_minutes": {
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 10000.0,
+                "maximum": 10000000.0,
                 "minimum": 1.0
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Absolute Lifetime Days"
+            "title": "Absolute Lifetime Minutes"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "SignInSettingsIn",
-        "description": "Request body of `PATCH /api/v1/settings/sign-in`; a field left out keeps its value.\n\nA change applies to sessions that begin afterwards; open sessions keep their lengths.\n\nParameters\n----------\nidle_timeout_minutes\n    The new idle timeout, in minutes (15 to 1440).\nabsolute_lifetime_days\n    The new absolute lifetime, in whole days (1 to 30); not shorter than the idle timeout."
+        "description": "Request body of `PATCH /api/v1/settings/sign-in`; a field left out keeps its value.\n\nA change applies to sessions that begin afterwards; open sessions keep their lengths.\n\nParameters\n----------\nidle_timeout_minutes\n    The new idle timeout, in minutes (15 to 1440).\nabsolute_lifetime_minutes\n    The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than\n    the idle timeout."
       },
       "SignInSettingsOut": {
         "properties": {
@@ -27127,9 +27127,9 @@
             "type": "integer",
             "title": "Idle Timeout Minutes"
           },
-          "absolute_lifetime_days": {
+          "absolute_lifetime_minutes": {
             "type": "integer",
-            "title": "Absolute Lifetime Days"
+            "title": "Absolute Lifetime Minutes"
           },
           "bounds": {
             "$ref": "#/components/schemas/SignInBoundsOut"
@@ -27138,11 +27138,11 @@
         "type": "object",
         "required": [
           "idle_timeout_minutes",
-          "absolute_lifetime_days",
+          "absolute_lifetime_minutes",
           "bounds"
         ],
         "title": "SignInSettingsOut",
-        "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_days\n    How long a session lasts at most, in whole days.\nbounds\n    The limits both may be chosen between."
+        "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_minutes\n    How long a session lasts at most, in minutes.\nbounds\n    The limits both may be chosen between."
       },
       "StorageConfigIn": {
         "properties": {

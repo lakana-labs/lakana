@@ -23,7 +23,6 @@ from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import get_principal, get_session_service
 
 _MINUTE = 60
-_DAY = 86400
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -33,8 +32,24 @@ router = APIRouter(
 )
 
 
+def _minutes(value: timedelta) -> int:
+    """Count the whole minutes of a duration.
+
+    Parameters
+    ----------
+    value
+        The duration.
+
+    Returns
+    -------
+    int
+        Its minutes.
+    """
+    return int(value.total_seconds()) // _MINUTE
+
+
 def _out(limits: SessionLimits) -> SignInSettingsOut:
-    """Write the limits in the units the interface shows.
+    """Write the limits in minutes, the unit every bound is expressible in.
 
     Parameters
     ----------
@@ -44,17 +59,17 @@ def _out(limits: SessionLimits) -> SignInSettingsOut:
     Returns
     -------
     SignInSettingsOut
-        Minutes and whole days, with the bounds.
+        Both lengths and their bounds, in minutes.
     """
     b = SESSION_BOUNDS
     return SignInSettingsOut(
-        idle_timeout_minutes=int(limits.idle.total_seconds()) // _MINUTE,
-        absolute_lifetime_days=int(limits.absolute.total_seconds()) // _DAY,
+        idle_timeout_minutes=_minutes(limits.idle),
+        absolute_lifetime_minutes=_minutes(limits.absolute),
         bounds=SignInBoundsOut(
-            idle_timeout_minutes_min=int(b.idle_min.total_seconds()) // _MINUTE,
-            idle_timeout_minutes_max=int(b.idle_max.total_seconds()) // _MINUTE,
-            absolute_lifetime_days_min=max(1, -(-int(b.absolute_min.total_seconds()) // _DAY)),
-            absolute_lifetime_days_max=int(b.absolute_max.total_seconds()) // _DAY,
+            idle_timeout_minutes_min=_minutes(b.idle_min),
+            idle_timeout_minutes_max=_minutes(b.idle_max),
+            absolute_lifetime_minutes_min=_minutes(b.absolute_min),
+            absolute_lifetime_minutes_max=_minutes(b.absolute_max),
         ),
     )
 
@@ -66,8 +81,9 @@ def get_sign_in_settings(
 ) -> SignInSettingsOut:
     """Show how long browser sessions last.
 
-    The idle timeout (default 12 hours) and the absolute lifetime (default 7 days), with the
-    bounds an administrator may choose between. Anyone signed in may read them.
+    The idle timeout (default 12 hours, 720 minutes) and the absolute lifetime (default 7 days,
+    10080 minutes), in minutes, with the bounds an administrator may choose between. Anyone
+    signed in may read them.
 
     Parameters
     ----------
@@ -93,9 +109,10 @@ def set_sign_in_settings(
     """Change how long browser sessions last.
 
     Needs the ADMIN role on the instance and, from the web interface, a passkey touch within
-    the last 15 minutes. The idle timeout may be 15 minutes to 24 hours, the absolute lifetime
-    1 to 30 days and not shorter than the idle timeout; a value outside answers 422 naming the
-    bound. Sessions already open keep their lengths. Recorded in the audit log.
+    the last 15 minutes. Both are in minutes: the idle timeout 15 to 1440 (24 hours), the
+    absolute lifetime 60 (1 hour) to 43200 (30 days) and not shorter than the idle timeout; a
+    value outside answers 422 naming the bound. Sessions already open keep their lengths.
+    Recorded in the audit log.
 
     Parameters
     ----------
@@ -119,8 +136,8 @@ def set_sign_in_settings(
             else None
         ),
         absolute=(
-            timedelta(days=body.absolute_lifetime_days)
-            if body.absolute_lifetime_days is not None
+            timedelta(minutes=body.absolute_lifetime_minutes)
+            if body.absolute_lifetime_minutes is not None
             else None
         ),
     )

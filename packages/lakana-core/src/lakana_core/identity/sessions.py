@@ -864,19 +864,21 @@ class SessionService:
         Raises
         ------
         NotFoundError
-            If no principal has `principal_name`.
+            If no principal has `principal_name` (asked only of an administrator).
         PermissionDenied
-            If `p` is another person and not an administrator.
+            If `p` is another person and not an administrator, whether or not the name exists.
         StepUpRequired
             If an administrator acts without a fresh passkey touch.
         """
+        if principal_name != p.name:
+            # Before the lookup, so a non-administrator cannot tell which names exist.
+            self._require_admin(p)
+            require_step_up(p, now=self._clock())
         target = self._principal_named(principal_name)
         condition = BrowserSession.principal_id == target.id
         if target.id == p.id:
             count = self._end_rows(condition, reason or "sign_out_everywhere")
         else:
-            self._require_admin(p)
-            require_step_up(p, now=self._clock())
             count = self._end_rows(condition, "ended_by_admin", actor=p, subject=target.name)
         self._session.commit()
         return count
@@ -930,13 +932,14 @@ class SessionService:
         Raises
         ------
         NotFoundError
-            If no principal has `principal_name`.
+            If no principal has `principal_name` (asked only of an administrator).
         PermissionDenied
-            If `p` is another person and not an administrator.
+            If `p` is another person and not an administrator, whether or not the name exists.
         """
-        target = self._principal_named(principal_name)
-        if target.id != p.id:
+        if principal_name != p.name:
+            # Before the lookup, so a non-administrator cannot tell which names exist.
             self._require_admin(p)
+        target = self._principal_named(principal_name)
         now = self._clock()
         rows = (
             self._session.execute(

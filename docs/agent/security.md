@@ -338,8 +338,11 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   answer carries it or its hash (`SessionOut`, `BrowserSessionOut`, tested). `HttpOnly`,
   `SameSite=Strict`, `Path=/`, no `Domain`. Over HTTPS `Secure` and the name
   `__Host-lakana_session`; over plain HTTP (only on `localhost`) `lakana_session_<port>` without
-  `Secure`, because cookies do not separate ports and another local server on another port
-  must not overwrite it. `read_session_cookie` reads it only below `/api/v1/` (never on the
+  `Secure`, because cookies do not separate ports: the port in the name keeps two local servers
+  from overwriting each other's cookie by accident. It does not stop a malicious page on another
+  `localhost` port, which can set `lakana_session_<port>` too (sign the person out, or plant its
+  own session); a residual of the one-person loopback setup, in `docs/security/threat-model.md`,
+  "Browser sessions (M7 1b)". `__Host-` closes it over HTTPS. `read_session_cookie` reads it only below `/api/v1/` (never on the
   Iceberg REST routes, pages or `/healthz`) and never with `LAKANA_UI__ENABLED=false`; every
   `/api/v1/sign-in/*` route then answers 409 (`require_interface`). A presented id is never
   adopted: only a sign-in creates a session, with a fresh id, and ends the one it replaces.
@@ -349,7 +352,9 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   working), different per session, and not computable by page script, because the cookie is
   HttpOnly. Every method but GET, HEAD and OPTIONS with the cookie needs it in `X-Lakana-CSRF`
   (403 `CsrfRefused`, compared in constant time), checked before the session's row is read, so
-  a refused change does not extend the session. Double-submit would not hold: on loopback,
+  a refused change does not extend the session. A CSRF or token-only refusal is audited as
+  `AUTHENTICATION_FAILED` with `reason: csrf` or `token_only_route`, rate-limited like any
+  failed sign-in. Double-submit would not hold: on loopback,
   other ports are the same site. Together with `SameSite=Strict` and the guard's Origin rule
   this is defence in depth.
 - **Token-only routes.** `POST /api/v1/task-tokens` and `DELETE /api/v1/task-tokens/{key_id}`
@@ -359,8 +364,10 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   never extends the idle timeout; `last_seen_at` is written at most once a minute otherwise.
 - **Ending other people's sessions and changing the session lengths** need the ADMIN role and,
   from a browser, step-up (`require_step_up`: a passkey touch within 15 minutes); each ended
-  session is audited with the administrator as actor and the person as subject. The lengths
-  live in the database (`GET`/`PATCH /api/v1/settings/sign-in`), never in the environment.
+  session is audited with the administrator as actor and the person as subject. Listing or
+  ending another person's sessions checks the ADMIN role before the name is looked up, so a
+  non-administrator gets 403 for every name and learns none. The lengths live in the database
+  (`GET`/`PATCH /api/v1/settings/sign-in`, in minutes), never in the environment.
 
 ## Local files `lakana load` reads: a capped child process (#353)
 

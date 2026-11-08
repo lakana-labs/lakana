@@ -88,6 +88,12 @@ CSRF_MESSAGE = (
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
+_SIGN_IN_OR_TOKEN = (  # nosec B105 -- a refusal's text, not a credential
+    "Not signed in. In the web interface: Sign in again. From code: send a token "
+    "(Authorization: Bearer lakana_pat_<keyid>_<secret>)."
+)
+"""The 401 detail of a request without any credential while the web interface is on."""
+
 _SHAPES = (
     "Authorization header must be 'Bearer lakana_pat_<keyid>_<secret>', "
     "'Bearer lakana_task_<keyid>_<secret>' or 'Bearer lakana_ci_<keyid>_<secret>'."
@@ -320,6 +326,8 @@ def get_principal(
     try:
         match = _AUTH_HEADER_PATTERN.match(authorization or "")
         if match is None:
+            if authorization is None and request.app.state.settings.ui.enabled:
+                raise AuthenticationError(_SIGN_IN_OR_TOKEN)
             raise AuthenticationError(_SHAPES)
         raw_token = match.group(1)
         if (parsed := parse_token(raw_token, "lakana_pat")) is not None:
@@ -375,15 +383,21 @@ def _session_principal(
     Raises
     ------
     TokenOnlyRoute
-        On a route of `TOKEN_ONLY_ROUTES` (403).
+        On a route of `TOKEN_ONLY_ROUTES` (403); audited as a failed sign-in with
+        ``reason: token_only_route``.
     CsrfRefused
-        If a state-changing request lacks the session's CSRF token (403).
+        If a state-changing request lacks the session's CSRF token (403); audited with
+        ``reason: csrf``.
     AuthenticationError
         If the cookie names no session or a wrong secret; `SessionEndedError` if the session
         has ended. Audited as a failed token is.
     """
+    key_id = cookie.split("_", 1)[0][:64]
+    credential: Credential = ("session", key_id)
+    detail: dict[str, str | int] = {"key_id": key_id, "credential": "session"}
     route = request.scope.get("route")
     if (request.method, getattr(route, "path", None)) in TOKEN_ONLY_ROUTES:
+        _record_failure(request, audit, credential, {**detail, "reason": "token_only_route"})
         raise TokenOnlyRoute(TOKEN_ONLY_MESSAGE)
     sessions = SessionService(
         session, get_grant_authorization(request, session), clock=get_clock(request)
@@ -391,13 +405,12 @@ def _session_principal(
     if request.method not in _SAFE_METHODS and not sessions.check_csrf(
         cookie, request.headers.get(CSRF_HEADER) or ""
     ):
+        _record_failure(request, audit, credential, {**detail, "reason": "csrf"})
         raise CsrfRefused(CSRF_MESSAGE)
-    key_id = cookie.split("_", 1)[0][:64]
-    credential: Credential = ("session", key_id)
     try:
         principal = sessions.verify(cookie, extend=request.headers.get(BACKGROUND_HEADER) != "1")
     except AuthenticationError:
-        _record_failure(request, audit, credential, {"key_id": key_id, "credential": "session"})
+        _record_failure(request, audit, credential, detail)
         raise
     _record_sign_in(request, audit, credential, principal.id, kind="session")
     return principal

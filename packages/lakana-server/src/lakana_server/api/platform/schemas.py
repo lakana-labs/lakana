@@ -5293,16 +5293,16 @@ class SignInBoundsOut(BaseModel):
         The shortest idle timeout, in minutes.
     idle_timeout_minutes_max
         The longest idle timeout, in minutes.
-    absolute_lifetime_days_min
-        The shortest absolute lifetime, in whole days.
-    absolute_lifetime_days_max
-        The longest absolute lifetime, in whole days.
+    absolute_lifetime_minutes_min
+        The shortest absolute lifetime, in minutes.
+    absolute_lifetime_minutes_max
+        The longest absolute lifetime, in minutes.
     """
 
     idle_timeout_minutes_min: int
     idle_timeout_minutes_max: int
-    absolute_lifetime_days_min: int
-    absolute_lifetime_days_max: int
+    absolute_lifetime_minutes_min: int
+    absolute_lifetime_minutes_max: int
 
 
 class SignInSettingsOut(BaseModel):
@@ -5312,14 +5312,14 @@ class SignInSettingsOut(BaseModel):
     ----------
     idle_timeout_minutes
         How long a session lasts without a request the person started, in minutes.
-    absolute_lifetime_days
-        How long a session lasts at most, in whole days.
+    absolute_lifetime_minutes
+        How long a session lasts at most, in minutes.
     bounds
         The limits both may be chosen between.
     """
 
     idle_timeout_minutes: int
-    absolute_lifetime_days: int
+    absolute_lifetime_minutes: int
     bounds: SignInBoundsOut
 
 
@@ -5332,11 +5332,12 @@ class SignInSettingsIn(BaseModel):
     ----------
     idle_timeout_minutes
         The new idle timeout, in minutes (15 to 1440).
-    absolute_lifetime_days
-        The new absolute lifetime, in whole days (1 to 30); not shorter than the idle timeout.
+    absolute_lifetime_minutes
+        The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than
+        the idle timeout.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    idle_timeout_minutes: int | None = Field(default=None, ge=1, le=100_000)
-    absolute_lifetime_days: int | None = Field(default=None, ge=1, le=10_000)
+    idle_timeout_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
+    absolute_lifetime_minutes: int | None = Field(default=None, ge=1, le=10_000_000)

@@ -632,6 +632,18 @@ def test_list_sessions_shows_open_ones_to_self_and_admin_only(
     assert idle_one.key_id not in {s.key_id for s in svc.list_sessions(_ref(bob), "bob")}
 
 
+def test_a_non_admin_cannot_tell_which_names_exist(session: Session, clock: _Clock) -> None:
+    """Another person's sessions are refused before the name is looked up."""
+    carol = _principal(session, "carol")
+    _principal(session, "bob")
+    svc = SessionService(session, GrantAuthorization(session), clock=clock)
+    for name in ("bob", "nobody"):
+        with pytest.raises(PermissionDenied):
+            svc.list_sessions(_ref(carol), name)
+        with pytest.raises(PermissionDenied):
+            svc.end_all(_ref(carol), name)
+
+
 def test_require_step_up_ignores_tokens_and_refuses_a_stale_session(
     svc: SessionService, alice: Principal, clock: _Clock
 ) -> None:

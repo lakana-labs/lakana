@@ -478,6 +478,45 @@ What it does not protect against. Each is accepted.
 13. **A merge holds its target's matching rows in the server process**, bounded by the append
     concurrency limit and, for a key of several columns, by 5,000 rows per batch.
 
+## Browser sessions (M7 1b)
+
+The web interface signs a person in with a browser session: a credential of `get_principal` like
+a token. The details and the code are in `docs/agent/security.md`, "Sign-in: links, sessions,
+passkeys (M7 1b)"; the design is `docs/superpowers/specs/2026-11-08-m7-part1b-sign-in-design.md`.
+
+### What is defended
+
+- **A session with more rights than its person.** The session resolves to the same principal as
+  the person's token, through the same authorization, break-glass rules, body limit and audit; no
+  route module reads the credential kind except the session routes themselves (a static test),
+  and every `/api/v1` operation is compared between a session and the person's token.
+- **Theft of the cookie by page script.** `HttpOnly`; only the secret's SHA-256 is stored and no
+  REST answer carries it or its hash.
+- **Cross-site requests.** `SameSite=Strict`, the Host/Origin guard, and a CSRF token derived from
+  the session secret on every state-changing cookie request; no CORS headers.
+- **Revocation latency.** The session's row is read on every request: sign out, sign out
+  everywhere, an administrator ending sessions and deactivation take effect on the next request.
+  A session ends after its idle timeout (12 hours by default) and its absolute lifetime (7 days),
+  which background polls do not extend.
+- **A session minting a task token.** The task-token routes refuse the cookie.
+- **Fixation.** A presented session id is never adopted; every sign-in issues a fresh one.
+- **Probing.** A refused cookie is audited, rate-limited per client address; another person's
+  sessions answer 403 to a non-administrator whether the name exists or not.
+
+### Residuals, stated as such
+
+- **Cookie overwrite on loopback.** Over plain HTTP on `localhost`, cookies do not separate
+  ports: a page served by another program on another `localhost` port can set
+  `lakana_session_<port>`, signing the person out or planting a session of its own (login CSRF).
+  It cannot read the cookie or act as the person. Accepted for the one-person local setup; a
+  team server uses HTTPS, where the `__Host-` prefix refuses a cookie set from elsewhere.
+- **Step-up before Task 6.** Until the sensitive actions (creating tokens, granting rights) call
+  `require_step_up`, a session of an administrator can do them without a fresh passkey touch;
+  the branch is not released before that lands.
+- **A stolen cookie works until it ends.** Whoever holds the cookie value acts as the person
+  until sign out, an administrator ends it, or its idle or absolute limit passes; the cookie is
+  never sent to another site and never logged.
+
 ## CI OIDC exchange (#15)
 
 A CI job exchanges its provider's OIDC ID token (`POST /api/v1/auth/oidc/token`, no credential)

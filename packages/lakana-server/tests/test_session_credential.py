@@ -470,3 +470,46 @@ def test_no_session_output_carries_a_secret() -> None:
     for model in (SessionOut, BrowserSessionOut):
         assert not [f for f in model.model_fields if "hash" in f or "secret" in f]
     assert CSRF_HEADER == "X-Lakana-CSRF"
+
+
+def _failed_rows(client: TestClient) -> list[dict[str, object]]:
+    """Read the details of every `AUTHENTICATION_FAILED` row.
+
+    Parameters
+    ----------
+    client
+        A started client.
+
+    Returns
+    -------
+    list of dict
+        The details, oldest first.
+    """
+    with Session(cast(FastAPI, client.app).state.engine) as session:
+        rows = session.execute(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == AuditEventType.AUTHENTICATION_FAILED)
+            .order_by(AuditEvent.occurred_at)
+        ).scalars()
+        return [r.detail for r in rows]
+
+
+def test_csrf_and_token_only_refusals_are_audited(client: TestClient) -> None:
+    """A refused cookie request is a failed sign-in in the audit log, naming why."""
+    name, value, csrf = signed_in(client, "admin")
+    key_id = value.split("_")[0]
+    r = client.patch("/api/v1/whoami", headers=session_headers(name, value), json={})
+    assert r.status_code == 403
+    r = client.delete("/api/v1/task-tokens/k", headers=session_headers(name, value, csrf))
+    assert r.status_code == 403
+    assert _failed_rows(client) == [
+        {"key_id": key_id, "credential": "session", "reason": "csrf"},
+        {"key_id": key_id, "credential": "session", "reason": "token_only_route"},
+    ]
+
+
+def test_a_browser_without_a_session_is_told_to_sign_in(client: TestClient) -> None:
+    """With the interface on, a request with no credential names signing in, not only tokens."""
+    r = client.get("/api/v1/whoami")
+    assert r.status_code == 401
+    assert "Sign in" in r.json()["detail"] and "Bearer" in r.json()["detail"]

@@ -171,19 +171,28 @@ def test_a_non_administrator_cannot_list_another_persons_sessions(client: TestCl
     assert client.get("/api/v1/principals/alice/sessions", headers=AUTH_HEADER).status_code == 200
 
 
+def test_a_non_administrator_cannot_tell_which_names_exist(client: TestClient) -> None:
+    """Another person's sessions answer 403 whether the name exists or not."""
+    name, value, csrf = signed_in(client, "alice")
+    for who in ("admin", "nobody"):
+        url = f"/api/v1/principals/{who}/sessions"
+        assert client.get(url, headers=session_headers(name, value)).status_code == 403
+        assert client.delete(url, headers=session_headers(name, value, csrf)).status_code == 403
+
+
 def test_every_signed_in_person_reads_the_sign_in_settings(client: TestClient) -> None:
-    """The defaults and the bounds, in the units the interface shows."""
+    """The defaults and the bounds, in minutes, so every bound the server keeps is expressible."""
     name, value, _ = signed_in(client, "alice")
     r = client.get("/api/v1/settings/sign-in", headers=session_headers(name, value))
     assert r.status_code == 200, r.text
     assert r.json() == {
         "idle_timeout_minutes": 720,
-        "absolute_lifetime_days": 7,
+        "absolute_lifetime_minutes": 10080,
         "bounds": {
             "idle_timeout_minutes_min": 15,
             "idle_timeout_minutes_max": 1440,
-            "absolute_lifetime_days_min": 1,
-            "absolute_lifetime_days_max": 30,
+            "absolute_lifetime_minutes_min": 60,
+            "absolute_lifetime_minutes_max": 43200,
         },
     }
 
@@ -193,7 +202,9 @@ def test_every_signed_in_person_reads_the_sign_in_settings(client: TestClient) -
     [
         ({"idle_timeout_minutes": 10}, "at least 15 minutes"),
         ({"idle_timeout_minutes": 1441}, "at most 24 hours"),
-        ({"absolute_lifetime_days": 31}, "at most 30 days"),
+        ({"absolute_lifetime_minutes": 59}, "at least 1 hour"),
+        ({"absolute_lifetime_minutes": 43201}, "at most 30 days"),
+        ({"idle_timeout_minutes": 120, "absolute_lifetime_minutes": 60}, "not be longer"),
     ],
 )
 def test_settings_outside_the_bounds_name_the_bound(
@@ -207,7 +218,7 @@ def test_settings_outside_the_bounds_name_the_bound(
 
 def test_an_administrator_changes_the_settings_with_step_up(client: TestClient) -> None:
     """Changing the lengths needs ADMIN and, from a browser, a fresh passkey touch."""
-    body = {"idle_timeout_minutes": 60, "absolute_lifetime_days": 2}
+    body = {"idle_timeout_minutes": 15, "absolute_lifetime_minutes": 60}
     name, alices, alice_csrf = signed_in(client, "alice", touched_at=datetime.now(UTC))
     r = client.patch(
         "/api/v1/settings/sign-in", headers=session_headers(name, alices, alice_csrf), json=body
@@ -223,8 +234,8 @@ def test_an_administrator_changes_the_settings_with_step_up(client: TestClient) 
         "/api/v1/settings/sign-in", headers=session_headers(name, fresh, fresh_csrf), json=body
     )
     assert r.status_code == 200, r.text
-    assert r.json()["idle_timeout_minutes"] == 60 and r.json()["absolute_lifetime_days"] == 2
+    assert r.json()["idle_timeout_minutes"] == 15 and r.json()["absolute_lifetime_minutes"] == 60
     assert (
         client.get("/api/v1/settings/sign-in", headers=AUTH_HEADER).json()["idle_timeout_minutes"]
-        == 60
+        == 15
     )
