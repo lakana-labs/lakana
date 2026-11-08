@@ -21,6 +21,7 @@ from lakana_core.ci_oidc.verification import IdTokenVerifier
 from lakana_core.config import warn_about_tokens_in_url_paths
 from lakana_core.db import create_engine
 from lakana_core.grants.admin import ineffective_grants_warning
+from lakana_core.identity.sessions import utc_now
 from lakana_core.readiness import probe_storage, read_database
 from lakana_core.secrets.crypto import ACCEPT_FORMAT_1_WARNING
 from lakana_core.secrets.keys import EnvKeyProvider
@@ -52,6 +53,9 @@ from lakana_server.api.platform.runs import router as runs_router
 from lakana_server.api.platform.runs import scheduler_router
 from lakana_server.api.platform.search import router as search_router
 from lakana_server.api.platform.secrets import router as secrets_router
+from lakana_server.api.platform.sessions import router as sessions_router
+from lakana_server.api.platform.sessions import sign_in_router
+from lakana_server.api.platform.sign_in_settings import router as sign_in_settings_router
 from lakana_server.api.platform.tables import dropped_router as dropped_tables_router
 from lakana_server.api.platform.tables import expiring_router as expiring_tables_router
 from lakana_server.api.platform.tables import router as tables_router
@@ -107,6 +111,9 @@ ROUTERS = (
     access_file_router,
     ci_oidc_router,
     whoami_router,
+    sign_in_router,
+    sessions_router,
+    sign_in_settings_router,
     info_router,
 )
 """Every router the application includes, in the order they are included."""
@@ -164,6 +171,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.engine = engine
         app.state.settings = resolved_settings
+        # The sign-in services' clock (`deps.get_clock`); a test may replace it.
+        app.state.clock = utc_now
         install_query_text(resolved_settings.audit.query_text)
         app.state.auth_audit_limiter = AuthAuditLimiter(
             resolved_settings.auth_audit.per_ip_per_minute

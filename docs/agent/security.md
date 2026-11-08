@@ -207,8 +207,8 @@ cookie set for another host.
 
 - **No privileged way in (rule 2).** The interface calls only the public REST API, with the
   user's own credential. The server gives it no endpoint of its own and no route besides its
-  static files; it has nothing an API client lacks. Part 1 has no sign-in and calls no route at
-  all; sign-in and sessions get their own design and security review before any code lands.
+  static files; it has nothing an API client lacks. Its credential is a browser session, a
+  credential of `get_principal` like a token: "Sign-in: links, sessions, passkeys (M7 1b)".
 - **No joined request path.** Hashed files under `/assets/` go through Starlette's
   `StaticFiles`, which normalises the path and refuses an absolute one, a NUL byte and any path
   whose real path (symlinks resolved) leaves `assets/`. Every other file (`theme-boot.js`, the
@@ -296,6 +296,59 @@ cookie set for another host.
   real build through `create_app` and checks the policy header and every file the page loads,
   but runs no browser. One smoke run against `lakana server start` is due once the interface
   calls the API.
+
+## Sign-in: links, sessions, passkeys (M7 1b)
+
+Design: `docs/superpowers/specs/2026-11-08-m7-part1b-sign-in-design.md` ("Decided rules" win).
+Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
+`lakana_server.deps.get_principal`, `api/platform/sessions.py`, `api/platform/sign_in_settings.py`.
+
+- **A session is the fourth credential of `get_principal`** (after a PAT, a task token and a CI
+  token), so authorization, deactivation, break-glass rules, the body limit
+  (`AuthenticateFirstRoute`), the failed-sign-in limiter and the sign-in audit window apply
+  unchanged: no route has a session-specific branch. The returned `PrincipalRef` carries
+  `credential="session"` and a `SessionContext`. The session's row is read on every request
+  (`SessionService.verify`), so sign out, sign out everywhere, an administrator ending sessions
+  and deactivation take effect on the next request; deactivation ends the rows in its own commit
+  (`PrincipalService.deactivate_principal`). An ended session answers 401 `SessionEndedError` with
+  `reason` (`idle`, `lifetime`, `sign_out`, `ended_by_admin`, `deactivated`, `token_revoked`, ...)
+  and "Sign in again". A refused cookie is audited as `AUTHENTICATION_FAILED` through
+  `auth_audit_limiter`, with `credential: session` and the cookie's key id; a success through
+  `sign_in_audit_limiter` keyed `("session", key_id)`. `test_session_parity.py` sends every
+  `/api/v1` operation of the running app once with a session and once with the same person's
+  token and compares status and body; `CREDENTIAL_SPECIFIC_ROUTES` lists the exceptions with a
+  reason, and a test fails when one of them no longer exists.
+- **Any `Authorization` header wins, valid or not.** With one present, the cookie is not read
+  and no CSRF token is asked for; an invalid Bearer beside a valid cookie is 401, never the
+  session's principal (`test_any_authorization_header_never_falls_back_to_the_cookie`).
+  `BrowserGuard` skips its cookie test and the Origin rule only for a Bearer header.
+- **The cookie.** Value `<key_id>_<secret>`; only the secret's SHA-256 is stored and no REST
+  answer carries it or its hash (`SessionOut`, `BrowserSessionOut`, tested). `HttpOnly`,
+  `SameSite=Strict`, `Path=/`, no `Domain`. Over HTTPS `Secure` and the name
+  `__Host-lakana_session`; over plain HTTP (only on `localhost`) `lakana_session_<port>` without
+  `Secure`, because cookies do not separate ports and another local server on another port
+  must not overwrite it. `read_session_cookie` reads it only below `/api/v1/` (never on the
+  Iceberg REST routes, pages or `/healthz`) and never with `LAKANA_UI__ENABLED=false`; every
+  `/api/v1/sign-in/*` route then answers 409 (`require_interface`). A presented id is never
+  adopted: only a sign-in creates a session, with a fresh id, and ends the one it replaces.
+- **CSRF: a synchroniser token derived from the session.** `csrf_token_for(cookie)` is
+  HMAC-SHA256 keyed with the session secret over a fixed message: the same for the whole
+  session (reading `GET /api/v1/sign-in/session` again never rotates it, so other tabs keep
+  working), different per session, and not computable by page script, because the cookie is
+  HttpOnly. Every method but GET, HEAD and OPTIONS with the cookie needs it in `X-Lakana-CSRF`
+  (403 `CsrfRefused`, compared in constant time), checked before the session's row is read, so
+  a refused change does not extend the session. Double-submit would not hold: on loopback,
+  other ports are the same site. Together with `SameSite=Strict` and the guard's Origin rule
+  this is defence in depth.
+- **Token-only routes.** `POST /api/v1/task-tokens` and `DELETE /api/v1/task-tokens/{key_id}`
+  refuse the cookie (403 `TokenOnlyRoute`, `deps.TOKEN_ONLY_ROUTES`, matched on the route
+  template): minting a task token from a browser would put a token in the interface.
+- **Background polls do not keep a session alive.** A request with `X-Lakana-Background: 1`
+  never extends the idle timeout; `last_seen_at` is written at most once a minute otherwise.
+- **Ending other people's sessions and changing the session lengths** need the ADMIN role and,
+  from a browser, step-up (`require_step_up`: a passkey touch within 15 minutes); each ended
+  session is audited with the administrator as actor and the person as subject. The lengths
+  live in the database (`GET`/`PATCH /api/v1/settings/sign-in`), never in the environment.
 
 ## Local files `lakana load` reads: a capped child process (#353)
 

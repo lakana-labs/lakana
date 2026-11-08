@@ -27,6 +27,7 @@ from lakana_core.errors import (
     NotFoundError,
     NotPublishedError,
     PermissionDenied,
+    SessionEndedError,
     StorageRefusedError,
     StorageUnavailableError,
     ValidationError,
@@ -82,6 +83,21 @@ class ClientDisconnectedError(LakanaError):
     letting Starlette's own `ClientDisconnect` propagate unhandled, is that
     an *unhandled* exception is what Starlette logs at `ERROR` with a full
     traceback ("Exception in ASGI application"); a handled one is not.
+    """
+
+
+class CsrfRefused(PermissionDenied):
+    """A state-changing request with the session cookie lacked its session's CSRF token.
+
+    Server-only: the CSRF header is an HTTP-layer concern of the browser session
+    (`lakana_server.browser_session`). Mapped to 403 through `PermissionDenied`.
+    """
+
+
+class TokenOnlyRoute(PermissionDenied):
+    """A route for code only (`lakana_server.deps.TOKEN_ONLY_ROUTES`) was called with the cookie.
+
+    Server-only, like `CsrfRefused`. Mapped to 403 through `PermissionDenied`.
     """
 
 
@@ -168,7 +184,9 @@ def install_exception_handlers(app: FastAPI) -> None:
         JSONResponse
             A body of the shape `{"detail": str, "type": str}`, with a
             `Retry-After` header attached for the one error type that needs
-            one (`_RETRY_AFTER_SECONDS`).
+            one (`_RETRY_AFTER_SECONDS`). A `SessionEndedError` (401) adds
+            `reason` (``idle``, ``lifetime``, ``sign_out``, ...), so the interface can
+            say why the person has to sign in again.
 
         Notes
         -----
@@ -186,11 +204,10 @@ def install_exception_handlers(app: FastAPI) -> None:
         )
         retry_after = _RETRY_AFTER_SECONDS.get(type(exc))
         headers = {"Retry-After": retry_after} if retry_after is not None else None
-        return JSONResponse(
-            status_code=status_code,
-            content={"detail": str(exc), "type": type(exc).__name__},
-            headers=headers,
-        )
+        content = {"detail": str(exc), "type": type(exc).__name__}
+        if isinstance(exc, SessionEndedError):
+            content["reason"] = exc.reason
+        return JSONResponse(status_code=status_code, content=content, headers=headers)
 
     def handle_validation_error(request: Request, exc: Exception) -> JSONResponse:
         """Answer a request that does not fit its schema, without echoing the input it was sent.

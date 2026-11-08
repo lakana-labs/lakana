@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import pytest
 from core_test_helpers import _RecordThenDeny
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable, SecurableKind
@@ -19,7 +20,8 @@ from lakana_core.errors import (
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.identity.principals import PrincipalService
-from lakana_core.models import Principal, PrincipalType
+from lakana_core.identity.sessions import SessionService
+from lakana_core.models import AuditEvent, AuditEventType, BrowserSession, Principal, PrincipalType
 
 
 def _admin(session: Session) -> PrincipalRef:
@@ -87,6 +89,47 @@ def test_deactivate_principal_sets_is_active_false(session: Session) -> None:
 
     fetched = service.get_principal_by_name(_admin(session), "ci-bot")
     assert fetched.is_active is False
+
+
+def test_deactivation_ends_every_session_of_the_person_at_once(session: Session) -> None:
+    """The sessions end in the deactivation's own commit, each audited with the reason."""
+    admin = _admin(session)
+    principals = PrincipalService(session, AllowAllAuthorization())
+    alice = principals.create_principal(admin, name="alice", type=PrincipalType.USER)
+    sessions = SessionService(session, AllowAllAuthorization())
+    for _ in range(2):
+        sessions.start(
+            alice.id, via="passkey", replacing=None, peer="1.2.3.4", user_agent="t", touched=True
+        )
+    session.commit()
+
+    principals.deactivate_principal(admin, "alice")
+
+    rows = session.execute(select(BrowserSession)).scalars().all()
+    assert [(r.ended_at is not None, r.end_reason) for r in rows] == [(True, "deactivated")] * 2
+    ended = session.execute(
+        select(AuditEvent).where(AuditEvent.event_type == AuditEventType.SESSION_ENDED)
+    ).scalars()
+    assert sorted(e.detail["reason"] for e in ended) == ["deactivated", "deactivated"]
+
+
+def test_deactivation_that_is_refused_ends_no_session(session: Session) -> None:
+    """The lockout guard runs first: a refused deactivation leaves the sessions open."""
+    admin = _admin(session)
+    principals = PrincipalService(session, AllowAllAuthorization())
+    grants = GrantService(session, AllowAllAuthorization())
+    root = principals.create_principal(admin, name="root", type=PrincipalType.USER)
+    grants.grant(admin, principal="root", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    SessionService(session, AllowAllAuthorization()).start(
+        root.id, via="passkey", replacing=None, peer="1.2.3.4", user_agent="t", touched=True
+    )
+    session.commit()
+
+    with pytest.raises(ConflictError):
+        principals.deactivate_principal(admin, "root")
+
+    session.rollback()
+    assert session.execute(select(BrowserSession.ended_at)).scalar_one() is None
 
 
 def test_list_principals_returns_every_principal(session: Session) -> None:

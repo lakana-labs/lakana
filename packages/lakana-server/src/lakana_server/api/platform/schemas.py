@@ -5205,3 +5205,138 @@ class AccessStatusOut(BaseModel):
 
     scopes: list[ManagedScopeOut]
     overrides: list[AccessOverrideOut]
+
+
+class SessionOut(BaseModel):
+    """Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.
+
+    Carries no secret: neither the cookie nor any hash of it.
+
+    Parameters
+    ----------
+    name
+        The signed-in person's principal name.
+    display_name
+        The person's display name; `null` for none.
+    type
+        The principal type (always ``USER``: service accounts cannot sign in).
+    via
+        How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.
+    csrf_token
+        The session's CSRF token, sent in `X-Lakana-CSRF` with every change. The same for the
+        whole session, so every tab can read it.
+    step_up_until
+        Until when actions that need a fresh passkey touch are allowed without another touch;
+        `null` when the session has no touch.
+    needs_passkey
+        Whether the person must register a passkey before going on (a session from a setup,
+        invite or recovery link on an account without a usable passkey).
+    offer_passkey
+        Whether the interface offers, without forcing, to register a passkey (a local sign-in
+        on an account without one).
+    absolute_expires_at
+        When the session ends at the latest, however active.
+    """
+
+    name: str
+    display_name: str | None
+    type: Literal["USER", "SERVICE_ACCOUNT"]
+    via: str
+    csrf_token: str
+    step_up_until: datetime | None
+    needs_passkey: bool
+    offer_passkey: bool
+    absolute_expires_at: datetime
+
+
+class BrowserSessionOut(BaseModel):
+    """One open browser session of a person, in `GET /api/v1/principals/{name}/sessions`.
+
+    Carries no secret and no part of the cookie.
+
+    Parameters
+    ----------
+    id
+        The session's id.
+    via
+        How the session began.
+    created_at
+        When it began.
+    last_seen_at
+        About when the person last used it (written at most once a minute).
+    absolute_expires_at
+        When it ends at the latest.
+    user_agent
+        The browser it began in, as the browser named itself.
+    peer
+        The address it began from, as the server saw it.
+    current
+        Whether this is the session of the request that asks.
+    """
+
+    id: uuid.UUID
+    via: str
+    created_at: datetime
+    last_seen_at: datetime
+    absolute_expires_at: datetime
+    user_agent: str
+    peer: str
+    current: bool
+
+
+class SignInBoundsOut(BaseModel):
+    """The limits an administrator may choose the session lengths between.
+
+    Parameters
+    ----------
+    idle_timeout_minutes_min
+        The shortest idle timeout, in minutes.
+    idle_timeout_minutes_max
+        The longest idle timeout, in minutes.
+    absolute_lifetime_days_min
+        The shortest absolute lifetime, in whole days.
+    absolute_lifetime_days_max
+        The longest absolute lifetime, in whole days.
+    """
+
+    idle_timeout_minutes_min: int
+    idle_timeout_minutes_max: int
+    absolute_lifetime_days_min: int
+    absolute_lifetime_days_max: int
+
+
+class SignInSettingsOut(BaseModel):
+    """Response body of `GET` and `PATCH /api/v1/settings/sign-in`.
+
+    Parameters
+    ----------
+    idle_timeout_minutes
+        How long a session lasts without a request the person started, in minutes.
+    absolute_lifetime_days
+        How long a session lasts at most, in whole days.
+    bounds
+        The limits both may be chosen between.
+    """
+
+    idle_timeout_minutes: int
+    absolute_lifetime_days: int
+    bounds: SignInBoundsOut
+
+
+class SignInSettingsIn(BaseModel):
+    """Request body of `PATCH /api/v1/settings/sign-in`; a field left out keeps its value.
+
+    A change applies to sessions that begin afterwards; open sessions keep their lengths.
+
+    Parameters
+    ----------
+    idle_timeout_minutes
+        The new idle timeout, in minutes (15 to 1440).
+    absolute_lifetime_days
+        The new absolute lifetime, in whole days (1 to 30); not shorter than the idle timeout.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    idle_timeout_minutes: int | None = Field(default=None, ge=1, le=100_000)
+    absolute_lifetime_days: int | None = Field(default=None, ge=1, le=10_000)

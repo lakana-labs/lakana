@@ -5,7 +5,8 @@ from __future__ import annotations
 import dataclasses
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from datetime import datetime
 
 from fastapi import Depends, Header, Query, Request
 from sqlalchemy.orm import Session
@@ -33,6 +34,7 @@ from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.principals import PrincipalService
+from lakana_core.identity.sessions import SessionService, utc_now
 from lakana_core.identity.task_tokens import TaskTokenService
 from lakana_core.identity.tokens import parse_token
 from lakana_core.jobs.service import JobService
@@ -48,6 +50,8 @@ from lakana_core.secrets.keys import EnvKeyProvider, KeyProvider
 from lakana_core.secrets.service import SecretService
 from lakana_core.statement_limit import check_statement_length
 from lakana_core.storage.resolver import StorageResolver
+from lakana_server.browser_session import BACKGROUND_HEADER, CSRF_HEADER, read_session_cookie
+from lakana_server.errors import CsrfRefused, TokenOnlyRoute
 from lakana_server.sign_in_audit import Credential
 
 PRINCIPAL_STATE_KEY = "_lakana_authenticated_principal"
@@ -65,6 +69,24 @@ which stays case-sensitive since it is not a registered scheme token.
 Which credential kind the captured token actually is (PAT, task token or CI
 token) is `parse_token`'s job, not this pattern's.
 """
+
+TOKEN_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {("POST", "/api/v1/task-tokens"), ("DELETE", "/api/v1/task-tokens/{key_id}")}
+)
+"""Operations (method, route template) that refuse the session cookie: they are for code only.
+
+Minting a task token from a browser would put a token in the interface, which never holds one."""
+
+TOKEN_ONLY_MESSAGE = (  # nosec B105 -- a refusal's text, not a credential
+    "Task tokens are for code, not a browser: create one with `lakana` and your own token."
+)
+
+CSRF_MESSAGE = (
+    "This change came without the session's CSRF token (X-Lakana-CSRF), or with another "
+    "session's. Reload the page and try again."
+)
+
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 _SHAPES = (
     "Authorization header must be 'Bearer lakana_pat_<keyid>_<secret>', "
@@ -164,24 +186,74 @@ def get_task_token_service(
     )
 
 
+def get_clock(request: Request) -> Callable[[], datetime]:
+    """Read the clock the sign-in services of this app use.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach `app.state.clock` (set at start-up; a test may
+        replace it).
+
+    Returns
+    -------
+    Callable
+        The clock; `lakana_core.identity.sessions.utc_now` when the app has none.
+    """
+    return getattr(request.app.state, "clock", utc_now)
+
+
+def get_session_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> SessionService:
+    """Build a SessionService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    SessionService
+        A service using real authorization and the app's clock.
+    """
+    return SessionService(session, authz, clock=get_clock(request))
+
+
 def get_principal(
     request: Request,
     authorization: str | None = Header(
         None,
         description=(
-            "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+            "The credential: `Bearer <token>` with a personal access token, task token or CI "
+            "token. Without it, the web interface's session cookie counts instead."
         ),
     ),
     session: Session = Depends(get_session),
     pats: PatService = Depends(get_pat_service),
     task_tokens: TaskTokenService = Depends(get_task_token_service),
 ) -> PrincipalRef:
-    """Resolve the acting principal from the Authorization header.
+    """Resolve the acting principal from the Authorization header or the session cookie.
 
     Verifies a real credential: a PAT (`lakana_pat_<key_id>_<secret>`), a
     task token (`lakana_task_<key_id>_<secret>`) or a CI token
     (`lakana_ci_<key_id>_<secret>`, `CiTokenService.verify`, which re-checks its
-    rule and principal every time), dispatched by prefix. This
+    rule and principal every time), dispatched by prefix, or, with no `Authorization` header
+    at all, the browser session cookie (`lakana_server.browser_session.read_session_cookie`:
+    below `/api/v1/` only, never with the interface off). Any `Authorization` header, valid or
+    not, wins: the cookie is then not read, and no CSRF token is asked for. A cookie request is
+    refused on `TOKEN_ONLY_ROUTES` (403 `TokenOnlyRoute`) and, for any method but GET, HEAD and
+    OPTIONS, without the session's CSRF token in `X-Lakana-CSRF` (403 `CsrfRefused`); the
+    session's row is then read (`SessionService.verify`), so an ended session fails at once
+    with `SessionEndedError` (401 with `reason`). The returned principal carries its
+    credential kind (`PrincipalRef.credential`). This
     replaces M1's shape-only check — a well-formed header with the wrong
     secret is now rejected, not accepted. Records `AUTHENTICATION_SUCCEEDED`
     for a successful attempt when `app.state.sign_in_audit_limiter`
@@ -227,14 +299,22 @@ def get_principal(
     Raises
     ------
     AuthenticationError
-        If the header is missing, does not match either credential shape,
-        or the credential fails verification (unknown, wrong secret,
-        expired, revoked, or its principal is deactivated).
+        If the header is missing (and no session cookie counts), does not match a credential
+        shape, or the credential fails verification (unknown, wrong secret, expired, revoked,
+        ended, or its principal is deactivated).
+    TokenOnlyRoute
+        If a session cookie is presented on a route of `TOKEN_ONLY_ROUTES`.
+    CsrfRefused
+        If a state-changing cookie request lacks its session's CSRF token.
     """
     already = getattr(request.state, PRINCIPAL_STATE_KEY, None)
     if isinstance(already, PrincipalRef):
         return already
     audit = AuditService(session)
+    if authorization is None:
+        cookie = read_session_cookie(request)
+        if cookie is not None:
+            return _session_principal(request, cookie, session, audit)
     key_id: str | None = None
     credential: Credential | None = None
     try:
@@ -253,29 +333,112 @@ def get_principal(
             credential = ("task", key_id)
             scope = task_tokens.verify(key_id, secret)
             _record_sign_in(request, audit, credential, scope.principal.id)
-            return scope.principal
+            return dataclasses.replace(scope.principal, credential="task")
         if (parsed := parse_token(raw_token, CI_TOKEN_PREFIX)) is not None:
             key_id, secret = parsed
             credential = ("ci", key_id)
             principal = CiTokenService(session).verify(key_id, secret)
             _record_sign_in(request, audit, credential, principal.id)
-            return principal
+            return dataclasses.replace(principal, credential="ci")
         raise AuthenticationError(_SHAPES)
     except AuthenticationError:
-        if credential is not None:
-            request.app.state.sign_in_audit_limiter.forget(credential)
-        client = request.client.host if request.client else "unknown"
-        admitted, suppressed = request.app.state.auth_audit_limiter.admit(client)
-        if admitted:
-            detail: dict[str, str | int] = {"key_id": (key_id or "")[:64]}
-            if suppressed > 0:
-                detail["suppressed"] = suppressed
-            audit.record(None, AuditEventType.AUTHENTICATION_FAILED, detail=detail, commit=True)
+        _record_failure(request, audit, credential, {"key_id": (key_id or "")[:64]})
         raise
 
 
+def _session_principal(
+    request: Request, cookie: str, session: Session, audit: AuditService
+) -> PrincipalRef:
+    """Authenticate a request by its session cookie.
+
+    Refuses the token-only routes, then a state-changing request without the session's CSRF
+    token, then verifies the session's row (read on every request, so an ended session fails
+    at once). Only a request the person started extends the idle timeout: one marked
+    `X-Lakana-Background: 1` does not.
+
+    Parameters
+    ----------
+    request
+        The current request.
+    cookie
+        The session cookie's value.
+    session
+        The current request's database session.
+    audit
+        Writes the authentication events.
+
+    Returns
+    -------
+    PrincipalRef
+        The session's principal, with ``credential="session"``.
+
+    Raises
+    ------
+    TokenOnlyRoute
+        On a route of `TOKEN_ONLY_ROUTES` (403).
+    CsrfRefused
+        If a state-changing request lacks the session's CSRF token (403).
+    AuthenticationError
+        If the cookie names no session or a wrong secret; `SessionEndedError` if the session
+        has ended. Audited as a failed token is.
+    """
+    route = request.scope.get("route")
+    if (request.method, getattr(route, "path", None)) in TOKEN_ONLY_ROUTES:
+        raise TokenOnlyRoute(TOKEN_ONLY_MESSAGE)
+    sessions = SessionService(
+        session, get_grant_authorization(request, session), clock=get_clock(request)
+    )
+    if request.method not in _SAFE_METHODS and not sessions.check_csrf(
+        cookie, request.headers.get(CSRF_HEADER) or ""
+    ):
+        raise CsrfRefused(CSRF_MESSAGE)
+    key_id = cookie.split("_", 1)[0][:64]
+    credential: Credential = ("session", key_id)
+    try:
+        principal = sessions.verify(cookie, extend=request.headers.get(BACKGROUND_HEADER) != "1")
+    except AuthenticationError:
+        _record_failure(request, audit, credential, {"key_id": key_id, "credential": "session"})
+        raise
+    _record_sign_in(request, audit, credential, principal.id, kind="session")
+    return principal
+
+
+def _record_failure(
+    request: Request,
+    audit: AuditService,
+    credential: Credential | None,
+    detail: dict[str, str | int],
+) -> None:
+    """Record a failed authentication, if the per-address limit admits it.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach both limiters and the client's address.
+    audit
+        Writes the row, with its own commit.
+    credential
+        The credential the attempt named, if any: its next success is then recorded.
+    detail
+        The row's detail; the count of attempts left out is added as ``suppressed``.
+    """
+    if credential is not None:
+        request.app.state.sign_in_audit_limiter.forget(credential)
+    client = request.client.host if request.client else "unknown"
+    admitted, suppressed = request.app.state.auth_audit_limiter.admit(client)
+    if admitted:
+        if suppressed > 0:
+            detail["suppressed"] = suppressed
+        audit.record(None, AuditEventType.AUTHENTICATION_FAILED, detail=detail, commit=True)
+
+
 def _record_sign_in(
-    request: Request, audit: AuditService, credential: Credential, principal_id: uuid.UUID
+    request: Request,
+    audit: AuditService,
+    credential: Credential,
+    principal_id: uuid.UUID,
+    *,
+    kind: str | None = None,
 ) -> None:
     """Record a successful authentication, if the sign-in window admits it.
 
@@ -289,6 +452,9 @@ def _record_sign_in(
         The verified token's kind and key id.
     principal_id
         The principal the token authenticated.
+    kind
+        Written to the row as ``credential`` when given (``session``); a token's row has
+        only its key id, as before.
 
     Raises
     ------
@@ -301,6 +467,8 @@ def _record_sign_in(
     if not admitted:
         return
     detail: dict[str, str | int] = {"key_id": credential[1]}
+    if kind is not None:
+        detail["credential"] = kind
     if suppressed > 0:
         detail["suppressed"] = suppressed
     try:

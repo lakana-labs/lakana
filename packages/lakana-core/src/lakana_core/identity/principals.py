@@ -12,6 +12,7 @@ from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.service import assert_admin_headroom
+from lakana_core.identity.sessions import SessionService
 from lakana_core.languages import canonical_language, language_problem
 from lakana_core.models import AuditEventType, Principal, PrincipalType
 from lakana_core.pagination import Page, name_contains, newest_first
@@ -121,6 +122,9 @@ class PrincipalService:
     def deactivate_principal(self, p: PrincipalRef, name: str, *, commit: bool = True) -> None:
         """Deactivate a principal, revoking its access without deleting it.
 
+        Every open browser session of the principal ends in the same commit, with reason
+        ``deactivated`` (`SessionService.end_for_principal`).
+
         Idempotent: deactivating an already-inactive principal is a no-op
         — it records no second `PRINCIPAL_DEACTIVATED` event, and does not
         re-run the admin-headroom check (an already-inactive principal
@@ -158,6 +162,9 @@ class PrincipalService:
             p.id,
             AuditEventType.PRINCIPAL_DEACTIVATED,
             detail={"principal": name, "type": principal.type.value},
+        )
+        SessionService(self._session, self._authz).end_for_principal(
+            principal.id, "deactivated", commit=False
         )
         if commit:
             self._session.commit()

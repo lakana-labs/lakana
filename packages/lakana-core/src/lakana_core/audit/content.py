@@ -100,6 +100,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "conditions",
         # a connection's name, as a task asked for it
         "connection",
+        # the kind of credential an authentication event names (``session``; a token's row
+        # names only its key id), never the credential itself
+        "credential",
         "credential_secret",
         "delivery_id",
         "deploy_id",

@@ -195,9 +195,11 @@
 "DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
+"DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7 }
 "DELETE /api/v1/repositories/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7 }
+"DELETE /api/v1/sign-in/session": { class: ui, part: 1 }
 "DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7 }
 "GET /api/v1/access/export":
   { class: ui, part: 7, note: "a download of the live access as an access file" }
@@ -268,11 +270,14 @@
 "GET /api/v1/principals": { class: ui, part: 7 }
 "GET /api/v1/principals/{name}": { class: ui, part: 7 }
 "GET /api/v1/principals/{name}/permissions": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "GET /api/v1/repositories": { class: ui, part: 8 }
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
 "GET /api/v1/row-filters": { class: ui, part: 7 }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
+"GET /api/v1/settings/sign-in": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
 "GET /api/v1/whoami": { class: read, part: 1 }
@@ -286,6 +291,7 @@
 "PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8 }
 "PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8 }
+"PATCH /api/v1/settings/sign-in": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "PATCH /api/v1/whoami": { class: ui, part: 1 }
 "POST /api/v1/access/apply":
   {

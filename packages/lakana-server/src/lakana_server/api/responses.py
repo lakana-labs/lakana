@@ -21,15 +21,28 @@ class ErrorOut(BaseModel):
         What went wrong and, where there is one, what to do next.
     type
         The name of the kind of error, for a client that wants to tell them apart.
+    reason
+        Why a browser session ended (``idle``, ``lifetime``, ``sign_out``, ...), only on the 401
+        of an ended session (`SessionEndedError`); absent otherwise.
     """
 
     detail: str = Field(description="What went wrong and, where there is one, what to do next.")
     type: str = Field(description="The name of the kind of error, such as `NotFoundError`.")
+    reason: str | None = Field(
+        default=None,
+        description=(
+            "Why a browser session ended (`idle`, `lifetime`, `sign_out`, ...); only with "
+            "`SessionEndedError`."
+        ),
+    )
 
 
 ERROR_MEANING: dict[int, str] = {
     400: "The client closed the connection before the request body arrived in full.",
-    401: "Not signed in: the token is missing, wrong, expired or revoked.",
+    401: (
+        "Not signed in: the token or browser session is missing, wrong, expired or revoked; an "
+        "ended session says why in `reason`."
+    ),
     403: "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
     404: "What the request names does not exist, or the caller may not know that it does.",
     408: "No part of the request body arrived within the read timeout.",
