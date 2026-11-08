@@ -16,9 +16,10 @@ from lakana_core.auth import AllowAllAuthorization
 from lakana_core.bootstrap import bootstrap_if_needed
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
-from lakana_core.errors import LinkUnusableError
+from lakana_core.errors import LinkUnusableError, ValidationError
 from lakana_core.identity.links import LinkService, Redeemed
 from lakana_core.identity.pats import PatService
+from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService
 from lakana_core.models import (
     AuditEvent,
@@ -162,3 +163,16 @@ def test_two_concurrent_uses_of_one_link_exactly_one_wins(engine: Engine, kind: 
             ).scalar_one()
             assert carols == 1
             assert won.started.principal.name == "carol"
+
+
+def test_a_name_whose_normalised_form_is_too_long_is_refused(engine: Engine) -> None:
+    """On Postgres the refusal comes before the 255-character column, not as a server error."""
+    with Session(engine) as session:
+        bootstrap_if_needed(session, "admin", key_id="opkey", secret="opsecret")
+        operator = PatService(session, AllowAllAuthorization()).verify("opkey", "opsecret")
+        with pytest.raises(ValidationError, match="255"):
+            _service(session).issue_invite(operator, name="\ufb03" * 100, display_name=None)
+        with pytest.raises(ValidationError, match="255"):
+            PrincipalService(session, AllowAllAuthorization()).create_principal(
+                operator, name="\ufb03" * 100, type=PrincipalType.USER
+            )

@@ -961,3 +961,14 @@ def test_names_with_invisible_or_control_characters_are_refused(world: World, na
         PrincipalService(world.session, world.authz).create_principal(
             world.operator, name=name, type=PrincipalType.USER
         )
+
+
+@pytest.mark.parametrize("name", ["\ufb03" * 100, "a" * 256], ids=["ligatures", "raw"])
+def test_a_name_whose_normalised_form_is_too_long_is_refused(world: World, name: str) -> None:
+    """A name over 255 characters, raw or normalised (U+FB03 becomes ``ffi``), is a 422."""
+    with pytest.raises(ValidationError, match="255"):
+        _invite(world, name)
+    with pytest.raises(ValidationError, match="255"):
+        PrincipalService(world.session, world.authz).create_principal(
+            world.operator, name=name, type=PrincipalType.USER
+        )

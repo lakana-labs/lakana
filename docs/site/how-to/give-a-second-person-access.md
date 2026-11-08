@@ -37,7 +37,9 @@ and `file` with `ﬁle`. A name an open invite of the web interface holds is ref
 until the invite is used, withdrawn or expires. A name is refused outright (422) when it holds a
 control character (such as a line break), an invisible format character (such as a zero-width
 space, a zero-width joiner, a soft hyphen or a direction mark), or starts with a combining mark
-(such as an accent with no letter before it). Choose another name, or withdraw the invite first.
+(such as an accent with no letter before it), and when it has more than 255 characters as typed
+or once normalised (a ligature such as `ﬃ` counts as three). Choose another name, or withdraw the
+invite first.
 
 ## Grant the smallest set
 

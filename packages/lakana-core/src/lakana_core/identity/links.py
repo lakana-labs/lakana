@@ -300,6 +300,41 @@ def name_key(name: str) -> str:
     return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", name).casefold())
 
 
+NAME_LIMIT = 255
+"""The most characters a principal name, and its `name_key`, may have (the columns' length)."""
+
+
+def name_length_problem(name: str) -> str | None:
+    """Say why a new principal name is too long, if it is.
+
+    Both the name and its `name_key` must fit `NAME_LIMIT`: normalising can lengthen a name
+    (the ligature ``U+FB03`` becomes ``ffi``), and an open invite stores the key.
+
+    Parameters
+    ----------
+    name
+        The candidate name.
+
+    Returns
+    -------
+    str or None
+        The refusal, naming the cause and the next step; `None` when the name fits.
+    """
+    if len(name) > NAME_LIMIT:
+        return (
+            f"name: at most {NAME_LIMIT} characters; this one has {len(name)}. Choose a "
+            "shorter name."
+        )
+    key = len(name_key(name))
+    if key > NAME_LIMIT:
+        return (
+            f"name: compared as {key} characters once its letters are normalised (ligatures "
+            f"such as U+FB03 count as several), and at most {NAME_LIMIT} fit. Choose a shorter "
+            "name, or write it with plain letters."
+        )
+    return None
+
+
 def invisible_character_problem(name: str) -> str | None:
     """Say why a new principal name is refused for its characters, if it is.
 
@@ -757,9 +792,9 @@ class LinkService:
                 f"name: give the new person's principal name, 1 to {_NAME_LIMIT} characters "
                 "without leading or trailing spaces."
             )
-        invisible = invisible_character_problem(name)
-        if invisible is not None:
-            raise ValidationError(invisible)
+        problem = name_length_problem(name) or invisible_character_problem(name)
+        if problem is not None:
+            raise ValidationError(problem)
         shown = display_name.strip() if display_name else None
         if shown is not None and len(shown) > _NAME_LIMIT:
             raise ValidationError(f"display_name: at most {_NAME_LIMIT} characters.")

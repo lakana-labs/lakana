@@ -14,6 +14,7 @@ from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDeni
 from lakana_core.grants.service import assert_admin_headroom
 from lakana_core.identity.links import (
     invisible_character_problem,
+    name_length_problem,
     name_unavailable,
     withdraw_open_links,
 )
@@ -70,7 +71,9 @@ class PrincipalService:
             letter case (active or deactivated), or an open invite reserves the name
             (`lakana_core.identity.links.name_unavailable`).
         ValidationError
-            If the name holds a control or format character, or starts with a combining mark
+            If the name or its normalised form is over 255 characters
+            (`lakana_core.identity.links.name_length_problem`), or it holds a control or format
+            character, or starts with a combining mark
             (`lakana_core.identity.links.invisible_character_problem`).
         PermissionDenied
             If the acting principal may not manage principals.
@@ -81,9 +84,9 @@ class PrincipalService:
         ).scalar_one_or_none()
         if existing is not None:
             raise AlreadyExistsError(f"Principal {name!r} already exists.")
-        invisible = invisible_character_problem(name)
-        if invisible is not None:
-            raise ValidationError(invisible)
+        problem = name_length_problem(name) or invisible_character_problem(name)
+        if problem is not None:
+            raise ValidationError(problem)
         problem = name_unavailable(self._session, name, now=utc_now())
         if problem is not None:
             raise AlreadyExistsError(problem)
