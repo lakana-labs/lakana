@@ -26,12 +26,14 @@
     "public/theme-boot.js",
     "build",
     "e2e",
+    "e2e-server",
     "scripts",
     "csp.ts",
     ".dependency-cruiser.cjs",
     ".size-limit.mjs",
     "vite.config.ts",
     "vitest.config.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright.server.config.ts"
   ]
 }

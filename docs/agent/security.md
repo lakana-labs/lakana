@@ -295,11 +295,15 @@ cookie set for another host.
   change the decision. No CORS headers are sent on any route. `test_browser_guard.py` tries other
   ports, letter case, trailing dots, other loopback spellings, a fake Bearer, missing and repeated `Host` and
   `Origin`, `Origin: null`, absolute-form targets and path prefixes.
-- **Not yet covered:** the Playwright suite runs against `vite preview`, not lakana-server.
-  `packages/lakana-server/tests/test_ui_real_build.py` (CI `ui`, after the build) serves the
-  real build through `create_app` and checks the policy header and every file the page loads,
-  but runs no browser. One smoke run against `lakana server start` is due once the interface
-  calls the API.
+- **Covered end to end:** the mocked Playwright suite runs against `vite preview`, but
+  `npm --prefix ui run e2e:server` (`ui/e2e-server/`) starts a real lakana-server on port 4174 and
+  drives the sign-in in a browser: the secret leaves the address bar, the cookie's flags, the
+  127.0.0.1 redirect, a cross-origin POST refused, a used link, passkeys with a virtual
+  authenticator. Chromium runs per pull request (CI `ui`); Firefox and WebKit nightly
+  (`canary.yml`). Not covered: HTTPS (`__Host-` cookie), a reverse proxy, a second origin's
+  passkey, and `lakana server start --local`.
+  `packages/lakana-server/tests/test_ui_real_build.py` still checks the policy header and every
+  file the page loads without a browser.
 
 ## Sign-in: links, sessions, passkeys (M7 1b)
 

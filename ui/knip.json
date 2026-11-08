@@ -5,10 +5,11 @@
     "build/*.ts",
     "scripts/*.mjs",
     "e2e/**/*.spec.ts",
+    "e2e-server/**/*.spec.ts",
     "*.config.ts",
     "csp.ts",
     "public/theme-boot.js"
   ],
-  "project": ["src/**/*.{ts,tsx}", "build/**/*.ts", "e2e/**/*.ts"],
+  "project": ["src/**/*.{ts,tsx}", "build/**/*.ts", "e2e/**/*.ts", "e2e-server/**/*.ts"],
   "ignoreDependencies": ["@ibm/plex-sans", "@ibm/plex-mono"]
 }
