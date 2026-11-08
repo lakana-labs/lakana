@@ -6,7 +6,7 @@
 #   uv export --frozen --no-dev --all-packages --no-emit-workspace -o dist/requirements.txt
 
 # Base image: pinned by tag and digest; Dependabot bumps the two together.
-FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1 AS builder
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS builder
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tini \
@@ -24,7 +24,7 @@ RUN python -m venv /opt/lakana \
 # Dependabot bumps the tag and the digest together; by hand, use `docker buildx imagetools inspect`.
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
-FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 ENV TMPDIR=/var/tmp/lakana \
     HOME=/home/lakana \
     PATH=/opt/lakana/bin:$PATH \
@@ -53,8 +53,14 @@ RUN groupadd --system --gid 10001 lakana \
  && install -d -o 0 -g 10001 -m 2750 /run/lakana-egress \
  && install -d -o 10001 -g 10001 -m 0700 /var/lib/lakana-task-work
 # git and ssh fetch repositories for deploys; runtime packages only.
+# zlib1g: CVE-2026-85091 (and CVE-2026-76844) are fixed in 1:1.3.dfsg+really1.3.1-1+deb13u1 from
+# trixie-security, newer than the base digest above (checked 2026-11-08). Only the named package
+# is upgraded, and the build fails below the fixed version; the line goes once a digest bump
+# carries the fix (docs/agent/security.md, "Image scan"). Dockerfile.task does the same.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git openssh-client \
+ && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+ && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' zlib1g)" ge 1:1.3.dfsg+really1.3.1-1+deb13u1 \
  && rm -rf /var/lib/apt/lists/*
 # uv builds the venvs of Python assets: copied from the `uv` stage above. The worker's venv
 # cache is private to uid 10001 (the worker refuses one that is not); a named volume mounted over

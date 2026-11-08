@@ -8,6 +8,7 @@ import re
 import shlex
 from pathlib import Path
 
+import pytest
 import yaml
 
 from lakana.ingest import _check
@@ -440,3 +441,46 @@ def test_the_task_image_drops_every_setuid_and_setgid_bit() -> None:
     assert step in text
     assert text.index(step) < text.index("USER 10001:10003")
     assert text.index(step) > text.index("useradd --system --uid 10002")
+
+
+# Debian security fixes newer than the pinned python:*-slim digests: package -> the first fixed
+# version. Each image upgrades exactly these packages and refuses to build below that version.
+# An entry goes once Dependabot's digest bump carries the fix (docs/agent/security.md,
+# "Image scan").
+_DEBIAN_FIXES = {"zlib1g": "1:1.3.dfsg+really1.3.1-1+deb13u1"}
+
+
+@pytest.mark.parametrize("dockerfile", ["Dockerfile", "Dockerfile.task"])
+def test_each_image_upgrades_the_debian_packages_its_base_digest_lacks_a_fix_for(
+    dockerfile: str,
+) -> None:
+    """Trivy's weekly scan fails on a fixed HIGH or CRITICAL Debian package (CVE-2026-85091).
+
+    The upgrade names its packages, never `apt-get upgrade` of everything, and checks the version
+    it got: a mirror that still serves the old one fails the build instead of the scan.
+    """
+    text = " ".join(
+        line.rstrip("\\").strip()
+        for line in (_DOCKERFILE.parent / dockerfile).read_text(encoding="utf-8").splitlines()
+    )
+    assert "apt-get upgrade" not in text
+    for package, fixed in _DEBIAN_FIXES.items():
+        assert f"apt-get install -y --no-install-recommends --only-upgrade {package}" in text
+        assert (
+            f"dpkg --compare-versions \"$(dpkg-query -W -f='${{Version}}' {package})\" ge {fixed}"
+            in text
+        )
+        assert text.index(f"--only-upgrade {package}") < text.index("USER 10001")
+
+
+def test_both_images_pin_the_same_python_3_14_base() -> None:
+    """One digest for python:3.14-slim: a fix that reaches the server image reaches the tasks."""
+
+    def base(path: Path) -> str:
+        return next(
+            line.split(" AS ")[0]
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("FROM python:3.14-slim@")
+        )
+
+    assert base(_TASK_DOCKERFILE) == base(_DOCKERFILE)
