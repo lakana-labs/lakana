@@ -49,9 +49,20 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.release-please.outputs.tag }}
+      # The web interface goes into the lakana-server wheel (hatch `artifacts`), so it is built
+      # first. No npm cache: nothing a cache could hold reaches a release.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+      - name: Install the interface's dependencies
+        run: npm ci --ignore-scripts --prefix ui
+      - name: Build the interface
+        run: npm --prefix ui run build
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
       - name: Build all packages
         run: uv build --all-packages -o dist
+      - name: Verify the server wheel carries the interface
+        run: unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/index.html'
       - name: Verify the version carries no local segment
         run: |
           if compgen -G "dist/*+*.whl" > /dev/null; then
@@ -63,11 +74,37 @@ jobs:
           name: dist
           path: dist/
 
+  # The interface's full end-to-end suite in Chromium, Firefox and WebKit, on the release's tag
+  # (a pull request runs Chromium only). Read-only; the approval waits for it.
+  ui-browsers:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.tag }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+      - name: Install the interface's dependencies
+        run: npm ci --ignore-scripts --prefix ui
+      - name: Build the interface
+        run: npm --prefix ui run build
+      - name: Install the three browsers
+        run: npx --prefix ui playwright install --with-deps chromium firefox webkit
+      - name: Every end-to-end test in every browser
+        run: npm --prefix ui run e2e:all
+
   # The one approval of a release: every job that publishes or signs anything waits for it, so
   # rejecting it publishes nothing. It runs no code and holds no permission; the reviewer is set
   # on the `release-approval` environment (Settings > Environments, see docs/agent/release.md).
   approve:
-    needs: [release-please, build]
+    needs: [release-please, build, ui-browsers]
     if: needs.release-please.outputs.released == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5

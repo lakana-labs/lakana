@@ -271,7 +271,7 @@ def test_each_package_publishes_to_production_pypi_from_its_own_environment() ->
     }
 
 
-_BEFORE_THE_GATE = {"release-please", "build", "sbom", "approve"}
+_BEFORE_THE_GATE = {"release-please", "build", "ui-browsers", "sbom", "approve"}
 _APPROVE_KEYS = {"needs", "if", "runs-on", "timeout-minutes", "environment", "permissions", "steps"}
 _STATUS_FUNCTIONS = re.compile(r"\b(always|cancelled|failure|success)\s*\(")
 """Any status function in an ``if`` drops the implicit ``success() &&``.
@@ -326,8 +326,8 @@ def _gate_violations(jobs: dict) -> list[str]:
     steps = approve.get("steps", [])
     if len(steps) != 1 or set(steps[0]) - {"run", "env"} or "run" not in steps[0]:
         problems.append("approve runs more than one plain `run` step")
-    if set(approve.get("needs", [])) != {"release-please", "build"}:
-        problems.append("approve does not need release-please and build")
+    if set(approve.get("needs", [])) != {"release-please", "build", "ui-browsers"}:
+        problems.append("approve does not need release-please, build and ui-browsers")
     for name, job in jobs.items():
         if name in _BEFORE_THE_GATE:
             if name in {"release-please", "approve"}:
@@ -347,7 +347,10 @@ def _gate_violations(jobs: dict) -> list[str]:
 
 
 def test_one_approval_job_gates_a_release() -> None:
-    """Only release-please, build and sbom run before ``approve``; none runs after a rejection."""
+    """Only release-please, build, ui-browsers and sbom run before ``approve``.
+
+    None runs after a rejection.
+    """
     jobs = _jobs("release.yml")
     assert _gate_violations(jobs) == []
     assert jobs["approve"]["if"] == "needs.release-please.outputs.released == 'true'"
@@ -389,6 +392,120 @@ def test_the_gate_check_catches_a_broken_workflow(
     jobs = copy.deepcopy(_jobs("release.yml"))
     break_it(jobs)
     assert any(expected in problem for problem in _gate_violations(jobs))
+
+
+_SETUP_NODE = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
+
+
+def _step_index(steps: list[dict], predicate: Callable[[dict], bool], what: str) -> int:
+    """Find the first step that matches, failing with its description when none does.
+
+    Parameters
+    ----------
+    steps
+        A job's steps.
+    predicate
+        Tells whether a step is the one looked for.
+    what
+        What the step is, for the failure message.
+
+    Returns
+    -------
+    int
+        The step's position.
+    """
+    found = [i for i, step in enumerate(steps) if predicate(step)]
+    assert found, f"no step: {what}"
+    return found[0]
+
+
+def _runs(command: str) -> Callable[[dict], bool]:
+    """Match a step whose ``run`` script has a line that is exactly ``command``.
+
+    Parameters
+    ----------
+    command
+        The command line.
+
+    Returns
+    -------
+    callable
+        The predicate.
+    """
+    return lambda step: command in _commands(step)
+
+
+def _node_from_the_nvmrc(step: dict) -> bool:
+    """Tell whether a step is ``ci.yml``'s setup-node, taking Node from ``ui/.nvmrc``.
+
+    Parameters
+    ----------
+    step
+        A workflow step.
+
+    Returns
+    -------
+    bool
+        ``True`` for that step.
+    """
+    return (
+        str(step.get("uses", "")).startswith(_SETUP_NODE)
+        and step.get("with", {}).get("node-version-file") == "ui/.nvmrc"
+    )
+
+
+def test_ci_and_the_release_take_node_from_the_same_action() -> None:
+    """The pinned setup-node of the release is the one ``ci.yml`` uses."""
+    steps = _jobs("ci.yml")["ui"]["steps"]
+    assert any(str(s.get("uses", "")).startswith(_SETUP_NODE) for s in steps)
+
+
+def test_the_release_builds_the_interface_before_the_wheels() -> None:
+    """The wheel ships the built interface, and the job fails when it does not."""
+    steps = _jobs("release.yml")["build"]["steps"]
+    checkout = _step_index(
+        steps, lambda s: str(s.get("uses", "")).startswith("actions/checkout@"), "checkout"
+    )
+    node = _step_index(steps, _node_from_the_nvmrc, "setup-node from ui/.nvmrc")
+    install = _step_index(steps, _runs("npm ci --ignore-scripts --prefix ui"), "npm ci")
+    build_ui = _step_index(steps, _runs("npm --prefix ui run build"), "the interface's build")
+    wheels = _step_index(steps, _runs("uv build --all-packages -o dist"), "uv build")
+    check = _step_index(
+        steps,
+        _runs("unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/index.html'"),
+        "the check of the wheel",
+    )
+    assert checkout < node < install < build_ui < wheels < check
+    assert "cache" not in steps[node]["with"]
+
+
+def test_the_release_runs_every_browser_before_the_approval() -> None:
+    """The full Playwright suite runs in Chromium, Firefox and WebKit on the release's tag."""
+    jobs = _jobs("release.yml")
+    job = jobs["ui-browsers"]
+    assert job["needs"] == "release-please"
+    assert job["if"] == "needs.release-please.outputs.released == 'true'"
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["permissions"] == {"contents": "read"}
+    steps = job["steps"]
+    checkout = _step_index(
+        steps, lambda s: str(s.get("uses", "")).startswith("actions/checkout@"), "checkout"
+    )
+    assert steps[checkout]["with"]["ref"] == "${{ needs.release-please.outputs.tag }}"
+    order = [
+        checkout,
+        _step_index(steps, _node_from_the_nvmrc, "setup-node from ui/.nvmrc"),
+        _step_index(steps, _runs("npm ci --ignore-scripts --prefix ui"), "npm ci"),
+        _step_index(steps, _runs("npm --prefix ui run build"), "the interface's build"),
+        _step_index(
+            steps,
+            _runs("npx --prefix ui playwright install --with-deps chromium firefox webkit"),
+            "the three browsers",
+        ),
+        _step_index(steps, _runs("npm --prefix ui run e2e:all"), "the full suite"),
+    ]
+    assert order == sorted(order)
+    assert "ui-browsers" in jobs["approve"]["needs"]
 
 
 def test_no_release_step_points_at_the_test_index() -> None:

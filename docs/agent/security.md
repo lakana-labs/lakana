@@ -199,6 +199,46 @@ both use `StorageOptions` / `OptionalStorageOptions`, which refuse a bad shape w
 names no key and no value. No other request body carries a credential: tokens and secrets are in
 headers or are only ever returned. The application logs no request body.
 
+## The web interface's files (M7)
+
+`lakana_server.ui` serves the built interface at `/`, only with `LAKANA_UI__ENABLED=true`
+(default false). It is the same origin as the API, so the interface needs no CORS and no
+cookie set for another host.
+
+- **No privileged way in (rule 2).** The interface calls only the public REST API, with the
+  user's own credential. The server gives it no endpoint of its own and no route besides its
+  static files; it has nothing an API client lacks. Part 1 has no sign-in and calls no route at
+  all; sign-in and sessions get their own design and security review before any code lands.
+- **No joined request path.** Hashed files under `/assets/` go through Starlette's
+  `StaticFiles`, which normalises the path and refuses an absolute one, a NUL byte and any path
+  whose real path (symlinks resolved) leaves `assets/`. Every other file (`theme-boot.js`, the
+  favicon, `licenses/...`) is looked up by name in a dictionary built when the app starts from
+  the files whose real path is inside the build; the request's path is only ever a key. A
+  symlink out of the build is never listed. `test_ui_serving.py` tries encoded `..`
+  (`%2e%2e`, `..%2f`), backslashes, absolute and doubled slashes, NUL and symlinked files and
+  directories.
+- **The API keeps its answers.** Every other GET or HEAD answers `index.html`, so a deep link
+  (`/catalog/sales.orders`: table names have dots, so there is no "has a dot, so it is a file"
+  rule) loads the app. That fallback route never matches a path whose first segment belongs to
+  the API (`reserved_segments`: the first segment of every route registered before it, plus
+  `api`), so an unknown `/api/v1/...` or `/v1/...` path stays the API's JSON 404 and a wrong
+  method its 405, never a page a client would parse as success. It is not in the OpenAPI
+  document. `test_turning_the_interface_on_changes_no_api_answer` compares status, type and body
+  with the interface on and off.
+- **Strict headers.** Every response of the interface (page, files, its 404s) carries
+  `Content-Security-Policy` (`ui.CONTENT_SECURITY_POLICY`, the same value as `ui/csp.ts`, which
+  `vite preview` and so the Playwright runs send; a test fails when they differ),
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY`.
+  The policy allows only the own origin, no inline script, inline style only for the two
+  hashed library texts, no `data:` URL, no frames. Content types come from a fixed table, not
+  the machine's MIME database; an unknown suffix is `application/octet-stream`. API responses
+  get none of these headers. An addition to the policy or a relaxed header needs its reason in
+  the pull request that makes it.
+- **Caching.** Only `/assets/` (names carry a content hash) is `immutable` for a year; the page,
+  the root files and the licences are `no-cache`, and a 404 is never cached for good.
+- **Fail at start.** Turned on without a built interface, the server refuses to start
+  (`UiNotBuiltError`) instead of serving 404s.
+
 ## Local files `lakana load` reads: a capped child process (#353)
 
 A small Parquet or Arrow file can decode to far more than its size (one value repeated by a

@@ -69,5 +69,11 @@ dependencies = [
     "uvicorn>=0.30",
 ]
 
+[tool.hatch.build]
+# The built web interface (`npm --prefix ui run build` writes it here) is git-ignored, and hatch
+# leaves ignored files out. Named here, for every target: `uv build` builds the wheel from the
+# sdist, so the sdist must carry it too (docs/agent/release.md, "The web interface in the wheel").
+artifacts = ["src/lakana_server/ui_dist/**"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/lakana_server"]

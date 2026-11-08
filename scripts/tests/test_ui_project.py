@@ -163,3 +163,61 @@ def test_every_cli_line_in_the_shell_exists() -> None:
         assert command in headings, (
             f"{line!r}: no heading for `{command}` in docs/site/reference/cli.md"
         )
+
+
+def _csp_from_ts() -> str:
+    """Evaluate the policy ``ui/csp.ts`` exports, from its source text.
+
+    Returns
+    -------
+    str
+        The value of ``CONTENT_SECURITY_POLICY`` as the browser receives it.
+    """
+    source = (UI / "csp.ts").read_text()
+    hashes_block = re.search(r"LIBRARY_STYLE_HASHES[^=]*=\s*\[(.*?)\];", source, re.S)
+    assert hashes_block, "LIBRARY_STYLE_HASHES not found in ui/csp.ts"
+    hashes = re.findall(r'^\s*"([^"]*)",', hashes_block.group(1), re.M)
+    assert hashes, "no hash in LIBRARY_STYLE_HASHES"
+    policy_block = re.search(
+        r"CONTENT_SECURITY_POLICY[^=]*=\s*\[(.*?)\]\.join\(\"; \"\);", source, re.S
+    )
+    assert policy_block, "CONTENT_SECURITY_POLICY is not a list joined with '; ' in ui/csp.ts"
+    parts = []
+    for line in policy_block.group(1).splitlines():
+        line = line.strip()
+        if not line or line.startswith("//"):
+            continue
+        literal = re.fullmatch(r'"([^"]*)",|`([^`]*)`,', line)
+        assert literal, f"cannot read this line of ui/csp.ts: {line!r}"
+        text = literal.group(1) if literal.group(1) is not None else literal.group(2)
+        text = text.replace('${LIBRARY_STYLE_HASHES.join(" ")}', " ".join(hashes))
+        assert "${" not in text, f"an expression this test does not know: {line!r}"
+        parts.append(text)
+    return "; ".join(parts)
+
+
+def test_the_server_sends_the_ui_s_csp() -> None:
+    """The server's header and ``vite preview``'s (the Playwright run) are one policy."""
+    from lakana_server.ui import CONTENT_SECURITY_POLICY
+
+    assert _csp_from_ts() == CONTENT_SECURITY_POLICY
+
+
+def test_no_area_path_collides_with_a_server_path() -> None:
+    """An area's URL never starts with a segment the server or the build owns."""
+    areas = (UI / "src/shell/areas.ts").read_text()
+    paths = re.findall(r"""path:\s*["']([^"']*)["']""", areas)
+    assert len(paths) >= 8, paths
+    firsts = {path.strip("/").split("/")[0] for path in paths}
+    server = {
+        "api",
+        "v1",
+        "healthz",
+        "readyz",
+        "docs",
+        "redoc",
+        "openapi.json",
+        "assets",
+        "licenses",
+    }
+    assert firsts & server == set()
