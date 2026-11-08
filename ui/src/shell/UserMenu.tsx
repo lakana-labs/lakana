@@ -1,5 +1,6 @@
 /**
- * The menu under the signed-in person's name: theme, density, language, and signing out.
+ * The menu under the signed-in person's name: theme, density, language, passkeys and sessions,
+ * and signing out.
  *
  * @packageDocumentation
  */
@@ -93,7 +94,8 @@ function ChoiceSection<K extends keyof Preferences>({
 
 /**
  * Renders the user menu at the bottom of the sidebar. Its button always shows who is signed in;
- * the menu holds the personal preferences and signing out, here or on every device.
+ * the menu holds the personal preferences, one's passkeys and sessions, and signing out, here or
+ * on every device.
  *
  * @returns The menu, and what went wrong when signing out did not work.
  */
@@ -142,6 +144,10 @@ export function UserMenu(): JSX.Element {
             />
             <MenuSection className="menu-section">
               <Header className="menu-header">{t("shell.account")}</Header>
+              <MenuItem className="menu-item" id="account" href="/account">
+                <span className="menu-check" aria-hidden="true" />
+                {t("account.title")}
+              </MenuItem>
               <MenuItem
                 className="menu-item"
                 id="sign-out"

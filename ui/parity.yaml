@@ -285,10 +285,16 @@
 "GET /api/v1/invites": { class: ui, part: 1 }
 "GET /api/v1/package-indexes": { class: ui, part: 8 }
 "GET /api/v1/package-indexes/{name}": { class: ui, part: 8 }
-"GET /api/v1/principals": { class: ui, part: 7 }
+"GET /api/v1/principals":
+  {
+    class: ui,
+    part: 7,
+    note: "Access → People lists and finds people from 1b; the full screen in 7",
+  }
 "GET /api/v1/principals/{name}": { class: ui, part: 7 }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
-"GET /api/v1/principals/{name}/permissions": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}/permissions":
+  { class: ui, part: 7, note: "1b asks it whether a person is an administrator (recovery links)" }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "GET /api/v1/recovery-links": { class: ui, part: 1 }

@@ -11,6 +11,19 @@ import { stepUp } from "./passkeys";
 
 setStepUp(stepUp);
 
+export {
+  createInvite,
+  createRecoveryLink,
+  isAdministrator,
+  listInvites,
+  listPeople,
+  listRecoveryLinks,
+  withdrawInvite,
+  withdrawRecoveryLink,
+} from "./access";
+export type { InviteOut, RecoveryLinkOut } from "./access";
+export { endSessions, listPasskeys, listSessions, removePasskey } from "./account";
+export type { PasskeyOut } from "./account";
 export { ApiError, onUnauthorized } from "./client";
 export { describeLink, redeemLink } from "./links";
 export type { LinkDescriptionOut } from "./links";
@@ -24,3 +37,5 @@ export {
   signOutEverywhere,
 } from "./session";
 export type { AccessOut, NoticeOut, SessionOut } from "./session";
+export { changeSignInSettings, getSignInSettings } from "./settings";
+export type { SignInSettingsOut } from "./settings";

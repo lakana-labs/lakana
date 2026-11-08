@@ -103,7 +103,7 @@ export function Sidebar({ areas, onSearch }: SidebarProps): JSX.Element {
           <span>{t("shell.search")}</span>
           <kbd aria-hidden="true">{t(`shell.searchShortcut.${shortcutLabel(navigator)}`)}</kbd>
         </button>
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label={t("shell.areas")}>
           {groups.map((group) => (
             <ul className="sidebar-list" key={group[0]?.group}>
               {group.map((area) => (

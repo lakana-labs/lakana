@@ -123,10 +123,25 @@ describe("tokens", () => {
       ["--color-bad", "--color-bad-bg"],
       ["--color-accent", "--color-accent-bg"],
       ["--color-on-accent", "--color-accent"],
+      ["--color-on-accent", "--color-accent-hover"],
     ] as const;
     for (const [foreground, background] of pairs) {
       expect(contrast(palette, foreground, background), foreground).toBeGreaterThanOrEqual(4.5);
     }
+  });
+
+  it.each(modes)("a hovered primary button differs from its rest state (%s)", (mode) => {
+    const palette = PALETTES[mode] ?? {};
+    expect(palette["--color-accent-hover"]).toMatch(/^#[0-9a-f]{6}$/);
+    expect(palette["--color-accent-hover"]).not.toBe(palette["--color-accent"]);
+    expect(contrast(palette, "--color-accent-hover", "--color-surface")).toBeGreaterThanOrEqual(3);
+  });
+
+  it("hovers the primary button with the token, never a filter", () => {
+    const signIn = readFileSync(resolve(import.meta.dirname, "../sign-in/sign-in.css"), "utf8");
+    const hovered = block(signIn, ".button-primary[data-hovered]");
+    expect(hovered).toContain("var(--color-accent-hover)");
+    expect(signIn).not.toMatch(/filter\s*:/);
   });
 
   it("keeps the light ground and surfaces soft, pale and cool", () => {

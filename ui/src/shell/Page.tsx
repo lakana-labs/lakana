@@ -12,27 +12,33 @@ export interface PageProps {
   readonly title: string;
   /** The page's content under the heading. */
   readonly children: ReactNode;
+  /** The page's one primary action, shown top right beside the heading; none by default. */
+  readonly action?: ReactNode;
 }
 
 /**
  * Sets `document.title` to "<title> · Lakana" and renders the heading, which the shell
  * focuses after a navigation (hence `tabIndex={-1}`).
  *
- * @param props - The title and the content.
+ * @param props - The title, the content and the action.
  * @param props.title - The page's name.
  * @param props.children - The content under the heading.
+ * @param props.action - The page's one primary action.
  * @returns The page.
  */
-export function Page({ title, children }: PageProps): JSX.Element {
+export function Page({ title, children, action }: PageProps): JSX.Element {
   const { t } = useTranslation();
   useEffect(() => {
     document.title = t("shell.documentTitle", { page: title });
   }, [t, title]);
   return (
     <div className="page">
-      <h1 className="page-title" tabIndex={-1}>
-        {title}
-      </h1>
+      <div className="page-head">
+        <h1 className="page-title" tabIndex={-1}>
+          {title}
+        </h1>
+        {action}
+      </div>
       {children}
     </div>
   );

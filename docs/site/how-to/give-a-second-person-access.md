@@ -6,8 +6,14 @@ instance that is running, and an administrator's profile: creating principals, g
 needs the `ADMIN` role on the instance. In local mode and in the Compose bundle the first profile
 is one (see [Getting started](../tutorials/getting-started.md) and
 [Deploying with Compose](deploy-with-compose.md)). The person you give access to needs the `lakana`
-command on their machine and a network route to the instance. The web interface is not part of
-this release, so a **token** is the way in for now: a secret string that stands for one person.
+command on their machine and a network route to the instance. From the command line a **token** is
+the way in: a secret string that stands for one person.
+
+!!! tip "Someone who works in the web interface needs no token"
+    Invite them instead: [Invite your team](invite-your-team.md) sends a link that creates their
+    account, and from then on a passkey signs them in. Then grant them a role as below. Issue a
+    token (the steps after the grant) only to someone who also works from the command line; an
+    invited person already exists, so skip "Create the person" for them.
 
 The steps below give a person called `alice` access to the environment `dev`. Use your own names.
 

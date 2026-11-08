@@ -44,9 +44,7 @@
   "comingSoon": {
     "part": "This screen comes in part {{part}} of the interface.",
     "useCli": "Until then, use the command line:",
-    "copy": "Copy command",
-    "copied": "Copied",
-    "selectAndCopy": "Select the line and copy it."
+    "copy": "Copy command"
   },
   "shell": {
     "product": "Lakana",
@@ -78,7 +76,8 @@
     "account": "Account",
     "signOut": "Sign out",
     "signOutEverywhere": "Sign out everywhere",
-    "signOutFailed": "Signing out did not work: {{detail}}"
+    "signOutFailed": "Signing out did not work: {{detail}}",
+    "areas": "Areas"
   },
   "palette": {
     "placeholder": "Go to a place or run a command",
@@ -197,5 +196,119 @@
       "self": "Something changed about signing in to your account on {{date}}.",
       "other": "Something changed about signing in to the account of {{subject}} on {{date}}."
     }
+  },
+  "copy": {
+    "copied": "Copied",
+    "select": "Select the line and copy it."
+  },
+  "common": {
+    "working": "Working…"
+  },
+  "list": {
+    "name": "Name",
+    "expires": "Expires",
+    "state": "State",
+    "actions": "Actions",
+    "open": "Open"
+  },
+  "dialog": {
+    "cancel": "Cancel",
+    "done": "Done"
+  },
+  "access": {
+    "tabs": "Access sections",
+    "withdraw": "Withdraw",
+    "copyLink": "Copy link",
+    "shownTitle": "Send this link to {{name}}",
+    "people": {
+      "tab": "People",
+      "find": "Find people",
+      "none": "Nobody matches.",
+      "person": "Person",
+      "service": "Service account",
+      "deactivated": "Deactivated"
+    },
+    "invites": {
+      "tab": "Invites",
+      "action": "Invite someone",
+      "intro": "An invite is a link that creates a person's account, with no rights, the first time it is used. It works once, for 7 days.",
+      "none": "No invite is open. Invite someone with the button above, or from the command line:",
+      "cli": "lakana invite create <name>",
+      "withdrawOf": "Withdraw the invite of {{name}}",
+      "name": "Name",
+      "nameHelp": "The name the person signs in as; it must not be taken, in any letter case.",
+      "displayName": "Display name (optional)",
+      "displayNameHelp": "How Lakana shows the person, such as their full name.",
+      "create": "Create the invite",
+      "shownOnce": "It works once, until {{date}}. This is the only time Lakana shows it: copy it now and send it to {{name}} yourself.",
+      "confirm": "The link creates the account with no rights. Before you grant any role, confirm outside Lakana that the person who signed up is {{name}}: ask them in person, by phone or in your team chat."
+    },
+    "recovery": {
+      "tab": "Recovery links",
+      "action": "Issue a recovery link",
+      "intro": "A recovery link lets a person who lost their passkeys back in. It works once, for 1 hour; using it replaces their passkeys, ends their sessions and tells every administrator.",
+      "none": "No recovery link is open. Issue one with the button above when someone has lost their passkeys.",
+      "withdrawOf": "Withdraw the recovery link of {{name}}",
+      "askFor": "The link is for {{name}}.",
+      "confirmFirst": "Issue one only after confirming outside Lakana, in person or by phone, that the person asked for it.",
+      "continue": "Continue",
+      "shownOnce": "It works once, for 1 hour, until {{date}}. Using it removes the passkeys of {{name}}, ends their sessions and tells every administrator. This is the only time Lakana shows it: copy it now and send it to {{name}} yourself.",
+      "adminTitle": "{{name}} is an administrator",
+      "operatorOnly": "Only the server operator can recover an administrator: run this where the server runs, with the bootstrap token.",
+      "operatorFor": "{{name}} is an administrator, so only the server operator can recover this account: run this where the server runs, with the bootstrap token.",
+      "command": "lakana recovery create {{name}}"
+    }
+  },
+  "account": {
+    "title": "Passkeys and sessions",
+    "purpose": "Your passkeys sign you in; your sessions are the browsers you are signed in on."
+  },
+  "passkeys": {
+    "title": "Passkeys",
+    "none": "You have no passkey yet. Add one: it signs you in with your fingerprint, face, PIN or security key.",
+    "noneOther": "No passkey.",
+    "unnamed": "Passkey",
+    "added": "Added {{date}}",
+    "lastUsed": "Last used {{date}}",
+    "neverUsed": "Never used",
+    "synced": "Synced across devices",
+    "disabled": "Disabled: a copy of it was detected",
+    "elsewhere": "Not usable at this address: it was added while Lakana had another address",
+    "remove": "Remove",
+    "removeOf": "Remove {{name}}"
+  },
+  "sessions": {
+    "title": "Sessions",
+    "none": "No open session.",
+    "browser": "{{browser}}, from {{peer}}",
+    "unknownBrowser": "Unknown browser",
+    "times": "Started {{started}} · last active {{seen}}",
+    "current": "This browser",
+    "endAll": "End all sessions"
+  },
+  "settings": {
+    "tabs": "Settings sections",
+    "signIn": {
+      "tab": "Sign-in",
+      "intro": "How long a browser session lasts. API tokens are not affected.",
+      "idle": "Idle timeout in minutes",
+      "idleHelp": "A session ends after this long without anything the person did. Between {{min}} and {{max}} minutes ({{minText}} to {{maxText}}).",
+      "absolute": "Longest session in minutes",
+      "absoluteHelp": "A session ends after this long, however active the person is. Between {{min}} and {{max}} minutes ({{minText}} to {{maxText}}).",
+      "appliesLater": "A change applies to sessions that begin afterwards; open sessions keep their lengths.",
+      "save": "Save",
+      "saved": "Saved. New sessions use these lengths.",
+      "idleOutOfBounds": "The idle timeout is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
+      "absoluteOutOfBounds": "The longest session is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
+      "shorterThanIdle": "The longest session cannot be shorter than the idle timeout ({{idle}} minutes). Make it longer, or the idle timeout shorter."
+    }
+  },
+  "duration": {
+    "minutes_one": "{{count}} minute",
+    "minutes_other": "{{count}} minutes",
+    "hours_one": "{{count}} hour",
+    "hours_other": "{{count}} hours",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days"
   }
 }

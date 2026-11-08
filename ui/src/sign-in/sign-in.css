@@ -55,8 +55,8 @@
 }
 
 .button-primary[data-hovered] {
-  background: var(--color-accent);
-  filter: brightness(1.1);
+  border-color: var(--color-accent-hover);
+  background: var(--color-accent-hover);
 }
 
 .button[data-disabled] {

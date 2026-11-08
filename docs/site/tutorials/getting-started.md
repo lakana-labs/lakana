@@ -72,7 +72,8 @@ command, the instance instead opens `http://localhost:8765` in your browser, sig
 browser in with your own profile. The first time, the interface offers to add a passkey (a
 fingerprint, a face, a PIN or a security key), which signs you in later without the terminal.
 **Not now** skips it, and the interface opens Home signed in; it offers again the next time you
-start. The menu under your name at the bottom of the sidebar signs you out. If you lose a passkey,
+start. The menu under your name at the bottom of the sidebar signs you out, and its **Passkeys
+and sessions** adds a passkey later. If you lose a passkey,
 see [Lost your passkey](../how-to/lost-your-passkey.md).
 
 To see a line for every request the server answers, start with the option `--log-requests`. To
@@ -477,8 +478,9 @@ name. In a script, pass `--yes` to skip the question.
   [asset front-matter](../reference/asset-front-matter.md) and [`lakana.yaml`](../reference/lakana-yaml.md).
 - [Load data from a source](../how-to/load-data-from-a-source.md) reads files, a database or a
   REST API on a schedule, from a project that `lakana init --template` writes.
-- [Give a second person access](../how-to/give-a-second-person-access.md) issues a token to a
-  colleague who may query one environment.
+- [Invite your team](../how-to/invite-your-team.md) brings colleagues into the web interface by a
+  link, and [Give a second person access](../how-to/give-a-second-person-access.md) grants them
+  the smallest set of rights or issues a token for the command line.
 - [Deploying with Compose (team mode)](../how-to/deploy-with-compose.md) moves from your machine to an
   instance a small team shares.
 - [Scope and philosophy](../explanation/scope.md) says what Lakana is for, and what it is not for.

@@ -54,6 +54,14 @@ async function openMenu(): Promise<ReturnType<typeof renderShell>> {
 }
 
 describe("UserMenu", () => {
+  it("opens one's passkeys and sessions", async () => {
+    const { user, router } = await openMenu();
+
+    await user.click(screen.getByRole("menuitem", { name: "Passkeys and sessions" }));
+
+    expect(router.state.location.pathname).toBe("/account");
+  });
+
   it("switches the theme and remembers it", async () => {
     const { user, storage } = await openMenu();
     expect(screen.getByRole("menuitemradio", { name: "System" })).toHaveAttribute(

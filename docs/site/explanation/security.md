@@ -1,12 +1,13 @@
 # Security overview
 
-How Lakana decides who may do what, where it keeps secrets, what it records, and how a query is
-kept inside what its author may read. This page is the short version for people who use or run an
+How Lakana decides who may do what, how a person signs in to the web interface, where it keeps
+secrets, what it records, and how a query is kept inside what its author may read. This page is the short version for people who use or run an
 instance; each part links to the page with the steps and the exact rules.
 
 ## Who may do what
 
-Every request is made by a **principal**: a person or a service account, signed in with a token.
+Every request is made by a **principal**: a person or a service account, signed in with a token
+or, in the web interface, with a browser session.
 A principal may do something only because a **grant** says so. A grant gives an action, or a
 **role** (a named set of actions such as `VIEWER`, `ANALYST`, `DATA_SCIENTIST`, `DATA_ENGINEER` or
 `ADMIN`), to a principal or a group, on an object: the instance, an environment, a namespace or a
@@ -30,6 +31,65 @@ table. Without a grant the answer is no, and the refusal is recorded.
   ([CI trust rules and CI tokens](../reference/ci-trust-rules.md)).
 - **Protected environments** accept writes only from deployed projects, so a person cannot change a
   production table by hand ([Projects and deploys](../how-to/projects.md#protected-environments-lockdown-and-break-glass)).
+
+## Signing in to the web interface
+
+A person signs in to the interface with a **passkey**: a key pair whose private half stays on
+their device or in their password manager, unlocked with a fingerprint, a face, a PIN or a
+security key. Lakana stores only the public half. A link signs a person in only to start: an
+invite creates the account, a recovery link lets them back in, and both lead straight to adding a
+passkey ([Invite your team](../how-to/invite-your-team.md),
+[Lost your passkey](../how-to/lost-your-passkey.md)).
+
+- **A session is a credential, like a token.** Signing in gives the browser a session cookie that
+  scripts cannot read (`HttpOnly`), that the browser sends only to the same site (`SameSite=Strict`)
+  and, over HTTPS, only over HTTPS. Every request with it carries the person's own rights, no more:
+  the same grants, filters, masks, limits and audit as their token would. Every change also
+  carries a second value the page holds in memory, so another site cannot make the browser act. The
+  session is checked on every request, so ending it takes effect at once.
+- **A session ends** after 12 hours without anything the person did, after 7 days at the latest
+  (an administrator may change both in **Settings → Sign-in**, up to 24 hours and 30 days), when the
+  person signs out here or everywhere, when an administrator ends it, and when the account is
+  deactivated. Background refreshes of a page never keep it alive.
+- **Sensitive actions need a fresh touch.** Adding or removing a passkey, issuing an invite or a
+  recovery link, creating an API token, granting or changing rights and ending another person's
+  sessions need a passkey touch from the last 15 minutes; the browser asks for one when it is
+  older. A stolen session cookie alone is therefore not enough for any of them.
+- **A passkey is bound to the address.** The browser offers a passkey only to the site it was made
+  for, and Lakana accepts its answer only from its own exact address, port included, so a
+  look-alike site gets nothing. Changing the public address
+  makes every passkey unusable ([Lost your passkey](../how-to/lost-your-passkey.md#after-changing-the-public-address)).
+  A passkey that turns out to have been copied (its counter goes backwards) is disabled, every
+  session of its owner ends, and the owner and the administrators get a notice.
+- **A new link or token is shown once.** The interface shows an invite or recovery link, and
+  later an API token a person creates, exactly once and never stores it; the server keeps only a
+  hash. The interface itself never uses a token and never sees an existing one.
+
+## How Lakana meets MFA requirements
+
+Many teams must show that people sign in with more than one factor. This is what Lakana does; it
+makes no claim of certification or compliance with any standard.
+
+- **A passkey is multi-factor in one step.** Lakana requires user verification, so a passkey
+  signs in only with something the person has (the device or security key holding it) together
+  with something they are or know (a fingerprint, a face or the device's PIN). It is bound to
+  Lakana's exact address, so it resists phishing: a look-alike site cannot ask for it, and an
+  answer meant for another address is refused.
+- **Single sign-on, when it comes,** will leave the factors to your identity provider: a person
+  signing in through it gets whatever multi-factor rule the provider enforces.
+- **API tokens are a single factor, by design.** Scripts, CI jobs and the command line use them.
+  The server stores only a hash of each token; any token can be revoked at once; CI and task tokens
+  expire on their own (a CI token after an hour). A token never turns into a browser session,
+  with two narrow exceptions for the operator's own setup: `lakana server start --local` signs the
+  local browser in with the person's own token, and the bootstrap token issues the first
+  administrator's one-time setup link. A browser session in turn never creates an API token
+  without a fresh passkey touch.
+- **Recovery links are the known weak point,** because they let someone in without a passkey.
+  Lakana limits them: a link works once, for 1 hour; using it removes all of the person's passkeys
+  and ends their sessions, so it cannot be used quietly alongside the real owner; every
+  administrator gets a notice; and an administrator's account is recovered only by the server
+  operator, never by another administrator. Confirm a request outside Lakana before you send a
+  link.
 
 ## Where secrets live
 
@@ -125,6 +185,14 @@ as two statements.
 
 ## What this does not protect
 
+- **Whoever holds a link before its person does.** An invite or recovery link signs in whoever
+  opens it first. Send links on a channel you trust and confirm the person outside Lakana before
+  you grant a role. A browser may keep a used link in its history; once used or expired it is
+  worthless.
+- **A device that is unlocked and signed in.** A session is as good as the person at the keyboard
+  until it ends; the sensitive actions above still need a passkey touch.
+- **Personal API tokens do not expire by themselves.** Revoke a token that is no longer used; the
+  token list shows when each was last used.
 - **Under the local runner, one instance is one trust domain for Python code.** A Python task runs as
   the worker's operating system user, so someone who may deploy Python code can read what the worker
   reads, filters and masks included. Deploy Python only from people you would trust with the stored data,

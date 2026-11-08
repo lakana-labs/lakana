@@ -6,6 +6,7 @@
 import type { ComponentType } from "react";
 import type { RouteObject } from "react-router";
 
+import { AccountScreen } from "../sign-in/AccountScreen";
 import { AppShell } from "./AppShell";
 import { type AreaAccess, type AreaId, SHIPPED_AREAS, type ShippedArea } from "./areas";
 import { AreaPage } from "./AreaPage";
@@ -28,10 +29,13 @@ export interface AreaModule {
 export type AreaPages = Partial<Record<AreaId, () => Promise<AreaModule>>>;
 
 /**
- * The screens of the areas that have one; none yet, every area shows its "coming in part N"
- * page.
+ * The screens of the areas that have one; every other area shows its "coming in part N" page.
+ * A screen holds the area's places under its path (`/access/invites`), so it owns `<area>/*`.
  */
-const AREA_PAGES: AreaPages = {};
+const AREA_PAGES: AreaPages = {
+  access: () => import("../access/AccessScreen"),
+  settings: () => import("../settings/SettingsScreen"),
+};
 
 /**
  * The route of one area, without its path.
@@ -68,7 +72,8 @@ function areaRoute(
 }
 
 /**
- * The route tree: one route per shipped area under the shell, and the not-found state for
+ * The route tree: one route per shipped area under the shell (with every path under it when the
+ * area has a screen), one's own passkeys and sessions at `/account`, and the not-found state for
  * every other path. A shipped area outside the user's access answers with the permission
  * state, so a deep link to it says why instead of "not found", and its screen is never loaded.
  *
@@ -84,13 +89,21 @@ export function appRoutes(
 ): RouteObject[] {
   const areas = SHIPPED_AREAS.map((area): RouteObject => {
     const route = areaRoute(area, access, pages, noAccessYet);
-    return area.path === "/" ? { index: true, ...route } : { path: area.path.slice(1), ...route };
+    if (area.path === "/") {
+      return { index: true, ...route };
+    }
+    const below = pages[area.id] === undefined ? "" : "/*";
+    return { path: `${area.path.slice(1)}${below}`, ...route };
   });
   return [
     {
       path: "/",
       element: <AppShell access={access} />,
-      children: [...areas, { path: "*", element: <NotFound /> }],
+      children: [
+        ...areas,
+        { path: "account", element: <AccountScreen /> },
+        { path: "*", element: <NotFound /> },
+      ],
     },
   ];
 }

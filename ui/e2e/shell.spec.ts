@@ -211,14 +211,14 @@ for (const theme of ["light", "dark"] as const) {
         expect(await violations(page), path).toEqual([]);
       }
       await page.getByRole("button", { name: "Menu" }).click();
-      await expect(page.getByRole("navigation")).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Areas" })).toBeVisible();
       expect(await violations(page), "menu open").toEqual([]);
     });
 
     test("the area list is reachable by keyboard, in a logical order", async ({ page }) => {
       await page.goto("/");
       await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-      await expect(page.getByRole("navigation")).toBeHidden();
+      await expect(page.getByRole("navigation", { name: "Areas" })).toBeHidden();
 
       await page.keyboard.press("Tab");
       await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
@@ -253,7 +253,7 @@ for (const theme of ["light", "dark"] as const) {
       await page.getByRole("link", { name: "Jobs" }).focus();
       await page.keyboard.press("Enter");
       await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeFocused();
-      await expect(page.getByRole("navigation")).toBeHidden();
+      await expect(page.getByRole("navigation", { name: "Areas" })).toBeHidden();
     });
 
     test("the user menu and the palette fit", async ({ page }) => {
@@ -264,7 +264,12 @@ for (const theme of ["light", "dark"] as const) {
       await page.getByRole("button", { name: "Signed in as admin" }).click();
       const menu = page.getByRole("menu", { name: "Preferences and account" });
       await expect(menu).toBeVisible();
-      await expect(menu).toBeInViewport({ ratio: 1 });
+      // The surface fits; a menu taller than the room left above its button scrolls inside it
+      // (vertical scrolling is allowed at 320 px, WCAG 1.4.10), so its last item is reachable.
+      await expect(page.locator(".float")).toBeInViewport({ ratio: 1 });
+      const last = menu.getByRole("menuitem", { name: "Sign out everywhere" });
+      await last.scrollIntoViewIfNeeded();
+      await expect(last).toBeInViewport({ ratio: 1 });
       await page.keyboard.press("Escape");
 
       await page.keyboard.press("Control+k");

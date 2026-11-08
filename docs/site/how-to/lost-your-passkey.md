@@ -23,19 +23,30 @@ each link works once. The interface removes the link from the address bar as soo
 opens, but the browser may still keep it in its own history; once used or expired, a link there
 is useless.
 
+## You still have a passkey
+
+Add a second one before you need it, on another device or a security key: open the menu under
+your name at the bottom of the sidebar, choose **Passkeys and sessions**, then **Add a passkey**.
+The same page removes a passkey you no longer use (Lakana keeps you from removing your last
+working one) and signs you out everywhere.
+
 ## You are the administrator who issues the link
 
-An administrator issues a recovery link with the `recovery create` command of the CLI, followed
-by the person's name, and sends the link it prints to that person on a channel you trust (the
-link is as good as a sign-in). The [CLI reference](../reference/cli.md#lakana-recovery) lists
-the commands that list the open links and withdraw one.
+In the interface, open **Access**, then **Recovery links**, and choose **Issue a recovery link**,
+or open the person under **People** and choose it there. Type the person's name; after a touch of
+your own passkey the interface shows the link once. Send it to that person on a channel you
+trust (the link is as good as a sign-in). The open links are listed on the same tab, where
+**Withdraw** stops one. From the command line, `recovery create` followed by the person's name
+does the same; the [CLI reference](../reference/cli.md#lakana-recovery) lists the commands that
+list the open links and withdraw one.
 
 Confirm that the request really comes from that person before you send a link, for example by
 calling them: whoever holds the link becomes them for the next hour.
 
 ## The administrator lost their passkey
 
-An administrator cannot recover another administrator. Recovering an administrator is for the
+An administrator cannot recover another administrator: for an administrator, the interface
+shows the command below instead of issuing a link. Recovering an administrator is for the
 **server operator**: the person who runs the server and holds its bootstrap token. The operator
 runs the same `recovery create` command where the server runs, with the profile that holds the
 bootstrap token:
