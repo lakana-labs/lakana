@@ -9,7 +9,7 @@ _LIVE = {"table undrop", "GET /api/v1/jobs"}
 
 @pytest.fixture(scope="module")
 def live() -> set[str]:
-    """Walk the real command tree and routers once for the module.
+    """Walk the real command tree and the committed routes once for the module.
 
     Returns
     -------

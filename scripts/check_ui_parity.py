@@ -2,8 +2,10 @@
 
 Every CLI command and every ``/api/v1`` route has one entry saying where the web interface
 covers it (class ``ui`` or ``read`` with a part 1-8), or why it does not (class ``git`` or
-``exception`` with a reason). The check walks the real command tree and the real routers, so a
-new command or route cannot land without a decision.
+``exception`` with a reason). The check walks the real command tree. The routes come from the
+committed ``docs/site/reference/openapi.json`` (importing the whole server takes seconds); CI's
+``generate_reference.py --check`` step (``.github/workflows/ci.yml``, not a pytest test) keeps
+that file equal to the live application, so a new route cannot land without a decision.
 """
 
 from __future__ import annotations
@@ -14,11 +16,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, FastAPI
 from typer._click import Command
 from typer.core import TyperGroup
 
-PARITY_FILE = Path(__file__).resolve().parent.parent / "ui" / "parity.yaml"
+ROOT = Path(__file__).resolve().parent.parent
+PARITY_FILE = ROOT / "ui" / "parity.yaml"
+OPENAPI_FILE = ROOT / "docs" / "site" / "reference" / "openapi.json"
 
 CLASSES = ("ui", "read", "git", "exception")
 PARTS = range(1, 9)
@@ -76,17 +79,9 @@ def live_keys() -> set[str]:
     import typer.main
 
     from lakana.cli.app import build_app
-    from lakana_server.api.iceberg.router import router as iceberg_router
-    from lakana_server.api.routing import describe_openapi
-    from lakana_server.app import ROUTERS
 
     keys = _leaves(typer.main.get_command(build_app()), "")
-    routers: list[APIRouter] = [r for r in ROUTERS if r is not iceberg_router]
-    app = FastAPI()
-    for router in routers:
-        app.include_router(router)
-    describe_openapi(app, routers)
-    paths = json.loads(json.dumps(app.openapi()))["paths"]
+    paths = json.loads(OPENAPI_FILE.read_text(encoding="utf-8"))["paths"]
     for path, methods in paths.items():
         if path.startswith("/api/v1/"):
             keys |= {f"{method.upper()} {path}" for method in methods}
