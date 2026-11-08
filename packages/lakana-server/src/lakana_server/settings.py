@@ -317,8 +317,13 @@ class UiConfig(BaseModel):
         it the server answers 429 "wait a minute"). IPv6 addresses count per /64 network.
         Everyone behind one NAT shares an address, so a large office may need more; behind a
         reverse proxy set `LAKANA_TRUSTED_PROXIES`, or every browser counts as the proxy and one
-        client can use up the limit for everyone. However many clients ask, at most 1,000
-        sign-in challenges are open at once; past that the oldest unanswered one goes first.
+        client can use up the limit for everyone. A sign-in challenge is signed, not stored, so
+        no number of requests can expire a challenge a person is answering.
+    passkey_options_per_network_per_minute
+        How often one network (IPv4 /24, IPv6 /48) may start a passkey sign-in per minute
+        (default 240; past it 429), so a client cannot get around the per-address limit by
+        rotating through the addresses of a rented block. An office whose people sign in from
+        many addresses of one /24 at once may need more.
     """
 
     enabled: bool = False
@@ -326,6 +331,7 @@ class UiConfig(BaseModel):
     allowed_hosts: list[str] = []
     local_sign_in: bool = False
     passkey_options_per_ip_per_minute: int = Field(default=60, gt=0)
+    passkey_options_per_network_per_minute: int = Field(default=240, gt=0)
 
     @field_validator("public_url")
     @classmethod

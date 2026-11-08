@@ -19465,7 +19465,7 @@
           "sign-in"
         ],
         "summary": "Start signing in with a passkey",
-        "description": "Needs no credential and no name: the options list no passkeys (`allowCredentials` is empty), so the browser offers the passkeys it has for this address and the person picks one with a touch and a PIN, fingerprint or face. The challenge works once, for 5 minutes. At most `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` (60) calls per client address (IPv6: per /64) and minute; past that 429.",
+        "description": "Needs no credential and no name: the options list no passkeys (`allowCredentials` is empty), so the browser offers the passkeys it has for this address and the person picks one with a touch and a PIN, fingerprint or face. The challenge works once, for 5 minutes. At most `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` (60) calls per client address (IPv6: per /64) and `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` (240) per network (IPv4 /24, IPv6 /48) and minute; past either 429. Nothing is stored for a challenge until it is answered.",
         "operationId": "passkey_sign_in_options_api_v1_sign_in_passkey_options_post",
         "responses": {
           "200": {

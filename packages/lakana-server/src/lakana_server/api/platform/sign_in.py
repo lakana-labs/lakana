@@ -12,8 +12,9 @@ wrong secret answers exactly like an unknown link (410, `state: unknown`).
 `POST /api/v1/sign-in/passkey/options` and `/passkey` sign in with a passkey and need no
 credential either: the passkey is the proof. They read at most `OPEN_BODY_LIMIT` (16 KiB) of
 body, the options route answers at most `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls
-per client address (IPv6: per /64) and minute (429 past that), a refused sign-in is audited like
-a refused link, and neither the browser's answer nor the challenge is logged.
+per client address (IPv6: per /64) and minute, and a coarser per-network rate (429 past either),
+a refused sign-in is audited like a refused link, and neither the browser's answer nor the
+challenge is logged.
 `POST /api/v1/sign-in/step-up/options` and `/step-up` confirm the caller's own browser session
 with a passkey touch.
 Every route answers 409 while the interface is off.
@@ -81,6 +82,28 @@ def client_bucket(host: str) -> str:
     if address.version == 6:
         return str(ipaddress.ip_network(f"{address}/64", strict=False))
     return host
+
+
+def network_bucket(host: str) -> str:
+    """Name the coarser rate-limit bucket of a client address: its network.
+
+    Parameters
+    ----------
+    host
+        The client's address as the server sees it.
+
+    Returns
+    -------
+    str
+        The IPv4 /24 or IPv6 /48 the address is in (a cheaply rented block spans many /64s), or
+        the host itself when it is not an address.
+    """
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    prefix = 48 if address.version == 6 else 24
+    return str(ipaddress.ip_network(f"{address}/{prefix}", strict=False))
 
 
 TOO_MANY_ATTEMPTS = "Too many sign-in attempts from this address; wait a minute."
@@ -344,7 +367,8 @@ def passkey_sign_in_options(
     empty), so the browser offers the passkeys it has for this address and the person picks one
     with a touch and a PIN, fingerprint or face. The challenge works once, for 5 minutes. At most
     `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` (60) calls per client address (IPv6: per /64)
-    and minute; past that 429.
+    and `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` (240) per network (IPv4 /24, IPv6 /48)
+    and minute; past either 429. Nothing is stored for a challenge until it is answered.
 
     Parameters
     ----------
@@ -365,6 +389,9 @@ def passkey_sign_in_options(
     """
     client = request.client.host if request.client else "unknown"
     admitted, _ = request.app.state.passkey_options_limiter.admit(client_bucket(client))
+    if admitted:
+        network = request.app.state.passkey_options_network_limiter
+        admitted, _ = network.admit(network_bucket(client))
     if not admitted:
         raise TooManyAttemptsError(TOO_MANY_ATTEMPTS)
     ceremony_id, options = passkeys.sign_in_options()

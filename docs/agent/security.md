@@ -461,21 +461,32 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   `allowCredentials` empty on sign-in, so no name is asked before the touch. Each passkey stores
   the RP id it was registered for; one of an earlier public address is not usable
   (`usable_here: false`, refused at sign-in with the next step: a recovery link).
-- **Challenges** are 32 bytes from `os.urandom`, rows of `webauthn_challenges` with a purpose
-  (`register`, `sign_in`, `step_up`), bound to the browser session except for sign-in, valid 5
-  minutes (`CHALLENGE_LIFETIME`, expired at `expires_at <= now`). Consumption is one conditional
-  update committed *before* the answer is checked, so a failed answer burns it. Every insert
-  deletes the expired rows in its own transaction, so anonymous option calls cannot grow the
-  table, and at most `MAX_OPEN_SIGN_IN_CHALLENGES` (1,000) unbound sign-in rows exist at once:
-  a new one past the cap deletes the oldest (used ones count too, since a garbage answer uses a
-  challenge up). Evicting, not refusing, because a refusal at the cap would lock every person
-  out for 5 minutes, while eviction only shortens a challenge's life to cap / flood rate: a
-  flood needs well over 1,000 requests in the seconds a touch takes to beat a real person.
-  `POST /api/v1/sign-in/passkey/options` is also limited per client address (IPv6: per /64,
-  `client_bucket`) by its own setting `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` (default
-  60; 429, `Retry-After: 60`). Everyone behind one NAT shares a bucket, and behind a reverse
-  proxy without `LAKANA_TRUSTED_PROXIES` every browser is the proxy's address, so one client
-  could use up the limit for all: the settings reference says so.
+- **Challenges** last 5 minutes (`CHALLENGE_LIFETIME`, expired at `expires_at <= now`) and are
+  used up *before* the answer is checked, so a failed answer burns one.
+  - Registration and step-up challenges are 32 bytes from `os.urandom`, rows of
+    `webauthn_challenges` bound to the (authenticated) browser session, consumed by one
+    conditional update; each insert deletes the expired rows.
+  - **Sign-in challenges are stateless** (`sign_challenge` / `open_challenge`): version, a
+    32-byte random nonce and the expiry, with an HMAC-SHA256 over the purpose (`sign_in`), the
+    RP id and those bytes. Nothing is stored when one is issued, so no flood of anonymous option
+    calls can grow a table or push out the challenge a person is answering (a cap on open rows
+    could: a /48 rents cheaply). On an answer the challenge is checked first, in constant time:
+    signature, purpose, RP id, expiry and that the ceremony id is the nonce's; then the nonce is
+    inserted as used (the ceremony id is the primary key, so a replay fails on it) in the
+    transaction that deletes expired nonces. Storage grows only with answered attempts, which
+    need an issued challenge, for 5 minutes.
+  - The key is 32 random bytes in `instance_settings` (`sign_in.challenge_key`), created on
+    first use: every server process and replica accepts a challenge another issued, and a
+    restart does not break a sign-in in progress (a per-process key would fail behind a load
+    balancer). It is never logged or returned; a database reader could forge a challenge, which
+    still needs a passkey's signature to sign in.
+  - `POST /api/v1/sign-in/passkey/options` is limited per client address (IPv6: per /64,
+    `client_bucket`) by `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` (default 60) and per
+    network (IPv4 /24, IPv6 /48, `network_bucket`) by
+    `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` (default 240); 429 with
+    `Retry-After: 60`. Everyone behind one NAT shares a bucket, and behind a reverse proxy
+    without `LAKANA_TRUSTED_PROXIES` every browser is the proxy's address, so one client could
+    use up the limit for all: the settings reference says so.
   The two open routes read at most 16 KiB (`OPEN_BODY_LIMIT`, checked before FastAPI decodes
   the body) and are Host- and Origin-checked by `BrowserGuard`.
 - **Library workarounds.** `py_webauthn` does not compare `userHandle`: the service requires it

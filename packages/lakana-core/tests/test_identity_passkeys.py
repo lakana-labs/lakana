@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from scripts.test_support.webauthn_test_helpers import SoftAuthenticator, unb64url
+from scripts.test_support.webauthn_test_helpers import SoftAuthenticator, b64url, unb64url
 from sqlalchemy import event, func, select, update
 from sqlalchemy.orm import ORMExecuteState, Session
 
@@ -33,8 +33,8 @@ from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.passkeys import (
     CHALLENGE_LIFETIME,
     FIRST_PASSKEY_WINDOW,
-    MAX_OPEN_SIGN_IN_CHALLENGES,
     PasskeyService,
+    sign_challenge,
 )
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService, StartedSession
@@ -571,48 +571,123 @@ def test_a_challenge_of_another_session_is_refused(world: World, alice: Signed) 
         )
 
 
-def test_challenge_is_32_random_bytes(world: World) -> None:
-    """Each options call stores a fresh 32-byte challenge."""
-    first, _ = world.passkeys.sign_in_options()
-    second, _ = world.passkeys.sign_in_options()
+def test_challenge_is_32_random_bytes(world: World, alice: Signed) -> None:
+    """A stored (registration) challenge is 32 random bytes; a sign-in nonce is too."""
+    first, _ = world.passkeys.registration_options(world.ref(alice))
+    second, _ = world.passkeys.registration_options(world.ref(alice))
     rows = {r.id: r.challenge for r in world.session.execute(select(WebauthnChallenge)).scalars()}
     assert len(rows[first]) == len(rows[second]) == 32
     assert rows[first] != rows[second]
+    _, one = world.passkeys.sign_in_options()
+    _, two = world.passkeys.sign_in_options()
+    assert one["challenge"] != two["challenge"]
+    assert len(unb64url(one["challenge"])) == 1 + 32 + 8 + 32
 
 
-def test_expired_challenges_are_purged_on_insert(world: World) -> None:
-    """Anonymous options calls cannot grow the table: expired rows go with each insert."""
+def test_expired_challenges_are_purged_on_insert(world: World, alice: Signed) -> None:
+    """Expired rows go with each insert."""
     for _ in range(3):
-        world.passkeys.sign_in_options()
+        world.passkeys.registration_options(world.ref(alice))
     world.clock.now += CHALLENGE_LIFETIME
-    world.passkeys.sign_in_options()
+    world.passkeys.registration_options(world.ref(alice))
     assert world.session.scalar(select(func.count()).select_from(WebauthnChallenge)) == 1
 
 
-def test_open_sign_in_challenges_are_capped_oldest_first(world: World, alice: Signed) -> None:
-    """Past the cap the oldest open sign-in challenge goes; newer ones and bound ones stay.
+def test_sign_in_options_store_nothing(world: World) -> None:
+    """Anonymous options calls cannot grow the table: a sign-in challenge is signed, not kept."""
+    for _ in range(3):
+        world.passkeys.sign_in_options()
+    assert world.session.scalar(select(func.count()).select_from(WebauthnChallenge)) == 0
 
-    Evicting, not refusing: a flood can shorten how long a challenge stays open, but a person
-    who answers within seconds still signs in, where a refusal would lock everyone out.
-    """
-    capped = PasskeyService(
-        world.session,
-        world.authz,
-        world.sessions,
-        NoticeService(world.session, clock=world.clock),
-        rp_id=RP_ID,
-        origin=ORIGIN,
-        clock=world.clock,
-        max_open_sign_in=3,
+
+def test_a_flood_of_options_never_invalidates_a_real_challenge(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    """However many anonymous challenges are issued, an earlier one still signs in."""
+    _, auth, _ = enrolled
+    ceremony, options = world.passkeys.sign_in_options()
+    for _ in range(1500):
+        world.passkeys.sign_in_options()
+    started = world.passkeys.sign_in(
+        ceremony, auth.get(options), replacing=None, peer="p", user_agent="u"
     )
-    bound, _ = capped.registration_options(world.ref(alice))
-    ceremonies = []
-    for _ in range(4):
-        world.clock.now += timedelta(seconds=1)
-        ceremonies.append(capped.sign_in_options()[0])
-    open_ids = set(world.session.execute(select(WebauthnChallenge.id)).scalars())
-    assert open_ids == {bound, *ceremonies[1:]}
-    assert MAX_OPEN_SIGN_IN_CHALLENGES == 1000
+    assert started.principal.name == "alice"
+
+
+def test_a_sign_in_challenge_cannot_be_replayed(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    """The nonce is recorded when answered; a second answer to it is refused."""
+    _, auth, _ = enrolled
+    ceremony, options = world.passkeys.sign_in_options()
+    world.passkeys.sign_in(ceremony, auth.get(options), replacing=None, peer="p", user_agent="u")
+    with pytest.raises(AuthenticationError, match="expired or was used"):
+        world.passkeys.sign_in(
+            ceremony, auth.get(options), replacing=None, peer="p", user_agent="u"
+        )
+
+
+def _tampered(challenge: str) -> str:
+    """Flip one bit of a challenge's nonce.
+
+    Parameters
+    ----------
+    challenge
+        The challenge, base64url.
+
+    Returns
+    -------
+    str
+        The changed challenge.
+    """
+    raw = bytearray(unb64url(challenge))
+    raw[5] ^= 1
+    return b64url(bytes(raw))
+
+
+@pytest.mark.parametrize("fault", ["tampered", "expired", "wrong_purpose", "wrong_rp", "ceremony"])
+def test_a_forged_or_stale_sign_in_challenge_is_refused(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey], fault: str
+) -> None:
+    """The signature, purpose, RP id, expiry and ceremony id are checked before anything else."""
+    _, auth, _ = enrolled
+    ceremony, options = world.passkeys.sign_in_options()
+    if fault == "tampered":
+        options = {**options, "challenge": _tampered(options["challenge"])}
+    elif fault == "expired":
+        world.clock.now += CHALLENGE_LIFETIME
+    elif fault == "wrong_purpose":
+        key = world.passkeys._challenge_key()
+        raw = unb64url(options["challenge"])
+        forged = sign_challenge(
+            key, "step_up", RP_ID, raw[1:33], int(world.clock.now.timestamp()) + 300
+        )
+        options = {**options, "challenge": b64url(forged)}
+    elif fault == "wrong_rp":
+        moved = world.service(rp_id="lakana.example.org", origin="https://lakana.example.org")
+        ceremony, options = moved.sign_in_options()
+        options = {**options, "rpId": RP_ID}
+    else:
+        ceremony = uuid.uuid4()
+    with pytest.raises(AuthenticationError, match="expired or was used"):
+        world.passkeys.sign_in(
+            ceremony, auth.get(options), replacing=None, peer="p", user_agent="u"
+        )
+    signed_in = select(func.count()).where(WebauthnChallenge.purpose == "sign_in")
+    assert world.session.scalar(signed_in) == 0
+
+
+def test_used_sign_in_nonces_are_purged_after_they_expire(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    """Storage grows only with answered attempts, and only for 5 minutes."""
+    _, auth, _ = enrolled
+    world.sign_in(auth)
+    world.sign_in(auth)
+    world.clock.now += CHALLENGE_LIFETIME
+    world.sign_in(auth)
+    assert world.session.scalar(select(func.count()).select_from(WebauthnChallenge)) == 1
+    assert world.session.scalar(select(WebauthnChallenge.purpose)) == "sign_in"
 
 
 def test_sign_in_is_usernameless(world: World) -> None:

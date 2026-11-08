@@ -8,9 +8,16 @@ The ceremonies follow the sign-in design's WebAuthn rules:
 - User verification is required and checked; credentials are discoverable (``residentKey:
   required``), so sign-in sends an empty ``allowCredentials`` and never asks for a name before
   the touch; attestation is ``none``.
-- A challenge is 32 random bytes, used once, valid for `CHALLENGE_LIFETIME`. It is consumed with
-  one conditional update, and committed before the answer is checked, so a failed answer uses it
-  up too. Expired rows are deleted whenever a new one is inserted.
+- Every challenge is used once and valid for `CHALLENGE_LIFETIME`, and is used up before the
+  answer is checked, so a failed answer uses it up too.
+- A registration or step-up challenge is 32 random bytes stored with the browser session it is
+  bound to, consumed with one conditional update; expired rows go whenever a row is inserted.
+- A sign-in challenge is stateless (`sign_challenge`): version, a 32-byte random nonce and the
+  expiry, signed with HMAC-SHA256 over the purpose and the RP id by a key kept in the database
+  (`CHALLENGE_KEY`). Nothing is stored when it is issued, so no number of anonymous calls can
+  push out a real person's challenge. An answer's challenge is checked first (constant time,
+  purpose, RP id, expiry, ceremony id); then its nonce is inserted as used, and a replay fails on
+  the primary key. Only answered attempts are stored, for 5 minutes.
 - A credential id already stored, for anyone, is refused.
 - The library does not compare the user handle, so the service does (in constant time).
 - A falling signature counter means a copied passkey. The library raises the same exception
@@ -21,13 +28,15 @@ The ceremonies follow the sign-in design's WebAuthn rules:
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 import json
 import os
 import unicodedata
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, select, update
@@ -80,6 +89,7 @@ from lakana_core.identity.sessions import (
 )
 from lakana_core.models import (
     AuditEventType,
+    InstanceSetting,
     Passkey,
     Principal,
     PrincipalType,
@@ -92,12 +102,17 @@ CHALLENGE_LIFETIME = timedelta(minutes=5)
 FIRST_PASSKEY_WINDOW = timedelta(minutes=15)
 """How long after a link sign-in the first passkey may be added without a touch."""
 
-MAX_OPEN_SIGN_IN_CHALLENGES = 1000
-"""How many unanswered sign-in challenges may be open at once; past it the oldest go first.
+CHALLENGE_KEY = "sign_in.challenge_key"
+"""The instance setting holding the key that signs sign-in challenges (32 random bytes, base64).
 
-Evicting rather than refusing: a flood of anonymous option calls only shortens how long a
-challenge stays answerable (the cap divided by the flood's rate), so a person who touches their
-passkey within seconds still signs in; refusing new challenges would lock everyone out."""
+In the database, not in the process: every server process and replica must accept a challenge
+another one issued, and a restart must not break a sign-in in progress. Whoever can read the
+database could forge a challenge, which still needs the passkey's signature to sign in."""
+
+_CHALLENGE_VERSION = b"\x01"
+_NONCE_BYTES = 32
+_MAC_BYTES = 32
+_TOKEN_BYTES = 1 + _NONCE_BYTES + 8 + _MAC_BYTES
 
 OPEN_BODY_LIMIT = 16 * 1024
 """The largest body the two open passkey routes read, like the OIDC exchange."""
@@ -211,9 +226,6 @@ class PasskeyService:
         The name authenticators show.
     clock
         The clock; `utc_now` by default.
-    max_open_sign_in
-        How many unanswered sign-in challenges may be open at once
-        (`MAX_OPEN_SIGN_IN_CHALLENGES`); a new one past it removes the oldest.
     """
 
     def __init__(
@@ -227,7 +239,6 @@ class PasskeyService:
         origin: str,
         rp_name: str = "Lakana",
         clock: Callable[[], datetime] = utc_now,
-        max_open_sign_in: int = MAX_OPEN_SIGN_IN_CHALLENGES,
     ) -> None:
         self._session = session
         self._authz = authz
@@ -237,7 +248,7 @@ class PasskeyService:
         self._origin = origin
         self._rp_name = rp_name
         self._clock = clock
-        self._max_open_sign_in = max_open_sign_in
+        self._key: bytes | None = None
 
     # -- shared steps -----------------------------------------------------------------------
 
@@ -314,9 +325,6 @@ class PasskeyService:
     ) -> WebauthnChallenge:
         """Store a fresh challenge, deleting every expired one in the same transaction.
 
-        A sign-in challenge (unbound) past `max_open_sign_in` open ones removes the oldest open
-        sign-in challenges; challenges bound to a session are never removed this way.
-
         Parameters
         ----------
         purpose
@@ -337,22 +345,6 @@ class PasskeyService:
             .where(WebauthnChallenge.expires_at <= now)
             .execution_options(synchronize_session=False)
         )
-        if session_id is None:
-            unbound = (
-                select(WebauthnChallenge.id)
-                # Used ones count too: a garbage answer uses a challenge up, and must not
-                # take it out of the cap.
-                .where(WebauthnChallenge.session_id.is_(None))
-                .order_by(WebauthnChallenge.created_at.desc(), WebauthnChallenge.id)
-                .offset(self._max_open_sign_in - 1)
-            )
-            evicted = list(self._session.execute(unbound).scalars())
-            if evicted:
-                self._session.execute(
-                    delete(WebauthnChallenge)
-                    .where(WebauthnChallenge.id.in_(evicted))
-                    .execution_options(synchronize_session=False)
-                )
         row = WebauthnChallenge(
             id=uuid.uuid4(),
             challenge=os.urandom(_CHALLENGE_BYTES),
@@ -451,7 +443,8 @@ class PasskeyService:
         Parameters
         ----------
         purpose
-            ``sign_in`` (unbound, no credential list) or ``step_up`` (bound to `p`'s session).
+            ``sign_in`` (a signed, unstored challenge, no credential list) or ``step_up`` (a
+            stored challenge bound to `p`'s session).
         p
             The caller of a step-up; `None` for sign-in.
 
@@ -460,21 +453,28 @@ class PasskeyService:
         tuple of (uuid.UUID, dict)
             The ceremony id and the ``publicKey`` options in their JSON form.
         """
-        context = self._session_of(p) if p is not None else None
-        row = self._new_challenge(
-            purpose,
-            session_id=context.session_id if context is not None else None,
-            principal_id=p.id if p is not None else None,
-        )
+        if p is None:
+            # Sign-in: a signed challenge, nothing stored, so a flood of anonymous calls can
+            # neither grow a table nor push out a real person's challenge.
+            nonce = os.urandom(_NONCE_BYTES)
+            expires = int(self._clock().timestamp() + CHALLENGE_LIFETIME.total_seconds())
+            challenge = sign_challenge(self._challenge_key(), purpose, self._rp_id, nonce, expires)
+            ceremony_id = uuid.UUID(bytes=nonce[:16])
+            descriptors: list[PublicKeyCredentialDescriptor] = []
+        else:
+            context = self._session_of(p)
+            row = self._new_challenge(purpose, session_id=context.session_id, principal_id=p.id)
+            challenge, ceremony_id = row.challenge, row.id
+            descriptors = self._descriptors(p.id)
         options = generate_authentication_options(
             rp_id=self._rp_id,
-            challenge=row.challenge,
+            challenge=challenge,
             timeout=int(CHALLENGE_LIFETIME.total_seconds() * 1000),
-            allow_credentials=self._descriptors(p.id) if p is not None else [],
+            allow_credentials=descriptors,
             user_verification=UserVerificationRequirement.REQUIRED,
         )
         self._session.commit()
-        return row.id, _json(options)
+        return ceremony_id, _json(options)
 
     def _parse(
         self, credential_json: str, error: type[AuthenticationError]
@@ -657,6 +657,100 @@ class PasskeyService:
         for recipient in sorted({principal.id, *active_instance_admin_ids(self._session)}, key=str):
             self._notices.add(recipient, "passkey_disabled", principal.id, detail)
         self._session.commit()
+
+    def _challenge_key(self) -> bytes:
+        """Read the key that signs sign-in challenges, creating it on first use.
+
+        Returns
+        -------
+        bytes
+            32 bytes, the same for every server process of the instance.
+        """
+        if self._key is not None:
+            return self._key
+        row = self._session.get(InstanceSetting, CHALLENGE_KEY)
+        if row is None:
+            try:
+                with self._session.begin_nested():
+                    row = InstanceSetting(
+                        key=CHALLENGE_KEY,
+                        value=base64.b64encode(os.urandom(32)).decode("ascii"),
+                        updated_at=self._clock(),
+                    )
+                    self._session.add(row)
+            except IntegrityError:
+                # Another process created it at the same moment: use theirs.
+                row = self._session.get(InstanceSetting, CHALLENGE_KEY)
+            self._session.commit()
+        assert row is not None  # nosec B101 -- created or read just above
+        self._key = base64.b64decode(str(row.value))
+        return self._key
+
+    def _use_sign_in_challenge(
+        self, ceremony_id: uuid.UUID, parsed: AuthenticationCredential
+    ) -> bytes:
+        """Check a sign-in challenge's signature, purpose, RP id and expiry, then use it up.
+
+        Nothing about the answer is trusted before the challenge's signature checked. Using it
+        up is one insert of its nonce (the ceremony id is the primary key), committed at once:
+        a replay fails on the key. Expired nonces are deleted in the same transaction, so the
+        table holds at most the answered attempts of the last 5 minutes.
+
+        Parameters
+        ----------
+        ceremony_id
+            The id `sign_in_options` returned.
+        parsed
+            The parsed assertion, whose client data carries the challenge.
+
+        Returns
+        -------
+        bytes
+            The challenge, for the WebAuthn verification.
+
+        Raises
+        ------
+        AuthenticationError
+            If the challenge was not issued here for sign-in at this address, has expired,
+            belongs to another ceremony, or was used.
+        """
+        gone = AuthenticationError(_CHALLENGE_GONE)
+        try:
+            data = json.loads(parsed.response.client_data_json)
+            challenge = base64url_to_bytes(data["challenge"])
+        except (*_ANSWER_ERRORS, AttributeError):
+            raise gone from None
+        now = self._clock()
+        opened = open_challenge(self._challenge_key(), "sign_in", self._rp_id, challenge)
+        if opened is None:
+            raise gone
+        nonce, expires = opened
+        if expires <= now.timestamp() or uuid.UUID(bytes=nonce[:16]) != ceremony_id:
+            raise gone
+        self._session.execute(
+            delete(WebauthnChallenge)
+            .where(WebauthnChallenge.expires_at <= now)
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            with self._session.begin_nested():
+                self._session.add(
+                    WebauthnChallenge(
+                        id=ceremony_id,
+                        challenge=nonce,
+                        purpose="sign_in",
+                        session_id=None,
+                        principal_id=None,
+                        created_at=now,
+                        expires_at=datetime.fromtimestamp(expires, UTC),
+                        used_at=now,
+                    )
+                )
+        except IntegrityError:
+            self._session.commit()
+            raise gone from None
+        self._session.commit()
+        return challenge
 
     # -- registration -----------------------------------------------------------------------
 
@@ -893,10 +987,8 @@ class PasskeyService:
             For a used or expired challenge, an unknown, disabled or copied passkey, a wrong
             user handle, a deactivated person or an answer that does not verify.
         """
-        challenge = self._consume(
-            ceremony_id, "sign_in", session_id=None, error=AuthenticationError
-        )
         parsed = self._parse(credential_json, AuthenticationError)
+        challenge = self._use_sign_in_challenge(ceremony_id, parsed)
         _, principal = self._assert(parsed, challenge, AuthenticationError, owner=None)
         started = self._sessions.start(
             principal.id,
@@ -1079,6 +1171,84 @@ class PasskeyService:
         if not own:
             self._sessions.end_for_principal(target.id, "passkey_removed")
         self._session.commit()
+
+
+def _mac(key: bytes, purpose: str, rp_id: str, body: bytes) -> bytes:
+    """Sign a challenge's body for one purpose at one relying-party id.
+
+    Parameters
+    ----------
+    key
+        The instance's challenge key.
+    purpose
+        What the challenge is for, such as ``sign_in``.
+    rp_id
+        The relying-party id.
+    body
+        Version, nonce and expiry.
+
+    Returns
+    -------
+    bytes
+        HMAC-SHA256.
+    """
+    message = b"\x00".join([b"lakana-webauthn-challenge", purpose.encode(), rp_id.encode(), body])
+    return hmac.new(key, message, hashlib.sha256).digest()
+
+
+def sign_challenge(key: bytes, purpose: str, rp_id: str, nonce: bytes, expires: int) -> bytes:
+    """Build a signed challenge: version, nonce, expiry (Unix seconds), HMAC.
+
+    Parameters
+    ----------
+    key
+        The instance's challenge key.
+    purpose
+        What it is for.
+    rp_id
+        The relying-party id it is for.
+    nonce
+        32 random bytes.
+    expires
+        When it stops working, in Unix seconds.
+
+    Returns
+    -------
+    bytes
+        The challenge the browser signs over.
+    """
+    body = _CHALLENGE_VERSION + nonce + expires.to_bytes(8, "big")
+    return body + _mac(key, purpose, rp_id, body)
+
+
+def open_challenge(
+    key: bytes, purpose: str, rp_id: str, challenge: bytes
+) -> tuple[bytes, int] | None:
+    """Check a signed challenge, in constant time.
+
+    Parameters
+    ----------
+    key
+        The instance's challenge key.
+    purpose
+        The purpose it must have been signed for.
+    rp_id
+        The relying-party id it must have been signed for.
+    challenge
+        What came back.
+
+    Returns
+    -------
+    tuple of (bytes, int), or None
+        The nonce and the expiry, or `None` when it was not signed with this key for this
+        purpose and RP id.
+    """
+    if len(challenge) != _TOKEN_BYTES or challenge[:1] != _CHALLENGE_VERSION:
+        return None
+    body, mac = challenge[:-_MAC_BYTES], challenge[-_MAC_BYTES:]
+    if not hmac.compare_digest(mac, _mac(key, purpose, rp_id, body)):
+        return None
+    return body[1 : 1 + _NONCE_BYTES], int.from_bytes(body[1 + _NONCE_BYTES :], "big")
 
 
 def _cross_origin(client_data_json: bytes) -> bool:

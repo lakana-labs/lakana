@@ -20,7 +20,7 @@ from scripts.test_support.webauthn_test_helpers import SoftAuthenticator
 
 import lakana_server.ui
 from lakana_core.config import DatabaseConfig, SecretsConfig
-from lakana_server.api.platform.sign_in import client_bucket
+from lakana_server.api.platform.sign_in import client_bucket, network_bucket
 from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
 from lakana_server.deps import PASSKEY_FIRST_ROUTES
@@ -332,6 +332,29 @@ def test_the_options_limit_is_its_own_setting(
 def test_an_ipv6_client_is_limited_by_its_64(first: str, second: str, same: bool) -> None:
     """One /64 is one bucket: an attacker cannot rotate through its addresses."""
     assert (client_bucket(first) == client_bucket(second)) is same
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "same"),
+    [
+        ("2001:db8:1:2::1", "2001:db8:1:ff::1", True),
+        ("2001:db8:1:2::1", "2001:db8:2:2::1", False),
+        ("192.0.2.1", "192.0.2.200", True),
+        ("192.0.2.1", "192.0.3.1", False),
+        ("testclient", "testclient", True),
+    ],
+)
+def test_a_network_is_limited_by_its_48_or_24(first: str, second: str, same: bool) -> None:
+    """The coarser bucket: an IPv6 /48 or an IPv4 /24."""
+    assert (network_bucket(first) == network_bucket(second)) is same
+
+
+def test_the_options_route_is_also_limited_per_network(client: TestClient) -> None:
+    """Past the network's rate: 429, even with addresses to spare."""
+    assert UiConfig().passkey_options_per_network_per_minute == 240
+    client.app.state.passkey_options_network_limiter = AuthAuditLimiter(2)
+    codes = [client.post("/api/v1/sign-in/passkey/options").status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
 
 
 def test_no_log_record_carries_the_credential_or_the_challenge(

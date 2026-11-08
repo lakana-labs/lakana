@@ -199,6 +199,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.passkey_options_limiter = AuthAuditLimiter(
             resolved_settings.ui.passkey_options_per_ip_per_minute
         )
+        app.state.passkey_options_network_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_network_per_minute
+        )
         # One verifier per process: it holds the issuers' key cache.
         app.state.ci_oidc_verifier = IdTokenVerifier(resolved_settings.ci_oidc)
         app.state.sign_in_audit_limiter = SignInAuditLimiter(
