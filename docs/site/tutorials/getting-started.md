@@ -6,10 +6,10 @@ from those tables. You do not need
 Docker or a database server.
 
 Lakana is pre-beta: the API and the data layout may change between 0.x releases, so do not put
-production data in it yet. It has no web interface yet: everything in this tutorial is done in a
-terminal with the CLI, and the interface is planned before the public beta. A first preview of
-it, which shows no data yet, is off by default: set `LAKANA_UI__ENABLED` to `true` in the
-environment you start the instance from, then open the address it prints in a browser (see the
+production data in it yet. Everything in this tutorial is done in a terminal with the CLI;
+the web interface is planned before the public beta. A first preview of it, which signs you in
+but shows no data yet, is off by default: set `LAKANA_UI__ENABLED` to `true` in the environment
+you start the instance from, and the start opens it in your browser, signed in (see the
 [settings reference](../reference/settings.md)).
 
 You need Python 3.11 or newer (on macOS: Python 3.13 or newer) and git. With an older Python on macOS, `lakana server start --local` stops before it starts anything and says so. Once Lakana is installed, plan on ten minutes.
@@ -68,7 +68,12 @@ Lakana is running at http://localhost:8765 — profile 'local', environment 'dev
 
 The line above it says the web interface is off. With `LAKANA_UI__ENABLED=true` in front of the
 command, the instance instead opens `http://localhost:8765` in your browser, signed in as you
-(`--no-browser` leaves the browser alone).
+(`--no-browser` leaves the browser alone). There is no password to type: the start signs the
+browser in with your own profile. The first time, the interface offers to add a passkey (a
+fingerprint, a face, a PIN or a security key), which signs you in later without the terminal.
+**Not now** skips it, and the interface opens Home signed in; it offers again the next time you
+start. The menu under your name at the bottom of the sidebar signs you out. If you lose a passkey,
+see [Lost your passkey](../how-to/lost-your-passkey.md).
 
 To see a line for every request the server answers, start with the option `--log-requests`. To
 see more or fewer of the other lines, set `LAKANA_LOG__LEVEL` (for example to `DEBUG`) in front of

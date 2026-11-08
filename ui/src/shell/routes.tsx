@@ -39,19 +39,21 @@ const AREA_PAGES: AreaPages = {};
  * @param area - The area.
  * @param access - The areas the user may use.
  * @param pages - The screens loaded on demand.
+ * @param noAccessYet - Whether Home says that the person has no access yet.
  * @returns The element, or the on-demand loader of the area's screen.
  */
 function areaRoute(
   area: ShippedArea,
   access: AreaAccess,
   pages: AreaPages,
+  noAccessYet: boolean,
 ): Pick<RouteObject, "element" | "hydrateFallbackElement" | "lazy"> {
   if (!access.has(area.id)) {
     return { element: <NotAvailable area={area} /> };
   }
   const load = pages[area.id];
   if (load === undefined) {
-    return { element: <AreaPage area={area} /> };
+    return { element: <AreaPage area={area} noAccessYet={noAccessYet && area.id === "home"} /> };
   }
   return {
     // A deep link shows the shell with an empty working area until the chunk arrives (React
@@ -72,11 +74,16 @@ function areaRoute(
  *
  * @param access - The areas the user may use.
  * @param pages - The screens loaded on demand; the interface's own by default.
+ * @param noAccessYet - Whether Home says that the person has no access yet.
  * @returns The routes for `createBrowserRouter` or `createMemoryRouter`.
  */
-export function appRoutes(access: AreaAccess, pages: AreaPages = AREA_PAGES): RouteObject[] {
+export function appRoutes(
+  access: AreaAccess,
+  pages: AreaPages = AREA_PAGES,
+  noAccessYet = false,
+): RouteObject[] {
   const areas = SHIPPED_AREAS.map((area): RouteObject => {
-    const route = areaRoute(area, access, pages);
+    const route = areaRoute(area, access, pages, noAccessYet);
     return area.path === "/" ? { index: true, ...route } : { path: area.path.slice(1), ...route };
   });
   return [

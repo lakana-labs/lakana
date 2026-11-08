@@ -209,7 +209,8 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   refuses `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `window.fetch`,
   `globalThis.fetch` and `navigator.sendBeacon` everywhere else, and HTTP client packages
   (`axios`, `ky`, `ofetch`, `superagent`) everywhere. dependency-cruiser keeps `src/api/` a leaf:
-  it imports only itself and npm packages. (`fetch` is a global, not an import, so
+  it imports only itself and npm packages (its own tests may also use the helpers in
+  `src/test/`). (`fetch` is a global, not an import, so
   dependency-cruiser cannot see it; ESLint guards it.)
 - **No Node globals in browser code.** `globals.node` is on for the config files and scripts, so
   ESLint refuses `process` and `Buffer` inside `ui/src/` (`src/api/` included): Vite does not

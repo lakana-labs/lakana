@@ -1,5 +1,6 @@
 /**
- * The frame around every page: skip link, sidebar, the working area and the command palette.
+ * The frame around every page: skip link, sidebar, sign-in notices, the working area and the
+ * command palette.
  *
  * @packageDocumentation
  */
@@ -8,6 +9,7 @@ import { RouterProvider } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Outlet, useHref, useLocation, useNavigate } from "react-router";
 
+import { Notices } from "../sign-in/Notices";
 import { type AreaAccess, visibleAreas } from "./areas";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
@@ -85,6 +87,7 @@ export function AppShell({ access }: AppShellProps): JSX.Element {
           }}
         />
         <main className="shell-main" id="main" ref={main} tabIndex={-1}>
+          <Notices />
           <Outlet />
         </main>
         <CommandPalette areas={areas} isOpen={paletteOpen} onOpenChange={setPaletteOpen} />

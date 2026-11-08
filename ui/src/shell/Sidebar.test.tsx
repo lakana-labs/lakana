@@ -63,7 +63,7 @@ describe("Sidebar", () => {
       within(panel as HTMLElement).getByRole("button", { name: "Search" }),
     ).toBeInTheDocument();
     expect(
-      within(panel as HTMLElement).getByRole("button", { name: "Not signed in" }),
+      within(panel as HTMLElement).getByRole("button", { name: "Signed in as admin" }),
     ).toBeInTheDocument();
 
     await user.click(toggle);

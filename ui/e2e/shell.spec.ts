@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 
+import { signInAsAdmin, STUBBED } from "./session";
+
 const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const KEY = "lakana.preferences";
 
@@ -49,6 +51,7 @@ for (const theme of ["light", "dark"] as const) {
   for (const density of ["roomy", "compact"] as const) {
     test.describe(`${theme}, ${density}`, () => {
       test.beforeEach(async ({ page }) => {
+        await signInAsAdmin(page);
         await page.addInitScript(
           ([key, value]) => {
             if (window.localStorage.getItem(key ?? "") === null) {
@@ -65,7 +68,7 @@ for (const theme of ["light", "dark"] as const) {
           await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
           expect(await violations(page), path).toEqual([]);
         }
-        await page.getByRole("button", { name: "Not signed in" }).click();
+        await page.getByRole("button", { name: "Signed in as admin" }).click();
         await expect(page.getByRole("menu", { name: "Preferences" })).toBeVisible();
         expect(await violations(page), "user menu").toEqual([]);
         await page.keyboard.press("Escape");
@@ -84,7 +87,7 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       });
 
-      test("the shell makes no request to the API", async ({ page }) => {
+      test("the shell asks the API only for the stubbed session routes", async ({ page }) => {
         const requests: string[] = [];
         page.on("request", (request) => requests.push(request.url()));
 
@@ -95,7 +98,11 @@ for (const theme of ["light", "dark"] as const) {
         }
         await page.waitForLoadState("networkidle");
 
-        expect(requests.filter((url) => url.includes("/api/") || url.includes("/v1/"))).toEqual([]);
+        const api = requests
+          .filter((url) => url.includes("/api/") || url.includes("/v1/"))
+          .map((url) => new URL(url).pathname);
+        expect(api.length).toBeGreaterThan(0);
+        expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
       });
 
       test("no console error on any area", async ({ page }) => {
@@ -107,7 +114,7 @@ for (const theme of ["light", "dark"] as const) {
           await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
         }
         // The floating surfaces: React Aria inserts its own styles for them.
-        await page.getByRole("button", { name: "Not signed in" }).click();
+        await page.getByRole("button", { name: "Signed in as admin" }).click();
         await expect(page.getByRole("menu", { name: "Preferences" })).toBeVisible();
         await page.keyboard.press("Escape");
         await page.getByRole("button", { name: "Search" }).click();
@@ -143,7 +150,7 @@ for (const theme of ["light", "dark"] as const) {
         await page.goto("/");
         await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
         const other = theme === "dark" ? "Light" : "Dark";
-        await page.getByRole("button", { name: "Not signed in" }).click();
+        await page.getByRole("button", { name: "Signed in as admin" }).click();
         // The check mark is not part of the name of the selected choice.
         const chosen = density === "roomy" ? "Roomy" : "Compact";
         await expect(page.getByRole("menuitemradio", { name: chosen, exact: true })).toBeChecked();
@@ -182,6 +189,7 @@ for (const theme of ["light", "dark"] as const) {
     test.use({ viewport: { width: 320, height: 640 } });
 
     test.beforeEach(async ({ page }) => {
+      await signInAsAdmin(page);
       await page.addInitScript(
         ([key, value]) => {
           window.localStorage.setItem(key ?? "", value ?? "");
@@ -232,7 +240,7 @@ for (const theme of ["light", "dark"] as const) {
         "Connections",
         "Access",
         "Settings",
-        "Not signed in",
+        "admin",
         "Copy command",
       ]);
       await expect(page.getByRole("link", { name: "Home" })).toHaveAttribute(
@@ -251,7 +259,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
 
       await page.getByRole("button", { name: "Menu" }).click();
-      await page.getByRole("button", { name: "Not signed in" }).click();
+      await page.getByRole("button", { name: "Signed in as admin" }).click();
       const menu = page.getByRole("menu", { name: "Preferences" });
       await expect(menu).toBeVisible();
       await expect(menu).toBeInViewport({ ratio: 1 });
@@ -289,7 +297,7 @@ async function transitionsDuringSwitch(page: Page): Promise<string[]> {
       }
     }).observe(document.documentElement, { attributeFilter: ["data-theme"] });
   });
-  await page.getByRole("button", { name: "Not signed in" }).click();
+  await page.getByRole("button", { name: "Signed in as admin" }).click();
   await page.getByRole("menuitemradio", { name: "Light", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   return page.evaluate(() => (window as unknown as { seenTransitions: string[] }).seenTransitions);
@@ -297,6 +305,7 @@ async function transitionsDuringSwitch(page: Page): Promise<string[]> {
 
 test.describe("the theme switch", () => {
   test.beforeEach(async ({ page }) => {
+    await signInAsAdmin(page);
     await page.addInitScript(
       ([key, value]) => {
         window.localStorage.setItem(key ?? "", value ?? "");
@@ -339,6 +348,7 @@ for (const width of [1280, 600]) {
   test(`the palette opens centred over the whole window, in its upper third, at ${String(width)} px`, async ({
     page,
   }) => {
+    await signInAsAdmin(page);
     await page.setViewportSize({ width, height: 800 });
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
@@ -360,6 +370,7 @@ test("the narrow top bar keeps its height and the content starts right below it"
   page,
 }) => {
   const heights: number[] = [];
+  await signInAsAdmin(page);
   for (const height of [500, 900, 1400]) {
     await page.setViewportSize({ width: 600, height });
     await page.goto("/");

@@ -225,7 +225,8 @@
 "GET /api/v1/ci-trust-rules": { class: ui, part: 7 }
 "GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
 "GET /api/v1/column-masks": { class: ui, part: 7 }
-"GET /api/v1/environments": { class: ui, part: 8 }
+"GET /api/v1/environments":
+  { class: ui, part: 8, note: "read from part 1 on: Home says when a person has no access yet" }
 "GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}": { class: ui, part: 6 }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}/tests/{test_id}":
@@ -288,7 +289,8 @@
 "GET /api/v1/principals": { class: ui, part: 7 }
 "GET /api/v1/principals/{name}": { class: ui, part: 7 }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
-"GET /api/v1/principals/{name}/permissions": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}/permissions":
+  { class: ui, part: 7, note: "read from part 1 on: Access and Settings for administrators only" }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "GET /api/v1/recovery-links": { class: ui, part: 1 }
@@ -296,7 +298,8 @@
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
 "GET /api/v1/row-filters": { class: ui, part: 7 }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
-"GET /api/v1/settings/sign-in": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"GET /api/v1/settings/sign-in":
+  { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }
 "GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/tasks/self/connections/{name}":
@@ -312,7 +315,8 @@
 "PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8 }
 "PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8 }
-"PATCH /api/v1/settings/sign-in": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"PATCH /api/v1/settings/sign-in":
+  { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "PATCH /api/v1/whoami": { class: ui, part: 1 }
 "POST /api/v1/access/apply":
   {

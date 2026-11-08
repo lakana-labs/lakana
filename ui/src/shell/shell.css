@@ -155,13 +155,12 @@
   width: 100%;
 }
 
-.user-menu-preview {
+.user-menu-error {
   margin: 0;
   padding: 0 var(--space-1);
   font-size: var(--type-label-size);
   line-height: var(--type-label-line);
-  font-weight: 400;
-  color: var(--color-text-faint);
+  color: var(--color-bad);
 }
 
 /* Floating surfaces: the user menu and the palette. In dark, lighter instead of shadowed. */

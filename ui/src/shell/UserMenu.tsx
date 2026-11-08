@@ -1,9 +1,9 @@
 /**
- * The menu under the user's name: theme, density and language.
+ * The menu under the signed-in person's name: theme, density, language, and signing out.
  *
  * @packageDocumentation
  */
-import { type JSX, useId } from "react";
+import { type JSX, useId, useState } from "react";
 import {
   Button,
   Header,
@@ -17,6 +17,8 @@ import { useTranslation } from "react-i18next";
 
 import { usePreferences } from "../preferences/PreferencesProvider";
 import type { Density, Language, Preferences, Theme } from "../preferences/preferences";
+import { problemText } from "../sign-in/messages";
+import { useSession } from "../sign-in/SessionProvider";
 
 const THEMES: readonly Theme[] = ["system", "light", "dark"];
 const DENSITIES: readonly Density[] = ["roomy", "compact"];
@@ -90,18 +92,30 @@ function ChoiceSection<K extends keyof Preferences>({
 }
 
 /**
- * Renders the user menu at the bottom of the sidebar. Part 1a has no sign-in, so it says so,
- * with a quiet preview line under it.
+ * Renders the user menu at the bottom of the sidebar. Its button always shows who is signed in;
+ * the menu holds the personal preferences and signing out, here or on every device.
  *
- * @returns The menu and the preview line.
+ * @returns The menu, and what went wrong when signing out did not work.
  */
 export function UserMenu(): JSX.Element {
   const { t } = useTranslation();
+  const session = useSession();
   const title = useId();
+  const [error, setError] = useState<string | null>(null);
+  const name = session.session?.display_name ?? session.session?.name;
+  const end = (ending: () => Promise<void>): void => {
+    setError(null);
+    ending().catch((failure: unknown) => {
+      setError(t("shell.signOutFailed", { detail: problemText(t, failure) }));
+    });
+  };
   return (
     <div className="user-menu">
       <MenuTrigger>
-        <Button className="user-menu-button">{t("shell.notSignedIn")}</Button>
+        {/* The name is what shows; the accessible name says what it is (it contains the name). */}
+        <Button className="user-menu-button" aria-label={t("shell.signedInAs", { name })}>
+          {name}
+        </Button>
         <Popover className="float" placement="top start">
           <p className="menu-title" id={title}>
             {t("shell.preferences")}
@@ -126,10 +140,37 @@ export function UserMenu(): JSX.Element {
               options={LANGUAGES}
               names="shell.languages"
             />
+            <MenuSection className="menu-section">
+              <Header className="menu-header">{t("shell.account")}</Header>
+              <MenuItem
+                className="menu-item"
+                id="sign-out"
+                onAction={() => {
+                  end(session.signOut);
+                }}
+              >
+                <span className="menu-check" aria-hidden="true" />
+                {t("shell.signOut")}
+              </MenuItem>
+              <MenuItem
+                className="menu-item"
+                id="sign-out-everywhere"
+                onAction={() => {
+                  end(session.signOutEverywhere);
+                }}
+              >
+                <span className="menu-check" aria-hidden="true" />
+                {t("shell.signOutEverywhere")}
+              </MenuItem>
+            </MenuSection>
           </Menu>
         </Popover>
       </MenuTrigger>
-      <p className="user-menu-preview">{t("shell.preview")}</p>
+      {error !== null && (
+        <p className="user-menu-error" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

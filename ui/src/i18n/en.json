@@ -57,8 +57,6 @@
       "mac": "⌘ K",
       "other": "Ctrl K"
     },
-    "notSignedIn": "Not signed in",
-    "preview": "Preview: sign-in comes later, and nothing here reads your data yet.",
     "preferences": "Preferences",
     "theme": "Theme",
     "themes": {
@@ -75,7 +73,12 @@
     "languages": {
       "en": "English"
     },
-    "menu": "Menu"
+    "menu": "Menu",
+    "signedInAs": "Signed in as {{name}}",
+    "account": "Account",
+    "signOut": "Sign out",
+    "signOutEverywhere": "Sign out everywhere",
+    "signOutFailed": "Signing out did not work: {{detail}}"
   },
   "palette": {
     "placeholder": "Go to a place or run a command",
@@ -94,5 +97,104 @@
     "title": "You cannot use {{area}}",
     "body": "Ask an administrator if you need it.",
     "action": "Go to Home"
+  },
+  "home": {
+    "noAccessYet": "You have no access yet; ask an administrator."
+  },
+  "session": {
+    "loading": "Loading…",
+    "ended": {
+      "idle": "Your session ended after a time without activity. Sign in again.",
+      "lifetime": "Your session reached its maximum length and ended. Sign in again.",
+      "sign_out": "You signed out.",
+      "sign_out_everywhere": "You signed out on every device.",
+      "ended_by_admin": "An administrator ended your session. Sign in again.",
+      "replaced": "A newer sign-in in this browser replaced this session. Sign in again.",
+      "deactivated": "Your account is deactivated, so your session ended. Ask an administrator to reactivate it, then sign in again.",
+      "token_revoked": "The token this session was created with was revoked or expired, so the session ended. Sign in again.",
+      "recovery": "Your account was recovered with a recovery link, which ended every earlier session. Sign in again with your new passkey.",
+      "passkey_copied": "A copy of one of your passkeys was detected; it is disabled and every session of your account was ended. Sign in with another passkey, or ask an administrator for a recovery link.",
+      "passkey_removed": "An administrator removed one of your passkeys, which ended your sessions. Sign in again with another passkey, or ask an administrator for a recovery link.",
+      "reactivated": "Your account was reactivated, which ended every earlier session and removed its passkeys. Ask the server operator for a new sign-in link."
+    }
+  },
+  "errors": {
+    "unreachable": "Lakana could not be reached. Check that the server is running and your network works, then try again.",
+    "unexpected": "Something went wrong in the interface. Reload the page and try again."
+  },
+  "passkey": {
+    "cancelled": "The passkey request was cancelled or took too long. Try again when you are ready.",
+    "unsupported": "This browser cannot use passkeys. Use a current version of Chrome, Edge, Firefox or Safari.",
+    "duplicate": "This device already holds a passkey for this account. Use another device or security key, or sign in with the passkey you have.",
+    "wrongAddress": "Passkeys work only at the address Lakana was set up with. Open Lakana at that address and try again.",
+    "failed": "The browser could not use the passkey ({{name}}). Try again, or use another device."
+  },
+  "signIn": {
+    "title": "Sign in to Lakana",
+    "intro": "Sign in with your passkey: your fingerprint, face, PIN or security key.",
+    "passkey": "Sign in with a passkey",
+    "waiting": "Waiting for your passkey…",
+    "refused": "This passkey did not sign you in: it may belong to another Lakana server, or it was removed. Try another passkey, or ask an administrator for a recovery link.",
+    "noPasskey": "No passkey on this device? Ask an administrator for a recovery link."
+  },
+  "link": {
+    "checkingTitle": "Signing in",
+    "checking": "Checking your sign-in link…",
+    "signInAs": "Sign in as {{name}}",
+    "joinAs": "Join Lakana as {{name}}",
+    "signInIntro": "This link signs you in once. Continue only if you asked for it.",
+    "joinIntro": "This invitation creates your account. Continue only if you expected it.",
+    "confirm": "Continue",
+    "signingIn": "Signing you in…",
+    "alreadySignedIn": "This browser is already signed in, so the local sign-in link was not used. Keep working as you are, or sign out first and open the link again.",
+    "toSignIn": "Go to sign-in",
+    "toHome": "Go to Home",
+    "used": {
+      "title": "This link was already used",
+      "body": "Each sign-in link works once. Sign in with your passkey, or ask whoever sent the link for a new one."
+    },
+    "expired": {
+      "title": "This link has expired",
+      "body": "Ask whoever sent it for a new link, or sign in with your passkey."
+    },
+    "withdrawn": {
+      "title": "This link was withdrawn",
+      "body": "Ask whoever sent it for a new link, or sign in with your passkey."
+    },
+    "unknown": {
+      "title": "This link does not work",
+      "body": "Check that you opened all of it, including everything after #, or ask whoever sent it for a new link."
+    }
+  },
+  "addPasskey": {
+    "title": "Add a passkey",
+    "who": "Signed in as {{name}}.",
+    "required": "You signed in with a link that works once. Add a passkey now: from then on it signs you in with your fingerprint, face, PIN or security key.",
+    "offer": "Sign in faster next time: add a passkey, and this device signs you in with your fingerprint, face, PIN or security key. You can also add one later.",
+    "add": "Add a passkey",
+    "notNow": "Not now",
+    "signOut": "Sign out",
+    "waiting": "Waiting for your passkey…"
+  },
+  "notices": {
+    "label": "Sign-in notices",
+    "dismiss": "Dismiss",
+    "dismissFailed": "The notice could not be dismissed: {{detail}}",
+    "recovery_used": {
+      "self": "A recovery link was used on your account on {{date}}. If this was not you, tell an administrator at once.",
+      "other": "A recovery link was used on the account of {{subject}} on {{date}}."
+    },
+    "passkey_disabled": {
+      "self": "One of your passkeys was disabled on {{date}} because a copy of it was detected. Add a new passkey, and tell an administrator if you did not copy it.",
+      "other": "A passkey of {{subject}} was disabled on {{date}} because a copy of it was detected."
+    },
+    "passkey_added": {
+      "self": "A passkey was added to your account on {{date}}. If this was not you, tell an administrator at once.",
+      "other": "A passkey was added to the account of {{subject}} on {{date}}."
+    },
+    "other": {
+      "self": "Something changed about signing in to your account on {{date}}.",
+      "other": "Something changed about signing in to the account of {{subject}} on {{date}}."
+    }
   }
 }

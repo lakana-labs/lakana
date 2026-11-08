@@ -97,8 +97,20 @@ function isShipped(area: Area): area is ShippedArea {
 /** Every shipped area, in sidebar order. */
 export const SHIPPED_AREAS: readonly ShippedArea[] = AREAS.filter(isShipped);
 
-/** Access to every shipped area: what the shell uses until sign-in exists. */
+/** Access to every shipped area: an administrator's. */
 export const ALL_SHIPPED: AreaAccess = new Set(SHIPPED_AREAS.map((area) => area.id));
+
+/**
+ * The areas a person may use: Access and Settings are for administrators only.
+ *
+ * @param admin - Whether the person holds the ADMIN role on the instance.
+ * @returns The areas.
+ */
+export function areasFor(admin: boolean): AreaAccess {
+  return admin
+    ? ALL_SHIPPED
+    : new Set(SHIPPED_AREAS.filter((area) => area.group !== "admin").map((area) => area.id));
+}
 
 /**
  * The areas a user sees: shipped and within their access. An area they cannot use is hidden,
