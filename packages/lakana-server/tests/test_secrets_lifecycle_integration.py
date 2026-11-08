@@ -28,7 +28,9 @@ from lakana_core.db import create_engine
 from lakana_core.models import Base, Secret
 from lakana_core.secrets.crypto import decrypt_secret_row
 from lakana_core.secrets.keys import EnvKeyProvider
+from lakana_server.api.platform.sessions import NO_SESSION
 from lakana_server.app import create_app
+from lakana_server.browser_session import INTERFACE_OFF
 from lakana_server.settings import Settings
 from tests.conftest import AUTH_HEADER
 
@@ -144,11 +146,17 @@ def test_secret_values_are_absent_from_the_secrets_routes_audit_log_row_and_log(
 
             # Every GET route that needs no path parameter, the audit log among them.
             # A list route that needs a filter answers 422 to a bare GET (no body worth searching);
-            # anything else must answer 200, and enough routes must have.
+            # a sign-in route answers 409 for a reason that has nothing to do with secrets (the
+            # interface is off, or a token has no browser session), checked by its text, not its
+            # path; anything else must answer 200, and enough routes must have. Every answer is
+            # searched for the secret values all the same.
+            not_applicable = {INTERFACE_OFF, NO_SESSION}
             for path, operations in app.openapi()["paths"].items():
                 if "get" in operations and "{" not in path and path.startswith("/api/"):
                     answer = client.get(path, headers=AUTH_HEADER)
-                    seen(answer, {200, 422})
+                    if answer.status_code == 409:
+                        assert answer.json()["detail"] in not_applicable, answer.text
+                    seen(answer, {200, 409, 422})
                     if answer.status_code == 200:
                         swept.append(path)
             audit = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params={"limit": 500})
