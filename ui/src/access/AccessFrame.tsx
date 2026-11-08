@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import type { JSX, ReactNode } from "react";
+import type { JSX, ReactNode, Ref } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Page } from "../shell/Page";
@@ -15,6 +15,8 @@ export interface AccessFrameProps {
   readonly action?: ReactNode;
   /** The place's content. */
   readonly children: ReactNode;
+  /** A ref to the heading, to move focus there after a row went away. */
+  readonly headingRef?: Ref<HTMLHeadingElement>;
 }
 
 /**
@@ -23,12 +25,13 @@ export interface AccessFrameProps {
  * @param props - The action and the content.
  * @param props.action - The place's one primary action.
  * @param props.children - The place's content.
+ * @param props.headingRef - A ref to the heading.
  * @returns The frame.
  */
-export function AccessFrame({ action, children }: AccessFrameProps): JSX.Element {
+export function AccessFrame({ action, children, headingRef }: AccessFrameProps): JSX.Element {
   const { t } = useTranslation();
   return (
-    <Page title={t("areas.access.name")} action={action}>
+    <Page title={t("areas.access.name")} action={action} headingRef={headingRef}>
       <SectionTabs
         label={t("access.tabs")}
         tabs={[

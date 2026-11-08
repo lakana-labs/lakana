@@ -291,7 +291,8 @@
     part: 7,
     note: "Access → People lists and finds people from 1b; the full screen in 7",
   }
-"GET /api/v1/principals/{name}": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}":
+  { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions":
   { class: ui, part: 7, note: "1b asks it whether a person is an administrator (recovery links)" }

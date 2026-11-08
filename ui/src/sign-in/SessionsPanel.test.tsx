@@ -61,9 +61,30 @@ describe("SessionsPanel", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "End all sessions" }));
+    const dialog = screen.getByRole("dialog", { name: "End all sessions of kim?" });
+    expect(dialog).toHaveTextContent("kim is signed out in every browser");
+    expect(server.sent.some((request) => request.method === "DELETE")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "End the sessions" }));
 
     expect(await screen.findByText("No open session.")).toBeInTheDocument();
     expect(server.sent.some((request) => request.method === "DELETE")).toBe(true);
+    expect(screen.getByRole("heading", { level: 2, name: "Sessions" })).toHaveFocus();
+  });
+
+  it("ends nothing when the administrator cancels", async () => {
+    const { user, server } = renderShell("/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim/permissions": { status: 200, body: { permissions: [] } },
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [THERE] },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "End all sessions" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(server.sent.some((request) => request.method === "DELETE")).toBe(false);
   });
 
   it("names the server's reason when ending sessions fails", async () => {

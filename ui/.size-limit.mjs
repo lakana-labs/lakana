@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 
 const ASSETS = "../packages/lakana-server/src/lakana_server/ui_dist/assets";
 const HERE = dirname(fileURLToPath(import.meta.url));
-// Measured 2.5 kB (the Access screen, 2026-11-09) + 10 %.
-const ON_DEMAND_LIMIT = "2.8 kB";
+// Measured 2.69 kB (the Access screen, 2026-11-09) + 10 %.
+const ON_DEMAND_LIMIT = "2.96 kB";
 
 /**
  * The JavaScript files a first visit loads: those index.html names.

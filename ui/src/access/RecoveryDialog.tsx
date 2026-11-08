@@ -47,7 +47,9 @@ export function RecoveryDialog({ name: known, onClose }: RecoveryDialogProps): J
   const [stage, setStage] = useState<Stage>({ kind: "ask" });
   const done = (
     <div className="step-actions">
-      <Button className="button button-primary" onPress={onClose}>
+      {/* The Continue button that had focus is gone; focus lands on the way out. */}
+      {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+      <Button className="button button-primary" onPress={onClose} autoFocus>
         {t("dialog.done")}
       </Button>
     </div>

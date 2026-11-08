@@ -14,10 +14,12 @@ setStepUp(stepUp);
 export {
   createInvite,
   createRecoveryLink,
+  getPrincipal,
   isAdministrator,
   listInvites,
   listPeople,
   listRecoveryLinks,
+  PEOPLE_LIMIT,
   withdrawInvite,
   withdrawRecoveryLink,
 } from "./access";

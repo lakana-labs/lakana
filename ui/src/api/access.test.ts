@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createInvite,
   createRecoveryLink,
+  getPrincipal,
   isAdministrator,
   listInvites,
   listPeople,
@@ -83,6 +84,14 @@ describe("access", () => {
       "GET /api/v1/recovery-links",
       "DELETE /api/v1/recovery-links/r%201",
     ]);
+  });
+
+  it("reads one principal", async () => {
+    const person = { name: "a b", type: "SERVICE", is_active: true };
+    const server = fakeServer({ "GET /api/v1/principals/a b": { status: 200, body: person } });
+
+    expect(await getPrincipal("a b")).toEqual(person);
+    expect(server.sent[0]?.path).toBe("/api/v1/principals/a%20b");
   });
 
   it("lists people, filtered by the words searched for", async () => {

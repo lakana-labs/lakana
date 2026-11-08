@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PREFERENCES_KEY } from "../preferences/preferences";
@@ -59,7 +59,10 @@ describe("UserMenu", () => {
 
     await user.click(screen.getByRole("menuitem", { name: "Passkeys and sessions" }));
 
-    expect(router.state.location.pathname).toBe("/account");
+    // The page is loaded on demand: the address changes once it arrived.
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/account");
+    });
   });
 
   it("switches the theme and remembers it", async () => {

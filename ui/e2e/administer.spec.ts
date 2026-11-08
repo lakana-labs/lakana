@@ -239,6 +239,14 @@ test.describe("administering sign-in", () => {
       Buffer.from("admin-passkey").toString("base64"),
     );
 
+    const remove = page.getByRole("button", { name: "Remove Passkey" });
+    await remove.click();
+    await expect(page.getByRole("dialog", { name: "Remove Passkey?" })).toBeVisible();
+    expect(await violations(page), "the confirmation").toEqual([]);
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(remove).toBeFocused();
+    expect(server.sent.some((request) => request.method() === "DELETE")).toBe(false);
+
     await page.goto(`${ORIGIN}/settings`);
     const idle = page.getByRole("textbox", { name: "Idle timeout in minutes" });
     await expect(idle).toHaveValue("720");

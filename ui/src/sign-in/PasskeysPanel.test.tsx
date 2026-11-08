@@ -89,9 +89,9 @@ describe("PasskeysPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/cancelled or took too long/);
   });
 
-  it("removes a passkey", async () => {
+  it("removes one's passkey only after a confirmation, and focuses the panel after", async () => {
     let mine: unknown[] = [LAPTOP, KEY];
-    const { user } = renderShell("/account", {
+    const { user, server } = renderShell("/account", {
       routes: {
         "GET /api/v1/principals/admin/passkeys": () => ({ status: 200, body: mine }),
         "GET /api/v1/principals/admin/sessions": { status: 200, body: [] },
@@ -103,9 +103,33 @@ describe("PasskeysPanel", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Remove Laptop" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove Laptop?" });
+    expect(dialog).toHaveTextContent("It no longer signs you in.");
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    await user.click(within(dialog).getByRole("button", { name: "Remove the passkey" }));
 
     expect(await screen.findByRole("button", { name: "Remove Passkey" })).toBeInTheDocument();
     expect(screen.queryByText("Laptop")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Passkeys" })).toHaveFocus();
+    expect(server.sent.filter((request) => request.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("sends nothing when the removal is cancelled, and gives focus back", async () => {
+    const { user, server } = renderShell("/account", {
+      routes: {
+        "GET /api/v1/principals/admin/passkeys": { status: 200, body: [LAPTOP] },
+        "GET /api/v1/principals/admin/sessions": { status: 200, body: [] },
+      },
+    });
+
+    const remove = await screen.findByRole("button", { name: "Remove Laptop" });
+    await user.click(remove);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(remove).toHaveFocus();
+    expect(server.sent.some((request) => request.method === "DELETE")).toBe(false);
   });
 
   it("shows the server's message when one's last passkey cannot be removed", async () => {
@@ -124,11 +148,42 @@ describe("PasskeysPanel", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Remove Laptop" }));
+    await user.click(screen.getByRole("button", { name: "Remove the passkey" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This is your last working passkey. Add another one first.",
     );
-    expect(screen.getByText("Laptop")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Remove Laptop?" })).toBeVisible();
+  });
+
+  it("warns an administrator what removing another person's passkey does", async () => {
+    let theirs: unknown[] = [LAPTOP];
+    const { user, server } = renderShell("/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": {
+          status: 200,
+          body: { name: "kim", type: "USER", is_active: true },
+        },
+        "GET /api/v1/principals/kim/permissions": { status: 200, body: { permissions: [] } },
+        "GET /api/v1/principals/kim/passkeys": () => ({ status: 200, body: theirs }),
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "DELETE /api/v1/principals/kim/passkeys/p-1": () => {
+          theirs = [];
+          return { status: 204 };
+        },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Remove Laptop" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove Laptop from kim?" });
+    expect(dialog).toHaveTextContent("kim is signed out everywhere");
+    expect(dialog).toHaveTextContent("only the server operator can let them back in");
+    await user.click(within(dialog).getByRole("button", { name: "Remove the passkey" }));
+
+    expect(await screen.findByText("No passkey.")).toBeInTheDocument();
+    expect(server.sent.find((request) => request.method === "DELETE")?.path).toBe(
+      "/api/v1/principals/kim/passkeys/p-1",
+    );
   });
 
   it("names the reason when the passkeys cannot be read", async () => {

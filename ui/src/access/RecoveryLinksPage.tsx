@@ -12,6 +12,7 @@ import { Link } from "react-router";
 import { listRecoveryLinks, withdrawRecoveryLink } from "../api";
 import { ListHead } from "../shell/ListHead";
 import { Loaded } from "../shell/Loaded";
+import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
@@ -29,9 +30,11 @@ export function RecoveryLinksPage(): JSX.Element {
   const when = useWhen();
   const links = useResource(listRecoveryLinks);
   const withdraw = useAttempt();
+  const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(links.data);
   const [issuing, setIssuing] = useState(false);
   return (
     <AccessFrame
+      headingRef={headingRef}
       action={
         <Button
           className="button button-primary"
@@ -71,6 +74,7 @@ export function RecoveryLinksPage(): JSX.Element {
                         onPress={() => {
                           withdraw.run(async () => {
                             await withdrawRecoveryLink(link.id);
+                            armFocus();
                             links.reload();
                           });
                         }}

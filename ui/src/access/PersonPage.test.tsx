@@ -156,4 +156,21 @@ describe("PersonPage", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("offers no recovery link for a service account, and says why", async () => {
+    const { server } = renderShell("/access/people/loader", {
+      routes: {
+        "GET /api/v1/principals/loader": {
+          status: 200,
+          body: { name: "loader", type: "SERVICE", is_active: true },
+        },
+        "GET /api/v1/principals/loader/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/loader/sessions": { status: 200, body: [] },
+      },
+    });
+
+    expect(await screen.findByText(/signs in with its API token/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Issue a recovery link" })).not.toBeInTheDocument();
+    expect(server.sent.some((request) => request.path.endsWith("/permissions"))).toBe(false);
+  });
 });

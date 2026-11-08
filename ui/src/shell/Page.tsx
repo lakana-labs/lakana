@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, type ReactNode, useEffect } from "react";
+import { type JSX, type ReactNode, type Ref, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 /** Properties of {@link Page}. */
@@ -14,6 +14,8 @@ export interface PageProps {
   readonly children: ReactNode;
   /** The page's one primary action, shown top right beside the heading; none by default. */
   readonly action?: ReactNode;
+  /** A ref to the heading, for a page that moves focus there after a change; none by default. */
+  readonly headingRef?: Ref<HTMLHeadingElement> | undefined;
 }
 
 /**
@@ -24,9 +26,10 @@ export interface PageProps {
  * @param props.title - The page's name.
  * @param props.children - The content under the heading.
  * @param props.action - The page's one primary action.
+ * @param props.headingRef - A ref to the heading.
  * @returns The page.
  */
-export function Page({ title, children, action }: PageProps): JSX.Element {
+export function Page({ title, children, action, headingRef }: PageProps): JSX.Element {
   const { t } = useTranslation();
   useEffect(() => {
     document.title = t("shell.documentTitle", { page: title });
@@ -34,7 +37,7 @@ export function Page({ title, children, action }: PageProps): JSX.Element {
   return (
     <div className="page">
       <div className="page-head">
-        <h1 className="page-title" tabIndex={-1}>
+        <h1 className="page-title" tabIndex={-1} ref={headingRef}>
           {title}
         </h1>
         {action}

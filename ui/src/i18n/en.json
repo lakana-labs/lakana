@@ -226,7 +226,9 @@
       "none": "Nobody matches.",
       "person": "Person",
       "service": "Service account",
-      "deactivated": "Deactivated"
+      "deactivated": "Deactivated",
+      "capped": "Showing the first {{count}}. Type part of a name to find someone who is not listed.",
+      "serviceNote": "{{name}} is a service account: it signs in with its API token, not a passkey, so it needs no recovery link. Issue it a new token instead."
     },
     "invites": {
       "tab": "Invites",
@@ -275,7 +277,12 @@
     "disabled": "Disabled: a copy of it was detected",
     "elsewhere": "Not usable at this address: it was added while Lakana had another address",
     "remove": "Remove",
-    "removeOf": "Remove {{name}}"
+    "removeOf": "Remove {{name}}",
+    "confirmOwn": "Remove {{name}}?",
+    "confirmOther": "Remove {{name}} from {{person}}?",
+    "confirmRemove": "Remove the passkey",
+    "ownEffect": "It no longer signs you in. Your other passkeys keep working; Lakana does not remove your last working one.",
+    "otherEffect": "{{person}} is signed out everywhere and needs another passkey to sign in. If it was their only one, they need a recovery link, and for an administrator only the server operator can let them back in."
   },
   "sessions": {
     "title": "Sessions",
@@ -284,13 +291,16 @@
     "unknownBrowser": "Unknown browser",
     "times": "Started {{started}} · last active {{seen}}",
     "current": "This browser",
-    "endAll": "End all sessions"
+    "endAll": "End all sessions",
+    "confirm": "End all sessions of {{name}}?",
+    "confirmEnd": "End the sessions",
+    "effect": "{{name}} is signed out in every browser and signs in again with a passkey."
   },
   "settings": {
     "tabs": "Settings sections",
     "signIn": {
       "tab": "Sign-in",
-      "intro": "How long a browser session lasts. API tokens are not affected.",
+      "intro": "How long a browser session lasts. API tokens are not affected. Saving asks for a passkey touch when yours is older than 15 minutes.",
       "idle": "Idle timeout in minutes",
       "idleHelp": "A session ends after this long without anything the person did. Between {{min}} and {{max}} minutes ({{minText}} to {{maxText}}).",
       "absolute": "Longest session in minutes",

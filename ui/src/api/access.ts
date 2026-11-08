@@ -78,7 +78,7 @@ interface PermissionsOut {
 }
 
 /** How many people the list shows at most. */
-const PEOPLE_LIMIT = 200;
+export const PEOPLE_LIMIT = 200;
 
 /**
  * The path of a principal's route.
@@ -164,6 +164,16 @@ export async function listPeople(words: string): Promise<readonly PrincipalOut[]
     query.set("q", words);
   }
   return api.request<readonly PrincipalOut[]>("GET", `/api/v1/principals?${query.toString()}`);
+}
+
+/**
+ * Reads one principal.
+ *
+ * @param name - The principal name.
+ * @returns The principal, with its type.
+ */
+export async function getPrincipal(name: string): Promise<PrincipalOut> {
+  return api.request<PrincipalOut>("GET", principalPath(name));
 }
 
 /**

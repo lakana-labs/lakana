@@ -110,6 +110,7 @@ describe("RecoveryLinksPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "ada is an administrator" });
     expect(within(dialog).getByText("lakana recovery create ada")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Done" })).toHaveFocus();
     expect(server.sent.some((request) => request.method === "POST")).toBe(false);
     await user.click(within(dialog).getByRole("button", { name: "Done" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -151,5 +152,6 @@ describe("RecoveryLinksPage", () => {
     );
 
     expect(await screen.findByText(/No recovery link is open/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Access" })).toHaveFocus();
   });
 });

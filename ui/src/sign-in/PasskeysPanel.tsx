@@ -3,13 +3,15 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useId } from "react";
+import { type JSX, useCallback, useId, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { addPasskey, listPasskeys, type PasskeyOut, removePasskey } from "../api";
 import { ListHead } from "../shell/ListHead";
+import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { Loaded } from "../shell/Loaded";
+import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "./Attempt";
@@ -23,8 +25,9 @@ export interface PasskeysPanelProps {
 }
 
 /**
- * Renders the panel. Removing a passkey asks for a passkey touch when the server needs one; the
- * server refuses to remove one's last working passkey and says what to do instead.
+ * Renders the panel. Removing a passkey first asks for a confirmation naming what it does, then
+ * for a passkey touch when the server needs one; the server refuses to remove one's last working
+ * passkey and says what to do instead. Afterwards focus moves to the panel's heading.
  *
  * @param props - Whose passkeys, and whether they are one's own.
  * @param props.name - The person's principal name.
@@ -38,6 +41,8 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
   const load = useCallback(() => listPasskeys(name), [name]);
   const passkeys = useResource(load);
   const attempt = useAttempt();
+  const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(passkeys.data);
+  const [removing, setRemoving] = useState<{ id: string; label: string } | null>(null);
 
   const details = (passkey: PasskeyOut): string =>
     [
@@ -53,7 +58,9 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
   return (
     <section className="panel" aria-labelledby={heading}>
       <div className="page-head">
-        <h2 id={heading}>{t("passkeys.title")}</h2>
+        <h2 id={heading} ref={headingRef} tabIndex={-1}>
+          {t("passkeys.title")}
+        </h2>
         {own && (
           <Button
             className="button button-primary"
@@ -89,12 +96,8 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
                         <Button
                           className="button"
                           aria-label={t("passkeys.removeOf", { name: label })}
-                          isDisabled={attempt.busy}
                           onPress={() => {
-                            attempt.run(async () => {
-                              await removePasskey(name, passkey.id);
-                              passkeys.reload();
-                            });
+                            setRemoving({ id: passkey.id, label });
                           }}
                         >
                           {t("passkeys.remove")}
@@ -109,6 +112,27 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
         }
       </Loaded>
       <AttemptStatus attempt={attempt} waiting={t("common.working")} />
+      {removing !== null && (
+        <ConfirmDialog
+          title={
+            own
+              ? t("passkeys.confirmOwn", { name: removing.label })
+              : t("passkeys.confirmOther", { name: removing.label, person: name })
+          }
+          confirmLabel={t("passkeys.confirmRemove")}
+          onConfirm={() => removePasskey(name, removing.id)}
+          onCancel={() => {
+            setRemoving(null);
+          }}
+          onDone={() => {
+            setRemoving(null);
+            armFocus();
+            passkeys.reload();
+          }}
+        >
+          <p>{own ? t("passkeys.ownEffect") : t("passkeys.otherEffect", { person: name })}</p>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }

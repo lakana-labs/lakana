@@ -6,7 +6,6 @@
 import type { ComponentType } from "react";
 import type { RouteObject } from "react-router";
 
-import { AccountScreen } from "../sign-in/AccountScreen";
 import { AppShell } from "./AppShell";
 import { type AreaAccess, type AreaId, SHIPPED_AREAS, type ShippedArea } from "./areas";
 import { AreaPage } from "./AreaPage";
@@ -101,7 +100,14 @@ export function appRoutes(
       element: <AppShell access={access} />,
       children: [
         ...areas,
-        { path: "account", element: <AccountScreen /> },
+        {
+          path: "account",
+          hydrateFallbackElement: <></>,
+          lazy: async () => {
+            const { AccountScreen } = await import("../sign-in/AccountScreen");
+            return { element: <AccountScreen /> };
+          },
+        },
         { path: "*", element: <NotFound /> },
       ],
     },

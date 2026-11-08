@@ -3,12 +3,14 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useId } from "react";
+import { type JSX, useCallback, useId, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { endSessions, listSessions } from "../api";
+import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { Loaded } from "../shell/Loaded";
+import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "./Attempt";
@@ -24,7 +26,8 @@ export interface SessionsPanelProps {
 
 /**
  * Renders the panel. On one's own account the action signs out everywhere, this browser
- * included; on another person's it ends their sessions (a passkey touch when the server asks).
+ * included; on another person's it ends their sessions after a confirmation (and a passkey touch
+ * when the server asks), then moves focus to the panel's heading.
  *
  * @param props - Whose sessions, and whether they are one's own.
  * @param props.name - The person's principal name.
@@ -39,22 +42,23 @@ export function SessionsPanel({ name, own }: SessionsPanelProps): JSX.Element {
   const load = useCallback(() => listSessions(name), [name]);
   const sessions = useResource(load);
   const attempt = useAttempt();
+  const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(sessions.data);
+  const [confirming, setConfirming] = useState(false);
   return (
     <section className="panel" aria-labelledby={heading}>
       <div className="page-head">
-        <h2 id={heading}>{t("sessions.title")}</h2>
+        <h2 id={heading} ref={headingRef} tabIndex={-1}>
+          {t("sessions.title")}
+        </h2>
         <Button
           className="button"
           isDisabled={attempt.busy}
           onPress={() => {
-            attempt.run(
-              own
-                ? session.signOutEverywhere
-                : async () => {
-                    await endSessions(name);
-                    sessions.reload();
-                  },
-            );
+            if (own) {
+              attempt.run(session.signOutEverywhere);
+            } else {
+              setConfirming(true);
+            }
           }}
         >
           {own ? t("shell.signOutEverywhere") : t("sessions.endAll")}
@@ -89,6 +93,23 @@ export function SessionsPanel({ name, own }: SessionsPanelProps): JSX.Element {
         }
       </Loaded>
       <AttemptStatus attempt={attempt} waiting={t("common.working")} />
+      {confirming && (
+        <ConfirmDialog
+          title={t("sessions.confirm", { name })}
+          confirmLabel={t("sessions.confirmEnd")}
+          onConfirm={() => endSessions(name)}
+          onCancel={() => {
+            setConfirming(false);
+          }}
+          onDone={() => {
+            setConfirming(false);
+            armFocus();
+            sessions.reload();
+          }}
+        >
+          <p>{t("sessions.effect", { name })}</p>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }

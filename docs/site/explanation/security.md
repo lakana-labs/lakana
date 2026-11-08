@@ -51,10 +51,16 @@ passkey ([Invite your team](../how-to/invite-your-team.md),
   (an administrator may change both in **Settings → Sign-in**, up to 24 hours and 30 days), when the
   person signs out here or everywhere, when an administrator ends it, and when the account is
   deactivated. Background refreshes of a page never keep it alive.
-- **Sensitive actions need a fresh touch.** Adding or removing a passkey, issuing an invite or a
-  recovery link, creating an API token, granting or changing rights and ending another person's
-  sessions need a passkey touch from the last 15 minutes; the browser asks for one when it is
-  older. A stolen session cookie alone is therefore not enough for any of them.
+- **Sensitive actions need a fresh touch.** In a browser, actions that change who may do what or
+  hand out credentials need a passkey touch from the last 15 minutes; the browser asks for one when
+  it is older. They are: adding or removing a passkey; issuing an invite or a recovery link;
+  creating an API token; creating or deactivating a person; granting or revoking rights, group
+  memberships, row filters and column masks, and applying an access file; ending another person's
+  sessions; changing the session lengths; creating or changing secrets, connections, CI trust
+  rules, repositories and package indexes; creating an environment or changing its protection or
+  storage; and binding a run-as account to a deploy. A stolen session cookie alone is therefore
+  not enough for any of them. A request with an API token needs no touch: the token is what the
+  command line uses.
 - **A passkey is bound to the address.** The browser offers a passkey only to the site it was made
   for, and Lakana accepts its answer only from its own exact address, port included, so a
   look-alike site gets nothing. Changing the public address
@@ -79,11 +85,19 @@ makes no claim of certification or compliance with any standard.
   signing in through it gets whatever multi-factor rule the provider enforces.
 - **API tokens are a single factor, by design.** Scripts, CI jobs and the command line use them.
   The server stores only a hash of each token; any token can be revoked at once; CI and task tokens
-  expire on their own (a CI token after an hour). A token never turns into a browser session,
-  with two narrow exceptions for the operator's own setup: `lakana server start --local` signs the
-  local browser in with the person's own token, and the bootstrap token issues the first
-  administrator's one-time setup link. A browser session in turn never creates an API token
-  without a fresh passkey touch.
+  expire on their own (a CI token after an hour). A task token, a CI token and a service
+  account's token never lead to a browser session. A person's own token signs its holder into a
+  browser only through `lakana server start --local`, on the machine that runs local mode. Two
+  kinds of token reach further, and need the same care as the passkeys themselves:
+    - **The server operator's bootstrap token** issues the first administrator's setup link and
+      recovery links for any person, administrators and its own account included, at any time.
+    - **An administrator's personal token** issues invite and recovery links (for anyone but
+      administrators) without a passkey touch, as the command line does, and can grant rights the
+      same way. Whoever holds it can therefore sign into a browser as another person, or as a new
+      account they then grant rights to. Keep administrators' tokens as safe as the bootstrap
+      token, give them to as few people as possible, and revoke one that is not in use.
+
+  A browser session in turn never creates an API token without a fresh passkey touch.
 - **Recovery links are the known weak point,** because they let someone in without a passkey.
   Lakana limits them: a link works once, for 1 hour; using it removes all of the person's passkeys
   and ends their sessions, so it cannot be used quietly alongside the real owner; every

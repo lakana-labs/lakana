@@ -21,6 +21,7 @@ import { ActionDialog } from "../shell/ActionDialog";
 import { CopyLine } from "../shell/CopyLine";
 import { ListHead } from "../shell/ListHead";
 import { Loaded } from "../shell/Loaded";
+import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
@@ -109,9 +110,11 @@ export function InvitesPage(): JSX.Element {
   const when = useWhen();
   const invites = useResource(listInvites);
   const withdraw = useAttempt();
+  const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(invites.data);
   const [inviting, setInviting] = useState(false);
   return (
     <AccessFrame
+      headingRef={headingRef}
       action={
         <Button
           className="button button-primary"
@@ -154,6 +157,7 @@ export function InvitesPage(): JSX.Element {
                         onPress={() => {
                           withdraw.run(async () => {
                             await withdrawInvite(invite.id);
+                            armFocus();
                             invites.reload();
                           });
                         }}

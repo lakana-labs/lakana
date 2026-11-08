@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -50,8 +50,25 @@ describe("PeoplePage", () => {
 
     await user.type(screen.getByRole("searchbox", { name: "Find people" }), "ki");
 
-    expect(await screen.findAllByRole("row")).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(2);
+    });
     expect(server.sent.at(-1)?.path).toBe("/api/v1/principals?limit=200&q=ki");
+    // Typing waits for a pause: no request for the half-typed "k".
+    expect(server.sent.some((request) => request.path.endsWith("q=k"))).toBe(false);
+  });
+
+  it("says when the list shows only the first 200", async () => {
+    const many = Array.from({ length: 200 }, (_, index) => ({
+      name: `user${String(index)}`,
+      type: "USER",
+      is_active: true,
+    }));
+    renderShell("/access", {
+      routes: { "GET /api/v1/principals": { status: 200, body: many } },
+    });
+
+    expect(await screen.findByText(/Showing the first 200/)).toBeInTheDocument();
   });
 
   it("says when nobody matches", async () => {

@@ -159,6 +159,7 @@ describe("InvitesPage", () => {
 
     expect(await screen.findByText(/No invite is open/)).toBeInTheDocument();
     expect(server.sent.some((request) => request.method === "DELETE")).toBe(true);
+    expect(screen.getByRole("heading", { level: 1, name: "Access" })).toHaveFocus();
   });
 
   it("names the server's reason when withdrawing fails", async () => {
