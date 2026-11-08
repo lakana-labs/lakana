@@ -106,29 +106,33 @@ def read_policy(dist: Path) -> str:
     Raises
     ------
     UiNotBuiltError
-        When `csp.txt` is missing or unreadable, empty, not plain ASCII, has a control
+        When `csp.txt` is missing, a link, unreadable, empty, not plain ASCII, has a control
         character (a line break would end the header), or has no `default-src`.
     """
     path = dist / CSP_FILE
-    policy = ""
-    try:
-        policy = path.read_bytes().decode("ascii").strip(" \n")
-    except FileNotFoundError:
-        cause = "is missing"
-    except OSError as exc:
-        cause = f"cannot be read ({exc.strerror})"
-    except UnicodeDecodeError:
-        cause = "is not plain ASCII"
+    if path.is_symlink():
+        # The build's own file: a link could hand the header to a file outside the build.
+        cause = "is a link"
     else:
-        directives = {part.strip().split(" ", 1)[0] for part in policy.split(";")}
-        if not policy:
-            cause = "is empty"
-        elif any(ord(char) < 32 or ord(char) == 127 for char in policy):
-            cause = "has a control character"
-        elif "default-src" not in directives:
-            cause = "has no default-src"
+        try:
+            policy = path.read_bytes().decode("ascii").strip(" \n")
+        except FileNotFoundError:
+            cause = "is missing"
+        except OSError as exc:
+            cause = f"cannot be read ({exc.strerror})"
+        except UnicodeDecodeError:
+            cause = "is not plain ASCII"
         else:
-            return policy
+            # Directive names are case-insensitive (CSP Level 3, "parse a serialized CSP").
+            directives = {part.strip().split(" ", 1)[0].lower() for part in policy.split(";")}
+            if not policy:
+                cause = "is empty"
+            elif any(ord(char) < 32 or ord(char) == 127 for char in policy):
+                cause = "has a control character"
+            elif "default-src" not in directives:
+                cause = "has no default-src"
+            else:
+                return policy
     raise UiNotBuiltError(
         f"LAKANA_UI__ENABLED is true, but the built interface's content security policy "
         f"({path}) {cause}. Rebuild the interface from a source checkout with "
@@ -351,7 +355,8 @@ class _AppPages(Route):
 
     It never matches a path whose first segment is the API's, in any letter case, so an
     unknown API path or a wrong method there answers exactly as it does without the
-    interface. Nor a path with a `.` or `..` segment or a backslash, which no browser sends
+    interface. Nor a path with a `.` or `..` segment, a doubled slash or a backslash, which no
+    browser sends
     and which could otherwise dress an API path up as a page (`/./api/...`).
     """
 
@@ -397,6 +402,9 @@ class _AppPages(Route):
         if (
             segments[0].casefold() in self._folded
             or "\\" in path
+            # An empty segment, other than after a trailing slash, is a doubled slash:
+            # `//api/v1/...` must stay the API's 404, so no such path is a page.
+            or "" in segments[:-1]
             or any(segment in {".", ".."} for segment in segments)
         ):
             return Match.NONE, {}

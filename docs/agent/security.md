@@ -223,8 +223,8 @@ cookie set for another host.
   the API (`reserved_segments`: the first segment of every route registered before it, plus
   `api`, compared in any letter case), so an unknown `/api/v1/...` or `/v1/...` path stays the
   API's JSON 404 and a wrong method its 405, never a page a client would parse as success. Nor
-  does it match a path with a `.` or `..` segment or a backslash (`/./api/...`), which no
-  browser sends. It is not in the OpenAPI document.
+  does it match a path with a `.` or `..` segment, an empty segment before the end (a doubled
+  slash: `//api/...`) or a backslash (`/./api/...`), which no browser sends. It is not in the OpenAPI document.
   `test_turning_the_interface_on_changes_no_api_answer` compares status, type and body with the
   interface on and off, and `test_an_unnormalised_api_path_answers_as_without_the_interface`
   does so with raw ASGI paths a client would have normalised.
@@ -239,7 +239,8 @@ cookie set for another host.
   `Content-Security-Policy`, with one source: `ui/csp.ts`. The build writes it to `csp.txt`
   (`ui/build/csp-file.ts`), the server reads that file at start-up (`ui.read_policy`) and sends
   it, and `vite preview`, so every Playwright run, sends the same constant. The header therefore
-  always matches the build actually served. A missing policy file, or one the server could not
+  always matches the build actually served. A missing policy file, a `csp.txt` that is a link (it could point outside the build), or one
+  the server could not
   send as one header (empty, a line break or other control character, not ASCII, no
   `default-src`), refuses the start. The other headers are
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY`.

@@ -545,6 +545,34 @@ def test_a_policy_that_is_not_text_refuses_to_start(
         _ui_client(settings, monkeypatch, ui_dist)
 
 
+def test_a_policy_linked_from_outside_the_build_refuses_to_start(
+    ui_dist: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`csp.txt` must be the build's own file, never one a link points to elsewhere."""
+    outside = ui_dist.parent / "other-policy.txt"
+    outside.write_text("default-src *")
+    (ui_dist / CSP_FILE).unlink()
+    (ui_dist / CSP_FILE).symlink_to(outside)
+    with pytest.raises(UiNotBuiltError, match="is a link"):
+        _ui_client(settings, monkeypatch, ui_dist)
+
+
+@pytest.mark.parametrize("policy", ["DEFAULT-SRC 'self'", "Default-Src 'none'; img-src 'self'"])
+def test_directive_names_are_read_in_any_case(
+    ui_dist: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    """Browsers read directive names case-insensitively, and so does the start-up check."""
+    (ui_dist / CSP_FILE).write_text(policy)
+    with _ui_client(settings, monkeypatch, ui_dist) as c:
+        assert c.get("/").headers["content-security-policy"] == policy
+
+
+def test_an_empty_segment_inside_an_app_path_is_no_page(ui_client: TestClient) -> None:
+    """Only a trailing slash may leave an empty segment; `/catalog/` is a page, `//x` is not."""
+    assert MARKER.encode() in _raw_get(ui_client.app, "/catalog/")[2]
+    assert _raw_get(ui_client.app, "//catalog")[0] == 404
+
+
 def test_an_unreadable_policy_refuses_to_start(
     ui_dist: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -714,6 +742,14 @@ def test_a_raw_path_outside_the_build_is_refused(ui_client: TestClient, path: st
         "/V1/nope",
         "/HEALTHZ",
         "/catalog/../api/v1/nope",
+        "//api/v1/nope",
+        "///api/v1/nope",
+        "//v1/config",
+        "//healthz",
+        "//API/v1",
+        "/\\/api",
+        "//./api",
+        "/catalog//api/v1/nope",
     ],
 )
 def test_an_unnormalised_api_path_answers_as_without_the_interface(
