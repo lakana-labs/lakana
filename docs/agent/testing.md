@@ -349,20 +349,29 @@ every missing output of it means "run everything".
   and runs `scripts/five_minute_test.sh` as the `five-minute` job does: `lakana` is pinned to the
   job's own build, every third-party dependency resolves from PyPI unpinned, so it sees a breaking
   release of `sqlglot`, `duckdb`, `pyiceberg` or anything else within a day, which the lock and the
-  pull-request jobs cannot. A failure is a failed scheduled run (GitHub notifies the maintainer;
-  the job has `contents: read` only and files no issue); the step summary lists the resolved
+  pull-request jobs cannot. A failure is a failed scheduled run, which `scheduled-failure.yml`
+  turns into an issue (the canary job itself has `contents: read` only); the step summary lists the resolved
   versions (`pip freeze`) so the run names the release that broke it. It is outside `ci.yml` and
   its `changes` gating, and on GitHub's runner whatever `CI_RUNNER` says.
 - **`security-deep.yml`** runs semgrep and Trivy weekly. The semgrep scan (a pinned image, no write
   scope, no token in the workspace) keeps its SARIF as an artifact; `semgrep-upload` alone has
   `security-events: write` and does nothing but upload it to code scanning. Dependabot does not
   read a workflow's `container:` image: bump the semgrep version and digest by hand.
+- **`scheduled-failure.yml`** (Scheduled failure report) runs when a watched workflow completes
+  (`workflow_run`) and acts only on a failed *scheduled* run of `canary.yml`, `codeql.yml`,
+  `scorecard.yml` or `security-deep.yml`: GitHub tells only the last editor of a cron about a red
+  scheduled run, and the weekly image scan once failed unseen for three weeks. It opens one issue
+  per workflow (`Scheduled run failed: <name>`, labelled `type:security`, assigned to the
+  maintainer) or comments on the one still open; close it once a scheduled run passes. Its one
+  job has `issues: write` and nothing else, checks nothing out and gets the run's fields as
+  environment variables. A new scheduled workflow joins its list, or `_NOT_REPORTED` in
+  `scripts/tests/test_workflows.py` says why not (`mutation.yml` today).
 - **`codeql.yml`** runs CodeQL for Python on pull requests, on a push to `main` and weekly, on a
   GitHub-hosted runner, with `security-events: write` on its one job. It is CodeQL's *advanced*
   setup: switching on *default setup* in the repository's code-scanning settings would make its
   uploads fail, so leave that toggle off.
 - **Token permissions.** No workflow has a write permission at its top level: each job names its
-  own (`cla.yml` and `security-deep.yml` included). `scripts/tests/test_workflows.py` fails on one.
+  own (`cla.yml`, `security-deep.yml` and `scheduled-failure.yml` included). `scripts/tests/test_workflows.py` fails on one.
 - **`release.yml`** is described in `docs/agent/release.md`; it also attaches the SBOM to each
   GitHub release, and publishes the documentation site on GitHub Pages (`pages` and
   `pages-deploy`; see "The documentation site on GitHub Pages" there).

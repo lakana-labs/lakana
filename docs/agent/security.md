@@ -6159,3 +6159,34 @@ pass before merge. Semgrep runs weekly (`security-deep.yml`); CodeQL (`codeql.ym
 pull request, every push to `main` and weekly; both upload SARIF to code scanning. OpenSSF Scorecard (`scorecard.yml`) runs on every push to `main`,
 weekly and on a branch-protection change, and publishes its score for the README badge; read the
 results at <https://scorecard.dev/viewer/?uri=github.com/lakana-labs/lakana>.
+
+### Image scan
+
+`security-deep.yml` also builds the server image (`Dockerfile`) as the release does and runs
+Trivy over it every Monday (HIGH and CRITICAL, `ignore-unfixed`): a fixed vulnerability in any
+layer fails the run. Fix it at the root, strictest first:
+
+- **Debian packages:** Dependabot's weekly `docker` update moves the `python:*-slim` digests in
+  `Dockerfile` and `Dockerfile.task` (both images pin the same 3.14 digest; a test keeps them
+  equal). When Debian publishes a fix after the newest digest, both images upgrade exactly that
+  package (`apt-get install --only-upgrade <package>`, never a blanket `apt-get upgrade`) and the
+  build checks the version with `dpkg --compare-versions`, so a stale mirror fails the build
+  rather than the scan. `_DEBIAN_FIXES` in `packages/lakana/tests/test_dockerfile.py` lists them;
+  drop an entry, its two lines and their comments once a digest bump carries the fix. Since
+  2026-11-08: `zlib1g` (CVE-2026-85091, CVE-2026-76844).
+- **Python packages:** a finding under a `.dist-info/METADATA` path is one of ours: raise it in
+  `uv.lock`. A finding under the target `Python` with no path comes from an SBOM file in the
+  image (the run warns "Third-party SBOM may lead to inaccurate vulnerability detection"):
+  find the file (`find / -name '*.cdx.json' -o -name '*.spdx.json' -o -path '*/sboms/*'`)
+  before deciding. Since 2026-11-08 the server image has no pip at all: the base image's
+  `/usr/local` pip vendored msgpack, urllib3 and setuptools, listed in
+  `pip/_vendor/bom.cdx.json`, and they lagged their fixes. The Python assets' venvs are uv's,
+  so the final stage uninstalls pip, deletes `ensurepip/_bundled` and fails the build if
+  `import pip` still works. The task image keeps its pip. Ignore a finding (`.trivyignore`,
+  with the file, the reason and a review date per entry) only when the code it names is not in
+  the image or cannot be reached; there is no such entry today.
+
+A failed scheduled run of `security-deep.yml` (and of `canary.yml`, `codeql.yml` and
+`scorecard.yml`) opens an issue `Scheduled run failed: <workflow>` labelled `type:security` and
+assigned to the maintainer, or comments on the one still open (`scheduled-failure.yml`,
+`docs/agent/testing.md`). Close it once a scheduled run passes again.

@@ -1066,4 +1066,5 @@ code above:
 - **Weekly**, a deep scan runs semgrep against the full codebase (`.github/workflows/security-deep.yml`),
   uploading its SARIF output to GitHub's code scanning UI and keeping it as a build artifact.
   CodeQL analyses the Python code on every pull request, on every push to `main` and weekly
-  (`.github/workflows/codeql.yml`); its findings are in the same UI.
+  (`.github/workflows/codeql.yml`); its findings are in the same UI. A failed scheduled run of a
+  security workflow opens an issue (`.github/workflows/scheduled-failure.yml`).

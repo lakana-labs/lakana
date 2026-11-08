@@ -2247,7 +2247,7 @@ def test_the_canary_runs_every_day_and_on_demand() -> None:
 
 
 def test_the_canary_has_the_least_privilege() -> None:
-    """No token write scope anywhere: a failure is a failed run, not an issue the job writes."""
+    """No token write scope here: the job writes no issue; `scheduled-failure.yml` does that."""
     workflow = _canary()
     assert workflow["permissions"] == {}
     (job,) = workflow["jobs"].values()
@@ -2664,3 +2664,121 @@ def test_the_required_docs_examples_check_collects_every_shard_and_compares_the_
     )
     upload = job["steps"][names.index("Upload what the examples printed")]
     assert upload["with"]["name"] == "docs-captures"
+
+
+# The scheduled workflows whose failure nobody would see otherwise: a red scheduled run notifies
+# only the last person to edit its cron, and the weekly image scan failed silently for three
+# weeks (19 Oct to 8 Nov 2026). `scheduled-failure.yml` turns each failure into an issue.
+_REPORTED = ("canary.yml", "codeql.yml", "scorecard.yml", "security-deep.yml")
+_NOT_REPORTED = {"mutation.yml": "test quality, not security: its score is read by hand"}
+
+
+def _scheduled_failure() -> dict:
+    """Load ``scheduled-failure.yml``.
+
+    Returns
+    -------
+    dict
+        The parsed workflow.
+    """
+    return yaml.safe_load((WORKFLOWS / "scheduled-failure.yml").read_text())
+
+
+def test_every_scheduled_workflow_is_reported_on_failure_or_says_why_not() -> None:
+    """A new scheduled workflow joins the list, or `_NOT_REPORTED` names the reason it does not."""
+    scheduled = sorted(
+        path.name
+        for path in WORKFLOWS.glob("*.yml")
+        if "schedule" in (yaml.safe_load(path.read_text())[True] or {})
+    )
+    assert scheduled == sorted([*_REPORTED, *_NOT_REPORTED])
+    names = sorted(yaml.safe_load((WORKFLOWS / f).read_text())["name"] for f in _REPORTED)
+    trigger = _scheduled_failure()[True]
+    assert set(trigger) == {"workflow_run"}
+    assert sorted(trigger["workflow_run"]["workflows"]) == names
+    assert trigger["workflow_run"]["types"] == ["completed"]
+
+
+def test_the_failure_report_writes_issues_and_nothing_else() -> None:
+    """Only `issues: write`, on its one job; no checkout and no action, so no code of a branch runs.
+
+    It reacts only to a failed *scheduled* run: a pull request's CodeQL run (perhaps from a fork)
+    never reaches it. The run's fields reach the script as environment variables, never as
+    `${{ }}` inside it, so no name or URL can inject a command.
+    """
+    workflow = _scheduled_failure()
+    assert workflow["permissions"] == {}
+    (job,) = workflow["jobs"].values()
+    assert job["permissions"] == {"issues": "write"}
+    assert job["runs-on"] == "ubuntu-latest"
+    assert isinstance(job["timeout-minutes"], int)
+    condition = job["if"]
+    assert "github.event.workflow_run.conclusion == 'failure'" in condition
+    assert "github.event.workflow_run.event == 'schedule'" in condition
+    (step,) = job["steps"]
+    assert "uses" not in step
+    assert "${{" not in step["run"]
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+
+
+def _report(tmp_path: Path, existing: str) -> list[str]:
+    """Run the report step against a fake ``gh`` and return the calls it made.
+
+    Parameters
+    ----------
+    tmp_path
+        Scratch directory for the fake and its log.
+    existing
+        What the fake prints for ``gh issue list``: an open issue's number, or nothing.
+
+    Returns
+    -------
+    list of str
+        One line per ``gh`` call, its arguments separated by ``|``.
+    """
+    (step,) = next(iter(_scheduled_failure()["jobs"].values()))["steps"]
+    fake = tmp_path / "gh"
+    log = tmp_path / "calls"
+    fake.write_text(
+        '#!/bin/sh\nIFS="|"; printf "%s" "$*" | tr "\\n" " " >> "$LOG"; echo >> "$LOG"\n'
+        'if [ "$1 $2" = "issue list" ]; then printf "%s" "$EXISTING"; fi\n'
+    )
+    fake.chmod(0o755)
+    env = {
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "LOG": str(log),
+        "EXISTING": existing,
+        "GH_TOKEN": "t",
+        "GH_REPO": "lakana-labs/lakana",
+        "WORKFLOW": "Security (deep)",
+        "RUN_URL": "https://github.com/lakana-labs/lakana/actions/runs/1",
+        "SHA": "abc123",
+    }
+    subprocess.run(["bash", "-c", step["run"]], env=env, check=True)
+    return log.read_text().splitlines()
+
+
+def test_a_first_failure_opens_one_security_issue_assigned_to_the_maintainer(
+    tmp_path: Path,
+) -> None:
+    """No open issue for the workflow yet: one is created, labelled and assigned."""
+    listing, create = _report(tmp_path, existing="")
+    assert listing.startswith("issue|list|")
+    assert "--state|open" in listing and "--label|type:security" in listing
+    assert create.startswith("issue|create|")
+    args = create.split("|")
+    assert args[args.index("--title") + 1] == "Scheduled run failed: Security (deep)"
+    assert args[args.index("--label") + 1] == "type:security"
+    assert args[args.index("--assignee") + 1] == "chrschy"
+    body = args[args.index("--body") + 1]
+    assert "https://github.com/lakana-labs/lakana/actions/runs/1" in body
+    assert "abc123" in body
+    assert "docs/agent/security.md" in body
+
+
+def test_a_repeated_failure_comments_on_the_open_issue(tmp_path: Path) -> None:
+    """One open issue per workflow: the next failure adds a comment, not a second issue."""
+    _, comment = _report(tmp_path, existing="42")
+    args = comment.split("|")
+    assert args[:3] == ["issue", "comment", "42"]
+    assert "https://github.com/lakana-labs/lakana/actions/runs/1" in args[args.index("--body") + 1]

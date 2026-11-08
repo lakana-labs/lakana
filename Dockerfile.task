@@ -13,12 +13,18 @@ FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b98
 
 # The Python bases, pinned by tag and digest like Dockerfile's (Dependabot bumps both; it cannot
 # bump a `FROM` that takes its tag from an ARG, so each version has a stage of its own).
-FROM python:3.11-slim@sha256:cce12316475d7d56d605f76e1d811d0dc4e7227f2d4afd29951521264f504ff8 AS py3.11
-FROM python:3.12-slim@sha256:cb33f7f771ecec2ef1225cf39b159591a040391bd73e4c01f00fdfc4c47611d2 AS py3.12
-FROM python:3.13-slim@sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39 AS py3.13
-FROM python:3.14-slim@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1 AS py3.14
+FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS py3.11
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS py3.12
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS py3.13
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS py3.14
 
 FROM py${PYTHON}
+# zlib1g: the security fix (CVE-2026-85091, CVE-2026-76844) is newer than the base digests
+# above, as in Dockerfile; only the named package, and the build fails below the fixed version.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+ && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' zlib1g)" ge 1:1.3.dfsg+really1.3.1-1+deb13u1 \
+ && rm -rf /var/lib/apt/lists/*
 # uid 10001 runs tasks (the worker's uid: the harness must own its work directory) in group
 # 10003, which is not the worker's group 10001; uid 10002 builds environments, so a task cannot
 # change the files of the environment it runs in. /env and /uv-cache give a new volume the
