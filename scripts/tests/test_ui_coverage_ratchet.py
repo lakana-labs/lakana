@@ -74,6 +74,33 @@ def test_an_empty_summary_is_full_coverage() -> None:
     assert ui_percentage(_summary((0, 0), (0, 0))) == pytest.approx(100.0)
 
 
+@pytest.mark.parametrize(
+    ("summary", "message"),
+    [
+        ({}, "no 'total' entry"),
+        ({"total": []}, "no 'total' entry"),
+        ({"total": {"lines": {"total": 1, "covered": 1}}}, "no 'branches' entry"),
+        ({"total": {"lines": {"total": "1", "covered": 1}}}, "'lines' has no counts"),
+        (
+            {"total": {"lines": {"total": 1, "covered": 1}, "branches": {"total": 1}}},
+            "'branches' has no counts",
+        ),
+    ],
+)
+def test_a_summary_without_counts_is_refused(summary: dict[str, object], message: str) -> None:
+    """A summary missing its totals or their counts names what is missing.
+
+    Parameters
+    ----------
+    summary
+        The malformed coverage summary.
+    message
+        The error it must raise.
+    """
+    with pytest.raises(ValueError, match=message):
+        ui_percentage(summary)
+
+
 @pytest.mark.parametrize("name", ["a.tsx", "a.ts", "a.css", "a.json"])
 def test_a_report_older_than_a_source_file_is_stale(tmp_path: Path, name: str) -> None:
     """A newer source file of any covered type makes the report stale."""
