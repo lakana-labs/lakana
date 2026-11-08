@@ -571,9 +571,9 @@ class PasskeyService:
         if not presented or not stored or not hmac.compare_digest(presented, stored):
             raise error(_NOT_VERIFIED.format(origin=self._origin))
         if principal.type != PrincipalType.USER or not principal.is_active:
+            # No name before the signature verified: the answer may be forged.
             raise error(
-                f"The account {principal.name!r} is deactivated. Ask an administrator to "
-                "reactivate it."
+                "The account of this passkey is deactivated. Ask an administrator to reactivate it."
             )
         try:
             verified = verify_authentication_response(
@@ -589,12 +589,26 @@ class PasskeyService:
             )
         except _ANSWER_ERRORS:
             raise error(_NOT_VERIFIED.format(origin=self._origin)) from None
+        if _cross_origin(parsed.response.client_data_json):
+            raise error(_NOT_VERIFIED.format(origin=self._origin))
         stored_count, new_count = row.sign_count, verified.new_sign_count
         if not (stored_count == 0 and new_count == 0) and new_count <= stored_count:
             self._disable_as_clone(row, principal, stored_count, new_count)
             raise error(_CLONE)
-        row.sign_count = new_count
-        row.last_used_at = self._clock()
+        # Conditional on the counter just read: of two uses at once, one wins.
+        recorded = self._session.execute(
+            update(Passkey)
+            .where(Passkey.id == row.id, Passkey.sign_count == stored_count)
+            .values(sign_count=new_count, last_used_at=self._clock())
+            .execution_options(synchronize_session=False)
+        ).rowcount  # ty: ignore[unresolved-attribute]
+        if recorded != 1:
+            self._session.rollback()
+            raise error(
+                "This passkey was used at the same moment elsewhere, so this use was refused. "
+                "Try again; if it keeps happening, the passkey may have been copied."
+            )
+        self._session.refresh(row)
         return row, principal
 
     def _disable_as_clone(
@@ -671,6 +685,12 @@ class PasskeyService:
             )
         first = not usable and context.via in LINK_VIAS
         if not (first and now - context.created_at < FIRST_PASSKEY_WINDOW):
+            if not usable and context.via == "local":
+                raise StepUpRequired(
+                    "A first passkey can be added within 15 minutes of signing in, and this "
+                    "session is older. Sign in again with `lakana server start --local` and add "
+                    "the passkey right away."
+                )
             if not usable and context.via in LINK_VIAS:
                 raise StepUpRequired(
                     "A first passkey can be added within 15 minutes of signing in with a link, "
@@ -714,7 +734,9 @@ class PasskeyService:
         """Finish adding a passkey: verify the browser's answer and store the passkey.
 
         Counts as a passkey touch for step-up. A passkey added later than 15 minutes after a
-        link sign-in leaves its person a notice.
+        link sign-in leaves its person a notice. The step-up rule was checked when the options
+        were issued; the answer is accepted for the challenge's 5 minutes even if the touch ages
+        out meanwhile, because the challenge is bound to this session.
 
         Parameters
         ----------
@@ -761,6 +783,8 @@ class PasskeyService:
             )
         except _ANSWER_ERRORS:
             raise PasskeyRefused(_NOT_VERIFIED.format(origin=self._origin)) from None
+        if _cross_origin(_registration_client_data(credential_json)):
+            raise PasskeyRefused(_NOT_VERIFIED.format(origin=self._origin))
         credential_id = bytes_to_base64url(verified.credential_id)
         taken = AlreadyExistsError(
             "This passkey is registered already. Sign in with it, or add a different one."
@@ -1042,6 +1066,49 @@ class PasskeyService:
         if not own:
             self._sessions.end_for_principal(target.id, "passkey_removed")
         self._session.commit()
+
+
+def _cross_origin(client_data_json: bytes) -> bool:
+    """Say whether a ceremony ran in a frame of another site.
+
+    The origin alone is checked by the library; a page of ours framed by another site would
+    still carry our origin, with ``crossOrigin: true`` (and a ``topOrigin``) beside it.
+
+    Parameters
+    ----------
+    client_data_json
+        The browser's ``clientDataJSON``.
+
+    Returns
+    -------
+    bool
+        `True` when ``crossOrigin`` is true or a ``topOrigin`` is present, and for data that
+        cannot be read.
+    """
+    try:
+        data = json.loads(client_data_json)
+    except ValueError:
+        return True
+    return not isinstance(data, dict) or data.get("crossOrigin") is True or "topOrigin" in data
+
+
+def _registration_client_data(credential_json: str) -> bytes:
+    """Read ``clientDataJSON`` from a registration answer the library has already verified.
+
+    Parameters
+    ----------
+    credential_json
+        The browser's ``credential.toJSON()``.
+
+    Returns
+    -------
+    bytes
+        The client data; empty when it cannot be read (`_cross_origin` then refuses).
+    """
+    try:
+        return base64url_to_bytes(json.loads(credential_json)["response"]["clientDataJSON"])
+    except _ANSWER_ERRORS:
+        return b""
 
 
 def _json(options: object) -> dict[str, Any]:

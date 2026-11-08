@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 from scripts.test_support.webauthn_test_helpers import SoftAuthenticator, unb64url
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import event, func, select, update
+from sqlalchemy.orm import ORMExecuteState, Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.bootstrap import bootstrap_if_needed, ensure_bootstrap_admin_grant
@@ -462,6 +462,53 @@ def test_registration_refuses_another_origin_or_rp_id(
     assert world.session.scalar(select(func.count()).select_from(Passkey)) == 0
 
 
+def test_registration_refuses_a_cross_origin_answer(world: World, alice: Signed) -> None:
+    """A ceremony run in a frame of another site is refused."""
+    with pytest.raises(PasskeyRefused):
+        world.register(alice, cross_origin=True)
+
+
+def test_a_local_session_after_the_window_names_a_new_local_link(world: World) -> None:
+    """The next step after a local sign-in is another local sign-in, not a recovery link."""
+    local = world.start(world.person("gus"), via="local")
+    world.clock.now = START + FIRST_PASSKEY_WINDOW + timedelta(minutes=1)
+    with pytest.raises(StepUpRequired, match="lakana server start --local"):
+        world.passkeys.registration_options(world.ref(local))
+
+
+def test_a_counter_changed_meanwhile_refuses_the_sign_in(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    """Two uses at once cannot both pass on the same stored counter."""
+    _, auth, stored = enrolled
+    moved: list[bool] = []
+
+    def other_use_first(state: ORMExecuteState) -> None:
+        """Let another use move the counter after this one read it, before it writes.
+
+        Parameters
+        ----------
+        state
+            The statement about to run.
+        """
+        target = getattr(state.statement, "table", None)
+        if state.is_update and getattr(target, "name", None) == "passkeys" and not moved:
+            moved.append(True)
+            state.session.connection().execute(
+                update(Passkey).where(Passkey.id == stored.id).values(sign_count=7)
+            )
+
+    event.listen(world.session, "do_orm_execute", other_use_first)
+    try:
+        with pytest.raises(AuthenticationError, match="at the same moment"):
+            world.sign_in(auth, sign_count=5)
+    finally:
+        event.remove(world.session, "do_orm_execute", other_use_first)
+    world.session.refresh(stored)
+    assert stored.disabled_at is None
+    assert len(world.events(AuditEventType.SESSION_STARTED)) == 1  # alice's link session only
+
+
 def test_registration_refuses_without_user_verification(world: World, alice: Signed) -> None:
     """A touch without a PIN or biometric is not enough."""
     with pytest.raises(PasskeyRefused):
@@ -592,6 +639,7 @@ def test_sign_in_with_a_passkey_starts_a_touched_session(
 
 FAULTS = {
     "uv_off": {"uv": False},
+    "cross_origin": {"cross_origin": True},
     "origin_other_port": {"origin": "http://localhost:9999"},
     "origin_other_host": {"origin": "http://evil.test:8000"},
     "rp_id_other": {"rp_id": "evil"},
@@ -671,8 +719,9 @@ def test_sign_in_refused_for_a_deactivated_person(
     PrincipalService(world.session, AllowAllAuthorization()).deactivate_principal(
         PrincipalRef(id=world.admin.id, name="admin", type=PrincipalType.USER), "alice"
     )
-    with pytest.raises(AuthenticationError, match="deactivated"):
+    with pytest.raises(AuthenticationError, match="deactivated") as refused:
         world.sign_in(auth)
+    assert "alice" not in str(refused.value)
 
 
 def test_unknown_passkey_is_refused(world: World) -> None:

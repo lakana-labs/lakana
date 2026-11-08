@@ -134,7 +134,9 @@ class SoftAuthenticator:
             }
         )
 
-    def _client_data(self, kind: str, options: dict[str, Any], origin: str | None) -> bytes:
+    def _client_data(
+        self, kind: str, options: dict[str, Any], origin: str | None, *, cross_origin: bool = False
+    ) -> bytes:
         """Build ``clientDataJSON``.
 
         Parameters
@@ -145,20 +147,24 @@ class SoftAuthenticator:
             The server's options, for the challenge.
         origin
             The origin to claim; `self.origin` when `None`.
+        cross_origin
+            Claim the ceremony ran in a frame of another site (``crossOrigin: true`` with a
+            ``topOrigin``).
 
         Returns
         -------
         bytes
             The JSON.
         """
-        return json.dumps(
-            {
-                "type": kind,
-                "challenge": options["challenge"],
-                "origin": origin or self.origin,
-                "crossOrigin": False,
-            }
-        ).encode("utf-8")
+        data: dict[str, Any] = {
+            "type": kind,
+            "challenge": options["challenge"],
+            "origin": origin or self.origin,
+            "crossOrigin": cross_origin,
+        }
+        if cross_origin:
+            data["topOrigin"] = "https://evil.test"
+        return json.dumps(data).encode("utf-8")
 
     def _rp_hash(self, options: dict[str, Any], rp_id: str | None) -> bytes:
         """Hash the relying-party id the authenticator claims.
@@ -213,6 +219,7 @@ class SoftAuthenticator:
         rp_id: str | None = None,
         uv: bool = True,
         up: bool = True,
+        cross_origin: bool = False,
     ) -> str:
         """Answer registration options, as `navigator.credentials.create` and `toJSON()` would.
 
@@ -228,6 +235,8 @@ class SoftAuthenticator:
             Whether the user-verified flag is set.
         up
             Whether the user-present flag is set.
+        cross_origin
+            Claim the ceremony ran in a frame of another site.
 
         Returns
         -------
@@ -235,7 +244,9 @@ class SoftAuthenticator:
             The registration credential's JSON.
         """
         self.user_handle = unb64url(options["user"]["id"])
-        client_data = self._client_data("webauthn.create", options, origin)
+        client_data = self._client_data(
+            "webauthn.create", options, origin, cross_origin=cross_origin
+        )
         attested = (
             bytes(16)
             + struct.pack(">H", len(self.credential_id))
@@ -275,6 +286,7 @@ class SoftAuthenticator:
         sign_count: int | None = None,
         user_handle: Any = _SAME,  # ruff: ignore[any-type]
         forge: bool = False,
+        cross_origin: bool = False,
     ) -> str:
         """Answer authentication options, as `navigator.credentials.get` and `toJSON()` would.
 
@@ -298,6 +310,8 @@ class SoftAuthenticator:
             registration options named.
         forge
             Sign with a different key, as someone without this passkey would.
+        cross_origin
+            Claim the ceremony ran in a frame of another site.
 
         Returns
         -------
@@ -308,7 +322,7 @@ class SoftAuthenticator:
             if self.counts:
                 self.sign_count += 1
             sign_count = self.sign_count
-        client_data = self._client_data("webauthn.get", options, origin)
+        client_data = self._client_data("webauthn.get", options, origin, cross_origin=cross_origin)
         auth_data = (
             self._rp_hash(options, rp_id)
             + bytes([self._flags(up=up, uv=uv)])

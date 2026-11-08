@@ -486,7 +486,11 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   (`disabled_reason = possible_clone`), audited `PASSKEY_DISABLED` and a notice goes to the
   person and every active administrator; the attempt is refused. A forged assertion with a low
   counter is refused by the signature and can never disable a passkey (tested). Two zero
-  counters (synced passkeys) are accepted.
+  counters (synced passkeys) are accepted. The new counter is written by a conditional update
+  on the counter just read, so of two uses at once only one passes. A `clientDataJSON` with
+  `crossOrigin: true` or a `topOrigin` (our page framed by another site) is refused, at
+  registration and assertion alike; checks that would name the account run only after the
+  signature verified or do not name it.
 - **Registration.** Only from a browser session (a token gets 409) and only for one's own
   account. Allowed with step-up, or for a person without a usable passkey within 15 minutes
   (`FIRST_PASSKEY_WINDOW`) of a setup, invite, recovery or local sign-in. A local-link session
