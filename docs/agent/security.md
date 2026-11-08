@@ -6174,3 +6174,14 @@ layer fails the run. Fix it at the root, strictest first:
   rather than the scan. `_DEBIAN_FIXES` in `packages/lakana/tests/test_dockerfile.py` lists them;
   drop an entry, its two lines and their comments once a digest bump carries the fix. Since
   2026-11-08: `zlib1g` (CVE-2026-85091, CVE-2026-76844).
+- **Python packages:** a finding under a `.dist-info/METADATA` path is one of ours: raise it in
+  `uv.lock`. A finding under the target `Python` with no path comes from an SBOM file in the
+  image (the run warns "Third-party SBOM may lead to inaccurate vulnerability detection"):
+  find the file (`find / -name '*.cdx.json' -o -name '*.spdx.json' -o -path '*/sboms/*'`)
+  before deciding. Since 2026-11-08 the server image has no pip at all: the base image's
+  `/usr/local` pip vendored msgpack, urllib3 and setuptools, listed in
+  `pip/_vendor/bom.cdx.json`, and they lagged their fixes. The Python assets' venvs are uv's,
+  so the final stage uninstalls pip, deletes `ensurepip/_bundled` and fails the build if
+  `import pip` still works. The task image keeps its pip. Ignore a finding (`.trivyignore`,
+  with the file, the reason and a review date per entry) only when the code it names is not in
+  the image or cannot be reached; there is no such entry today.

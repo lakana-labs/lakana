@@ -484,3 +484,22 @@ def test_both_images_pin_the_same_python_3_14_base() -> None:
         )
 
     assert base(_TASK_DOCKERFILE) == base(_DOCKERFILE)
+
+
+def test_final_stage_drops_the_base_images_pip_and_its_bundled_wheel() -> None:
+    """The server image ships no pip: nothing in it installs packages with pip at runtime.
+
+    The base image's `/usr/local` pip vendors its own msgpack, urllib3 and setuptools and lists
+    them in `pip/_vendor/bom.cdx.json`, which Trivy reads; on 2026-11-08 three of them carried
+    fixed HIGH vulnerabilities (CVE-2026-114613, CVE-2025-47273, CVE-2026-97687). The Python
+    assets' venvs are uv's, and the venv in `/opt/lakana` already lost its pip in the builder.
+    `ensurepip`'s bundled wheel holds the same copies, so it goes too, and the build fails if
+    `import pip` still works. The task image keeps its pip: a task's environment may use it.
+    """
+    final = _final_stage()
+    (step,) = [ln for ln in final if "pip uninstall" in ln]
+    assert step.startswith("RUN python -m pip uninstall -y")
+    assert step.split("&&")[0].split()[-1] == "pip"
+    assert "rm -rf /usr/local/lib/python3.14/ensurepip/_bundled /usr/local/bin/pip " in step
+    assert "! python -I -c 'import pip'" in step
+    assert final.index(step) < final.index("USER 10001:10001")

@@ -52,6 +52,12 @@ RUN groupadd --system --gid 10001 lakana \
  && install -d -o 0 -g 0 -m 0700 /var/lib/lakana-launcher \
  && install -d -o 0 -g 10001 -m 2750 /run/lakana-egress \
  && install -d -o 10001 -g 10001 -m 0700 /var/lib/lakana-task-work
+# No pip in the image: nothing here installs with it (the assets' venvs are uv's), and the base
+# image's copy vendors msgpack, urllib3 and setuptools (listed in pip/_vendor/bom.cdx.json, which
+# Trivy reads) that lag their security fixes. ensurepip's bundled wheel holds the same copies.
+RUN python -m pip uninstall -y --disable-pip-version-check --root-user-action=ignore pip \
+ && rm -rf /usr/local/lib/python3.14/ensurepip/_bundled /usr/local/bin/pip \
+ && ! python -I -c 'import pip' 2>/dev/null
 # git and ssh fetch repositories for deploys; runtime packages only.
 # zlib1g: CVE-2026-85091 (and CVE-2026-76844) are fixed in 1:1.3.dfsg+really1.3.1-1+deb13u1 from
 # trixie-security, newer than the base digest above (checked 2026-11-08). Only the named package
