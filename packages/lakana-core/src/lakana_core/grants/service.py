@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change
@@ -13,7 +13,11 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
 from lakana_core.catalog.identity import namespace_exists, resolve_environment_id, resolve_table_id
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
-from lakana_core.grants.admin import ADMIN_ONLY_ACTIONS, authorize_admin_only
+from lakana_core.grants.admin import (
+    ADMIN_ONLY_ACTIONS,
+    authorize_admin_only,
+    holds_instance_admin,
+)
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
@@ -510,6 +514,50 @@ class GrantService:
             limit=limit,
             cursor=cursor,
         )
+
+    def is_admin(self, p: PrincipalRef) -> bool:
+        """Say whether the caller holds the `ADMIN` role on the instance.
+
+        About the caller only, so it needs no authorization.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        bool
+            `lakana_core.grants.admin.holds_instance_admin` for the caller.
+        """
+        return holds_instance_admin(self._session, p.id)
+
+    def has_any_grant(self, p: PrincipalRef) -> bool:
+        """Say whether the caller has any right at all, so the interface can tell a new person.
+
+        About the caller only, so it needs no authorization and tells nothing about anyone else.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        bool
+            `True` for an active principal with at least one unrevoked grant, of any role or
+            action and at any scope (instance, environment, namespace or table), held directly
+            or through a group it belongs to; one `EXISTS` query.
+        """
+        groups = select(GroupMembership.group_id).where(GroupMembership.principal_id == p.id)
+        query = select(
+            exists().where(
+                exists().where(Principal.id == p.id, Principal.is_active.is_(True)),
+                Grant.revoked_at.is_(None),
+                or_(Grant.principal_id == p.id, Grant.group_id.in_(groups)),
+            )
+        )
+        return bool(self._session.execute(query).scalar())
 
     def explain(self, p: PrincipalRef, principal_name: str, scope: Securable) -> PermissionReport:
         """Say what a principal may do on an object, and through which grant or group.

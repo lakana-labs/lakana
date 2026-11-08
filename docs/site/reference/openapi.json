@@ -18706,7 +18706,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any grant at all (any scope, directly or through a group): the web interface shows the administration areas, or tells a new person to ask for access, from these two.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -31336,6 +31336,16 @@
               }
             ],
             "title": "Language"
+          },
+          "admin": {
+            "type": "boolean",
+            "title": "Admin",
+            "default": false
+          },
+          "has_access": {
+            "type": "boolean",
+            "title": "Has Access",
+            "default": false
           }
         },
         "type": "object",
@@ -31345,7 +31355,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet."
       },
       "WorkerCachesOut": {
         "properties": {

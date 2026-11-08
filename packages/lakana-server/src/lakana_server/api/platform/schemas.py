@@ -2356,6 +2356,11 @@ class WhoamiOut(BaseModel):
         The CI token's scope when the caller authenticated with one; `None` otherwise.
     language
         Your preferred language for catalog texts; `null` for none.
+    admin
+        Whether you hold the `ADMIN` role on the instance (directly or through a group).
+    has_access
+        Whether you have any grant at all, at any scope, directly or through a group; `false`
+        for a new person nobody has granted anything yet.
     """
 
     name: str
@@ -2363,6 +2368,8 @@ class WhoamiOut(BaseModel):
     task_token: TaskTokenScopeOut | None
     ci_token: CiTokenScopeOut | None = None
     language: str | None = None
+    admin: bool = False
+    has_access: bool = False
 
 
 class ProfileIn(BaseModel):
