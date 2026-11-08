@@ -29,6 +29,38 @@ EXCEPTIONS = frozenset({"task-token mint", "POST /api/v1/task-tokens"})
 """The only keys allowed class ``exception``; a new one is a visible diff here."""
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """A YAML loader that refuses a mapping with the same key twice."""
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        """Build a mapping, refusing duplicate keys.
+
+        Parameters
+        ----------
+        node
+            The YAML mapping node.
+        deep
+            Whether to construct nested objects at once.
+
+        Returns
+        -------
+        dict
+            The mapping.
+
+        Raises
+        ------
+        ValueError
+            If a key appears twice.
+        """
+        seen: set[Any] = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=True)
+            if key in seen:
+                raise ValueError(f"{key!r} appears twice in ui/parity.yaml: remove one entry.")
+            seen.add(key)
+        return super().construct_mapping(node, deep)
+
+
 def load_entries(path: Path) -> dict[str, dict[str, Any]]:
     """Read the inventory file.
 
@@ -41,8 +73,13 @@ def load_entries(path: Path) -> dict[str, dict[str, Any]]:
     -------
     dict of str to dict
         The entries by key.
+
+    Raises
+    ------
+    ValueError
+        If a key appears twice.
     """
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
 
 
 def _leaves(command: Command, path: str) -> set[str]:
@@ -83,8 +120,7 @@ def live_keys() -> set[str]:
     keys = _leaves(typer.main.get_command(build_app()), "")
     paths = json.loads(OPENAPI_FILE.read_text(encoding="utf-8"))["paths"]
     for path, methods in paths.items():
-        if path.startswith("/api/v1/"):
-            keys |= {f"{method.upper()} {path}" for method in methods}
+        keys |= {f"{method.upper()} {path}" for method in methods}
     return keys
 
 
@@ -103,11 +139,16 @@ def _invalid(key: str, entry: Mapping[str, Any]) -> str | None:
     str or None
         The problem with the next step, or None when the entry is valid.
     """
+    if not isinstance(entry, Mapping):
+        return (
+            f"{key!r} has no value: give it {{class: ui, part: N}} or {{class: git, reason: ...}}."
+        )
     cls = entry.get("class")
     if cls not in CLASSES:
         return f"{key!r} has class {cls!r}; use one of {', '.join(CLASSES)}."
     if cls in ("ui", "read"):
-        if entry.get("part") not in PARTS:
+        part = entry.get("part")
+        if isinstance(part, bool) or part not in PARTS:
             return (
                 f"{key!r} is class {cls} and needs `part:` 1-8 (the interface part that shows it)."
             )

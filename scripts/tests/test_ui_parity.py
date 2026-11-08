@@ -1,5 +1,7 @@
 """Tests for the inventory of every command and route with its place in the interface."""
 
+from pathlib import Path
+
 import pytest
 
 from scripts.check_ui_parity import PARITY_FILE, live_keys, load_entries, problems
@@ -80,3 +82,37 @@ def test_invalid_entries_are_reported() -> None:
     text = "\n".join(problems(entries, _LIVE | set(entries)))
     for key in ("table undrop", "GET /api/v1/jobs", "'a'", "'b'", "'c'", "'d'"):
         assert key in text
+
+
+def test_a_ui_entry_with_a_reason_and_a_git_entry_with_a_part_are_refused() -> None:
+    """The field that belongs to the other classes is refused."""
+    entries = {
+        "table undrop": {"class": "ui", "part": 3, "reason": "x"},
+        "GET /api/v1/jobs": {"class": "git", "reason": "x", "part": 3},
+    }
+    text = "\n".join(problems(entries, _LIVE))
+    assert "drop `reason:`" in text
+    assert "drop `part:`" in text
+
+
+def test_an_empty_entry_and_a_boolean_part_are_refused() -> None:
+    """An entry without a value, or with ``part: true``, gets a message naming the key."""
+    entries = {"table undrop": None, "GET /api/v1/jobs": {"class": "ui", "part": True}}
+    text = "\n".join(problems(entries, _LIVE))
+    assert "'table undrop' has no value" in text
+    assert "'GET /api/v1/jobs'" in text
+    assert "part" in text
+
+
+def test_a_duplicate_key_in_the_file_is_refused(tmp_path: Path) -> None:
+    """YAML would keep the last of two equal keys; the loader names the key instead.
+
+    Parameters
+    ----------
+    tmp_path
+        A scratch directory.
+    """
+    path = tmp_path / "parity.yaml"
+    path.write_text('"a": {class: git, reason: x}\n"a": {class: git, reason: y}\n')
+    with pytest.raises(ValueError, match="'a' appears twice"):
+        load_entries(path)

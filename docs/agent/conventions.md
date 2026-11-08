@@ -183,7 +183,8 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   does by hand is in the UI; whatever a Git repository defines (assets, schedules, access files,
   deploys) or local tooling does (`init`, `profile`, `load`) is Git. `exception` is reserved for
   the two task-token minting entries. `scripts/tests/test_ui_parity.py` walks the live command
-  tree and route table and fails on a missing, stale or invalid entry, naming it and the next step.
+  tree and reads the routes from the committed `docs/site/reference/openapi.json` (kept equal to the app
+  by CI's `generate_reference.py --check`) and fails on a missing, stale or invalid entry, naming it and the next step.
 - **Exact pins, one tool per pull request.** Every dependency is an exact version
   (`ui/.npmrc`: `save-exact`, `engine-strict`, `ignore-scripts`), Node is the `26` line
   (`ui/.nvmrc`, `engines.node`). Dependabot groups what ships (`ui-runtime`) and the few
