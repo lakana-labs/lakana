@@ -4,6 +4,7 @@ import { MemoryStorage } from "../test/storage";
 import {
   applyPreferences,
   browserStorage,
+  fadeOnSystemThemeChange,
   DEFAULT_PREFERENCES,
   PREFERENCES_KEY,
   readPreferences,
@@ -120,8 +121,8 @@ describe("preferences", () => {
 
       vi.advanceTimersByTime(THEME_FADE_MS - 1);
       applyPreferences(root, { theme: "dark", density: "roomy", language: "en" });
-      vi.advanceTimersByTime(THEME_FADE_MS - 1);
-      // A second change restarts the fade rather than cutting it short.
+      // A second change restarts the fade; the attribute outlasts the transition by 50 ms.
+      vi.advanceTimersByTime(THEME_FADE_MS + 49);
       expect(root.hasAttribute("data-theme-fade")).toBe(true);
 
       vi.advanceTimersByTime(1);
@@ -129,6 +130,36 @@ describe("preferences", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("fades an operating-system theme change while the system theme is in use", () => {
+    vi.useFakeTimers();
+    try {
+      const root = document.createElement("html");
+      const media = new EventTarget() as MediaQueryList;
+      const stop = fadeOnSystemThemeChange(root, media);
+
+      media.dispatchEvent(new Event("change"));
+      expect(root.hasAttribute("data-theme-fade")).toBe(true);
+      vi.advanceTimersByTime(THEME_FADE_MS + 50);
+      expect(root.hasAttribute("data-theme-fade")).toBe(false);
+
+      // A chosen theme does not follow the system, so nothing fades.
+      root.setAttribute("data-theme", "dark");
+      media.dispatchEvent(new Event("change"));
+      expect(root.hasAttribute("data-theme-fade")).toBe(false);
+
+      root.removeAttribute("data-theme");
+      stop();
+      media.dispatchEvent(new Event("change"));
+      expect(root.hasAttribute("data-theme-fade")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("has nothing to follow without matchMedia", () => {
+    expect(fadeOnSystemThemeChange(document.createElement("html"), undefined)).not.toThrow();
   });
 
   it.each([

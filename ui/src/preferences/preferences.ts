@@ -102,15 +102,16 @@ export function writePreferences(storage: Storage | null, value: Preferences): v
 }
 
 /**
- * How long `data-theme-fade` stays on the root after a theme change: the 200 ms motion step of
- * `--motion-panel` in `tokens.css`, during which `base.css` fades the colours.
+ * How long the colours fade after a theme change: the 200 ms motion step of `--motion-panel` in
+ * `tokens.css`, while `data-theme-fade` is on the root and `base.css` fades them.
  */
 export const THEME_FADE_MS = 200;
 
 const fades = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
 
 /**
- * Marks the root with `data-theme-fade` for {@link THEME_FADE_MS}, restarting a running fade.
+ * Marks the root with `data-theme-fade` for a little over {@link THEME_FADE_MS}, restarting a
+ * running fade.
  *
  * @param root - The `<html>` element.
  */
@@ -119,10 +120,34 @@ function fadeTheme(root: HTMLElement): void {
   root.setAttribute("data-theme-fade", "");
   fades.set(
     root,
+    // A little longer than the transition, so a late last frame does not snap.
     setTimeout(() => {
       root.removeAttribute("data-theme-fade");
-    }, THEME_FADE_MS),
+    }, THEME_FADE_MS + 50),
   );
+}
+
+/**
+ * Fades the colours when the operating system switches between light and dark while the
+ * system theme is in use (no `data-theme` on the root); a chosen theme does not follow it.
+ *
+ * @param root - The `<html>` element.
+ * @param media - The `prefers-color-scheme` query; undefined where `matchMedia` is missing.
+ * @returns A function that stops listening.
+ */
+export function fadeOnSystemThemeChange(
+  root: HTMLElement,
+  media: MediaQueryList | undefined,
+): () => void {
+  const onChange = (): void => {
+    if (!root.hasAttribute("data-theme")) {
+      fadeTheme(root);
+    }
+  };
+  media?.addEventListener("change", onChange);
+  return () => {
+    media?.removeEventListener("change", onChange);
+  };
 }
 
 /**
