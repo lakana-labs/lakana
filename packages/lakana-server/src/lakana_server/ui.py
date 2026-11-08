@@ -17,6 +17,7 @@ import logging
 import os
 import re
 from collections.abc import Awaitable, Callable
+from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -33,31 +34,11 @@ logger = logging.getLogger(__name__)
 UI_DIST: Path = Path(__file__).parent / "ui_dist"
 """Where the built interface lives inside the installed package (git-ignored in a checkout)."""
 
-_LIBRARY_STYLE_HASHES = (
-    # react-aria usePress: @layer { [data-react-aria-pressable] { touch-action: ... } }
-    "'sha256-38RhXrc7EdReTKsOm23ZPOCUgniTUUcjky8QOOrQx6o='",
-    # react-aria usePreventScroll: @layer { * { overscroll-behavior: contain; } }
-    "'sha256-gYiS/BvZvRcK27JIXTuwhZ3hs2+VJ1X+2gUlE+farlg='",
-)
+CSP_FILE = "csp.txt"
+"""The file of the build holding its `Content-Security-Policy`, the one source of the policy.
 
-CONTENT_SECURITY_POLICY: str = "; ".join(
-    [
-        "default-src 'self'",
-        "script-src 'self'",
-        f"style-src 'self' {' '.join(_LIBRARY_STYLE_HASHES)}",
-        "img-src 'self'",
-        "font-src 'self'",
-        "connect-src 'self'",
-        "object-src 'none'",
-        "base-uri 'none'",
-        "form-action 'self'",
-        "frame-ancestors 'none'",
-    ]
-)
-"""The `Content-Security-Policy` of every response of the interface.
-
-The same value as `CONTENT_SECURITY_POLICY` in `ui/csp.ts`, which `vite preview` (and so every
-Playwright run) sends; `scripts/tests/test_ui_project.py` fails when the two differ. Change both.
+`ui/csp.ts` defines it; the build writes it here (`ui/build/csp-file.ts`) and `vite preview`
+sends the same constant, so the header always matches the interface actually served.
 """
 
 _IMMUTABLE = "public, max-age=31536000, immutable"
@@ -109,11 +90,60 @@ def content_type(path: Path) -> str:
     return _CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
 
 
-def _headers(cache_control: str) -> dict[str, str]:
+def read_policy(dist: Path) -> str:
+    """Read the content security policy the build wrote, refusing one it cannot send.
+
+    Parameters
+    ----------
+    dist
+        The build directory.
+
+    Returns
+    -------
+    str
+        The policy, surrounding spaces and newlines removed: one header value.
+
+    Raises
+    ------
+    UiNotBuiltError
+        When `csp.txt` is missing or unreadable, empty, not plain ASCII, has a control
+        character (a line break would end the header), or has no `default-src`.
+    """
+    path = dist / CSP_FILE
+    policy = ""
+    try:
+        policy = path.read_bytes().decode("ascii").strip(" \n")
+    except FileNotFoundError:
+        cause = "is missing"
+    except OSError as exc:
+        cause = f"cannot be read ({exc.strerror})"
+    except UnicodeDecodeError:
+        cause = "is not plain ASCII"
+    else:
+        directives = {part.strip().split(" ", 1)[0] for part in policy.split(";")}
+        if not policy:
+            cause = "is empty"
+        elif any(ord(char) < 32 or ord(char) == 127 for char in policy):
+            cause = "has a control character"
+        elif "default-src" not in directives:
+            cause = "has no default-src"
+        else:
+            return policy
+    raise UiNotBuiltError(
+        f"LAKANA_UI__ENABLED is true, but the built interface's content security policy "
+        f"({path}) {cause}. Rebuild the interface from a source checkout with "
+        "`npm --prefix ui ci && npm --prefix ui run build`, or install a released "
+        "lakana-server; or set LAKANA_UI__ENABLED=false."
+    )
+
+
+def _headers(policy: str, cache_control: str) -> dict[str, str]:
     """Build the headers of every response of the interface.
 
     Parameters
     ----------
+    policy
+        The build's content security policy (`read_policy`).
     cache_control
         The `Cache-Control` value.
 
@@ -123,7 +153,7 @@ def _headers(cache_control: str) -> dict[str, str]:
         The policy, the security headers and the cache rule.
     """
     return {
-        "Content-Security-Policy": CONTENT_SECURITY_POLICY,
+        "Content-Security-Policy": policy,
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
         "X-Frame-Options": "DENY",
@@ -131,23 +161,27 @@ def _headers(cache_control: str) -> dict[str, str]:
     }
 
 
-def _not_found(status_code: int = 404) -> Response:
-    """Answer a request for a file of the interface that does not exist.
+def _error(policy: str, status_code: int = 404) -> Response:
+    """Answer a request for a file of the interface that cannot be served.
 
     Parameters
     ----------
+    policy
+        The build's content security policy.
     status_code
-        The status, 404 unless the method was wrong.
+        The status: 404, or what `StaticFiles` refused with (405 for a wrong method).
 
     Returns
     -------
     Response
-        A short plain-text answer with the interface's headers, never cached.
+        The status's own phrase as plain text with the interface's headers, never cached; a
+        405 also names the methods that work (`Allow`).
     """
+    headers = _headers(policy, _REVALIDATE)
+    if status_code == 405:
+        headers["Allow"] = "GET, HEAD"
     return PlainTextResponse(
-        "Not found" if status_code == 404 else "Method not allowed",
-        status_code=status_code,
-        headers=_headers(_REVALIDATE),
+        HTTPStatus(status_code).phrase, status_code=status_code, headers=headers
     )
 
 
@@ -157,6 +191,19 @@ class _Assets(StaticFiles):
     `StaticFiles` normalises the path, refuses an absolute one, a NUL byte and one whose real
     path (symlinks resolved) is outside the directory.
     """
+
+    def __init__(self, directory: Path, policy: str) -> None:
+        """Serve `directory` with `policy` on every answer.
+
+        Parameters
+        ----------
+        directory
+            The build's `assets/`.
+        policy
+            The build's content security policy.
+        """
+        super().__init__(directory=directory)
+        self.policy = policy
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         """Serve one asset, or a plain 404 with the interface's headers.
@@ -176,11 +223,11 @@ class _Assets(StaticFiles):
         try:
             response = await super().get_response(path, scope)
         except HTTPException as exc:
-            return _not_found(exc.status_code)
+            return _error(self.policy, exc.status_code)
         if response.status_code in {200, 206}:
             response.headers["Content-Type"] = content_type(Path(path))
         cached = response.status_code in {200, 206, 304}
-        response.headers.update(_headers(_IMMUTABLE if cached else _REVALIDATE))
+        response.headers.update(_headers(self.policy, _IMMUTABLE if cached else _REVALIDATE))
         return response
 
 
@@ -218,7 +265,9 @@ def _files(directory: Path, dist: Path, *, recursive: bool) -> dict[str, Path]:
     return found
 
 
-def _file_endpoint(path: Path, cache_control: str) -> Callable[[Request], Awaitable[Response]]:
+def _file_endpoint(
+    path: Path, cache_control: str, policy: str
+) -> Callable[[Request], Awaitable[Response]]:
     """Make the endpoint that sends one fixed file of the build.
 
     Parameters
@@ -227,6 +276,8 @@ def _file_endpoint(path: Path, cache_control: str) -> Callable[[Request], Awaita
         The file; it never comes from the request.
     cache_control
         Its `Cache-Control` value.
+    policy
+        The build's content security policy.
 
     Returns
     -------
@@ -247,18 +298,24 @@ def _file_endpoint(path: Path, cache_control: str) -> Callable[[Request], Awaita
         Response
             The file, typed by `content_type`, with the interface's headers.
         """
-        return FileResponse(path, media_type=content_type(path), headers=_headers(cache_control))
+        return FileResponse(
+            path, media_type=content_type(path), headers=_headers(policy, cache_control)
+        )
 
     return endpoint
 
 
-def _licence_endpoint(licences: dict[str, Path]) -> Callable[[Request], Awaitable[Response]]:
+def _licence_endpoint(
+    licences: dict[str, Path], policy: str
+) -> Callable[[Request], Awaitable[Response]]:
     """Make the endpoint for `/licenses/...`, which looks a name up and never joins it.
 
     Parameters
     ----------
     licences
         The licence files by their path below `licenses/`.
+    policy
+        The build's content security policy.
 
     Returns
     -------
@@ -281,8 +338,10 @@ def _licence_endpoint(licences: dict[str, Path]) -> Callable[[Request], Awaitabl
         """
         path = licences.get(request.path_params["name"])
         if path is None:
-            return _not_found()
-        return FileResponse(path, media_type=content_type(path), headers=_headers(_REVALIDATE))
+            return _error(policy)
+        return FileResponse(
+            path, media_type=content_type(path), headers=_headers(policy, _REVALIDATE)
+        )
 
     return endpoint
 
@@ -290,11 +349,13 @@ def _licence_endpoint(licences: dict[str, Path]) -> Callable[[Request], Awaitabl
 class _AppPages(Route):
     """Every other GET or HEAD path: the app's page, so a deep link loads the app.
 
-    It never matches a path whose first segment is the API's, so an unknown API path or a
-    wrong method there answers exactly as it does without the interface.
+    It never matches a path whose first segment is the API's, in any letter case, so an
+    unknown API path or a wrong method there answers exactly as it does without the
+    interface. Nor a path with a `.` or `..` segment or a backslash, which no browser sends
+    and which could otherwise dress an API path up as a page (`/./api/...`).
     """
 
-    def __init__(self, index: Path, reserved: frozenset[str]) -> None:
+    def __init__(self, index: Path, reserved: frozenset[str], policy: str) -> None:
         """Answer with `index` everywhere outside `reserved`.
 
         Parameters
@@ -303,17 +364,20 @@ class _AppPages(Route):
             The build's `index.html`.
         reserved
             The first path segments that stay the API's (`reserved_segments`).
+        policy
+            The build's content security policy.
         """
         super().__init__(
             "/{path:path}",
-            _file_endpoint(index, _REVALIDATE),
+            _file_endpoint(index, _REVALIDATE, policy),
             methods=["GET", "HEAD"],
             include_in_schema=False,
         )
         self.reserved = reserved
+        self._folded = frozenset(segment.casefold() for segment in reserved)
 
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
-        """Match like `Route`, except never in a reserved first segment.
+        """Match like `Route`, except never in a reserved first segment or an odd path.
 
         Parameters
         ----------
@@ -323,15 +387,20 @@ class _AppPages(Route):
         Returns
         -------
         tuple of Match and dict
-            `Match.NONE` for a reserved first segment, otherwise what `Route` says.
+            `Match.NONE` for a reserved first segment, a dot segment or a backslash,
+            otherwise what `Route` says.
         """
-        path = scope.get("path", "")
-        root_path = scope.get("root_path", "")
-        if root_path and path.startswith(root_path):
-            path = path[len(root_path) :]
-        if path.lstrip("/").split("/", 1)[0] in self.reserved:
+        match, child = super().matches(scope)
+        # `Route` has already removed the `root_path` (at a segment boundary); no match, no path.
+        path = child.get("path_params", {}).get("path", "")
+        segments = path.split("/")
+        if (
+            segments[0].casefold() in self._folded
+            or "\\" in path
+            or any(segment in {".", ".."} for segment in segments)
+        ):
             return Match.NONE, {}
-        return super().matches(scope)
+        return match, child
 
 
 def reserved_segments(app: FastAPI) -> frozenset[str]:
@@ -347,12 +416,25 @@ def reserved_segments(app: FastAPI) -> frozenset[str]:
     frozenset of str
         The first segment of every route registered so far (`api`, `v1`, `healthz`, `docs`,
         `openapi.json`, ...), plus `api` itself.
+
+    Raises
+    ------
+    RuntimeError
+        When a route's first segment is a path parameter (`/{tenant}/...`): no segment could
+        keep the pages off it.
     """
     segments = {"api"}
     # Through FastAPI's iterator: an included router is one entry of `app.router.routes`
     # (`_IncludedRouter`, no `path`) whose routes only the iterator reaches.
     for route in iter_route_contexts(app.router.routes):
-        segments.add((route.path or "").lstrip("/").split("/", 1)[0])
+        path = route.path or ""
+        first = path.lstrip("/").split("/", 1)[0]
+        if first.startswith("{"):
+            raise RuntimeError(
+                f"The route {path} starts with a path parameter, so the web interface's pages "
+                "cannot be kept off it; give it a fixed first segment."
+            )
+        segments.add(first)
     segments.discard("")
     return frozenset(segments)
 
@@ -370,7 +452,15 @@ def mount_ui(app: FastAPI, dist: Path) -> None:
     Raises
     ------
     UiNotBuiltError
-        When `dist` has no `index.html`.
+        When `dist` has no `index.html` or no `assets/`, or its policy is missing or
+        malformed (`read_policy`).
+
+    Notes
+    -----
+    FastAPI 0.141's `app.frontend()` registers low-priority routes tried after every other
+    one, which would remove the "mount last" rule, but it is no drop-in: its fallback depends
+    on `Accept: text/html` and it has no reserved segments (a browser opening `/api/v1/nope`
+    would get the page). Revisit at the next FastAPI-related change.
     """
     index = dist / _INDEX
     if not index.is_file():
@@ -379,26 +469,34 @@ def mount_ui(app: FastAPI, dist: Path) -> None:
             "Install a released lakana-server, or build it from a source checkout with "
             "`npm --prefix ui ci && npm --prefix ui run build`; or set LAKANA_UI__ENABLED=false."
         )
+    if not (dist / "assets").is_dir():
+        raise UiNotBuiltError(
+            f"LAKANA_UI__ENABLED is true, but the built interface ({dist}) has no assets/ "
+            "directory: the build is incomplete. Rebuild it from a source checkout with "
+            "`npm --prefix ui ci && npm --prefix ui run build`, or install a released "
+            "lakana-server; or set LAKANA_UI__ENABLED=false."
+        )
+    policy = read_policy(dist)
     reserved = reserved_segments(app)
     routes = app.router.routes
-    routes.append(Mount("/assets", app=_Assets(directory=dist / "assets", check_dir=False)))
+    routes.append(Mount("/assets", app=_Assets(dist / "assets", policy)))
     routes.append(
         Route(
             "/licenses/{name:path}",
-            _licence_endpoint(_files(dist / "licenses", dist, recursive=True)),
+            _licence_endpoint(_files(dist / "licenses", dist, recursive=True), policy),
             methods=["GET", "HEAD"],
             include_in_schema=False,
         )
     )
     for name, path in sorted(_files(dist, dist, recursive=False).items()):
-        if name != _INDEX and name not in reserved and _ROOT_FILE_NAME.fullmatch(name):
+        if name not in {_INDEX, CSP_FILE, *reserved} and _ROOT_FILE_NAME.fullmatch(name):
             routes.append(
                 Route(
                     f"/{name}",
-                    _file_endpoint(path, _REVALIDATE),
+                    _file_endpoint(path, _REVALIDATE, policy),
                     methods=["GET", "HEAD"],
                     include_in_schema=False,
                 )
             )
-    routes.append(_AppPages(index, reserved))
+    routes.append(_AppPages(index, reserved, policy))
     logger.info("The web interface is served at /.")

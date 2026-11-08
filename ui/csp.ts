@@ -27,7 +27,8 @@ export const LIBRARY_STYLE_HASHES: readonly string[] = [
  * @remarks
  * Strict on purpose: only the interface's own origin, no inline script or style (except the
  * library style texts hashed above), no `data:` URL, no frames. A later need is added here with its reason. `vite preview` sends it, so the
- * Playwright tests run under it, and lakana-server sends the same value.
+ * Playwright tests run under it; the build writes it to `csp.txt` (`build/csp-file.ts`), which
+ * lakana-server reads and sends.
  */
 export const CONTENT_SECURITY_POLICY: string = [
   "default-src 'self'",

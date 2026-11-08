@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { cspFile } from "./build/csp-file.ts";
 import { browserTargets } from "./build/targets.ts";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
 import packageJson from "./package.json" with { type: "json" };
@@ -9,7 +10,8 @@ const targets = browserTargets(packageJson.browserslist);
 
 export default defineConfig({
   base: "/",
-  plugins: [react()],
+  // cspFile writes the policy into the build, for lakana-server to send (build/csp-file.ts).
+  plugins: [react(), cspFile()],
   build: {
     // Inside the server package: the wheel ships the interface (git-ignored, built in CI).
     outDir: "../packages/lakana-server/src/lakana_server/ui_dist",

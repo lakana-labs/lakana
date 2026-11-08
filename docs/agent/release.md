@@ -246,7 +246,8 @@ not reach it (a target's own `artifacts` would replace the shared one;
 
 - **`build`** sets up Node from `ui/.nvmrc` (the setup-node pin of `ci.yml`, no npm cache), runs
   `npm ci --ignore-scripts --prefix ui` and `npm --prefix ui run build`, then `uv build
-  --all-packages`, then fails unless `lakana_server/ui_dist/index.html` is in the server wheel.
+  --all-packages`, then fails unless `lakana_server/ui_dist/index.html` and `csp.txt` (the policy the server
+  sends; without it the server refuses to start with the interface on) are in the server wheel.
 - **`ui-browsers`** runs the interface's whole Playwright suite (`e2e:all`) in Chromium, Firefox
   and WebKit on the tag, read-only, before the approval; a pull request runs Chromium only (the
   `ui` job of `ci.yml`). A failure there stops the release before anything is published.

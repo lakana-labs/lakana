@@ -475,6 +475,9 @@ def test_the_release_builds_the_interface_before_the_wheels() -> None:
         _runs("unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/index.html'"),
         "the check of the wheel",
     )
+    assert _runs("unzip -l dist/lakana_server-*.whl | grep -q 'lakana_server/ui_dist/csp.txt'")(
+        steps[check]
+    ), "the wheel's check misses the policy file the server needs"
     assert checkout < node < install < build_ui < wheels < check
     assert "cache" not in steps[node]["with"]
 

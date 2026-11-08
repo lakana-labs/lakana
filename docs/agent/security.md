@@ -221,13 +221,27 @@ cookie set for another host.
   (`/catalog/sales.orders`: table names have dots, so there is no "has a dot, so it is a file"
   rule) loads the app. That fallback route never matches a path whose first segment belongs to
   the API (`reserved_segments`: the first segment of every route registered before it, plus
-  `api`), so an unknown `/api/v1/...` or `/v1/...` path stays the API's JSON 404 and a wrong
-  method its 405, never a page a client would parse as success. It is not in the OpenAPI
-  document. `test_turning_the_interface_on_changes_no_api_answer` compares status, type and body
-  with the interface on and off.
+  `api`, compared in any letter case), so an unknown `/api/v1/...` or `/v1/...` path stays the
+  API's JSON 404 and a wrong method its 405, never a page a client would parse as success. Nor
+  does it match a path with a `.` or `..` segment or a backslash (`/./api/...`), which no
+  browser sends. It is not in the OpenAPI document.
+  `test_turning_the_interface_on_changes_no_api_answer` compares status, type and body with the
+  interface on and off, and `test_an_unnormalised_api_path_answers_as_without_the_interface`
+  does so with raw ASGI paths a client would have normalised.
+- **Registered last.** `mount_ui` runs after every router, and the pages are the last route: a
+  route added later would be shadowed by them when the interface is on, and a route whose first
+  segment is a path parameter (`/{tenant}/...`) makes `reserved_segments` refuse to start. Both
+  are pinned by tests. FastAPI 0.141's `app.frontend()` (low-priority routes tried after all
+  others) would lift the ordering rule, but it is no drop-in: its fallback keys on
+  `Accept: text/html` and has no reserved segments, so a browser opening `/api/v1/nope` would get
+  the page. Revisit it at the next FastAPI-related change.
 - **Strict headers.** Every response of the interface (page, files, its 404s) carries
-  `Content-Security-Policy` (`ui.CONTENT_SECURITY_POLICY`, the same value as `ui/csp.ts`, which
-  `vite preview` and so the Playwright runs send; a test fails when they differ),
+  `Content-Security-Policy`, with one source: `ui/csp.ts`. The build writes it to `csp.txt`
+  (`ui/build/csp-file.ts`), the server reads that file at start-up (`ui.read_policy`) and sends
+  it, and `vite preview`, so every Playwright run, sends the same constant. The header therefore
+  always matches the build actually served. A missing policy file, or one the server could not
+  send as one header (empty, a line break or other control character, not ASCII, no
+  `default-src`), refuses the start. The other headers are
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY`.
   The policy allows only the own origin, no inline script, inline style only for the two
   hashed library texts, no `data:` URL, no frames. Content types come from a fixed table, not
@@ -236,8 +250,12 @@ cookie set for another host.
   the pull request that makes it.
 - **Caching.** Only `/assets/` (names carry a content hash) is `immutable` for a year; the page,
   the root files and the licences are `no-cache`, and a 404 is never cached for good.
-- **Fail at start.** Turned on without a built interface, the server refuses to start
-  (`UiNotBuiltError`) instead of serving 404s.
+- **Fail at start.** Turned on without a built interface (no `index.html`, no `assets/`, or a
+  missing or malformed `csp.txt`), the server refuses to start (`UiNotBuiltError`) instead of
+  serving errors.
+- **Not yet covered:** the Playwright suite runs against `vite preview`, not lakana-server, so
+  the server's header path is pinned by Python tests only. One smoke run against
+  `lakana server start` is due once the interface calls the API.
 
 ## Local files `lakana load` reads: a capped child process (#353)
 

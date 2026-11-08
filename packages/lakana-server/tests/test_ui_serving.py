@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import tomllib
 from collections.abc import Iterator
@@ -11,13 +12,14 @@ from typing import cast
 import httpx
 import pytest
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from fastapi.testclient import TestClient
+from starlette.types import ASGIApp, Message
 
 import lakana_server.ui
 from lakana_server.app import create_app
 from lakana_server.settings import Settings, UiConfig
-from lakana_server.ui import CONTENT_SECURITY_POLICY, UiNotBuiltError, reserved_segments
+from lakana_server.ui import CSP_FILE, UiNotBuiltError, reserved_segments
 from tests.conftest import AUTH_HEADER
 
 MARKER = "<!-- fixture-index -->"
@@ -33,8 +35,11 @@ INDEX = (
     f"</head><body>{MARKER}<div id=root></div></body></html>"
 )
 
+POLICY = "default-src 'self'; script-src 'self'; frame-ancestors 'none'; report-to fixture"
+"""The fixture build's policy: the server must send exactly what the build wrote."""
+
 UI_HEADERS = {
-    "content-security-policy": CONTENT_SECURITY_POLICY,
+    "content-security-policy": POLICY,
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "x-frame-options": "DENY",
@@ -59,6 +64,7 @@ def ui_dist(tmp_path: Path) -> Path:
     (dist / "assets").mkdir(parents=True)
     (dist / "licenses").mkdir()
     (dist / "index.html").write_text(INDEX)
+    (dist / CSP_FILE).write_text(POLICY)
     (dist / "assets" / "app-1a2b.js").write_text("console.log('app');")
     (dist / "assets" / "plex-9z8y.woff2").write_bytes(b"wOF2font")
     (dist / "theme-boot.js").write_text("document.documentElement.dataset.theme='light';")
@@ -266,7 +272,7 @@ def test_another_method_on_an_asset_is_refused(ui_client: TestClient) -> None:
     """Files are read-only: a POST is 405 with the interface's headers."""
     response = ui_client.post("/assets/app-1a2b.js")
     assert response.status_code == 405
-    assert response.text == "Method not allowed"
+    assert response.text == "Method Not Allowed"
     _assert_ui_headers(response)
 
 
@@ -449,9 +455,9 @@ def test_the_openapi_paths_are_the_same_with_the_interface(
         assert getattr(route, "include_in_schema", False) is False
 
 
-def test_reserved_segments_cover_the_api(ui_client: TestClient) -> None:
+def test_reserved_segments_cover_the_api(client: TestClient) -> None:
     """Every first segment the API uses is reserved, so the page never answers there."""
-    reserved = reserved_segments(cast(FastAPI, ui_client.app))
+    reserved = reserved_segments(cast(FastAPI, client.app))
     assert reserved >= {"api", "v1", "healthz", "readyz", "docs", "redoc", "openapi.json"}
 
 
@@ -476,3 +482,275 @@ def test_the_sdist_and_the_wheel_carry_the_built_interface() -> None:
     assert "src/lakana_server/ui_dist/**" in build["artifacts"]
     for target in ("wheel", "sdist"):
         assert "artifacts" not in build.get("targets", {}).get(target, {}), target
+
+
+def test_the_header_is_the_policy_the_build_wrote(
+    ui_dist: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One source: whatever `csp.txt` the build carries is the header, trailing newline aside."""
+    other = "default-src 'none'"
+    (ui_dist / CSP_FILE).write_text(other + "\n")
+    with _ui_client(settings, monkeypatch, ui_dist) as c:
+        for path in ("/", "/catalog", "/assets/app-1a2b.js", "/theme-boot.js", "/assets/nope"):
+            assert c.get(path).headers["content-security-policy"] == other, path
+
+
+def test_the_policy_file_is_not_a_page_of_its_own(ui_client: TestClient) -> None:
+    """`csp.txt` is read at start-up, not served: its path is an app path like any other."""
+    response = ui_client.get(f"/{CSP_FILE}")
+    assert response.status_code == 200
+    assert response.text == INDEX
+
+
+@pytest.mark.parametrize(
+    ("content", "cause"),
+    [
+        (None, "is missing"),
+        ("", "is empty"),
+        ("   \n", "is empty"),
+        ("default-src 'self'\nX-Injected: 1", "control character"),
+        ("default-src 'self'\r", "control character"),
+        ("default-src 'self'\x00", "control character"),
+        ("default-src 'sélf'", "not plain ASCII"),
+        ("script-src 'self'", "has no default-src"),
+    ],
+)
+def test_a_missing_or_malformed_policy_refuses_to_start(
+    ui_dist: Path,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    content: str | None,
+    cause: str,
+) -> None:
+    """Without a policy it can send as one header, the server stops and says how to fix it."""
+    if content is None:
+        (ui_dist / CSP_FILE).unlink()
+    else:
+        (ui_dist / CSP_FILE).write_bytes(content.encode())
+    with pytest.raises(UiNotBuiltError) as raised:
+        _ui_client(settings, monkeypatch, ui_dist)
+    message = str(raised.value)
+    assert cause in message
+    assert str(ui_dist / CSP_FILE) in message
+    assert "npm --prefix ui run build" in message
+    assert "LAKANA_UI__ENABLED=false" in message
+
+
+def test_a_policy_that_is_not_text_refuses_to_start(
+    ui_dist: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bytes that are not UTF-8 are a broken build, named as such."""
+    (ui_dist / CSP_FILE).write_bytes(b"default-src \xff")
+    with pytest.raises(UiNotBuiltError, match="not plain ASCII"):
+        _ui_client(settings, monkeypatch, ui_dist)
+
+
+def test_an_unreadable_policy_refuses_to_start(
+    ui_dist: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A policy path the server cannot read names the system's reason."""
+    (ui_dist / CSP_FILE).unlink()
+    (ui_dist / CSP_FILE).mkdir()
+    with pytest.raises(UiNotBuiltError, match="cannot be read"):
+        _ui_client(settings, monkeypatch, ui_dist)
+
+
+def test_a_build_without_assets_refuses_to_start(
+    ui_dist: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partial build would answer every script with an error; it stops the start instead."""
+    for path in (ui_dist / "assets").iterdir():
+        path.unlink()
+    (ui_dist / "assets").rmdir()
+    with pytest.raises(UiNotBuiltError, match=r"has no assets/ directory"):
+        _ui_client(settings, monkeypatch, ui_dist)
+
+
+def test_the_pages_are_the_last_route_and_every_api_segment_is_reserved(
+    ui_client: TestClient, client: TestClient
+) -> None:
+    """Nothing registered after the interface, and every API route is outside its pages.
+
+    A route added after `mount_ui` would be shadowed by the pages; a path-parameter first
+    segment could not be reserved at all.
+    """
+    routes = cast(FastAPI, ui_client.app).router.routes
+    pages = routes[-1]
+    assert isinstance(pages, lakana_server.ui._AppPages)
+    api = cast(FastAPI, client.app)
+    firsts = {
+        (route.path or "").lstrip("/").split("/", 1)[0]
+        for route in iter_route_contexts(api.router.routes)
+    }
+    assert firsts - {""} <= pages.reserved
+    assert not any(segment.startswith("{") for segment in pages.reserved)
+
+
+def test_an_api_route_with_a_parameter_first_cannot_be_served_beside() -> None:
+    """A route such as `/{tenant}/...` would swallow app paths; mounting refuses it."""
+    app = FastAPI()
+
+    @app.get("/{tenant}/things")
+    def things(tenant: str) -> str:
+        """Stand for an API route whose first segment is a parameter.
+
+        Parameters
+        ----------
+        tenant
+            The parameter.
+
+        Returns
+        -------
+        str
+            The parameter.
+        """
+        return tenant
+
+    with pytest.raises(RuntimeError, match=r"/\{tenant\}/things"):
+        reserved_segments(app)
+
+
+def _raw_get(app: object, path: str, root_path: str = "") -> tuple[int, dict[str, str], bytes]:
+    """Send one GET with a path exactly as given, as a server delivers it after unquoting.
+
+    A client such as httpx removes `.` and `..` segments before sending; this does not.
+
+    Parameters
+    ----------
+    app
+        The started ASGI application.
+    path
+        The decoded request path.
+    root_path
+        The ASGI `root_path`.
+
+    Returns
+    -------
+    tuple of int, dict of str to str, and bytes
+        The status, the headers (lower-case names) and the body.
+    """
+    sent: list[Message] = []
+
+    async def receive() -> Message:  # ruff: ignore[unused-async]
+        """Hand over an empty request body.
+
+        Returns
+        -------
+        dict
+            The one `http.request` message.
+        """
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:  # ruff: ignore[unused-async]
+        """Keep a message the application sends.
+
+        Parameters
+        ----------
+        message
+            The ASGI message.
+        """
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode("utf-8", "surrogateescape"),
+        "root_path": root_path,
+        "query_string": b"",
+        "headers": [(b"host", b"testserver")],
+        "client": ("127.0.0.1", 50000),
+        "server": ("testserver", 80),
+    }
+
+    async def call() -> None:
+        """Run the application once on this request."""
+        await cast(ASGIApp, app)(scope, receive, send)
+
+    asyncio.run(call())
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    headers = {k.decode().lower(): v.decode() for k, v in start["headers"]}
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    return start["status"], headers, body
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/assets/../index.html",
+        "/assets/../../secret.txt",
+        "/assets/../../ui.py",
+        "/assets/..\\..\\secret.txt",
+        "/assets//etc/passwd",
+        "/assets/app-1a2b.js\x00",
+        "/licenses/../../secret.txt",
+        "/licenses/../index.html",
+        "/../secret.txt",
+        "/../../etc/passwd",
+        "/.\\..\\secret.txt",
+    ],
+)
+def test_a_raw_path_outside_the_build_is_refused(ui_client: TestClient, path: str) -> None:
+    """Literal dot segments, which a client would remove, reach no file outside the build."""
+    status, headers, body = _raw_get(ui_client.app, path)
+    assert SECRET.encode() not in body
+    assert b"root:" not in body
+    assert status == 404, (status, body[:60])
+    assert MARKER.encode() not in body
+    assert headers.get("content-security-policy") in {POLICY, None}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/./api/v1/nope",
+        "/API/v1/nope",
+        "/Api/V1/whoami",
+        "/api\\v1/nope",
+        "/../api/v1/nope",
+        "/V1/nope",
+        "/HEALTHZ",
+        "/catalog/../api/v1/nope",
+    ],
+)
+def test_an_unnormalised_api_path_answers_as_without_the_interface(
+    client: TestClient, ui_client: TestClient, path: str
+) -> None:
+    """A path a client would not send still gets the API's answer, never the page."""
+    off = _raw_get(client.app, path)
+    on = _raw_get(ui_client.app, path)
+    assert (on[0], on[1].get("content-type"), on[2]) == (
+        off[0],
+        off[1].get("content-type"),
+        off[2],
+    )
+    assert MARKER.encode() not in on[2]
+
+
+def test_a_prefix_is_stripped_only_at_a_segment_boundary(ui_client: TestClient) -> None:
+    """Behind `root_path="/lakana"`, `/lakana/api/...` stays the API's; app paths are pages."""
+    status, _, body = _raw_get(ui_client.app, "/lakana/api/v1/nope", root_path="/lakana")
+    assert status == 404
+    assert MARKER.encode() not in body
+    status, _, body = _raw_get(ui_client.app, "/lakana/catalog", root_path="/lakana")
+    assert status == 200
+    assert MARKER.encode() in body
+
+
+@pytest.mark.parametrize(
+    ("method", "status", "text"), [("POST", 405, "Method Not Allowed"), ("GET", 404, "Not Found")]
+)
+def test_an_asset_error_names_its_own_status(
+    ui_client: TestClient, method: str, status: int, text: str
+) -> None:
+    """The text is the status's own phrase, and a 405 says which methods work."""
+    response = ui_client.request(method, "/assets/app-1a2b.js" if status == 405 else "/assets/x")
+    assert response.status_code == status
+    assert response.text == text
+    if status == 405:
+        assert response.headers["allow"] == "GET, HEAD"
+    else:
+        assert "allow" not in response.headers

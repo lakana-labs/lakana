@@ -165,42 +165,18 @@ def test_every_cli_line_in_the_shell_exists() -> None:
         )
 
 
-def _csp_from_ts() -> str:
-    """Evaluate the policy ``ui/csp.ts`` exports, from its source text.
+def test_the_build_carries_the_policy_the_server_sends() -> None:
+    """One source for the policy: ``ui/csp.ts``, which the build writes to ``csp.txt``.
 
-    Returns
-    -------
-    str
-        The value of ``CONTENT_SECURITY_POLICY`` as the browser receives it.
+    ``vite preview`` sends the same constant, and lakana-server reads the file at start-up
+    (``lakana_server.ui.CSP_FILE``), so the three never differ.
     """
-    source = (UI / "csp.ts").read_text()
-    hashes_block = re.search(r"LIBRARY_STYLE_HASHES[^=]*=\s*\[(.*?)\];", source, re.S)
-    assert hashes_block, "LIBRARY_STYLE_HASHES not found in ui/csp.ts"
-    hashes = re.findall(r'^\s*"([^"]*)",', hashes_block.group(1), re.M)
-    assert hashes, "no hash in LIBRARY_STYLE_HASHES"
-    policy_block = re.search(
-        r"CONTENT_SECURITY_POLICY[^=]*=\s*\[(.*?)\]\.join\(\"; \"\);", source, re.S
-    )
-    assert policy_block, "CONTENT_SECURITY_POLICY is not a list joined with '; ' in ui/csp.ts"
-    parts = []
-    for line in policy_block.group(1).splitlines():
-        line = line.strip()
-        if not line or line.startswith("//"):
-            continue
-        literal = re.fullmatch(r'"([^"]*)",|`([^`]*)`,', line)
-        assert literal, f"cannot read this line of ui/csp.ts: {line!r}"
-        text = literal.group(1) if literal.group(1) is not None else literal.group(2)
-        text = text.replace('${LIBRARY_STYLE_HASHES.join(" ")}', " ".join(hashes))
-        assert "${" not in text, f"an expression this test does not know: {line!r}"
-        parts.append(text)
-    return "; ".join(parts)
+    from lakana_server.ui import CSP_FILE
 
-
-def test_the_server_sends_the_ui_s_csp() -> None:
-    """The server's header and ``vite preview``'s (the Playwright run) are one policy."""
-    from lakana_server.ui import CONTENT_SECURITY_POLICY
-
-    assert _csp_from_ts() == CONTENT_SECURITY_POLICY
+    config = (UI / "vite.config.ts").read_text()
+    assert 'from "./build/csp-file.ts"' in config
+    assert re.search(r"plugins:\s*\[[^\]]*\bcspFile\(\)", config), "cspFile() not in plugins"
+    assert f'CSP_FILE = "{CSP_FILE}"' in (UI / "build/csp-file.ts").read_text()
 
 
 def test_no_area_path_collides_with_a_server_path() -> None:
