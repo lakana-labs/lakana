@@ -197,7 +197,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         # Its own bucket too: the open passkey sign-in options route, per client address.
         app.state.passkey_options_limiter = AuthAuditLimiter(
-            resolved_settings.auth_audit.per_ip_per_minute
+            resolved_settings.ui.passkey_options_per_ip_per_minute
         )
         # One verifier per process: it holds the issuers' key cache.
         app.state.ci_oidc_verifier = IdTokenVerifier(resolved_settings.ci_oidc)

@@ -92,6 +92,13 @@ CHALLENGE_LIFETIME = timedelta(minutes=5)
 FIRST_PASSKEY_WINDOW = timedelta(minutes=15)
 """How long after a link sign-in the first passkey may be added without a touch."""
 
+MAX_OPEN_SIGN_IN_CHALLENGES = 1000
+"""How many unanswered sign-in challenges may be open at once; past it the oldest go first.
+
+Evicting rather than refusing: a flood of anonymous option calls only shortens how long a
+challenge stays answerable (the cap divided by the flood's rate), so a person who touches their
+passkey within seconds still signs in; refusing new challenges would lock everyone out."""
+
 OPEN_BODY_LIMIT = 16 * 1024
 """The largest body the two open passkey routes read, like the OIDC exchange."""
 
@@ -204,6 +211,9 @@ class PasskeyService:
         The name authenticators show.
     clock
         The clock; `utc_now` by default.
+    max_open_sign_in
+        How many unanswered sign-in challenges may be open at once
+        (`MAX_OPEN_SIGN_IN_CHALLENGES`); a new one past it removes the oldest.
     """
 
     def __init__(
@@ -217,6 +227,7 @@ class PasskeyService:
         origin: str,
         rp_name: str = "Lakana",
         clock: Callable[[], datetime] = utc_now,
+        max_open_sign_in: int = MAX_OPEN_SIGN_IN_CHALLENGES,
     ) -> None:
         self._session = session
         self._authz = authz
@@ -226,6 +237,7 @@ class PasskeyService:
         self._origin = origin
         self._rp_name = rp_name
         self._clock = clock
+        self._max_open_sign_in = max_open_sign_in
 
     # -- shared steps -----------------------------------------------------------------------
 
@@ -302,6 +314,9 @@ class PasskeyService:
     ) -> WebauthnChallenge:
         """Store a fresh challenge, deleting every expired one in the same transaction.
 
+        A sign-in challenge (unbound) past `max_open_sign_in` open ones removes the oldest open
+        sign-in challenges; challenges bound to a session are never removed this way.
+
         Parameters
         ----------
         purpose
@@ -322,6 +337,22 @@ class PasskeyService:
             .where(WebauthnChallenge.expires_at <= now)
             .execution_options(synchronize_session=False)
         )
+        if session_id is None:
+            unbound = (
+                select(WebauthnChallenge.id)
+                # Used ones count too: a garbage answer uses a challenge up, and must not
+                # take it out of the cap.
+                .where(WebauthnChallenge.session_id.is_(None))
+                .order_by(WebauthnChallenge.created_at.desc(), WebauthnChallenge.id)
+                .offset(self._max_open_sign_in - 1)
+            )
+            evicted = list(self._session.execute(unbound).scalars())
+            if evicted:
+                self._session.execute(
+                    delete(WebauthnChallenge)
+                    .where(WebauthnChallenge.id.in_(evicted))
+                    .execution_options(synchronize_session=False)
+                )
         row = WebauthnChallenge(
             id=uuid.uuid4(),
             challenge=os.urandom(_CHALLENGE_BYTES),

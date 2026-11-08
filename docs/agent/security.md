@@ -466,8 +466,16 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   minutes (`CHALLENGE_LIFETIME`, expired at `expires_at <= now`). Consumption is one conditional
   update committed *before* the answer is checked, so a failed answer burns it. Every insert
   deletes the expired rows in its own transaction, so anonymous option calls cannot grow the
-  table; `POST /api/v1/sign-in/passkey/options` is limited per client address with its own
-  `AuthAuditLimiter` bucket at `LAKANA_AUTH_AUDIT__PER_IP_PER_MINUTE` (429, `Retry-After: 60`).
+  table, and at most `MAX_OPEN_SIGN_IN_CHALLENGES` (1,000) unbound sign-in rows exist at once:
+  a new one past the cap deletes the oldest (used ones count too, since a garbage answer uses a
+  challenge up). Evicting, not refusing, because a refusal at the cap would lock every person
+  out for 5 minutes, while eviction only shortens a challenge's life to cap / flood rate: a
+  flood needs well over 1,000 requests in the seconds a touch takes to beat a real person.
+  `POST /api/v1/sign-in/passkey/options` is also limited per client address (IPv6: per /64,
+  `client_bucket`) by its own setting `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` (default
+  60; 429, `Retry-After: 60`). Everyone behind one NAT shares a bucket, and behind a reverse
+  proxy without `LAKANA_TRUSTED_PROXIES` every browser is the proxy's address, so one client
+  could use up the limit for all: the settings reference says so.
   The two open routes read at most 16 KiB (`OPEN_BODY_LIMIT`, checked before FastAPI decodes
   the body) and are Host- and Origin-checked by `BrowserGuard`.
 - **Library workarounds.** `py_webauthn` does not compare `userHandle`: the service requires it

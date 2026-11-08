@@ -81,8 +81,7 @@ class AuthAuditConfig(BaseModel):
     per_ip_per_minute
         Failed sign-ins that the audit log records per client per minute (default 10). Requests
         past the rate are still refused with 401, but not each recorded, so repeated attempts
-        cannot flood the log. The same rate, counted on its own, limits how often one client
-        may start a passkey sign-in; past it the server answers 429 "wait a minute".
+        cannot flood the log.
     """
 
     per_ip_per_minute: int = Field(default=10, gt=0)
@@ -313,12 +312,20 @@ class UiConfig(BaseModel):
         token, without a passkey touch (default false). `lakana server start --local` sets it for
         one person's own machine; it needs `LAKANA_HOST` on a loopback address and the public
         address on `localhost`, or the server does not start. On a team server leave it unset.
+    passkey_options_per_ip_per_minute
+        How often one client address may start a passkey sign-in per minute (default 60; past
+        it the server answers 429 "wait a minute"). IPv6 addresses count per /64 network.
+        Everyone behind one NAT shares an address, so a large office may need more; behind a
+        reverse proxy set `LAKANA_TRUSTED_PROXIES`, or every browser counts as the proxy and one
+        client can use up the limit for everyone. However many clients ask, at most 1,000
+        sign-in challenges are open at once; past that the oldest unanswered one goes first.
     """
 
     enabled: bool = False
     public_url: str | None = None
     allowed_hosts: list[str] = []
     local_sign_in: bool = False
+    passkey_options_per_ip_per_minute: int = Field(default=60, gt=0)
 
     @field_validator("public_url")
     @classmethod
@@ -498,7 +505,9 @@ class Settings(BaseSettings):
         `["10.0.0.2"]` or `["10.1.0.0/16"]`. Empty (the default): no forwarded header is
         believed, also not from `127.0.0.1`, and the client address in audit events and rate
         limits is the TCP peer's. Behind a reverse proxy, list it here, or every request looks
-        as if it came from the proxy. No wildcard and no network of every address (`0.0.0.0/0`,
+        as if it came from the proxy, and one client can use up a per-address limit, such as
+        passkey sign-in's (`LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE`), for everyone. No
+        wildcard and no network of every address (`0.0.0.0/0`,
         `::/0`): a client could then claim any address.
     repo_roots
         Absolute directories that local repositories must lie under, as a JSON list, for example

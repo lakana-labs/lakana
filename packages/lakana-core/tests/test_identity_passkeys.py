@@ -33,6 +33,7 @@ from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.passkeys import (
     CHALLENGE_LIFETIME,
     FIRST_PASSKEY_WINDOW,
+    MAX_OPEN_SIGN_IN_CHALLENGES,
     PasskeyService,
 )
 from lakana_core.identity.principals import PrincipalService
@@ -539,6 +540,32 @@ def test_expired_challenges_are_purged_on_insert(world: World) -> None:
     world.clock.now += CHALLENGE_LIFETIME
     world.passkeys.sign_in_options()
     assert world.session.scalar(select(func.count()).select_from(WebauthnChallenge)) == 1
+
+
+def test_open_sign_in_challenges_are_capped_oldest_first(world: World, alice: Signed) -> None:
+    """Past the cap the oldest open sign-in challenge goes; newer ones and bound ones stay.
+
+    Evicting, not refusing: a flood can shorten how long a challenge stays open, but a person
+    who answers within seconds still signs in, where a refusal would lock everyone out.
+    """
+    capped = PasskeyService(
+        world.session,
+        world.authz,
+        world.sessions,
+        NoticeService(world.session, clock=world.clock),
+        rp_id=RP_ID,
+        origin=ORIGIN,
+        clock=world.clock,
+        max_open_sign_in=3,
+    )
+    bound, _ = capped.registration_options(world.ref(alice))
+    ceremonies = []
+    for _ in range(4):
+        world.clock.now += timedelta(seconds=1)
+        ceremonies.append(capped.sign_in_options()[0])
+    open_ids = set(world.session.execute(select(WebauthnChallenge.id)).scalars())
+    assert open_ids == {bound, *ceremonies[1:]}
+    assert MAX_OPEN_SIGN_IN_CHALLENGES == 1000
 
 
 def test_sign_in_is_usernameless(world: World) -> None:

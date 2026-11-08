@@ -20,6 +20,7 @@ from scripts.test_support.webauthn_test_helpers import SoftAuthenticator
 
 import lakana_server.ui
 from lakana_core.config import DatabaseConfig, SecretsConfig
+from lakana_server.api.platform.sign_in import client_bucket
 from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
 from lakana_server.deps import PASSKEY_FIRST_ROUTES
@@ -302,6 +303,35 @@ def test_options_route_is_limited_per_client(client: TestClient) -> None:
     assert r.status_code == 429
     assert r.json()["detail"] == "Too many sign-in attempts from this address; wait a minute."
     assert r.headers["retry-after"] == "60"
+
+
+def test_the_options_limit_is_its_own_setting(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE`, 60 by default, apart from the audit rate."""
+    assert UiConfig().passkey_options_per_ip_per_minute == 60
+    monkeypatch.setattr(lakana_server.ui, "UI_DIST", write_ui_dist(tmp_path))
+    configured = settings.model_copy(
+        update={"ui": UiConfig(enabled=True, passkey_options_per_ip_per_minute=3)}
+    )
+    configured.auth_audit.per_ip_per_minute = 1
+    with TestClient(create_app(configured), base_url=PUBLIC, headers={"Origin": PUBLIC}) as c:
+        codes = [c.post("/api/v1/sign-in/passkey/options").status_code for _ in range(4)]
+    assert codes == [200, 200, 200, 429]
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "same"),
+    [
+        ("2001:db8:1:2::1", "2001:db8:1:2:ffff::9", True),
+        ("2001:db8:1:2::1", "2001:db8:1:3::1", False),
+        ("192.0.2.1", "192.0.2.2", False),
+        ("testclient", "testclient", True),
+    ],
+)
+def test_an_ipv6_client_is_limited_by_its_64(first: str, second: str, same: bool) -> None:
+    """One /64 is one bucket: an attacker cannot rotate through its addresses."""
+    assert (client_bucket(first) == client_bucket(second)) is same
 
 
 def test_no_log_record_carries_the_credential_or_the_challenge(
