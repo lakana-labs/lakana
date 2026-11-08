@@ -132,6 +132,15 @@ const PROBES = [
     expect: ["no-restricted-properties", "no-restricted-properties"],
   },
   {
+    gate: "ESLint Node globals in browser code",
+    files: {
+      "src/shell/node.ts":
+        'export const mode = process.env["NODE_ENV"];\nexport const bytes = Buffer.from("a");\n',
+    },
+    run: npmRun("lint"),
+    expect: ["no-restricted-globals", "no-restricted-globals"],
+  },
+  {
     gate: "ESLint HTTP client packages",
     files: { "src/shell/client.ts": 'import axios from "axios";\n\nexport const probe = axios;\n' },
     run: npmRun("lint"),

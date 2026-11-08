@@ -12,6 +12,7 @@ import "./styles/tokens.css";
 import "./styles/fonts.css";
 import "./styles/base.css";
 import "./status/status.css";
+import "./shell/shell.css";
 
 const root = document.getElementById("root");
 if (root === null) {

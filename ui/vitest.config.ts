@@ -11,8 +11,10 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      // main.tsx only mounts <App/>, like `if __name__ == "__main__"` in Python.
-      exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/main.tsx"],
+      // main.tsx only mounts <App/>, like `if __name__ == "__main__"` in Python; App.tsx is
+      // only the browser router's wiring (the routes are tested through appRoutes, the wiring
+      // by the Playwright tests).
+      exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/main.tsx", "src/App.tsx"],
       reporter: ["text-summary", "json-summary"],
       thresholds: { lines: 90, branches: 90, functions: 90, statements: 90 },
     },

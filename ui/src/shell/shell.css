@@ -1,0 +1,332 @@
+/* The shell: sidebar, working area, user menu and command palette; values come from tokens.css. */
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.skip-link {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 2;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--color-float);
+  box-shadow: var(--shadow-float);
+  color: var(--color-accent);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+/* Sidebar */
+.sidebar {
+  position: sticky;
+  top: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  height: 100vh;
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.sidebar-product {
+  margin: 0;
+  padding: 0 var(--space-3);
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.sidebar-search,
+.user-menu-button,
+.button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sidebar-search {
+  justify-content: space-between;
+  width: 100%;
+  background: var(--color-ground);
+  color: var(--color-text-muted);
+}
+
+.sidebar-search kbd {
+  font-family: var(--font-sans);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  color: var(--color-text-faint);
+}
+
+.sidebar-search:hover,
+.user-menu-button[data-hovered],
+.button[data-hovered] {
+  background: var(--color-sunk);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-5);
+  overflow-y: auto;
+}
+
+.sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sidebar-link {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--row-height) - 8px);
+  padding: 0 var(--space-3);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: background var(--motion-fast) var(--ease);
+}
+
+.sidebar-link[data-hovered] {
+  background: var(--color-sunk);
+  color: var(--color-text);
+}
+
+/* The current area: an accent bar and a heavier weight, never colour alone. */
+.sidebar-link[aria-current="page"] {
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-bg);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+/* User menu */
+.user-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.user-menu-button {
+  width: 100%;
+}
+
+.user-menu-preview {
+  margin: 0;
+  padding: 0 var(--space-1);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  font-weight: 400;
+  color: var(--color-text-faint);
+}
+
+/* Floating surfaces: the user menu and the palette. In dark, lighter instead of shadowed. */
+.float {
+  box-sizing: border-box;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-float);
+  box-shadow: var(--shadow-float);
+  color: var(--color-text);
+}
+
+.menu-title {
+  margin: 0;
+  padding: var(--space-2) var(--space-4) 0;
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  font-weight: var(--type-label-weight);
+  color: var(--color-text-muted);
+}
+
+.menu {
+  padding: var(--space-1);
+  outline: none;
+}
+
+.menu-section + .menu-section {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-line);
+}
+
+.menu-header {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  font-weight: var(--type-label-weight);
+  color: var(--color-text-muted);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  cursor: default;
+  outline: none;
+}
+
+.menu-item[data-focused] {
+  background: var(--color-accent-bg);
+}
+
+.menu-item[data-focus-visible] {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* A selected choice carries a check mark, so the state is not colour alone. */
+.menu-check {
+  flex: none;
+  width: 16px;
+  text-align: center;
+}
+
+.menu-item[aria-checked="true"] .menu-check::before {
+  content: "✓";
+  color: var(--color-accent);
+}
+
+/* Command palette */
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: var(--space-8) var(--space-4) var(--space-4) calc(var(--sidebar-width) + var(--space-6));
+  background: rgba(20, 36, 46, 0.24);
+}
+
+.palette {
+  width: min(560px, 100%);
+}
+
+.palette-dialog {
+  outline: none;
+}
+
+.palette-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--row-height);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--color-line);
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  outline: none;
+}
+
+.palette-input::placeholder {
+  color: var(--color-text-faint);
+}
+
+.palette-field[data-focus-visible] .palette-input,
+.palette-input[data-focused] {
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.palette-menu {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.palette-empty {
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+/* Working area */
+.shell-main {
+  min-width: 0;
+  padding: var(--space-6) var(--space-6) var(--space-7);
+}
+
+/* The skip link's target is focused by script; its own outline would frame the whole page. */
+.shell-main:focus {
+  outline: none;
+}
+
+.page {
+  max-width: 720px;
+}
+
+.page-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-title-size);
+  line-height: var(--type-title-line);
+  font-weight: var(--type-title-weight);
+}
+
+.page-purpose {
+  margin: 0 0 var(--space-5);
+  color: var(--color-text-muted);
+}
+
+.coming-soon p {
+  margin: 0 0 var(--space-2);
+}
+
+.coming-soon-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.coming-soon-line code {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-sunk);
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  line-height: var(--type-code-line);
+  overflow-wrap: anywhere;
+}
+
+.coming-soon-hint {
+  min-height: var(--type-body-line);
+  color: var(--color-text-muted);
+}
+
+/* React Aria's pressable rule (it would add it as an inline <style>; see index.html). */
+@layer {
+  [data-react-aria-pressable] {
+    touch-action: pan-x pan-y pinch-zoom;
+  }
+}

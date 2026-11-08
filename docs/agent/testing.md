@@ -1122,7 +1122,7 @@ first failure; CI's `ui` job runs them one step each.
 
 | Gate | Command | Where it runs |
 |---|---|---|
-| ESLint (strict type-checked, react-hooks, jsx-a11y strict, TSDoc, the server-only-through-`src/api/` rule), no warning allowed | `npm --prefix ui run lint` | `check`, CI `ui` |
+| ESLint (strict type-checked, react-hooks, jsx-a11y strict, TSDoc, the server-only-through-`src/api/` rule, no `process`/`Buffer` in `src/`), no warning allowed | `npm --prefix ui run lint` | `check`, CI `ui` |
 | Prettier | `npm --prefix ui run format:check` (`format` rewrites) | `check`, CI `ui` |
 | tsc (strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`) | `npm --prefix ui run typecheck` | `check`, CI `ui` |
 | dependency-cruiser (no cycles, no orphans, `src/api/` a leaf, no dev dependency or test in shipped code) | `npm --prefix ui run depcruise` | `check`, CI `ui` |
@@ -1131,7 +1131,7 @@ first failure; CI's `ui` job runs them one step each.
 | build | `npm --prefix ui run build` | `check`, CI `ui` |
 | size-limit (gzipped JavaScript; a raised limit needs a sentence in its pull request) | `npm --prefix ui run size` | `check`, CI `ui` |
 | UI coverage ratchet | `python3 -m scripts.ui_coverage_ratchet` | CI `ui` |
-| Playwright smoke test on Chromium, axe (WCAG 2.2 AA tags), no request to the API, no console error | `npm --prefix ui run e2e:smoke` | locally after `check`, CI `ui` |
+| Playwright on Chromium (`e2e/shell.spec.ts` in light and dark, roomy and compact: axe with WCAG 2.2 AA tags on every area, the menu and the palette, no request to the API, no console error, deep link styled, theme without a flash, no horizontal scroll; `e2e/glyphs.spec.ts`) | `npm --prefix ui run e2e:smoke` | locally after `check`, CI `ui` |
 | every gate fails on a violation | `npm --prefix ui run prove-gates` | CI `ui` |
 | copied code (jscpd + ratchet) | see "The duplication ratchet" | CI `lint` |
 | npm audit and osv-scanner over `ui/` and `tools/jscpd` locks, level `low` | `npm audit --audit-level=low --prefix ui` | `security.yml` `npm audit` |
@@ -1146,7 +1146,7 @@ first failure; CI's `ui` job runs them one step each.
   directory (`$GATE_PROBE_DIR`, default `~/.cache/lakana-ui-gate-probe`; CI uses
   `$RUNNER_TEMP/gate-probe`), writes one violation per gate (an unsafe `any`, a conditional hook,
   an image without alt text, an undocumented export, a `fetch`, `window.fetch`,
-  `navigator.sendBeacon` or `axios` outside `src/api/`, bad formatting, three type errors, an import out of `src/api/` and a cycle, an unused file, an
+  `navigator.sendBeacon` or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type errors, an import out of `src/api/` and a cycle, an unused file, an
   untested branch, a size limit of 1 B, an 80-token copy), runs the gate and requires it to fail
   with the expected message; one probe checks the other way round, that a `fetch` inside
   `src/api/` is accepted. It prints one line per probe and fails naming every gate that got its

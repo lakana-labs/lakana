@@ -10,6 +10,19 @@ import tseslint from "typescript-eslint";
 const SERVER_ONLY_THROUGH_API =
   "Only ui/src/api/ talks to the server (the REST API is the only way in)";
 
+const NETWORK_GLOBALS = ["fetch", "XMLHttpRequest", "WebSocket", "EventSource"].map((name) => ({
+  name,
+  message: SERVER_ONLY_THROUGH_API,
+}));
+
+// The config files and scripts run in Node, so `globals.node` stays on; ui/src/ runs in the
+// browser, where these do not exist (Vite does not polyfill them).
+const NODE_GLOBALS = ["process", "Buffer"].map((name) => ({
+  name,
+  message:
+    "ui/src/ runs in the browser, which has no Node globals; use import.meta.env or Uint8Array.",
+}));
+
 // The TSDoc tags jsdoc does not know by itself.
 const TSDOC_TAGS = [
   "alpha",
@@ -79,13 +92,7 @@ export default defineConfig(
   },
   {
     rules: {
-      "no-restricted-globals": [
-        "error",
-        ...["fetch", "XMLHttpRequest", "WebSocket", "EventSource"].map((name) => ({
-          name,
-          message: SERVER_ONLY_THROUGH_API,
-        })),
-      ],
+      "no-restricted-globals": ["error", ...NETWORK_GLOBALS],
       "no-restricted-properties": [
         "error",
         { object: "window", property: "fetch", message: SERVER_ONLY_THROUGH_API },
@@ -104,8 +111,15 @@ export default defineConfig(
     },
   },
   {
+    files: ["src/**"],
+    rules: { "no-restricted-globals": ["error", ...NETWORK_GLOBALS, ...NODE_GLOBALS] },
+  },
+  {
     files: ["src/api/**"],
-    rules: { "no-restricted-globals": "off", "no-restricted-properties": "off" },
+    rules: {
+      "no-restricted-globals": ["error", ...NODE_GLOBALS],
+      "no-restricted-properties": "off",
+    },
   },
   {
     // eslint-plugin-jsx-a11y ships no types, so its config is `any` in this one file.

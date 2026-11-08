@@ -138,3 +138,28 @@ def test_only_complete_plex_files_are_used() -> None:
     assert len(urls) == 3
     for url in urls:
         assert "fonts/complete/woff2/" in url, url
+
+
+def test_every_cli_line_in_the_shell_exists() -> None:
+    """Each "use the command line" line of the shell names a command the CLI reference has.
+
+    A subcommand (``lakana runs list``) needs its ``###`` heading; a command whose next word is
+    an argument (``lakana search <words>``, ``lakana sql "select 1"``) needs its ``##`` heading.
+    """
+    areas = (UI / "src/shell/areas.ts").read_text()
+    lines = [line for _, line in re.findall(r"""cli:\s*(["'])(.*?)\1""", areas) if line]
+    assert len(lines) >= 7, lines
+    headings = set(
+        re.findall(
+            r"^#{2,3} `(lakana [a-z -]+)`$", (ROOT / "docs/site/reference/cli.md").read_text(), re.M
+        )
+    )
+    for line in lines:
+        words = line.split()
+        assert words[0] == "lakana", line
+        command = " ".join(
+            words[:3] if len(words) > 2 and re.fullmatch(r"[a-z][a-z-]*", words[2]) else words[:2]
+        )
+        assert command in headings, (
+            f"{line!r}: no heading for `{command}` in docs/site/reference/cli.md"
+        )

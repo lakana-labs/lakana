@@ -1,0 +1,103 @@
+import { screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import { renderShell } from "../test/render";
+
+const shippedAreas = [
+  ["Home", "/"],
+  ["Catalog", "/catalog"],
+  ["Queries", "/queries"],
+  ["Jobs", "/jobs"],
+  ["Connections", "/connections"],
+  ["Access", "/access"],
+  ["Settings", "/settings"],
+] as const;
+
+/**
+ * The links that mark themselves as the current page.
+ *
+ * @returns Their names.
+ */
+function currentLinks(): string[] {
+  return screen
+    .getAllByRole("link")
+    .filter((link) => link.getAttribute("aria-current") === "page")
+    .map((link) => link.textContent);
+}
+
+describe("appRoutes", () => {
+  it.each(shippedAreas)("%s has its own URL, heading and title", async (name, path) => {
+    renderShell(path);
+
+    expect(await screen.findByRole("heading", { level: 1, name })).toBeInTheDocument();
+    expect(document.title).toBe(`${name} · Lakana`);
+    expect(currentLinks()).toEqual([name]);
+  });
+
+  it("an unknown path shows the not-found state inside the shell", async () => {
+    const { user, router } = renderShell("/catalog/does/not/exist");
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "This page does not exist" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Check the address, or start again from Home.")).toBeInTheDocument();
+    expect(screen.getByRole("navigation")).toBeInTheDocument();
+    expect(document.title).toBe("This page does not exist · Lakana");
+
+    await user.click(screen.getByRole("link", { name: "Go to Home" }));
+    expect(router.state.location.pathname).toBe("/");
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+  });
+
+  it("/experiments is not found", async () => {
+    renderShell("/experiments");
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "This page does not exist" }),
+    ).toBeInTheDocument();
+  });
+
+  it("an area outside the user's access shows the permission state", async () => {
+    const { user, router } = renderShell("/jobs", { access: new Set(["home", "catalog"]) });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "You cannot use Jobs" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Ask an administrator if you need it.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Jobs" })).not.toBeInTheDocument();
+    expect(document.title).toBe("You cannot use Jobs · Lakana");
+
+    await user.click(screen.getByRole("link", { name: "Go to Home" }));
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("Home outside the user's access shows the permission state too", async () => {
+    renderShell("/", { access: new Set(["catalog"]) });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "You cannot use Home" }),
+    ).toBeInTheDocument();
+  });
+
+  it("moves focus to the heading after navigation", async () => {
+    const { user } = renderShell("/");
+    const home = await screen.findByRole("heading", { level: 1, name: "Home" });
+    expect(home).not.toHaveFocus();
+
+    await user.click(screen.getByRole("link", { name: "Catalog" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Catalog" })).toHaveFocus();
+    expect(currentLinks()).toEqual(["Catalog"]);
+  });
+
+  it("the skip link moves focus to the main content", async () => {
+    const { user } = renderShell("/queries");
+    await screen.findByRole("heading", { level: 1, name: "Queries" });
+
+    await user.tab();
+    expect(screen.getByRole("link", { name: "Skip to content" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByRole("main")).toHaveFocus();
+  });
+});

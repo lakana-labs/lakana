@@ -203,6 +203,15 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   (`axios`, `ky`, `ofetch`, `superagent`) everywhere. dependency-cruiser keeps `src/api/` a leaf:
   it imports only itself and npm packages. (`fetch` is a global, not an import, so
   dependency-cruiser cannot see it; ESLint guards it.)
+- **No Node globals in browser code.** `globals.node` is on for the config files and scripts, so
+  ESLint refuses `process` and `Buffer` inside `ui/src/` (`src/api/` included): Vite does not
+  polyfill them, so they would fail only in the browser. Use `import.meta.env` and `Uint8Array`.
+- **The content security policy stays strict** (`ui/csp.ts`: no inline script or style). The
+  stored theme is applied before the first paint by a file, `ui/public/theme-boot.js`, not an
+  inline script; React Aria's one injected `<style>` (`react-aria-pressable-style`) is
+  pre-empted by an element with that id in `ui/index.html`, and its rule lives in
+  `ui/src/shell/shell.css`. A React Aria upgrade that injects another one shows up as a console
+  error in `e2e/shell.spec.ts`.
 - **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
   stylesheet and string on (part 1a, Task 3).
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools

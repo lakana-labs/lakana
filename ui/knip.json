@@ -6,7 +6,8 @@
     "scripts/*.mjs",
     "e2e/**/*.spec.ts",
     "*.config.ts",
-    "csp.ts"
+    "csp.ts",
+    "public/theme-boot.js"
   ],
   "project": ["src/**/*.{ts,tsx}", "build/**/*.ts", "e2e/**/*.ts"],
   "ignoreDependencies": ["@ibm/plex-sans", "@ibm/plex-mono"]
