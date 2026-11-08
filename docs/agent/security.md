@@ -6185,3 +6185,8 @@ layer fails the run. Fix it at the root, strictest first:
   `import pip` still works. The task image keeps its pip. Ignore a finding (`.trivyignore`,
   with the file, the reason and a review date per entry) only when the code it names is not in
   the image or cannot be reached; there is no such entry today.
+
+A failed scheduled run of `security-deep.yml` (and of `canary.yml`, `codeql.yml` and
+`scorecard.yml`) opens an issue `Scheduled run failed: <workflow>` labelled `type:security` and
+assigned to the maintainer, or comments on the one still open (`scheduled-failure.yml`,
+`docs/agent/testing.md`). Close it once a scheduled run passes again.
