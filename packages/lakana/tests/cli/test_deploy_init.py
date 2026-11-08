@@ -1319,15 +1319,45 @@ def test_an_ip_public_url_without_the_interface_keeps_the_profile_and_uses_local
 def test_the_interface_refuses_plain_http_off_localhost_and_a_host_that_is_no_name(
     tmp_path: Path, released: None
 ) -> None:
-    """With `--ui`: `http://` off localhost exits 1 naming https; a bad host name exits 2."""
+    """With `--ui`: `http://` off localhost or a host the server would refuse exits 1."""
     state = make_state(tmp_path, FakeApi())
     plain = invoke(
         state, "bundle", "init", str(tmp_path / "a"), "--ui", "--public-url", "http://lakana.ex"
     )
     odd = invoke(
-        state, "bundle", "init", str(tmp_path / "b"), "--public-url", "https://lak_ana.example"
+        state,
+        "bundle",
+        "init",
+        str(tmp_path / "b"),
+        "--ui",
+        "--public-url",
+        "https://lak_ana.example",
+    )
+    long_label = invoke(
+        state,
+        "bundle",
+        "init",
+        str(tmp_path / "c"),
+        "--ui",
+        "--public-url",
+        f"https://{'a' * 64}.example",
     )
 
     assert plain.exit_code == 1 and "https://" in plain.stderr
-    assert odd.exit_code == 2 and "host" in odd.stderr
-    assert not (tmp_path / "a").exists() and not (tmp_path / "b").exists()
+    assert odd.exit_code == 1 and "host name" in odd.stderr
+    assert long_label.exit_code == 1 and "host name" in long_label.stderr
+    for name in ("a", "b", "c"):
+        assert not (tmp_path / name).exists()
+
+
+@pytest.mark.parametrize("url", ["https://lak_ana.example", f"https://{'a' * 64}.example"])
+def test_without_the_interface_a_host_the_server_would_refuse_falls_back_to_localhost(
+    tmp_path: Path, released: None, url: str
+) -> None:
+    """Like an IP address: the CLI profile keeps it, the server gets `http://localhost`."""
+    state = make_state(tmp_path, FakeApi())
+    target = tmp_path / "b"
+    result = invoke(state, "bundle", "init", str(target), "--public-url", url)
+
+    assert result.exit_code == 0, result.stderr
+    assert _env(target / ".env")["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8000"

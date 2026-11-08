@@ -21,7 +21,8 @@ deploy_app = typer.Typer(help="Generate a team deployment bundle.", no_args_is_h
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _IMAGE_RE = re.compile(r"^[A-Za-z0-9._/:@-]+$")
-_HOST_NAME_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*")
+_LABEL_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+"""One label of a host name, as the server's `LAKANA_UI__PUBLIC_URL` check accepts it."""
 
 
 def _is_loopback(host: str) -> bool:
@@ -103,8 +104,9 @@ def _interface_url(public_url: str | None, port: int, ui: bool) -> tuple[str, bo
     Raises
     ------
     CliError
-        With `--ui`: for an IP address (passkeys need a name) or plain `http://` off
-        `localhost` (exit 1). Always: for a host that is not a host name (exit 2).
+        With `--ui`: for an IP address or anything else that is not a host name (passkeys
+        need a name), or plain `http://` off `localhost` (exit 1). Without `--ui` such an address
+        still serves the CLI profile, and the interface gets the fallback.
     """
     fallback = f"http://localhost:{port}"
     if public_url is None:
@@ -113,7 +115,7 @@ def _interface_url(public_url: str | None, port: int, ui: bool) -> tuple[str, bo
     host = (parts.hostname or "").lower()
     if _is_loopback(host):
         return fallback, True
-    if _is_ip_address(host):
+    if _is_ip_address(host) or not all(_LABEL_RE.fullmatch(p) for p in host.split(".")):
         if ui:
             raise CliError(
                 "--public-url must use a host name for the web interface (passkeys are tied to "
@@ -121,10 +123,6 @@ def _interface_url(public_url: str | None, port: int, ui: bool) -> tuple[str, bo
                 1,
             )
         return fallback, True
-    if not _HOST_NAME_RE.fullmatch(host):
-        raise CliError(
-            f"--public-url must name a host such as lakana.example.com; {host!r} is not one"
-        )
     if ui and parts.scheme == "http":
         raise CliError(
             "--public-url must start with https:// for the web interface on a team server: "
