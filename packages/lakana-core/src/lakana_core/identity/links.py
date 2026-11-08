@@ -36,6 +36,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
+from urllib.parse import urlsplit
 
 from sqlalchemy import delete, exists, select, update
 from sqlalchemy.exc import IntegrityError
@@ -257,7 +258,9 @@ def refuse_automation(p: PrincipalRef) -> None:
         raise PermissionDenied(AUTOMATION_MESSAGE)
 
 
-def has_passkey(session: Session, principal_id: uuid.UUID, *, usable: bool = True) -> bool:
+def has_passkey(
+    session: Session, principal_id: uuid.UUID, *, usable: bool = True, rp_id: str | None = None
+) -> bool:
     """Say whether a person has a passkey.
 
     Parameters
@@ -268,6 +271,9 @@ def has_passkey(session: Session, principal_id: uuid.UUID, *, usable: bool = Tru
         The person.
     usable
         Count only passkeys that are not disabled (a disabled clone cannot sign in).
+    rp_id
+        Count only passkeys registered for this relying-party id (the host of the public
+        address): one registered for an earlier address cannot sign in here.
 
     Returns
     -------
@@ -277,6 +283,8 @@ def has_passkey(session: Session, principal_id: uuid.UUID, *, usable: bool = Tru
     condition = Passkey.principal_id == principal_id
     if usable:
         condition = condition & Passkey.disabled_at.is_(None)
+    if rp_id is not None:
+        condition = condition & (Passkey.rp_id == rp_id)
     return bool(session.execute(select(exists().where(condition))).scalar())
 
 
@@ -1166,7 +1174,9 @@ class LinkService:
                 "user_agent": user_agent[:255],
             },
         )
-        usable = has_passkey(self._session, principal_id)
+        usable = has_passkey(
+            self._session, principal_id, rp_id=urlsplit(self._origin).hostname or ""
+        )
         local = kind == "local"
         return Redeemed(
             started=started,

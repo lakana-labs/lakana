@@ -19295,6 +19295,294 @@
         }
       }
     },
+    "/api/v1/sign-in/step-up/options": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Start confirming your browser session with a passkey touch (step-up)",
+        "description": "Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. A token has no browser session, so it gets 409: step-up never applies to a token's requests.",
+        "operationId": "step_up_options_api_v1_sign_in_step_up_options_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyOptionsOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/step-up": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Confirm your browser session with a touch of one of your passkeys",
+        "description": "Send the browser's `credential.toJSON()` for the ceremony `/step-up/options` started. Only a passkey of the account the session is signed in as counts; another person's, an answer from another address or without user verification, or a used or expired challenge answers 403 `PasskeyRefused` and the session stays as it was.",
+        "operationId": "step_up_api_v1_sign_in_step_up_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyAnswerIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepUpOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/passkey/options": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Start signing in with a passkey",
+        "description": "Needs no credential and no name: the options list no passkeys (`allowCredentials` is empty), so the browser offers the passkeys it has for this address and the person picks one with a touch and a PIN, fingerprint or face. The challenge works once, for 5 minutes. At most `LAKANA_AUTH_AUDIT__PER_IP_PER_MINUTE` calls per client address and minute; past that 429.",
+        "operationId": "passkey_sign_in_options_api_v1_sign_in_passkey_options_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyOptionsOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/passkey": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Sign in with a passkey",
+        "description": "Send the browser's `credential.toJSON()` for the ceremony the options route started. A passkey that verifies starts a browser session with a fresh id (a session the browser had is ended), sets its cookie, and counts as a passkey touch for 15 minutes of step-up actions. An unknown, disabled or copied passkey, an answer from another address or without user verification, or a used or expired challenge answers 401 and is recorded in the audit log. A passkey whose signature counter went backwards is disabled (it may have been copied) and the person and every administrator are told.",
+        "operationId": "passkey_sign_in_api_v1_sign_in_passkey_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyAnswerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sign-in/notices": {
       "get": {
         "tags": [
@@ -20151,6 +20439,410 @@
           },
           "401": {
             "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/passkeys": {
+      "get": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "List a person's passkeys",
+        "description": "Anyone may list their own; another person's needs the ADMIN role on the instance (403 otherwise). Disabled passkeys are listed with `disabled_reason`; `usable_here` is false for a passkey registered for an earlier public address (`LAKANA_UI__PUBLIC_URL`).",
+        "operationId": "list_passkeys_api_v1_principals__name__passkeys_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "The person's principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PasskeyOut"
+                  },
+                  "title": "Response List Passkeys Api V1 Principals  Name  Passkeys Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Finish adding a passkey to your own account",
+        "description": "Send the browser's `credential.toJSON()` for the ceremony the options route started, and optionally a name for the passkey. An answer from another address or without user verification, or a used or expired challenge, answers 403 `PasskeyRefused`; a passkey that is registered already answers 409. Adding a passkey counts as a passkey touch.",
+        "operationId": "register_passkey_api_v1_principals__name__passkeys_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Your own principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasskeyRegisterIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/passkeys/options": {
+      "post": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Start adding a passkey to your own account",
+        "description": "From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.",
+        "operationId": "passkey_registration_options_api_v1_principals__name__passkeys_options_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Your own principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyOptionsOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/passkeys/{passkey_id}": {
+      "delete": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Remove a passkey",
+        "description": "Your own, or, with the ADMIN role on the instance, anyone's. From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). Your own last working passkey cannot be removed (409): add another one first, or ask an administrator for a recovery link. An administrator removing another person's passkey also ends all of that person's browser sessions.",
+        "operationId": "remove_passkey_api_v1_principals__name__passkeys__passkey_id__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "The person's principal name."
+          },
+          {
+            "name": "passkey_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Passkey Id"
+            },
+            "description": "The passkey's id, from the list."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26349,6 +27041,144 @@
         "title": "PackageIndexUpdate",
         "description": "Request body for changing a package index; omitted fields stay, `null` clears the secret.\n\nParameters\n----------\nurl\n    New URL.\ncredential_secret\n    New secret name."
       },
+      "PasskeyAnswerIn": {
+        "properties": {
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ceremony Id"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Credential"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ceremony_id",
+          "credential"
+        ],
+        "title": "PasskeyAnswerIn",
+        "description": "Request body of `POST /api/v1/sign-in/passkey` and `POST /api/v1/sign-in/step-up`.\n\nParameters\n----------\nceremony_id\n    The id the options route returned.\nanswer\n    Sent as ``credential``: the browser's `credential.toJSON()` for that ceremony. Never\n    logged and never stored."
+      },
+      "PasskeyOptionsOut": {
+        "properties": {
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ceremony Id"
+          },
+          "public_key": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Public Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ceremony_id",
+          "public_key"
+        ],
+        "title": "PasskeyOptionsOut",
+        "description": "Response body of the passkey options routes: one WebAuthn ceremony to answer.\n\nParameters\n----------\nceremony_id\n    Sent back with the browser's answer. The challenge works once, for 5 minutes.\npublic_key\n    The ``publicKey`` options in their JSON form: the interface passes them to\n    `PublicKeyCredential.parseCreationOptionsFromJSON` (adding a passkey) or\n    `parseRequestOptionsFromJSON` (signing in, step-up)."
+      },
+      "PasskeyOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "backup_eligible": {
+            "type": "boolean",
+            "title": "Backup Eligible"
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
+          },
+          "usable_here": {
+            "type": "boolean",
+            "title": "Usable Here"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "last_used_at",
+          "backup_eligible",
+          "disabled_reason",
+          "usable_here"
+        ],
+        "title": "PasskeyOut",
+        "description": "One passkey of a person; never its key or its credential id.\n\nParameters\n----------\nid\n    The passkey's id, for removing it.\nname\n    What its person called it.\ncreated_at\n    When it was added.\nlast_used_at\n    When it last signed in or confirmed a step-up; `None` for never.\nbackup_eligible\n    Whether it is a synced passkey (for example in a password manager or a platform\n    account), which may exist on several devices.\ndisabled_reason\n    ``possible_clone`` when it was disabled because its signature counter went backwards;\n    `None` while it works.\nusable_here\n    Whether it was registered for this server's current public address. Changing the\n    address (`LAKANA_UI__PUBLIC_URL`) leaves earlier passkeys unusable."
+      },
+      "PasskeyRegisterIn": {
+        "properties": {
+          "ceremony_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ceremony Id"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Credential"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ceremony_id",
+          "credential"
+        ],
+        "title": "PasskeyRegisterIn",
+        "description": "Request body of `POST /api/v1/principals/{name}/passkeys`.\n\nParameters\n----------\nceremony_id\n    The id `POST /api/v1/principals/{name}/passkeys/options` returned.\nanswer\n    Sent as ``credential``: the browser's `credential.toJSON()` for that ceremony.\nname\n    What to call the passkey, such as the device it is on; ``Passkey`` when left out."
+      },
       "PermissionOut": {
         "properties": {
           "action": {
@@ -28534,6 +29364,21 @@
         ],
         "title": "SignInSettingsOut",
         "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_minutes\n    How long a session lasts at most, in minutes.\nbounds\n    The limits both may be chosen between."
+      },
+      "StepUpOut": {
+        "properties": {
+          "step_up_until": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Step Up Until"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step_up_until"
+        ],
+        "title": "StepUpOut",
+        "description": "Response body of `POST /api/v1/sign-in/step-up`.\n\nParameters\n----------\nstep_up_until\n    Until when step-up actions (such as adding or removing a passkey) need no new passkey\n    touch in this session."
       },
       "StorageConfigIn": {
         "properties": {

@@ -77,6 +77,15 @@ CREDENTIAL_SPECIFIC_ROUTES: dict[tuple[str, str], str] = {
         "PAT only: the operator's / local person's own token mints the link"
     ),
     **{
+        route: "session only: a ceremony binds to the browser session"
+        for route in (
+            ("POST", "/api/v1/sign-in/step-up/options"),
+            ("POST", "/api/v1/sign-in/step-up"),
+            ("POST", "/api/v1/principals/{name}/passkeys/options"),
+            ("POST", "/api/v1/principals/{name}/passkeys"),
+        )
+    },
+    **{
         route: "token-only: the cookie is refused (403 TokenOnlyRoute)"
         for route in TOKEN_ONLY_ROUTES
     },
@@ -107,6 +116,7 @@ STATEFUL_READS: dict[tuple[str, str], str] = {
 
 OPEN_OPERATIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/oidc/token"): "takes a CI provider's ID token, not a credential",
+    ("POST", "/api/v1/sign-in/passkey"): "usernameless sign-in: the passkey is the proof",
 }
 """Operations that read no credential at all; they may answer 401 both ways."""
 
@@ -385,9 +395,9 @@ def _request_for(document: dict[str, Any], method: str, path: str) -> _Request:
 def _normalised(value: Any) -> Any:  # ruff: ignore[any-type]
     """Replace what two identical requests made at different moments answer differently.
 
-    A created object's id, a timestamp, a newly issued token's text and a new sign-in link's
-    random halves differ between the two worlds even when the credential plays no part;
-    everything else is compared as it is.
+    A created object's id, a timestamp, a newly issued token's text, a new sign-in link's
+    random halves and a WebAuthn challenge differ between the two worlds even when the
+    credential plays no part; everything else is compared as it is.
 
     Parameters
     ----------
@@ -397,12 +407,16 @@ def _normalised(value: Any) -> Any:  # ruff: ignore[any-type]
     Returns
     -------
     Any
-        The value with ids, key ids, times, token texts and sign-in links replaced by
-        placeholders, and
+        The value with ids, key ids, times, token texts, sign-in links and challenges replaced
+        by placeholders, and
         `request_id` dropped.
     """
     if isinstance(value, dict):
-        return {k: _normalised(v) for k, v in value.items() if k != "request_id"}
+        return {
+            k: "<challenge>" if k == "challenge" else _normalised(v)
+            for k, v in value.items()
+            if k != "request_id"
+        }
     if isinstance(value, list):
         return [_normalised(v) for v in value]
     if isinstance(value, str):

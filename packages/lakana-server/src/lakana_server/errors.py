@@ -27,6 +27,7 @@ from lakana_core.errors import (
     NoCheckedSnapshotError,
     NotFoundError,
     NotPublishedError,
+    PasskeyRefused,
     PermissionDenied,
     SessionEndedError,
     StorageRefusedError,
@@ -102,8 +103,26 @@ class TokenOnlyRoute(PermissionDenied):
     """
 
 
+class PasskeyRequired(PermissionDenied):
+    """A session from a setup, invite or recovery link acted before its person had a passkey.
+
+    Server-only, like `CsrfRefused`: `lakana_server.deps.get_principal` allows such a session
+    only `PASSKEY_FIRST_ROUTES` (register a passkey, read the session, sign out). Mapped to 403.
+    """
+
+
+class TooManyAttemptsError(LakanaError):
+    """A client asked for passkey sign-in options faster than the per-address limit.
+
+    Server-only, an HTTP-layer limit like `PayloadTooLargeError`. Mapped to 429 with a
+    `Retry-After: 60` header.
+    """
+
+
 _STATUS_CODES: dict[type[LakanaError], int] = {
     AuthenticationError: 401,
+    PasskeyRefused: 403,
+    TooManyAttemptsError: 429,
     LinkUnusableError: 410,
     NotFoundError: 404,
     AlreadyExistsError: 409,
@@ -125,6 +144,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
 }
 
 _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
+    TooManyAttemptsError: "60",
     AppendConcurrencyLimitError: "1",
     DownloadConcurrencyLimitError: "1",
     StorageUnavailableError: "5",

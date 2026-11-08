@@ -215,12 +215,18 @@ _OPEN_ROUTES = {
     "/api/v1/auth/oidc/token",
     "/api/v1/sign-in/links/describe",
     "/api/v1/sign-in/links/redeem",
+    # usernameless sign-in, <= 16 KiB body
+    "/api/v1/sign-in/passkey/options",
+    "/api/v1/sign-in/passkey",
 }
 """The routes that answer without a credential, by design: the CI token exchange takes an ID
 token, not a credential, and reads at most 16 KiB of body; `/readyz` has no body and answers
 with check names only, from a cache (`lakana_server.readiness`). The two sign-in link routes
 take a link, which is the proof: a JSON body of at most 64 + 128 characters, under the JSON
-limit, Host- and Origin-checked by the browser guard, answering 409 with the interface off."""
+limit, Host- and Origin-checked by the browser guard, answering 409 with the interface off. The
+two passkey sign-in routes are usernameless sign-in: the passkey is the proof; they read at most
+16 KiB of body (`lakana_core.identity.passkeys.OPEN_BODY_LIMIT`), the same guard and switch
+apply, and the options route is limited per client address."""
 
 _DOCS_ROUTES = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 """FastAPI's own documentation routes: not `APIRoute`s, no body."""

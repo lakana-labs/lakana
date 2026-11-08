@@ -62,6 +62,7 @@ ERROR_MEANING: dict[int, str] = {
         "or is not known; ask for a new link."
     ),
     413: "The request body is larger than the server accepts.",
+    429: "Too many attempts from this address; ask again after the time in `Retry-After`.",
     502: (
         "A service behind the server, such as the environment's storage, refused it; the message "
         "says what to fix. Asking again does not help until then."

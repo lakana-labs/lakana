@@ -46,6 +46,7 @@ from lakana_server.api.platform.invites import router as invites_router
 from lakana_server.api.platform.jobs import router as jobs_router
 from lakana_server.api.platform.namespaces import router as namespaces_router
 from lakana_server.api.platform.package_indexes import router as package_indexes_router
+from lakana_server.api.platform.passkeys import router as passkeys_router
 from lakana_server.api.platform.principals import router as principals_router
 from lakana_server.api.platform.queries import router as queries_router
 from lakana_server.api.platform.recovery_links import links_router as recovery_links_router
@@ -58,6 +59,7 @@ from lakana_server.api.platform.search import router as search_router
 from lakana_server.api.platform.secrets import router as secrets_router
 from lakana_server.api.platform.sessions import router as sessions_router
 from lakana_server.api.platform.sessions import sign_in_router
+from lakana_server.api.platform.sign_in import open_router as passkey_sign_in_router
 from lakana_server.api.platform.sign_in import router as sign_in_links_router
 from lakana_server.api.platform.sign_in_notices import router as sign_in_notices_router
 from lakana_server.api.platform.sign_in_settings import router as sign_in_settings_router
@@ -118,11 +120,13 @@ ROUTERS = (
     whoami_router,
     sign_in_router,
     sign_in_links_router,
+    passkey_sign_in_router,
     sign_in_notices_router,
     invites_router,
     recovery_link_router,
     recovery_links_router,
     sessions_router,
+    passkeys_router,
     sign_in_settings_router,
     info_router,
 )
@@ -189,6 +193,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         # Its own bucket: a flood of refused exchanges must not hide failed sign-ins.
         app.state.oidc_exchange_audit_limiter = AuthAuditLimiter(
+            resolved_settings.auth_audit.per_ip_per_minute
+        )
+        # Its own bucket too: the open passkey sign-in options route, per client address.
+        app.state.passkey_options_limiter = AuthAuditLimiter(
             resolved_settings.auth_audit.per_ip_per_minute
         )
         # One verifier per process: it holds the issuers' key cache.

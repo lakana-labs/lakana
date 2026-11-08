@@ -322,7 +322,11 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   two ways. Statically, no module under `lakana_server/api/` reads a principal's `.session`,
   `.credential` or `.token_id` except those in `CREDENTIAL_READERS`, each tied to operations
   in `CREDENTIAL_SPECIFIC_ROUTES` (today only `api/platform/sessions.py`); core rules that look
-  at the session (`require_step_up`) are outside this guard and tested in core. Dynamically,
+  at the session (`require_step_up`, the passkey ceremonies) are outside this guard and tested
+  in core. The passkey bodies' `credential` field is `answer` in Python (alias `credential`), so
+  the guard stays strict. The four session-bound ceremony routes (step-up options and answer,
+  passkey registration options and answer) are in `CREDENTIAL_SPECIFIC_ROUTES`: a token gets
+  409 there by design. Dynamically,
   every other `/api/v1` operation of the running app is sent once with a session and once with
   the same person's token, from the same database state (snapshot and restore), with path
   parameters naming real objects of the person (environment, namespace, table, the person) and
@@ -441,6 +445,62 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   same commit; reactivating the bootstrap principal (`bootstrap_if_needed`) removes its
   passkeys, ends its sessions (`reactivated`) and withdraws its links.
 
+### Passkeys (WebAuthn) and step-up
+
+Core: `lakana_core.identity.passkeys` (`PasskeyService`, `needs_passkey`), library `webauthn`
+3.0.1 (BSD-3-Clause; it brought cbor2 MIT, pyasn1 BSD-2-Clause, pyasn1-modules BSD, pyOpenSSL
+Apache-2.0); server: `api/platform/sign_in.py` (passkey sign-in, step-up),
+`api/platform/passkeys.py` (list, add, remove), `deps.get_principal` (the passkey-first rule).
+Tests use a software authenticator (`scripts/test_support/webauthn_test_helpers.py`: a real
+ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification is never mocked.
+
+- **Parameters.** RP id = host of `Settings.public_origin()` (never an IP; `localhost` locally);
+  the origin is compared exactly, port included, with `public_origin().origin`, never with
+  anything from the request. `userVerification: required` and checked
+  (`require_user_verification=True`); `residentKey: required`; `attestation: none`;
+  `allowCredentials` empty on sign-in, so no name is asked before the touch. Each passkey stores
+  the RP id it was registered for; one of an earlier public address is not usable
+  (`usable_here: false`, refused at sign-in with the next step: a recovery link).
+- **Challenges** are 32 bytes from `os.urandom`, rows of `webauthn_challenges` with a purpose
+  (`register`, `sign_in`, `step_up`), bound to the browser session except for sign-in, valid 5
+  minutes (`CHALLENGE_LIFETIME`, expired at `expires_at <= now`). Consumption is one conditional
+  update committed *before* the answer is checked, so a failed answer burns it. Every insert
+  deletes the expired rows in its own transaction, so anonymous option calls cannot grow the
+  table; `POST /api/v1/sign-in/passkey/options` is limited per client address with its own
+  `AuthAuditLimiter` bucket at `LAKANA_AUTH_AUDIT__PER_IP_PER_MINUTE` (429, `Retry-After: 60`).
+  The two open routes read at most 16 KiB (`OPEN_BODY_LIMIT`, checked before FastAPI decodes
+  the body) and are Host- and Origin-checked by `BrowserGuard`.
+- **Library workarounds.** `py_webauthn` does not compare `userHandle`: the service requires it
+  and compares it with `principals.webauthn_handle` (32 random bytes per person, never the
+  name) in constant time. Its counter check raises the same exception as a bad signature, so
+  the service passes a stored count of 0 and applies the clone rule itself after the signature
+  verified: `if not (stored == 0 and new == 0) and new <= stored` the passkey is disabled
+  (`disabled_reason = possible_clone`), audited `PASSKEY_DISABLED` and a notice goes to the
+  person and every active administrator; the attempt is refused. A forged assertion with a low
+  counter is refused by the signature and can never disable a passkey (tested). Two zero
+  counters (synced passkeys) are accepted.
+- **Registration.** Only from a browser session (a token gets 409) and only for one's own
+  account. Allowed with step-up, or for a person without a usable passkey within 15 minutes
+  (`FIRST_PASSKEY_WINDOW`) of a setup, invite, recovery or local sign-in. A local-link session
+  never adds a second passkey. A credential id stored for anyone is refused (409). It counts as
+  a touch; a passkey added outside the first window leaves the person a `passkey_added` notice.
+- **The passkey-first rule.** A session that began with a setup, invite or recovery link while
+  its person has no usable passkey may only use `deps.PASSKEY_FIRST_ROUTES` (register a
+  passkey, read its own session, sign out); every other `/api/v1` operation answers 403
+  `PasskeyRequired` naming the next step (tested over every operation of the running app). The
+  parity test's session began with a passkey, so it is unaffected.
+- **Step-up** (`require_step_up`, `STEP_UP_WINDOW` 15 minutes) is enforced in core for session
+  credentials. `POST /api/v1/sign-in/step-up` accepts only a passkey of the signed-in person
+  (another person's valid passkey: 403 `PasskeyRefused`, no touch). **Token (Bearer) requests are
+  not session-bound and step-up does not apply to them**: a token is not a browser session, and
+  its holder could do the same with the CLI. In-session ceremony failures are 403
+  (`PasskeyRefused`) so the interface keeps its session; a failed passkey sign-in is 401 and
+  audited as `AUTHENTICATION_FAILED` (`credential: passkey`, nothing of the answer).
+- **Removal** needs step-up; nobody removes their own last active passkey (409: add another, or
+  ask for a recovery link); an administrator removing another person's passkey ends all that
+  person's sessions (`reason: passkey_removed`). No answer carries a public key or credential
+  id; neither the browser's answer nor a challenge is logged (tested with `caplog`).
+
 ### Residuals of sign-in
 
 - **A link is a bearer secret for its lifetime.** Whoever reads it (a forwarded mail, a shared
@@ -450,6 +510,10 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   the session row just before a concurrent end (sign out, deactivation, recovery) commits may
   still be served once; the next request fails. Ending is one conditional update, so the end
   itself is never lost or doubled.
+- **Passkeys act through the page.** A hostile browser extension or an XSS in the interface
+  acts as the page: it can run a ceremony the person then confirms with a touch. Another
+  process of the same OS user can read the browser's cookies. On loopback another
+  `localhost` port receives the non-`Secure` local cookie (see "The cookie").
 - **A pre-upgrade bootstrap PAT.** Migration 0069 marks as the operator's only unrevoked PATs
   named `bootstrap` owned by the bootstrap principal. A PAT an administrator issued before the
   upgrade for the bootstrap principal and named `bootstrap` would also be marked; revoke such a

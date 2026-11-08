@@ -135,6 +135,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "mode",
         "name",
         "operation",
+        # a passkey's id (`lakana_core.identity.passkeys`), never its key or credential id
+        "passkey_id",
         "path",
         # the client's address and browser of a sign-in, as the server saw them
         "peer",
@@ -211,6 +213,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "why",
         # counts, sizes and times
         "after",
+        # whether a passkey is synced (its counters when disabled: stored_, presented_count)
+        "backup_eligible",
         "before",
         "bytes",
         "bytes_deleted",
@@ -243,6 +247,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "older_than_days",
         "on",
         "others_shown",
+        "presented_count",
         "previous",
         "previous_days",
         "purge_after",
@@ -261,6 +266,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "size_bytes",
         "snapshot_id",
         "snapshots_expired",
+        "stored_count",
         "suppressed",
         "tables",
         "tables_touched",

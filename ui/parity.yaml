@@ -196,6 +196,7 @@
 "DELETE /api/v1/invites/{invite_id}": { class: ui, part: 1 }
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
+"DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7 }
 "DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1 }
@@ -273,6 +274,7 @@
 "GET /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "GET /api/v1/principals": { class: ui, part: 7 }
 "GET /api/v1/principals/{name}": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions": { class: ui, part: 7 }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
@@ -372,6 +374,8 @@
 "POST /api/v1/invites": { class: ui, part: 1 }
 "POST /api/v1/package-indexes": { class: ui, part: 8 }
 "POST /api/v1/principals": { class: ui, part: 7 }
+"POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
+"POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "POST /api/v1/repositories": { class: ui, part: 8 }
@@ -380,8 +384,12 @@
 "POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }
 "POST /api/v1/sign-in/local-link":
   { class: git, reason: "local tooling: server start --local signs the browser in" }
+"POST /api/v1/sign-in/passkey": { class: ui, part: 1 }
+"POST /api/v1/sign-in/passkey/options": { class: ui, part: 1 }
 "POST /api/v1/sign-in/setup-link":
   { class: git, reason: "local deployment tooling: the Compose set-up prints the first link" }
+"POST /api/v1/sign-in/step-up": { class: ui, part: 1 }
+"POST /api/v1/sign-in/step-up/options": { class: ui, part: 1 }
 "POST /api/v1/task-tokens":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
 "PUT /api/v1/environments/{environment_name}/secrets/{secret_name}/use": { class: ui, part: 7 }

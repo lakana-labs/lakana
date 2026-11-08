@@ -64,6 +64,10 @@ _SESSION_ENDED = {
         "Your account was recovered with a recovery link, which ended every earlier session. "
         "Sign in again with your new passkey."
     ),
+    "passkey_removed": (
+        "An administrator removed one of your passkeys, which ended your sessions. Sign in "
+        "again with another passkey, or ask an administrator for a recovery link."
+    ),
     "reactivated": (
         "Your account was reactivated, which ended every earlier session and removed its "
         "passkeys. Ask the server operator for a new sign-in link."
@@ -98,6 +102,15 @@ class StepUpRequired(PermissionDenied):
 
     Raised by `lakana_core.identity.sessions.require_step_up` for a session whose last passkey
     touch is missing or older than 15 minutes; a token caller never gets it.
+    """
+
+
+class PasskeyRefused(AuthenticationError):
+    """A passkey ceremony inside a browser session failed: a registration or a step-up touch.
+
+    The browser's answer did not verify, its challenge was used or expired, or the passkey is
+    not the caller's. Distinct from the plain `AuthenticationError` of a failed passkey sign-in
+    (401): the caller is signed in, so the server answers 403 and the session goes on.
     """
 
 

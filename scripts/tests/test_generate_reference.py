@@ -422,11 +422,13 @@ def test_every_route_that_needs_a_caller_documents_the_refusal_of_a_missing_one(
     """Every route answers 401 for a missing or wrong credential, and says so.
 
     Except the two sign-in link routes, which take no credential: the link is the proof, and a
-    link that cannot be used answers 410.
+    link that cannot be used answers 410; and the passkey sign-in options, which only start a
+    usernameless sign-in (the sign-in itself answers 401 for a passkey that does not verify).
     """
     no_credential = {
         "POST /api/v1/sign-in/links/describe",
         "POST /api/v1/sign-in/links/redeem",
+        "POST /api/v1/sign-in/passkey/options",
     }
     missing = [
         f"{method} {path}"

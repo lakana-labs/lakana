@@ -5560,3 +5560,106 @@ class SignInNoticeOut(BaseModel):
     kind: str
     subject: str | None
     created_at: datetime
+
+
+class PasskeyOptionsOut(BaseModel):
+    """Response body of the passkey options routes: one WebAuthn ceremony to answer.
+
+    Parameters
+    ----------
+    ceremony_id
+        Sent back with the browser's answer. The challenge works once, for 5 minutes.
+    public_key
+        The ``publicKey`` options in their JSON form: the interface passes them to
+        `PublicKeyCredential.parseCreationOptionsFromJSON` (adding a passkey) or
+        `parseRequestOptionsFromJSON` (signing in, step-up).
+    """
+
+    ceremony_id: uuid.UUID
+    public_key: dict[str, Any]
+
+
+class PasskeyAnswerIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/passkey` and `POST /api/v1/sign-in/step-up`.
+
+    Parameters
+    ----------
+    ceremony_id
+        The id the options route returned.
+    answer
+        Sent as ``credential``: the browser's `credential.toJSON()` for that ceremony. Never
+        logged and never stored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ceremony_id: uuid.UUID
+    # Named `answer` in Python, so no route reads a `.credential` attribute: that name is the
+    # principal's credential kind, which the session parity test keeps out of route modules.
+    answer: dict[str, Any] = Field(alias="credential")
+
+
+class PasskeyRegisterIn(BaseModel):
+    """Request body of `POST /api/v1/principals/{name}/passkeys`.
+
+    Parameters
+    ----------
+    ceremony_id
+        The id `POST /api/v1/principals/{name}/passkeys/options` returned.
+    answer
+        Sent as ``credential``: the browser's `credential.toJSON()` for that ceremony.
+    name
+        What to call the passkey, such as the device it is on; ``Passkey`` when left out.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ceremony_id: uuid.UUID
+    answer: dict[str, Any] = Field(alias="credential")
+    name: str | None = Field(default=None, max_length=100)
+
+
+class PasskeyOut(BaseModel):
+    """One passkey of a person; never its key or its credential id.
+
+    Parameters
+    ----------
+    id
+        The passkey's id, for removing it.
+    name
+        What its person called it.
+    created_at
+        When it was added.
+    last_used_at
+        When it last signed in or confirmed a step-up; `None` for never.
+    backup_eligible
+        Whether it is a synced passkey (for example in a password manager or a platform
+        account), which may exist on several devices.
+    disabled_reason
+        ``possible_clone`` when it was disabled because its signature counter went backwards;
+        `None` while it works.
+    usable_here
+        Whether it was registered for this server's current public address. Changing the
+        address (`LAKANA_UI__PUBLIC_URL`) leaves earlier passkeys unusable.
+    """
+
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    last_used_at: datetime | None
+    backup_eligible: bool
+    disabled_reason: str | None
+    usable_here: bool
+
+
+class StepUpOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/step-up`.
+
+    Parameters
+    ----------
+    step_up_until
+        Until when step-up actions (such as adding or removing a passkey) need no new passkey
+        touch in this session.
+    """
+
+    step_up_until: datetime

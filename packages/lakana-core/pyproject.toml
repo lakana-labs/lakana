@@ -75,6 +75,10 @@ dependencies = [
     # MIT. Verifies the signature of a CI provider's OIDC ID token (`lakana_core.ci_oidc`); every
     # claim is checked by Lakana itself. Its `crypto` extra only adds `cryptography`, listed above.
     "pyjwt>=2.15.1",
+    # BSD-3-Clause. WebAuthn ceremonies for passkey sign-in (lakana_core.identity.passkeys).
+    # Brings cbor2 (MIT), pyasn1 (BSD-2-Clause), pyasn1-modules (BSD) and pyOpenSSL
+    # (Apache-2.0).
+    "webauthn>=3.0.1",
 ]
 
 [tool.hatch.version]

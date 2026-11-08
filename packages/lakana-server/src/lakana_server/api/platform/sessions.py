@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ConflictError
 from lakana_core.identity.links import has_passkey
+from lakana_core.identity.passkeys import needs_passkey
 from lakana_core.identity.sessions import STEP_UP_WINDOW, SessionService, csrf_token_for
 from lakana_core.models import BrowserSession, Principal
 from lakana_server.api.platform.schemas import BrowserSessionOut, SessionOut
@@ -28,9 +29,6 @@ from lakana_server.deps import get_principal, get_session, get_session_service
 
 NO_SESSION = "This route describes a browser session; a token has none."
 """The 409 detail of the session routes for a caller authenticated with a token."""
-
-LINK_VIAS = frozenset({"setup", "invite", "recovery"})
-"""The sign-ins after which an account without a usable passkey must register one."""
 
 sign_in_router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -106,7 +104,8 @@ def describe_session(
     assert context is not None  # nosec B101 -- _own_session refused a token caller
     row = session.get(BrowserSession, context.session_id)
     assert row is not None  # nosec B101 -- get_principal just read it
-    usable = has_passkey(session, principal.id)
+    rp_id = request.app.state.settings.public_origin().host
+    usable = has_passkey(session, principal.id, rp_id=rp_id)
     person = session.get(Principal, principal.id)
     return SessionOut(
         name=principal.name,
@@ -117,7 +116,7 @@ def describe_session(
         step_up_until=(
             context.last_touch_at + STEP_UP_WINDOW if context.last_touch_at is not None else None
         ),
-        needs_passkey=not usable and context.via in LINK_VIAS,
+        needs_passkey=needs_passkey(session, principal, rp_id),
         offer_passkey=not usable and context.via == "local",
         absolute_expires_at=row.absolute_expires_at,
     )

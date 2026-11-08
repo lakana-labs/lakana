@@ -95,7 +95,7 @@ Compose](../how-to/deploy-with-compose.md).
 
 | Variable | Type | Default | Read by | Description |
 |---|---|---|---|---|
-| `LAKANA_AUTH_AUDIT__PER_IP_PER_MINUTE` | whole number, above 0 | `10` | server | Failed sign-ins that the audit log records per client per minute (default 10). Requests past the rate are still refused with 401, but not each recorded, so repeated attempts cannot flood the log. |
+| `LAKANA_AUTH_AUDIT__PER_IP_PER_MINUTE` | whole number, above 0 | `10` | server | Failed sign-ins that the audit log records per client per minute (default 10). Requests past the rate are still refused with 401, but not each recorded, so repeated attempts cannot flood the log. The same rate, counted on its own, limits how often one client may start a passkey sign-in; past it the server answers 429 "wait a minute". |
 
 ## `LAKANA_DENIAL_AUDIT__*`
 

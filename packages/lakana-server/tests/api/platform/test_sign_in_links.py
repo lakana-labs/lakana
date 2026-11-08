@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from datetime import timedelta
@@ -12,6 +13,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from scripts.test_support.webauthn_test_helpers import SoftAuthenticator
 
 import lakana_server.ui
 from lakana_server.app import create_app
@@ -61,6 +63,29 @@ def _person(client: TestClient, name: str) -> dict[str, str]:
     r = client.post(f"/api/v1/principals/{name}/tokens", headers=AUTH_HEADER, json={"name": "t"})
     assert r.status_code == 201, r.text
     return {"Authorization": f"Bearer {r.json()['token']}", "key_id": r.json()["key_id"]}
+
+
+def _add_passkey(client: TestClient, name: str, headers: dict[str, str]) -> None:
+    """Add a passkey from a software authenticator, as the interface does after a link.
+
+    Parameters
+    ----------
+    client
+        A started client.
+    name
+        The person signed in.
+    headers
+        Their session's cookie and CSRF headers.
+    """
+    options = client.post(f"/api/v1/principals/{name}/passkeys/options", headers=headers)
+    assert options.status_code == 200, options.text
+    answer = SoftAuthenticator(origin=PUBLIC).create(options.json()["public_key"])
+    r = client.post(
+        f"/api/v1/principals/{name}/passkeys",
+        headers=headers,
+        json={"ceremony_id": options.json()["ceremony_id"], "credential": json.loads(answer)},
+    )
+    assert r.status_code == 201, r.text
 
 
 def _bearer(person: dict[str, str]) -> dict[str, str]:
@@ -342,13 +367,16 @@ def test_recovery_links_notify_and_can_be_listed_and_withdrawn(ui_client: TestCl
     assert redeemed.status_code == 200, redeemed.text
     value = redeemed.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
     headers = session_headers("lakana_session_8000", value)
+    csrf = redeemed.json()["csrf_token"]
+    refused = ui_client.get("/api/v1/sign-in/notices", headers=headers)
+    assert refused.status_code == 403 and refused.json()["type"] == "PasskeyRequired"
+    _add_passkey(ui_client, "alice", session_headers("lakana_session_8000", value, csrf))
     notices = ui_client.get("/api/v1/sign-in/notices", headers=headers)
     assert notices.status_code == 200, notices.text
     assert [(n["kind"], n["subject"]) for n in notices.json()] == [("recovery_used", "alice")]
     operator = ui_client.get("/api/v1/sign-in/notices", headers=AUTH_HEADER).json()
     assert len(operator) == 1
     notice_id = notices.json()[0]["id"]
-    csrf = redeemed.json()["csrf_token"]
     gone = ui_client.delete(
         f"/api/v1/sign-in/notices/{notice_id}",
         headers=session_headers("lakana_session_8000", value, csrf),

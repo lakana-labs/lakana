@@ -34,6 +34,7 @@ from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.links import LinkService
 from lakana_core.identity.notices import NoticeService
+from lakana_core.identity.passkeys import PasskeyService, needs_passkey
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService, utc_now
@@ -53,7 +54,7 @@ from lakana_core.secrets.service import SecretService
 from lakana_core.statement_limit import check_statement_length
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.browser_session import BACKGROUND_HEADER, CSRF_HEADER, read_session_cookie
-from lakana_server.errors import CsrfRefused, TokenOnlyRoute
+from lakana_server.errors import CsrfRefused, PasskeyRequired, TokenOnlyRoute
 from lakana_server.sign_in_audit import Credential
 
 PRINCIPAL_STATE_KEY = "_lakana_authenticated_principal"
@@ -81,6 +82,24 @@ Minting a task token from a browser would put a token in the interface, which ne
 
 TOKEN_ONLY_MESSAGE = (  # nosec B105 -- a refusal's text, not a credential
     "Task tokens are for code, not a browser: create one with `lakana` and your own token."
+)
+
+PASSKEY_FIRST_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", "/api/v1/sign-in/session"),
+        ("DELETE", "/api/v1/sign-in/session"),
+        ("POST", "/api/v1/principals/{name}/passkeys/options"),
+        ("POST", "/api/v1/principals/{name}/passkeys"),
+    }
+)
+"""What a session from a setup, invite or recovery link may do before its person has a passkey:
+register one, read the session, and sign out (`lakana_core.identity.passkeys.needs_passkey`)."""
+
+PASSKEY_REQUIRED_MESSAGE = (
+    "Add a passkey first. You signed in with a setup, invite or recovery link, and until your "
+    "account has a passkey this session can only add one, show who is signed in, and sign out. "
+    "Add the passkey in the web interface now; after 15 minutes, ask an administrator for a new "
+    "link instead."
 )
 
 CSRF_MESSAGE = (
@@ -290,6 +309,61 @@ def get_notice_service(request: Request, session: Session = Depends(get_session)
     return NoticeService(session, clock=get_clock(request))
 
 
+def get_passkey_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> PasskeyService:
+    """Build a PasskeyService for the current request.
+
+    The relying-party id is the host of the configured public address and the origin is that
+    address exactly (`Settings.public_origin`), never anything from the request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the settings and the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    PasskeyService
+        A service using real authorization and the app's clock.
+    """
+    public = request.app.state.settings.public_origin()
+    clock = get_clock(request)
+    return PasskeyService(
+        session,
+        authz,
+        SessionService(session, authz, clock=clock),
+        NoticeService(session, clock=clock),
+        rp_id=public.host,
+        origin=public.origin,
+        clock=clock,
+    )
+
+
+def record_failed_passkey(request: Request, session: Session) -> None:
+    """Record a refused passkey sign-in, if the per-address limit admits it.
+
+    The same limiter as a failed token or link. Neither the browser's answer nor the challenge
+    is recorded.
+
+    Parameters
+    ----------
+    request
+        The current request.
+    session
+        The current request's database session; rolled back first, so nothing the refused
+        attempt left pending is committed with the row.
+    """
+    session.rollback()
+    _record_failure(request, AuditService(session), None, {"credential": "passkey"})
+
+
 def record_failed_link(request: Request, session: Session, public_id: str) -> None:
     """Record a refused use of a sign-in link, if the per-address limit admits it.
 
@@ -392,6 +466,9 @@ def get_principal(
         If a session cookie is presented on a route of `TOKEN_ONLY_ROUTES`.
     CsrfRefused
         If a state-changing cookie request lacks its session's CSRF token.
+    PasskeyRequired
+        If a session from a setup, invite or recovery link, whose person has no usable
+        passkey, asks for anything outside `PASSKEY_FIRST_ROUTES` (403).
     """
     already = getattr(request.state, PRINCIPAL_STATE_KEY, None)
     if isinstance(already, PrincipalRef):
@@ -468,6 +545,9 @@ def _session_principal(
     CsrfRefused
         If a state-changing request lacks the session's CSRF token (403); audited with
         ``reason: csrf``.
+    PasskeyRequired
+        If the session must register a passkey first and the route is not one of
+        `PASSKEY_FIRST_ROUTES` (403).
     AuthenticationError
         If the cookie names no session or a wrong secret; `SessionEndedError` if the session
         has ended. Audited as a failed token is.
@@ -493,6 +573,11 @@ def _session_principal(
         _record_failure(request, audit, credential, detail)
         raise
     _record_sign_in(request, audit, credential, principal.id, kind="session")
+    rp_id = request.app.state.settings.public_origin().host
+    if (request.method, getattr(route, "path", None)) not in PASSKEY_FIRST_ROUTES and (
+        needs_passkey(session, principal, rp_id)
+    ):
+        raise PasskeyRequired(PASSKEY_REQUIRED_MESSAGE)
     return principal
 
 
