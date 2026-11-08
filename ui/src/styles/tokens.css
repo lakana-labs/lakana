@@ -1,0 +1,135 @@
+/*
+ * Design tokens: the one reviewed token file ("Still Water", light and dark).
+ * Every colour, size, space and duration of the interface comes from here. The sail amber of the
+ * brand stays out of the interface. In dark, floating surfaces are lighter instead of shadowed.
+ */
+
+:root {
+  --color-ground: #f5f8f9;
+  --color-surface: #ffffff;
+  --color-sunk: #edf2f4;
+  --color-line: #d3dce1;
+  --color-edge: #72848f;
+  --color-text: #14242e;
+  --color-text-muted: #465a66;
+  --color-text-faint: #566873;
+  --color-accent: #1f5e86;
+  --color-accent-bg: #e0edf4;
+  --color-on-accent: #ffffff;
+  --color-knockout: #ffffff;
+  --color-ok: #1f6b48;
+  --color-ok-bg: #e3f1ea;
+  --color-warn: #8a5700;
+  --color-warn-bg: #f8edd6;
+  --color-bad: #b0362c;
+  --color-bad-bg: #fae6e3;
+  --color-float: #ffffff;
+  --shadow-float: 0 4px 16px rgba(20, 36, 46, 0.14);
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --type-title-size: 20px;
+  --type-title-line: 28px;
+  --type-title-weight: 500;
+  --type-section-size: 15px;
+  --type-section-line: 22px;
+  --type-section-weight: 500;
+  --type-body-size: 14px;
+  --type-body-line: 22px;
+  --type-body-weight: 400;
+  --type-dense-size: 13px;
+  --type-dense-line: 18px;
+  --type-dense-weight: 400;
+  --type-data-size: 12.5px;
+  --type-data-line: 18px;
+  --type-data-weight: 400;
+  --type-code-size: 12.5px;
+  --type-code-line: 20px;
+  --type-code-weight: 400;
+  --type-label-size: 12px;
+  --type-label-line: 16px;
+  --type-label-weight: 500;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --row-height: 44px;
+  --radius-control: 4px;
+  --radius-panel: 6px;
+  --sidebar-width: 200px;
+  --focus-ring: 2px solid var(--color-accent);
+  --focus-offset: 2px;
+
+  --motion-fast: 120ms;
+  --motion-panel: 200ms;
+  --ease: cubic-bezier(0.2, 0, 0.38, 0.9);
+  --pulse: 2.4s;
+}
+
+/* Dark follows the system unless the user chose light; data-theme="dark" forces it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-ground: #0f171c;
+    --color-surface: #151f26;
+    --color-sunk: #0b1216;
+    --color-line: #283640;
+    --color-edge: #627682;
+    --color-text: #e3eaee;
+    --color-text-muted: #a5b4bd;
+    --color-text-faint: #8799a4;
+    --color-accent: #7fbadb;
+    --color-accent-bg: #17303f;
+    --color-on-accent: #0f171c;
+    --color-knockout: #0f171c;
+    --color-ok: #6fc79a;
+    --color-ok-bg: #143024;
+    --color-warn: #e2b55e;
+    --color-warn-bg: #33290f;
+    --color-bad: #f28c80;
+    --color-bad-bg: #3a1d1a;
+    --color-float: #1c2a33;
+    --shadow-float: none;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-ground: #0f171c;
+  --color-surface: #151f26;
+  --color-sunk: #0b1216;
+  --color-line: #283640;
+  --color-edge: #627682;
+  --color-text: #e3eaee;
+  --color-text-muted: #a5b4bd;
+  --color-text-faint: #8799a4;
+  --color-accent: #7fbadb;
+  --color-accent-bg: #17303f;
+  --color-on-accent: #0f171c;
+  --color-knockout: #0f171c;
+  --color-ok: #6fc79a;
+  --color-ok-bg: #143024;
+  --color-warn: #e2b55e;
+  --color-warn-bg: #33290f;
+  --color-bad: #f28c80;
+  --color-bad-bg: #3a1d1a;
+  --color-float: #1c2a33;
+  --shadow-float: none;
+}
+
+/* The compact density is a preference; roomy is the default. */
+:root[data-density="compact"] {
+  --row-height: 36px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-panel: 0ms;
+    --pulse: 0ms;
+  }
+}

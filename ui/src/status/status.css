@@ -1,0 +1,58 @@
+.status-glyph {
+  flex: none;
+  vertical-align: -3px;
+}
+
+.status-glyph-succeeded {
+  color: var(--color-ok);
+}
+
+.status-glyph-failed {
+  color: var(--color-bad);
+}
+
+.status-glyph-warning {
+  color: var(--color-warn);
+}
+
+.status-glyph-running {
+  color: var(--color-accent);
+}
+
+.status-glyph-queued,
+.status-glyph-upstream-failed,
+.status-glyph-cancelled {
+  color: var(--color-text-muted);
+}
+
+.status-glyph-pulse {
+  animation: status-pulse var(--pulse) var(--ease) infinite;
+}
+
+@keyframes status-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-glyph-pulse {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .status-glyph {
+    color: CanvasText;
+  }
+
+  .status-glyph-knockout {
+    stroke: Canvas;
+  }
+}

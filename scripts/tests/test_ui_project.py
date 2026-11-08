@@ -124,3 +124,17 @@ def test_the_ui_sources_are_not_git_ignored() -> None:
     for path in ("ui/build/targets.ts", "ui/scripts/prove-gates.mjs", "ui/src/App.tsx"):
         done = subprocess.run(["git", "check-ignore", "-q", path], cwd=ROOT, check=False)
         assert done.returncode == 1, path
+
+
+def test_the_plex_licence_names_the_reserved_font() -> None:
+    """The font licence ships with the interface (Vitest compares it with the package copy)."""
+    licence = (UI / "public/licenses/IBM-Plex-OFL-1.1.txt").read_text(encoding="utf-8")
+    assert licence.startswith('Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"')
+
+
+def test_only_complete_plex_files_are_used() -> None:
+    """The ``complete`` woff2 files are the ones with every glyph; no other folder is referenced."""
+    urls = re.findall(r"url\(([^)]*)\)", (UI / "src/styles/fonts.css").read_text())
+    assert len(urls) == 3
+    for url in urls:
+        assert "fonts/complete/woff2/" in url, url

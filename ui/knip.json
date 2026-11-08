@@ -8,5 +8,6 @@
     "*.config.ts",
     "csp.ts"
   ],
-  "project": ["src/**/*.{ts,tsx}", "build/**/*.ts", "e2e/**/*.ts"]
+  "project": ["src/**/*.{ts,tsx}", "build/**/*.ts", "e2e/**/*.ts"],
+  "ignoreDependencies": ["@ibm/plex-sans", "@ibm/plex-mono"]
 }

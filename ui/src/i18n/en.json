@@ -1,0 +1,11 @@
+{
+  "status": {
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "warning": "Warning",
+    "running": "Running",
+    "queued": "Queued",
+    "upstream-failed": "Upstream failed",
+    "cancelled": "Cancelled"
+  }
+}

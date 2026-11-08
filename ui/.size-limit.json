@@ -3,6 +3,18 @@
     "name": "JavaScript",
     "path": "../packages/lakana-server/src/lakana_server/ui_dist/assets/*.js",
     "gzip": true,
-    "limit": "75 kB"
+    "limit": "92 kB"
+  },
+  {
+    "name": "CSS",
+    "path": "../packages/lakana-server/src/lakana_server/ui_dist/assets/*.css",
+    "gzip": true,
+    "limit": "1.5 kB"
+  },
+  {
+    "name": "Fonts",
+    "path": "../packages/lakana-server/src/lakana_server/ui_dist/assets/*.woff2",
+    "gzip": false,
+    "limit": "200 kB"
   }
 ]
