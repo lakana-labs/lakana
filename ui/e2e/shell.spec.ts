@@ -270,6 +270,71 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
+/**
+ * Switches the theme in the user menu and reads the page's transitions as the switch applies.
+ *
+ * @param page - A page showing the shell in the dark theme.
+ * @returns The transition of `<body>` and of the sidebar while the colours change.
+ */
+async function transitionsDuringSwitch(page: Page): Promise<string[]> {
+  // A mutation observer reads the styles in the same task as the change, before any timer.
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    Object.assign(window, { seenTransitions: seen });
+    new MutationObserver(() => {
+      if (document.documentElement.getAttribute("data-theme") !== "light") return;
+      for (const node of [document.body, document.querySelector(".sidebar")]) {
+        const style = getComputedStyle(node ?? document.body);
+        seen.push(`${style.transitionProperty} ${style.transitionDuration}`);
+      }
+    }).observe(document.documentElement, { attributeFilter: ["data-theme"] });
+  });
+  await page.getByRole("button", { name: "Not signed in" }).click();
+  await page.getByRole("menuitemradio", { name: "Light", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  return page.evaluate(() => (window as unknown as { seenTransitions: string[] }).seenTransitions);
+}
+
+test.describe("the theme switch", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme: "dark", density: "roomy", language: "en" })],
+    );
+  });
+
+  test("fades the colours over 200 ms, and nothing on first paint", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    const atRest = await page.evaluate(() => getComputedStyle(document.body).transitionDuration);
+    expect(atRest).toBe("0s");
+
+    const during = await transitionsDuringSwitch(page);
+
+    expect(during.length).toBeGreaterThan(0);
+    for (const transition of during) {
+      expect(transition).toMatch(/^background-color, color, border-color, fill, stroke 0\.2s/);
+    }
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme-fade");
+  });
+
+  test("does not fade under reduced motion", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+
+    const during = await transitionsDuringSwitch(page);
+
+    expect(during.length).toBeGreaterThan(0);
+    for (const transition of during) {
+      // The fade rule applies, but reduced motion holds its duration at zero.
+      expect(transition).toBe("background-color, color, border-color, fill, stroke 0s");
+    }
+  });
+});
+
 test("the narrow top bar keeps its height and the content starts right below it", async ({
   page,
 }) => {

@@ -32,6 +32,17 @@ body {
   outline-offset: var(--focus-offset);
 }
 
+/* A theme change fades the colours, never the layout. The attribute is on the root only while
+   the change runs (src/preferences/preferences.ts), so the first paint and hovers stay as they are. */
+:root[data-theme-fade],
+:root[data-theme-fade] *,
+:root[data-theme-fade] *::before,
+:root[data-theme-fade] *::after {
+  transition-property: background-color, color, border-color, fill, stroke;
+  transition-duration: var(--motion-panel);
+  transition-timing-function: var(--ease);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

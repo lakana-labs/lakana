@@ -102,13 +102,41 @@ export function writePreferences(storage: Storage | null, value: Preferences): v
 }
 
 /**
+ * How long `data-theme-fade` stays on the root after a theme change: the 200 ms motion step of
+ * `--motion-panel` in `tokens.css`, during which `base.css` fades the colours.
+ */
+export const THEME_FADE_MS = 200;
+
+const fades = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+
+/**
+ * Marks the root with `data-theme-fade` for {@link THEME_FADE_MS}, restarting a running fade.
+ *
+ * @param root - The `<html>` element.
+ */
+function fadeTheme(root: HTMLElement): void {
+  clearTimeout(fades.get(root));
+  root.setAttribute("data-theme-fade", "");
+  fades.set(
+    root,
+    setTimeout(() => {
+      root.removeAttribute("data-theme-fade");
+    }, THEME_FADE_MS),
+  );
+}
+
+/**
  * Applies the preferences to the document root: `data-theme` only for a chosen light or dark
- * theme (the system theme leaves it to `prefers-color-scheme`), `data-density` and `lang`.
+ * theme (the system theme leaves it to `prefers-color-scheme`), `data-density` and `lang`. A
+ * change of `data-theme` fades the colours; the first paint and an unchanged theme do not.
  *
  * @param root - The `<html>` element.
  * @param value - The preferences.
  */
 export function applyPreferences(root: HTMLElement, value: Preferences): void {
+  if (root.getAttribute("data-theme") !== (value.theme === "system" ? null : value.theme)) {
+    fadeTheme(root);
+  }
   if (value.theme === "system") {
     root.removeAttribute("data-theme");
   } else {

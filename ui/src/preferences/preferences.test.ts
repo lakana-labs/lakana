@@ -7,6 +7,7 @@ import {
   DEFAULT_PREFERENCES,
   PREFERENCES_KEY,
   readPreferences,
+  THEME_FADE_MS,
   writePreferences,
 } from "./preferences";
 
@@ -106,5 +107,41 @@ describe("preferences", () => {
 
     expect(root.getAttribute("data-theme")).toBe(theme);
     expect(root.getAttribute("data-density")).toBe("compact");
+  });
+
+  it("fades the colours while the theme changes, and only then", () => {
+    vi.useFakeTimers();
+    try {
+      const root = document.createElement("html");
+      root.setAttribute("data-theme", "dark");
+
+      applyPreferences(root, { theme: "light", density: "roomy", language: "en" });
+      expect(root.hasAttribute("data-theme-fade")).toBe(true);
+
+      vi.advanceTimersByTime(THEME_FADE_MS - 1);
+      applyPreferences(root, { theme: "dark", density: "roomy", language: "en" });
+      vi.advanceTimersByTime(THEME_FADE_MS - 1);
+      // A second change restarts the fade rather than cutting it short.
+      expect(root.hasAttribute("data-theme-fade")).toBe(true);
+
+      vi.advanceTimersByTime(1);
+      expect(root.hasAttribute("data-theme-fade")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["the same theme", "dark", "dark"],
+    ["the system theme, still unset", null, "system"],
+  ] as const)("does not fade on %s", (_case, before, theme) => {
+    const root = document.createElement("html");
+    if (before !== null) {
+      root.setAttribute("data-theme", before);
+    }
+
+    applyPreferences(root, { theme, density: "compact", language: "en" });
+
+    expect(root.hasAttribute("data-theme-fade")).toBe(false);
   });
 });
