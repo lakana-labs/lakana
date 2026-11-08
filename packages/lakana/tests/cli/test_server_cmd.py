@@ -7,6 +7,8 @@ import signal
 import socket
 import sys
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -2037,6 +2039,20 @@ class _HandOffRun:
     env: dict[str, str]
 
 
+def _fake_browser(monkeypatch: pytest.MonkeyPatch, open_url: Callable[[str], object]) -> None:
+    """Make `_sign_the_browser_in` hand its file to `open_url`, synchronously.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch fixture.
+    open_url
+        Receives the URL the browser would open.
+    """
+    monkeypatch.setattr(server, "_browser", lambda: SimpleNamespace(open=open_url))
+    monkeypatch.setattr(server, "_start_opener", lambda browser, url: browser.open(url))
+
+
 def _start_with_ui(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2109,7 +2125,7 @@ def _start_with_ui(
         scheduled.append((seconds, action))
         return lambda: None
 
-    monkeypatch.setattr(server.webbrowser, "open", fake_open)
+    _fake_browser(monkeypatch, fake_open)
     monkeypatch.setattr(server, "_schedule", fake_schedule)
     monkeypatch.setattr(server, "_stdout_is_terminal", lambda: terminal)
     env = {} if ui is None else {"LAKANA_UI__ENABLED": ui}
@@ -2252,7 +2268,7 @@ def test_a_refused_local_link_keeps_the_instance_running_and_says_why(
         json={"detail": "A local sign-in link is minted with your own personal access token."},
     )
     opened: list[str] = []
-    monkeypatch.setattr(server.webbrowser, "open", opened.append)
+    _fake_browser(monkeypatch, opened.append)
     result = invoke(
         make_state(tmp_path, api),
         *_start_args(tmp_path / "data"),
@@ -2293,7 +2309,7 @@ def _direct_hand_off(
     api = FakeApi()
     api.on("POST", "/api/v1/sign-in/local-link", json={"url": link, "expires_at": "2026-11-08"})
     opened: list[str] = []
-    monkeypatch.setattr(server.webbrowser, "open", opened.append)
+    _fake_browser(monkeypatch, opened.append)
     monkeypatch.setattr(server, "_schedule", lambda seconds, action: lambda: None)
     monkeypatch.setattr(server, "_stdout_is_terminal", lambda: False)
     root = prepare_data_dir(tmp_path / "data")
@@ -2350,3 +2366,115 @@ def test_stdout_is_a_terminal_asks_stdout(monkeypatch: pytest.MonkeyPatch) -> No
     """The seam reports what `sys.stdout.isatty` says."""
     monkeypatch.setattr(server.sys, "stdout", SimpleNamespace(isatty=lambda: True))
     assert server._stdout_is_terminal() is True
+
+
+def test_a_console_browser_or_no_display_is_never_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A text browser would take over the terminal; without a display nothing can open."""
+    monkeypatch.setattr(server.sys, "platform", "linux")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(server.webbrowser, "get", lambda: server.webbrowser.GenericBrowser("w3m"))
+    assert server._browser() is None
+    graphical = server.webbrowser.BackgroundBrowser("firefox")
+    monkeypatch.setattr(server.webbrowser, "get", lambda: graphical)
+    assert server._browser() is graphical
+    monkeypatch.delenv("DISPLAY")
+    assert server._browser() is None
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    assert server._browser() is graphical
+    in_background = server.webbrowser.BackgroundBrowser("/usr/bin/w3m")
+    monkeypatch.setattr(server.webbrowser, "get", lambda: in_background)
+    assert server._browser() is None
+
+    def no_browser() -> object:
+        raise server.webbrowser.Error("could not locate runnable browser")
+
+    monkeypatch.setattr(server.webbrowser, "get", no_browser)
+    assert server._browser() is None
+
+
+def test_a_browser_that_does_not_return_never_holds_the_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The opener runs on its own thread: start-up goes on while it is still busy."""
+    release = threading.Event()
+    opened: list[str] = []
+
+    def blocking_open(url: str) -> bool:
+        opened.append(url)
+        release.wait(5)
+        return True
+
+    monkeypatch.setattr(server, "_browser", lambda: SimpleNamespace(open=blocking_open))
+    api = FakeApi()
+    api.on(
+        "POST", "/api/v1/sign-in/local-link", json={"url": _LOCAL_LINK, "expires_at": "2026-11-08"}
+    )
+    monkeypatch.setattr(server, "_schedule", lambda seconds, action: lambda: None)
+    monkeypatch.setattr(server, "_stdout_is_terminal", lambda: False)
+    root = prepare_data_dir(tmp_path / "data")
+    began = time.monotonic()
+    hand_off = server._sign_the_browser_in(
+        make_state(tmp_path, api), root, 8765, "lakana_pat_a_b", {"LAKANA_UI__ENABLED": "true"}
+    )
+    took = time.monotonic() - began
+    release.set()
+    assert hand_off is not None
+    assert took < 1.0
+
+
+def test_without_a_browser_a_terminal_still_gets_the_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No usable browser: nothing is started, and a terminal gets the line to open by hand."""
+    monkeypatch.setattr(server, "_browser", lambda: None)
+    started: list[object] = []
+    monkeypatch.setattr(server, "_start_opener", lambda browser, url: started.append(url))
+    api = FakeApi()
+    api.on(
+        "POST", "/api/v1/sign-in/local-link", json={"url": _LOCAL_LINK, "expires_at": "2026-11-08"}
+    )
+    monkeypatch.setattr(server, "_schedule", lambda seconds, action: lambda: None)
+    monkeypatch.setattr(server, "_stdout_is_terminal", lambda: True)
+    root = prepare_data_dir(tmp_path / "data")
+    server._sign_the_browser_in(
+        make_state(tmp_path, api), root, 8765, "lakana_pat_a_b", {"LAKANA_UI__ENABLED": "true"}
+    )
+    assert started == []
+    assert _LOCAL_LINK in capsys.readouterr().out
+
+
+def test_a_stale_hand_off_file_is_removed_at_every_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file a killed run left behind goes even when no browser is opened this time."""
+    stale = prepare_data_dir(tmp_path / "data").sign_in_path
+    stale.write_text("old link")
+    run = _start_with_ui(tmp_path, monkeypatch, extra=("--no-browser",))
+    assert run.result.exit_code == 0, run.result.stderr
+    assert not stale.exists()
+
+
+def test_a_symlink_in_place_of_the_hand_off_file_is_replaced_not_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The link goes into a new file of its own; the symlink's target is never written."""
+    target = tmp_path / "target.html"
+    target.write_text("untouched")
+    root = prepare_data_dir(tmp_path / "data")
+    root.sign_in_path.symlink_to(target)
+    server._write_hand_off(root.sign_in_path, _LOCAL_LINK)
+    assert target.read_text() == "untouched"
+    assert not root.sign_in_path.is_symlink()
+    assert _LOCAL_LINK in root.sign_in_path.read_text()
+
+
+def test_a_later_run_without_this_instance_s_token_says_why_no_browser_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One line explains that profile 'local' holds no token of this instance."""
+    hand_off, opened, api, _ = _direct_hand_off(tmp_path, monkeypatch, token=None)
+    assert hand_off is None and opened == [] and api.requests == []
+    assert "profile 'local'" in capsys.readouterr().err

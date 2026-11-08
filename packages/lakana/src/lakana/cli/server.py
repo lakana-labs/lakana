@@ -67,6 +67,8 @@ _HAND_OFF_SECONDS = 60.0
 """How long the browser hand-off file may exist at most."""
 _TRUE_WORDS = frozenset({"1", "true", "t", "yes", "y", "on"})
 """The spellings of true the server's settings accept for a boolean, in lower case."""
+_CONSOLE_BROWSERS = frozenset({"www-browser", "links", "links2", "elinks", "lynx", "w3m"})
+"""Browsers that run in the terminal: started from here, they would take it over."""
 
 _SignalHandler = Callable[[int, FrameType | None], object] | int | None
 """A signal disposition as `signal.signal` accepts and returns it.
@@ -215,6 +217,51 @@ def _schedule(seconds: float, action: Callable[[], None]) -> Callable[[], None]:
     return timer.cancel
 
 
+def _browser() -> webbrowser.BaseBrowser | None:
+    """Find a graphical browser to hand the sign-in page to, if there is one.
+
+    Returns
+    -------
+    webbrowser.BaseBrowser or None
+        The browser `webbrowser` would use; None on Linux without a display (`DISPLAY`,
+        `WAYLAND_DISPLAY`), when no browser is found, or when it is a terminal browser (`lynx`,
+        `w3m`, `www-browser` ...), which would hold this terminal until it is closed.
+    """
+    if sys.platform.startswith("linux") and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        return None
+    try:
+        browser = webbrowser.get()
+    except webbrowser.Error:
+        return None
+    if isinstance(browser, webbrowser.GenericBrowser) and not isinstance(
+        browser, webbrowser.BackgroundBrowser
+    ):
+        return None
+    if Path(str(getattr(browser, "name", ""))).name in _CONSOLE_BROWSERS:
+        return None
+    return browser
+
+
+def _start_opener(browser: webbrowser.BaseBrowser, url: str) -> None:
+    """Ask the browser to open a URL on a daemon thread, so start-up never waits for it.
+
+    Parameters
+    ----------
+    browser
+        The browser `_browser` chose.
+    url
+        The `file://` URL of the hand-off page.
+    """
+
+    def run() -> None:
+        with contextlib.suppress(webbrowser.Error, OSError):
+            browser.open(url)
+
+    threading.Thread(target=run, name="lakana-browser", daemon=True).start()
+
+
 def _stdout_is_terminal() -> bool:
     """Tell whether stdout is a terminal (a seam for tests).
 
@@ -298,8 +345,10 @@ def _sign_the_browser_in(
 
     The link never appears on a command line: it is written to `sign-in.html` in the data
     directory (mode 0600), and the browser is given that file's path. The file is removed after
-    a minute, or at shutdown if that comes first. Snap and Flatpak browsers cannot read the data
-    directory, so a terminal also gets the link to open by hand; a pipe or a file never does.
+    a minute, or at shutdown if that comes first. The browser is started on a thread of its own
+    and never on Linux without a display or when it is a terminal browser, so start-up never
+    waits for it. Snap and Flatpak browsers cannot read the data directory, so a terminal also
+    gets the link to open by hand; a pipe or a file never does.
     Every failure is a warning: the instance keeps running.
 
     Parameters
@@ -327,6 +376,10 @@ def _sign_the_browser_in(
         )
         return None
     if token is None:
+        sys.stderr.write(
+            "The browser was not signed in: profile 'local' holds no token of this instance. "
+            f"Open {shown_url(port)} and sign in with your passkey.\n"
+        )
         return None
     try:
         with state.login_client_factory(f"http://127.0.0.1:{port}", token) as client:
@@ -353,11 +406,13 @@ def _sign_the_browser_in(
         )
         return None
     hand_off.cancel = _schedule(_HAND_OFF_SECONDS, hand_off.remove)
-    with contextlib.suppress(webbrowser.Error):
-        webbrowser.open(hand_off.path.as_uri())
+    browser = _browser()
+    if browser is not None:
+        _start_opener(browser, hand_off.path.as_uri())
     if _stdout_is_terminal():
         sys.stdout.write(
-            f"If the browser did not open signed in, open this link within 10 minutes: {link.url}\n"
+            f"If the browser did not open signed in, open this link within 10 minutes: "
+            f"{_output.safe_text(link.url)}\n"
         )
     return hand_off
 
@@ -744,7 +799,7 @@ def _first_run_setup(
     Returns
     -------
     str
-        The platform URL, for the ready line.
+        The bootstrap credential's token, now in profile `local`.
     """
     url = f"http://127.0.0.1:{port}"
     token = f"lakana_pat_{key_id}_{secret}"
@@ -762,7 +817,7 @@ def _first_run_setup(
         client.environments.create(
             "dev", storage={"scheme": "file", "root": data_dir.env_root("dev"), "options": {}}
         )
-    return url
+    return token
 
 
 def _later_run_profile_check(state: CliState, data_dir: DataDir, url: str) -> str | None:
@@ -1112,6 +1167,8 @@ def _run_locked(
         )
     )
 
+    # A page a killed run left behind holds a dead link; nothing should find it.
+    _HandOff(root.sign_in_path).remove()
     previous_handlers = _install_shutdown_handlers()
     hand_off: _HandOff | None = None
     try:
@@ -1122,8 +1179,7 @@ def _run_locked(
             sup.wait_ready(server)
             token: str | None
             if key_id is not None and secret is not None:
-                _first_run_setup(state, root, port, key_id, secret)
-                token = f"lakana_pat_{key_id}_{secret}"
+                token = _first_run_setup(state, root, port, key_id, secret)
             else:
                 token = _later_run_profile_check(state, root, f"http://127.0.0.1:{port}")
             worker = sup.start_worker()
