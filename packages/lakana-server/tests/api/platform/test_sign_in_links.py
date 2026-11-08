@@ -448,3 +448,19 @@ def test_a_session_cannot_mint_a_local_link(local_client: TestClient) -> None:
     r = local_client.post("/api/v1/sign-in/local-link", headers=session_headers(name, value, csrf))
     assert r.status_code == 403, r.text
     assert "personal access token" in r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("name", "status"),
+    [("\uff41\uff44\uff4d\uff49\uff4e", 409), ("ad​min", 422), ("́admin", 422)],
+)
+def test_look_alike_and_invisible_names_are_refused_over_rest(
+    ui_client: TestClient, name: str, status: int
+) -> None:
+    """A fullwidth twin of `admin` collides; zero-width and leading combining marks are refused."""
+    for path, body in (
+        ("/api/v1/principals", {"name": name, "type": "USER"}),
+        ("/api/v1/invites", {"name": name}),
+    ):
+        r = ui_client.post(path, headers=AUTH_HEADER, json=body)
+        assert r.status_code == status, r.text

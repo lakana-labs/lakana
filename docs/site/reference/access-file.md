@@ -69,7 +69,7 @@ tags and no duplicate keys, because each would hide from a reviewer what the fil
 | `version` | the number `1` | Required. |
 | `manages` | list of scopes | Required. `[instance]`, or a list of environment names. The scopes the file owns, see [What `manages` owns](#what-manages-owns). |
 | `groups` | mapping | Optional, and only with `manages: [instance]`. Group name to `{members: [names]}`. A member is a user's name. |
-| `service_accounts` | list of names | Optional, and only with `manages: [instance]`. The service accounts the instance has. A new name that differs only in letter case from an existing principal (active or deactivated), or that an open invite holds, is refused when the file is applied. |
+| `service_accounts` | list of names | Optional, and only with `manages: [instance]`. The service accounts the instance has. A new name is refused when the file is applied if it equals an existing principal's name (active or deactivated) or an open invite's after Unicode NFKC normalisation and case folding (`Bot`, `BOT` and the fullwidth `ｂｏｔ` all equal `bot`), or if it holds a control or invisible format character (such as a zero-width space) or starts with a combining mark. |
 | `grants` | list | Optional. See [Grants](#grants). |
 | `policies` | list | Optional. Row filters and column masks, see [Policies](#policies). |
 | `ci_trust` | list | Optional. CI trust rules, see [CI trust rules](#ci-trust-rules). |

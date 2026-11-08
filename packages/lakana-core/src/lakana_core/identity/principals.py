@@ -12,7 +12,11 @@ from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.service import assert_admin_headroom
-from lakana_core.identity.links import name_unavailable, withdraw_open_links
+from lakana_core.identity.links import (
+    invisible_character_problem,
+    name_unavailable,
+    withdraw_open_links,
+)
 from lakana_core.identity.sessions import SessionService, utc_now
 from lakana_core.languages import canonical_language, language_problem
 from lakana_core.models import AuditEventType, Principal, PrincipalType
@@ -65,6 +69,9 @@ class PrincipalService:
             If a principal with that name already exists, one whose name differs only in
             letter case (active or deactivated), or an open invite reserves the name
             (`lakana_core.identity.links.name_unavailable`).
+        ValidationError
+            If the name holds a control or format character, or starts with a combining mark
+            (`lakana_core.identity.links.invisible_character_problem`).
         PermissionDenied
             If the acting principal may not manage principals.
         """
@@ -74,6 +81,9 @@ class PrincipalService:
         ).scalar_one_or_none()
         if existing is not None:
             raise AlreadyExistsError(f"Principal {name!r} already exists.")
+        invisible = invisible_character_problem(name)
+        if invisible is not None:
+            raise ValidationError(invisible)
         problem = name_unavailable(self._session, name, now=utc_now())
         if problem is not None:
             raise AlreadyExistsError(problem)

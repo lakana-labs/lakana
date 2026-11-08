@@ -394,9 +394,9 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   next step.
 - **Single use is one conditional update** (`UPDATE … SET used_at = now WHERE used_at IS NULL
   AND withdrawn_at IS NULL AND expires_at > now RETURNING`) in the transaction that also
-  creates the invitee's account and the session; any failure after it rolls all of it back, so
-  the link stays usable. Two concurrent uses: exactly one wins (SQLite file test and a Postgres
-  two-connection test). Withdrawing shares the `used_at IS NULL` guard, so a link is used or
+  creates the invitee's account and the session; any other failure after it rolls all of it
+  back, so the link stays usable. Two concurrent uses: exactly one wins (SQLite file test, and a
+  Postgres two-connection test for each of the four kinds). Withdrawing shares the `used_at IS NULL` guard, so a link is used or
   withdrawn, never both. Expired means `expires_at <= now`. Lifetimes: setup and local 10
   minutes, recovery 1 hour, invite 7 days.
 - **Links are for people.** `refuse_automation` is the first call of every `issue_*`: a task or
@@ -420,8 +420,16 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   (active or deactivated) or another open invite has it, and for the bootstrap name; the open
   invite reserves it (`sign_in_links.reserved_name`, unique), and principal creation
   (`create_principal`: `POST /api/v1/principals`, `lakana principal create`, access apply)
-  refuses a case variant of an existing name and a reserved name too (F25). Using an invite
-  whose name was taken meanwhile fails ("ask for a new invite").
+  refuses such a name too (F25). Names are compared by `name_key`: NFKC, case fold, NFKC
+  (Unicode's `NFKC_Casefold` for identifiers), so fullwidth and ligature twins collide; a name
+  with a control (`Cc`) or format (`Cf`: zero-width, soft hyphen, direction marks) character,
+  or starting with a combining mark, is refused (422, `invisible_character_problem`).
+- **Rules are re-checked when a link is used**, in its claiming transaction: a setup link fails
+  once the bootstrap account has a passkey; a recovery link fails when its person has become an
+  administrator, unless the operator's bootstrap PAT issued it (recorded in `source_pat_id`);
+  an invite fails when its name was taken meanwhile. Each such link is then withdrawn (audited
+  with the reason, gone from the open lists) and the error names the next step (an
+  administrator's recovery: `lakana recovery create NAME`; an invite: `lakana invite create`).
 - **A local link** (`POST /api/v1/sign-in/local-link`) exists only with
   `LAKANA_UI__LOCAL_SIGN_IN` (404 otherwise), is minted with the person's own PAT (never a
   session), records that PAT, and its session ends when the PAT is revoked or expires

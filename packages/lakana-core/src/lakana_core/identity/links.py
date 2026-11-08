@@ -30,6 +30,7 @@ Rules (the spec's "Decided rules", and the security reviews S3, S4, S9, N4 to N8
 from __future__ import annotations
 
 import secrets
+import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -110,10 +111,30 @@ LOCAL_OFF = (
 )
 """The refusal (404) of a local link while `LAKANA_UI__LOCAL_SIGN_IN` is off."""
 
-NAME_TAKEN_MEANWHILE = "That name was taken meanwhile; ask for a new invite."
+NAME_TAKEN_MEANWHILE = (
+    "That name was taken meanwhile, so this invite was closed. Ask whoever invited you for a new "
+    "invite under another name (an administrator runs `lakana invite create NAME`)."
+)
 """The refusal of an invite whose name another principal took after it was issued."""
 
 _NAME_LIMIT = 255
+
+
+class _CloseLink(Exception):
+    """A claimed link whose rules no longer hold: roll back, withdraw it, raise `error`.
+
+    Parameters
+    ----------
+    error
+        The error the caller sees.
+    reason
+        Why the link is closed, for the audit event.
+    """
+
+    def __init__(self, error: Exception, reason: str) -> None:
+        super().__init__(reason)
+        self.error = error
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -259,11 +280,60 @@ def has_passkey(session: Session, principal_id: uuid.UUID, *, usable: bool = Tru
     return bool(session.execute(select(exists().where(condition))).scalar())
 
 
-def _clashing_principal(session: Session, name: str) -> str | None:
-    """Find a principal whose name equals `name` in any letter case.
+def name_key(name: str) -> str:
+    """Reduce a principal name to what two look-alike names share.
 
-    Compared with `str.casefold` in Python rather than SQL ``lower``, which folds only ASCII
-    on SQLite: the list of principals of one instance is small.
+    NFKC normalisation (fullwidth ``U+FF41`` becomes ``a``, the ligature ``U+FB01`` becomes
+    ``fi``), then case folding (``ß`` becomes ``ss``), then NFKC again, as Unicode's
+    ``NFKC_Casefold`` recommends for identifiers. Two names with the same key are one name.
+
+    Parameters
+    ----------
+    name
+        A principal name.
+
+    Returns
+    -------
+    str
+        Its comparison key; also what an open invite reserves.
+    """
+    return unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", name).casefold())
+
+
+def invisible_character_problem(name: str) -> str | None:
+    """Say why a new principal name is refused for its characters, if it is.
+
+    Refused: control characters (Unicode category ``Cc``, such as a line break), format
+    characters (``Cf``: zero-width space, zero-width joiner, soft hyphen, direction marks) and
+    a combining mark (``Mn``, ``Mc``, ``Me``) as the first character. Each can make two names
+    look the same, or a name look like another.
+
+    Parameters
+    ----------
+    name
+        The candidate name.
+
+    Returns
+    -------
+    str or None
+        The refusal, naming the cause and the next step; `None` when the characters are fine.
+    """
+    for position, character in enumerate(name):
+        category = unicodedata.category(character)
+        if category in {"Cc", "Cf"} or (position == 0 and category.startswith("M")):
+            return (
+                f"name: character {position + 1} (U+{ord(character):04X}) is invisible or "
+                "combines with the one before it, so the name could look like another. Type the "
+                "name again with letters, digits and visible punctuation only."
+            )
+    return None
+
+
+def _clashing_principal(session: Session, name: str) -> str | None:
+    """Find a principal whose name has the same `name_key` as `name`.
+
+    Compared in Python rather than with SQL ``lower``, which folds only ASCII on SQLite and
+    knows no NFKC: the list of principals of one instance is small.
 
     Parameters
     ----------
@@ -277,9 +347,9 @@ def _clashing_principal(session: Session, name: str) -> str | None:
     str or None
         The existing principal's name, active or not; `None` when no name clashes.
     """
-    folded = name.casefold()
+    key = name_key(name)
     for existing in session.execute(select(Principal.name)).scalars():
-        if existing.casefold() == folded:
+        if name_key(existing) == key:
             return existing
     return None
 
@@ -302,7 +372,7 @@ def _reserving_invite(session: Session, name: str, now: datetime) -> SignInLink 
         The open invite; `None` when none reserves the name (an expired one does not).
     """
     row = session.execute(
-        select(SignInLink).where(SignInLink.reserved_name == name.casefold())
+        select(SignInLink).where(SignInLink.reserved_name == name_key(name))
     ).scalar_one_or_none()
     if row is None or _state(row, now) != "open":
         return None
@@ -312,8 +382,10 @@ def _reserving_invite(session: Session, name: str, now: datetime) -> SignInLink 
 def name_unavailable(session: Session, name: str, *, now: datetime) -> str | None:
     """Say why a new principal cannot have a name, if it cannot (F25).
 
-    The exact name is checked by the caller; this refuses a name that differs from an existing
-    principal's (active or deactivated) only in letter case, and one an open invite reserves.
+    The exact name and the characters (`invisible_character_problem`) are checked by the
+    caller; this refuses a name whose `name_key` equals an existing principal's
+    (active or deactivated: it differs only in letter case or in look-alike forms such as
+    fullwidth letters), and one an open invite reserves.
 
     Parameters
     ----------
@@ -332,7 +404,8 @@ def name_unavailable(session: Session, name: str, *, now: datetime) -> str | Non
     existing = _clashing_principal(session, name)
     if existing is not None:
         return (
-            f"The name {name!r} differs only in letter case from the existing principal "
+            f"The name {name!r} differs only in letter case or look-alike characters (such "
+            f"as fullwidth letters) from the existing principal "
             f"{existing!r}, and names that look alike are refused. Choose another name, or use "
             f"{existing!r}."
         )
@@ -498,7 +571,8 @@ class LinkService:
         name
             The principal name it signs in as (an invite: the name it creates).
         source_pat_id
-            The PAT a local link is minted with.
+            The PAT a local link is minted with, or the operator's bootstrap PAT a recovery
+            link is issued with.
         invite_display_name
             An invite's display name.
 
@@ -523,7 +597,7 @@ class LinkService:
             principal_id=principal_id,
             invite_name=name if kind == "invite" else None,
             invite_display_name=invite_display_name,
-            reserved_name=name.casefold() if kind == "invite" else None,
+            reserved_name=name_key(name) if kind == "invite" else None,
             issued_by=p.id,
             source_pat_id=source_pat_id,
             created_at=now,
@@ -683,10 +757,13 @@ class LinkService:
                 f"name: give the new person's principal name, 1 to {_NAME_LIMIT} characters "
                 "without leading or trailing spaces."
             )
+        invisible = invisible_character_problem(name)
+        if invisible is not None:
+            raise ValidationError(invisible)
         shown = display_name.strip() if display_name else None
         if shown is not None and len(shown) > _NAME_LIMIT:
             raise ValidationError(f"display_name: at most {_NAME_LIMIT} characters.")
-        if name.casefold() == self._bootstrap_name.casefold():
+        if name_key(name) == name_key(self._bootstrap_name):
             raise AlreadyExistsError(
                 f"{name!r} is the server's first administrator (LAKANA_BOOTSTRAP_ADMIN) and "
                 "cannot be invited. Choose another name."
@@ -701,7 +778,7 @@ class LinkService:
         # An expired invite still holds its reservation; free it before taking the name.
         self._session.execute(
             update(SignInLink)
-            .where(SignInLink.reserved_name == name.casefold(), SignInLink.expires_at <= now)
+            .where(SignInLink.reserved_name == name_key(name), SignInLink.expires_at <= now)
             .values(reserved_name=None)
             .execution_options(synchronize_session="fetch")
         )
@@ -771,7 +848,15 @@ class LinkService:
         if target.id in active_instance_admin_ids(self._session) and not operator:
             raise PermissionDenied(NOT_OPERATOR_RECOVERY)
         self._withdraw_open(target.id, "recovery", p)
-        return self._issue(p, "recovery", principal_id=target.id, name=target.name)
+        return self._issue(
+            p,
+            "recovery",
+            principal_id=target.id,
+            name=target.name,
+            # The operator's token is recorded, so the link may still recover the person if
+            # they become an administrator before it is used.
+            source_pat_id=p.token_id if operator else None,
+        )
 
     def _by_public_id(self, public_id: str) -> SignInLink | None:
         """Look a link up by its public id.
@@ -902,10 +987,63 @@ class LinkService:
                 row, now, replacing=replacing, peer=peer, user_agent=user_agent
             )
             self._session.commit()
+        except _CloseLink as close:
+            self._session.rollback()
+            self._close(row.id, row.kind, close.reason)
+            raise close.error from None
         except BaseException:
             self._session.rollback()
             raise
         return redeemed
+
+    def _close(self, link_id: uuid.UUID, kind: str, reason: str) -> None:
+        """Withdraw a link whose rules no longer hold at its use, audited, and commit.
+
+        Parameters
+        ----------
+        link_id
+            The link.
+        kind
+            Its kind, for the audit event.
+        reason
+            Why, for the audit event.
+        """
+        closed = self._session.execute(
+            update(SignInLink)
+            .where(
+                SignInLink.id == link_id,
+                SignInLink.used_at.is_(None),
+                SignInLink.withdrawn_at.is_(None),
+            )
+            .values(withdrawn_at=self._clock(), reserved_name=None)
+            .returning(SignInLink.id)
+            .execution_options(synchronize_session=False)
+        ).all()
+        if closed:
+            AuditService(self._session).record(
+                None,
+                AuditEventType.SIGN_IN_LINK_WITHDRAWN,
+                detail={"kind": kind, "link_id": str(link_id), "reason": reason},
+            )
+        self._session.commit()
+
+    def _issued_by_operator(self, row: SignInLink) -> bool:
+        """Say whether a recovery link was issued with the operator's bootstrap token.
+
+        Parameters
+        ----------
+        row
+            The link.
+
+        Returns
+        -------
+        bool
+            Whether `source_pat_id` names a bootstrap PAT that is still unrevoked.
+        """
+        if row.source_pat_id is None:
+            return False
+        pat = self._session.get(PersonalAccessToken, row.source_pat_id)
+        return pat is not None and pat.bootstrap and pat.revoked_at is None
 
     def _complete(
         self, row: SignInLink, now: datetime, *, replacing: str | None, peer: str, user_agent: str
@@ -932,8 +1070,11 @@ class LinkService:
 
         Raises
         ------
-        ConflictError
-            For an invite whose name was taken meanwhile.
+        _CloseLink
+            When a rule checked at issue no longer holds: an invite's name was taken meanwhile,
+            the bootstrap account of a setup link has a passkey now, or the person of a recovery
+            link became an administrator and the link was not the operator's. The caller
+            withdraws the link and raises the carried error.
         """
         kind = row.kind
         if kind == "invite":
@@ -943,6 +1084,22 @@ class LinkService:
             principal_id = row.principal_id
         principal = self._session.get(Principal, principal_id)
         assert principal is not None  # nosec B101 -- a link's principal cascades with it
+        if kind == "setup" and has_passkey(self._session, principal_id, usable=False):
+            raise _CloseLink(ConflictError(ALREADY_SET_UP), "already_set_up")
+        if (
+            kind == "recovery"
+            and principal_id in active_instance_admin_ids(self._session)
+            and not self._issued_by_operator(row)
+        ):
+            raise _CloseLink(
+                PermissionDenied(
+                    f"{principal.name!r} became an administrator after this recovery link was "
+                    "issued, and an administrator is recovered by the server operator only: run "
+                    f"`lakana recovery create {principal.name}` with the bootstrap token where "
+                    "the server runs. This link was closed."
+                ),
+                "became_admin",
+            )
         if kind == "recovery":
             self._recover(principal, row)
         started = self._sessions.start(
@@ -998,12 +1155,12 @@ class LinkService:
 
         Raises
         ------
-        ConflictError
+        _CloseLink
             If a principal took the name meanwhile (`NAME_TAKEN_MEANWHILE`).
         """
         name = row.invite_name or ""
         if _clashing_principal(self._session, name) is not None:
-            raise ConflictError(NAME_TAKEN_MEANWHILE)
+            raise _CloseLink(ConflictError(NAME_TAKEN_MEANWHILE), "name_taken")
         principal = Principal(
             id=uuid.uuid4(),
             type=PrincipalType.USER,
@@ -1016,7 +1173,7 @@ class LinkService:
             with self._session.begin_nested():
                 self._session.flush()
         except IntegrityError:
-            raise ConflictError(NAME_TAKEN_MEANWHILE) from None
+            raise _CloseLink(ConflictError(NAME_TAKEN_MEANWHILE), "name_taken") from None
         AuditService(self._session).record(
             principal.id,
             AuditEventType.PRINCIPAL_CREATED,

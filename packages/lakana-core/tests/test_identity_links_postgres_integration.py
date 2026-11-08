@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -19,7 +20,15 @@ from lakana_core.errors import LinkUnusableError
 from lakana_core.identity.links import LinkService, Redeemed
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.sessions import SessionService
-from lakana_core.models import AuditEvent, AuditEventType, Base, BrowserSession, Principal
+from lakana_core.models import (
+    AuditEvent,
+    AuditEventType,
+    Base,
+    BrowserSession,
+    Principal,
+    PrincipalType,
+    SignInNotice,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -61,21 +70,38 @@ def _service(session: Session) -> LinkService:
         authz,
         SessionService(session, authz),
         origin=ORIGIN,
-        local_mode=False,
+        local_mode=True,
         bootstrap_name="admin",
     )
 
 
-@pytest.mark.parametrize("kind", ["setup", "invite"])
+@pytest.mark.parametrize("kind", ["setup", "invite", "recovery", "local"])
 def test_two_concurrent_uses_of_one_link_exactly_one_wins(engine: Engine, kind: str) -> None:
-    """Two connections use one link at once: one session (one account), one `used` refusal."""
+    """Two connections use one link at once: one session (one account), one `used` refusal.
+
+    For every kind: setup, invite (one account), recovery (its passkey removal, session end and
+    notices happen once) and local.
+    """
     with Session(engine) as setup:
         bootstrap_if_needed(setup, "admin", key_id="opkey", secret="opsecret")
         operator = PatService(setup, AllowAllAuthorization()).verify("opkey", "opsecret")
         if kind == "setup":
             link = _service(setup).issue_setup(operator)
-        else:
+        elif kind == "invite":
             link = _service(setup).issue_invite(operator, name="carol", display_name=None)
+        else:
+            person = Principal(id=uuid.uuid4(), type=PrincipalType.USER, name=f"bob-{kind}")
+            setup.add(person)
+            setup.commit()
+            if kind == "recovery":
+                link = _service(setup).issue_recovery(operator, principal_name=person.name)
+            else:
+                issued = PatService(setup, AllowAllAuthorization()).issue(
+                    operator, person.name, name="laptop"
+                )
+                key_id, secret = issued.token.removeprefix("lakana_pat_").split("_", 1)
+                own = PatService(setup, AllowAllAuthorization()).verify(key_id, secret)
+                link = _service(setup).issue_local(own)
     fragment = dict(item.split("=", 1) for item in link.url.split("#", 1)[1].split("&"))
     barrier = threading.Barrier(2)
     results: list[object] = []
@@ -123,6 +149,13 @@ def test_two_concurrent_uses_of_one_link_exactly_one_wins(engine: Engine, kind: 
             .where(AuditEvent.detail["link_id"].as_string() == str(link.id))
         ).scalar_one()
         assert used == 1
+        if kind == "recovery":
+            notices = check.execute(
+                select(func.count())
+                .select_from(SignInNotice)
+                .where(SignInNotice.detail["link_id"].as_string() == str(link.id))
+            ).scalar_one()
+            assert notices == 2  # the person and the one administrator, once each
         if kind == "invite":
             carols = check.execute(
                 select(func.count()).select_from(Principal).where(Principal.name == "carol")

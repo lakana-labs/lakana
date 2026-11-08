@@ -24,6 +24,7 @@ from lakana_core.errors import (
     PermissionDenied,
     SessionEndedError,
     StepUpRequired,
+    ValidationError,
 )
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
@@ -883,3 +884,80 @@ def test_the_operator_may_recover_the_bootstrap_principal(world: World) -> None:
     """The operator, who has no other way back in, may recover their own account."""
     link = world.links.issue_recovery(world.operator, principal_name="admin")
     assert world.redeem(link).started.principal.id == world.operator.id
+
+
+def test_recovery_link_refused_when_the_person_became_an_administrator(world: World) -> None:
+    """A recovery link an administrator issued stops working once its person is an admin."""
+    bob = world.person("bob")
+    boss = world.person("boss", admin=True)
+    link = world.links.issue_recovery(world.pat(boss), principal_name="bob")
+    ensure_bootstrap_admin_grant(
+        world.session,
+        PrincipalRef(id=bob.id, name=bob.name, type=bob.type),
+        AllowAllAuthorization(),
+    )
+    with pytest.raises(PermissionDenied, match="lakana recovery create bob"):
+        world.redeem(link)
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+    assert world.links.list_open(world.operator, "recovery") == []
+
+
+def test_operators_recovery_link_for_an_administrator_still_works(world: World) -> None:
+    """A recovery link the operator issued for an administrator is used normally."""
+    world.person("boss", admin=True)
+    link = world.links.issue_recovery(world.operator, principal_name="boss")
+    assert world.redeem(link).kind == "recovery"
+
+
+def test_setup_link_refused_once_the_bootstrap_account_has_a_passkey(world: World) -> None:
+    """A setup link issued before the first passkey is refused when used after it."""
+    link = world.links.issue_setup(world.operator)
+    admin = world.session.get(Principal, world.operator.id)
+    assert admin is not None
+    _passkey(world, admin)
+    with pytest.raises(ConflictError, match="lakana recovery create"):
+        world.redeem(link)
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+
+
+def test_invite_taken_meanwhile_is_closed_and_names_the_next_step(world: World) -> None:
+    """An invite whose name was taken is closed (not listed as open) and names the next step."""
+    link = _invite(world, "carol")
+    world.person("carol")
+    with pytest.raises(ConflictError, match="lakana invite create"):
+        world.redeem(link)
+    assert world.links.list_open(world.operator, "invite") == []
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+
+
+@pytest.mark.parametrize(
+    ("existing", "candidate"),
+    [
+        ("alice", "\uff41\uff4c\uff49\uff43\uff45"),  # fullwidth
+        ("straße", "STRASSE"),
+        ("\ufb01le", "file"),  # ligature
+    ],
+)
+def test_look_alike_names_collide(world: World, existing: str, candidate: str) -> None:
+    """Names are compared after NFKC and case folding, for invites and for creation."""
+    world.person(existing)
+    with pytest.raises(AlreadyExistsError):
+        _invite(world, candidate)
+    with pytest.raises(AlreadyExistsError):
+        PrincipalService(world.session, world.authz).create_principal(
+            world.operator, name=candidate, type=PrincipalType.USER
+        )
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["al​ice", "​alice", "ali­ce", "alice\u0007", "bob\nx", "́alice"],
+)
+def test_names_with_invisible_or_control_characters_are_refused(world: World, name: str) -> None:
+    """Zero-width and other format characters, control characters and a leading combining mark."""
+    with pytest.raises(ValidationError, match="invisible"):
+        _invite(world, name)
+    with pytest.raises(ValidationError, match="invisible"):
+        PrincipalService(world.session, world.authz).create_principal(
+            world.operator, name=name, type=PrincipalType.USER
+        )

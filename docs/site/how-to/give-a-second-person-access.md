@@ -30,10 +30,14 @@ It can do nothing yet. Next:
 
 A principal can do nothing until it has a grant. The command prints the two steps that follow.
 
-Names are compared in any letter case: while `alice` exists, even deactivated, `Alice` and `ALICE`
-are refused, so two look-alike accounts cannot exist. A name an open invite of the web interface
-holds is refused too, until the invite is used, withdrawn or expires. Choose another name, or
-withdraw the invite first.
+A new name must not look like an existing one. It is compared with every principal, active or
+deactivated, after Unicode NFKC normalisation and case folding, so while `alice` exists these are
+refused (409): `Alice`, `ALICE`, and the fullwidth `ａｌｉｃｅ`; `STRASSE` collides with `straße`
+and `file` with `ﬁle`. A name an open invite of the web interface holds is refused the same way
+until the invite is used, withdrawn or expires. A name is refused outright (422) when it holds a
+control character (such as a line break), an invisible format character (such as a zero-width
+space, a zero-width joiner, a soft hyphen or a direction mark), or starts with a combining mark
+(such as an accent with no letter before it). Choose another name, or withdraw the invite first.
 
 ## Grant the smallest set
 
