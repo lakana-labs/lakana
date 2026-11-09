@@ -1006,7 +1006,8 @@ class LinkService:
             For a local link over an open session (the link stays usable), and for an invite
             whose name was taken meanwhile.
         PermissionDenied
-            If the person cannot sign in (deactivated; a local link's token revoked).
+            If the person cannot sign in (deactivated; a local link's token revoked), and for a
+            local link on a server no longer in local mode (the link is closed).
         """
         row = self._by_public_id(public_id)
         if row is None or not verify_secret(secret, row.secret_hash):
@@ -1146,10 +1147,10 @@ class LinkService:
         ------
         _CloseLink
             When a rule checked at issue no longer holds: an invite's name was taken meanwhile,
-            the bootstrap account of a setup link has a passkey now, or the person of a recovery
+            a local link is used on a server no longer in local mode, the bootstrap account of a
+            setup link has a passkey now, or the person of a recovery
             link holds or has held ADMIN (`Principal.held_admin`) and the link was not the
-            operator's. The caller
-            withdraws the link and raises the carried error.
+            operator's. The caller withdraws the link and raises the carried error.
         """
         kind = row.kind
         if kind == "invite":
@@ -1159,6 +1160,15 @@ class LinkService:
             principal_id = row.principal_id
         principal = self._session.get(Principal, principal_id)
         assert principal is not None  # nosec B101 -- a link's principal cascades with it
+        if kind == "local" and not self._local_mode:
+            raise _CloseLink(
+                PermissionDenied(
+                    "This local sign-in link was made while the server ran in local mode, and "
+                    "it no longer does, so the link was closed. Start it again with `lakana "
+                    "server start --local`, or sign in with your passkey."
+                ),
+                "not_local",
+            )
         if kind == "setup" and has_passkey(self._session, principal_id, usable=False):
             raise _CloseLink(ConflictError(ALREADY_SET_UP), "already_set_up")
         if (

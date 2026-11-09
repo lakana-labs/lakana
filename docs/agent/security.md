@@ -443,7 +443,8 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   with a control (`Cc`) or format (`Cf`: zero-width, soft hyphen, direction marks) character,
   or starting with a combining mark, is refused (422, `invisible_character_problem`).
 - **Rules are re-checked when a link is used**, in its claiming transaction: a setup link fails
-  once the bootstrap account has a passkey; a recovery link fails when its person holds or has
+  once the bootstrap account has a passkey; a local link fails on a server no longer in local
+  mode; a recovery link fails when its person holds or has
   held ADMIN by then (`held_admin`), unless the operator's bootstrap PAT issued it (recorded in `source_pat_id`);
   an invite fails when its name was taken meanwhile. Each such link is then withdrawn (audited
   with the reason, gone from the open lists) and the error names the next step (an

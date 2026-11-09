@@ -1092,3 +1092,25 @@ def test_a_person_who_never_held_admin_is_recoverable_by_an_administrator(world:
     world.session.refresh(bob)
     assert not bob.held_admin
     assert world.links.issue_recovery(world.pat(boss), principal_name="bob")
+
+
+def test_local_link_is_closed_when_used_after_local_mode_was_turned_off(
+    world: World, session: Session
+) -> None:
+    """A local link issued in local mode is refused, and withdrawn, by a server without it."""
+    bob = world.person("bob")
+    link = world.links.issue_local(world.pat(bob))
+    off = LinkService(
+        session,
+        world.authz,
+        world.sessions,
+        origin=ORIGIN,
+        local_mode=False,
+        bootstrap_name="admin",
+        clock=world.clock,
+    )
+    public_id, secret = parts(link.url)
+    with pytest.raises(PermissionDenied, match="local mode"):
+        off.redeem(public_id, secret, replacing=None, peer="p", user_agent="u", has_session=False)
+    assert world.links.describe(public_id).state == "withdrawn"
+    assert world.session.execute(select(BrowserSession)).scalars().all() == []
