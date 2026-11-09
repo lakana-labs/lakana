@@ -148,8 +148,12 @@ test("no Back or Forward step shows the local link's secret", async ({ browser, 
   const before = await page.evaluate(() => history.length);
 
   await page.goto(link);
-  await expect(page.getByRole("heading", { level: 1, name: "Add a passkey" })).toBeVisible();
-  await page.getByRole("button", { name: "Not now" }).click();
+  // The passkey offer comes only while the administrator has none (an earlier test adds one).
+  const landed = page.getByRole("heading", { level: 1, name: /^(Add a passkey|Home)$/ });
+  await expect(landed).toBeVisible();
+  if ((await landed.textContent()) === "Add a passkey") {
+    await page.getByRole("button", { name: "Not now" }).click();
+  }
   await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
 
   // The link's own entry is replaced, never followed by another one.
