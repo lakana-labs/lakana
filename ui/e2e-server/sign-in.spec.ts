@@ -9,6 +9,18 @@ const SECRET_PARAM = /[#&?]s=/;
 const CSRF_KEY = "lakana.csrf";
 
 /**
+ * Reads the secret (`s=`) of a link, from after its `#`.
+ *
+ * @param link - The link.
+ * @returns The secret.
+ */
+function secretOf(link: string): string {
+  const secret = new URLSearchParams(new URL(link).hash.slice(1)).get("s");
+  expect(secret).toBeTruthy();
+  return secret ?? "";
+}
+
+/**
  * Runs axe over the page with the WCAG 2.2 AA tags.
  *
  * @param page - The page to check.
@@ -88,17 +100,22 @@ test("the link secret is gone from the address bar and history", async ({ browse
   const page = await freshPage(browser);
   const link = await inviteLink(request, uniqueName("secret"));
   expect(link).toMatch(SECRET_PARAM);
+  const secret = secretOf(link);
 
   await page.goto(link);
   await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
-  expect(page.url()).not.toMatch(SECRET_PARAM);
+  expect(page.url()).not.toContain(secret);
   expect(page.url()).not.toContain("#");
 
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Add a passkey" })).toBeVisible();
-  expect(page.url()).not.toMatch(SECRET_PARAM);
-  const state = await page.evaluate(() => JSON.stringify(history.state));
-  expect(state).not.toContain("secret");
+  expect(page.url()).not.toContain(secret);
+  const kept = await page.evaluate(() => ({
+    state: JSON.stringify(history.state),
+    location: location.href,
+  }));
+  expect(kept.state).not.toContain(secret);
+  expect(kept.location).not.toContain(secret);
   await page.context().close();
 });
 
@@ -150,12 +167,21 @@ test("127.0.0.1 redirects to localhost", async ({ browser }) => {
   await page.context().close();
 });
 
-test("a cross-origin POST is refused", async ({ request }) => {
+test("a cross-origin POST is refused, the same POST from the origin is not", async ({
+  request,
+}) => {
   const refused = await request.post("/api/v1/sign-in/links/describe", {
     headers: { Origin: "http://evil.example" },
     data: { link_id: "anything" },
   });
   expect(refused.status()).toBe(403);
+  const control = await request.post("/api/v1/sign-in/links/describe", {
+    headers: { Origin: ORIGIN },
+    data: { link_id: "anything" },
+  });
+  // An unknown link: the request passed the Origin check and reached the route.
+  expect(control.status()).toBe(410);
+  expect(((await control.json()) as { state?: string }).state).toBe("unknown");
 });
 
 test("the session cookie alone signs nobody in; a new tab of the origin stays signed in", async ({
