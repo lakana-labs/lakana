@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -152,6 +152,8 @@ describe("RecoveryLinksPage", () => {
     );
 
     expect(await screen.findByText(/No recovery link is open/)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Access" })).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1, name: "Access" })).toHaveFocus();
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -68,7 +68,9 @@ describe("SessionsPanel", () => {
 
     expect(await screen.findByText("No open session.")).toBeInTheDocument();
     expect(server.sent.some((request) => request.method === "DELETE")).toBe(true);
-    expect(screen.getByRole("heading", { level: 2, name: "Sessions" })).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "Sessions" })).toHaveFocus();
+    });
   });
 
   it("ends nothing when the administrator cancels", async () => {
