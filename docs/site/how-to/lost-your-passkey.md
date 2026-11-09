@@ -14,7 +14,10 @@ so a recovery nobody asked for does not go unnoticed.
 1. Ask an administrator of your instance for a recovery link. Tell them the name you sign in
    with; the sign-in page names nobody, so they need it from you.
 2. Open the link within the hour, in the browser you want to use from now on. The page says
-   "Sign in as" and your name; choose **Continue**.
+   "Sign in as" and your name; choose **Continue**. Where the new passkey can live depends on
+   the browser: on Linux some browsers offer only a USB security key (Firefox, at the time of
+   writing), while Chrome also offers a phone (a QR code, then Bluetooth) or Google Password
+   Manager.
 3. The interface asks you to add a passkey, and nothing else works until you have one. Choose
    **Add a passkey** and follow your browser.
 

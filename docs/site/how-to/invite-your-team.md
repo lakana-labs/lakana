@@ -7,6 +7,11 @@ browser. For a team that means a DNS name and HTTPS: passkeys work only at a dom
 at a bare IP address, and over plain HTTP only on `localhost`
 ([Deploying with Compose](deploy-with-compose.md) sets the public address up).
 
+Where a passkey can live depends on the person's browser and system: on Linux some browsers offer
+only a USB security key (Firefox, at the time of writing), while Chrome also offers a phone (a QR
+code, then Bluetooth) or Google Password Manager. Someone on Linux without a security key can
+sign up in Chrome.
+
 An **invite** is a link that creates the person's account the first time it is used. It works
 once, for 7 days, and the account it creates has no rights at all until you grant some.
 
