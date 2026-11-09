@@ -6,14 +6,19 @@ Every attestation and assertion comes from a software authenticator
 
 from __future__ import annotations
 
+import base64
+import json
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from scripts.test_support.webauthn_test_helpers import SoftAuthenticator, b64url, unb64url
-from sqlalchemy import event, func, select, update
+from sqlalchemy import delete, event, func, insert, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import ORMExecuteState, Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
@@ -27,6 +32,7 @@ from lakana_core.errors import (
     PermissionDenied,
     SessionEndedError,
     StepUpRequired,
+    ValidationError,
 )
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.identity.notices import NoticeService
@@ -34,6 +40,9 @@ from lakana_core.identity.passkeys import (
     CHALLENGE_LIFETIME,
     FIRST_PASSKEY_WINDOW,
     PasskeyService,
+    _cross_origin,
+    _registration_client_data,
+    open_challenge,
     sign_challenge,
 )
 from lakana_core.identity.principals import PrincipalService
@@ -42,6 +51,7 @@ from lakana_core.models import (
     AuditEvent,
     AuditEventType,
     BrowserSession,
+    InstanceSetting,
     Passkey,
     Principal,
     PrincipalType,
@@ -982,3 +992,133 @@ def test_passkey_from_an_older_session_leaves_a_notice(
     world.register(alice)
     assert [n.kind for n in world.notices(alice.row)] == ["passkey_added"]
     assert len(world.events(AuditEventType.PASSKEY_ADDED)) == 2
+
+
+def test_a_passkey_name_over_100_characters_is_refused_with_a_shorter_suggestion(
+    world: World, alice: Signed
+) -> None:
+    """An overlong or control-character name is refused before the ceremony is used up."""
+    ceremony, _ = world.passkeys.registration_options(world.ref(alice))
+    for name in ("x" * 101, "bad\x07name"):
+        with pytest.raises(ValidationError, match="Choose a shorter name"):
+            world.passkeys.register(world.ref(alice), ceremony, "{}", name=name, user_agent="u")
+
+
+def test_registration_options_for_a_person_who_is_gone_say_so(world: World, alice: Signed) -> None:
+    """A session whose person was deleted meanwhile gets a plain not-found."""
+    ref = world.ref(alice)
+    world.session.execute(delete(Principal).where(Principal.id == ref.id))
+    world.session.expire_all()
+    with pytest.raises(NotFoundError, match="No such principal"):
+        world.passkeys.registration_options(ref)
+
+
+def test_two_servers_creating_the_challenge_key_at_once_end_with_one_key(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The loser of the race on the challenge key's first creation uses the winner's key."""
+    winner = b"w" * 32
+    real_nested = world.session.begin_nested
+
+    @contextmanager
+    def other_process_first() -> Generator[None]:
+        """Let another process store its key just before this one's insert flushes.
+
+        Yields
+        ------
+        None
+            While this process's own insert is pending.
+        """
+        world.session.execute(
+            insert(InstanceSetting).values(
+                key="sign_in.challenge_key",
+                value=base64.b64encode(winner).decode("ascii"),
+                updated_at=START,
+            )
+        )
+        with real_nested():
+            yield
+
+    monkeypatch.setattr(world.session, "begin_nested", other_process_first)
+    assert world.passkeys._challenge_key() == winner
+    monkeypatch.undo()
+    assert world.service()._challenge_key() == winner
+
+
+def test_a_sign_in_answer_whose_client_data_is_not_json_is_refused_as_expired(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    """An answer whose client data cannot be read has no challenge to match, so it is refused."""
+    _, auth, _ = enrolled
+    ceremony, options = world.passkeys.sign_in_options()
+    answer = json.loads(auth.get(options))
+    answer["response"]["clientDataJSON"] = b64url(b"not json at all")
+    with pytest.raises(AuthenticationError, match="expired or was used"):
+        world.passkeys.sign_in(
+            ceremony, json.dumps(answer), replacing=None, peer="p", user_agent="u"
+        )
+    signed_in = select(func.count()).where(WebauthnChallenge.purpose == "sign_in")
+    assert world.session.scalar(signed_in) == 0
+
+
+def test_a_credential_id_stored_between_the_check_and_the_insert_is_refused(
+    world: World, alice: Signed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the insert itself finds the credential id taken, the answer is the plain refusal."""
+    real_flush = world.session.flush
+
+    def losing_flush(*args: object, **kwargs: object) -> None:
+        """Fail the flush that writes the new passkey, as a competing insert would.
+
+        Parameters
+        ----------
+        *args
+            Passed on.
+        **kwargs
+            Passed on.
+
+        Raises
+        ------
+        IntegrityError
+            When a passkey is waiting to be written.
+        """
+        if any(isinstance(row, Passkey) for row in world.session.new):
+            raise IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed"))
+        real_flush(*args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(world.session, "flush", losing_flush)
+    with pytest.raises(AlreadyExistsError, match="registered already"):
+        world.register(alice)
+    monkeypatch.undo()
+    assert world.session.scalar(select(func.count()).select_from(Passkey)) == 0
+
+
+@pytest.mark.parametrize("size", [0, 1, 40, 48, 49, 200])
+def test_a_challenge_of_the_wrong_size_is_not_one_of_ours(world: World, size: int) -> None:
+    """Only a challenge with the exact length and version byte opens; others give nothing."""
+    key = world.passkeys._challenge_key()
+    assert open_challenge(key, "sign_in", RP_ID, b"\x01" * size) is None
+
+
+@pytest.mark.parametrize(
+    ("data", "refused"),
+    [
+        (b"not json", True),
+        (b"[]", True),
+        (b'{"crossOrigin": true}', True),
+        (b'{"topOrigin": "https://evil.example"}', True),
+        (b'{"crossOrigin": false}', False),
+    ],
+)
+def test_cross_origin_client_data_is_refused_and_unreadable_data_too(
+    data: bytes, refused: bool
+) -> None:
+    """Client data from a frame, or that cannot be read at all, counts as cross-origin."""
+    assert _cross_origin(data) is refused
+
+
+def test_unreadable_registration_answer_gives_empty_client_data_which_is_refused() -> None:
+    """A registration answer with unreadable client data yields none, and none is refused."""
+    for broken in ("not json", "{}", '{"response": {}}'):
+        assert _registration_client_data(broken) == b""
+    assert _cross_origin(b"") is True

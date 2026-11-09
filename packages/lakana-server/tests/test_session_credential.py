@@ -233,6 +233,19 @@ def test_the_csrf_token_is_random_stored_as_a_hash_and_never_read_back(
     assert "csrf_token" not in r.json() and csrf not in r.text
 
 
+def test_cookie_authenticates_api_v1_behind_a_path_prefix(client: TestClient) -> None:
+    """Under a proxy's path prefix (`root_path`), the cookie still counts below `/api/v1/`."""
+    name, value, csrf = signed_in(client, "admin")
+    prefixed = TestClient(
+        cast(FastAPI, client.app), root_path="/lakana", base_url=PUBLIC, headers={"Origin": PUBLIC}
+    )
+    r = prefixed.get("/lakana/api/v1/whoami", headers=session_headers(name, value, csrf))
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "admin"
+    r = prefixed.get("/lakana/v1/dev/namespaces", headers=session_headers(name, value, csrf))
+    assert r.status_code == 401
+
+
 def test_cookie_is_ignored_outside_api_v1(client: TestClient) -> None:
     """The Iceberg REST routes never read the cookie: only a token answers there."""
     name, value, csrf = signed_in(client, "admin")

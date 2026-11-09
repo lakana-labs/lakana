@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import delete, event, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind
@@ -1430,3 +1431,94 @@ def test_operators_recovery_link_for_an_administrator_fails_once_the_token_is_re
     world.session.commit()
     with pytest.raises(PermissionDenied, match="lakana recovery create boss"):
         world.redeem(link)
+
+
+def test_two_invites_for_one_name_at_the_same_moment_name_the_next_step(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The invite that loses the race on the name's reservation says so and leaves no link."""
+    real_commit = world.session.commit
+    calls: list[int] = []
+
+    def losing_commit() -> None:
+        """Fail the first commit as the database does for a reservation another invite won.
+
+        Raises
+        ------
+        IntegrityError
+            On the first call; later calls commit.
+        """
+        calls.append(1)
+        if len(calls) == 1:
+            raise IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed"))
+        real_commit()
+
+    monkeypatch.setattr(world.session, "commit", losing_commit)
+    with pytest.raises(AlreadyExistsError, match="List the open invites"):
+        _invite(world, "carol")
+    monkeypatch.undo()
+    assert world.links.list_open(world.operator, "invite") == []
+    assert _invite(world, "carol").url
+
+
+def test_invite_refuses_an_overlong_display_name(world: World) -> None:
+    """A display name over the limit is refused, naming the field and the limit."""
+    with pytest.raises(ValidationError, match=r"display_name: at most 255 characters"):
+        _invite(world, "carol", display_name="x" * 256)
+
+
+def test_recovery_of_an_unknown_name_names_the_next_step(world: World) -> None:
+    """A recovery for a name nobody has says to check the name."""
+    with pytest.raises(NotFoundError, match="Check the name and try again"):
+        world.links.issue_recovery(world.operator, principal_name="nobody")
+
+
+def test_invite_whose_name_is_taken_in_the_race_window_is_closed(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name taken between the check and the insert closes the invite and names the next step."""
+    link = _invite(world, "carol")
+    world.person("carol")
+    monkeypatch.setattr("lakana_core.identity.links._clashing_principal", lambda *_a, **_k: None)
+    with pytest.raises(ConflictError, match="lakana invite create"):
+        world.redeem(link)
+    monkeypatch.undo()
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+    events = world.session.scalars(
+        select(AuditEvent).where(AuditEvent.event_type == AuditEventType.SIGN_IN_LINK_WITHDRAWN)
+    ).all()
+    assert [e.detail["reason"] for e in events] == ["name_taken"]
+
+
+def test_closing_a_link_that_was_withdrawn_meanwhile_audits_nothing_twice(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When another call withdrew the link first, closing it adds no second withdrawal event."""
+    link = _invite(world, "carol")
+    world.person("carol")
+    monkeypatch.setattr(world.links, "_withdraw_if_open", lambda _link_id: False)
+    with pytest.raises(ConflictError, match="lakana invite create"):
+        world.redeem(link)
+    events = world.session.scalars(
+        select(AuditEvent).where(AuditEvent.event_type == AuditEventType.SIGN_IN_LINK_WITHDRAWN)
+    ).all()
+    assert events == []
+
+
+def test_name_of_a_link_follows_its_kind_and_survives_a_missing_principal(world: World) -> None:
+    """An invite names the account it creates; a link to a person who is gone names no one."""
+    invite = SignInLink(kind="invite", principal_id=None, invite_name="carol")
+    orphan = SignInLink(kind="recovery", principal_id=uuid.uuid4(), invite_name=None)
+    bound = SignInLink(kind="recovery", principal_id=world.person("bob").id)
+    assert world.links.name_of(invite) == "carol"
+    assert world.links.name_of(orphan) == ""
+    assert world.links.name_of(bound) == "bob"
+
+
+def test_withdraw_for_principal_commits_when_asked(world: World) -> None:
+    """With `commit=True` the withdrawal survives a later rollback; by default it does not."""
+    bob = world.person("bob")
+    link = world.links.issue_recovery(world.operator, principal_name="bob")
+    assert world.links.withdraw_for_principal(bob.id, commit=True) == 1
+    world.session.rollback()
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"

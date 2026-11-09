@@ -224,6 +224,22 @@ def test_loopback_alias_redirects_pages_to_localhost(client: TestClient, alias: 
     assert r.headers["location"] == "http://localhost:8000/catalog?x=1"
 
 
+def test_a_path_without_a_leading_slash_moves_below_the_public_origin(settings: Settings) -> None:
+    """At an alias, a path that lacks its slash is given one, never glued onto the host."""
+    scope = {"path": "evil.example/a", "headers": [(b"host", b"127.0.0.1:8000")]}
+    status, headers = _call(settings, scope)
+    assert status == 308
+    assert headers["location"] == "http://localhost:8000/evil.example/a"
+
+
+def test_cookies_that_are_not_the_sessions_do_not_make_browser_traffic(client: TestClient) -> None:
+    """Several unrelated cookies leave a request without credentials in the non-browser class."""
+    r = client.get(
+        "/api/v1/whoami", headers={"Cookie": "theme=dark; lang=en", "Host": "server:8000"}
+    )
+    assert r.status_code != 421
+
+
 def test_loopback_alias_head_is_redirected_and_post_is_not(client: TestClient) -> None:
     """Only GET and HEAD move; a POST at an alias meets the Origin check instead."""
     assert (
