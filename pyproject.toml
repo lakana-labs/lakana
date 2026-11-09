@@ -59,7 +59,7 @@ check = [
 ]
 # The documentation site (docs/site). Built in CI; published at the public beta.
 docs = [
-    "zensical>=0.0.74",
+    "zensical>=0.1.0",
 ]
 
 [tool.ruff]
