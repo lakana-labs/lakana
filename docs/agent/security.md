@@ -617,13 +617,21 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   run-as account need step-up, but a deploy afterwards does not. A stale session (a browser
   left signed in) of a person with DEPLOY can therefore run any branch or tag of the registered
   repository as the bound account, until the session's idle timeout or lifetime ends it.
-- **The local sign-in hand-off.** `lakana server start --local` writes the local link to
-  `<data dir>/sign-in.html` (0600, in the 0700 data directory, `O_EXCL | O_NOFOLLOW`) and gives
-  the browser only that file's path, so the secret is never on a command line another OS user
-  can read; the file is removed after 60 seconds or at shutdown. Until then another process of
-  the same OS user can read it, as it can read the profile's token. A Snap or Flatpak browser
-  cannot read the data directory: a terminal then also gets the link printed (never a pipe or a
-  file), which stays in the terminal's scrollback until it is used or expires (10 minutes).
+- **The local sign-in link on a command line.** `lakana server start --local` opens the local
+  link (`http://localhost:<port>/sign-in#l=…&s=…`) directly in the default web browser
+  (`webbrowser`, on a daemon thread; never on Linux without a display or with a terminal
+  browser), so the system's http handler opens it. The secret is therefore on the browser
+  command line of `xdg-open` on Linux and, when that starts the browser fresh, of the browser
+  process for as long as it runs (by then the link is used or expired); on macOS it goes to
+  `osascript` on standard input, on Windows to `os.startfile`, so neither has a command line
+  with it. Other OS users of the machine can read it in the process list. The link works once and only for 60 seconds
+  (`LINK_LIFETIMES["local"]`), the page removes it from the address bar and history before its
+  first request (`ui/src/sign-in/fragment.ts`), and local mode is for a machine only one
+  person uses. A terminal also gets the link printed (never a pipe or a file), which stays in
+  its scrollback until it is used or expires. An earlier design handed the link over in a 0600
+  `<data dir>/sign-in.html` instead: a `file://` URL goes to the `.html` handler (a mail program
+  on some desktops) and a Snap or Flatpak browser cannot read the hidden data directory, so the
+  browser ended signed out (2026-11-09). A start still removes such a leftover file.
 - **A pre-upgrade bootstrap PAT.** Migration 0069 marks as the operator's only unrevoked PATs
   named `bootstrap` owned by the bootstrap principal. A PAT an administrator issued before the
   upgrade for the bootstrap principal and named `bootstrap` would also be marked; revoke such a

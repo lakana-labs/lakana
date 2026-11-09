@@ -10,7 +10,8 @@ Rules (the spec's "Decided rules", and the security reviews S3, S4, S9, N4 to N8
 
 - Only the secret's SHA-256 digest is stored; the presented secret is compared in constant time.
   A wrong secret answers exactly like an unknown public id (`LinkUnusableError("unknown")`).
-- Lifetimes (`LINK_LIFETIMES`): setup and local 10 minutes, recovery 1 hour, invite 7 days.
+- Lifetimes (`LINK_LIFETIMES`): setup 10 minutes, local 60 seconds (the browser opens it at
+  once), recovery 1 hour, invite 7 days.
   A link is expired from `expires_at` on (``expires_at <= now``).
 - Use is one conditional ``UPDATE … WHERE used_at IS NULL AND withdrawn_at IS NULL AND
   expires_at > now RETURNING`` in the transaction that also creates the account (invite) and
@@ -88,7 +89,7 @@ LinkState = Literal["open", "used", "expired", "withdrawn"]
 
 LINK_LIFETIMES: dict[str, timedelta] = {
     "setup": timedelta(minutes=10),
-    "local": timedelta(minutes=10),
+    "local": timedelta(seconds=60),
     "recovery": timedelta(hours=1),
     "invite": timedelta(days=7),
 }
@@ -776,7 +777,7 @@ class LinkService:
         Returns
         -------
         IssuedLink
-            A link for the caller, valid for 10 minutes; its session ends when the token is
+            A link for the caller, valid for 60 seconds; its session ends when the token is
             revoked.
 
         Raises

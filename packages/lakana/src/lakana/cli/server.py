@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import html
 import json
 import os
 import re
@@ -63,8 +62,8 @@ _STOP_TIMEOUT_SECONDS = 30.0
 _STOP_POLL_SECONDS = 0.1
 _BOOTSTRAP_ENV_VARS = ("LAKANA_BOOTSTRAP_PAT_KEY_ID", "LAKANA_BOOTSTRAP_PAT_SECRET")
 _LOOPBACK_URL_RE = re.compile(r"http://127\.0\.0\.1:\d+")
-_HAND_OFF_SECONDS = 60.0
-"""How long the browser hand-off file may exist at most."""
+_OLD_SIGN_IN_PAGE = "sign-in.html"
+"""The page an older version handed the sign-in link over in; a start removes a leftover."""
 _TRUE_WORDS = frozenset({"1", "true", "t", "yes", "y", "on"})
 """The spellings of true the server's settings accept for a boolean, in lower case."""
 _CONSOLE_BROWSERS = frozenset({"www-browser", "links", "links2", "elinks", "lynx", "w3m"})
@@ -196,29 +195,8 @@ def _ui_enabled(env: Mapping[str, str]) -> bool:
     return env.get("LAKANA_UI__ENABLED", "").strip().lower() in _TRUE_WORDS
 
 
-def _schedule(seconds: float, action: Callable[[], None]) -> Callable[[], None]:
-    """Run an action once after a delay, on a daemon thread (a seam for tests).
-
-    Parameters
-    ----------
-    seconds
-        The delay.
-    action
-        What to run.
-
-    Returns
-    -------
-    Callable
-        Cancels the action if it has not run yet.
-    """
-    timer = threading.Timer(seconds, action)
-    timer.daemon = True
-    timer.start()
-    return timer.cancel
-
-
 def _browser() -> webbrowser.BaseBrowser | None:
-    """Find a graphical browser to hand the sign-in page to, if there is one.
+    """Find a graphical browser to open the sign-in link in, if there is one.
 
     Returns
     -------
@@ -252,7 +230,8 @@ def _start_opener(browser: webbrowser.BaseBrowser, url: str) -> None:
     browser
         The browser `_browser` chose.
     url
-        The `file://` URL of the hand-off page.
+        The `http(s)` sign-in link, so the system's web-browser handler opens it (a `file://`
+        URL would go to the `.html` handler, which may be a mail program).
     """
 
     def run() -> None:
@@ -273,114 +252,47 @@ def _stdout_is_terminal() -> bool:
     return sys.stdout.isatty()
 
 
-class _HandOff:
-    """The file that hands the local sign-in link to the browser, removed once.
-
-    Parameters
-    ----------
-    path
-        The file.
-    """
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.cancel: Callable[[], None] = lambda: None
-
-    def remove(self) -> None:
-        """Delete the file if it is still there; safe to call more than once."""
-        with contextlib.suppress(OSError):
-            self.path.unlink(missing_ok=True)
-
-
-def _hand_off_page(url: str) -> str:
-    """Build the page that sends the browser on to the sign-in link at once.
-
-    Parameters
-    ----------
-    url
-        The link.
-
-    Returns
-    -------
-    str
-        A small HTML page with a refresh to `url` and a link for a browser that ignores it.
-    """
-    target = html.escape(url, quote=True)
-    return (
-        "<!doctype html>\n"
-        '<meta charset="utf-8">\n'
-        '<meta name="referrer" content="no-referrer">\n'
-        f'<meta http-equiv="refresh" content="0;url={target}">\n'
-        "<title>Signing in to Lakana</title>\n"
-        f'<p>Signing in to Lakana… <a href="{target}">Continue</a></p>\n'
-    )
-
-
-def _write_hand_off(path: Path, url: str) -> None:
-    """Write the hand-off page readable by this user only, never through a symlink.
-
-    Parameters
-    ----------
-    path
-        The file, inside the 0700 data directory.
-    url
-        The sign-in link.
-    """
-    with contextlib.suppress(FileNotFoundError):
-        path.unlink()
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(_hand_off_page(url))
-
-
 def _sign_the_browser_in(
     state: CliState,
-    data_dir: DataDir,
     port: int,
     token: str | None,
     env: Mapping[str, str],
-) -> _HandOff | None:
+) -> None:
     """Open the browser signed in, with a link asked for with the person's own token.
 
-    The link never appears on a command line: it is written to `sign-in.html` in the data
-    directory (mode 0600), and the browser is given that file's path. The file is removed after
-    a minute, or at shutdown if that comes first. The browser is started on a thread of its own
-    and never on Linux without a display or when it is a terminal browser, so start-up never
-    waits for it. Snap and Flatpak browsers cannot read the data directory, so a terminal also
-    gets the link to open by hand; a pipe or a file never does.
-    Every failure is a warning: the instance keeps running.
+    The link (`http://localhost:<port>/sign-in#…`, single use, 60 seconds) goes to the default
+    web browser directly. Its secret is therefore on the command line of `xdg-open` (Linux) and
+    of a browser started fresh, which other users of this machine can see; local mode is for a
+    machine only one person uses. A link that does not point at this instance's
+    `localhost:<port>` is refused.
+    The browser is started on a thread of its own and never on Linux without a display or when
+    it is a terminal browser, so start-up never waits for it. A terminal also gets the link to
+    open by hand; a pipe or a file never does. Every failure is a warning: the instance keeps
+    running.
 
     Parameters
     ----------
     state
         The CLI state, for `login_client_factory`.
-    data_dir
-        The data directory.
     port
         The instance's port.
     token
         The `local` profile's token; `None` when there is no usable one (nothing happens).
     env
         The children's environment, for `LAKANA_UI__ENABLED`.
-
-    Returns
-    -------
-    _HandOff or None
-        The hand-off file to remove at shutdown, or None when none was written.
     """
     if not _ui_enabled(env):
         sys.stdout.write(
             "The web interface is off; to open it signed in, start again with "
             "LAKANA_UI__ENABLED=true.\n"
         )
-        return None
+        return
     if token is None:
         sys.stderr.write(
             "The browser was not signed in: profile 'local' holds no token of this instance. "
             f"Open {shown_url(port)} and sign in with your passkey.\n"
         )
-        return None
+        return
     try:
         with state.login_client_factory(f"http://127.0.0.1:{port}", token) as client:
             link = client.sign_in.local_link()
@@ -389,32 +301,28 @@ def _sign_the_browser_in(
             f"Couldn't open the browser signed in: {exc}. Open {shown_url(port)} and sign in "
             "with your passkey, or ask an administrator for a recovery link.\n"
         )
-        return None
+        return
     if urlsplit(link.url).scheme not in {"http", "https"}:
         sys.stderr.write(
             f"Couldn't open the browser signed in: the server answered a link that is not a web "
             f"address. Open {shown_url(port)} and sign in with your passkey.\n"
         )
-        return None
-    hand_off = _HandOff(data_dir.sign_in_path)
-    try:
-        _write_hand_off(hand_off.path, link.url)
-    except OSError as exc:
+        return
+    if (parts := urlsplit(link.url)).hostname != "localhost" or parts.port != port:
         sys.stderr.write(
-            f"Couldn't write {hand_off.path} to open the browser signed in ({exc}); open "
-            f"{shown_url(port)} and sign in with your passkey.\n"
+            "Couldn't open the browser signed in: the server answered a link that is not this "
+            f"instance's address. Open {shown_url(port)} and sign in with your passkey.\n"
         )
-        return None
-    hand_off.cancel = _schedule(_HAND_OFF_SECONDS, hand_off.remove)
+        return
     browser = _browser()
     if browser is not None:
-        _start_opener(browser, hand_off.path.as_uri())
+        _start_opener(browser, link.url)
     if _stdout_is_terminal():
         sys.stdout.write(
-            f"If the browser did not open signed in, open this link within 10 minutes: "
+            "If the browser did not open signed in, open this link within 1 minute (it works "
+            "once; after that, start Lakana again for a new one): "
             f"{_output.safe_text(link.url)}\n"
         )
-    return hand_off
 
 
 def _probe_health(url: str) -> bool:
@@ -1177,10 +1085,10 @@ def _run_locked(
         )
     )
 
-    # A page a killed run left behind holds a dead link; nothing should find it.
-    _HandOff(root.sign_in_path).remove()
+    # An older version handed the link over in a page; a leftover holds a dead link.
+    with contextlib.suppress(OSError):
+        (root.root / _OLD_SIGN_IN_PAGE).unlink(missing_ok=True)
     previous_handlers = _install_shutdown_handlers()
-    hand_off: _HandOff | None = None
     try:
         try:
             sup.migrate()
@@ -1195,7 +1103,7 @@ def _run_locked(
             worker = sup.start_worker()
             _write_pidfile_or_fail(root.worker_pid, worker.pid)
             if open_browser:
-                hand_off = _sign_the_browser_in(state, root, port, token, env)
+                _sign_the_browser_in(state, port, token, env)
             sys.stdout.write(_ready_line(shown_url(port)) + "\n")
             # Flush explicitly: stdout is block-buffered, not line-buffered,
             # whenever it isn't a tty (piped to a file, `tee`, or a
@@ -1216,9 +1124,6 @@ def _run_locked(
             raise typer.Exit(1) from exc
     finally:
         _ignore_signals(previous_handlers)
-        if hand_off is not None:
-            hand_off.cancel()
-            hand_off.remove()
         try:
             sup.stop()
         finally:

@@ -101,7 +101,7 @@ class SignIn:
         """Issue a sign-in link for yourself, with your own personal access token.
 
         Only on a server with local sign-in on (`lakana server start --local` sets it). The
-        link works once, for 10 minutes, and signs in without a passkey touch.
+        link works once, for 60 seconds, and signs in without a passkey touch.
 
         Returns
         -------
