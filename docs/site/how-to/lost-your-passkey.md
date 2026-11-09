@@ -25,7 +25,8 @@ If the page says the link was already used, has expired or was withdrawn, or tha
 it was deactivated or is no longer an administrator, ask an administrator for a new one: each
 link works once. The interface removes the link from the address bar and from the tab's Back
 and Forward steps as soon as the page opens, but the browser keeps it in its own history (Ctrl+H)
-and may suggest it in the address bar; once used or expired, a link there is useless.
+and may suggest it in the address bar. A recovery link opened but not continued still works
+from there until its hour is over: use it, or ask the administrator to withdraw it.
 
 ## You still have a passkey
 

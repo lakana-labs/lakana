@@ -226,7 +226,7 @@ as two statements.
   both do, and a page cannot change that. Opening an invite or recovery link only shows it; it is
   used when the person chooses **Continue**. Until then, a link in that history still works: an
   invite for up to 7 days, a recovery link for up to 1 hour. Once used, expired or withdrawn it is
-  worthless; the local start's link is used at once and lasts one minute. Withdraw a link that was
+  worthless; the local start's link lasts one minute, used or not. Withdraw a link that was
   opened but not used, and clear that history entry if others use the device or see the screen.
 - **A device that is unlocked and signed in.** A session is as good as the person at the keyboard
   until it ends; the sensitive actions above still need a passkey touch.
