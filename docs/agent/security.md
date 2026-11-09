@@ -621,8 +621,10 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   link (`http://localhost:<port>/sign-in#l=…&s=…`) directly in the default web browser
   (`webbrowser`, on a daemon thread; never on Linux without a display or with a terminal
   browser), so the system's http handler opens it. The secret is therefore on the browser
-  launch's command line (`xdg-open`, `open`) for a moment, where other OS users of the machine
-  can read it in the process list. The link works once and only for 60 seconds
+  command line of `xdg-open` on Linux and, when that starts the browser fresh, of the browser
+  process for as long as it runs (by then the link is used or expired); on macOS it goes to
+  `osascript` on standard input, on Windows to `os.startfile`, so neither has a command line
+  with it. Other OS users of the machine can read it in the process list. The link works once and only for 60 seconds
   (`LINK_LIFETIMES["local"]`), the page removes it from the address bar and history before its
   first request (`ui/src/sign-in/fragment.ts`), and local mode is for a machine only one
   person uses. A terminal also gets the link printed (never a pipe or a file), which stays in

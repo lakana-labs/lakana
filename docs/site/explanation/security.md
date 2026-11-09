@@ -53,8 +53,9 @@ passkey ([Invite your team](../how-to/invite-your-team.md),
   to every program serving another `localhost` port, because cookies do not separate ports.
   Without the page's second secret such a program cannot act as you, but it can still sign you
   out. The start also opens a sign-in link in your browser: it works once and only for one
-  minute, but while the browser starts, other accounts on the machine can see it in the list of
-  running programs. Do not run `lakana server start --local` on a machine shared with other
+  minute, but on Linux other accounts on the machine can see it in the list of running programs
+  while the browser starts, and then in the browser's own entry there, by which time it is used
+  or has expired. Do not run `lakana server start --local` on a machine shared with other
   people's accounts; there, run the Compose bundle with HTTPS
   ([Deploy with Compose](../how-to/deploy-with-compose.md)).
 - **A session ends** after 12 hours without anything the person did, after 7 days at the latest

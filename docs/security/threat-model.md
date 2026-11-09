@@ -537,8 +537,11 @@ passkeys (M7 1b)"; the design is `docs/superpowers/specs/2026-11-08-m7-part1b-si
   refuses a cookie set from elsewhere and no other port receives it.
 - **The local sign-in link in the process list.** `lakana server start --local` opens the
   local link (`http://localhost:<port>/sign-in#l=…&s=…`) directly in the default web browser,
-  so the secret is on the command line of the browser launch (`xdg-open`, `open`) for a moment,
-  and another OS user of the machine who reads the process list then can sign in as the person.
+  so on Linux the secret is on the command line of `xdg-open` and, when that starts the browser
+  fresh, of the browser process for as long as it runs (by then the link is used or expired);
+  on macOS it reaches `osascript` on its standard input, not its command line; on Windows
+  Python opens it with `os.startfile`, so no launcher command line carries it. Another OS user
+  of the machine who reads the process list in that window can sign in as the person.
   The link works once and only for 60 seconds, and the browser normally uses it within a
   second; the page removes it from the address bar and history before its first request. A
   file hand-off would keep it off the command line, but a `file://` URL goes to the `.html`

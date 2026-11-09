@@ -2296,6 +2296,26 @@ def test_a_link_that_is_not_a_web_address_is_never_handed_to_the_browser(
     assert "not a web address" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "link",
+    ["http://example.com:8765/sign-in#l=x&s=y", "http://localhost:9999/sign-in#l=x&s=y"],
+)
+def test_a_link_to_another_host_or_port_is_never_handed_to_the_browser(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    link: str,
+) -> None:
+    """A link that does not point at this instance is refused and printed nowhere."""
+    opened, _ = _direct_sign_in(tmp_path, monkeypatch, link=link)
+
+    captured = capsys.readouterr()
+    assert opened == []
+    assert "not this instance's address" in captured.err
+    assert "http://localhost:8765" in captured.err
+    assert "sign-in#" not in captured.err + captured.out
+
+
 def test_without_a_token_of_this_instance_nothing_is_asked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

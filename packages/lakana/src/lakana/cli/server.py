@@ -261,8 +261,10 @@ def _sign_the_browser_in(
     """Open the browser signed in, with a link asked for with the person's own token.
 
     The link (`http://localhost:<port>/sign-in#…`, single use, 60 seconds) goes to the default
-    web browser directly. Its secret is therefore briefly on the browser launch's command line,
-    which other users of this machine can see; local mode is for a machine only one person uses.
+    web browser directly. Its secret is therefore on the command line of `xdg-open` (Linux) and
+    of a browser started fresh, which other users of this machine can see; local mode is for a
+    machine only one person uses. A link that does not point at this instance's
+    `localhost:<port>` is refused.
     The browser is started on a thread of its own and never on Linux without a display or when
     it is a terminal browser, so start-up never waits for it. A terminal also gets the link to
     open by hand; a pipe or a file never does. Every failure is a warning: the instance keeps
@@ -304,6 +306,12 @@ def _sign_the_browser_in(
         sys.stderr.write(
             f"Couldn't open the browser signed in: the server answered a link that is not a web "
             f"address. Open {shown_url(port)} and sign in with your passkey.\n"
+        )
+        return
+    if (parts := urlsplit(link.url)).hostname != "localhost" or parts.port != port:
+        sys.stderr.write(
+            "Couldn't open the browser signed in: the server answered a link that is not this "
+            f"instance's address. Open {shown_url(port)} and sign in with your passkey.\n"
         )
         return
     browser = _browser()
