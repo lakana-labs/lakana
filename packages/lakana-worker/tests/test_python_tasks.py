@@ -1587,9 +1587,11 @@ def test_a_drain_during_a_query_poll_takes_no_query_queued_after_it(
     submitted = threading.Event()
     queued: list[uuid.UUID] = []
     real_poll = poller_module.poll_iteration
+    held: list[bool] = []
 
     def late(*args: object, **kwargs: object) -> bool:
         assert submitted.wait(_WAIT), "the script never queued its query"
+        held.append(True)
         return real_poll(*args, **kwargs)  # ty: ignore[invalid-argument-type]
 
     monkeypatch.setattr(poller_module, "poll_iteration", late)
@@ -1615,6 +1617,7 @@ def test_a_drain_during_a_query_poll_takes_no_query_queued_after_it(
     with world.session() as session:
         query_run = session.get(QueryRun, queued[0])
         assert query_run is not None and query_run.status is QueryRunStatus.QUEUED
+    assert held, "the query poll never ran, so the window was not exercised"
 
 
 def test_a_drain_before_the_process_starts_releases_without_a_process(
