@@ -3,9 +3,9 @@ members = ["packages/*"]
 
 [dependency-groups]
 dev = [
-    "hypothesis>=6.170.14",
+    "hypothesis>=6.170.15",
     "polars>=2.1.0",
-    "import-linter>=2",
+    "import-linter>=2.16",
     "pip-licenses>=5",
     "pytest>=9.2.0",
     "pytest-cov>=6",
