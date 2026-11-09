@@ -515,3 +515,15 @@ def test_look_alike_and_invisible_names_are_refused_over_rest(
     ):
         r = ui_client.post(path, headers=AUTH_HEADER, json=body)
         assert r.status_code == status, r.text
+
+
+def test_a_local_link_is_used_over_an_ended_session(local_client: TestClient) -> None:
+    """A signed-out session, even with its CSRF token, is no open session: the link signs in."""
+    alice = _person(local_client, "alice")
+    url = local_client.post("/api/v1/sign-in/local-link", headers=_bearer(alice)).json()["url"]
+    name, value, csrf = signed_in(local_client, "admin")
+    headers = session_headers(name, value, csrf)
+    assert local_client.delete("/api/v1/sign-in/session", headers=headers).status_code == 204
+    r = _redeem(local_client, url, **headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "alice"
