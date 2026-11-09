@@ -535,6 +535,16 @@ passkeys (M7 1b)"; the design is `docs/superpowers/specs/2026-11-08-m7-part1b-si
   mode is for a machine only one person uses: the docs say not to run it on a machine shared
   with other OS users and to run the Compose bundle with HTTPS there, where the `__Host-` prefix
   refuses a cookie set from elsewhere and no other port receives it.
+- **The local sign-in link in the process list.** `lakana server start --local` opens the
+  local link (`http://localhost:<port>/sign-in#l=…&s=…`) directly in the default web browser,
+  so the secret is on the command line of the browser launch (`xdg-open`, `open`) for a moment,
+  and another OS user of the machine who reads the process list then can sign in as the person.
+  The link works once and only for 60 seconds, and the browser normally uses it within a
+  second; the page removes it from the address bar and history before its first request. A
+  file hand-off would keep it off the command line, but a `file://` URL goes to the `.html`
+  handler (a mail program on some desktops) and Snap and Flatpak browsers cannot read the
+  hidden data directory, so it failed on ordinary desktops. Accepted because local mode is for
+  a machine only one person uses (the same reason as the cookie on loopback above).
 - **A stolen session works until it ends.** Whoever holds both the cookie value and the page's
   CSRF token (for example a program of the same OS user reading the browser's profile) acts as
   the person until sign out, an administrator ends it, or its idle or absolute limit passes;

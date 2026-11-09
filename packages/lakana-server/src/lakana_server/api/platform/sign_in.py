@@ -346,8 +346,8 @@ def issue_local_link(
     Only while local sign-in is on (`LAKANA_UI__LOCAL_SIGN_IN`, which `lakana server start
     --local` sets; 404 otherwise), only with a person's own personal access token (never a
     task, CI or service-account token, and never a browser session). The link works once, for
-    10 minutes, signs in without a passkey touch, and its session ends when the token is
-    revoked.
+    60 seconds (the start opens it in the browser at once), signs in without a passkey touch,
+    and its session ends when the token is revoked.
 
     Parameters
     ----------
