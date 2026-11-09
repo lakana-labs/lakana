@@ -186,8 +186,11 @@ class GroupService:
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
         """
+        # jscpd:ignore-start -- every public method calls the guard itself, then step-up
+        # (test_admin_only_call_sites.py enumerates the calls), so this pair repeats by design.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
         require_step_up(p)
+        # jscpd:ignore-end
         group = self._get_group(name)
         guard_change(self._session, p, environment=None, change=f"delete group {name}")
         self._session.execute(
@@ -316,8 +319,11 @@ class GroupService:
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
         """
+        # jscpd:ignore-start -- every public method calls the guard itself, then step-up
+        # (test_admin_only_call_sites.py enumerates the calls), so this pair repeats by design.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
         require_step_up(p)
+        # jscpd:ignore-end
         group = self._get_group(group_name)
         principal = self._get_member_principal(principal_name)
         existing = self._session.execute(
@@ -375,8 +381,11 @@ class GroupService:
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
         """
+        # jscpd:ignore-start -- every public method calls the guard itself, then step-up
+        # (test_admin_only_call_sites.py enumerates the calls), so this pair repeats by design.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
         require_step_up(p)
+        # jscpd:ignore-end
         group = self._get_group(group_name)
         principal = self._get_member_principal(principal_name)
         membership = self._session.execute(

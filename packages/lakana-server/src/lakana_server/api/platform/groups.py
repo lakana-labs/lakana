@@ -103,14 +103,14 @@ def delete_group(
 ) -> None:
     """Delete a group.
 
-    From the web interface it needs a passkey touch within the last 15 minutes (403
-    `StepUpRequired`); a token never does.
+    Needs the `ADMIN` role on the instance. Answers 404 when there is no such group and 409
+    while an active grant, row filter or column mask still names it.
 
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
-    Needs the `ADMIN` role on the instance. Answers 404 when there is no such group and 409
-    while an active grant, row filter or column mask still names it.
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Parameters
     ----------

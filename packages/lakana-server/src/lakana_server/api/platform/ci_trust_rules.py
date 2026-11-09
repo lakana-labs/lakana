@@ -237,14 +237,14 @@ def enable_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Enable a CI trust rule.
 
-    From the web interface it needs a passkey touch within the last 15 minutes (403
-    `StepUpRequired`); a token never does.
+    Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422
+    when its conditions no longer meet the requirements of a new rule.
 
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
-    Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422
-    when its conditions no longer meet the requirements of a new rule.
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Parameters
     ----------

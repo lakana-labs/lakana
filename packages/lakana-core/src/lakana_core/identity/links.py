@@ -47,7 +47,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.errors import (
     AlreadyExistsError,
     ConflictError,
@@ -56,7 +56,7 @@ from lakana_core.errors import (
     PermissionDenied,
     ValidationError,
 )
-from lakana_core.grants.admin import acts_as_instance_admin, holds_instance_admin
+from lakana_core.grants.admin import holds_instance_admin
 from lakana_core.grants.service import (
     ISSUED_BY_ADMINS,
     active_instance_admin_ids,
@@ -66,6 +66,7 @@ from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.sessions import (
     SessionService,
     StartedSession,
+    require_principal_admin,
     require_step_up,
     utc_now,
 )
@@ -609,25 +610,18 @@ class LinkService:
         self._clock = clock
 
     def _require_admin(self, p: PrincipalRef) -> None:
-        """Refuse unless `p` is an instance administrator.
+        """Refuse unless `p` is an instance administrator (`require_principal_admin`).
 
         Parameters
         ----------
         p
             The acting principal.
-
-        Raises
-        ------
-        PermissionDenied
-            If `authz` refuses `MANAGE_PRINCIPAL` at instance scope, or `p` does not hold the
-            `ADMIN` role there.
         """
-        self._authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
-        if acts_as_instance_admin(self._session, self._authz, p):
-            return
-        raise PermissionDenied(
-            "Only an administrator (the ADMIN role on the instance) can issue, list or withdraw "
-            "invites and recovery links. Ask an administrator."
+        require_principal_admin(
+            self._session,
+            self._authz,
+            p,
+            doing="issue, list or withdraw invites and recovery links",
         )
 
     def _issue(
@@ -1079,6 +1073,35 @@ class LinkService:
             raise
         return redeemed
 
+    def _withdraw_if_open(self, link_id: uuid.UUID) -> bool:
+        """Withdraw a link unless it was used or withdrawn already; the caller audits and commits.
+
+        Shares the ``used_at IS NULL`` guard with `redeem`, so a link is either used or
+        withdrawn, never both.
+
+        Parameters
+        ----------
+        link_id
+            The link.
+
+        Returns
+        -------
+        bool
+            Whether this call withdrew it.
+        """
+        withdrawn = self._session.execute(
+            update(SignInLink)
+            .where(
+                SignInLink.id == link_id,
+                SignInLink.used_at.is_(None),
+                SignInLink.withdrawn_at.is_(None),
+            )
+            .values(withdrawn_at=self._clock(), reserved_name=None)
+            .returning(SignInLink.id)
+            .execution_options(synchronize_session=False)
+        ).all()
+        return bool(withdrawn)
+
     def _close(self, link_id: uuid.UUID, kind: str, reason: str) -> None:
         """Withdraw a link whose rules no longer hold at its use, audited, and commit.
 
@@ -1091,18 +1114,7 @@ class LinkService:
         reason
             Why, for the audit event.
         """
-        closed = self._session.execute(
-            update(SignInLink)
-            .where(
-                SignInLink.id == link_id,
-                SignInLink.used_at.is_(None),
-                SignInLink.withdrawn_at.is_(None),
-            )
-            .values(withdrawn_at=self._clock(), reserved_name=None)
-            .returning(SignInLink.id)
-            .execution_options(synchronize_session=False)
-        ).all()
-        if closed:
+        if self._withdraw_if_open(link_id):
             AuditService(self._session).record(
                 None,
                 AuditEventType.SIGN_IN_LINK_WITHDRAWN,
@@ -1386,18 +1398,7 @@ class LinkService:
             raise NotFoundError(
                 f"No {kind or 'sign-in'} link has this id. List the open ones to find it."
             )
-        withdrawn = self._session.execute(
-            update(SignInLink)
-            .where(
-                SignInLink.id == link_id,
-                SignInLink.used_at.is_(None),
-                SignInLink.withdrawn_at.is_(None),
-            )
-            .values(withdrawn_at=self._clock(), reserved_name=None)
-            .returning(SignInLink.id)
-            .execution_options(synchronize_session=False)
-        ).all()
-        if not withdrawn:
+        if not self._withdraw_if_open(link_id):
             self._session.rollback()
             self._session.refresh(row)
             raise ConflictError(

@@ -12,11 +12,11 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import AuditEventType, Group, Principal, RowFilter
 from lakana_core.policy.columns import (
     ColumnSource,
     PolicyTarget,
+    authorize_policy_change,
     binding_for,
     list_columns,
     policy_table,
@@ -298,8 +298,7 @@ class RowFilterService(PolicyShowing):
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
         """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        require_step_up(p)
+        authorize_policy_change(self._authz, p)
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
         principal_id = self._get_principal(principal).id if principal is not None else None
@@ -478,8 +477,7 @@ class RowFilterService(PolicyShowing):
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
         """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        require_step_up(p)
+        authorize_policy_change(self._authz, p)
         row = self._session.get(RowFilter, row_filter_id)
         if row is None:
             raise NotFoundError(f"No row filter {row_filter_id}.")

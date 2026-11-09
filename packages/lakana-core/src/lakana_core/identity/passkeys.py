@@ -66,7 +66,7 @@ from webauthn.helpers.structs import (
 )
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SessionContext
+from lakana_core.auth import AuthorizationService, PrincipalRef, SessionContext
 from lakana_core.errors import (
     AlreadyExistsError,
     AuthenticationError,
@@ -77,13 +77,14 @@ from lakana_core.errors import (
     StepUpRequired,
     ValidationError,
 )
-from lakana_core.grants.admin import acts_as_instance_admin
 from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.links import has_passkey
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.sessions import (
     SessionService,
     StartedSession,
+    principal_named,
+    require_principal_admin,
     require_step_up,
     utc_now,
 )
@@ -279,50 +280,16 @@ class PasskeyService:
         return p.session
 
     def _require_admin(self, p: PrincipalRef) -> None:
-        """Refuse unless `p` is an instance administrator.
+        """Refuse unless `p` is an instance administrator (`require_principal_admin`).
 
         Parameters
         ----------
         p
             The acting principal.
-
-        Raises
-        ------
-        PermissionDenied
-            If `p` does not hold the `ADMIN` role at instance scope.
         """
-        self._authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
-        if acts_as_instance_admin(self._session, self._authz, p):
-            return
-        raise PermissionDenied(
-            "Only an administrator (the ADMIN role on the instance) can see or remove another "
-            "person's passkeys. Ask an administrator."
+        require_principal_admin(
+            self._session, self._authz, p, doing="see or remove another person's passkeys"
         )
-
-    def _principal_named(self, name: str) -> Principal:
-        """Look up a principal by name.
-
-        Parameters
-        ----------
-        name
-            The name.
-
-        Returns
-        -------
-        Principal
-            The row.
-
-        Raises
-        ------
-        NotFoundError
-            If no principal has that name.
-        """
-        row = self._session.execute(
-            select(Principal).where(Principal.name == name)
-        ).scalar_one_or_none()
-        if row is None:
-            raise NotFoundError(f"No principal named {name!r}. Check the name and try again.")
-        return row
 
     def _new_challenge(
         self, purpose: str, *, session_id: uuid.UUID | None, principal_id: uuid.UUID | None
@@ -1106,7 +1073,7 @@ class PasskeyService:
         """
         if principal_name != p.name:
             self._require_admin(p)
-        target = self._principal_named(principal_name)
+        target = principal_named(self._session, principal_name)
         return list(
             self._session.execute(
                 select(Passkey)
@@ -1145,7 +1112,7 @@ class PasskeyService:
         if principal_name != p.name:
             self._require_admin(p)
         require_step_up(p, now=self._clock())
-        target = self._principal_named(principal_name)
+        target = principal_named(self._session, principal_name)
         row = self._session.execute(
             select(Passkey).where(Passkey.id == passkey_id, Passkey.principal_id == target.id)
         ).scalar_one_or_none()

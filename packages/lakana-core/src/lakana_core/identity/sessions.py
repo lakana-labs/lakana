@@ -181,6 +181,63 @@ def _split(cookie_value: str) -> tuple[str, str] | None:
     return (match.group(1), match.group(2)) if match else None
 
 
+def require_principal_admin(
+    session: Session, authz: AuthorizationService, p: PrincipalRef, *, doing: str
+) -> None:
+    """Refuse unless `p` is an instance administrator.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    authz
+        The calling service's authorization.
+    p
+        The acting principal.
+    doing
+        What only an administrator may do, for the refusal (``see or remove another
+        person's passkeys``).
+
+    Raises
+    ------
+    PermissionDenied
+        If `authz` refuses `MANAGE_PRINCIPAL` at instance scope, or `p` does not hold the
+        `ADMIN` role there (`acts_as_instance_admin`).
+    """
+    authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
+    if acts_as_instance_admin(session, authz, p):
+        return
+    raise PermissionDenied(
+        f"Only an administrator (the ADMIN role on the instance) can {doing}. Ask an administrator."
+    )
+
+
+def principal_named(session: Session, name: str) -> Principal:
+    """Look up a principal by name.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    name
+        The name.
+
+    Returns
+    -------
+    Principal
+        The row.
+
+    Raises
+    ------
+    NotFoundError
+        If no principal has that name.
+    """
+    row = session.execute(select(Principal).where(Principal.name == name)).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(f"No principal named {name!r}. Check the name and try again.")
+    return row
+
+
 def require_step_up(p: PrincipalRef, *, now: datetime | None = None) -> None:
     """Refuse an action unless the session's last passkey touch is fresh.
 
@@ -313,51 +370,14 @@ class SessionService:
         self._clock = clock
 
     def _require_admin(self, p: PrincipalRef) -> None:
-        """Refuse unless `p` is an instance administrator.
+        """Refuse unless `p` is an instance administrator (`require_principal_admin`).
 
         Parameters
         ----------
         p
             The acting principal.
-
-        Raises
-        ------
-        PermissionDenied
-            If `authz` refuses `MANAGE_PRINCIPAL` at instance scope, or `p` does not hold the
-            `ADMIN` role there.
         """
-        self._authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
-        if acts_as_instance_admin(self._session, self._authz, p):
-            return
-        raise PermissionDenied(
-            "Only an administrator (the ADMIN role on the instance) can do this for another "
-            "person. Ask an administrator."
-        )
-
-    def _principal_named(self, name: str) -> Principal:
-        """Look up a principal by name.
-
-        Parameters
-        ----------
-        name
-            The name.
-
-        Returns
-        -------
-        Principal
-            The row.
-
-        Raises
-        ------
-        NotFoundError
-            If no principal has that name.
-        """
-        row = self._session.execute(
-            select(Principal).where(Principal.name == name)
-        ).scalar_one_or_none()
-        if row is None:
-            raise NotFoundError(f"No principal named {name!r}. Check the name and try again.")
-        return row
+        require_principal_admin(self._session, self._authz, p, doing="do this for another person")
 
     def _end_rows(
         self,
@@ -850,7 +870,7 @@ class SessionService:
             # Before the lookup, so a non-administrator cannot tell which names exist.
             self._require_admin(p)
             require_step_up(p, now=self._clock())
-        target = self._principal_named(principal_name)
+        target = principal_named(self._session, principal_name)
         condition = BrowserSession.principal_id == target.id
         if target.id == p.id:
             count = self._end_rows(condition, reason or "sign_out_everywhere")
@@ -915,7 +935,7 @@ class SessionService:
         if principal_name != p.name:
             # Before the lookup, so a non-administrator cannot tell which names exist.
             self._require_admin(p)
-        target = self._principal_named(principal_name)
+        target = principal_named(self._session, principal_name)
         now = self._clock()
         rows = (
             self._session.execute(

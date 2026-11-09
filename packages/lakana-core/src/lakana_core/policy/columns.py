@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pyiceberg.types import NestedField, StringType
 
-from lakana_core.auth import PrincipalRef
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.catalog.identity import (
     refuse_view_as_policy_target,
     resolve_environment_id,
@@ -18,6 +18,7 @@ from lakana_core.catalog.identity import (
 )
 from lakana_core.errors import ConflictError, LakanaError, NotFoundError, PermissionDenied
 from lakana_core.identifiers import NamespacePath, TableRef
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.policy.expressions import QualifiedColumnError, validate_restricted_expression
 from lakana_core.policy.field_binding import BY_NAME, PolicyBinding, bind_policy
 
@@ -52,6 +53,27 @@ class PolicyTarget:
     schema_id: int | None
     binding: PolicyBinding
     type_checked: bool = False
+
+
+def authorize_policy_change(authz: AuthorizationService, p: PrincipalRef) -> None:
+    """Authorize creating or revoking a row filter or column mask.
+
+    Parameters
+    ----------
+    authz
+        The calling service's authorization.
+    p
+        The acting principal.
+
+    Raises
+    ------
+    PermissionDenied
+        Without `MANAGE_POLICY` on the instance.
+    StepUpRequired
+        In a browser session whose last passkey touch is older than 15 minutes.
+    """
+    authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
+    require_step_up(p)
 
 
 def policy_table(
