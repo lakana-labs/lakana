@@ -248,7 +248,10 @@ def poll_once(
         Passed through to `run_deploy`; `None` uses `DeploySettings()`.
     engine
         Executes ready task runs after queries and deploys; `None`
-        claims none, and none is claimed while the engine is draining.
+        claims none. While its drain is set nothing at all is claimed, a
+        query or a deploy neither: the drain is looked at after the queues
+        are read, so a run queued after a SIGTERM that landed during the
+        poll stays queued.
     only_queries
         Claim only query runs: used while this worker supervises a Python
         task, whose own input queries must be served. No deploy and
@@ -276,8 +279,8 @@ def poll_once(
     -------
     bool
         `True` if an item was claimed and run (or its claim was refused: the poll did not idle),
-        `False` if the queues of its kinds were empty, the worker may not claim, or the memory
-        watchdog is stopping it (`Activity.stopping`).
+        `False` if the queues of its kinds were empty, the worker may not claim, the engine is
+        draining, or the memory watchdog is stopping it (`Activity.stopping`).
     """
     if may_claim is not None and not may_claim():
         return False
@@ -314,8 +317,14 @@ def poll_once(
             .with_for_update(skip_locked=True)
         ).scalar_one_or_none()
     )
+    if engine is not None and engine.drain.is_set():
+        # Looked at again after the read, not only before the poll: a run queued after a
+        # SIGTERM that landed during this poll is read here, and must stay queued. Rolling
+        # back drops the row locks, so another worker can take what was read.
+        session.rollback()
+        return False
     if query is None and deploy_run is None:
-        if only_queries or not pipeline_too or engine is None or engine.drain.is_set():
+        if only_queries or not pipeline_too or engine is None:
             return False
         claimed = claim_task(session, engine.settings.worker_id, engine.settings.lease_seconds)
         if claimed is None:
