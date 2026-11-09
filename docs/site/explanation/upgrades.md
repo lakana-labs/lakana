@@ -149,6 +149,24 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   interface must pass the browser's `Host` header through (nginx: `proxy_set_header Host $http_host;`).
   Engines, CI and workers that call the API with a token are not affected.
 
+### Principal names and the operator's token
+
+- `POST /api/v1/principals` (and `lakana principal create`, and the service accounts of an access
+  file) now refuses a name that differs only in letter case from an existing principal, a name
+  an open invite reserves, and a name with a control or invisible format character. The 409 or
+  422 names the clash; choose another name. This holds with the interface off as well.
+- The upgrade marks the server operator's token, the one that issues the setup link and recovers
+  administrators: the unrevoked token named `bootstrap` of the principal
+  `LAKANA_BOOTSTRAP_ADMIN` names. If you set a name of your own and run `migrate` separately,
+  give it the same `LAKANA_BOOTSTRAP_ADMIN` as the server before you upgrade (the bundle and
+  `lakana server start --local` use the default name and need nothing). Otherwise no token is
+  marked: the bootstrap token keeps its administrator rights, but `lakana sign-in setup-link`
+  answers that it is not the operator's.
+- The mark goes by that name, so a token an administrator issued for that principal with the
+  name `bootstrap` before this release is marked too and gets the operator's powers. Check with
+  `lakana token list <bootstrap admin>` after upgrading and revoke any `bootstrap` token you do
+  not recognise as the one the server wrote.
+
 ### The Compose bundle's web interface settings
 
 - A new bundle's `.env` has two more keys, which `compose.yaml` passes to `server`:
