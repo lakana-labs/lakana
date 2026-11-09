@@ -32,6 +32,7 @@ BLOCK = "<!-- output: demo#show -->\n```text\n{}```\n"
             "took <duration>, then <duration>, <duration>, <duration>",
         ),
         ("1.5 MiB and 20KiB", "<size> and <size>"),
+        ("Resolved 44 packages in 327ms", "Resolved <count> packages in <duration>"),
         ("lakana_pat_Ab12Cd34_s3cr3t-value_9", "lakana_pat_<key id>_<secret>"),
         ("lakana_ci_Ab12Cd34_s3cr3t-value", "lakana_ci_<key id>_<secret>"),
         ("(snapshot 5033228317085625887, 05 Nov 00:33 UTC)", "(snapshot <snapshot>, <alert time>)"),
@@ -53,6 +54,7 @@ def test_each_mask_hides_the_part_that_differs_per_run(text: str, expected: str)
         "key_id name",
         "v1.2",
         "1234567 rows on 05 Nov",
+        "44 packages",
     ],
 )
 def test_text_that_is_the_same_on_every_run_is_left_alone(text: str) -> None:
