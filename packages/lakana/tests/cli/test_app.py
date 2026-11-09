@@ -91,9 +91,14 @@ def _run(app: typer.Typer, *args: str, state: CliState | None = None) -> typer.t
 
 
 @pytest.mark.parametrize(("exc_type", "code"), EXIT_CODES)
-def test_each_sdk_error_maps_to_its_exit_code(exc_type: type[LakanaError], code: int) -> None:
+def test_each_sdk_error_maps_to_its_exit_code(
+    exc_type: type[LakanaError], code: int, tmp_path: Path
+) -> None:
     """Every SDK error type exits with its documented code and an `Error:` line."""
-    result = _run(_app_raising(exc_type("boom")), "boom")
+    # An empty profile file: a connection error names the profile in effect, never the
+    # developer's own.
+    state = CliState(config_path=tmp_path / "config.toml")
+    result = _run(_app_raising(exc_type("boom")), "boom", state=state)
 
     assert result.exit_code == code
     assert "Error: boom" in result.stderr
