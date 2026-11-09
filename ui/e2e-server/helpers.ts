@@ -40,6 +40,17 @@ export function setupLink(request: APIRequestContext): Promise<string> {
 }
 
 /**
+ * Mints the local sign-in link `lakana server start --local` opens: the first administrator's,
+ * with their own token. It works once, for 60 seconds, and only offers a passkey.
+ *
+ * @param request - The request context.
+ * @returns The link, with its secret after the `#`.
+ */
+export function localLink(request: APIRequestContext): Promise<string> {
+  return ask(request, "/api/v1/sign-in/local-link");
+}
+
+/**
  * Mints an invite for a new person.
  *
  * @param request - The request context.

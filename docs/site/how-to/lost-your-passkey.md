@@ -20,9 +20,9 @@ so a recovery nobody asked for does not go unnoticed.
 
 If the page says the link was already used, has expired or was withdrawn, or that whoever issued
 it was deactivated or is no longer an administrator, ask an administrator for a new one: each
-link works once. The interface removes the link from the address bar as soon as the page
-opens, but the browser may still keep it in its own history; once used or expired, a link there
-is useless.
+link works once. The interface removes the link from the address bar and from the tab's Back
+and Forward steps as soon as the page opens, but the browser keeps it in its own history (Ctrl+H)
+and may suggest it in the address bar; once used or expired, a link there is useless.
 
 ## You still have a passkey
 

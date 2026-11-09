@@ -32,6 +32,8 @@ export default defineConfig({
       LAKANA_UI__ENABLED: "true",
       LAKANA_PORT: PORT,
       LAKANA_UI__PUBLIC_URL: URL,
+      // The local link of `lakana server start --local`, for the automatic sign-in's flow.
+      LAKANA_UI__LOCAL_SIGN_IN: "true",
       LAKANA_BOOTSTRAP_PAT_KEY_ID: "e2ekey",
       LAKANA_BOOTSTRAP_PAT_SECRET: "e2esecret",
       LAKANA_SECRETS__MASTER_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",

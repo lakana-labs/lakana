@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Browser, expect, type Page, test } from "@playwright/test";
 
-import { addAuthenticator, inviteLink, setupLink, uniqueName } from "./helpers";
+import { addAuthenticator, inviteLink, localLink, setupLink, uniqueName } from "./helpers";
 
 const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const ORIGIN = "http://localhost:4174";
@@ -116,6 +116,50 @@ test("the link secret is gone from the address bar and history", async ({ browse
   }));
   expect(kept.state).not.toContain(secret);
   expect(kept.location).not.toContain(secret);
+  await page.context().close();
+});
+
+/**
+ * Walks the tab's session history from its first entry to its last, through Back and Forward.
+ *
+ * @param page - The page.
+ * @returns Every address the tab showed on the way.
+ */
+async function walkHistory(page: Page): Promise<string[]> {
+  const length = await page.evaluate(() => history.length);
+  const seen = [page.url()];
+  for (let step = 1; step < length; step += 1) {
+    await page.goBack();
+    seen.push(page.url());
+  }
+  for (let step = 1; step < length; step += 1) {
+    await page.goForward();
+    seen.push(page.url());
+  }
+  return seen;
+}
+
+test("no Back or Forward step shows the local link's secret", async ({ browser, request }) => {
+  // The automatic sign-in of `lakana server start --local`: link, redeem, passkey offer, Home.
+  const page = await freshPage(browser);
+  await page.goto(`${ORIGIN}/healthz`);
+  const link = await localLink(request);
+  const secret = secretOf(link);
+  const before = await page.evaluate(() => history.length);
+
+  await page.goto(link);
+  await expect(page.getByRole("heading", { level: 1, name: "Add a passkey" })).toBeVisible();
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+
+  // The link's own entry is replaced, never followed by another one.
+  expect(await page.evaluate(() => history.length)).toBe(before + 1);
+  const seen = await walkHistory(page);
+  expect(seen).toContain(`${ORIGIN}/healthz`);
+  for (const address of seen) {
+    expect(address).not.toContain("#");
+    expect(address).not.toContain(secret);
+  }
   await page.context().close();
 });
 

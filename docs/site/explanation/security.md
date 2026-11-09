@@ -220,8 +220,11 @@ as two statements.
 
 - **Whoever holds a link before its person does.** An invite or recovery link signs in whoever
   opens it first. Send links on a channel you trust and confirm the person outside Lakana before
-  you grant a role. A browser may keep a used link in its history; once used or expired it is
-  worthless.
+  you grant a role. The page takes the link out of the address bar and out of the tab's Back and
+  Forward steps before it sends anything, but the browser's own history (Ctrl+H, and the
+  suggestions of its address bar) keeps the address as it was first opened: Chrome and Firefox
+  both do, and a page cannot change that. A link there is used or expired, and so worthless; the
+  local start's link lasts one minute. Clear that history entry if the screen is shared.
 - **A device that is unlocked and signed in.** A session is as good as the person at the keyboard
   until it ends; the sensitive actions above still need a passkey touch.
 - **Personal API tokens do not expire by themselves.** Revoke a token that is no longer used; the

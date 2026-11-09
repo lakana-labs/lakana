@@ -15,7 +15,9 @@ export interface LinkFragment {
 /**
  * Takes the sign-in link out of the address: reads it, then at once replaces the history entry
  * with the address without its fragment, before the interface sends any request, so the secret
- * stays neither in the address bar, nor in history, nor in a bookmark.
+ * stays neither in the address bar, nor in any Back or Forward step of the tab, nor in a
+ * bookmark. The browser's global history keeps the address as first opened (Chromium and
+ * Firefox both do; no page can change that), so the link must be single use and short-lived.
  *
  * @param location - The browser's location.
  * @param history - The browser's history.
