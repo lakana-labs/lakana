@@ -19,7 +19,8 @@ const SESSION = {
   created_at: "2026-11-08T09:00:00Z",
   last_seen_at: "2026-11-08T10:00:00Z",
   absolute_expires_at: "2026-11-15T09:00:00Z",
-  user_agent: "Firefox on Linux",
+  user_agent: "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0",
+  browser: "Firefox on Linux",
   peer: "192.0.2.1",
   current: false,
 };

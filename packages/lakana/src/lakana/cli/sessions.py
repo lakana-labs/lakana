@@ -36,9 +36,9 @@ def list_sessions(
     _output.emit(
         state,
         client.sessions.list(who),
-        columns=("id", "via", "created_at", "last_seen_at", "absolute_expires_at", "user_agent"),
-        droppable=("user_agent", "absolute_expires_at"),
-        flexible=("user_agent",),
+        columns=("id", "via", "created_at", "last_seen_at", "absolute_expires_at", "browser"),
+        droppable=("browser", "absolute_expires_at"),
+        flexible=("browser",),
     )
 
 

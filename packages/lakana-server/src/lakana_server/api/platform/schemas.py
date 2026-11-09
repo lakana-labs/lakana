@@ -5271,6 +5271,9 @@ class BrowserSessionOut(BaseModel):
         When it ends at the latest.
     user_agent
         The browser it began in, as the browser named itself.
+    browser
+        The same in plain words for the common browsers ("Firefox 158 on Ubuntu"), otherwise
+        `user_agent` itself; empty when the browser sent none.
     peer
         The address it began from, as the server saw it.
     current
@@ -5283,6 +5286,7 @@ class BrowserSessionOut(BaseModel):
     last_seen_at: datetime
     absolute_expires_at: datetime
     user_agent: str
+    browser: str
     peer: str
     current: bool
 

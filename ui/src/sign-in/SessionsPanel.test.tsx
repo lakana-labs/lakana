@@ -4,17 +4,26 @@ import { describe, expect, it } from "vitest";
 import { renderShell } from "../test/render";
 import { signedIn } from "../test/session";
 
+const FIREFOX = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0";
 const HERE = {
   id: "s-1",
   via: "passkey",
   created_at: "2026-11-08T09:00:00Z",
   last_seen_at: "2026-11-08T10:00:00Z",
   absolute_expires_at: "2026-11-15T09:00:00Z",
-  user_agent: "Firefox on Linux",
+  user_agent: FIREFOX,
+  browser: "Firefox 158 on Ubuntu",
   peer: "192.0.2.1",
   current: true,
 };
-const THERE = { ...HERE, id: "s-2", user_agent: "", peer: "198.51.100.7", current: false };
+const THERE = {
+  ...HERE,
+  id: "s-2",
+  user_agent: "",
+  browser: "",
+  peer: "198.51.100.7",
+  current: false,
+};
 
 describe("SessionsPanel", () => {
   it("lists one's sessions and marks this browser", async () => {
@@ -25,7 +34,9 @@ describe("SessionsPanel", () => {
       },
     });
 
-    expect(await screen.findByText(/Firefox on Linux/)).toBeInTheDocument();
+    const named = await screen.findByText("Firefox 158 on Ubuntu, from 192.0.2.1");
+    expect(named).toHaveAttribute("title", FIREFOX);
+    expect(screen.queryByText(/Mozilla/)).not.toBeInTheDocument();
     expect(screen.getByText("This browser")).toBeInTheDocument();
     expect(screen.getByText(/Unknown browser/)).toBeInTheDocument();
     expect(screen.getByText(/198\.51\.100\.7/)).toBeInTheDocument();

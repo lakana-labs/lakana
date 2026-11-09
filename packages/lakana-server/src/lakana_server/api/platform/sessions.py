@@ -26,6 +26,7 @@ from lakana_server.browser_session import (
     require_interface,
 )
 from lakana_server.deps import get_principal, get_session, get_session_service
+from lakana_server.user_agents import describe_browser
 
 NO_SESSION = "This route describes a browser session; a token has none."
 """The 409 detail of the session routes for a caller authenticated with a token."""
@@ -188,6 +189,7 @@ def list_sessions(
             last_seen_at=row.last_seen_at,
             absolute_expires_at=row.absolute_expires_at,
             user_agent=row.user_agent,
+            browser=describe_browser(row.user_agent),
             peer=row.peer,
             current=row.id == current,
         )

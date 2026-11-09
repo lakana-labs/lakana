@@ -374,6 +374,7 @@ def signed_in(
     *,
     touched_at: datetime | None = None,
     via: str = "passkey",
+    user_agent: str = "pytest",
 ) -> tuple[str, str, str]:
     """Start a browser session for a principal directly through the session service.
 
@@ -389,6 +390,8 @@ def signed_in(
         The time of the session's last passkey touch, for step-up; `None` for none.
     via
         How the session began.
+    user_agent
+        The browser's user agent, as it named itself.
 
     Returns
     -------
@@ -406,7 +409,7 @@ def signed_in(
             via=via,
             replacing=None,
             peer="testclient",
-            user_agent="pytest",
+            user_agent=user_agent,
             touched=False,
         )
         if touched_at is not None:

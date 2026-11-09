@@ -40,6 +40,11 @@ export interface BrowserSessionOut {
   readonly absolute_expires_at: string;
   /** The browser it began in, as the browser named itself; may be blank. */
   readonly user_agent: string;
+  /**
+   * The same in plain words for the common browsers ("Firefox 158 on Ubuntu"), otherwise the
+   * user agent itself; blank when the browser sent none.
+   */
+  readonly browser: string;
   /** The address it began from. */
   readonly peer: string;
   /** True for the session of the request that asks: this browser. */

@@ -22408,6 +22408,10 @@
             "type": "string",
             "title": "User Agent"
           },
+          "browser": {
+            "type": "string",
+            "title": "Browser"
+          },
           "peer": {
             "type": "string",
             "title": "Peer"
@@ -22425,11 +22429,12 @@
           "last_seen_at",
           "absolute_expires_at",
           "user_agent",
+          "browser",
           "peer",
           "current"
         ],
         "title": "BrowserSessionOut",
-        "description": "One open browser session of a person, in `GET /api/v1/principals/{name}/sessions`.\n\nCarries no secret and no part of the cookie.\n\nParameters\n----------\nid\n    The session's id.\nvia\n    How the session began.\ncreated_at\n    When it began.\nlast_seen_at\n    About when the person last used it (written at most once a minute).\nabsolute_expires_at\n    When it ends at the latest.\nuser_agent\n    The browser it began in, as the browser named itself.\npeer\n    The address it began from, as the server saw it.\ncurrent\n    Whether this is the session of the request that asks."
+        "description": "One open browser session of a person, in `GET /api/v1/principals/{name}/sessions`.\n\nCarries no secret and no part of the cookie.\n\nParameters\n----------\nid\n    The session's id.\nvia\n    How the session began.\ncreated_at\n    When it began.\nlast_seen_at\n    About when the person last used it (written at most once a minute).\nabsolute_expires_at\n    When it ends at the latest.\nuser_agent\n    The browser it began in, as the browser named itself.\nbrowser\n    The same in plain words for the common browsers (\"Firefox 158 on Ubuntu\"), otherwise\n    `user_agent` itself; empty when the browser sent none.\npeer\n    The address it began from, as the server saw it.\ncurrent\n    Whether this is the session of the request that asks."
       },
       "CheckHealthOut": {
         "properties": {
