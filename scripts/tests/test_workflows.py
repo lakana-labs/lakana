@@ -595,6 +595,18 @@ def test_dependabot_groups_its_updates_and_keeps_the_pinned_tools_apart() -> Non
     assert python["exclude-patterns"] == ["ruff", "ty"]
 
 
+def test_dependabot_holds_eslint_and_its_rules_on_the_same_major() -> None:
+    """ESLint stays on 9 until jsx-a11y supports 10; `@eslint/js` never moves ahead of it.
+
+    A major `@eslint/js` alone (#509) brought rules ESLint 9 was never checked against.
+    """
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
+    (ui,) = [e for e in config["updates"] if e["directory"] == "/ui"]
+    held = {rule["dependency-name"]: rule["update-types"] for rule in ui.get("ignore", [])}
+    assert held.get("eslint") == ["version-update:semver-major"]
+    assert held.get("@eslint/js") == ["version-update:semver-major"]
+
+
 def test_dependabot_watches_the_pinned_jscpd() -> None:
     """The lockfile of the duplication check is updated by Dependabot, as a hidden `ci` change."""
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())

@@ -85,6 +85,13 @@ updates:
       ui-testing-library:
         dependency-type: "development"
         patterns: ["@testing-library/*"]
+    ignore:
+      # ESLint stays on 9 until eslint-plugin-jsx-a11y supports 10 (docs/agent/conventions.md);
+      # @eslint/js moves with it, never ahead of it.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps"                  # runtime: the "Dependencies" section of the changelog
       prefix-development: "build"     # a tool: hidden from the changelog
