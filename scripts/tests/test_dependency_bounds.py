@@ -5,8 +5,10 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 PACKAGES = Path(__file__).resolve().parents[2] / "packages"
+DEPENDABOT = Path(__file__).resolve().parents[2] / ".github" / "dependabot.yml"
 
 DEEPLY_USED = [
     ("lakana-core", "sqlglot"),
@@ -49,6 +51,49 @@ def test_a_deeply_used_dependency_has_an_upper_bound(package: str, dependency: s
         f"{package} must give {dependency} an upper bound (found {requirement!r}): a fresh install "
         "ignores the lock and would take a release Lakana was not tested on. Raise the bound in "
         "its own pull request, after reading the upstream changelog and running the suite."
+    )
+
+
+def _dependabot_uv_ignores(dependency: str) -> list[str]:
+    """Collect the versions Dependabot's `uv` updates ignore for one dependency.
+
+    Parameters
+    ----------
+    dependency
+        The package name as Dependabot's `dependency-name` gives it.
+
+    Returns
+    -------
+    list of str
+        The `versions` of every matching ignore entry, in file order.
+    """
+    config = yaml.safe_load(DEPENDABOT.read_text())
+    (uv,) = (u for u in config["updates"] if u["package-ecosystem"] == "uv")
+    return [
+        version
+        for entry in uv.get("ignore", [])
+        if entry["dependency-name"] == dependency
+        for version in entry.get("versions", [])
+    ]
+
+
+def test_a_sqlglot_hold_below_a_minor_release_is_also_a_dependabot_ignore() -> None:
+    """A hold such as `sqlglot<30.25` stays put until the rewrite is adapted (issue #415).
+
+    Without an ignore Dependabot's weekly group raises the bound itself (pull request #528 made
+    it `>=30.29.0,<30.30`), which moves the security-relevant query guard onto a sqlglot nobody
+    reviewed. A bound at a major release (`<31`) is the ordinary one and needs no ignore; a
+    leftover ignore would then keep the lock from moving inside it.
+    """
+    (requirement,) = (r for r in _requirements("lakana-core") if re.match(r"sqlglot\b", r))
+    match = re.search(r"<\s*(\d+(?:\.\d+)?)\s*$", requirement)
+    assert match, f"sqlglot needs a plain `<X` or `<X.Y` upper bound (found {requirement!r})"
+    bound = match.group(1)
+    expected = [f">={bound}"] if "." in bound else []
+    assert _dependabot_uv_ignores("sqlglot") == expected, (
+        f"lakana-core requires {requirement!r}: .github/dependabot.yml must ignore sqlglot "
+        f"{expected or 'nothing'} so that Dependabot keeps the hold, and drop the ignore when "
+        "the bound goes back to the next major release."
     )
 
 

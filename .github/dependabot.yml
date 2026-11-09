@@ -9,6 +9,11 @@ updates:
       python:                       # one pull request per week, not one per package
         patterns: ["*"]
         exclude-patterns: ["ruff", "ty"]   # pinned exactly; each upgrades in its own pull request
+    ignore:
+      # sqlglot stays below 30.25 until the query guard and rewrite are adapted to its qualifier
+      # (issue #415, docs/agent/conventions.md); without this the group raises the bound itself.
+      - dependency-name: "sqlglot"
+        versions: [">=30.25"]
     commit-message:
       prefix: "deps"          # "Dependencies" section of the changelog
 
