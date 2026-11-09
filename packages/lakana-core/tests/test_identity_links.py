@@ -421,10 +421,10 @@ def test_concurrent_redeems_exactly_one_wins_sqlite(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("kind", "lifetime"),
-    [("setup", 600), ("local", 600), ("recovery", 3600), ("invite", 604800)],
+    [("setup", 600), ("local", 60), ("recovery", 3600), ("invite", 604800)],
 )
 def test_lifetimes(kind: str, lifetime: int) -> None:
-    """Setup and local 10 minutes, recovery 1 hour, invite 7 days."""
+    """Setup 10 minutes, local 60 seconds, recovery 1 hour, invite 7 days."""
     assert LINK_LIFETIMES[kind].total_seconds() == lifetime
 
 
@@ -432,6 +432,16 @@ def test_issued_links_expire_after_their_lifetime(world: World) -> None:
     """An issued link's expiry is the issue time plus its kind's lifetime."""
     assert _invite(world).expires_at == START + LINK_LIFETIMES["invite"]
     assert world.links.issue_setup(world.operator).expires_at == START + LINK_LIFETIMES["setup"]
+
+
+def test_a_local_link_expires_a_minute_after_it_was_issued(world: World, clock: _Clock) -> None:
+    """The browser opens it at once: it works 59 s after it was issued and not 60 s after."""
+    link = world.links.issue_local(world.pat(world.person("bob")))
+    assert link.expires_at == START + timedelta(seconds=60)
+    clock.now = START + timedelta(seconds=60)
+    assert world.links.describe(parts(link.url)[0]).state == "expired"
+    clock.now = START + timedelta(seconds=59)
+    assert world.redeem(link).kind == "local"
 
 
 def test_invite_creates_a_new_account_with_no_rights(world: World) -> None:

@@ -69,7 +69,9 @@ Lakana is running at http://localhost:8765 — profile 'local', environment 'dev
 The line above it says the web interface is off. With `LAKANA_UI__ENABLED=true` in front of the
 command, the instance instead opens `http://localhost:8765` in your browser, signed in as you
 (`--no-browser` leaves the browser alone). There is no password to type: the start signs the
-browser in with your own profile. The first time, the interface offers to add a passkey (a
+browser in with your own profile, through a link that works once and only for one minute. If
+the browser does not open signed in, open the link the terminal prints within that minute; after
+that, stop the instance and start it again for a new one. The first time, the interface offers to add a passkey (a
 fingerprint, a face, a PIN or a security key), which signs you in later without the terminal.
 **Not now** skips it, and the interface opens Home signed in; it offers again the next time you
 start. The menu under your name at the bottom of the sidebar signs you out, and its **Passkeys
