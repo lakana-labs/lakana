@@ -57,6 +57,7 @@ from lakana.cli import (
     tokens,
 )
 from lakana.cli._state import CliError, CliState, ci_oidc_in_use, state_of
+from lakana.cli._unreachable import unreachable_message
 from lakana.errors import (
     AuthenticationError,
     ConfigError,
@@ -196,6 +197,10 @@ class _LakanaGroup(TyperGroup):
         except CliError as exc:
             _output.error(state_of(ctx), exc.kind, str(exc), exc.hint)
             raise typer.Exit(exc.exit_code) from exc
+        except LakanaConnectionError as exc:
+            state = state_of(ctx)
+            _output.error(state, type(exc).__name__, unreachable_message(state, exc), None)
+            raise typer.Exit(exit_code_for(exc)) from exc
         except LakanaError as exc:
             _output.error(state_of(ctx), type(exc).__name__, str(exc), _hint(exc))
             raise typer.Exit(exit_code_for(exc)) from exc

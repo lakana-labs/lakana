@@ -62,6 +62,14 @@ it, and none should be added (a separate `docker compose wait setup` step here u
 `setup`'s own exit on a restart, where it sends two quick `GET`s and exits in under a
 second).
 
+With more than one instance, say this bundle under `team` and Lakana on your own machine under
+`local` (`lakana server start --local`), each `lakana` command talks to the default profile
+unless you pass `--profile NAME` right after `lakana`. When that instance is not running, the
+error names the profile, its address and the next step: "Could not reach profile 'team' at
+http://127.0.0.1:18999 (connection refused). Start that instance, or use another profile:
+lakana --profile local COMMAND, or make it the default with lakana profile use local". `lakana
+profile list` shows every profile and marks the default.
+
 ## Sign in to the web interface
 
 The web interface is off unless you ask for it:
