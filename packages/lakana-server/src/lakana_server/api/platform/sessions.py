@@ -15,7 +15,7 @@ from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ConflictError
 from lakana_core.identity.links import has_passkey
 from lakana_core.identity.passkeys import needs_passkey
-from lakana_core.identity.sessions import STEP_UP_WINDOW, SessionService, csrf_token_for
+from lakana_core.identity.sessions import STEP_UP_WINDOW, SessionService
 from lakana_core.models import BrowserSession, Principal
 from lakana_server.api.platform.schemas import BrowserSessionOut, SessionOut
 from lakana_server.api.responses import errors
@@ -80,8 +80,7 @@ def describe_session(
 ) -> SessionOut:
     """Describe your browser session.
 
-    Answers who is signed in, the session's CSRF token (the same for the whole session, so
-    every tab can use it), until when step-up actions need no new passkey touch, and whether
+    Answers who is signed in, until when step-up actions need no new passkey touch, and whether
     a passkey must or may be registered now. A request with a token gets 409: a token has no
     session. Answers 409 while the web interface is off.
 
@@ -99,7 +98,7 @@ def describe_session(
     SessionOut
         The session, without its secret.
     """
-    _, cookie = _own_session(principal, request)
+    _own_session(principal, request)
     context = principal.session
     assert context is not None  # nosec B101 -- _own_session refused a token caller
     row = session.get(BrowserSession, context.session_id)
@@ -112,7 +111,6 @@ def describe_session(
         display_name=person.display_name if person is not None else None,
         type=principal.type.value,
         via=context.via,
-        csrf_token=csrf_token_for(cookie),
         step_up_until=(
             context.last_touch_at + STEP_UP_WINDOW if context.last_touch_at is not None else None
         ),

@@ -492,8 +492,15 @@ passkeys (M7 1b)"; the design is `docs/superpowers/specs/2026-11-08-m7-part1b-si
   and every `/api/v1` operation is compared between a session and the person's token.
 - **Theft of the cookie by page script.** `HttpOnly`; only the secret's SHA-256 is stored and no
   REST answer carries it or its hash.
-- **Cross-site requests.** `SameSite=Strict`, the Host/Origin guard, and a CSRF token derived from
-  the session secret on every state-changing cookie request; no CORS headers.
+- **The cookie alone.** Every cookie request, reads too, must carry the session's CSRF token: a
+  second random secret, not derived from the cookie, returned only by the same-origin sign-in
+  that started the session (link, passkey, local sign-in), kept by the page in its origin's
+  `localStorage`, stored by the server only as a SHA-256 and compared in constant time; without
+  it the answer is 401 `CsrfRefused` ("Sign in again"). Whoever obtains only the cookie, such as
+  a program on another `localhost` port, which receives the plain-HTTP cookie because cookies do
+  not separate ports, cannot act as the person. The same rule holds over HTTPS.
+- **Cross-site requests.** `SameSite=Strict`, the Host/Origin guard, and the CSRF token on every
+  cookie request; no CORS headers.
 - **Revocation latency.** The session's row is read on every request: sign out, sign out
   everywhere, an administrator ending sessions and deactivation take effect on the next request.
   A session ends after its idle timeout (12 hours by default) and its absolute lifetime (7 days),
@@ -508,17 +515,20 @@ passkeys (M7 1b)"; the design is `docs/superpowers/specs/2026-11-08-m7-part1b-si
 
 ### Residuals, stated as such
 
-- **Cookie overwrite on loopback.** Over plain HTTP on `localhost`, cookies do not separate
-  ports: a page served by another program on another `localhost` port can set
-  `lakana_session_<port>`, signing the person out or planting a session of its own (login CSRF).
-  It cannot read the cookie or act as the person. Accepted for the one-person local setup; a
-  team server uses HTTPS, where the `__Host-` prefix refuses a cookie set from elsewhere.
-- **Step-up before Task 6.** Until the sensitive actions (creating tokens, granting rights) call
-  `require_step_up`, a session of an administrator can do them without a fresh passkey touch;
-  the branch is not released before that lands.
-- **A stolen cookie works until it ends.** Whoever holds the cookie value acts as the person
-  until sign out, an administrator ends it, or its idle or absolute limit passes; the cookie is
-  never sent to another site and never logged.
+- **The cookie on loopback.** Over plain HTTP on `localhost`, cookies do not separate ports:
+  every program serving another `localhost` port receives `lakana_session_<port>` and can set
+  it. Receiving it gives nothing without the CSRF token (see "The cookie alone"). Setting it can
+  sign the person out, or plant a session of the program's own, which the page cannot use
+  either: its stored token belongs to its own session, so it gets 401 and asks the person to sign
+  in. A program running as the same OS user can read the browser's profile, `localStorage`
+  included, and therefore act as the person; that is outside what a browser can defend. Local
+  mode is for a machine only one person uses: the docs say not to run it on a machine shared
+  with other OS users and to run the Compose bundle with HTTPS there, where the `__Host-` prefix
+  refuses a cookie set from elsewhere and no other port receives it.
+- **A stolen session works until it ends.** Whoever holds both the cookie value and the page's
+  CSRF token (for example a program of the same OS user reading the browser's profile) acts as
+  the person until sign out, an administrator ends it, or its idle or absolute limit passes;
+  neither is sent to another site or logged.
 
 ## CI OIDC exchange (#15)
 

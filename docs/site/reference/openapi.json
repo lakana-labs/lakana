@@ -18848,7 +18848,7 @@
           "sign-in"
         ],
         "summary": "Describe your browser session",
-        "description": "Answers who is signed in, the session's CSRF token (the same for the whole session, so every tab can use it), until when step-up actions need no new passkey touch, and whether a passkey must or may be registered now. A request with a token gets 409: a token has no session. Answers 409 while the web interface is off.",
+        "description": "Answers who is signed in, until when step-up actions need no new passkey touch, and whether a passkey must or may be registered now. A request with a token gets 409: a token has no session. Answers 409 while the web interface is off.",
         "operationId": "describe_session_api_v1_sign_in_session_get",
         "parameters": [
           {
@@ -29167,10 +29167,6 @@
             "type": "string",
             "title": "Via"
           },
-          "csrf_token": {
-            "type": "string",
-            "title": "Csrf Token"
-          },
           "step_up_until": {
             "anyOf": [
               {
@@ -29203,14 +29199,13 @@
           "display_name",
           "type",
           "via",
-          "csrf_token",
           "step_up_until",
           "needs_passkey",
           "offer_passkey",
           "absolute_expires_at"
         ],
         "title": "SessionOut",
-        "description": "Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.\n\nCarries no secret: neither the cookie nor any hash of it.\n\nParameters\n----------\nname\n    The signed-in person's principal name.\ndisplay_name\n    The person's display name; `null` for none.\ntype\n    The principal type (always ``USER``: service accounts cannot sign in).\nvia\n    How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.\ncsrf_token\n    The session's CSRF token, sent in `X-Lakana-CSRF` with every change. The same for the\n    whole session, so every tab can read it.\nstep_up_until\n    Until when actions that need a fresh passkey touch are allowed without another touch;\n    `null` when the session has no touch.\nneeds_passkey\n    Whether the person must register a passkey before going on (a session from a setup,\n    invite or recovery link on an account without a usable passkey).\noffer_passkey\n    Whether the interface offers, without forcing, to register a passkey (a local sign-in\n    on an account without one).\nabsolute_expires_at\n    When the session ends at the latest, however active."
+        "description": "Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.\n\nCarries no secret: neither the cookie, nor the CSRF token, nor any hash of them.\n\nParameters\n----------\nname\n    The signed-in person's principal name.\ndisplay_name\n    The person's display name; `null` for none.\ntype\n    The principal type (always ``USER``: service accounts cannot sign in).\nvia\n    How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.\nstep_up_until\n    Until when actions that need a fresh passkey touch are allowed without another touch;\n    `null` when the session has no touch.\nneeds_passkey\n    Whether the person must register a passkey before going on (a session from a setup,\n    invite or recovery link on an account without a usable passkey).\noffer_passkey\n    Whether the interface offers, without forcing, to register a passkey (a local sign-in\n    on an account without one).\nabsolute_expires_at\n    When the session ends at the latest, however active."
       },
       "SignInBoundsOut": {
         "properties": {
@@ -29306,7 +29301,7 @@
           "csrf_token"
         ],
         "title": "SignInOut",
-        "description": "Response body of `POST /api/v1/sign-in/links/redeem`; the session comes as a cookie.\n\nParameters\n----------\nname\n    The principal name now signed in.\nneeds_passkey\n    Whether the person must register a passkey now (setup, invite and recovery links on an\n    account without one).\noffer_passkey\n    Whether the interface offers, never forces, a passkey (a local link on an account\n    without one).\ncsrf_token\n    The session's CSRF token, for `X-Lakana-CSRF` on every change."
+        "description": "Response body of `POST /api/v1/sign-in/links/redeem`; the session comes as a cookie.\n\nParameters\n----------\nname\n    The principal name now signed in.\nneeds_passkey\n    Whether the person must register a passkey now (setup, invite and recovery links on an\n    account without one).\noffer_passkey\n    Whether the interface offers, never forces, a passkey (a local link on an account\n    without one).\ncsrf_token\n    The session's CSRF token, shown here only: send it in `X-Lakana-CSRF` with every\n    request that carries the session cookie, reads too. Keep it in the page's own storage;\n    the server keeps only its hash and never returns it again."
       },
       "SignInSettingsIn": {
         "properties": {

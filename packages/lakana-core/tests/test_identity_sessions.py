@@ -34,10 +34,10 @@ from lakana_core.identity.sessions import (
     STEP_UP_WINDOW,
     SessionService,
     StartedSession,
-    csrf_token_for,
     require_step_up,
     utc_now,
 )
+from lakana_core.identity.tokens import hash_secret
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
@@ -237,17 +237,27 @@ def test_key_id_has_no_underscore(svc: SessionService, alice: Principal) -> None
     assert started.cookie_value.startswith(f"{started.key_id}_")
 
 
-def test_csrf_token_is_stable_per_session_and_differs_between_sessions(
-    svc: SessionService, alice: Principal
+def test_csrf_token_is_random_and_checked_against_its_hash(
+    svc: SessionService, alice: Principal, session: Session
 ) -> None:
-    """The CSRF token is derived: the same on every call, different per session."""
+    """The CSRF token is random per session, stored only as a hash, and never derived.
+
+    `check_csrf` says `None` for a cookie that names no session, so `verify` reports it.
+    """
     a = _start(svc, alice, peer="p", user_agent="u")
     b = _start(svc, alice, peer="p", user_agent="u")
-    assert csrf_token_for(a.cookie_value) == a.csrf_token == csrf_token_for(a.cookie_value)
-    assert svc.check_csrf(a.cookie_value, a.csrf_token)
-    assert not svc.check_csrf(b.cookie_value, a.csrf_token)
-    assert not svc.check_csrf(a.cookie_value, "ä-not-ascii")
-    assert not svc.check_csrf("malformed", a.csrf_token)
+    assert a.csrf_token != b.csrf_token and len(a.csrf_token) >= 43
+    row = session.execute(
+        select(BrowserSession).where(BrowserSession.key_id == a.key_id)
+    ).scalar_one()
+    assert row.csrf_hash == hash_secret(a.csrf_token)
+    assert a.csrf_token not in a.cookie_value
+    assert svc.check_csrf(a.cookie_value, a.csrf_token) is True
+    assert svc.check_csrf(b.cookie_value, a.csrf_token) is False
+    assert svc.check_csrf(a.cookie_value, "ä-not-ascii") is False
+    assert svc.check_csrf(a.cookie_value, "") is False
+    assert svc.check_csrf("malformed", a.csrf_token) is None
+    assert svc.check_csrf(f"{a.key_id}_wrong", a.csrf_token) is None
 
 
 @pytest.mark.parametrize("cookie", ["", "nounderscore", "zz_secret", f"{'a' * 32}_wrong"])

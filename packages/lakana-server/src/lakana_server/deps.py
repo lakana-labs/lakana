@@ -103,11 +103,10 @@ PASSKEY_REQUIRED_MESSAGE = (
 )
 
 CSRF_MESSAGE = (
-    "This change came without the session's CSRF token (X-Lakana-CSRF), or with another "
-    "session's. Reload the page and try again."
+    "This request came with the session cookie but without its page's CSRF token "
+    "(X-Lakana-CSRF), or with another session's, and the cookie alone signs nobody in. "
+    "Sign in again."
 )
-
-_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 _SIGN_IN_OR_TOKEN = (  # nosec B105 -- a refusal's text, not a credential
     "Not signed in. In the web interface: Sign in again. From code: send a token "
@@ -409,9 +408,9 @@ def get_principal(
     at all, the browser session cookie (`lakana_server.browser_session.read_session_cookie`:
     below `/api/v1/` only, never with the interface off). Any `Authorization` header, valid or
     not, wins: the cookie is then not read, and no CSRF token is asked for. A cookie request is
-    refused on `TOKEN_ONLY_ROUTES` (403 `TokenOnlyRoute`) and, for any method but GET, HEAD and
-    OPTIONS, without the session's CSRF token in `X-Lakana-CSRF` (403 `CsrfRefused`); the
-    session's row is then read (`SessionService.verify`), so an ended session fails at once
+    refused on `TOKEN_ONLY_ROUTES` (403 `TokenOnlyRoute`) and, whatever its method, without the
+    session's CSRF token in `X-Lakana-CSRF` (401 `CsrfRefused`); the session's row is then
+    read (`SessionService.verify`), so an ended session fails at once
     with `SessionEndedError` (401 with `reason`). The returned principal carries its
     credential kind (`PrincipalRef.credential`). This
     replaces M1's shape-only check — a well-formed header with the wrong
@@ -465,7 +464,7 @@ def get_principal(
     TokenOnlyRoute
         If a session cookie is presented on a route of `TOKEN_ONLY_ROUTES`.
     CsrfRefused
-        If a state-changing cookie request lacks its session's CSRF token.
+        If a cookie request lacks its session's CSRF token (401).
     PasskeyRequired
         If a session from a setup, invite or recovery link, whose person has no usable
         passkey, asks for anything outside `PASSKEY_FIRST_ROUTES` (403).
@@ -516,10 +515,10 @@ def _session_principal(
 ) -> PrincipalRef:
     """Authenticate a request by its session cookie.
 
-    Refuses the token-only routes, then a state-changing request without the session's CSRF
-    token, then verifies the session's row (read on every request, so an ended session fails
-    at once). Only a request the person started extends the idle timeout: one marked
-    `X-Lakana-Background: 1` does not.
+    Refuses the token-only routes, then any request without the session's CSRF token (the
+    cookie alone is worthless: another `localhost` port receives it too), then verifies the
+    session's row (read on every request, so an ended session fails at once). Only a request the
+    person started extends the idle timeout: one marked `X-Lakana-Background: 1` does not.
 
     Parameters
     ----------
@@ -543,8 +542,8 @@ def _session_principal(
         On a route of `TOKEN_ONLY_ROUTES` (403); audited as a failed sign-in with
         ``reason: token_only_route``.
     CsrfRefused
-        If a state-changing request lacks the session's CSRF token (403); audited with
-        ``reason: csrf``.
+        If the request lacks the session's CSRF token or carries another (401); audited with
+        ``reason: csrf``. A cookie that names no session falls through to `verify`.
     PasskeyRequired
         If the session must register a passkey first and the route is not one of
         `PASSKEY_FIRST_ROUTES` (403).
@@ -562,9 +561,7 @@ def _session_principal(
     sessions = SessionService(
         session, get_grant_authorization(request, session), clock=get_clock(request)
     )
-    if request.method not in _SAFE_METHODS and not sessions.check_csrf(
-        cookie, request.headers.get(CSRF_HEADER) or ""
-    ):
+    if sessions.check_csrf(cookie, request.headers.get(CSRF_HEADER) or "") is False:
         _record_failure(request, audit, credential, {**detail, "reason": "csrf"})
         raise CsrfRefused(CSRF_MESSAGE)
     try:

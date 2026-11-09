@@ -74,7 +74,9 @@ fingerprint, a face, a PIN or a security key), which signs you in later without 
 **Not now** skips it, and the interface opens Home signed in; it offers again the next time you
 start. The menu under your name at the bottom of the sidebar signs you out, and its **Passkeys
 and sessions** adds a passkey later. If you lose a passkey,
-see [Lost your passkey](../how-to/lost-your-passkey.md).
+see [Lost your passkey](../how-to/lost-your-passkey.md). Local mode is for a machine only you
+use: on a machine shared with other people's accounts, run the Compose bundle with HTTPS instead
+([why](../explanation/security.md#signing-in-to-the-web-interface)).
 
 To see a line for every request the server answers, start with the option `--log-requests`. To
 see more or fewer of the other lines, set `LAKANA_LOG__LEVEL` (for example to `DEBUG`) in front of

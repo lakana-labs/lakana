@@ -3,8 +3,11 @@
 A session is started by a sign-in (a link or a passkey) and sent to the browser as an
 HttpOnly cookie ``<key_id>_<secret>``. Only the secret's SHA-256 digest is stored, and the
 presented secret is compared in constant time (`lakana_core.identity.tokens.verify_secret`).
-The CSRF token is derived from the secret (`csrf_token_for`), so it needs no column and is the
-same for every request of one session.
+The CSRF token is a second, random secret of the session, unrelated to the cookie: the
+sign-in that starts the session returns it once, the page keeps it in its origin's storage,
+and every cookie request, reads too, carries it (`check_csrf`, against `csrf_hash`, in constant
+time). Whoever holds only the cookie, such as another program on another `localhost` port
+(cookies do not separate ports), therefore cannot act as the person.
 
 The row is read on every request (`SessionService.verify`), so ending a session takes effect
 at once. A session ends when it is signed out, ended by an administrator, idle for longer than
@@ -15,9 +18,6 @@ the idle timeout; background polls (`extend=False`) never do.
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import re
 import secrets
 import uuid
@@ -125,7 +125,6 @@ STEP_UP_MESSAGE = (
 )
 
 _COOKIE = re.compile(r"([0-9a-f]{32})_(.+)", re.DOTALL)
-_CSRF_MESSAGE = b"lakana-csrf"
 
 
 def utc_now() -> datetime:
@@ -150,7 +149,8 @@ class StartedSession:
     cookie_value
         ``<key_id>_<secret>``, the cookie's value. Left out of the `repr`.
     csrf_token
-        The session's CSRF token (`csrf_token_for(cookie_value)`). Left out of the `repr`.
+        The session's CSRF token: random, stored only as `csrf_hash`, shown here and nowhere
+        else. Left out of the `repr`.
     principal
         The principal, as `SessionService.verify` would return it now.
     absolute_expires_at
@@ -179,36 +179,6 @@ def _split(cookie_value: str) -> tuple[str, str] | None:
     """
     match = _COOKIE.fullmatch(cookie_value)
     return (match.group(1), match.group(2)) if match else None
-
-
-def csrf_token_for(cookie_value: str) -> str:
-    """Derive a session's CSRF token from its cookie.
-
-    HMAC-SHA256 keyed with the session secret over a fixed message: the same for every call
-    of one session (so reading it again never rotates it and two tabs keep working), different
-    for every session, and of no help in finding the secret. Page script cannot compute it,
-    because the cookie is HttpOnly.
-
-    Parameters
-    ----------
-    cookie_value
-        The session cookie's value.
-
-    Returns
-    -------
-    str
-        The token, base64url without padding.
-
-    Raises
-    ------
-    ValueError
-        If the value is not a session cookie.
-    """
-    parts = _split(cookie_value)
-    if parts is None:
-        raise ValueError("not a session cookie")
-    digest = hmac.new(parts[1].encode("utf-8"), _CSRF_MESSAGE, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def require_step_up(p: PrincipalRef, *, now: datetime | None = None) -> None:
@@ -643,10 +613,12 @@ class SessionService:
         limits = self.get_limits()
         key_id = secrets.token_hex(16)
         secret = secrets.token_urlsafe(32)
+        csrf_token = secrets.token_urlsafe(32)
         row = BrowserSession(
             id=uuid.uuid4(),
             key_id=key_id,
             secret_hash=hash_secret(secret),
+            csrf_hash=hash_secret(csrf_token),
             principal_id=principal.id,
             via=via,
             link_id=link_id,
@@ -676,7 +648,7 @@ class SessionService:
         return StartedSession(
             key_id=key_id,
             cookie_value=cookie_value,
-            csrf_token=csrf_token_for(cookie_value),
+            csrf_token=csrf_token,
             principal=_ref(principal, row),
             absolute_expires_at=row.absolute_expires_at,
         )
@@ -749,27 +721,29 @@ class SessionService:
             select(BrowserSession.end_reason).where(BrowserSession.id == row_id)
         ).scalar_one()
 
-    def check_csrf(self, cookie_value: str, token: str) -> bool:
-        """Say whether a request's CSRF token belongs to its session cookie.
+    def check_csrf(self, cookie_value: str, token: str) -> bool | None:
+        """Say whether a request's CSRF token belongs to the session its cookie names.
+
+        Reads the row but changes nothing, so a refused request never extends the session.
 
         Parameters
         ----------
         cookie_value
             The session cookie's value.
         token
-            The token the request carried.
+            The token the request carried (``""`` for none).
 
         Returns
         -------
-        bool
-            `True` if `token` is `csrf_token_for(cookie_value)`, compared in constant time;
-            `False` for a malformed cookie.
+        bool or None
+            `True` if `token` hashes to the session's `csrf_hash` (compared in constant time),
+            `False` if it does not; `None` when the cookie names no session (malformed, unknown
+            key id or wrong secret), which `verify` then reports.
         """
-        try:
-            expected = csrf_token_for(cookie_value)
-        except ValueError:
-            return False
-        return hmac.compare_digest(expected.encode("ascii"), token.encode("utf-8"))
+        row = self._find(cookie_value)
+        if row is None:
+            return None
+        return verify_secret(token, row.csrf_hash)
 
     def touch(self, key_id: str) -> None:
         """Record a passkey touch in an open session; the caller commits.

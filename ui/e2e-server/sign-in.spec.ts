@@ -6,6 +6,7 @@ import { addAuthenticator, inviteLink, setupLink, uniqueName } from "./helpers";
 const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const ORIGIN = "http://localhost:4174";
 const SECRET_PARAM = /[#&?]s=/;
+const CSRF_KEY = "lakana.csrf";
 
 /**
  * Runs axe over the page with the WCAG 2.2 AA tags.
@@ -68,12 +69,18 @@ test.describe("the first administrator", () => {
 
   test("passkey sign-in after sign out", async ({ browserName }) => {
     test.skip(browserName !== "chromium", NOT_CHROMIUM);
+    const before = await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY);
+    expect(before).toBeTruthy();
     await page.getByRole("button", { name: "Signed in as admin" }).click();
     await page.getByRole("menuitem", { name: "Sign out everywhere" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Sign in to Lakana" })).toBeVisible();
+    expect(await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY)).toBeNull();
 
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    const after = await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY);
+    expect(after).toBeTruthy();
+    expect(after).not.toBe(before);
   });
 });
 
@@ -149,6 +156,42 @@ test("a cross-origin POST is refused", async ({ request }) => {
     data: { link_id: "anything" },
   });
   expect(refused.status()).toBe(403);
+});
+
+test("the session cookie alone signs nobody in; a new tab of the origin stays signed in", async ({
+  browser,
+  request,
+}) => {
+  const page = await freshPage(browser);
+  await page.goto(await inviteLink(request, uniqueName("cookie-alone")));
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Add a passkey" })).toBeVisible();
+  const [cookie] = await page.context().cookies();
+  const token = await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY);
+  expect(cookie?.name).toBe("lakana_session_4174");
+  expect(token).toBeTruthy();
+
+  // What another program on another localhost port has: the cookie, not the origin's storage.
+  const jar = `${cookie?.name ?? ""}=${cookie?.value ?? ""}`;
+  for (const [method, path] of [
+    ["GET", "/api/v1/sign-in/session"],
+    ["GET", "/api/v1/whoami"],
+    ["DELETE", "/api/v1/sign-in/session"],
+  ] as const) {
+    const alone = await request.fetch(path, { method, headers: { Cookie: jar, Origin: ORIGIN } });
+    expect(alone.status(), `${method} ${path}`).toBe(401);
+    expect(((await alone.json()) as { type?: string }).type).toBe("CsrfRefused");
+  }
+  const withToken = await request.get("/api/v1/sign-in/session", {
+    headers: { Cookie: jar, Origin: ORIGIN, "X-Lakana-CSRF": token ?? "" },
+  });
+  expect(withToken.status()).toBe(200);
+  expect(await withToken.text()).not.toContain(token ?? "");
+
+  const tab = await page.context().newPage();
+  await tab.goto("/");
+  await expect(tab.getByRole("heading", { level: 1, name: "Add a passkey" })).toBeVisible();
+  await page.context().close();
 });
 
 test.describe("an invited person", () => {

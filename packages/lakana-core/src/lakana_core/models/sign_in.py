@@ -1,8 +1,8 @@
 """The sign-in models: links, browser sessions, passkeys, challenges, notices and settings.
 
 No row stores a secret: a link's secret and a session's secret are kept only as their SHA-256
-digest (`lakana_core.identity.tokens.hash_secret`) and compared in constant time; the CSRF
-token is derived from the session secret, so it has no column at all. The public halves
+digest (`lakana_core.identity.tokens.hash_secret`) and compared in constant time; so is a
+session's CSRF token, a second random secret (`BrowserSession.csrf_hash`). The public halves
 (`SignInLink.public_id`, `BrowserSession.key_id`) are the indexed lookup keys.
 """
 
@@ -72,7 +72,9 @@ class SignInLink(Base):
 class BrowserSession(Base):
     """One browser session: the interface's credential, sent as an HttpOnly cookie.
 
-    The cookie is ``<key_id>_<secret>``; only `secret_hash` is stored. `idle_seconds` and
+    The cookie is ``<key_id>_<secret>``; only `secret_hash` is stored. The page holds a second,
+    unrelated secret, the CSRF token, which every cookie request must carry; only `csrf_hash` is
+    stored. `idle_seconds` and
     `absolute_expires_at` are fixed when the session starts, so changing the instance's limits
     affects new sessions only. An ended session keeps its row with `ended_at` and `end_reason`.
     """
@@ -82,6 +84,9 @@ class BrowserSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     key_id: Mapped[str] = mapped_column(String(32), unique=True)
     secret_hash: Mapped[str] = mapped_column(String(64))
+    csrf_hash: Mapped[str] = mapped_column(String(64))
+    """The SHA-256 of the session's CSRF token: random, never derived from the cookie, returned
+    only by the sign-in that started the session."""
     principal_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("principals.id", ondelete="CASCADE"), index=True
     )

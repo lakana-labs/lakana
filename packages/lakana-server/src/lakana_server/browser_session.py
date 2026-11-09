@@ -12,9 +12,11 @@ counts:
   `__Host-lakana_session`; over plain HTTP (only on `localhost`, `Settings` refuses anything
   else) the name `lakana_session_<port>`, since cookies do not separate ports.
 
-Every state-changing request with the cookie carries the session's CSRF token in
-`X-Lakana-CSRF` (`CSRF_HEADER`), checked by `get_principal`. The interface marks its background
-polls with `X-Lakana-Background: 1` (`BACKGROUND_HEADER`), which do not extend the idle timeout.
+Every request with the cookie, reads too, carries the session's CSRF token in
+`X-Lakana-CSRF` (`CSRF_HEADER`), checked by `get_principal`: a random secret only the page
+holds, so the cookie alone, which every other `localhost` port receives, signs nobody in. The
+interface marks its background polls with `X-Lakana-Background: 1` (`BACKGROUND_HEADER`),
+which do not extend the idle timeout.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from lakana_core.errors import ConflictError
 from lakana_server.settings import PublicOrigin
 
 CSRF_HEADER = "X-Lakana-CSRF"
-"""The request header that carries the session's CSRF token on every state-changing request."""
+"""The request header that carries the session's CSRF token on every cookie request."""
 
 BACKGROUND_HEADER = "X-Lakana-Background"
 """The request header (value ``1``) that marks a background poll; it never extends a session."""

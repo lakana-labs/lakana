@@ -44,9 +44,17 @@ passkey ([Invite your team](../how-to/invite-your-team.md),
 - **A session is a credential, like a token.** Signing in gives the browser a session cookie that
   scripts cannot read (`HttpOnly`), that the browser sends only to the same site (`SameSite=Strict`)
   and, over HTTPS, only over HTTPS. Every request with it carries the person's own rights, no more:
-  the same grants, filters, masks, limits and audit as their token would. Every change also
-  carries a second value the page holds in memory, so another site cannot make the browser act. The
-  session is checked on every request, so ending it takes effect at once.
+  the same grants, filters, masks, limits and audit as their token would. Every request, reads
+  too, also carries a second secret that only the page holds, in its own address's storage
+  (address and port): the cookie alone signs nobody in, and another site cannot make the browser
+  act. Signing out removes it; a new tab of the same address keeps working. The session is
+  checked on every request, so ending it takes effect at once.
+- **Local mode is for a machine only you use.** On `http://localhost`, browsers send the cookie
+  to every program serving another `localhost` port, because cookies do not separate ports.
+  Without the page's second secret such a program cannot act as you, but it can still sign you
+  out. Do not run `lakana server start --local` on a machine shared with other people's
+  accounts; there, run the Compose bundle with HTTPS
+  ([Deploy with Compose](../how-to/deploy-with-compose.md)).
 - **A session ends** after 12 hours without anything the person did, after 7 days at the latest
   (an administrator may change both in **Settings → Sign-in**, up to 24 hours and 30 days), when the
   person signs out here or everywhere, when an administrator ends it, and when the account is

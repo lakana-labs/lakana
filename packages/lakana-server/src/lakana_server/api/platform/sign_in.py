@@ -47,7 +47,12 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.browser_session import cookie_name, require_interface, set_session_cookie
+from lakana_server.browser_session import (
+    CSRF_HEADER,
+    cookie_name,
+    require_interface,
+    set_session_cookie,
+)
 from lakana_server.deps import (
     get_clock,
     get_link_service,
@@ -269,7 +274,10 @@ def redeem_link(
     origin = request.app.state.settings.public_origin()
     presented = request.cookies.get(cookie_name(origin)) or None
     has_session = False
-    if presented is not None:
+    # A session counts only with its page's CSRF token: a cookie alone is no usable session.
+    if presented is not None and sessions.check_csrf(
+        presented, request.headers.get(CSRF_HEADER) or ""
+    ):
         try:
             sessions.verify(presented, extend=False)
             has_session = True

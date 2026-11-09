@@ -1,15 +1,36 @@
 /**
  * The one way the interface talks to the server: `fetch` with the browser's own session cookie,
- * the session's CSRF token on every change, and the server's refusals as {@link ApiError}.
+ * the session's CSRF token on every request, and the server's refusals as {@link ApiError}.
  *
  * @remarks
- * The interface never holds a token. The session cookie is `HttpOnly`, so script cannot read
- * it; the CSRF token lives in this module's memory only, never in any browser storage.
+ * The interface never holds an API token. The session cookie is `HttpOnly`, so script cannot
+ * read it. The CSRF token is the session's second secret: the sign-in answers it once, and the
+ * server refuses every cookie request without it, reads too. Cookies do not separate ports, so
+ * another program on another `localhost` port receives the cookie; it cannot read this origin's
+ * `localStorage`, where the token lives, so the cookie alone is worthless to it. `localStorage`
+ * rather than `sessionStorage` keeps a new tab signed in. The token is removed at sign-out and
+ * on a 401; when the browser blocks storage it is kept in memory for this tab only.
  * @packageDocumentation
  */
 
-/** Methods that change nothing, so they carry no CSRF token. */
-const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+/** The `localStorage` key of the session's CSRF token, per origin (scheme, host and port). */
+export const CSRF_STORAGE_KEY = "lakana.csrf";
+
+/** The token when the browser refuses storage (a private window, blocked site data). */
+let memoryToken: string | null = null;
+
+/**
+ * Reads the session's CSRF token.
+ *
+ * @returns The token, or null before a sign-in and after sign-out.
+ */
+function csrfToken(): string | null {
+  try {
+    return localStorage.getItem(CSRF_STORAGE_KEY) ?? memoryToken;
+  } catch {
+    return memoryToken;
+  }
+}
 
 /** Options of a request. */
 export interface RequestOptions {
@@ -59,15 +80,35 @@ export class ApiError extends Error {
   }
 }
 
-let csrfToken: string | null = null;
-
 /**
- * Keeps the session's CSRF token for the requests that follow, or forgets it.
+ * Keeps the session's CSRF token for the requests that follow, in every tab of this origin, or
+ * forgets it.
  *
- * @param token - The token the session routes answered, or null after signing out.
+ * @param token - The token a sign-in answered, or null after signing out.
  */
 export function setCsrfToken(token: string | null): void {
-  csrfToken = token;
+  memoryToken = token;
+  try {
+    if (token === null) {
+      localStorage.removeItem(CSRF_STORAGE_KEY);
+    } else {
+      localStorage.setItem(CSRF_STORAGE_KEY, token);
+    }
+  } catch {
+    // Storage is blocked: the token stays in memory, for this tab only.
+  }
+}
+
+/**
+ * Forgets the token a refused request was sent with, unless another tab has stored a newer one
+ * meanwhile (a fresh sign-in there must not be undone by an old tab's 401).
+ *
+ * @param sent - The token the request carried.
+ */
+function forgetToken(sent: string | null): void {
+  if (sent !== null && csrfToken() === sent) {
+    setCsrfToken(null);
+  }
 }
 
 const unauthorizedListeners = new Set<(error: ApiError) => void>();
@@ -199,8 +240,9 @@ export async function send<T>(
   if (body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  if (!SAFE_METHODS.has(method) && csrfToken !== null) {
-    headers.set("X-Lakana-CSRF", csrfToken);
+  const token = csrfToken();
+  if (token !== null) {
+    headers.set("X-Lakana-CSRF", token);
   }
   if (options.background === true) {
     headers.set("X-Lakana-Background", "1");
@@ -219,6 +261,7 @@ export async function send<T>(
   if (!response.ok) {
     const error = await refusal(response);
     if (error.status === 401) {
+      forgetToken(token);
       for (const listener of unauthorizedListeners) {
         listener(error);
       }

@@ -5217,7 +5217,7 @@ class AccessStatusOut(BaseModel):
 class SessionOut(BaseModel):
     """Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.
 
-    Carries no secret: neither the cookie nor any hash of it.
+    Carries no secret: neither the cookie, nor the CSRF token, nor any hash of them.
 
     Parameters
     ----------
@@ -5229,9 +5229,6 @@ class SessionOut(BaseModel):
         The principal type (always ``USER``: service accounts cannot sign in).
     via
         How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.
-    csrf_token
-        The session's CSRF token, sent in `X-Lakana-CSRF` with every change. The same for the
-        whole session, so every tab can read it.
     step_up_until
         Until when actions that need a fresh passkey touch are allowed without another touch;
         `null` when the session has no touch.
@@ -5249,7 +5246,6 @@ class SessionOut(BaseModel):
     display_name: str | None
     type: Literal["USER", "SERVICE_ACCOUNT"]
     via: str
-    csrf_token: str
     step_up_until: datetime | None
     needs_passkey: bool
     offer_passkey: bool
@@ -5416,7 +5412,9 @@ class SignInOut(BaseModel):
         Whether the interface offers, never forces, a passkey (a local link on an account
         without one).
     csrf_token
-        The session's CSRF token, for `X-Lakana-CSRF` on every change.
+        The session's CSRF token, shown here only: send it in `X-Lakana-CSRF` with every
+        request that carries the session cookie, reads too. Keep it in the page's own storage;
+        the server keeps only its hash and never returns it again.
     """
 
     name: str

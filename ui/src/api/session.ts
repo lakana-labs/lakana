@@ -16,8 +16,6 @@ export interface SessionOut {
   readonly type: string;
   /** How the session started: `passkey`, `setup`, `invite`, `recovery` or `local`. */
   readonly via: string;
-  /** The session's CSRF token, the same for the whole session. */
-  readonly csrf_token: string;
   /** Until when actions that need a passkey touch need no new one, or null. */
   readonly step_up_until: string | null;
   /** True when the person must add a passkey before anything else. */
@@ -57,21 +55,23 @@ interface WhoamiOut {
 }
 
 /**
- * Reads the browser's session and keeps its CSRF token.
+ * Reads the browser's session. It never carries the CSRF token: only a sign-in answers that.
  *
  * @returns The session.
- * @throws {ApiError} 401 when the browser is not signed in, with `reason` when a session ended.
+ * @throws {ApiError} 401 when the browser is not signed in (no session, or no CSRF token in
+ * this origin's storage), with `reason` when a session ended.
  */
 export async function getSession(): Promise<SessionOut> {
-  const session = await api.request<SessionOut>("GET", "/api/v1/sign-in/session");
-  setCsrfToken(session.csrf_token);
-  return session;
+  return api.request<SessionOut>("GET", "/api/v1/sign-in/session");
 }
 
-/** Ends this browser's session and forgets its CSRF token. */
+/** Ends this browser's session and forgets its CSRF token, even when the server failed. */
 export async function signOut(): Promise<void> {
-  await api.request("DELETE", "/api/v1/sign-in/session");
-  setCsrfToken(null);
+  try {
+    await api.request("DELETE", "/api/v1/sign-in/session");
+  } finally {
+    setCsrfToken(null);
+  }
 }
 
 /**

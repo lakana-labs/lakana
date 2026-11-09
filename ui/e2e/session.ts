@@ -12,7 +12,6 @@ export const ADMIN_SESSION = {
   display_name: null,
   type: "USER",
   via: "passkey",
-  csrf_token: "csrf-e2e",
   step_up_until: null,
   needs_passkey: false,
   offer_passkey: false,

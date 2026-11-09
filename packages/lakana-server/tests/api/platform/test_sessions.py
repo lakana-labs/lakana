@@ -89,16 +89,18 @@ def test_sign_out_with_a_token_has_nothing_to_end(client: TestClient) -> None:
 
 
 def test_describe_the_session(client: TestClient) -> None:
-    """The interface reads who is signed in, the CSRF token and what the session still needs."""
+    """The interface reads who is signed in and what the session still needs, never the token."""
     touched = datetime.now(UTC)
     name, value, csrf = signed_in(client, "alice", touched_at=touched, via="invite")
-    body = client.get("/api/v1/sign-in/session", headers=session_headers(name, value)).json()
+    body = client.get("/api/v1/sign-in/session", headers=session_headers(name, value, csrf)).json()
     assert body["name"] == "alice" and body["type"] == "USER" and body["via"] == "invite"
-    assert body["csrf_token"] == csrf
+    assert "csrf_token" not in body
     assert body["needs_passkey"] is True and body["offer_passkey"] is False
     assert body["step_up_until"] is not None and body["absolute_expires_at"]
-    _, local, _ = signed_in(client, "alice", via="local")
-    body = client.get("/api/v1/sign-in/session", headers=session_headers(name, local)).json()
+    _, local, local_csrf = signed_in(client, "alice", via="local")
+    body = client.get(
+        "/api/v1/sign-in/session", headers=session_headers(name, local, local_csrf)
+    ).json()
     assert body["needs_passkey"] is False and body["offer_passkey"] is True
     assert body["step_up_until"] is None
 
@@ -142,9 +144,9 @@ def test_ending_another_persons_sessions_needs_step_up(client: TestClient) -> No
 
 def test_a_person_lists_their_own_sessions_without_secrets(client: TestClient) -> None:
     """Each open session is listed once, the current one marked; no hash appears."""
-    name, value, _ = signed_in(client, "alice")
+    name, value, csrf = signed_in(client, "alice")
     _, other, _ = signed_in(client, "alice")
-    r = client.get("/api/v1/principals/alice/sessions", headers=session_headers(name, value))
+    r = client.get("/api/v1/principals/alice/sessions", headers=session_headers(name, value, csrf))
     assert r.status_code == 200, r.text
     listed = r.json()
     assert [s["current"] for s in listed] == [True, False]
@@ -165,8 +167,8 @@ def test_a_person_lists_their_own_sessions_without_secrets(client: TestClient) -
 
 def test_a_non_administrator_cannot_list_another_persons_sessions(client: TestClient) -> None:
     """Listing someone else's sessions needs the ADMIN role."""
-    name, value, _ = signed_in(client, "alice")
-    r = client.get("/api/v1/principals/admin/sessions", headers=session_headers(name, value))
+    name, value, csrf = signed_in(client, "alice")
+    r = client.get("/api/v1/principals/admin/sessions", headers=session_headers(name, value, csrf))
     assert r.status_code == 403, r.text
     assert client.get("/api/v1/principals/alice/sessions", headers=AUTH_HEADER).status_code == 200
 
@@ -176,14 +178,14 @@ def test_a_non_administrator_cannot_tell_which_names_exist(client: TestClient) -
     name, value, csrf = signed_in(client, "alice")
     for who in ("admin", "nobody"):
         url = f"/api/v1/principals/{who}/sessions"
-        assert client.get(url, headers=session_headers(name, value)).status_code == 403
+        assert client.get(url, headers=session_headers(name, value, csrf)).status_code == 403
         assert client.delete(url, headers=session_headers(name, value, csrf)).status_code == 403
 
 
 def test_every_signed_in_person_reads_the_sign_in_settings(client: TestClient) -> None:
     """The defaults and the bounds, in minutes, so every bound the server keeps is expressible."""
-    name, value, _ = signed_in(client, "alice")
-    r = client.get("/api/v1/settings/sign-in", headers=session_headers(name, value))
+    name, value, csrf = signed_in(client, "alice")
+    r = client.get("/api/v1/settings/sign-in", headers=session_headers(name, value, csrf))
     assert r.status_code == 200, r.text
     assert r.json() == {
         "idle_timeout_minutes": 720,

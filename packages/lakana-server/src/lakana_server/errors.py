@@ -88,11 +88,12 @@ class ClientDisconnectedError(LakanaError):
     """
 
 
-class CsrfRefused(PermissionDenied):
-    """A state-changing request with the session cookie lacked its session's CSRF token.
+class CsrfRefused(AuthenticationError):
+    """A request with the session cookie lacked its session's CSRF token, or carried another.
 
     Server-only: the CSRF header is an HTTP-layer concern of the browser session
-    (`lakana_server.browser_session`). Mapped to 403 through `PermissionDenied`.
+    (`lakana_server.browser_session`). Mapped to 401 through `AuthenticationError`: the cookie
+    alone signs nobody in, and the interface answers a 401 by asking the person to sign in.
     """
 
 

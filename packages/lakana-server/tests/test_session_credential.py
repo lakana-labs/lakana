@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 import lakana_server.ui
 from lakana_core.auth import AllowAllAuthorization
 from lakana_core.identity.pats import PatService
-from lakana_core.identity.sessions import csrf_token_for
+from lakana_core.identity.tokens import hash_secret
 from lakana_core.models import AuditEvent, AuditEventType, BrowserSession, Principal
 from lakana_server.api.platform.schemas import BrowserSessionOut, SessionOut
 from lakana_server.app import create_app
@@ -175,27 +175,77 @@ def _set_cookie(response: object) -> str:
 
 
 def test_cookie_authenticates_api_v1(client: TestClient) -> None:
-    """A session cookie on `/api/v1` authenticates as the person it belongs to."""
-    name, value, _ = signed_in(client, "admin")
-    r = client.get("/api/v1/whoami", headers=session_headers(name, value))
+    """A session cookie with its CSRF token on `/api/v1` authenticates as its person."""
+    name, value, csrf = signed_in(client, "admin")
+    r = client.get("/api/v1/whoami", headers=session_headers(name, value, csrf))
     assert r.status_code == 200, r.text
     assert r.json()["name"] == "admin"
 
 
+@pytest.mark.parametrize("method", ["GET", "PATCH"])
+@pytest.mark.parametrize("clients", ["client", "https_client"])
+def test_the_cookie_alone_signs_nobody_in(
+    request: pytest.FixtureRequest, clients: str, method: str
+) -> None:
+    """Without the page's CSRF token the cookie is worthless: reads and changes get 401.
+
+    Another program on another `localhost` port receives the cookie, but not the token,
+    which only the page's origin holds; over HTTPS the same rule applies.
+
+    Parameters
+    ----------
+    request
+        Reaches the client fixture by name.
+    clients
+        The fixture: plain HTTP on loopback, or HTTPS.
+    method
+        A read or a change.
+    """
+    client = cast(TestClient, request.getfixturevalue(clients))
+    name, value, csrf = signed_in(client, "admin")
+    for token in (None, "", csrf + "x", signed_in(client, "admin")[2]):
+        r = client.request(
+            method,
+            "/api/v1/whoami",
+            headers=session_headers(name, value, token),
+            json={"language": "de"} if method == "PATCH" else None,
+        )
+        assert r.status_code == 401, r.text
+        assert r.json()["type"] == "CsrfRefused"
+        assert "Sign in again" in r.json()["detail"]
+
+
+def test_the_csrf_token_is_random_stored_as_a_hash_and_never_read_back(
+    client: TestClient,
+) -> None:
+    """The token is not derived from the cookie: only its hash is stored, and no read returns it."""
+    name, value, csrf = signed_in(client, "admin")
+    key_id, secret = value.split("_", 1)
+    with Session(cast(FastAPI, client.app).state.engine) as session:
+        row = session.execute(
+            select(BrowserSession).where(BrowserSession.key_id == key_id)
+        ).scalar_one()
+        assert row.csrf_hash == hash_secret(csrf)
+        assert row.secret_hash != row.csrf_hash
+    assert csrf not in value and secret not in csrf
+    r = client.get("/api/v1/sign-in/session", headers=session_headers(name, value, csrf))
+    assert r.status_code == 200, r.text
+    assert "csrf_token" not in r.json() and csrf not in r.text
+
+
 def test_cookie_is_ignored_outside_api_v1(client: TestClient) -> None:
     """The Iceberg REST routes never read the cookie: only a token answers there."""
-    name, value, _ = signed_in(client, "admin")
+    name, value, csrf = signed_in(client, "admin")
     assert client.get("/v1/dev/namespaces", headers=AUTH_HEADER).status_code != 401
-    r = client.get("/v1/dev/namespaces", headers=session_headers(name, value))
+    r = client.get("/v1/dev/namespaces", headers=session_headers(name, value, csrf))
     assert r.status_code == 401
 
 
 def test_cookie_is_ignored_with_the_interface_off(client_ui_off: TestClient) -> None:
     """With `LAKANA_UI__ENABLED=false` a valid session cookie authenticates nothing."""
-    name, value, _ = signed_in(client_ui_off, "admin")
-    assert (
-        client_ui_off.get("/api/v1/whoami", headers=session_headers(name, value)).status_code == 401
-    )
+    name, value, csrf = signed_in(client_ui_off, "admin")
+    r = client_ui_off.get("/api/v1/whoami", headers=session_headers(name, value, csrf))
+    assert r.status_code == 401
 
 
 @pytest.mark.parametrize("headers", [{}, AUTH_HEADER])
@@ -227,16 +277,13 @@ def test_token_only_routes_ignore_the_cookie(client: TestClient, method: str, pa
 
 
 def test_csrf_token_survives_a_second_tab(client: TestClient) -> None:
-    """Reading the session again never rotates its CSRF token, so other tabs keep working."""
-    name, value, _ = signed_in(client, "admin")
-    first = client.get("/api/v1/sign-in/session", headers=session_headers(name, value))
-    second = client.get("/api/v1/sign-in/session", headers=session_headers(name, value))
-    assert first.status_code == 200, first.text
-    assert first.json()["csrf_token"] == second.json()["csrf_token"]
+    """Requests never rotate the CSRF token, so every tab of the origin keeps using it."""
+    name, value, csrf = signed_in(client, "admin")
+    for _ in range(2):
+        r = client.get("/api/v1/sign-in/session", headers=session_headers(name, value, csrf))
+        assert r.status_code == 200, r.text
     r = client.patch(
-        "/api/v1/whoami",
-        headers=session_headers(name, value, first.json()["csrf_token"]),
-        json={"language": "de"},
+        "/api/v1/whoami", headers=session_headers(name, value, csrf), json={"language": "de"}
     )
     assert r.status_code == 200, r.text
 
@@ -268,39 +315,13 @@ def test_any_authorization_header_never_falls_back_to_the_cookie(
     assert r.status_code == 401, r.text
 
 
-def test_unsafe_cookie_request_needs_the_csrf_token(client: TestClient) -> None:
-    """A change sent with the cookie and without the CSRF header is refused."""
-    name, value, _ = signed_in(client, "admin")
-    r = client.patch(
-        "/api/v1/whoami", headers=session_headers(name, value), json={"language": "de"}
-    )
-    assert r.status_code == 403, r.text
-    assert r.json()["type"] == "CsrfRefused"
-    assert "Reload the page and try again" in r.json()["detail"]
-
-
-def test_csrf_token_of_another_session_is_refused(client: TestClient) -> None:
-    """The CSRF token is bound to its own session."""
-    name, value, _ = signed_in(client, "admin")
-    _, _, other_csrf = signed_in(client, "admin")
-    r = client.patch(
-        "/api/v1/whoami", headers=session_headers(name, value, other_csrf), json={"language": "de"}
-    )
-    assert r.status_code == 403
-    assert r.json()["type"] == "CsrfRefused"
-
-
 def test_cookie_request_is_authenticated_before_the_body_is_read(client: TestClient) -> None:
-    """A malformed body gets 401 without a working cookie, 403 without CSRF, 422 only then.
-
-    The CSRF token is checked before the session's row: a forged cookie needs its own token
-    (derivable by whoever forged it) to reach the 401.
-    """
+    """A malformed body gets 401 without a working cookie or its CSRF token, 422 only then."""
     name, value, csrf = signed_in(client, "admin")
     bad = '{"language": '
     json_type = {"Content-Type": "application/json"}
     forged = value.split("_")[0] + "_wrong"
-    unknown = session_headers(name, forged, csrf_token_for(forged))
+    unknown = session_headers(name, forged, csrf)
     assert (
         client.patch("/api/v1/whoami", headers={**unknown, **json_type}, content=bad).status_code
         == 401
@@ -308,7 +329,7 @@ def test_cookie_request_is_authenticated_before_the_body_is_read(client: TestCli
     no_csrf = session_headers(name, value)
     assert (
         client.patch("/api/v1/whoami", headers={**no_csrf, **json_type}, content=bad).status_code
-        == 403
+        == 401
     )
     good = session_headers(name, value, csrf)
     assert (
@@ -326,7 +347,7 @@ def test_ended_session_names_the_reason(client: TestClient) -> None:
         ).status_code
         == 204
     )
-    r = client.get("/api/v1/whoami", headers=session_headers(name, value))
+    r = client.get("/api/v1/whoami", headers=session_headers(name, value, csrf))
     assert r.status_code == 401 and r.json()["type"] == "SessionEndedError"
     assert "sign in again" in r.json()["detail"].lower()
     assert r.json()["reason"] == "sign_out"
@@ -346,21 +367,29 @@ def test_background_requests_do_not_extend_the_session(
 ) -> None:
     """Only requests the person started keep the session alive; polls never do."""
     cast(FastAPI, client.app).state.clock = clock
-    name, polled, _ = signed_in(client, "admin")
-    _, used, _ = signed_in(client, "admin")
+    name, polled, polled_csrf = signed_in(client, "admin")
+    _, used, used_csrf = signed_in(client, "admin")
     clock.advance(timedelta(hours=11))
     background = {BACKGROUND_HEADER: "1"}
     assert (
         client.get(
-            "/api/v1/whoami", headers={**session_headers(name, polled), **background}
+            "/api/v1/whoami", headers={**session_headers(name, polled, polled_csrf), **background}
         ).status_code
         == 200
     )
-    assert client.get("/api/v1/whoami", headers=session_headers(name, used)).status_code == 200
+    assert (
+        client.get("/api/v1/whoami", headers=session_headers(name, used, used_csrf)).status_code
+        == 200
+    )
     clock.advance(timedelta(hours=2))
-    r = client.get("/api/v1/whoami", headers={**session_headers(name, polled), **background})
+    r = client.get(
+        "/api/v1/whoami", headers={**session_headers(name, polled, polled_csrf), **background}
+    )
     assert r.status_code == 401 and r.json()["reason"] == "idle"
-    assert client.get("/api/v1/whoami", headers=session_headers(name, used)).status_code == 200
+    assert (
+        client.get("/api/v1/whoami", headers=session_headers(name, used, used_csrf)).status_code
+        == 200
+    )
 
 
 def test_failed_cookie_attempts_are_rate_limited_in_the_audit_log(
@@ -397,9 +426,10 @@ def test_failed_cookie_attempts_are_rate_limited_in_the_audit_log(
 
 def test_a_session_success_is_audited_once_per_window(client: TestClient) -> None:
     """Successes go through the sign-in window like a token's, keyed by the session."""
-    name, value, _ = signed_in(client, "admin")
+    name, value, csrf = signed_in(client, "admin")
     for _ in range(3):
-        assert client.get("/api/v1/whoami", headers=session_headers(name, value)).status_code == 200
+        r = client.get("/api/v1/whoami", headers=session_headers(name, value, csrf))
+        assert r.status_code == 200
     with Session(cast(FastAPI, client.app).state.engine) as session:
         rows = (
             session.execute(
@@ -419,10 +449,10 @@ def test_a_session_success_is_audited_once_per_window(client: TestClient) -> Non
 def test_deactivation_ends_sessions_at_once(client: TestClient) -> None:
     """Deactivating a person ends their sessions in the same request."""
     _add_user(client, "alice")
-    name, value, _ = signed_in(client, "alice")
+    name, value, csrf = signed_in(client, "alice")
     assert client.delete("/api/v1/principals/alice", headers=AUTH_HEADER).status_code == 204
     assert [r.end_reason for r in _rows(client)] == ["deactivated"]
-    r = client.get("/api/v1/whoami", headers=session_headers(name, value))
+    r = client.get("/api/v1/whoami", headers=session_headers(name, value, csrf))
     assert r.status_code == 401 and r.json()["reason"] == "deactivated"
 
 
@@ -460,8 +490,8 @@ def test_cookie_attributes_over_https(https_client: TestClient) -> None:
     lowered = _set_cookie(cleared).lower()
     assert lowered.startswith("__host-lakana_session=") and "; secure" in lowered
     assert "max-age=0" in lowered and "path=/" in lowered
-    name, value, _ = signed_in(https_client, "admin")
-    r = https_client.get("/api/v1/whoami", headers=session_headers(name, value))
+    name, value, csrf = signed_in(https_client, "admin")
+    r = https_client.get("/api/v1/whoami", headers=session_headers(name, value, csrf))
     assert r.status_code == 200, r.text
 
 
@@ -499,7 +529,7 @@ def test_csrf_and_token_only_refusals_are_audited(client: TestClient) -> None:
     name, value, csrf = signed_in(client, "admin")
     key_id = value.split("_")[0]
     r = client.patch("/api/v1/whoami", headers=session_headers(name, value), json={})
-    assert r.status_code == 403
+    assert r.status_code == 401
     r = client.delete("/api/v1/task-tokens/k", headers=session_headers(name, value, csrf))
     assert r.status_code == 403
     assert _failed_rows(client) == [

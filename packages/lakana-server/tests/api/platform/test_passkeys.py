@@ -167,7 +167,10 @@ def test_full_browser_sign_in_sets_the_cookie(client: TestClient, alice: dict[st
     cookie = r.headers["set-cookie"]
     assert cookie.startswith("lakana_session_8000=") and "httponly" in cookie.lower()
     value = cookie.split(";", 1)[0].split("=", 1)[1]
-    r = client.get("/api/v1/sign-in/session", headers=session_headers("lakana_session_8000", value))
+    r = client.get(
+        "/api/v1/sign-in/session",
+        headers=session_headers("lakana_session_8000", value, body["csrf_token"]),
+    )
     assert r.status_code == 200 and r.json()["via"] == "passkey"
     assert r.json()["step_up_until"] is not None
 

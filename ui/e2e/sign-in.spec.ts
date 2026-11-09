@@ -182,7 +182,9 @@ test.describe("signing in", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Sign in to Lakana" })).toBeVisible();
     await expect(page.getByText("You signed out on every device.")).toBeVisible();
     const ended = server.sent.find((request) => request.url().endsWith("/kim/sessions"));
-    expect(ended?.headers()["x-lakana-csrf"]).toBe(KIM.csrf_token);
+    // The token the link's sign-in answered, kept in the origin's storage; cleared at sign-out.
+    expect(ended?.headers()["x-lakana-csrf"]).toBe("c");
+    expect(await page.evaluate(() => localStorage.getItem("lakana.csrf"))).toBeNull();
     expect(await violations(page), "the sign-in page").toEqual([]);
 
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();

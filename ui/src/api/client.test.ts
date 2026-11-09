@@ -1,11 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, api, onUnauthorized, send, setCsrfToken, setStepUp } from "./client";
+import {
+  ApiError,
+  CSRF_STORAGE_KEY,
+  api,
+  onUnauthorized,
+  send,
+  setCsrfToken,
+  setStepUp,
+} from "./client";
 
 import { fakeServer } from "../test/server";
 
 describe("send", () => {
-  it("sends the CSRF token on unsafe requests only", async () => {
+  it("sends the CSRF token on every request, reads too", async () => {
     const server = fakeServer({
       "GET /api/v1/things": { status: 200, body: [] },
       "POST /api/v1/things": { status: 201, body: {} },
@@ -20,11 +28,77 @@ describe("send", () => {
     await send("DELETE", "/api/v1/things");
 
     expect(server.sent.map((request) => request.headers["x-lakana-csrf"])).toEqual([
-      undefined,
+      "csrf-1",
       "csrf-1",
       "csrf-1",
       "csrf-1",
     ]);
+  });
+
+  it("keeps the token in the origin's storage, so a new tab of the same origin has it", async () => {
+    const server = fakeServer({ "GET /api/v1/things": { status: 200, body: [] } });
+    setCsrfToken("csrf-1");
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBe("csrf-1");
+    localStorage.setItem(CSRF_STORAGE_KEY, "from-another-tab");
+
+    await send("GET", "/api/v1/things");
+
+    expect(server.sent[0]?.headers["x-lakana-csrf"]).toBe("from-another-tab");
+    setCsrfToken(null);
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
+  });
+
+  it("forgets the token on a 401", async () => {
+    const server = fakeServer({
+      "GET /api/v1/things": {
+        status: 401,
+        body: { detail: "Sign in again.", type: "CsrfRefused" },
+      },
+      "POST /api/v1/things": { status: 200, body: {} },
+    });
+    setCsrfToken("csrf-1");
+
+    await expect(send("GET", "/api/v1/things")).rejects.toBeInstanceOf(ApiError);
+    await send("POST", "/api/v1/things", {});
+
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
+    expect(server.sent[1]?.headers).not.toHaveProperty("x-lakana-csrf");
+  });
+
+  it("keeps a newer token another tab stored while a request failed", async () => {
+    const server = fakeServer({
+      "GET /api/v1/things": () => {
+        localStorage.setItem(CSRF_STORAGE_KEY, "newer");
+        return { status: 401, body: { detail: "x", type: "SessionEndedError" } };
+      },
+      "POST /api/v1/things": { status: 200, body: {} },
+    });
+    setCsrfToken("older");
+
+    await send("GET", "/api/v1/things").catch(() => undefined);
+    await send("POST", "/api/v1/things", {});
+
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBe("newer");
+    expect(server.sent[1]?.headers["x-lakana-csrf"]).toBe("newer");
+  });
+
+  it("keeps the token in memory when the browser blocks storage", async () => {
+    const server = fakeServer({ "GET /api/v1/things": { status: 200, body: [] } });
+    const blocked = (): never => {
+      throw new DOMException("blocked", "SecurityError");
+    };
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(blocked);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(blocked);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(blocked);
+    setCsrfToken("in-memory");
+
+    await send("GET", "/api/v1/things");
+    setCsrfToken(null);
+    await send("GET", "/api/v1/things");
+
+    expect(server.sent[0]?.headers["x-lakana-csrf"]).toBe("in-memory");
+    expect(server.sent[1]?.headers).not.toHaveProperty("x-lakana-csrf");
+    vi.restoreAllMocks();
   });
 
   it("sends no CSRF header before a session gave one", async () => {

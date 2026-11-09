@@ -179,11 +179,16 @@ def test_redeem_sets_the_cookie_and_returns_no_secret(ui_client: TestClient) -> 
     assert "httponly" in cookie.lower() and "samesite=strict" in cookie.lower()
     value = cookie.split(";", 1)[0].split("=", 1)[1]
     me = ui_client.get(
-        "/api/v1/sign-in/session", headers=session_headers("lakana_session_8000", value)
+        "/api/v1/sign-in/session",
+        headers=session_headers("lakana_session_8000", value, body["csrf_token"]),
     )
     assert me.status_code == 200, me.text
     assert me.json()["needs_passkey"] is True
-    assert me.json()["csrf_token"] == body["csrf_token"]
+    assert body["csrf_token"] not in me.text
+    alone = ui_client.get(
+        "/api/v1/sign-in/session", headers=session_headers("lakana_session_8000", value)
+    )
+    assert alone.status_code == 401 and alone.json()["type"] == "CsrfRefused"
 
 
 def test_describe_of_an_unknown_link_is_410(ui_client: TestClient) -> None:
@@ -349,7 +354,8 @@ def test_an_invite_signs_in_a_new_person_with_their_display_name(ui_client: Test
     assert r.json()["needs_passkey"] is True
     value = r.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
     me = ui_client.get(
-        "/api/v1/sign-in/session", headers=session_headers("lakana_session_8000", value)
+        "/api/v1/sign-in/session",
+        headers=session_headers("lakana_session_8000", value, r.json()["csrf_token"]),
     )
     assert (me.json()["name"], me.json()["display_name"]) == ("carol", "Carol C.")
 
@@ -366,8 +372,8 @@ def test_recovery_links_notify_and_can_be_listed_and_withdrawn(ui_client: TestCl
     redeemed = _redeem(ui_client, r.json()["url"])
     assert redeemed.status_code == 200, redeemed.text
     value = redeemed.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
-    headers = session_headers("lakana_session_8000", value)
     csrf = redeemed.json()["csrf_token"]
+    headers = session_headers("lakana_session_8000", value, csrf)
     refused = ui_client.get("/api/v1/sign-in/notices", headers=headers)
     assert refused.status_code == 403 and refused.json()["type"] == "PasskeyRequired"
     _add_passkey(ui_client, "alice", session_headers("lakana_session_8000", value, csrf))
@@ -447,7 +453,7 @@ def test_a_local_link_signs_in_without_a_passkey_and_ends_with_its_token(
     assert redeemed.status_code == 200, redeemed.text
     assert (redeemed.json()["needs_passkey"], redeemed.json()["offer_passkey"]) == (False, True)
     value = redeemed.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1]
-    headers = session_headers("lakana_session_8000", value)
+    headers = session_headers("lakana_session_8000", value, redeemed.json()["csrf_token"])
     assert local_client.get("/api/v1/sign-in/session", headers=headers).status_code == 200
     revoked = local_client.delete(
         f"/api/v1/principals/alice/tokens/{alice['key_id']}", headers=AUTH_HEADER
@@ -469,14 +475,21 @@ def test_the_first_run_bootstrap_token_mints_a_local_link(local_client: TestClie
 
 
 def test_a_local_link_is_not_used_over_an_open_session(local_client: TestClient) -> None:
-    """A browser that is signed in gets 409, and the link stays usable."""
+    """A page that is signed in (cookie and its CSRF token) gets 409; the link stays usable.
+
+    A cookie whose page lost its token is no usable session: the link then signs in and
+    ends that session as ``replaced``.
+    """
     alice = _person(local_client, "alice")
     url = local_client.post("/api/v1/sign-in/local-link", headers=_bearer(alice)).json()["url"]
-    name, value, _ = signed_in(local_client, "admin")
-    r = _redeem(local_client, url, Cookie=f"{name}={value}")
+    name, value, csrf = signed_in(local_client, "admin")
+    r = _redeem(local_client, url, **session_headers(name, value, csrf))
     assert r.status_code == 409, r.text
     assert "already signed in" in r.json()["detail"]
-    assert _redeem(local_client, url).status_code == 200
+    r = _redeem(local_client, url, Cookie=f"{name}={value}")
+    assert r.status_code == 200, r.text
+    ended = local_client.get("/api/v1/whoami", headers=session_headers(name, value, csrf))
+    assert ended.status_code == 401 and ended.json()["reason"] == "replaced"
 
 
 def test_a_session_cannot_mint_a_local_link(local_client: TestClient) -> None:

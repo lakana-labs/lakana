@@ -144,6 +144,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("key_id", sa.String(length=32), nullable=False),
         sa.Column("secret_hash", sa.String(length=64), nullable=False),
+        sa.Column("csrf_hash", sa.String(length=64), nullable=False),
         sa.Column("principal_id", sa.Uuid(), nullable=False),
         sa.Column("via", sa.String(length=16), nullable=False),
         sa.Column("link_id", sa.Uuid(), nullable=True),

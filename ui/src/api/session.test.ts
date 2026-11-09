@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { send } from "./client";
+import { ApiError, CSRF_STORAGE_KEY, send, setCsrfToken } from "./client";
 import {
   dismissNotice,
   getSession,
@@ -13,45 +13,58 @@ import {
 import { ADMIN_SESSION, fakeServer, whoami } from "../test/server";
 
 describe("session", () => {
-  it("keeps one CSRF token across two loads of the session", async () => {
+  it("reads the session without receiving or changing the CSRF token", async () => {
     const server = fakeServer({
       "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
-      "DELETE /api/v1/sign-in/session": { status: 204 },
     });
+    setCsrfToken("csrf-1");
 
-    const first = await getSession();
-    const second = await getSession();
-    await signOut();
+    const session = await getSession();
 
-    expect(first.csrf_token).toBe("csrf-1");
-    expect(second.csrf_token).toBe(first.csrf_token);
-    expect(server.sent[2]?.headers["x-lakana-csrf"]).toBe("csrf-1");
+    expect(session).not.toHaveProperty("csrf_token");
+    expect(server.sent[0]?.headers["x-lakana-csrf"]).toBe("csrf-1");
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBe("csrf-1");
   });
 
   it("forgets the CSRF token after signing out", async () => {
     const server = fakeServer({
-      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
       "DELETE /api/v1/sign-in/session": { status: 204 },
       "POST /api/v1/things": { status: 200, body: {} },
     });
-    await getSession();
+    setCsrfToken("csrf-1");
 
     await signOut();
     await send("POST", "/api/v1/things", {});
 
-    expect(server.sent[2]?.headers).not.toHaveProperty("x-lakana-csrf");
+    expect(server.sent[0]?.headers["x-lakana-csrf"]).toBe("csrf-1");
+    expect(server.sent[1]?.headers).not.toHaveProperty("x-lakana-csrf");
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
+  });
+
+  it("forgets the CSRF token even when signing out fails", async () => {
+    const server = fakeServer({
+      "DELETE /api/v1/sign-in/session": { status: 500, body: { detail: "x" } },
+      "POST /api/v1/things": { status: 200, body: {} },
+    });
+    setCsrfToken("csrf-1");
+
+    await expect(signOut()).rejects.toBeInstanceOf(ApiError);
+    await send("POST", "/api/v1/things", {});
+
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
+    expect(server.sent[1]?.headers).not.toHaveProperty("x-lakana-csrf");
   });
 
   it("signs out everywhere through the person's sessions", async () => {
     const server = fakeServer({
-      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
       "DELETE /api/v1/principals/a b/sessions": { status: 204 },
     });
-    await getSession();
+    setCsrfToken("csrf-1");
 
     await signOutEverywhere("a b");
 
-    expect(server.sent[1]).toMatchObject({
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
+    expect(server.sent[0]).toMatchObject({
       method: "DELETE",
       path: "/api/v1/principals/a%20b/sessions",
       headers: { "x-lakana-csrf": "csrf-1" },

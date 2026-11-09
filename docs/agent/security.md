@@ -351,24 +351,31 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   `SameSite=Strict`, `Path=/`, no `Domain`. Over HTTPS `Secure` and the name
   `__Host-lakana_session`; over plain HTTP (only on `localhost`) `lakana_session_<port>` without
   `Secure`, because cookies do not separate ports: the port in the name keeps two local servers
-  from overwriting each other's cookie by accident. It does not stop a malicious page on another
-  `localhost` port, which can set `lakana_session_<port>` too (sign the person out, or plant its
-  own session); a residual of the one-person loopback setup, in `docs/security/threat-model.md`,
-  "Browser sessions (M7 1b)". `__Host-` closes it over HTTPS. `read_session_cookie` reads it only below `/api/v1/` (never on the
+  from overwriting each other's cookie by accident. Every program serving another `localhost`
+  port receives the cookie and can set it; the CSRF token below makes the cookie alone
+  worthless, so it can sign the person out but not act as them (residual in
+  `docs/security/threat-model.md`, "Browser sessions (M7 1b)"; local mode is for single-user
+  machines, the user docs say so). `__Host-` closes the rest over HTTPS. `read_session_cookie` reads it only below `/api/v1/` (never on the
   Iceberg REST routes, pages or `/healthz`) and never with `LAKANA_UI__ENABLED=false`; every
   `/api/v1/sign-in/*` route then answers 409 (`require_interface`). A presented id is never
   adopted: only a sign-in creates a session, with a fresh id, and ends the one it replaces.
-- **CSRF: a synchroniser token derived from the session.** `csrf_token_for(cookie)` is
-  HMAC-SHA256 keyed with the session secret over a fixed message: the same for the whole
-  session (reading `GET /api/v1/sign-in/session` again never rotates it, so other tabs keep
-  working), different per session, and not computable by page script, because the cookie is
-  HttpOnly. Every method but GET, HEAD and OPTIONS with the cookie needs it in `X-Lakana-CSRF`
-  (403 `CsrfRefused`, compared in constant time), checked before the session's row is read, so
-  a refused change does not extend the session. A CSRF or token-only refusal is audited as
-  `AUTHENTICATION_FAILED` with `reason: csrf` or `token_only_route`, rate-limited like any
-  failed sign-in. Double-submit would not hold: on loopback,
-  other ports are the same site. Together with `SameSite=Strict` and the guard's Origin rule
-  this is defence in depth.
+- **CSRF: a second random secret of the session, on every cookie request.** `SessionService.start`
+  draws it (`secrets.token_urlsafe(32)`, unrelated to the cookie) and stores only its SHA-256
+  (`browser_sessions.csrf_hash`); only the same-origin sign-in responses return it
+  (`POST /api/v1/sign-in/links/redeem`, which the local auto sign-in uses too, and
+  `POST /api/v1/sign-in/passkey`), never `GET /api/v1/sign-in/session`. The UI keeps it in `localStorage`
+  (`lakana.csrf`, `ui/src/api/client.ts`), which is per origin and so per port, unlike cookies;
+  a new tab of the origin reuses it, sign-out and any 401 remove it (unless another tab stored a
+  newer one). Every cookie request, whatever its method, needs it in `X-Lakana-CSRF`
+  (`check_csrf`, constant time), else 401 `CsrfRefused` naming "Sign in again"; it is checked
+  before the session's row is used, so a refused request never extends the session. A cookie
+  that names no session falls through to the plain 401. The same rule over HTTPS (one code path;
+  over HTTPS it is defence in depth). The redeem route counts the browser as signed in (local link
+  refused, 409) only with the cookie *and* its token: a cookie the page cannot use is no
+  session. A CSRF or token-only refusal is audited as `AUTHENTICATION_FAILED` with
+  `reason: csrf` or `token_only_route`, rate-limited like any failed sign-in. Double-submit
+  would not hold: on loopback, other ports are the same site and receive the cookie. Together
+  with `SameSite=Strict` and the guard's Origin rule this is defence in depth.
 - **Token-only routes.** `POST /api/v1/task-tokens` and `DELETE /api/v1/task-tokens/{key_id}`
   refuse the cookie (403 `TokenOnlyRoute`, `deps.TOKEN_ONLY_ROUTES`, matched on the route
   template): minting a task token from a browser would put a token in the interface.
@@ -591,8 +598,10 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   itself is never lost or doubled.
 - **Passkeys act through the page.** A hostile browser extension or an XSS in the interface
   acts as the page: it can run a ceremony the person then confirms with a touch. Another
-  process of the same OS user can read the browser's cookies. On loopback another
-  `localhost` port receives the non-`Secure` local cookie (see "The cookie").
+  process of the same OS user can read the browser's profile, cookies and `localStorage`
+  included, and act as the person. On loopback every other `localhost` port receives the
+  non-`Secure` local cookie but not the CSRF token, so it can sign the person out, not act as
+  them (see "The cookie"); local mode is for single-user machines.
 - **A deploy needs no fresh touch.** `POST /api/v1/environments/{env}/deploys` is in
   `NO_STEP_UP` (`test_step_up_routes.py`): registering the repository's source and binding the
   run-as account need step-up, but a deploy afterwards does not. A stale session (a browser
