@@ -617,7 +617,45 @@ def test_remeasure_runs_the_tests_under_coverage_apart_from_the_run(tmp_path: Pa
     assert "--cov" in command
     assert "-n" not in command
     assert "-o" in command and "junit_family=xunit1" in command
-    assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage.remeasured")
+    assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage.remeasured.0")
+
+
+def test_remeasure_runs_each_package_in_its_own_process(tmp_path: Path) -> None:
+    """Two packages' tests never share a pytest process: each has a `conftest` of its own.
+
+    In one process the first package's `conftest` module shadows the next one's, and a test
+    importing from its own `conftest` fails to collect (PR #521's run).
+    """
+    calls: list[list[str]] = []
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
+        calls.append(command)
+        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
+        ids = [c for c in command if "::" in c]
+        cases = [_case(i.split("::")[0], i.split("::")[1], 0.3) for i in ids]
+        report.write_text(_junit(*cases))
+
+    tests = [
+        TestTime("packages/lakana-core/tests/test_x.py", "a", 2.5, slow=False, skipped=False),
+        TestTime("packages/lakana/tests/cli/test_app.py", "b", 2.5, slow=False, skipped=False),
+        TestTime("packages/lakana-core/tests/test_y.py", "c", 2.5, slow=False, skipped=False),
+        TestTime("scripts/tests/test_z.py", "d", 2.5, slow=False, skipped=False),
+    ]
+    seconds = remeasure(tests, tmp_path, run=run)
+    assert seconds == {t.nodeid: 0.3 for t in tests}
+    groups = [sorted(c for c in command if "::" in c) for command in calls]
+    assert sorted(groups) == sorted(
+        [
+            [
+                "packages/lakana-core/tests/test_x.py::a",
+                "packages/lakana-core/tests/test_y.py::c",
+            ],
+            ["packages/lakana/tests/cli/test_app.py::b"],
+            ["scripts/tests/test_z.py::d"],
+        ]
+    )
+    reports = {next(c for c in command if c.startswith("--junitxml=")) for command in calls}
+    assert len(reports) == len(calls)
 
 
 def test_remeasure_without_a_report_answers_nothing(tmp_path: Path) -> None:
