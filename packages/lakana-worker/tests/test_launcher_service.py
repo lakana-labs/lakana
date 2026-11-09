@@ -232,7 +232,7 @@ def test_a_run_streams_output_and_removes_its_container_and_network(tmp_path: Pa
             seen[name] = body
         return original(method, name, action, body)
 
-    engine._network = spy  # ty: ignore[invalid-assignment]
+    engine._network = spy
 
     result = launcher.run(_run(), emitted.append)
 
@@ -308,7 +308,7 @@ def _spied(engine: FakeEngine, monkeypatch: pytest.MonkeyPatch) -> list[str]:
             order.append("wait")
         return original(method, path, *args, **kwargs)
 
-    engine.request = request  # ty: ignore[invalid-assignment]
+    engine.request = request
     return order
 
 
@@ -344,7 +344,7 @@ def test_the_sampler_stops_when_waiting_for_the_container_fails(
             raise EngineError("gone")
         return inner(method, path, *args, **kwargs)
 
-    engine.request = failing  # ty: ignore[invalid-assignment]
+    engine.request = failing
 
     with pytest.raises(EngineError):
         launcher.run(_run(), lambda line: None)
@@ -511,7 +511,7 @@ def test_a_stop_docker_did_not_carry_out_answers_false_and_a_retry_stops_the_tas
     assert launcher.stop(StopRequest("t1", "w1")) == {"stopped": False}
     assert worker.is_alive()
 
-    engine.request = real  # ty: ignore[invalid-assignment]
+    engine.request = real
     assert launcher.stop(StopRequest("t1", "w1")) == {"stopped": True}
     worker.join(10)
     assert results[0]["stopped"] is True
@@ -529,7 +529,7 @@ def test_a_stop_of_a_container_that_already_ended_or_is_gone_answers_true(tmp_pa
     for status in (304, 404):
         _intercept(engine, lambda method, path, body: path.endswith("/stop"), (status, b""))
         assert launcher.stop(StopRequest("t1", "w1")) == {"stopped": True}
-        engine.request = real  # ty: ignore[invalid-assignment]
+        engine.request = real
     launcher.stop(StopRequest("t1", "w1"))
     worker.join(10)
 
@@ -727,7 +727,7 @@ def _intercept(engine: FakeEngine, match: Any, reply: Any) -> None:
             return reply
         return real(method, path, body, query=query, timeout=timeout)
 
-    engine.request = request  # ty: ignore[invalid-assignment]
+    engine.request = request
 
 
 def _starts(engine: FakeEngine) -> int:
@@ -1401,7 +1401,7 @@ def test_a_stop_and_a_kill_that_docker_cannot_carry_out_are_not_errors(tmp_path:
             raise EngineError("gone")
         return real(method, path, body, query=query, timeout=timeout)
 
-    engine.request = request  # ty: ignore[invalid-assignment]
+    engine.request = request
 
     result = launcher.run(_run(timeout=1), lambda line: None)
 
@@ -1429,7 +1429,7 @@ def test_a_run_ends_even_when_the_task_exits_before_reading_its_input(tmp_path: 
         theirs.close()
         return ours
 
-    engine.attach = closed  # ty: ignore[invalid-assignment]
+    engine.attach = closed
 
     assert launcher.run(_run(), lambda line: None)["exit"] == 1
 
@@ -1562,7 +1562,7 @@ def test_cleanup_lists_the_containers_before_it_looks_at_the_live_runs(tmp_path:
             launcher._register("lakana-task-late", "w1", 3, 0)
         return answer
 
-    engine.request = listing_then_register  # ty: ignore[invalid-assignment]
+    engine.request = listing_then_register
 
     assert launcher.cleanup(CleanupRequest("w1")) == {"removed": 0}
     assert "late" in engine.containers
@@ -2516,7 +2516,7 @@ def test_a_container_that_never_stops_is_removed_when_the_wait_gives_up(tmp_path
             raise EngineError("Docker did not answer within 123 s")
         return real(method, path, body, query=query, timeout=timeout)
 
-    engine.request = request  # ty: ignore[invalid-assignment]
+    engine.request = request
 
     with pytest.raises(EngineError, match="did not answer"):
         launcher.run(_run(timeout=30), lambda line: None)
@@ -2626,7 +2626,7 @@ def test_a_build_reaches_its_hosts_through_the_egress_proxy_only(tmp_path: Path)
             connected[name] = body
         return original(method, name, action, body)
 
-    engine._network = spy  # ty: ignore[invalid-assignment]
+    engine._network = spy
     subnets: list[str] = []
     allocate = launcher._allocate_subnet
 
@@ -2646,7 +2646,7 @@ def test_a_build_reaches_its_hosts_through_the_egress_proxy_only(tmp_path: Path)
         subnets.append(allocate(name))
         return subnets[-1]
 
-    launcher._allocate_subnet = remember  # ty: ignore[invalid-assignment]
+    launcher._allocate_subnet = remember
 
     launcher.build(_build(), lambda line: None)
 
@@ -2842,7 +2842,7 @@ def _subnet_of(launcher: Launcher, engine: FakeEngine) -> list[str]:
         subnets.append(allocate(name))
         return subnets[-1]
 
-    launcher._allocate_subnet = remember  # ty: ignore[invalid-assignment]
+    launcher._allocate_subnet = remember
     return subnets
 
 
@@ -3209,7 +3209,7 @@ def _networks_listing_answers(engine: FakeEngine, reply: Any) -> None:
             return reply
         return real(method, path, body, query=query, timeout=timeout)
 
-    engine.request = request  # ty: ignore[invalid-assignment]
+    engine.request = request
 
 
 def test_start_writes_every_docker_gateway_and_the_operator_ranges_for_the_proxy(
@@ -3253,7 +3253,7 @@ def test_a_network_made_after_start_is_refused_before_the_next_run_attaches_anyt
             seen.append(_refused(tmp_path))
         return real(method, path, body, query=query, timeout=timeout)
 
-    engine.request = request  # ty: ignore[invalid-assignment]
+    engine.request = request
 
     launcher.run(_run(), lambda line: None)
 
@@ -3387,7 +3387,7 @@ def test_an_older_gateway_listing_never_replaces_a_newer_one(tmp_path: Path) -> 
             held.wait(5)
         return answer
 
-    engine.request = request  # ty: ignore[invalid-assignment]
+    engine.request = request
     first = threading.Thread(target=launcher._write_refused, name="open-a")
     first.start()
     assert listed.wait(5)
@@ -3435,7 +3435,7 @@ def _unwritable(launcher: Launcher) -> None:
     def fail(path: Path, text: str) -> None:
         raise OSError(errno.EROFS, "Read-only file system")
 
-    launcher._replace_refused = fail  # ty: ignore[invalid-assignment]
+    launcher._replace_refused = fail
 
 
 def test_start_stops_when_the_refused_ranges_cannot_be_written(tmp_path: Path) -> None:

@@ -1383,7 +1383,7 @@ def test_a_growing_task_is_ended_alone_while_the_worker_and_a_query_live_on(tmp_
     harness = Harness(tmp_path)
     task_pids: list[int] = []
     add = harness.registry.add
-    harness.registry.add = lambda task: (task_pids.append(task.pid), add(task))[1]  # ty: ignore[invalid-assignment]
+    harness.registry.add = lambda task: (task_pids.append(task.pid), add(task))[1]
     worker_stops: list[int] = []
     dog = MemoryWatchdog(
         250 * MB,

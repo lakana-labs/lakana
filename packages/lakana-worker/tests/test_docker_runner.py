@@ -197,7 +197,7 @@ def _run(
         """
         return original({**request, "_attempt_dir": str(job.attempt_dir)}, on_log, timeout=timeout)
 
-    launcher.call = call  # ty: ignore[invalid-assignment]
+    launcher.call = call
     logs: list[bytes] = []
     stop = StopSignal()
     return _runner(launcher, **(runner or {})).run(job, logs.append, stop), logs, stop
@@ -650,7 +650,7 @@ def test_a_stop_the_launcher_cannot_take_is_not_raised(tmp_path: Path) -> None:
         threading.Event().wait(0.1)
         return {"exit": 137, "stopped": True}
 
-    launcher.stop = down  # ty: ignore[invalid-assignment]
+    launcher.stop = down
     launcher.scripts["run"] = slow
 
     outcome = _runner(launcher).run(_task(tmp_path), lambda chunk: None, stop)
@@ -1077,7 +1077,7 @@ def test_a_stop_the_launcher_has_not_registered_yet_is_asked_again(tmp_path: Pat
         launcher.released.wait(10)
         return {"exit": 137, "stopped": True}
 
-    launcher.stop = late  # ty: ignore[invalid-assignment]
+    launcher.stop = late
     launcher.scripts["run"] = blocks
     stop = StopSignal()
     threading.Timer(0.05, stop.set, (StopReason.LEASE_LOST,)).start()
@@ -1322,7 +1322,7 @@ def test_a_stop_the_launcher_keeps_refusing_is_asked_again_less_and_less_often(
         return {"exit": 137, "stopped": True}
 
     monkeypatch.setattr("lakana_worker.runners._clock", clock)
-    launcher.stop = refuses  # ty: ignore[invalid-assignment]
+    launcher.stop = refuses
     launcher.scripts["run"] = runs_until_asked_enough
 
     _runner(launcher, poll_seconds=tick).run(_task(tmp_path), lambda chunk: None, stop)

@@ -1258,7 +1258,7 @@ def _compressed(kind: str, data: bytes) -> bytes:
 
     if kind == "zstd":
         try:
-            from compression import zstd  # ty: ignore[unresolved-import]
+            from compression import zstd  # ty: ignore[import-not-found]
         except ImportError:
             return b"\x28\xb5\x2f\xfd" + data
         return zstd.compress(data)

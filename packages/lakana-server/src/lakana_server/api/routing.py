@@ -144,7 +144,7 @@ def describe_openapi(app: FastAPI, routers: Iterable[APIRouter]) -> None:
                         parameter["description"] = texts[parameter["name"]]
         return document
 
-    app.openapi = openapi  # ty: ignore[invalid-assignment]
+    app.openapi = openapi
 
 
 class AuthenticateFirstRoute(APIRoute):

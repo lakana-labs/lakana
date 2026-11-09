@@ -972,7 +972,7 @@ def start_egress(stack: Stack, *, network: str | None = None, reachable: str | N
         write(path, text)
         egress.put_archive(APP, _proxy_files({"refused.json": text.encode()}))
 
-    launcher._replace_refused = mirrored  # ty: ignore[invalid-assignment]
+    launcher._replace_refused = mirrored
     egress.start()
     wait_until_listening(egress, EGRESS_PORT)
     return egress

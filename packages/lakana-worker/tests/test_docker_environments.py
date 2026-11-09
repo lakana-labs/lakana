@@ -616,7 +616,7 @@ def test_a_stop_the_launcher_has_not_registered_yet_is_asked_again(tmp_path: Pat
             released.set()
         return answer
 
-    launcher.stop = stop_later  # ty: ignore[invalid-assignment]
+    launcher.stop = stop_later
     building = threading.Event()
 
     def build(request: dict[str, Any], on_log: Callable[[bytes], None]) -> dict[str, object]:
@@ -770,7 +770,7 @@ def test_a_launcher_that_cannot_take_the_stop_is_asked_again(tmp_path: Path) -> 
         released.set()
         return True
 
-    launcher.stop = unreachable_then_stop  # ty: ignore[invalid-assignment]
+    launcher.stop = unreachable_then_stop
     building = threading.Event()
     launcher.scripts.update(
         {

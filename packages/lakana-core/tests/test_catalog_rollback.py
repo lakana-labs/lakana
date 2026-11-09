@@ -1932,7 +1932,7 @@ def _lose_the_commit(
             raise error or OperationalError("COMMIT", None, ConnectionResetError("reset"))
         real()
 
-    session.commit = commit  # ty: ignore[invalid-assignment]
+    session.commit = commit
 
 
 def _results_outcomes(session: Session) -> set[RollbackOutcome | None]:
@@ -2056,13 +2056,13 @@ def test_when_the_reread_fails_the_outcome_is_not_known_and_nothing_is_recorded(
         )
         raise OperationalError("COMMIT", None, ConnectionResetError("reset"))
 
-    session.commit = commit_then_break  # ty: ignore[invalid-assignment]
+    session.commit = commit_then_break
 
     result = _roll_back(catalog, principal, task, written)
 
     assert result == Rollback(RollbackOutcome.FAILED, _NOT_KNOWN)
     monkeypatch.undo()
-    session.commit = real_commit  # ty: ignore[invalid-assignment]
+    session.commit = real_commit
     assert [e.detail["outcome"] for e in _events(session)] == ["rolled_back"]
     assert _results_outcomes(session) == {RollbackOutcome.ROLLED_BACK, None}
 
@@ -2268,7 +2268,7 @@ def test_a_landed_rollback_stays_landed_when_another_writer_commits_before_the_r
             _write(other, principal, _orders([9], ["us"]), WriteMode.APPEND)
             raise OperationalError("COMMIT", None, ConnectionResetError("reset"))
 
-    session.commit = commit  # ty: ignore[invalid-assignment]
+    session.commit = commit
 
     result = _roll_back(catalog, principal, task, written)
 
@@ -2328,7 +2328,7 @@ def test_a_stale_claim_whose_commit_failed_records_nothing(
         second_session.commit()
         raise OperationalError("COMMIT", None, ConnectionResetError("reset"))
 
-    session.commit = commit  # ty: ignore[invalid-assignment]
+    session.commit = commit
 
     with pytest.raises(PermissionDenied) as caught:
         _roll_back(catalog, _bound(principal, task, claim=1), task, written)
