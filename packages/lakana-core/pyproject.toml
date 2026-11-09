@@ -51,8 +51,9 @@ dependencies = [
     "s3fs>=2026.9.0",
     # MIT. SQL parsing, identifier resolution, lineage extraction, and the
     # rewrite that replaces a qualified table reference with a scoped read —
-    # one dependency for all four. Held below 30.25, whose qualifier breaks the
-    # rewrite (VALUES lists, correlated subqueries, lambdas): lift it in #415.
+    # one dependency for all four. Held below 30.25, whose qualifier refuses
+    # unqualified columns in subqueries and whose parser forgets the LAMBDA
+    # keyword: lift it in #415. Dependabot ignores >=30.25 (dependabot.yml).
     "sqlglot>=30.21.0,<30.25",
     # Apache-2.0 OR BSD-3-Clause. Envelope encryption for secrets: AES-256-GCM
     # via AESGCM, verified directly against this exact version during
