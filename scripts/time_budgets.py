@@ -40,6 +40,7 @@ BUDGETS = Path("scripts/time-budgets.toml")
 BASELINE = Path("scripts/slow-tests-baseline.json")
 DOCS = "docs/agent/testing.md, 'Time budgets'"
 UPDATE_COMMAND = "uv run python scripts/time_budgets.py slow-tests --update REPORT.xml ..."
+WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"  # read by scripts/remeasure_warm_up.py
 
 
 @dataclass(frozen=True)
@@ -531,13 +532,46 @@ def _package_of(test: TestTime) -> str:
     return "/".join(parts[:2]) if parts[:1] == ("packages",) and len(parts) > 2 else parts[0]
 
 
+def _warm_up_plan(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> dict[str, object]:
+    """Write down what the warm-up plugin needs to pick each candidate's warm-up.
+
+    Parameters
+    ----------
+    group
+        The candidates of one package.
+    warm_from
+        Every test the reports hold.
+
+    Returns
+    -------
+    dict
+        ``candidates``: their node ids; ``seconds``: the shard time of every other test of
+        their files that ran, the only tests that may warm them up.
+    """
+    candidates = [test.nodeid for test in group]
+    files = {test.file for test in group}
+    seconds = {
+        test.nodeid: test.seconds
+        for test in warm_from
+        if test.file in files and not test.skipped and test.nodeid not in candidates
+    }
+    return {"candidates": candidates, "seconds": seconds}
+
+
 def remeasure(
-    tests: Sequence[TestTime], workdir: Path, run: Callable[..., object] = subprocess.run
+    tests: Sequence[TestTime],
+    workdir: Path,
+    run: Callable[..., object] = subprocess.run,
+    warm_from: Sequence[TestTime] = (),
 ) -> dict[str, float]:
     """Run tests again, on their own and serially, under coverage as in the shards.
 
     Each package's tests run in a pytest process of their own: every package has a module
-    named `conftest`, and in one process the first one imported would shadow the others.
+    named `conftest`, and in one process the first one imported would shadow the others. Each
+    process collects the candidates' files, and the plugin `scripts.remeasure_warm_up` keeps
+    only the candidates, each after the cheapest other test of its module that uses all its
+    session- and module-scoped fixtures: that test takes the one-off setup a shard charges
+    to whichever test runs first, and its time is not counted.
 
     Parameters
     ----------
@@ -548,38 +582,54 @@ def remeasure(
         combined report of the run.
     run
         Runs the command; `subprocess.run` unless a test replaces it.
+    warm_from
+        Every test the reports hold, from which the warm-up tests are picked; empty runs each
+        candidate alone.
 
     Returns
     -------
     dict
-        Seconds by node id, for the tests the new reports hold; a package whose report
+        Seconds by node id, for the candidates the new reports hold; a package whose report
         cannot be read adds nothing.
     """
     groups: dict[str, list[TestTime]] = {}
     for test in tests:
         groups.setdefault(_package_of(test), []).append(test)
+    wanted = {test.nodeid for test in tests}
     seconds: dict[str, float] = {}
     for index, group in enumerate(groups.values()):
         report = workdir / f"remeasured-{index}.xml"
+        plan = workdir / f"warm-up-{index}.json"
+        plan.write_text(json.dumps(_warm_up_plan(group, warm_from)))
         command = [
             sys.executable,
             "-m",
             "pytest",
-            *[test.nodeid for test in group],
+            *dict.fromkeys(test.file for test in group),
             "-q",
             "-p",
             "no:cacheprovider",
+            "-p",
+            "scripts.remeasure_warm_up",
             "--cov",
             "--cov-report=",
             f"--junitxml={report}",
             "-o",
             "junit_family=xunit1",
         ]
-        env = {**os.environ, "COVERAGE_FILE": str(workdir / f".coverage.remeasured.{index}")}
+        env = {
+            **os.environ,
+            "COVERAGE_FILE": str(workdir / f".coverage.remeasured.{index}"),
+            WARM_UP_ENV: str(plan),
+        }
         run(command, env=env, check=False)
         try:
             seconds.update(
-                {t.nodeid: t.seconds for t in parse_junit(report.read_text()) if not t.skipped}
+                {
+                    t.nodeid: t.seconds
+                    for t in parse_junit(report.read_text())
+                    if not t.skipped and t.nodeid in wanted
+                }
             )
         except (OSError, ValueError):
             continue
@@ -672,7 +722,11 @@ def _run_slow_tests(args: argparse.Namespace) -> int:
             threshold=budgets.threshold_seconds,
             baseline=baseline,
             confirm_threshold=budgets.confirm_seconds,
-            remeasure=(lambda over: remeasure(over, Path(workdir))) if args.confirm else None,
+            remeasure=(
+                (lambda over: remeasure(over, Path(workdir), warm_from=tests))
+                if args.confirm
+                else None
+            ),
         )
     for note in notes:
         print(note)

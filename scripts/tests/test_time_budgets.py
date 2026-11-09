@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.remeasure_warm_up import WARM_UP_ENV
 from scripts.time_budgets import (
     Budgets,
     JobTime,
@@ -599,6 +600,34 @@ def test_nothing_is_run_again_when_nothing_is_over() -> None:
     assert again.asked == []  # ty: ignore[unresolved-attribute]
 
 
+def _rerun(
+    calls: list[tuple[list[str], dict[str, str]]], seconds: float = 0.3
+) -> Callable[..., None]:
+    """Stand in for the re-run: report every planned candidate and warm-up.
+
+    Parameters
+    ----------
+    calls
+        Collects each command and its environment.
+    seconds
+        The time each test reports.
+
+    Returns
+    -------
+    callable
+        A replacement for `subprocess.run`.
+    """
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
+        calls.append((command, env))
+        plan = json.loads(Path(env[WARM_UP_ENV]).read_text())
+        ids = [*plan["candidates"], *plan["seconds"]]
+        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
+        report.write_text(_junit(*[_case(*i.split("::"), seconds) for i in dict.fromkeys(ids)]))
+
+    return run
+
+
 def test_remeasure_runs_the_tests_under_coverage_apart_from_the_run(tmp_path: Path) -> None:
     """Serially, with coverage into its own file, and the times read from its own report."""
     calls: list[tuple[list[str], dict[str, str]]] = []
@@ -613,7 +642,7 @@ def test_remeasure_runs_the_tests_under_coverage_apart_from_the_run(tmp_path: Pa
     tests = [TestTime("a.py", "t", 2.5, slow=False, skipped=False, classname="a")]
     assert remeasure(tests, tmp_path, run=run) == {"a.py::t": 0.4}
     ((command, env),) = calls
-    assert command[1:4] == ["-m", "pytest", "a.py::t"]
+    assert command[1:4] == ["-m", "pytest", "a.py"]
     assert "--cov" in command
     assert "-n" not in command
     assert "-o" in command and "junit_family=xunit1" in command
@@ -626,36 +655,60 @@ def test_remeasure_runs_each_package_in_its_own_process(tmp_path: Path) -> None:
     In one process the first package's `conftest` module shadows the next one's, and a test
     importing from its own `conftest` fails to collect (PR #521's run).
     """
-    calls: list[list[str]] = []
-
-    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
-        calls.append(command)
-        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
-        ids = [c for c in command if "::" in c]
-        cases = [_case(i.split("::")[0], i.split("::")[1], 0.3) for i in ids]
-        report.write_text(_junit(*cases))
-
+    calls: list[tuple[list[str], dict[str, str]]] = []
     tests = [
         TestTime("packages/lakana-core/tests/test_x.py", "a", 2.5, slow=False, skipped=False),
         TestTime("packages/lakana/tests/cli/test_app.py", "b", 2.5, slow=False, skipped=False),
         TestTime("packages/lakana-core/tests/test_y.py", "c", 2.5, slow=False, skipped=False),
         TestTime("scripts/tests/test_z.py", "d", 2.5, slow=False, skipped=False),
     ]
-    seconds = remeasure(tests, tmp_path, run=run)
+    seconds = remeasure(tests, tmp_path, run=_rerun(calls))
     assert seconds == {t.nodeid: 0.3 for t in tests}
-    groups = [sorted(c for c in command if "::" in c) for command in calls]
+    groups = [sorted(c for c in command if c.endswith(".py")) for command, _ in calls]
     assert sorted(groups) == sorted(
         [
-            [
-                "packages/lakana-core/tests/test_x.py::a",
-                "packages/lakana-core/tests/test_y.py::c",
-            ],
-            ["packages/lakana/tests/cli/test_app.py::b"],
-            ["scripts/tests/test_z.py::d"],
+            ["packages/lakana-core/tests/test_x.py", "packages/lakana-core/tests/test_y.py"],
+            ["packages/lakana/tests/cli/test_app.py"],
+            ["scripts/tests/test_z.py"],
         ]
     )
-    reports = {next(c for c in command if c.startswith("--junitxml=")) for command in calls}
-    assert len(reports) == len(calls)
+    reports = {next(c for c in command if c.startswith("--junitxml=")) for command, _ in calls}
+    plans = {env[WARM_UP_ENV] for _, env in calls}
+    assert len(reports) == len(plans) == len(calls)
+
+
+def test_remeasure_hands_the_warm_up_plugin_its_candidates_and_the_shard_times(
+    tmp_path: Path,
+) -> None:
+    """The plugin picks each candidate's warm-up from its files; only candidates are counted.
+
+    Run on its own, a candidate otherwise pays for the session's fixtures and first imports,
+    which no shard charges to it (the run of PR 522 failed on that).
+    """
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    core = "packages/lakana-core/tests/test_x.py"
+    other = "packages/lakana-core/tests/test_y.py"
+    candidates = [
+        TestTime(core, "slow", 2.6, slow=False, skipped=False),
+        TestTime(core, "slower", 2.8, slow=False, skipped=False),
+        TestTime(other, "lonely", 2.6, slow=False, skipped=False),
+    ]
+    everything = [
+        *candidates,
+        TestTime(core, "quick", 0.01, slow=False, skipped=False),
+        TestTime(core, "skipped", 0.0, slow=False, skipped=True),
+        TestTime("packages/lakana-core/tests/test_z.py", "elsewhere", 0.1, False, False),
+    ]
+    seconds = remeasure(candidates, tmp_path, run=_rerun(calls), warm_from=everything)
+    assert seconds == {t.nodeid: 0.3 for t in candidates}
+    ((command, env),) = calls
+    assert "-p" in command and "scripts.remeasure_warm_up" in command
+    assert [c for c in command if c.endswith(".py")] == [core, other]
+    plan = json.loads(Path(env[WARM_UP_ENV]).read_text())
+    assert plan == {
+        "candidates": [t.nodeid for t in candidates],
+        "seconds": {f"{core}::quick": 0.01},
+    }
 
 
 def test_remeasure_without_a_report_answers_nothing(tmp_path: Path) -> None:
@@ -669,7 +722,9 @@ def test_main_confirms_before_failing(
 ) -> None:
     """``--confirm`` runs the candidates again; without it the first time decides."""
     (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 2.5)))
-    monkeypatch.setattr("scripts.time_budgets.remeasure", lambda tests, workdir: {"a.py::t": 0.5})
+    monkeypatch.setattr(
+        "scripts.time_budgets.remeasure", lambda tests, workdir, warm_from=(): {"a.py::t": 0.5}
+    )
     assert main(["slow-tests", "--confirm", "one.xml"]) == 0
     assert "counted as noise" in capsys.readouterr().out
     assert main(["slow-tests", "one.xml"]) == 1
