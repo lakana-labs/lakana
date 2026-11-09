@@ -504,6 +504,7 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 | `version` | `1.2.3`, with `.dev4`, `rc1`, `+g1a2b3c` | `<version>` |
 | `duration` | a number with `ms`, `s`, `sec`, `seconds`, `min`, `minutes` | `<duration>` |
 | `size` | a number with `KiB`, `MiB`, `GiB`, `KB`, `MB`, `GB` | `<size>` |
+| `package count` | the number in uv's `Resolved 44 packages`, which follows the public index | `<count>` |
 
 A mask hides a change too, so add one only for a value that really differs per run, and
 prefer a narrow pattern. Table width depends on the terminal: an example that quotes tables
