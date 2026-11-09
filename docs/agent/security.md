@@ -546,7 +546,10 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
 - **The step-up actions** (the spec's core set: whatever hands out access). A session whose
   last touch is older than 15 minutes gets 403 `StepUpRequired` ("Confirm with your passkey and
   try again"); a token never does, because it has no session. `require_step_up(p)` is called in
-  the core service right after authorization, so a route and the access file's apply share it:
+  the core service right after authorization, so a route and the access file's apply share it.
+  It measures the touch against `SessionContext.verified_at`, the session service's clock when
+  the request's session was read (the app clock in the server), so a test that moves
+  `app.state.clock` ages a touch for every route alike:
   - API tokens and the accounts they act for: `POST /api/v1/principals/{name}/tokens` (personal
     and service-account tokens), `POST /api/v1/principals` (a new service account is the first
     step to a token for it), `DELETE /api/v1/principals/{name}` (deactivating a person);

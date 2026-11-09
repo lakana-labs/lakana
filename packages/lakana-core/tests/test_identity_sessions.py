@@ -698,6 +698,7 @@ def test_verify_returns_a_session_principal(svc: SessionService, alice: Principa
         created_at=START,
         last_touch_at=None,
         source_pat_id=None,
+        verified_at=START,
     )
     assert started.principal.id == alice.id
     assert started.principal.credential == "session"
@@ -822,3 +823,19 @@ def test_list_sessions_leaves_out_sessions_that_can_no_longer_be_used(
     alice.is_active = False
     session.commit()
     assert svc.list_sessions(_ref(admin), "alice") == []
+
+
+def test_step_up_measures_against_the_clock_the_session_was_verified_with(
+    svc: SessionService, alice: Principal, clock: _Clock
+) -> None:
+    """Without `now`, step-up uses the service clock of the request, not the wall clock.
+
+    So a test that moves the app clock ages a touch for every route alike, whether its service
+    passes a clock to `require_step_up` or not.
+    """
+    started = _start(svc, alice, touched=True)
+    clock.now = START + STEP_UP_WINDOW
+    require_step_up(svc.verify(started.cookie_value, extend=False))
+    clock.now = START + STEP_UP_WINDOW + timedelta(seconds=1)
+    with pytest.raises(StepUpRequired):
+        require_step_up(svc.verify(started.cookie_value, extend=False))

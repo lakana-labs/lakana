@@ -242,6 +242,10 @@ class SessionContext:
     source_pat_id
         The personal access token the session was created through (a local sign-in link);
         `None` otherwise. The session ends when that token is revoked or expires.
+    verified_at
+        When the session was read for this request, by the session service's clock (the app's
+        clock, `app.state.clock`, in the server). Step-up measures against it unless a caller
+        passes its own time, so every route ages a touch by the same clock.
     """
 
     session_id: uuid.UUID
@@ -250,6 +254,7 @@ class SessionContext:
     created_at: datetime
     last_touch_at: datetime | None
     source_pat_id: uuid.UUID | None
+    verified_at: datetime
 
 
 @dataclass(frozen=True)

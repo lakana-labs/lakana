@@ -192,7 +192,9 @@ def require_step_up(p: PrincipalRef, *, now: datetime | None = None) -> None:
     p
         The acting principal.
     now
-        The time to measure against; the current time by default.
+        The time to measure against; by default the time the session was verified for this
+        request (`SessionContext.verified_at`, the session service's clock), so services that
+        pass no time and those that pass their clock agree.
 
     Raises
     ------
@@ -203,7 +205,7 @@ def require_step_up(p: PrincipalRef, *, now: datetime | None = None) -> None:
     if p.session is None:
         return
     touched = p.session.last_touch_at
-    current = now if now is not None else utc_now()
+    current = now if now is not None else p.session.verified_at
     if touched is None or current - touched > STEP_UP_WINDOW:
         raise StepUpRequired(STEP_UP_MESSAGE)
 
@@ -649,7 +651,7 @@ class SessionService:
             key_id=key_id,
             cookie_value=cookie_value,
             csrf_token=csrf_token,
-            principal=_ref(principal, row),
+            principal=_ref(principal, row, now),
             absolute_expires_at=row.absolute_expires_at,
         )
 
@@ -702,7 +704,7 @@ class SessionService:
         if extend and now - row.last_seen_at >= LAST_SEEN_WRITE_INTERVAL:
             row.last_seen_at = now
             self._session.commit()
-        return _ref(principal, row)
+        return _ref(principal, row, now)
 
     def _stored_reason(self, row_id: uuid.UUID) -> str | None:
         """Read the reason a session ended with.
@@ -977,7 +979,7 @@ def _pat_valid(pat: PersonalAccessToken, now: datetime) -> bool:
     return pat.revoked_at is None and (pat.expires_at is None or pat.expires_at > now)
 
 
-def _ref(principal: Principal, row: BrowserSession) -> PrincipalRef:
+def _ref(principal: Principal, row: BrowserSession, now: datetime) -> PrincipalRef:
     """Build the principal reference of a session.
 
     Parameters
@@ -986,6 +988,8 @@ def _ref(principal: Principal, row: BrowserSession) -> PrincipalRef:
         The session's principal.
     row
         The session.
+    now
+        The service clock's time of this check (`SessionContext.verified_at`).
 
     Returns
     -------
@@ -1005,5 +1009,6 @@ def _ref(principal: Principal, row: BrowserSession) -> PrincipalRef:
             created_at=row.created_at,
             last_touch_at=row.last_touch_at,
             source_pat_id=row.source_pat_id,
+            verified_at=now,
         ),
     )
