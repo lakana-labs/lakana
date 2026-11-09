@@ -257,8 +257,9 @@ def test_setup_link_prints_only_the_link(tmp_path: Path) -> None:
 def test_setup_link_after_setup_names_the_next_step(tmp_path: Path) -> None:
     """Once the first administrator has a passkey, the 409 names the recovery command."""
     detail = (
-        "Already set up: the first administrator has a passkey. Use a recovery link "
-        "(`lakana recovery create`)."
+        "Already set up: the first administrator has a passkey, even if it stopped working "
+        "after a change of the public address. The server operator recovers the account: run "
+        "`lakana recovery create admin` with the bootstrap token where the server runs."
     )
     api = FakeApi()
     api.on("POST", "/api/v1/sign-in/setup-link", status=409, json={"detail": detail})

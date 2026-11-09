@@ -699,8 +699,9 @@ def test_setup_link_only_while_the_bootstrap_principal_has_no_passkey(world: Wor
     admin = world.session.get(Principal, world.operator.id)
     assert admin is not None
     _passkey(world, admin)
-    with pytest.raises(ConflictError, match="lakana recovery create"):
+    with pytest.raises(ConflictError, match="lakana recovery create admin") as refused:
         world.links.issue_setup(world.operator)
+    assert "public address" in str(refused.value) and "server operator" in str(refused.value)
 
 
 def test_setup_link_needs_the_bootstrap_token_not_a_session(world: World) -> None:
@@ -915,7 +916,7 @@ def test_setup_link_refused_once_the_bootstrap_account_has_a_passkey(world: Worl
     admin = world.session.get(Principal, world.operator.id)
     assert admin is not None
     _passkey(world, admin)
-    with pytest.raises(ConflictError, match="lakana recovery create"):
+    with pytest.raises(ConflictError, match="lakana recovery create admin"):
         world.redeem(link)
     assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
 

@@ -115,11 +115,27 @@ def not_operator_recovery(name: str) -> str:
     )
 
 
-ALREADY_SET_UP = (
-    "Already set up: the first administrator has a passkey. Use a recovery link "
-    "(`lakana recovery create`)."
-)
-"""The refusal of a setup link once the bootstrap principal has a passkey."""
+def already_set_up(bootstrap_name: str) -> str:
+    """Word the refusal of a setup link once the first administrator has a passkey.
+
+    Parameters
+    ----------
+    bootstrap_name
+        The bootstrap principal's name (`LAKANA_BOOTSTRAP_ADMIN`).
+
+    Returns
+    -------
+    str
+        The cause (a passkey exists, perhaps made for an earlier public address) and the server
+        operator's command.
+    """
+    return (
+        "Already set up: the first administrator has a passkey, even if it stopped working "
+        "after a change of the public address. The server operator recovers the account: run "
+        f"`lakana recovery create {bootstrap_name}` with the bootstrap token where the server "
+        "runs."
+    )
+
 
 LOCAL_OFF = (
     "Local sign-in is off on this server; it is only for `lakana server start --local` on one "
@@ -743,7 +759,7 @@ class LinkService:
         if not is_operator(self._session, p, bootstrap_name=self._bootstrap_name):
             raise PermissionDenied(NOT_OPERATOR_SETUP)
         if has_passkey(self._session, p.id, usable=False):
-            raise ConflictError(ALREADY_SET_UP)
+            raise ConflictError(already_set_up(self._bootstrap_name))
         self._withdraw_open(p.id, "setup", p)
         return self._issue(p, "setup", principal_id=p.id, name=p.name)
 
@@ -1170,7 +1186,7 @@ class LinkService:
                 "not_local",
             )
         if kind == "setup" and has_passkey(self._session, principal_id, usable=False):
-            raise _CloseLink(ConflictError(ALREADY_SET_UP), "already_set_up")
+            raise _CloseLink(ConflictError(already_set_up(self._bootstrap_name)), "already_set_up")
         if (
             kind == "recovery"
             and self._is_or_was_admin(principal)
