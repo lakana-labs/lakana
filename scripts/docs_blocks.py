@@ -644,6 +644,7 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
             "<duration>",
         ),
         ("size", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:KiB|MiB|GiB|KB|MB|GB)\b", "<size>"),
+        ("package count", r"(?<=\bResolved )\d+(?= packages?\b)", "<count>"),
     )
 )
 """The parts of an output that differ on every run, hidden before a comparison.
