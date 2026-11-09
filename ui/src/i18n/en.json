@@ -50,6 +50,7 @@
     "product": "Lakana",
     "documentTitle": "{{page}} · Lakana",
     "skip": "Skip to content",
+    "breadcrumb": "Breadcrumb",
     "search": "Search",
     "searchShortcut": {
       "mac": "⌘ K",

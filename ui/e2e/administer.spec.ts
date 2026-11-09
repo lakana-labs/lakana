@@ -258,3 +258,30 @@ test.describe("administering sign-in", () => {
     expect(errors).toEqual([]);
   });
 });
+
+test("a person's page has a breadcrumb that fits 320 px and passes axe", async ({ page }) => {
+  await signInAsAdmin(page);
+  const name = "a-person-with-a-rather-long-principal-name";
+  await page.route(`**/api/v1/principals/${name}/permissions`, (route) =>
+    route.fulfill({ json: { permissions: [] } }),
+  );
+  await page.route(`**/api/v1/principals/${name}/passkeys`, (route) => route.fulfill({ json: [] }));
+  await page.route(`**/api/v1/principals/${name}/sessions`, (route) => route.fulfill({ json: [] }));
+  await page.route(`**/api/v1/principals/${name}`, (route) =>
+    route.fulfill({ json: { name, type: "USER" } }),
+  );
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto(`/access/people/${name}`);
+
+  const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
+  await expect(crumbs.getByText(name)).toHaveAttribute("aria-current", "page");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+  expect(await violations(page), "a person's page at 320 px").toEqual([]);
+
+  await crumbs.getByRole("link", { name: "People" }).click();
+  await expect(page).toHaveURL(/\/access$/);
+});

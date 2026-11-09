@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -57,6 +57,21 @@ describe("PersonPage", () => {
     expect(
       await screen.findByRole("button", { name: "Issue a recovery link" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows the breadcrumb Access › People › the person", async () => {
+    renderShell("/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+      },
+    });
+
+    const nav = await screen.findByRole("navigation", { name: "Breadcrumb" });
+    expect(within(nav).getByRole("link", { name: "Access" })).toHaveAttribute("href", "/access");
+    expect(within(nav).getByRole("link", { name: "People" })).toHaveAttribute("href", "/access");
+    expect(within(nav).getByText("kim")).toHaveAttribute("aria-current", "page");
   });
 
   it("shows the operator's command instead of a button for an administrator", async () => {

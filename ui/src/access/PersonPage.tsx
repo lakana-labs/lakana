@@ -61,6 +61,10 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
   return (
     <Page
       title={name}
+      trail={[
+        { to: "/access", label: t("areas.access.name") },
+        { to: "/access", label: t("access.people.tab") },
+      ]}
       action={
         kind === "person" && (
           <Button
