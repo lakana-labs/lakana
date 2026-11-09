@@ -1,5 +1,5 @@
 {
-  "duplicated_lines": 1195,
+  "duplicated_lines": 1193,
   "clones": 61,
   "pairs": {
     "lakana/_artifact_manifest.py ↔ lakana_core/artifacts/manifest.py": {
@@ -96,7 +96,7 @@
     },
     "lakana_core/policy/column_masks.py ↔ lakana_core/policy/row_filters.py": {
       "clones": 5,
-      "lines": 122
+      "lines": 121
     },
     "lakana_core/projects/checks.py ↔ lakana_core/projects/discovery.py": {
       "clones": 1,
@@ -124,7 +124,7 @@
     },
     "lakana_core/secrets/service.py ↔ lakana_core/secrets/service.py": {
       "clones": 1,
-      "lines": 10
+      "lines": 9
     },
     "lakana_server/api/platform/column_masks.py ↔ lakana_server/api/platform/row_filters.py": {
       "clones": 2,
