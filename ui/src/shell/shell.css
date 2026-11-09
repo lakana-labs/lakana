@@ -155,18 +155,19 @@
   width: 100%;
 }
 
-.user-menu-preview {
+.user-menu-error {
   margin: 0;
   padding: 0 var(--space-1);
   font-size: var(--type-label-size);
   line-height: var(--type-label-line);
-  font-weight: 400;
-  color: var(--color-text-faint);
+  color: var(--color-bad);
 }
 
-/* Floating surfaces: the user menu and the palette. In dark, lighter instead of shadowed. */
+/* Floating surfaces: the user menu and the palette. In dark, lighter instead of shadowed. A
+   surface taller than the room the window leaves scrolls inside itself, never over its trigger. */
 .float {
   box-sizing: border-box;
+  overflow-y: auto;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
   background: var(--color-float);
@@ -209,6 +210,8 @@
   min-height: 32px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-control);
+  color: inherit;
+  text-decoration: none;
   cursor: default;
   outline: none;
 }
@@ -319,7 +322,7 @@
   margin: 0 0 var(--space-2);
 }
 
-.coming-soon-line {
+.copy-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -327,7 +330,7 @@
   margin: var(--space-3) 0;
 }
 
-.coming-soon-line code {
+.copy-line code {
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
@@ -338,8 +341,9 @@
   overflow-wrap: anywhere;
 }
 
-.coming-soon-hint {
+.copy-hint {
   min-height: var(--type-body-line);
+  margin: 0 0 var(--space-2);
   color: var(--color-text-muted);
 }
 

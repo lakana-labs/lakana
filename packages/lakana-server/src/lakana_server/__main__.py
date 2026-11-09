@@ -43,7 +43,9 @@ def main(argv: list[str] | None = None) -> None:
     `docker compose logs server`. Uvicorn keeps its own handlers, with formatters that escape
     control characters like the root handler's (`lakana_server.log_config`), and gets the same
     level, so its access log (one line per request) is printed at INFO and DEBUG only, and not
-    at all with `LAKANA_LOG__ACCESS=false`.
+    at all with `LAKANA_LOG__ACCESS=false`. Forwarded headers (`X-Forwarded-For`,
+    `X-Forwarded-Proto`) are believed only from `LAKANA_TRUSTED_PROXIES`, and from no one when
+    it is empty, whatever uvicorn's own default or `FORWARDED_ALLOW_IPS` say.
     """
     parser = argparse.ArgumentParser(prog="lakana-server", description="Run the Lakana API server.")
     parser.add_argument("command", nargs="?", choices=["migrate"], help="migrate: apply migrations")
@@ -65,6 +67,9 @@ def main(argv: list[str] | None = None) -> None:
         log_level=settings.log.level.lower(),
         log_config=uvicorn_log_config(),
         access_log=settings.log.access,
+        # Uvicorn would trust `X-Forwarded-*` from 127.0.0.1 (or `FORWARDED_ALLOW_IPS`) unasked.
+        proxy_headers=bool(settings.trusted_proxies),
+        forwarded_allow_ips=",".join(settings.trusted_proxies),
     )
 
 

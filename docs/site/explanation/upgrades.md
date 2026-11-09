@@ -133,6 +133,55 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 | 0.10.0 | A package index URL with a query string is refused; move a `uv.toml` into `pyproject.toml`; lineage and failure causes changed. | This row |
 | 0.9.0 | Upgrade every worker before you deploy Python assets; rewrite `asset(deps=...)` as `asset(inputs=...)`; move helper modules out of `assets/`; an older bundle needs three additions. | [Upgrading](../how-to/deploy-with-compose.md#upgrading), [Projects and deploys](../how-to/projects.md) |
 
+## Notes for the next release
+
+### A proxy is trusted for client addresses only when you list it
+
+- A proxy on the same host is no longer trusted for `X-Forwarded-For` by default: set
+  `LAKANA_TRUSTED_PROXIES` to its address, or audit peers and rate-limit keys show the proxy.
+  Before, the server believed `X-Forwarded-For` and `X-Forwarded-Proto` from `127.0.0.1`
+  (uvicorn's own default). Now it believes them only from the addresses or networks in
+  `LAKANA_TRUSTED_PROXIES`, as a JSON list such as `["127.0.0.1"]` or `["10.1.0.0/16"]`
+  ([settings](../reference/settings.md)).
+- With the web interface on (`LAKANA_UI__ENABLED=true`), a browser must reach it at its public
+  address (`LAKANA_UI__PUBLIC_URL`, `http://localhost:<port>` by default) or a name in
+  `LAKANA_UI__ALLOWED_HOSTS`; any other `Host` is answered 421. A reverse proxy in front of the
+  interface must pass the browser's `Host` header through (nginx: `proxy_set_header Host $http_host;`).
+  Engines, CI and workers that call the API with a token are not affected.
+
+### Principal names and the operator's token
+
+- `POST /api/v1/principals` (and `lakana principal create`, and the service accounts of an access
+  file) now refuses a name that differs only in letter case from an existing principal, a name
+  an open invite reserves, and a name with a control or invisible format character. The 409 or
+  422 names the clash; choose another name. This holds with the interface off as well.
+- The upgrade marks the server operator's token, the one that issues the setup link and recovers
+  administrators: the unrevoked token named `bootstrap` of the principal
+  `LAKANA_BOOTSTRAP_ADMIN` names. If you set a name of your own and run `migrate` separately,
+  give it the same `LAKANA_BOOTSTRAP_ADMIN` as the server before you upgrade (the bundle and
+  `lakana server start --local` use the default name and need nothing). Otherwise no token is
+  marked: the bootstrap token keeps its administrator rights, but `lakana sign-in setup-link`
+  answers that it is not the operator's.
+- The mark goes by that name, so a token an administrator issued for that principal with the
+  name `bootstrap` before this release is marked too and gets the operator's powers. Check with
+  `lakana token list <bootstrap admin>` after upgrading and revoke any `bootstrap` token you do
+  not recognise as the one the server wrote.
+
+### The Compose bundle's web interface settings
+
+- A new bundle's `.env` has two more keys, which `compose.yaml` passes to `server`:
+  `LAKANA_UI__ENABLED` (`false` unless `lakana bundle init --ui`) and `LAKANA_UI__PUBLIC_URL`, the
+  address people open the interface at (`--public-url` when its host is a name, otherwise
+  `http://localhost:<LAKANA_PORT>`) ([The `.env` file](../reference/compose-bundle.md#the-env-file)).
+- An existing bundle needs no change: with this release's `compose.yaml` and an `.env` without
+  the keys, the interface stays off. To turn it on, replace `compose.yaml`, add
+  `LAKANA_UI__ENABLED=true` and `LAKANA_UI__PUBLIC_URL=https://<the DNS name people open>` to
+  `.env`, run `docker compose up -d --wait` and then `lakana sign-in setup-link`
+  ([Sign in to the web interface](../how-to/deploy-with-compose.md#sign-in-to-the-web-interface)).
+- `lakana server start --local` sets `LAKANA_UI__PUBLIC_URL` itself, to
+  `http://localhost:<port>`: a value in your shell (for example from a bundle's `.env`) is ignored
+  with one line saying so.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

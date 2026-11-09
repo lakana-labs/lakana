@@ -44,9 +44,7 @@
   "comingSoon": {
     "part": "This screen comes in part {{part}} of the interface.",
     "useCli": "Until then, use the command line:",
-    "copy": "Copy command",
-    "copied": "Copied",
-    "selectAndCopy": "Select the line and copy it."
+    "copy": "Copy command"
   },
   "shell": {
     "product": "Lakana",
@@ -57,9 +55,7 @@
       "mac": "⌘ K",
       "other": "Ctrl K"
     },
-    "notSignedIn": "Not signed in",
-    "preview": "Preview: sign-in comes later, and nothing here reads your data yet.",
-    "preferences": "Preferences",
+    "preferences": "Preferences and account",
     "theme": "Theme",
     "themes": {
       "system": "System",
@@ -75,7 +71,13 @@
     "languages": {
       "en": "English"
     },
-    "menu": "Menu"
+    "menu": "Menu",
+    "signedInAs": "Signed in as {{name}}",
+    "account": "Account",
+    "signOut": "Sign out",
+    "signOutEverywhere": "Sign out everywhere",
+    "signOutFailed": "Signing out did not work: {{detail}}",
+    "areas": "Areas"
   },
   "palette": {
     "placeholder": "Go to a place or run a command",
@@ -94,5 +96,229 @@
     "title": "You cannot use {{area}}",
     "body": "Ask an administrator if you need it.",
     "action": "Go to Home"
+  },
+  "home": {
+    "noAccessYet": "You have no access yet; ask an administrator."
+  },
+  "session": {
+    "loading": "Loading…",
+    "ended": {
+      "idle": "Your session ended after a time without activity. Sign in again.",
+      "lifetime": "Your session reached its maximum length and ended. Sign in again.",
+      "sign_out": "You signed out.",
+      "sign_out_everywhere": "You signed out on every device.",
+      "ended_by_admin": "An administrator ended your session. Sign in again.",
+      "replaced": "A newer sign-in in this browser replaced this session. Sign in again.",
+      "deactivated": "Your account is deactivated, so your session ended. Ask an administrator to reactivate it, then sign in again.",
+      "token_revoked": "The token this session was created with was revoked or expired, so the session ended. Sign in again.",
+      "recovery": "Your account was recovered with a recovery link, which ended every earlier session. Sign in again with your new passkey.",
+      "passkey_copied": "A copy of one of your passkeys was detected; it is disabled and every session of your account was ended. Sign in with another passkey, or ask an administrator for a recovery link.",
+      "passkey_removed": "An administrator removed one of your passkeys, which ended your sessions. Sign in again with another passkey, or ask an administrator for a recovery link.",
+      "reactivated": "Your account was reactivated, which ended every earlier session and removed its passkeys. Ask the server operator for a new sign-in link."
+    }
+  },
+  "errors": {
+    "unreachable": "Lakana could not be reached. Check that the server is running and your network works, then try again.",
+    "unexpected": "Something went wrong in the interface. Reload the page and try again."
+  },
+  "passkey": {
+    "cancelled": "The passkey request was cancelled or took too long. Try again when you are ready.",
+    "unsupported": "This browser cannot use passkeys. Use a current version of Chrome, Edge, Firefox or Safari.",
+    "duplicate": "This device already holds a passkey for this account. Use another device or security key, or sign in with the passkey you have.",
+    "wrongAddress": "Passkeys work only at the address Lakana was set up with. Open Lakana at that address and try again.",
+    "failed": "The browser could not use the passkey ({{name}}). Try again, or use another device."
+  },
+  "signIn": {
+    "title": "Sign in to Lakana",
+    "intro": "Sign in with your passkey: your fingerprint, face, PIN or security key.",
+    "passkey": "Sign in with a passkey",
+    "waiting": "Waiting for your passkey…",
+    "refused": "This passkey did not sign you in: it may belong to another Lakana server, or it was removed. Try another passkey, or ask an administrator for a recovery link.",
+    "noPasskey": "No passkey on this device? Ask an administrator for a recovery link."
+  },
+  "link": {
+    "checkingTitle": "Signing in",
+    "checking": "Checking your sign-in link…",
+    "signInAs": "Sign in as {{name}}",
+    "joinAs": "Join Lakana as {{name}}",
+    "signInIntro": "This link signs you in once. Continue only if you asked for it.",
+    "joinIntro": "This invitation creates your account. Continue only if you expected it.",
+    "confirm": "Continue",
+    "signingIn": "Signing you in…",
+    "toSignIn": "Go to sign-in",
+    "toHome": "Go to Home",
+    "used": {
+      "title": "This link was already used",
+      "body": "Each sign-in link works once. Sign in with your passkey, or ask whoever sent the link for a new one."
+    },
+    "expired": {
+      "title": "This link has expired",
+      "body": "Ask whoever sent it for a new link, or sign in with your passkey."
+    },
+    "withdrawn": {
+      "title": "This link was withdrawn",
+      "body": "Ask whoever sent it for a new link, or sign in with your passkey."
+    },
+    "unknown": {
+      "title": "This link does not work",
+      "body": "Check that you opened all of it, including everything after #, or ask whoever sent it for a new link."
+    },
+    "tryAgain": "Try again",
+    "replaces": "This browser is signed in as {{name}}; continuing signs that session out."
+  },
+  "addPasskey": {
+    "title": "Add a passkey",
+    "who": "Signed in as {{name}}.",
+    "required": "You signed in with a link that works once. Add a passkey now: from then on it signs you in with your fingerprint, face, PIN or security key.",
+    "offer": "Sign in faster next time: add a passkey, and this device signs you in with your fingerprint, face, PIN or security key. You can also add one later.",
+    "add": "Add a passkey",
+    "notNow": "Not now",
+    "signOut": "Sign out",
+    "waiting": "Waiting for your passkey…"
+  },
+  "notices": {
+    "label": "Sign-in notices",
+    "dismiss": "Dismiss",
+    "dismissFailed": "The notice could not be dismissed: {{detail}}",
+    "recovery_used": {
+      "self": "A recovery link was used on your account on {{date}}. If this was not you, tell an administrator at once.",
+      "other": "A recovery link was used on the account of {{subject}} on {{date}}."
+    },
+    "passkey_disabled": {
+      "self": "One of your passkeys was disabled on {{date}} because a copy of it was detected. Sign in with another passkey, or ask an administrator for a recovery link, and tell an administrator if you did not copy it.",
+      "other": "A passkey of {{subject}} was disabled on {{date}} because a copy of it was detected."
+    },
+    "passkey_added": {
+      "self": "A passkey was added to your account on {{date}}. If this was not you, tell an administrator at once.",
+      "other": "A passkey was added to the account of {{subject}} on {{date}}."
+    },
+    "other": {
+      "self": "Something changed about signing in to your account on {{date}}.",
+      "other": "Something changed about signing in to the account of {{subject}} on {{date}}."
+    }
+  },
+  "copy": {
+    "copied": "Copied",
+    "select": "Select the line and copy it."
+  },
+  "common": {
+    "working": "Working…"
+  },
+  "list": {
+    "name": "Name",
+    "expires": "Expires",
+    "state": "State",
+    "actions": "Actions",
+    "open": "Open"
+  },
+  "dialog": {
+    "cancel": "Cancel",
+    "done": "Done"
+  },
+  "access": {
+    "tabs": "Access sections",
+    "withdraw": "Withdraw",
+    "copyLink": "Copy link",
+    "shownTitle": "Send this link to {{name}}",
+    "people": {
+      "tab": "People",
+      "find": "Find people",
+      "none": "Nobody matches.",
+      "person": "Person",
+      "service": "Service account",
+      "deactivated": "Deactivated",
+      "capped": "Showing the first {{count}}. Type part of a name to find someone who is not listed.",
+      "serviceNote": "{{name}} is a service account: it signs in with its API token, not a passkey, so it needs no recovery link. Issue it a new token instead."
+    },
+    "invites": {
+      "tab": "Invites",
+      "action": "Invite someone",
+      "intro": "An invite is a link that creates a person's account, with no rights, the first time it is used. It works once, for 7 days.",
+      "none": "No invite is open. Invite someone with the button above, or from the command line:",
+      "cli": "lakana invite create <name>",
+      "withdrawOf": "Withdraw the invite of {{name}}",
+      "name": "Name",
+      "nameHelp": "The name the person signs in as; it must not be taken, in any letter case.",
+      "displayName": "Display name (optional)",
+      "displayNameHelp": "How Lakana shows the person, such as their full name.",
+      "create": "Create the invite",
+      "shownOnce": "It works once, until {{date}}. This is the only time Lakana shows it: copy it now and send it to {{name}} yourself.",
+      "confirm": "The link creates the account with no rights. Before you grant any role, confirm outside Lakana that the person who signed up is {{name}}: ask them in person, by phone or in your team chat."
+    },
+    "recovery": {
+      "tab": "Recovery links",
+      "action": "Issue a recovery link",
+      "intro": "A recovery link lets a person who lost their passkeys back in. It works once, for 1 hour; using it replaces their passkeys, ends their sessions and tells every administrator.",
+      "none": "No recovery link is open. Issue one with the button above when someone has lost their passkeys.",
+      "withdrawOf": "Withdraw the recovery link of {{name}}",
+      "askFor": "The link is for {{name}}.",
+      "confirmFirst": "Issue one only after confirming outside Lakana, in person or by phone, that the person asked for it.",
+      "continue": "Continue",
+      "shownOnce": "It works once, for 1 hour, until {{date}}. Using it removes the passkeys of {{name}}, ends their sessions and tells every administrator. This is the only time Lakana shows it: copy it now and send it to {{name}} yourself.",
+      "adminTitle": "{{name}} is an administrator",
+      "operatorOnly": "Only the server operator can recover an administrator: run this where the server runs, with the bootstrap token.",
+      "operatorFor": "{{name}} is an administrator, so only the server operator can recover this account: run this where the server runs, with the bootstrap token.",
+      "command": "lakana recovery create {{name}}"
+    }
+  },
+  "account": {
+    "title": "Passkeys and sessions",
+    "purpose": "Your passkeys sign you in; your sessions are the browsers you are signed in on."
+  },
+  "passkeys": {
+    "title": "Passkeys",
+    "none": "You have no passkey yet. Add one: it signs you in with your fingerprint, face, PIN or security key.",
+    "noneOther": "No passkey.",
+    "unnamed": "Passkey",
+    "added": "Added {{date}}",
+    "lastUsed": "Last used {{date}}",
+    "neverUsed": "Never used",
+    "synced": "Synced across devices",
+    "disabled": "Disabled: a copy of it was detected",
+    "elsewhere": "Not usable at this address: it was added while Lakana had another address",
+    "remove": "Remove",
+    "removeOf": "Remove {{name}}",
+    "confirmOwn": "Remove {{name}}?",
+    "confirmOther": "Remove {{name}} from {{person}}?",
+    "confirmRemove": "Remove the passkey",
+    "ownEffect": "It no longer signs you in. Your other passkeys keep working; Lakana does not remove your last working one.",
+    "otherEffect": "{{person}} is signed out everywhere and needs another passkey to sign in. If it was their only one, they need a recovery link, and for an administrator only the server operator can let them back in."
+  },
+  "sessions": {
+    "title": "Sessions",
+    "none": "No open session.",
+    "browser": "{{browser}}, from {{peer}}",
+    "unknownBrowser": "Unknown browser",
+    "times": "Started {{started}} · last active {{seen}}",
+    "current": "This browser",
+    "endAll": "End all sessions",
+    "confirm": "End all sessions of {{name}}?",
+    "confirmEnd": "End the sessions",
+    "effect": "{{name}} is signed out in every browser and signs in again with a passkey."
+  },
+  "settings": {
+    "tabs": "Settings sections",
+    "signIn": {
+      "tab": "Sign-in",
+      "intro": "How long a browser session lasts. API tokens are not affected. Saving asks for a passkey touch when yours is older than 15 minutes.",
+      "idle": "Idle timeout in minutes",
+      "idleHelp": "A session ends after this long without anything the person did. Between {{min}} and {{max}} minutes ({{minText}} to {{maxText}}).",
+      "absolute": "Longest session in minutes",
+      "absoluteHelp": "A session ends after this long, however active the person is. Between {{min}} and {{max}} minutes ({{minText}} to {{maxText}}).",
+      "appliesLater": "A change applies to sessions that begin afterwards; open sessions keep their lengths.",
+      "save": "Save",
+      "saved": "Saved. New sessions use these lengths.",
+      "idleOutOfBounds": "The idle timeout is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
+      "absoluteOutOfBounds": "The longest session is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
+      "shorterThanIdle": "The longest session cannot be shorter than the idle timeout ({{idle}} minutes). Make it longer, or the idle timeout shorter."
+    }
+  },
+  "duration": {
+    "minutes_one": "{{count}} minute",
+    "minutes_other": "{{count}} minutes",
+    "hours_one": "{{count}} hour",
+    "hours_other": "{{count}} hours",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days"
   }
 }

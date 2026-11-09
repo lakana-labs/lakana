@@ -2236,6 +2236,27 @@ def _canary() -> dict:
     return yaml.safe_load((WORKFLOWS / "canary.yml").read_text())
 
 
+def _canary_job(name: str = "canary") -> dict:
+    """Pick one job of the dependency canary workflow by its name.
+
+    Parameters
+    ----------
+    name
+        The job's key: ``canary`` (the five-minute script) or ``ui-browsers``.
+
+    Returns
+    -------
+    dict
+        The job.
+    """
+    return _canary()["jobs"][name]
+
+
+def test_the_canary_has_exactly_its_two_jobs() -> None:
+    """A new job here is a decision: it must get its own least-privilege tests below."""
+    assert set(_canary()["jobs"]) == {"canary", "ui-browsers"}
+
+
 def test_the_canary_runs_every_day_and_on_demand() -> None:
     """A breaking upstream release is seen within a day: a daily schedule, and a manual run."""
     triggers = _canary()[True]
@@ -2250,7 +2271,7 @@ def test_the_canary_has_the_least_privilege() -> None:
     """No token write scope here: the job writes no issue; `scheduled-failure.yml` does that."""
     workflow = _canary()
     assert workflow["permissions"] == {}
-    (job,) = workflow["jobs"].values()
+    job = _canary_job()
     assert job["permissions"] == {"contents": "read"}
     assert isinstance(job["timeout-minutes"], int)
     checkout = next(s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout@"))
@@ -2259,7 +2280,7 @@ def test_the_canary_has_the_least_privilege() -> None:
 
 def test_the_canary_runs_on_github_s_runner() -> None:
     """A scheduled job has no pull request to judge it, so the `CI_RUNNER` switch does not apply."""
-    (job,) = _canary()["jobs"].values()
+    job = _canary_job()
     assert job["runs-on"] == "ubuntu-latest"
 
 
@@ -2269,7 +2290,7 @@ def test_the_canary_installs_its_own_build_with_unpinned_dependencies() -> None:
     Only `lakana` is pinned (to the build's own version, with `--find-links`), never with
     `--no-index` or a constraints file: an unpinned install is the point of the job.
     """
-    (job,) = _canary()["jobs"].values()
+    job = _canary_job()
     commands = "\n".join(c for step in job["steps"] for c in _commands(step))
     assert "uv build --all-packages" in commands
     assert "five_minute_test.sh --find-links /dist" in commands
@@ -2283,11 +2304,31 @@ def test_the_canary_installs_its_own_build_with_unpinned_dependencies() -> None:
 
 def test_the_canary_shows_the_versions_it_resolved_even_when_it_fails() -> None:
     """A failure names the version that broke it: the summary is written even on a failure."""
-    (job,) = _canary()["jobs"].values()
+    job = _canary_job()
     script = (ROOT / "scripts" / "five_minute_test.sh").read_text()
     assert "pip freeze" in script
     summary = [s for s in job["steps"] if '>> "$GITHUB_STEP_SUMMARY"' in s.get("run", "")]
     assert summary and all(s.get("if") == "${{ always() }}" for s in summary)
+
+
+def test_the_ui_browser_canary_has_the_least_privilege_on_github_s_runner() -> None:
+    """The Firefox and WebKit run reads the repository only, on GitHub's runner, with no token."""
+    job = _canary_job("ui-browsers")
+    assert job["permissions"] == {"contents": "read"}
+    assert job["runs-on"] == "ubuntu-latest"
+    assert isinstance(job["timeout-minutes"], int)
+    checkout = next(s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["persist-credentials"] is False
+
+
+def test_every_canary_action_is_pinned_by_commit() -> None:
+    """Every `uses:` of both canary jobs names a full commit SHA, never a tag or a branch."""
+    for name in ("canary", "ui-browsers"):
+        uses = [s["uses"] for s in _canary_job(name)["steps"] if "uses" in s]
+        assert uses, name
+        for action in uses:
+            ref = action.split("@", 1)[1]
+            assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{name}: {action}"
 
 
 def _all_commands(job: dict) -> list[str]:

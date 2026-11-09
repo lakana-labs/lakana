@@ -43,8 +43,9 @@ module.exports = {
     {
       name: "api-is-a-leaf",
       severity: "error",
-      comment: "src/api/ talks to the server and imports nothing of the interface.",
-      from: { path: "^src/api/" },
+      comment:
+        "src/api/ talks to the server and imports nothing of the interface (its tests may use the test helpers).",
+      from: { path: "^src/api/", pathNot: [TEST] },
       to: { pathNot: ["^src/api/", "^node_modules/"] },
     },
     {

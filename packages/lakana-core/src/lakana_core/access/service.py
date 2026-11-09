@@ -52,6 +52,7 @@ from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.service import GrantService, active_instance_admin_ids
 from lakana_core.identifiers import TableRef, environment_name_problem
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AccessManagedScope,
     AccessOverride,
@@ -686,9 +687,12 @@ class AccessService:
             administrator or drop the caller's own ADMIN role.
         AccessFileError
             When the plan has problems; every one is listed.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
         self._authorize(p)
+        require_step_up(p)
         commit = _valid_commit(source_commit)
         try:
             lock_access(self._session, shared=False)

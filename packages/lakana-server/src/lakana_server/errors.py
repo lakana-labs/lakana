@@ -23,10 +23,13 @@ from lakana_core.errors import (
     GraphBusyError,
     KeptAfterCheckError,
     LakanaError,
+    LinkUnusableError,
     NoCheckedSnapshotError,
     NotFoundError,
     NotPublishedError,
+    PasskeyRefused,
     PermissionDenied,
+    SessionEndedError,
     StorageRefusedError,
     StorageUnavailableError,
     ValidationError,
@@ -85,8 +88,43 @@ class ClientDisconnectedError(LakanaError):
     """
 
 
+class CsrfRefused(AuthenticationError):
+    """A request with the session cookie lacked its session's CSRF token, or carried another.
+
+    Server-only: the CSRF header is an HTTP-layer concern of the browser session
+    (`lakana_server.browser_session`). Mapped to 401 through `AuthenticationError`: the cookie
+    alone signs nobody in, and the interface answers a 401 by asking the person to sign in.
+    """
+
+
+class TokenOnlyRoute(PermissionDenied):
+    """A route for code only (`lakana_server.deps.TOKEN_ONLY_ROUTES`) was called with the cookie.
+
+    Server-only, like `CsrfRefused`. Mapped to 403 through `PermissionDenied`.
+    """
+
+
+class PasskeyRequired(PermissionDenied):
+    """A session from a setup, invite or recovery link acted before its person had a passkey.
+
+    Server-only, like `CsrfRefused`: `lakana_server.deps.get_principal` allows such a session
+    only `PASSKEY_FIRST_ROUTES` (register a passkey, read the session, sign out). Mapped to 403.
+    """
+
+
+class TooManyAttemptsError(LakanaError):
+    """A client asked for passkey sign-in options faster than the per-address limit.
+
+    Server-only, an HTTP-layer limit like `PayloadTooLargeError`. Mapped to 429 with a
+    `Retry-After: 60` header.
+    """
+
+
 _STATUS_CODES: dict[type[LakanaError], int] = {
     AuthenticationError: 401,
+    PasskeyRefused: 403,
+    TooManyAttemptsError: 429,
+    LinkUnusableError: 410,
     NotFoundError: 404,
     AlreadyExistsError: 409,
     ConflictError: 409,
@@ -107,6 +145,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
 }
 
 _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
+    TooManyAttemptsError: "60",
     AppendConcurrencyLimitError: "1",
     DownloadConcurrencyLimitError: "1",
     StorageUnavailableError: "5",
@@ -168,7 +207,11 @@ def install_exception_handlers(app: FastAPI) -> None:
         JSONResponse
             A body of the shape `{"detail": str, "type": str}`, with a
             `Retry-After` header attached for the one error type that needs
-            one (`_RETRY_AFTER_SECONDS`).
+            one (`_RETRY_AFTER_SECONDS`). A `SessionEndedError` (401) adds
+            `reason` (``idle``, ``lifetime``, ``sign_out``, ...), so the interface can
+            say why the person has to sign in again. A `LinkUnusableError` (410) adds `state`
+            (``used``, ``expired``, ``withdrawn``, ``unknown``), so the sign-in page can say
+            which.
 
         Notes
         -----
@@ -186,11 +229,12 @@ def install_exception_handlers(app: FastAPI) -> None:
         )
         retry_after = _RETRY_AFTER_SECONDS.get(type(exc))
         headers = {"Retry-After": retry_after} if retry_after is not None else None
-        return JSONResponse(
-            status_code=status_code,
-            content={"detail": str(exc), "type": type(exc).__name__},
-            headers=headers,
-        )
+        content = {"detail": str(exc), "type": type(exc).__name__}
+        if isinstance(exc, SessionEndedError):
+            content["reason"] = exc.reason
+        if isinstance(exc, LinkUnusableError):
+            content["state"] = exc.state
+        return JSONResponse(status_code=status_code, content=content, headers=headers)
 
     def handle_validation_error(request: Request, exc: Exception) -> JSONResponse:
         """Answer a request that does not fit its schema, without echoing the input it was sent.

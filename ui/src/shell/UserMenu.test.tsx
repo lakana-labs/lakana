@@ -1,8 +1,11 @@
-import { screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PREFERENCES_KEY } from "../preferences/preferences";
+import { ApiError } from "../api";
 import { renderShell } from "../test/render";
+import { ADMIN_SESSION } from "../test/server";
+import { signedIn } from "../test/session";
 
 const root = document.documentElement;
 
@@ -22,6 +25,22 @@ function stored(storage: Storage): unknown {
 }
 
 /**
+ * Renders the shell with a session and opens the user menu.
+ *
+ * @param session - The session value.
+ * @returns The shell.
+ */
+async function openMenuWith(
+  session: ReturnType<typeof signedIn>,
+): Promise<ReturnType<typeof renderShell>> {
+  const shell = renderShell("/", { session });
+  await screen.findByRole("heading", { level: 1, name: "Home" });
+  await shell.user.click(screen.getByRole("button", { name: "Signed in as admin" }));
+  await screen.findByRole("menu", { name: "Preferences and account" });
+  return shell;
+}
+
+/**
  * Renders the shell and opens the user menu.
  *
  * @returns The shell.
@@ -29,12 +48,23 @@ function stored(storage: Storage): unknown {
 async function openMenu(): Promise<ReturnType<typeof renderShell>> {
   const shell = renderShell("/");
   await screen.findByRole("heading", { level: 1, name: "Home" });
-  await shell.user.click(screen.getByRole("button", { name: "Not signed in" }));
-  await screen.findByRole("menu", { name: "Preferences" });
+  await shell.user.click(screen.getByRole("button", { name: "Signed in as admin" }));
+  await screen.findByRole("menu", { name: "Preferences and account" });
   return shell;
 }
 
 describe("UserMenu", () => {
+  it("opens one's passkeys and sessions", async () => {
+    const { user, router } = await openMenu();
+
+    await user.click(screen.getByRole("menuitem", { name: "Passkeys and sessions" }));
+
+    // The page is loaded on demand: the address changes once it arrived.
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/account");
+    });
+  });
+
   it("switches the theme and remembers it", async () => {
     const { user, storage } = await openMenu();
     expect(screen.getByRole("menuitemradio", { name: "System" })).toHaveAttribute(
@@ -46,7 +76,7 @@ describe("UserMenu", () => {
 
     expect(root.getAttribute("data-theme")).toBe("dark");
     expect(stored(storage)).toEqual({ theme: "dark", density: "roomy", language: "en" });
-    await user.click(screen.getByRole("button", { name: "Not signed in" }));
+    await user.click(screen.getByRole("button", { name: "Signed in as admin" }));
     expect(await screen.findByRole("menuitemradio", { name: "Dark" })).toHaveAttribute(
       "aria-checked",
       "true",
@@ -84,7 +114,7 @@ describe("UserMenu", () => {
     await screen.findByRole("heading", { level: 1, name: "Home" });
     expect(root.getAttribute("data-theme")).toBe("light");
 
-    await shell.user.click(screen.getByRole("button", { name: "Not signed in" }));
+    await shell.user.click(screen.getByRole("button", { name: "Signed in as admin" }));
 
     expect(await screen.findByRole("menuitemradio", { name: "Light" })).toHaveAttribute(
       "aria-checked",
@@ -96,14 +126,48 @@ describe("UserMenu", () => {
     );
   });
 
-  it("shows Not signed in and the preview line", async () => {
+  it("shows the signed-in name in the user menu", async () => {
     renderShell("/");
     await screen.findByRole("heading", { level: 1, name: "Home" });
 
-    expect(screen.getByRole("button", { name: "Not signed in" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Preview: sign-in comes later, and nothing here reads your data yet."),
-    ).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Signed in as admin" });
+    expect(button).toHaveTextContent("admin");
+    expect(screen.queryByText(/Preview/)).not.toBeInTheDocument();
+  });
+
+  it("shows the display name when the person has one", async () => {
+    renderShell("/", {
+      session: signedIn({ session: { ...ADMIN_SESSION, display_name: "Kim Lee" } }),
+    });
+
+    expect(await screen.findByRole("button", { name: "Signed in as Kim Lee" })).toBeInTheDocument();
+  });
+
+  it("signs out, here or everywhere", async () => {
+    const session = signedIn();
+    const { user } = await openMenuWith(session);
+
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(session.signOut).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Signed in as admin" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Sign out everywhere" }));
+    expect(session.signOutEverywhere).toHaveBeenCalledTimes(1);
+  });
+
+  it("says why signing out did not work", async () => {
+    const session = signedIn({
+      signOut: vi.fn(() =>
+        Promise.reject(new ApiError(503, "Unavailable", "The server is busy; try again.")),
+      ),
+    });
+    const { user } = await openMenuWith(session);
+
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Signing out did not work: The server is busy; try again.",
+    );
   });
 });
 

@@ -185,8 +185,10 @@ including `IcebergRoute`) runs `get_principal` first for a route that has a body
 and stores the principal on `request.state` under the private name `PRINCIPAL_STATE_KEY`;
 `get_principal` returns it, if it is a `PrincipalRef`, instead of verifying and auditing the
 credential a second time. `test_body_limit.py` reads the running app (`create_app`), not the `ROUTERS`
-tuple: every route with a body is an `AuthenticateFirstRoute`, and every route but `/healthz`, `/readyz` and
-`/v1/config` depends on `get_principal`, however it got into the app. A request with no credential, or a wrong one, is 401 and is
+tuple: every route with a body is an `AuthenticateFirstRoute`, and every route but `/healthz`, `/readyz`,
+`/v1/config` and the open routes of `_OPEN_ROUTES` (the CI token exchange, and
+`POST /api/v1/sign-in/links/describe` and `/links/redeem`, whose link is the proof) depends on
+`get_principal`, however it got into the app. A request with no credential, or a wrong one, is 401 and is
 audited and rate-limited as before. The limit above bounds what a caller *with* a credential can make
 the server decode.
 
@@ -196,8 +198,10 @@ secrets bodies validate `values` with `SecretValues` (`api/platform/schemas.py`)
 no key and no value. The storage `options` of an environment (`StorageConfigIn.options` on create,
 `EnvironmentStorageUpdate.options` on `PATCH .../storage`) can carry inline S3 credentials too, so
 both use `StorageOptions` / `OptionalStorageOptions`, which refuse a bad shape with one message that
-names no key and no value. No other request body carries a credential: tokens and secrets are in
-headers or are only ever returned. The application logs no request body.
+names no key and no value. One other request body carries a credential: a sign-in link's secret
+(`POST /api/v1/sign-in/links/redeem`, a plain string field, so a validation error names the field
+and never the value). Tokens and secrets are otherwise in headers or are only ever returned. The
+application logs no request body (`test_the_secret_appears_in_no_log_record`).
 
 ## The web interface's files (M7)
 
@@ -207,8 +211,8 @@ cookie set for another host.
 
 - **No privileged way in (rule 2).** The interface calls only the public REST API, with the
   user's own credential. The server gives it no endpoint of its own and no route besides its
-  static files; it has nothing an API client lacks. Part 1 has no sign-in and calls no route at
-  all; sign-in and sessions get their own design and security review before any code lands.
+  static files; it has nothing an API client lacks. Its credential is a browser session, a
+  credential of `get_principal` like a token: "Sign-in: links, sessions, passkeys (M7 1b)".
 - **No joined request path.** Hashed files under `/assets/` go through Starlette's
   `StaticFiles`, which normalises the path and refuses an absolute one, a NUL byte and any path
   whose real path (symlinks resolved) leaves `assets/`. Every other file (`theme-boot.js`, the
@@ -254,11 +258,376 @@ cookie set for another host.
 - **Fail at start.** Turned on without a built interface (no `index.html`, no `assets/`, or a
   missing or malformed `csp.txt`), the server refuses to start (`UiNotBuiltError`) instead of
   serving errors.
-- **Not yet covered:** the Playwright suite runs against `vite preview`, not lakana-server.
-  `packages/lakana-server/tests/test_ui_real_build.py` (CI `ui`, after the build) serves the
-  real build through `create_app` and checks the policy header and every file the page loads,
-  but runs no browser. One smoke run against `lakana server start` is due once the interface
-  calls the API.
+- **Host and Origin (`lakana_server.browser_guard.BrowserGuard`, part 1b).** A pure ASGI
+  middleware, outermost and present only with the interface on, defends against DNS rebinding
+  and cross-site requests before any route, credential or body is looked at. Order: (1) a
+  request whose first `Authorization` header is `Bearer <credential>` skips the cookie test and
+  the Origin rule, never the Host check of pages and sign-in routes (see below; any other
+  `Authorization` is checked like none); (2) *browser traffic* is a path of the interface (not
+  `/api`, `/v1` or below, `/healthz`, `/readyz`; any other spelling, such as `/API/...` or
+  `//api/...`, counts as the interface's), a request with a session cookie (any name starting
+  `lakana_session` or `__Host-lakana_session`, any letter case), or `/api/v1/sign-in/...`;
+  anything else passes; (3) browser traffic needs exactly one `Host`, equal without letter case
+  to one of `Settings.allowed_host_headers()` (the public `host[:port]` as browsers send it; on
+  `localhost` also `127.0.0.1:<port>` and `[::1]:<port>`; plus `LAKANA_UI__ALLOWED_HOSTS`),
+  else 421 `HostNotAllowed`, which never repeats the `Host`; (4) a GET or HEAD of a page at
+  `127.0.0.1` or `[::1]` is sent (308, `no-store`) to `localhost`, the location built from
+  `public_origin()` and the decoded, re-encoded path, never from `Host` or the raw request
+  target; (5) every method but GET, HEAD and OPTIONS needs exactly one `Origin` equal to
+  `public_origin().origin`, or no `Origin` and `Sec-Fetch-Site: same-origin` (`same-site` is not
+  enough: on loopback other ports are the same site), else 403 `OriginNotAllowed`. A WebSocket of
+  browser traffic always needs the Origin and is closed (1008) otherwise. **Why the Host check is
+  scoped:** engines, CI and the Compose worker reach open non-browser routes (`/v1/config`,
+  `/api/v1/auth/oidc/token`) by internal names (`server:8000`) without a credential; DNS
+  rebinding only matters where a page, a cookie or a sign-in route is involved, and a rebinding
+  page cannot hold a real token. **A Bearer header does not skip the Host check** of pages and
+  sign-in routes: a rebinding page is same-origin with its own name, so it can add a fake
+  `Authorization: Bearer x` without a preflight and would otherwise reach the open sign-in routes
+  at any name. A Bearer only skips the cookie test of (2) (the Bearer wins over the cookie) and
+  the Origin rule (5) (a cross-site page cannot send it without a CORS preflight, which no route
+  answers; `lakana server start --local` posts to a sign-in route with a token and no `Origin`).
+  Ordinary API routes with a Bearer pass at any name, as the Compose worker calls them.
+  `LAKANA_UI__PUBLIC_URL` refuses an IP address (also `127.1`,
+  `0x7f.0.0.1`: a last label that is a number), a path, query, fragment, user name, trailing dot
+  or non-ASCII name, and, with the interface on, plain `http://` off `localhost`. A reverse proxy
+  must pass the browser's `Host` with its port (nginx `$http_host`; the default `$proxy_host` gets 421, and `$host` drops the port). The guard uses only the
+  `Host` header, so an absolute-form request target (`GET http://localhost:8000/`) does not
+  change the decision. No CORS headers are sent on any route. `test_browser_guard.py` tries other
+  ports, letter case, trailing dots, other loopback spellings, a fake Bearer, missing and repeated `Host` and
+  `Origin`, `Origin: null`, absolute-form targets and path prefixes.
+- **Covered end to end:** the mocked Playwright suite runs against `vite preview`, but
+  `npm --prefix ui run e2e:server` (`ui/e2e-server/`) starts a real lakana-server on port 4174 and
+  drives the sign-in in a browser: the secret leaves the address bar, the cookie's flags, the
+  127.0.0.1 redirect, a cross-origin POST refused, a used link, passkeys with a virtual
+  authenticator. Chromium runs per pull request (CI `ui`); Firefox and WebKit nightly
+  (`canary.yml`). Not covered: HTTPS (`__Host-` cookie), a reverse proxy, a second origin's
+  passkey, and `lakana server start --local`.
+  `packages/lakana-server/tests/test_ui_real_build.py` still checks the policy header and every
+  file the page loads without a browser.
+
+## Sign-in: links, sessions, passkeys (M7 1b)
+
+Design: `docs/superpowers/specs/2026-11-08-m7-part1b-sign-in-design.md` ("Decided rules" win).
+Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
+`lakana_server.deps.get_principal`, `api/platform/sessions.py`, `api/platform/sign_in_settings.py`.
+
+- **A session is the fourth credential of `get_principal`** (after a PAT, a task token and a CI
+  token), so authorization, deactivation, break-glass rules, the body limit
+  (`AuthenticateFirstRoute`), the failed-sign-in limiter and the sign-in audit window apply
+  unchanged: no route has a session-specific branch. The returned `PrincipalRef` carries
+  `credential="session"` and a `SessionContext`. The session's row is read on every request
+  (`SessionService.verify`), so sign out, sign out everywhere, an administrator ending sessions
+  and deactivation take effect on the next request; deactivation ends the rows in its own commit
+  (`PrincipalService.deactivate_principal`). An ended session answers 401 `SessionEndedError` with
+  `reason` (`idle`, `lifetime`, `sign_out`, `ended_by_admin`, `deactivated`, `token_revoked`, ...)
+  and "Sign in again". A refused cookie is audited as `AUTHENTICATION_FAILED` through
+  `auth_audit_limiter`, with `credential: session` and the cookie's key id; a success through
+  `sign_in_audit_limiter` keyed `("session", key_id)`. `test_session_parity.py` holds parity
+  two ways. Statically, no module under `lakana_server/api/` reads a principal's `.session`,
+  `.credential` or `.token_id` except those in `CREDENTIAL_READERS`, each tied to operations
+  in `CREDENTIAL_SPECIFIC_ROUTES` (today only `api/platform/sessions.py`); core rules that look
+  at the session (`require_step_up`, the passkey ceremonies) are outside this guard and tested
+  in core. The passkey bodies' `credential` field is `answer` in Python (alias `credential`), so
+  the guard stays strict. The four session-bound ceremony routes (step-up options and answer,
+  passkey registration options and answer) are in `CREDENTIAL_SPECIFIC_ROUTES`: a token gets
+  409 there by design. Dynamically,
+  every other `/api/v1` operation of the running app is sent once with a session and once with
+  the same person's token, from the same database state (snapshot and restore), with path
+  parameters naming real objects of the person (environment, namespace, table, the person) and
+  a minimal body and query built from the OpenAPI document; status, body (ids, times, key ids
+  and new token texts normalised) and `Set-Cookie` must match. About 149 of 154 cases run
+  their handler (`test_most_cases_reach_their_handler` requires nine in ten). What it does not
+  prove: the person holds ADMIN with a fresh passkey touch, so it does not compare a
+  non-administrator's refusals or a session without step-up, and a handler path the minimal
+  request does not reach is unseen. Each exception list (`CREDENTIAL_SPECIFIC_ROUTES`,
+  `STATEFUL_READS`, `OPEN_OPERATIONS`) carries its reason and a test fails when an entry no
+  longer exists.
+- **Any `Authorization` header wins, valid or not.** With one present, the cookie is not read
+  and no CSRF token is asked for; an invalid Bearer beside a valid cookie is 401, never the
+  session's principal (`test_any_authorization_header_never_falls_back_to_the_cookie`).
+  `BrowserGuard` skips its cookie test and the Origin rule only for a Bearer header.
+- **The cookie.** Value `<key_id>_<secret>`; only the secret's SHA-256 is stored and no REST
+  answer carries it or its hash (`SessionOut`, `BrowserSessionOut`, tested). `HttpOnly`,
+  `SameSite=Strict`, `Path=/`, no `Domain`. Over HTTPS `Secure` and the name
+  `__Host-lakana_session`; over plain HTTP (only on `localhost`) `lakana_session_<port>` without
+  `Secure`, because cookies do not separate ports: the port in the name keeps two local servers
+  from overwriting each other's cookie by accident. Every program serving another `localhost`
+  port receives the cookie and can set it; the CSRF token below makes the cookie alone
+  worthless, so it can sign the person out but not act as them (residual in
+  `docs/security/threat-model.md`, "Browser sessions (M7 1b)"; local mode is for single-user
+  machines, the user docs say so). `__Host-` closes the rest over HTTPS. `read_session_cookie` reads it only below `/api/v1/` (never on the
+  Iceberg REST routes, pages or `/healthz`) and never with `LAKANA_UI__ENABLED=false`; every
+  `/api/v1/sign-in/*` route then answers 409 (`require_interface`). A presented id is never
+  adopted: only a sign-in creates a session, with a fresh id, and ends the one it replaces.
+- **CSRF: a second random secret of the session, on every cookie request.** `SessionService.start`
+  draws it (`secrets.token_urlsafe(32)`, unrelated to the cookie) and stores only its SHA-256
+  (`browser_sessions.csrf_hash`); only the same-origin sign-in responses return it
+  (`POST /api/v1/sign-in/links/redeem`, which the local auto sign-in uses too, and
+  `POST /api/v1/sign-in/passkey`), never `GET /api/v1/sign-in/session`. The UI keeps it in `localStorage`
+  (`lakana.csrf`, `ui/src/api/client.ts`), which is per origin and so per port, unlike cookies;
+  a new tab of the origin reuses it, sign-out and any 401 remove it (unless another tab stored a
+  newer one). Every cookie request, whatever its method, needs it in `X-Lakana-CSRF`
+  (`check_csrf`, constant time), else 401 `CsrfRefused` naming "Sign in again"; it is checked
+  before the session's row is used, so a refused request never extends the session. A cookie
+  that names no session falls through to the plain 401. The same rule over HTTPS (one code path;
+  over HTTPS it is defence in depth). The redeem route counts the browser as signed in (local link
+  refused, 409) only with the cookie *and* its token: a cookie the page cannot use is no
+  session. A CSRF or token-only refusal is audited as `AUTHENTICATION_FAILED` with
+  `reason: csrf` or `token_only_route`, rate-limited like any failed sign-in. Double-submit
+  would not hold: on loopback, other ports are the same site and receive the cookie. Together
+  with `SameSite=Strict` and the guard's Origin rule this is defence in depth.
+- **Token-only routes.** `POST /api/v1/task-tokens` and `DELETE /api/v1/task-tokens/{key_id}`
+  refuse the cookie (403 `TokenOnlyRoute`, `deps.TOKEN_ONLY_ROUTES`, matched on the route
+  template): minting a task token from a browser would put a token in the interface.
+- **Background polls do not keep a session alive.** A request with `X-Lakana-Background: 1`
+  never extends the idle timeout; `last_seen_at` is written at most once a minute otherwise.
+- **Ending other people's sessions and changing the session lengths** need the ADMIN role and,
+  from a browser, step-up (`require_step_up`: a passkey touch within 15 minutes); each ended
+  session is audited with the administrator as actor and the person as subject. Listing or
+  ending another person's sessions checks the ADMIN role before the name is looked up, so a
+  non-administrator gets 403 for every name and learns none. The lengths live in the database
+  (`GET`/`PATCH /api/v1/settings/sign-in`, in minutes), never in the environment.
+
+### Links: setup, invite, recovery, local
+
+Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automation`,
+`name_unavailable`), `lakana_core.identity.notices`; server: `api/platform/sign_in.py`,
+`invites.py`, `recovery_links.py`, `sign_in_notices.py`.
+
+- **A link is `<public address>/sign-in#l=<public id>&s=<secret>`**, always built from
+  `Settings.public_origin()`, never from a request. Both halves travel after the `#`, so no
+  request line, access log or `Referer` carries them. Only the secret's SHA-256 is stored and
+  compared in constant time; `IssuedLink` leaves the URL out of its `repr`; no audit event
+  holds the secret, its hash or the URL (tested). The public id is a lookup key, not a secret.
+- **Opening a link never uses it.** `POST /api/v1/sign-in/links/describe` takes the public id
+  only and shows "Sign in as X"; `POST /links/redeem` with both halves uses it. Both need no
+  credential (the link is the proof), are Host- and Origin-checked by `BrowserGuard`, answer
+  409 with the interface off, and audit a refusal as `AUTHENTICATION_FAILED`
+  (`credential: link`, the public id) through `auth_audit_limiter`. A wrong secret answers
+  exactly like an unknown public id (410, `state: unknown`), so a secret cannot be probed
+  against a known id; a used, expired or withdrawn link answers 410 with that `state` and the
+  next step.
+- **Single use is one conditional update** (`UPDATE … SET used_at = now WHERE used_at IS NULL
+  AND withdrawn_at IS NULL AND expires_at > now RETURNING`) in the transaction that also
+  creates the invitee's account and the session; any other failure after it rolls all of it
+  back, so the link stays usable. Two concurrent uses: exactly one wins (SQLite file test, and a
+  Postgres two-connection test for each of the four kinds). Withdrawing shares the `used_at IS NULL` guard, so a link is used or
+  withdrawn, never both. Expired means `expires_at <= now`. Lifetimes: setup and local 10
+  minutes, recovery 1 hour, invite 7 days.
+- **Links are for people.** `refuse_automation` is the first call of every `issue_*`: a task or
+  CI token and a service account's token never issue a link (and never start a session).
+- **The operator** is the holder of the bootstrap PAT itself: `is_operator` needs
+  `credential == "pat"`, a `token_id` naming an unrevoked, unexpired PAT with `bootstrap = true`
+  owned by the caller, and the caller named `LAKANA_BOOTSTRAP_ADMIN`. A PAT an administrator
+  issues for the bootstrap principal, even one named `bootstrap`, a session and every other
+  token are not. Only the operator issues the setup link (only while the bootstrap principal
+  has no passkey at all) and a recovery link for an administrator: anyone who holds ADMIN now
+  (`active_instance_admin_ids`) or ever held it, directly or through a group
+  (`Principal.held_admin`, set by `mark_admin_holders` in `GrantService.grant` and
+  `GroupService.add_member`, never cleared, backfilled by migration 0070 from grants and audit
+  rows). An ordinary administrator gets 403 naming `lakana recovery create <name>` where the
+  server runs, at issue and again at use, so revoking ADMIN first does not get around it.
+- **Recovery** is for another person (oneself: "use Add passkey"), except that the operator
+  may recover the bootstrap principal itself, which has no other way back in. Issuing an invite
+  or a recovery link needs the ADMIN role and, from a browser, step-up. A new recovery link
+  withdraws the person's previous open one. Using it deletes the person's passkeys, ends every
+  session (`reason: recovery`) and writes a sign-in notice (`recovery_used`) for the person and
+  every active administrator, in the same transaction.
+- **Invites** create a new USER with no grants when used (the administrator confirms the person
+  before granting roles). The name is refused, compared with `str.casefold`, when any principal
+  (active or deactivated) or another open invite has it, and for the bootstrap name; the open
+  invite reserves it (`sign_in_links.reserved_name`, unique), and principal creation
+  (`create_principal`: `POST /api/v1/principals`, `lakana principal create`, access apply)
+  refuses such a name too (F25). Names are compared by `name_key`: NFKC, case fold, NFKC
+  (Unicode's `NFKC_Casefold` for identifiers), so fullwidth and ligature twins collide; a name
+  with a control (`Cc`) or format (`Cf`: zero-width, soft hyphen, direction marks) character,
+  or starting with a combining mark, is refused (422, `invisible_character_problem`).
+- **Rules are re-checked when a link is used**, in its claiming transaction: a setup link fails
+  once the bootstrap account has a passkey; a local link fails on a server no longer in local
+  mode; a recovery link fails when its person holds or has
+  held ADMIN by then (`held_admin`), unless the operator's bootstrap PAT issued it (recorded in `source_pat_id`);
+  an invite fails when its name was taken meanwhile; an invite or recovery link fails when its
+  issuer is gone, deactivated or no longer holds instance ADMIN (`_check_issuer`, reasons
+  `issuer_gone`, `issuer_deactivated`, `issuer_not_admin`; the operator's links too, and an
+  operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired). Each such link is then withdrawn (audited
+  with the reason, gone from the open lists) and the error names the next step (an
+  administrator's recovery: `lakana recovery create NAME`; an invite: `lakana invite create`).
+- **A local link** (`POST /api/v1/sign-in/local-link`) exists only with
+  `LAKANA_UI__LOCAL_SIGN_IN` (404 otherwise), is minted with the person's own PAT (never a
+  session), records that PAT, and its session ends when the PAT is revoked or expires
+  (`token_revoked`, tested over HTTP). It signs in without a passkey touch (the token holder
+  could do everything the session can), so its session has `needs_passkey = false` and only
+  *offers* a passkey. It is never used while the browser presents an open session (409; the
+  link stays usable), so a page cannot sign a signed-in person in as someone else.
+- **Reactivation and deactivation.** Deactivating a person withdraws their open links in the
+  same commit, and also the open invites and recovery links they issued; revoking an instance
+  ADMIN grant and leaving a group that holds one do the same for everyone left without ADMIN
+  (`lakana_core.grants.service.withdraw_links_of_lapsed_issuers`, audited per link). Deleting a
+  group needs its grants revoked first, so that path goes through the revoke; reactivating the bootstrap principal (`bootstrap_if_needed`) removes its
+  passkeys, ends its sessions (`reactivated`) and withdraws its links.
+
+### Passkeys (WebAuthn) and step-up
+
+Core: `lakana_core.identity.passkeys` (`PasskeyService`, `needs_passkey`), library `webauthn`
+3.0.1 (BSD-3-Clause; it brought cbor2 MIT, pyasn1 BSD-2-Clause, pyasn1-modules BSD, pyOpenSSL
+Apache-2.0); server: `api/platform/sign_in.py` (passkey sign-in, step-up),
+`api/platform/passkeys.py` (list, add, remove), `deps.get_principal` (the passkey-first rule).
+Tests use a software authenticator (`scripts/test_support/webauthn_test_helpers.py`: a real
+ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification is never mocked.
+
+- **Parameters.** RP id = host of `Settings.public_origin()` (never an IP; `localhost` locally);
+  the origin is compared exactly, port included, with `public_origin().origin`, never with
+  anything from the request. `userVerification: required` and checked
+  (`require_user_verification=True`); `residentKey: required`; `attestation: none`;
+  `allowCredentials` empty on sign-in, so no name is asked before the touch. Each passkey stores
+  the RP id it was registered for; one of an earlier public address is not usable
+  (`usable_here: false`, refused at sign-in with the next step: a recovery link).
+- **Challenges** last 5 minutes (`CHALLENGE_LIFETIME`, expired at `expires_at <= now`) and are
+  used up *before* the answer is checked, so a failed answer burns one.
+  - Registration and step-up challenges are 32 bytes from `os.urandom`, rows of
+    `webauthn_challenges` bound to the (authenticated) browser session, consumed by one
+    conditional update; each insert deletes the expired rows.
+  - **Sign-in challenges are stateless** (`sign_challenge` / `open_challenge`): version, a
+    32-byte random nonce and the expiry, with an HMAC-SHA256 over the purpose (`sign_in`), the
+    RP id and those bytes. Nothing is stored when one is issued, so no flood of anonymous option
+    calls can grow a table or push out the challenge a person is answering (a cap on open rows
+    could: a /48 rents cheaply). On an answer the challenge is checked first, in constant time:
+    signature, purpose, RP id, expiry and that the ceremony id is the nonce's; then the nonce is
+    inserted as used (the ceremony id is the primary key, so a replay fails on it) in the
+    transaction that deletes expired nonces. Storage grows only with answered attempts, which
+    need an issued challenge, for 5 minutes.
+  - The key is 32 random bytes in `instance_settings` (`sign_in.challenge_key`), created on
+    first use: every server process and replica accepts a challenge another issued, and a
+    restart does not break a sign-in in progress (a per-process key would fail behind a load
+    balancer). It is never logged or returned; a database reader could forge a challenge, which
+    still needs a passkey's signature to sign in. A challenge whose expiry is later than now +
+    5 minutes + `CLOCK_SKEW` (30 s) is refused, so a forged one never outlives five minutes.
+  - **Rotating the key**: delete the row (`DELETE FROM instance_settings WHERE key =
+    'sign_in.challenge_key';`); no restart is needed, since each request reads the key, and the
+    next options call creates a new one. Challenges issued with the old one stop working at once (a person mid-sign-in
+    clicks "Sign in" again); sessions and passkeys are unaffected. Do it after anyone may have
+    read the database.
+  - `POST /api/v1/sign-in/passkey/options` is limited per client address (IPv6: per /64,
+    `client_bucket`) by `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` (default 60) and per
+    network (IPv4 /24, IPv6 /48, `network_bucket`) by
+    `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` (default 240); 429 with
+    `Retry-After: 60`. Everyone behind one NAT shares a bucket, and behind a reverse proxy
+    without `LAKANA_TRUSTED_PROXIES` every browser is the proxy's address, so one client could
+    use up the limit for all: the settings reference says so.
+  The two open routes read at most 16 KiB (`OPEN_BODY_LIMIT`, checked before FastAPI decodes
+  the body) and are Host- and Origin-checked by `BrowserGuard`.
+- **Library workarounds.** `py_webauthn` does not compare `userHandle`: the service requires it
+  and compares it with `principals.webauthn_handle` (32 random bytes per person, never the
+  name) in constant time. Its counter check raises the same exception as a bad signature, so
+  the service passes a stored count of 0 and applies the clone rule itself after the signature
+  verified: `if not (stored == 0 and new == 0) and new <= stored` the passkey is disabled
+  (`disabled_reason = possible_clone`), every session of the person ends (`reason:
+  passkey_copied`; nothing records which passkey a session began with, so all go), it is
+  audited `PASSKEY_DISABLED` (with `sessions_ended`) and a notice ("a copy of a passkey was
+  detected; it is disabled and every session of NAME was ended") goes to the person and every
+  active administrator; the attempt is refused. This is a detected clone, not the removal of a
+  last passkey, which by the spec ends no session. A forged assertion with a low
+  counter is refused by the signature and can never disable a passkey (tested). Two zero
+  counters (synced passkeys) are accepted. The new counter is written by a conditional update
+  on the counter just read, so of two uses at once only one passes. A `clientDataJSON` with
+  `crossOrigin: true` or a `topOrigin` (our page framed by another site) is refused, at
+  registration and assertion alike; checks that would name the account run only after the
+  signature verified or do not name it.
+- **Registration.** Only from a browser session (a token gets 409) and only for one's own
+  account. Allowed with step-up, or for a person without a usable passkey within 15 minutes
+  (`FIRST_PASSKEY_WINDOW`) of a setup, invite, recovery or local sign-in. A local-link session
+  never adds a second passkey. A credential id stored for anyone is refused (409). It counts as
+  a touch; a passkey added outside the first window leaves the person a `passkey_added` notice.
+- **The passkey-first rule.** A session that began with a setup, invite or recovery link while
+  its person has no usable passkey may only use `deps.PASSKEY_FIRST_ROUTES` (register a
+  passkey, read its own session, sign out); every other `/api/v1` operation answers 403
+  `PasskeyRequired` naming the next step (tested over every operation of the running app). The
+  parity test's session began with a passkey, so it is unaffected.
+- **Step-up** (`require_step_up`, `STEP_UP_WINDOW` 15 minutes) is enforced in core for session
+  credentials. `POST /api/v1/sign-in/step-up` accepts only a passkey of the signed-in person
+  (another person's valid passkey: 403 `PasskeyRefused`, no touch). **Token (Bearer) requests are
+  not session-bound and step-up does not apply to them**: a token is not a browser session, and
+  its holder could do the same with the CLI. In-session ceremony failures are 403
+  (`PasskeyRefused`) so the interface keeps its session; a failed passkey sign-in is 401 and
+  audited as `AUTHENTICATION_FAILED` (`credential: passkey`, nothing of the answer).
+- **The step-up actions** (the spec's core set: whatever hands out access). A session whose
+  last touch is older than 15 minutes gets 403 `StepUpRequired` ("Confirm with your passkey and
+  try again"); a token never does, because it has no session. `require_step_up(p)` is called in
+  the core service right after authorization, so a route and the access file's apply share it.
+  It measures the touch against `SessionContext.verified_at`, the session service's clock when
+  the request's session was read (the app clock in the server), so a test that moves
+  `app.state.clock` ages a touch for every route alike:
+  - API tokens and the accounts they act for: `POST /api/v1/principals/{name}/tokens` (personal
+    and service-account tokens), `POST /api/v1/principals` (a new service account is the first
+    step to a token for it), `DELETE /api/v1/principals/{name}` (deactivating a person);
+  - rights: `POST /api/v1/grants`, `DELETE /api/v1/grants/{grant_id}`,
+    `PUT|DELETE /api/v1/groups/{name}/members/{principal_name}`, `DELETE /api/v1/groups/{name}`
+    (removes its members' rights), `POST /api/v1/access/apply`; row filters and column masks
+    (`POST`, `DELETE`), because removing one widens what a person reads; CI trust rules (`POST`,
+    `PATCH`, `…/enable`, `…/disable`, `DELETE`), because a rule lets a CI job act as its service
+    account; `PUT /api/v1/environments/{env}/deployments/{repo}/run-as`, because every run of the
+    deployment then writes with that account's rights (clearing it removes rights: no step-up);
+  - credentials and sources: `POST /api/v1/environments`, `PATCH /api/v1/environments/{name}/storage`
+    (where data goes and with which storage credentials), `PATCH /api/v1/environments/{name}`
+    (protection decides who may write there); secrets in an environment: create, rotate
+    (`PATCH`) and `PUT …/secrets/{secret_name}/use` (binding hands the value to code);
+    connections: `POST`, `PATCH` (their credentials and address); package indexes and
+    repositories: `POST`, `PATCH /{name}` (where code and packages come from);
+  - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
+    passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
+    (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.
+
+  `STEP_UP_ROUTES` in `packages/lakana-server/tests/test_step_up_routes.py` is this list as a
+  test: each route refuses a session touched 16 minutes ago and succeeds after a touch and for a
+  token. Every other write of `/api/v1` sits in `NO_STEP_UP` with a one-line reason, so a new
+  write route fails the test until it is placed. The rule: step-up when a write changes who or
+  what can act or read (identities, rights, run-as, CI trust), handles credentials or secrets, or
+  changes where code or data come from or go; none for removing access (revoking a token,
+  withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
+  one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
+  descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
+  is a data operation undone with restore; it joins with its screen in part 8 (spec). The
+  passkey registration answer needs no touch of its own: it answers the challenge of the step-up
+  options route. Task tokens are absent: their routes are token-only
+  (`TOKEN_ONLY_ROUTES`) and a session never reaches them. The parity test's session has a fresh
+  touch, so session and token still answer alike there.
+- **Removal** needs step-up; nobody removes their own last passkey that works at this address
+  (one of an earlier public address does not count; 409: add another, or
+  ask for a recovery link); an administrator removing another person's passkey ends all that
+  person's sessions (`reason: passkey_removed`). No answer carries a public key or credential
+  id; neither the browser's answer nor a challenge is logged (tested with `caplog`).
+
+### Residuals of sign-in
+
+- **A link is a bearer secret for its lifetime.** Whoever reads it (a forwarded mail, a shared
+  screen) can use it once until it expires or is withdrawn; lifetimes are short except the
+  invite's 7 days, and an administrator lists and withdraws open invites and recovery links.
+- **The READ COMMITTED window in `SessionService.verify`.** On Postgres, a request that read
+  the session row just before a concurrent end (sign out, deactivation, recovery) commits may
+  still be served once; the next request fails. Ending is one conditional update, so the end
+  itself is never lost or doubled.
+- **Passkeys act through the page.** A hostile browser extension or an XSS in the interface
+  acts as the page: it can run a ceremony the person then confirms with a touch. Another
+  process of the same OS user can read the browser's profile, cookies and `localStorage`
+  included, and act as the person. On loopback every other `localhost` port receives the
+  non-`Secure` local cookie but not the CSRF token, so it can sign the person out, not act as
+  them (see "The cookie"); local mode is for single-user machines.
+- **A deploy needs no fresh touch.** `POST /api/v1/environments/{env}/deploys` is in
+  `NO_STEP_UP` (`test_step_up_routes.py`): registering the repository's source and binding the
+  run-as account need step-up, but a deploy afterwards does not. A stale session (a browser
+  left signed in) of a person with DEPLOY can therefore run any branch or tag of the registered
+  repository as the bound account, until the session's idle timeout or lifetime ends it.
+- **The local sign-in hand-off.** `lakana server start --local` writes the local link to
+  `<data dir>/sign-in.html` (0600, in the 0700 data directory, `O_EXCL | O_NOFOLLOW`) and gives
+  the browser only that file's path, so the secret is never on a command line another OS user
+  can read; the file is removed after 60 seconds or at shutdown. Until then another process of
+  the same OS user can read it, as it can read the profile's token. A Snap or Flatpak browser
+  cannot read the data directory: a terminal then also gets the link printed (never a pipe or a
+  file), which stays in the terminal's scrollback until it is used or expires (10 minutes).
+- **A pre-upgrade bootstrap PAT.** Migration 0069 marks as the operator's only unrevoked PATs
+  named `bootstrap` owned by the bootstrap principal. A PAT an administrator issued before the
+  upgrade for the bootstrap principal and named `bootstrap` would also be marked; revoke such a
+  token after upgrading (`lakana token list admin`), or the next lockout recovery revokes it.
 
 ## Local files `lakana load` reads: a capped child process (#353)
 
@@ -3432,8 +3801,10 @@ nonzero), so the flood stays visible in aggregate rather than one row per attemp
 recorded `key_id` is truncated to 64 characters, regardless of how long the caller's
 presented `key_id` was. The limiter's client dictionary is bounded at 10 000 entries
 (oldest evicted first) and guarded by a lock, since FastAPI runs `get_principal` in a
-threadpool. `X-Forwarded-For` is not trusted for the client key — see the threat model's
-"Explicitly not defended" for what that means for a proxied deployment.
+threadpool. `X-Forwarded-For` is trusted only from the proxies in `LAKANA_TRUSTED_PROXIES`
+(uvicorn's `proxy_headers`, `lakana_server.__main__`); unset, the client key is the TCP peer —
+uvicorn's own default of trusting 127.0.0.1 is turned off. See the threat model's "Explicitly
+not defended" for what an unlisted proxy means.
 
 **Bounding successful-authentication audit writes (#217).** `get_principal` records
 `AUTHENTICATION_SUCCEEDED` only when `lakana_server.sign_in_audit.SignInAuditLimiter`

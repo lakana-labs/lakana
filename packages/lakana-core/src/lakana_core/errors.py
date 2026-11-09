@@ -4,6 +4,8 @@ These carry no HTTP knowledge; the server layer is responsible for mapping
 them onto status codes and response bodies.
 """
 
+from typing import Literal
+
 
 class LakanaError(Exception):
     """Base class for every error raised by lakana-core."""
@@ -41,6 +43,118 @@ class AuthenticationError(LakanaError):
     revoked or expired PAT too, which is why the distinction exists now
     rather than being introduced later as a breaking change to the mapping.
     """
+
+
+_SESSION_ENDED = {
+    "idle": "Your session ended after a time without activity. Sign in again.",
+    "lifetime": "Your session reached its maximum length and ended. Sign in again.",
+    "sign_out": "You signed out. Sign in again.",
+    "sign_out_everywhere": "You signed out on every device. Sign in again.",
+    "ended_by_admin": "An administrator ended your session. Sign in again.",
+    "replaced": "A newer sign-in in this browser replaced this session. Sign in again.",
+    "deactivated": (
+        "Your account is deactivated, so your session ended. Ask an administrator to "
+        "reactivate it, then sign in again."
+    ),
+    "token_revoked": (  # nosec B105 -- a reason label and its message, not a credential
+        "The token this session was created with was revoked or expired, so the session ended. "
+        "Sign in again."
+    ),
+    "recovery": (
+        "Your account was recovered with a recovery link, which ended every earlier session. "
+        "Sign in again with your new passkey."
+    ),
+    "passkey_copied": (
+        "A copy of one of your passkeys was detected; it is disabled and every session of your "
+        "account was ended. Sign in with another passkey, or ask an administrator for a recovery "
+        "link."
+    ),
+    "passkey_removed": (
+        "An administrator removed one of your passkeys, which ended your sessions. Sign in "
+        "again with another passkey, or ask an administrator for a recovery link."
+    ),
+    "reactivated": (
+        "Your account was reactivated, which ended every earlier session and removed its "
+        "passkeys. Ask the server operator for a new sign-in link."
+    ),
+}
+"""The message for each reason a session ends; an unknown reason gets a general one."""
+
+
+class SessionEndedError(AuthenticationError):
+    """A browser session was valid once and has ended.
+
+    Distinct from a plain `AuthenticationError` (an unknown or forged cookie) so the interface
+    can say why: the server answers 401 with `reason`.
+
+    Parameters
+    ----------
+    reason
+        Why it ended: ``idle``, ``lifetime``, ``sign_out``, ``sign_out_everywhere``,
+        ``ended_by_admin``, ``replaced``, ``deactivated``, ``token_revoked``, or another
+        reason a caller of `SessionService.end_for_principal` gave.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(
+            _SESSION_ENDED.get(reason, f"Your session ended ({reason}). Sign in again.")
+        )
+
+
+class StepUpRequired(PermissionDenied):
+    """The action needs a fresh passkey touch in this browser session.
+
+    Raised by `lakana_core.identity.sessions.require_step_up` for a session whose last passkey
+    touch is missing or older than 15 minutes; a token caller never gets it.
+    """
+
+
+class PasskeyRefused(AuthenticationError):
+    """A passkey ceremony inside a browser session failed: a registration or a step-up touch.
+
+    The browser's answer did not verify, its challenge was used or expired, or the passkey is
+    not the caller's. Distinct from the plain `AuthenticationError` of a failed passkey sign-in
+    (401): the caller is signed in, so the server answers 403 and the session goes on.
+    """
+
+
+_LINK_UNUSABLE = {
+    "used": (
+        "This sign-in link was already used, and each link works once. Sign in with your "
+        "passkey, or ask whoever sent it for a new link."
+    ),
+    "expired": (
+        "This sign-in link has expired. Ask whoever sent it for a new link, or sign in with "
+        "your passkey."
+    ),
+    "withdrawn": (
+        "This sign-in link was withdrawn. Ask whoever sent it for a new link, or sign in with "
+        "your passkey."
+    ),
+    "unknown": (
+        "This sign-in link is not known: check that you opened all of it, or ask whoever sent "
+        "it for a new link."
+    ),
+}
+"""The message for each state of a link that cannot be used."""
+
+
+class LinkUnusableError(LakanaError):
+    """A sign-in link cannot be used: it was used, expired, withdrawn, or is not known.
+
+    A wrong secret is reported as ``unknown``, exactly like a public id that names no link, so
+    a secret cannot be probed. The server answers 410 with `state`.
+
+    Parameters
+    ----------
+    state
+        ``used``, ``expired``, ``withdrawn`` or ``unknown``.
+    """
+
+    def __init__(self, state: Literal["used", "expired", "withdrawn", "unknown"]) -> None:
+        self.state = state
+        super().__init__(_LINK_UNUSABLE[state])
 
 
 class StorageUnavailableError(LakanaError):

@@ -18,7 +18,9 @@ Pages:
 - [Is my instance healthy?](instance-health.md): what to look at (services, workers, queue, database, storage, disk), which log lines matter, and what to collect before you ask a question.
 - [Export and keep the audit log](export-and-keep-the-audit-log.md): what the log records and does not, how to export it on a schedule, who may read it, and that it has no tamper-evidence yet.
 - [Install without internet access](install-without-internet-access.md): packages, the container image, an internal package index for Python assets, git on an internal server and the DuckDB extension.
+- [Invite your team](invite-your-team.md): invite a colleague to the web interface by a link, confirm them before granting a role, recover a lost passkey, and end a person's sessions.
 - [Give a second person access](give-a-second-person-access.md): create a user, grant the smallest set to query one environment, issue a token, and take access away.
+- [Lost your passkey](lost-your-passkey.md): get back into the web interface with a recovery link, issue one as an administrator, recover an administrator as the server operator, and what changing the public address does to passkeys.
 - [Keep access in a reviewed file](keep-access-in-a-reviewed-file.md): export who has access to what as a file, review changes in a pull request, apply them from CI, and what a managed scope refuses.
 - [Why may (or may not) someone do this?](why-may-someone-do-this.md): see what a principal may do on an object, and through which grant, role or group.
 - [Upgrade to the release with artifacts](upgrade-to-artifacts.md): the migration, the order and the way back.

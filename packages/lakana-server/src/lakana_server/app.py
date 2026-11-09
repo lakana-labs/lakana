@@ -21,6 +21,7 @@ from lakana_core.ci_oidc.verification import IdTokenVerifier
 from lakana_core.config import warn_about_tokens_in_url_paths
 from lakana_core.db import create_engine
 from lakana_core.grants.admin import ineffective_grants_warning
+from lakana_core.identity.sessions import utc_now
 from lakana_core.readiness import probe_storage, read_database
 from lakana_core.secrets.crypto import ACCEPT_FORMAT_1_WARNING
 from lakana_core.secrets.keys import EnvKeyProvider
@@ -41,17 +42,27 @@ from lakana_server.api.platform.grants import router as grants_router
 from lakana_server.api.platform.graph import router as graph_router
 from lakana_server.api.platform.groups import router as groups_router
 from lakana_server.api.platform.info import router as info_router
+from lakana_server.api.platform.invites import router as invites_router
 from lakana_server.api.platform.jobs import router as jobs_router
 from lakana_server.api.platform.namespaces import router as namespaces_router
 from lakana_server.api.platform.package_indexes import router as package_indexes_router
+from lakana_server.api.platform.passkeys import router as passkeys_router
 from lakana_server.api.platform.principals import router as principals_router
 from lakana_server.api.platform.queries import router as queries_router
+from lakana_server.api.platform.recovery_links import links_router as recovery_links_router
+from lakana_server.api.platform.recovery_links import router as recovery_link_router
 from lakana_server.api.platform.repositories import router as repositories_router
 from lakana_server.api.platform.row_filters import router as row_filters_router
 from lakana_server.api.platform.runs import router as runs_router
 from lakana_server.api.platform.runs import scheduler_router
 from lakana_server.api.platform.search import router as search_router
 from lakana_server.api.platform.secrets import router as secrets_router
+from lakana_server.api.platform.sessions import router as sessions_router
+from lakana_server.api.platform.sessions import sign_in_router
+from lakana_server.api.platform.sign_in import open_router as passkey_sign_in_router
+from lakana_server.api.platform.sign_in import router as sign_in_links_router
+from lakana_server.api.platform.sign_in_notices import router as sign_in_notices_router
+from lakana_server.api.platform.sign_in_settings import router as sign_in_settings_router
 from lakana_server.api.platform.tables import dropped_router as dropped_tables_router
 from lakana_server.api.platform.tables import expiring_router as expiring_tables_router
 from lakana_server.api.platform.tables import router as tables_router
@@ -63,6 +74,7 @@ from lakana_server.api.platform.whoami import router as whoami_router
 from lakana_server.api.routing import describe_openapi
 from lakana_server.auth_rate_limit import AuthAuditLimiter
 from lakana_server.body_limit import BodyLimitMiddleware, streaming_routes
+from lakana_server.browser_guard import BrowserGuard
 from lakana_server.concurrency import AppendConcurrencyLimiter
 from lakana_server.deprecation import DeprecationHeaders
 from lakana_server.errors import install_exception_handlers
@@ -106,6 +118,16 @@ ROUTERS = (
     access_file_router,
     ci_oidc_router,
     whoami_router,
+    sign_in_router,
+    sign_in_links_router,
+    passkey_sign_in_router,
+    sign_in_notices_router,
+    invites_router,
+    recovery_link_router,
+    recovery_links_router,
+    sessions_router,
+    passkeys_router,
+    sign_in_settings_router,
     info_router,
 )
 """Every router the application includes, in the order they are included."""
@@ -163,6 +185,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.engine = engine
         app.state.settings = resolved_settings
+        # The sign-in services' clock (`deps.get_clock`); a test may replace it.
+        app.state.clock = utc_now
         install_query_text(resolved_settings.audit.query_text)
         app.state.auth_audit_limiter = AuthAuditLimiter(
             resolved_settings.auth_audit.per_ip_per_minute
@@ -170,6 +194,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Its own bucket: a flood of refused exchanges must not hide failed sign-ins.
         app.state.oidc_exchange_audit_limiter = AuthAuditLimiter(
             resolved_settings.auth_audit.per_ip_per_minute
+        )
+        # Its own bucket too: the open passkey sign-in options route, per client address.
+        app.state.passkey_options_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_ip_per_minute
+        )
+        app.state.passkey_options_network_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_network_per_minute
         )
         # One verifier per process: it holds the issuers' key cache.
         app.state.ci_oidc_verifier = IdTokenVerifier(resolved_settings.ci_oidc)
@@ -318,5 +349,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         iceberg=iceberg_router.routes,
     )
     app.add_middleware(DeprecationHeaders)
+    if resolved_settings.ui.enabled:
+        # Outermost: Host and Origin are checked before any route, credential or body.
+        app.add_middleware(BrowserGuard, settings=resolved_settings)
     describe_openapi(app, ROUTERS)
     return app

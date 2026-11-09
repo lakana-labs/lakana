@@ -38,6 +38,9 @@ def create_environment(
 ) -> EnvironmentOut:
     """Create an environment.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Needs `MANAGE_ENVIRONMENT` on the instance. Answers 409 when an environment of that name
     exists.
 
@@ -81,6 +84,9 @@ def update_environment_storage(
 ) -> EnvironmentOut:
     """Change an environment's storage.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Replaces the environment's storage options and the secret that holds its storage
     credential. Needs `MANAGE_ENVIRONMENT` on the instance; while the environment has a
     storage secret, changing the options also needs `MANAGE_SECRET` in it. Answers 404 when
@@ -121,6 +127,9 @@ def set_environment_protection(
     catalog: CatalogService = Depends(get_catalog),
 ) -> EnvironmentOut:
     """Protect or unprotect an environment.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Sets the environment's protected flag. A protected environment refuses changes that
     would lose data (deleting it, a retention that expires tables) until the flag is

@@ -100,6 +100,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "conditions",
         # a connection's name, as a task asked for it
         "connection",
+        # the kind of credential an authentication event names (``session``; a token's row
+        # names only its key id), never the credential itself
+        "credential",
         "credential_secret",
         "delivery_id",
         "deploy_id",
@@ -124,13 +127,19 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "kinds",
         # the language a description or label edit was made in: a tag, never the text
         "language",
+        # the sign-in link a browser session began with (`lakana_core.identity.sessions`)
+        "link_id",
         "location",
         "locations",
         "manifest_sha256",
         "mode",
         "name",
         "operation",
+        # a passkey's id (`lakana_core.identity.passkeys`), never its key or credential id
+        "passkey_id",
         "path",
+        # the client's address and browser of a sign-in, as the server saw them
+        "peer",
         "principal",
         "principal_id",
         "project_version_id",
@@ -164,9 +173,12 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "type",
         "url",
         "use",
+        "user_agent",
         # the column a history write took each version's start from, or "run" for the run clock
         "valid_from",
         "version",
+        # how a browser session began: setup, invite, recovery, local or passkey
+        "via",
         "waits_for_run_id",
         # states, outcomes and fixed reasons
         "already_deleted",
@@ -201,6 +213,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "why",
         # counts, sizes and times
         "after",
+        # whether a passkey is synced (its counters when disabled: stored_, presented_count)
+        "backup_eligible",
         "before",
         "bytes",
         "bytes_deleted",
@@ -233,6 +247,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "older_than_days",
         "on",
         "others_shown",
+        "presented_count",
         "previous",
         "previous_days",
         "purge_after",
@@ -248,9 +263,11 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "rows_updated",
         "run_started_at",
         "scheduled_for",
+        "sessions_ended",
         "size_bytes",
         "snapshot_id",
         "snapshots_expired",
+        "stored_count",
         "suppressed",
         "tables",
         "tables_touched",

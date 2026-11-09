@@ -38,6 +38,9 @@ INDEX = (
 POLICY = "default-src 'self'; script-src 'self'; frame-ancestors 'none'; report-to fixture"
 """The fixture build's policy: the server must send exactly what the build wrote."""
 
+PUBLIC = "http://localhost:8000"
+"""The interface's public address in the test settings: the guard refuses other `Host`s."""
+
 UI_HEADERS = {
     "content-security-policy": POLICY,
     "x-content-type-options": "nosniff",
@@ -94,7 +97,8 @@ def _ui_client(settings: Settings, monkeypatch: pytest.MonkeyPatch, dist: Path) 
         A client for the app, not yet started.
     """
     monkeypatch.setattr(lakana_server.ui, "UI_DIST", dist)
-    return TestClient(create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)})))
+    app = create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)}))
+    return TestClient(app, base_url=PUBLIC)
 
 
 @pytest.fixture
@@ -210,8 +214,12 @@ def test_head_on_the_index(ui_client: TestClient) -> None:
 
 
 def test_another_method_on_a_page_is_refused(ui_client: TestClient) -> None:
-    """The interface's pages are read-only: a POST is 405, never the page."""
-    response = ui_client.post("/catalog")
+    """The interface's pages are read-only: a POST is 405, never the page.
+
+    The request comes from the interface's own origin, so the Host and Origin guard
+    (`test_browser_guard.py`) lets it reach the route.
+    """
+    response = ui_client.post("/catalog", headers={"Origin": PUBLIC})
     assert response.status_code == 405
     assert MARKER not in response.text
 
@@ -274,7 +282,7 @@ def test_an_unsatisfiable_range_is_not_cached(ui_client: TestClient) -> None:
 
 def test_another_method_on_an_asset_is_refused(ui_client: TestClient) -> None:
     """Files are read-only: a POST is 405 with the interface's headers."""
-    response = ui_client.post("/assets/app-1a2b.js")
+    response = ui_client.post("/assets/app-1a2b.js", headers={"Origin": PUBLIC})
     assert response.status_code == 405
     assert response.text == "Method Not Allowed"
     _assert_ui_headers(response)
@@ -311,7 +319,7 @@ def test_behind_a_path_prefix_the_api_keeps_its_answers(
     """Under a proxy's path prefix (`root_path`), an API path is still never the page."""
     monkeypatch.setattr(lakana_server.ui, "UI_DIST", ui_dist)
     app = create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)}))
-    with TestClient(app, root_path="/lakana") as c:
+    with TestClient(app, root_path="/lakana", base_url=PUBLIC) as c:
         response = c.get("/lakana/api/v1/nope")
         assert response.status_code == 404
         assert MARKER not in response.text
@@ -694,9 +702,9 @@ def _raw_get(app: object, path: str, root_path: str = "") -> tuple[int, dict[str
         "raw_path": path.encode("utf-8", "surrogateescape"),
         "root_path": root_path,
         "query_string": b"",
-        "headers": [(b"host", b"testserver")],
+        "headers": [(b"host", b"localhost:8000")],
         "client": ("127.0.0.1", 50000),
-        "server": ("testserver", 80),
+        "server": ("127.0.0.1", 8000),
     }
 
     async def call() -> None:
@@ -788,7 +796,8 @@ def test_an_asset_error_names_its_own_status(
     ui_client: TestClient, method: str, status: int, text: str
 ) -> None:
     """The text is the status's own phrase, and a 405 says which methods work."""
-    response = ui_client.request(method, "/assets/app-1a2b.js" if status == 405 else "/assets/x")
+    path = "/assets/app-1a2b.js" if status == 405 else "/assets/x"
+    response = ui_client.request(method, path, headers={"Origin": PUBLIC})
     assert response.status_code == status
     assert response.text == text
     if status == 405:

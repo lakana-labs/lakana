@@ -51,12 +51,47 @@ def test_every_sdk_route_exists_on_the_server(settings: Settings) -> None:
     assert not missing, f"SDK routes not on the server: {sorted(missing)}"
 
 
+_WEBAUTHN = "a WebAuthn ceremony: only a browser holding the passkey can answer it"
+_BROWSER_SESSION = "describes or ends the browser session of the request; a token has none (409)"
+
+BROWSER_ONLY: dict[tuple[str, str], str] = {
+    ("POST", "/api/v1/sign-in/links/describe"): (
+        "the sign-in page reads the link's fragment, which only the browser that opened it has"
+    ),
+    ("POST", "/api/v1/sign-in/links/redeem"): (
+        "using a link starts a browser session and sets its cookie; a program keeps its token"
+    ),
+    ("POST", "/api/v1/sign-in/passkey/options"): _WEBAUTHN,
+    ("POST", "/api/v1/sign-in/passkey"): _WEBAUTHN,
+    ("POST", "/api/v1/sign-in/step-up/options"): _WEBAUTHN,
+    ("POST", "/api/v1/sign-in/step-up"): _WEBAUTHN,
+    ("POST", "/api/v1/principals/{name}/passkeys/options"): _WEBAUTHN,
+    ("POST", "/api/v1/principals/{name}/passkeys"): _WEBAUTHN,
+    ("GET", "/api/v1/sign-in/session"): _BROWSER_SESSION,
+    ("DELETE", "/api/v1/sign-in/session"): _BROWSER_SESSION,
+    ("GET", "/api/v1/sign-in/notices"): (
+        "notices are what the interface shows at sign-in; the same events are in the audit log "
+        "(`lakana audit list`)"
+    ),
+    ("DELETE", "/api/v1/sign-in/notices/{notice_id}"): (
+        "dismissing a notice the interface showed; the audit log keeps the event"
+    ),
+}
+"""Platform routes only a browser uses, so the SDK has no method for them, with the reason."""
+
+
 @pytest.mark.slow
 def test_every_server_route_has_an_sdk_method(settings: Settings) -> None:
-    """Every platform route is reachable through the SDK."""
+    """Every platform route is reachable through the SDK, except the browser-only ones.
+
+    No exemption is stale: each is a real route, and none is also in the SDK's table.
+    """
     sdk = {(r.method, r.path) for r in ROUTES.values()}
-    uncovered = _server_routes(settings) - sdk
+    server = _server_routes(settings)
+    uncovered = server - sdk - set(BROWSER_ONLY)
     assert not uncovered, f"Platform routes without an SDK method: {sorted(uncovered)}"
+    assert set(BROWSER_ONLY) - server == set()
+    assert set(BROWSER_ONLY) & sdk == set()
 
 
 def test_every_route_is_used_by_a_resource_method() -> None:

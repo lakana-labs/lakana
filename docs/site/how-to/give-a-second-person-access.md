@@ -6,8 +6,14 @@ instance that is running, and an administrator's profile: creating principals, g
 needs the `ADMIN` role on the instance. In local mode and in the Compose bundle the first profile
 is one (see [Getting started](../tutorials/getting-started.md) and
 [Deploying with Compose](deploy-with-compose.md)). The person you give access to needs the `lakana`
-command on their machine and a network route to the instance. The web interface is not part of
-this release, so a **token** is the way in for now: a secret string that stands for one person.
+command on their machine and a network route to the instance. From the command line a **token** is
+the way in: a secret string that stands for one person.
+
+!!! tip "Someone who works in the web interface needs no token"
+    Invite them instead: [Invite your team](invite-your-team.md) sends a link that creates their
+    account, and from then on a passkey signs them in. Then grant them a role as below. Issue a
+    token (the steps after the grant) only to someone who also works from the command line; an
+    invited person already exists, so skip "Create the person" for them.
 
 The steps below give a person called `alice` access to the environment `dev`. Use your own names.
 
@@ -29,6 +35,17 @@ It can do nothing yet. Next:
 ```
 
 A principal can do nothing until it has a grant. The command prints the two steps that follow.
+
+A new name must not look like an existing one. It is compared with every principal, active or
+deactivated, after Unicode NFKC normalisation and case folding, so while `alice` exists these are
+refused (409): `Alice`, `ALICE`, and the fullwidth `ａｌｉｃｅ`; `STRASSE` collides with `straße`
+and `file` with `ﬁle`. A name an open invite of the web interface holds is refused the same way
+until the invite is used, withdrawn or expires. A name is refused outright (422) when it holds a
+control character (such as a line break), an invisible format character (such as a zero-width
+space, a zero-width joiner, a soft hyphen or a direction mark), or starts with a combining mark
+(such as an accent with no letter before it), and when it has more than 255 characters as typed
+or once normalised (a ligature such as `ﬃ` counts as three). Choose another name, or withdraw the
+invite first.
 
 ## Grant the smallest set
 

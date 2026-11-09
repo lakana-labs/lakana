@@ -25,6 +25,7 @@ from lakana_core.connections.endpoints import endpoint_hosts
 from lakana_core.db import refuse_concurrent_change
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, ValidationError
 from lakana_core.identifiers import shown
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
     AuditEventType,
@@ -323,8 +324,11 @@ class SecretService:
             If `use` is an index, repository or connection and the environment itself uses a
             secret of this name, for storage or webhooks, or `use` is a connection of another
             environment.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_SECRET, Securable.environment_scope(environment))
+        require_step_up(p)
         env = self._get_environment(environment)
         with refuse_concurrent_change(self._session, f"Secret '{shown(name)}'"):
             if use is not None:
@@ -404,11 +408,14 @@ class SecretService:
             environment.
         PermissionDenied
             If the acting principal may not manage secrets in the secret's environment.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         secret = self._get_secret(secret_id)
         env = self._session.get(Environment, secret.environment_id)
         assert env is not None  # nosec B101 -- environment_id is a non-nullable FK with ON DELETE CASCADE
         self._authz.authorize(p, Action.MANAGE_SECRET, Securable.environment_scope(env.name))
+        require_step_up(p)
         with refuse_concurrent_change(self._session, f"Secret '{shown(secret.name)}'"):
             self._bind_locked(p, secret, env, use)
         return secret
@@ -623,11 +630,14 @@ class SecretService:
         PermissionDenied
             If the acting principal may not manage secrets in this
             secret's environment.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         secret = self._get_secret(secret_id)
         env = self._session.get(Environment, secret.environment_id)
         assert env is not None  # nosec B101 -- environment_id is a non-nullable FK with ON DELETE CASCADE
         self._authz.authorize(p, Action.MANAGE_SECRET, Securable.environment_scope(env.name))
+        require_step_up(p)
         if secret.revoked_at is not None:
             raise ValidationError(f"Secret {secret_id} has been revoked and cannot be rotated.")
         rotate_values(self._session, self._key_provider, p, secret, values)

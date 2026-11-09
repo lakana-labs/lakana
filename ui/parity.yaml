@@ -74,6 +74,9 @@
 "index show": { class: ui, part: 8 }
 "index update": { class: ui, part: 8 }
 "init": { class: git, reason: "project init" }
+"invite create": { class: ui, part: 1 }
+"invite list": { class: ui, part: 1 }
+"invite withdraw": { class: ui, part: 1 }
 "job list": { class: read, part: 5 }
 "job notification": { class: ui, part: 5 }
 "job notify-test": { class: ui, part: 5 }
@@ -90,6 +93,8 @@
 "ns get": { class: read, part: 3 }
 "ns list": { class: read, part: 3 }
 "orphans": { class: ui, part: 3 }
+"passkey list": { class: ui, part: 1 }
+"passkey remove": { class: ui, part: 1 }
 "principal create": { class: ui, part: 7 }
 "principal deactivate": { class: ui, part: 7 }
 "principal get": { class: ui, part: 7 }
@@ -104,6 +109,9 @@
 "query status": { class: ui, part: 4 }
 "query submit": { class: ui, part: 4 }
 "query wait": { class: ui, part: 4 }
+"recovery create": { class: ui, part: 1 }
+"recovery list": { class: ui, part: 1 }
+"recovery withdraw": { class: ui, part: 1 }
 "repo add": { class: ui, part: 8 }
 "repo list": { class: ui, part: 8 }
 "repo remove": { class: ui, part: 8 }
@@ -130,6 +138,11 @@
 "server start": { class: git, reason: "local dev tooling" }
 "server status": { class: git, reason: "local dev tooling" }
 "server stop": { class: git, reason: "local dev tooling" }
+"session end": { class: ui, part: 1 }
+"session list": { class: ui, part: 1 }
+"sign-in settings": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"sign-in setup-link":
+  { class: git, reason: "local deployment tooling: prints the first administrator's link" }
 "sql": { class: ui, part: 4, note: "--into (write into a table) is Git, see table append" }
 "table append":
   {
@@ -193,11 +206,17 @@
 "DELETE /api/v1/grants/{grant_id}": { class: ui, part: 7 }
 "DELETE /api/v1/groups/{name}": { class: ui, part: 7 }
 "DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
+"DELETE /api/v1/invites/{invite_id}": { class: ui, part: 1 }
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
+"DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
+"DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7 }
+"DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1 }
 "DELETE /api/v1/repositories/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7 }
+"DELETE /api/v1/sign-in/notices/{notice_id}": { class: ui, part: 1 }
+"DELETE /api/v1/sign-in/session": { class: ui, part: 1 }
 "DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7 }
 "GET /api/v1/access/export":
   { class: ui, part: 7, note: "a download of the live access as an access file" }
@@ -263,16 +282,31 @@
 "GET /api/v1/groups": { class: ui, part: 7 }
 "GET /api/v1/groups/{name}/members": { class: ui, part: 7 }
 "GET /api/v1/info": { class: read, part: 8 }
+"GET /api/v1/invites": { class: ui, part: 1 }
 "GET /api/v1/package-indexes": { class: ui, part: 8 }
 "GET /api/v1/package-indexes/{name}": { class: ui, part: 8 }
-"GET /api/v1/principals": { class: ui, part: 7 }
-"GET /api/v1/principals/{name}": { class: ui, part: 7 }
-"GET /api/v1/principals/{name}/permissions": { class: ui, part: 7 }
+"GET /api/v1/principals":
+  {
+    class: ui,
+    part: 7,
+    note: "Access → People lists and finds people from 1b; the full screen in 7",
+  }
+"GET /api/v1/principals/{name}":
+  { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }
+"GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
+"GET /api/v1/principals/{name}/permissions":
+  { class: ui, part: 7, note: "1b asks it whether a person is an administrator (recovery links)" }
+"GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
+"GET /api/v1/recovery-links": { class: ui, part: 1 }
 "GET /api/v1/repositories": { class: ui, part: 8 }
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
 "GET /api/v1/row-filters": { class: ui, part: 7 }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
+"GET /api/v1/settings/sign-in":
+  { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"GET /api/v1/sign-in/notices": { class: ui, part: 1 }
+"GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
 "GET /api/v1/whoami": { class: read, part: 1 }
@@ -286,6 +320,8 @@
 "PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8 }
 "PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8 }
+"PATCH /api/v1/settings/sign-in":
+  { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "PATCH /api/v1/whoami": { class: ui, part: 1 }
 "POST /api/v1/access/apply":
   {
@@ -357,11 +393,25 @@
 "POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }
 "POST /api/v1/grants": { class: ui, part: 7 }
 "POST /api/v1/groups": { class: ui, part: 7 }
+"POST /api/v1/invites": { class: ui, part: 1 }
 "POST /api/v1/package-indexes": { class: ui, part: 8 }
 "POST /api/v1/principals": { class: ui, part: 7 }
+"POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
+"POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1 }
+"POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "POST /api/v1/repositories": { class: ui, part: 8 }
 "POST /api/v1/row-filters": { class: ui, part: 7 }
+"POST /api/v1/sign-in/links/describe": { class: ui, part: 1 }
+"POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }
+"POST /api/v1/sign-in/local-link":
+  { class: git, reason: "local tooling: server start --local signs the browser in" }
+"POST /api/v1/sign-in/passkey": { class: ui, part: 1 }
+"POST /api/v1/sign-in/passkey/options": { class: ui, part: 1 }
+"POST /api/v1/sign-in/setup-link":
+  { class: git, reason: "local deployment tooling: the Compose set-up prints the first link" }
+"POST /api/v1/sign-in/step-up": { class: ui, part: 1 }
+"POST /api/v1/sign-in/step-up/options": { class: ui, part: 1 }
 "POST /api/v1/task-tokens":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
 "PUT /api/v1/environments/{environment_name}/secrets/{secret_name}/use": { class: ui, part: 7 }

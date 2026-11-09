@@ -163,7 +163,7 @@ jobs:
         run: |
           # Anything but a pull request that provably changes nothing relevant runs the job.
           if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null \
-            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|packages/lakana-server/(src/lakana_server/ui|tests/test_ui_real_build)\.py|\.github/workflows/ci\.yml)'; then
+            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|packages/lakana-(server|core)/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|packages/lakana-server/(src/lakana_server/ui|tests/test_ui_real_build)\.py|\.github/workflows/ci\.yml)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "No change to ui/ or its gates: skipping the interface's gates."
@@ -217,6 +217,11 @@ jobs:
         run: |
           npx --prefix ui playwright install --with-deps chromium
           npm --prefix ui run e2e:smoke
+      # The sign-in end to end: a real lakana-server on a fresh SQLite database serves the build
+      # that was just made (Firefox and WebKit run nightly in canary.yml).
+      - if: steps.scope.outputs.run == 'true'
+        name: Playwright against lakana-server (Chromium)
+        run: npm --prefix ui run e2e:server -- --project=chromium
       - if: steps.scope.outputs.run == 'true'
         name: every gate fails on a violation
         env:

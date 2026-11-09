@@ -55,6 +55,9 @@ def create_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Create a CI trust rule.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -187,6 +190,9 @@ def update_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Change a CI trust rule.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -231,11 +237,14 @@ def enable_ci_trust_rule(
 ) -> CiTrustRuleOut:
     """Enable a CI trust rule.
 
+    Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422
+    when its conditions no longer meet the requirements of a new rule.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
-    Needs the `ADMIN` role on the instance. Answers 404 when there is no such rule and 422
-    when its conditions no longer meet the requirements of a new rule.
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Parameters
     ----------
@@ -261,6 +270,9 @@ def disable_ci_trust_rule(
     service: CiTrustRuleService = Depends(get_ci_trust_rule_service),
 ) -> CiTrustRuleOut:
     """Disable a CI trust rule.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
@@ -292,6 +304,9 @@ def delete_ci_trust_rule(
     service: CiTrustRuleService = Depends(get_ci_trust_rule_service),
 ) -> None:
     """Delete a CI trust rule.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).

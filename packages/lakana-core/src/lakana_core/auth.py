@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from lakana_core.identifiers import NamespacePath
 
@@ -220,6 +220,44 @@ class WriteFence:
 
 
 @dataclass(frozen=True)
+class SessionContext:
+    """The browser session a principal was authenticated with; carried on `PrincipalRef.session`.
+
+    Read from the session's row at every request (`lakana_core.identity.sessions`), never
+    from the cookie's text.
+
+    Parameters
+    ----------
+    session_id
+        The session row's id.
+    key_id
+        The session's public lookup key (the part of the cookie before the first ``_``).
+    via
+        How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.
+    created_at
+        When it began.
+    last_touch_at
+        The last passkey touch in this session; `None` for none. Step-up
+        (`lakana_core.identity.sessions.require_step_up`) asks for one no older than 15 minutes.
+    source_pat_id
+        The personal access token the session was created through (a local sign-in link);
+        `None` otherwise. The session ends when that token is revoked or expires.
+    verified_at
+        When the session was read for this request, by the session service's clock (the app's
+        clock, `app.state.clock`, in the server). Step-up measures against it unless a caller
+        passes its own time, so every route ages a touch by the same clock.
+    """
+
+    session_id: uuid.UUID
+    key_id: str
+    via: str
+    created_at: datetime
+    last_touch_at: datetime | None
+    source_pat_id: uuid.UUID | None
+    verified_at: datetime
+
+
+@dataclass(frozen=True)
 class PrincipalRef:
     """The actor on whose behalf an operation runs.
 
@@ -258,6 +296,15 @@ class PrincipalRef:
     language
         The principal's preferred language for catalog texts, read when the credential was
         verified; `None` for none.
+    credential
+        The kind of credential the request presented: ``pat``, ``task``, ``ci`` or
+        ``session``; `None` where a reference is built without one (the server's bootstrap,
+        the worker's own references).
+    session
+        Set when the principal was authenticated with a browser session; `None` otherwise.
+    token_id
+        The verified personal access token's row id (``credential == "pat"``); `None` for
+        every other credential.
     """
 
     id: uuid.UUID
@@ -270,6 +317,9 @@ class PrincipalRef:
     write_fence: WriteFence | None = None
     ci_scope: CiScope | None = None
     language: str | None = None
+    credential: Literal["pat", "task", "ci", "session"] | None = None
+    session: SessionContext | None = None
+    token_id: uuid.UUID | None = None
 
 
 class SecurableKind(enum.StrEnum):

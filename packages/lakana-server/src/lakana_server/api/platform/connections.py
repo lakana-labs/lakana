@@ -89,6 +89,9 @@ def create_connection(
 ) -> ConnectionOut:
     """Create a connection.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Creates a connection of the environment: its kind, address and settings, and its secret,
     either new values (stored as a new secret `<name>-connection`, or the next free
     `<name>-connection-N` when a secret holds that name, born bound to it, never shown again)
@@ -209,6 +212,9 @@ def update_connection(
     service: ConnectionService = Depends(get_connection_service),
 ) -> ConnectionOut:
     """Change a connection.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Changes its address, settings or secret; its name and kind never change. New secret values
     set its own secret again (or create the next free `<name>-connection`); `clear` with

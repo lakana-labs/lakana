@@ -254,6 +254,9 @@ def set_run_as(
 ) -> DeploymentOut:
     """Set the service account a deployment runs as.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Binds the service account whose rights the runs of this deployment use to write. Needs
     `MANAGE_ENVIRONMENT` on the environment. Answers 404 when the environment, repository,
     deployment or service account does not exist (one message for a missing or non-service

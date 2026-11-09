@@ -113,7 +113,7 @@ def test_an_explicit_summary_and_description_win() -> None:
 
 
 def test_errors_document_each_status_once_with_the_error_body() -> None:
-    """Each code has a description and the ``detail``/``type`` body of the platform API."""
+    """Each code has a description and the ``detail``/``type`` (``reason``) body of the API."""
     router = APIRouter(route_class=AuthenticateFirstRoute)
 
     @router.get("/x", responses=errors(404, 409))
@@ -125,7 +125,7 @@ def test_errors_document_each_status_once_with_the_error_body() -> None:
     assert responses["404"]["description"] == ERROR_MEANING[404]
     schema = responses["409"]["content"]["application/json"]["schema"]
     assert schema == {"$ref": "#/components/schemas/ErrorOut"}
-    assert set(ErrorOut.model_fields) == {"detail", "type"}
+    assert set(ErrorOut.model_fields) == {"detail", "type", "reason", "state"}
 
 
 def test_an_unknown_status_is_refused() -> None:

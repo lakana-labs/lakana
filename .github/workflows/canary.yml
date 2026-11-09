@@ -3,7 +3,9 @@ name: Dependency canary
 # Installs Lakana as a user does, with every third-party dependency unpinned, and runs the
 # five-minute test. The lock cannot catch a breaking release of a dependency, because a
 # `pip install` ignores it: this job sees one within a day. A failure is a failed scheduled
-# run, which scheduled-failure.yml turns into an issue; this job writes nothing back.
+# run, which scheduled-failure.yml turns into an issue; this job writes nothing back. The second
+# job, `ui-browsers`, runs the sign-in end-to-end tests of the web interface against a real
+# lakana-server in Firefox and WebKit, which a pull request tests in Chromium only.
 
 on:
   schedule:
@@ -37,3 +39,25 @@ jobs:
       - name: Show the resolved versions and the timings
         if: ${{ always() }}
         run: cat "$RUNNER_TEMP/out.md" >> "$GITHUB_STEP_SUMMARY" || true
+
+  ui-browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: uv sync --all-packages --locked
+      - run: npm ci --ignore-scripts --prefix ui
+      - run: npm --prefix ui run build
+      - run: npx --prefix ui playwright install --with-deps firefox webkit
+      - run: npm --prefix ui run e2e:server -- --project=firefox --project=webkit

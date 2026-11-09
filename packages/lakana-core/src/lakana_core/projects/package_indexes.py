@@ -33,6 +33,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.identifiers import is_secret_name, shown, validate_path_component
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import AuditEventType, PackageIndex
 from lakana_core.projects.lookups import live_environment_names
 from lakana_core.projects.package_sources import RegisteredIndex, normalize_index_url
@@ -283,8 +284,11 @@ class PackageIndexService:
             If the name or the URL is taken, including by a concurrent create.
         ConflictError
             If the commit fails for a reason other than a collision.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_PACKAGE_INDEX, Securable.instance_scope())
+        require_step_up(p)
         _validate_name(name)
         stored = normalize_index_url(url, credential=credential_secret is not None)
         _validate_secret_name(credential_secret)
@@ -454,8 +458,11 @@ class PackageIndexService:
             change.
         ConflictError
             If the commit fails for a reason other than a collision.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_PACKAGE_INDEX, Securable.instance_scope())
+        require_step_up(p)
         row = self._find(name)
         if not changes:
             raise ValidationError("Nothing to change; name at least one field.")

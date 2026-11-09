@@ -2356,6 +2356,11 @@ class WhoamiOut(BaseModel):
         The CI token's scope when the caller authenticated with one; `None` otherwise.
     language
         Your preferred language for catalog texts; `null` for none.
+    admin
+        Whether you hold the `ADMIN` role on the instance (directly or through a group).
+    has_access
+        Whether you have any grant at all, at any scope, directly or through a group; `false`
+        for a new person nobody has granted anything yet.
     """
 
     name: str
@@ -2363,6 +2368,8 @@ class WhoamiOut(BaseModel):
     task_token: TaskTokenScopeOut | None
     ci_token: CiTokenScopeOut | None = None
     language: str | None = None
+    admin: bool = False
+    has_access: bool = False
 
 
 class ProfileIn(BaseModel):
@@ -5205,3 +5212,459 @@ class AccessStatusOut(BaseModel):
 
     scopes: list[ManagedScopeOut]
     overrides: list[AccessOverrideOut]
+
+
+class SessionOut(BaseModel):
+    """Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.
+
+    Carries no secret: neither the cookie, nor the CSRF token, nor any hash of them.
+
+    Parameters
+    ----------
+    name
+        The signed-in person's principal name.
+    display_name
+        The person's display name; `null` for none.
+    type
+        The principal type (always ``USER``: service accounts cannot sign in).
+    via
+        How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.
+    step_up_until
+        Until when actions that need a fresh passkey touch are allowed without another touch;
+        `null` when the session has no touch.
+    needs_passkey
+        Whether the person must register a passkey before going on (a session from a setup,
+        invite or recovery link on an account without a usable passkey).
+    offer_passkey
+        Whether the interface offers, without forcing, to register a passkey (a local sign-in
+        on an account without one).
+    absolute_expires_at
+        When the session ends at the latest, however active.
+    """
+
+    name: str
+    display_name: str | None
+    type: Literal["USER", "SERVICE_ACCOUNT"]
+    via: str
+    step_up_until: datetime | None
+    needs_passkey: bool
+    offer_passkey: bool
+    absolute_expires_at: datetime
+
+
+class BrowserSessionOut(BaseModel):
+    """One open browser session of a person, in `GET /api/v1/principals/{name}/sessions`.
+
+    Carries no secret and no part of the cookie.
+
+    Parameters
+    ----------
+    id
+        The session's id.
+    via
+        How the session began.
+    created_at
+        When it began.
+    last_seen_at
+        About when the person last used it (written at most once a minute).
+    absolute_expires_at
+        When it ends at the latest.
+    user_agent
+        The browser it began in, as the browser named itself.
+    peer
+        The address it began from, as the server saw it.
+    current
+        Whether this is the session of the request that asks.
+    """
+
+    id: uuid.UUID
+    via: str
+    created_at: datetime
+    last_seen_at: datetime
+    absolute_expires_at: datetime
+    user_agent: str
+    peer: str
+    current: bool
+
+
+class SignInBoundsOut(BaseModel):
+    """The limits an administrator may choose the session lengths between.
+
+    Parameters
+    ----------
+    idle_timeout_minutes_min
+        The shortest idle timeout, in minutes.
+    idle_timeout_minutes_max
+        The longest idle timeout, in minutes.
+    absolute_lifetime_minutes_min
+        The shortest absolute lifetime, in minutes.
+    absolute_lifetime_minutes_max
+        The longest absolute lifetime, in minutes.
+    """
+
+    idle_timeout_minutes_min: int
+    idle_timeout_minutes_max: int
+    absolute_lifetime_minutes_min: int
+    absolute_lifetime_minutes_max: int
+
+
+class SignInSettingsOut(BaseModel):
+    """Response body of `GET` and `PATCH /api/v1/settings/sign-in`.
+
+    Parameters
+    ----------
+    idle_timeout_minutes
+        How long a session lasts without a request the person started, in minutes.
+    absolute_lifetime_minutes
+        How long a session lasts at most, in minutes.
+    bounds
+        The limits both may be chosen between.
+    """
+
+    idle_timeout_minutes: int
+    absolute_lifetime_minutes: int
+    bounds: SignInBoundsOut
+
+
+class SignInSettingsIn(BaseModel):
+    """Request body of `PATCH /api/v1/settings/sign-in`; a field left out keeps its value.
+
+    A change applies to sessions that begin afterwards; open sessions keep their lengths.
+
+    Parameters
+    ----------
+    idle_timeout_minutes
+        The new idle timeout, in minutes (15 to 1440).
+    absolute_lifetime_minutes
+        The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than
+        the idle timeout.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    idle_timeout_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
+    absolute_lifetime_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
+
+
+class LinkIdIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/links/describe`: the link's public id only.
+
+    Parameters
+    ----------
+    link_id
+        The public id, the ``l=`` part after the ``#`` of the link.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    link_id: str = Field(min_length=1, max_length=64)
+
+
+class LinkRedeemIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/links/redeem`: the link's two halves.
+
+    Parameters
+    ----------
+    link_id
+        The public id, the ``l=`` part after the ``#`` of the link.
+    secret
+        The secret, the ``s=`` part. Never logged and never stored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    link_id: str = Field(min_length=1, max_length=64)
+    secret: str = Field(min_length=1, max_length=128)
+
+
+class LinkDescriptionOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/links/describe`: what the sign-in page shows.
+
+    Parameters
+    ----------
+    kind
+        ``setup``, ``invite``, ``recovery`` or ``local``.
+    name
+        The principal name the link signs in as (an invite: the account it creates).
+    display_name
+        The person's display name, if one is known.
+    state
+        Always ``open`` here; a link that cannot be used answers 410 with its state.
+    """
+
+    kind: str
+    name: str
+    display_name: str | None
+    state: str
+
+
+class SignInOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/links/redeem`; the session comes as a cookie.
+
+    Parameters
+    ----------
+    name
+        The principal name now signed in.
+    needs_passkey
+        Whether the person must register a passkey now (setup, invite and recovery links on an
+        account without one).
+    offer_passkey
+        Whether the interface offers, never forces, a passkey (a local link on an account
+        without one).
+    csrf_token
+        The session's CSRF token, shown here only: send it in `X-Lakana-CSRF` with every
+        request that carries the session cookie, reads too. Keep it in the page's own storage;
+        the server keeps only its hash and never returns it again.
+    """
+
+    name: str
+    needs_passkey: bool
+    offer_passkey: bool
+    csrf_token: str
+
+
+class IssuedLinkOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/setup-link` and `/local-link`.
+
+    Parameters
+    ----------
+    url
+        The link, shown only here: whoever has it can sign in once until it expires.
+    expires_at
+        When it stops working.
+    """
+
+    url: str
+    expires_at: datetime
+
+
+class InviteIn(BaseModel):
+    """Request body of `POST /api/v1/invites`.
+
+    Parameters
+    ----------
+    name
+        The new person's principal name; refused if any principal or open invite has it in
+        any letter case.
+    display_name
+        The person's name as the interface shows it; optional.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
+
+
+class InviteOut(BaseModel):
+    """Response body of `POST /api/v1/invites`: the invite with its link, shown only here.
+
+    Parameters
+    ----------
+    id
+        The invite's id, to withdraw it by.
+    name
+        The principal name the invite creates.
+    display_name
+        The display name, if one was given.
+    url
+        The link to send to the person; valid for 7 days, once.
+    expires_at
+        When it stops working.
+    """
+
+    id: uuid.UUID
+    name: str
+    display_name: str | None
+    url: str
+    expires_at: datetime
+
+
+class OpenInviteOut(BaseModel):
+    """One open invite in `GET /api/v1/invites`; without its link, which is shown only once.
+
+    Parameters
+    ----------
+    id
+        The invite's id.
+    name
+        The principal name it creates.
+    display_name
+        The display name, if one was given.
+    created_at
+        When it was issued.
+    expires_at
+        When it stops working.
+    """
+
+    id: uuid.UUID
+    name: str
+    display_name: str | None
+    created_at: datetime
+    expires_at: datetime
+
+
+class RecoveryLinkOut(BaseModel):
+    """Response body of `POST /api/v1/principals/{name}/recovery-link`, shown only here.
+
+    Parameters
+    ----------
+    id
+        The link's id, to withdraw it by.
+    name
+        The person it recovers.
+    url
+        The link to send to the person; valid for 1 hour, once.
+    expires_at
+        When it stops working.
+    """
+
+    id: uuid.UUID
+    name: str
+    url: str
+    expires_at: datetime
+
+
+class OpenRecoveryLinkOut(BaseModel):
+    """One open recovery link in `GET /api/v1/recovery-links`; without the link itself.
+
+    Parameters
+    ----------
+    id
+        The link's id.
+    name
+        The person it recovers.
+    created_at
+        When it was issued.
+    expires_at
+        When it stops working.
+    """
+
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class SignInNoticeOut(BaseModel):
+    """One sign-in notice of the caller, in `GET /api/v1/sign-in/notices`.
+
+    Parameters
+    ----------
+    id
+        The notice's id, to dismiss it by.
+    kind
+        What happened, such as ``recovery_used`` (a recovery link was used).
+    subject
+        The name of the person it is about, if any.
+    created_at
+        When it happened.
+    """
+
+    id: uuid.UUID
+    kind: str
+    subject: str | None
+    created_at: datetime
+
+
+class PasskeyOptionsOut(BaseModel):
+    """Response body of the passkey options routes: one WebAuthn ceremony to answer.
+
+    Parameters
+    ----------
+    ceremony_id
+        Sent back with the browser's answer. The challenge works once, for 5 minutes.
+    public_key
+        The ``publicKey`` options in their JSON form: the interface passes them to
+        `PublicKeyCredential.parseCreationOptionsFromJSON` (adding a passkey) or
+        `parseRequestOptionsFromJSON` (signing in, step-up).
+    """
+
+    ceremony_id: uuid.UUID
+    public_key: dict[str, Any]
+
+
+class PasskeyAnswerIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/passkey` and `POST /api/v1/sign-in/step-up`.
+
+    Parameters
+    ----------
+    ceremony_id
+        The id the options route returned.
+    answer
+        Sent as ``credential``: the browser's `credential.toJSON()` for that ceremony. Never
+        logged and never stored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ceremony_id: uuid.UUID
+    # Named `answer` in Python, so no route reads a `.credential` attribute: that name is the
+    # principal's credential kind, which the session parity test keeps out of route modules.
+    answer: dict[str, Any] = Field(alias="credential")
+
+
+class PasskeyRegisterIn(BaseModel):
+    """Request body of `POST /api/v1/principals/{name}/passkeys`.
+
+    Parameters
+    ----------
+    ceremony_id
+        The id `POST /api/v1/principals/{name}/passkeys/options` returned.
+    answer
+        Sent as ``credential``: the browser's `credential.toJSON()` for that ceremony.
+    name
+        What to call the passkey, such as the device it is on; ``Passkey`` when left out.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ceremony_id: uuid.UUID
+    answer: dict[str, Any] = Field(alias="credential")
+    name: str | None = Field(default=None, max_length=100)
+
+
+class PasskeyOut(BaseModel):
+    """One passkey of a person; never its key or its credential id.
+
+    Parameters
+    ----------
+    id
+        The passkey's id, for removing it.
+    name
+        What its person called it.
+    created_at
+        When it was added.
+    last_used_at
+        When it last signed in or confirmed a step-up; `None` for never.
+    backup_eligible
+        Whether it is a synced passkey (for example in a password manager or a platform
+        account), which may exist on several devices.
+    disabled_reason
+        ``possible_clone`` when it was disabled because its signature counter went backwards;
+        `None` while it works.
+    usable_here
+        Whether it was registered for this server's current public address. Changing the
+        address (`LAKANA_UI__PUBLIC_URL`) leaves earlier passkeys unusable.
+    """
+
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    last_used_at: datetime | None
+    backup_eligible: bool
+    disabled_reason: str | None
+    usable_here: bool
+
+
+class StepUpOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/step-up`.
+
+    Parameters
+    ----------
+    step_up_until
+        Until when step-up actions (such as adding or removing a passkey) need no new passkey
+        touch in this session.
+    """
+
+    step_up_until: datetime

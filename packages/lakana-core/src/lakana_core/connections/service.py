@@ -57,6 +57,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.identifiers import shown
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
     AuditEventType,
@@ -413,6 +414,34 @@ class ConnectionService:
             raise NotFoundError(f"No environment named '{shown(name)}'.")
         return env
 
+    def _managed_environment(self, p: PrincipalRef, name: str) -> Environment:
+        """Authorize `MANAGE_CONNECTION` and a fresh passkey touch, then look the environment up.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        name
+            The environment's name.
+
+        Returns
+        -------
+        Environment
+            The row.
+
+        Raises
+        ------
+        PermissionDenied
+            Without `MANAGE_CONNECTION` on the environment.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
+        NotFoundError
+            If there is no such environment.
+        """
+        self._authz.authorize(p, Action.MANAGE_CONNECTION, Securable.environment_scope(name))
+        require_step_up(p)
+        return self._environment(name)
+
     def _find(self, env: Environment, name: str, *, lock: bool = False) -> Connection:
         """Look up a connection of an environment; the caller has authorized.
 
@@ -605,10 +634,11 @@ class ConnectionService:
             If the new secret's name was taken at the same time.
         LakanaError
             If no usable secrets master key is configured; nothing is kept.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         scope = Securable.environment_scope(environment)
-        self._authz.authorize(p, Action.MANAGE_CONNECTION, scope)
-        env = self._environment(environment)
+        env = self._managed_environment(p, environment)
         if not isinstance(name, str) or not NAME.match(name):
             raise ValidationError(_NAME_RULE)
         new_address, new_settings = validate_connection(kind, address, settings)
@@ -798,10 +828,10 @@ class ConnectionService:
             If the new secret's name was taken at the same time.
         LakanaError
             If no usable secrets master key is configured; nothing is kept.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
-        scope = Securable.environment_scope(environment)
-        self._authz.authorize(p, Action.MANAGE_CONNECTION, scope)
-        env = self._environment(environment)
+        env = self._managed_environment(p, environment)
         clear = list(clear)
         if (
             address is None

@@ -13,7 +13,12 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.roles import Role
-from lakana_core.grants.service import assert_admin_headroom
+from lakana_core.grants.service import (
+    assert_admin_headroom,
+    mark_admin_holders,
+    withdraw_links_of_lapsed_issuers,
+)
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AuditEventType,
     ColumnMask,
@@ -178,8 +183,14 @@ class GroupService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
+        # jscpd:ignore-start -- every public method calls the guard itself, then step-up
+        # (test_admin_only_call_sites.py enumerates the calls), so this pair repeats by design.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        require_step_up(p)
+        # jscpd:ignore-end
         group = self._get_group(name)
         guard_change(self._session, p, environment=None, change=f"delete group {name}")
         self._session.execute(
@@ -305,8 +316,14 @@ class GroupService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
+        # jscpd:ignore-start -- every public method calls the guard itself, then step-up
+        # (test_admin_only_call_sites.py enumerates the calls), so this pair repeats by design.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        require_step_up(p)
+        # jscpd:ignore-end
         group = self._get_group(group_name)
         principal = self._get_member_principal(principal_name)
         existing = self._session.execute(
@@ -321,6 +338,7 @@ class GroupService:
             self._session, p, environment=None, change=f"add {principal_name} to {group_name}"
         )
         self._session.add(GroupMembership(group_id=group.id, principal_id=principal.id))
+        mark_admin_holders(self._session)
         AuditService(self._session).record(
             p.id,
             AuditEventType.GROUP_MEMBER_ADDED,
@@ -333,6 +351,10 @@ class GroupService:
         self, p: PrincipalRef, group_name: str, principal_name: str, *, commit: bool = True
     ) -> None:
         """Remove a principal from a group.
+
+        Leaving a group that holds instance ADMIN withdraws the person's open invites and
+        recovery links if that was their last way to ADMIN
+        (`lakana_core.grants.service.withdraw_links_of_lapsed_issuers`).
 
         Parameters
         ----------
@@ -356,8 +378,14 @@ class GroupService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
+        # jscpd:ignore-start -- every public method calls the guard itself, then step-up
+        # (test_admin_only_call_sites.py enumerates the calls), so this pair repeats by design.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        require_step_up(p)
+        # jscpd:ignore-end
         group = self._get_group(group_name)
         principal = self._get_member_principal(principal_name)
         membership = self._session.execute(
@@ -371,7 +399,8 @@ class GroupService:
         guard_change(
             self._session, p, environment=None, change=f"remove {principal_name} from {group_name}"
         )
-        if self._grants_instance_admin(group.id):
+        admin_group = self._grants_instance_admin(group.id)
+        if admin_group:
             assert_admin_headroom(self._session, excluding_membership=(group.id, principal.id))
         self._session.delete(membership)
         AuditService(self._session).record(
@@ -379,6 +408,8 @@ class GroupService:
             AuditEventType.GROUP_MEMBER_REMOVED,
             detail={"group": group_name, "principal": principal_name},
         )
+        if admin_group:
+            withdraw_links_of_lapsed_issuers(self._session, actor_id=p.id)
         if commit:
             self._session.commit()
 

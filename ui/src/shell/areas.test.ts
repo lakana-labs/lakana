@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ALL_SHIPPED, AREAS, type AreaId, visibleAreas } from "./areas";
+import { ALL_SHIPPED, AREAS, type AreaId, areasFor, visibleAreas } from "./areas";
 import { initI18n } from "../i18n/i18n";
 
 const i18n = initI18n();
@@ -37,5 +37,10 @@ describe("areas", () => {
       expect(i18n.t(`areas.${area.id}.purpose`)).not.toBe(`areas.${area.id}.purpose`);
       expect(area.cli).toMatch(/^lakana /);
     }
+  });
+
+  it("gives Access and Settings to administrators only", () => {
+    expect([...areasFor(true)]).toEqual([...ALL_SHIPPED]);
+    expect([...areasFor(false)]).toEqual(["home", "catalog", "queries", "jobs", "connections"]);
   });
 });

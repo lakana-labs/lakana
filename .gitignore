@@ -31,6 +31,7 @@ jscpd-report/
 packages/lakana-server/src/lakana_server/ui_dist/
 ui/coverage/
 ui/test-results/
+ui/.e2e-server/
 ui/playwright-report/
 jscpd-report-ui/
 # ui/build/ holds source (the build targets), not a Python build: keep it.

@@ -392,6 +392,10 @@ _EXEMPT = {
     "to check a role of",
     ("GrantService", "check_target"): "validates without writing; its caller (`grant`/`create`, "
     "or `AccessService`) has authorized",
+    ("GrantService", "has_any_grant"): "answers about the caller only (`whoami`), reading "
+    "nothing about anyone else and writing nothing",
+    ("GrantService", "is_admin"): "answers about the caller only (`whoami`), reading nothing "
+    "about anyone else and writing nothing",
     ("CiTrustRuleService", "check_rule"): "validates without writing; its caller "
     "(`grant`/`create`, or `AccessService`) has authorized",
 }

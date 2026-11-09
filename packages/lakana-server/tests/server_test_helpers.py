@@ -5,14 +5,22 @@ import json
 import tempfile
 import uuid
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from minio import Minio
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
+from lakana_core.auth import AllowAllAuthorization
+from lakana_core.identity.sessions import SessionService, utc_now
+from lakana_core.models import BrowserSession, Principal
+from lakana_server.browser_session import CSRF_HEADER, cookie_name
 from tests.conftest import AUTH_HEADER
 
 _MINIMAL_SCHEMA = {
@@ -358,3 +366,76 @@ def upload_artifact(
     committed = client.post(f"{base}/uploads/{upload_id}/commit", headers=auth, json={})
     assert committed.status_code == 201, committed.text
     return committed.json()
+
+
+def signed_in(
+    client: TestClient,
+    principal: str,
+    *,
+    touched_at: datetime | None = None,
+    via: str = "passkey",
+) -> tuple[str, str, str]:
+    """Start a browser session for a principal directly through the session service.
+
+    Uses the app's clock (`app.state.clock`) and commits, as a sign-in route would.
+
+    Parameters
+    ----------
+    client
+        A started client of the app.
+    principal
+        The name of the person signing in (a user).
+    touched_at
+        The time of the session's last passkey touch, for step-up; `None` for none.
+    via
+        How the session began.
+
+    Returns
+    -------
+    tuple of (str, str, str)
+        The cookie's name, its value and the session's CSRF token.
+    """
+    app = cast(FastAPI, client.app)
+    clock = getattr(app.state, "clock", utc_now)
+    with Session(app.state.engine) as session:
+        principal_id = session.execute(
+            select(Principal.id).where(Principal.name == principal)
+        ).scalar_one()
+        started = SessionService(session, AllowAllAuthorization(), clock=clock).start(
+            principal_id,
+            via=via,
+            replacing=None,
+            peer="testclient",
+            user_agent="pytest",
+            touched=False,
+        )
+        if touched_at is not None:
+            row = session.execute(
+                select(BrowserSession).where(BrowserSession.key_id == started.key_id)
+            ).scalar_one()
+            row.last_touch_at = touched_at
+        session.commit()
+    return cookie_name(app.state.settings.public_origin()), started.cookie_value, started.csrf_token
+
+
+def session_headers(name: str, value: str, csrf: str | None = None) -> dict[str, str]:
+    """Build the headers of a request the interface sends with its session.
+
+    Parameters
+    ----------
+    name
+        The cookie's name.
+    value
+        The cookie's value.
+    csrf
+        The CSRF token, sent in `X-Lakana-CSRF`; `None` leaves the header out.
+
+    Returns
+    -------
+    dict of str to str
+        `Cookie`, and the CSRF header when given.
+    """
+    headers = {"Cookie": f"{name}={value}"}
+    if csrf is not None:
+        headers[CSRF_HEADER] = csrf
+    return headers

@@ -36,6 +36,9 @@ def create_principal(
 ) -> PrincipalOut:
     """Create a principal.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is
     managed by a file: for a person the override answers 422.
@@ -195,13 +198,16 @@ def deactivate_principal(
 ) -> None:
     """Deactivate a principal.
 
+    Stops the principal from signing in. The record stays, with every grant, token and audit
+    entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when
+    there is no principal of that name and 409 when it is the last active administrator.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited). Only a service account is
     managed by a file: for a person the override answers 422.
 
-    Stops the principal from signing in. The record stays, with every grant, token and audit
-    entry that refers to it. Needs `MANAGE_PRINCIPAL` on the instance. Answers 404 when
-    there is no principal of that name and 409 when it is the last active administrator.
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Parameters
     ----------

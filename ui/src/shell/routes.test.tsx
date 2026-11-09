@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { Page } from "./Page";
@@ -17,12 +17,13 @@ const shippedAreas = [
 ] as const;
 
 /**
- * The links that mark themselves as the current page.
+ * The sidebar's links that mark themselves as the current page (an area's tabs mark theirs too).
  *
  * @returns Their names.
  */
 function currentLinks(): string[] {
-  return screen
+  const sidebar = screen.getByRole("navigation", { name: "Areas" });
+  return within(sidebar)
     .getAllByRole("link")
     .filter((link) => link.getAttribute("aria-current") === "page")
     .map((link) => link.textContent);
@@ -33,7 +34,10 @@ describe("appRoutes", () => {
     renderShell(path);
 
     expect(await screen.findByRole("heading", { level: 1, name })).toBeInTheDocument();
-    expect(document.title).toBe(`${name} · Lakana`);
+    // A screen loaded on demand renders outside act(), so its title effect may come a moment later.
+    await waitFor(() => {
+      expect(document.title).toBe(`${name} · Lakana`);
+    });
     expect(currentLinks()).toEqual([name]);
   });
 
@@ -44,7 +48,7 @@ describe("appRoutes", () => {
       await screen.findByRole("heading", { level: 1, name: "This page does not exist" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Check the address, or start again from Home.")).toBeInTheDocument();
-    expect(screen.getByRole("navigation")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Areas" })).toBeInTheDocument();
     expect(document.title).toBe("This page does not exist · Lakana");
 
     await user.click(screen.getByRole("link", { name: "Go to Home" }));

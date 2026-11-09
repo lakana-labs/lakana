@@ -15,6 +15,7 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef
 from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.identity.tokens import generate_token, hash_secret, verify_secret
 from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
 
@@ -99,6 +100,7 @@ class PatService:
         expires_at: datetime | None = None,
         key_id: str | None = None,
         secret: str | None = None,
+        bootstrap: bool = False,
         commit: bool = True,
     ) -> IssuedPat:
         """Issue a new PAT for a principal.
@@ -124,6 +126,10 @@ class PatService:
         secret
             A specific secret to use instead of a freshly generated one.
             Same restriction as `key_id`.
+        bootstrap
+            Mark the PAT as the operator's token (`PersonalAccessToken.bootstrap`). Passed only
+            by `lakana_core.bootstrap.bootstrap_if_needed`; the platform API's request schema
+            has no such field, so a PAT an administrator issues, whatever its name, never is.
         commit
             If `False`, add the row and its audit event to the session
             without committing, and without this method's own
@@ -157,8 +163,11 @@ class PatService:
         sqlalchemy.exc.IntegrityError
             If the commit fails for any reason other than a key_id collision
             — e.g. the acting principal's audit foreign key.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        require_step_up(p)
         principal = self._get_principal(principal_name)
         fixed_credential = key_id is not None and secret is not None
         if fixed_credential:
@@ -181,6 +190,7 @@ class PatService:
                 name=name,
                 created_at=now,
                 expires_at=expires_at,
+                bootstrap=bootstrap,
             )
             self._session.add(pat)
             AuditService(self._session).record(
@@ -339,7 +349,8 @@ class PatService:
         Returns
         -------
         PrincipalRef
-            The principal this PAT authenticates as.
+            The principal this PAT authenticates as, with ``credential="pat"`` and the PAT's
+            row id as `token_id`.
 
         Raises
         ------
@@ -362,5 +373,10 @@ class PatService:
         pat.last_used_at = datetime.now(UTC)
         self._session.commit()
         return PrincipalRef(
-            id=principal.id, name=principal.name, type=principal.type, language=principal.language
+            id=principal.id,
+            name=principal.name,
+            type=principal.type,
+            language=principal.language,
+            credential="pat",
+            token_id=pat.id,
         )

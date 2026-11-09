@@ -102,6 +102,10 @@ services:
       LAKANA_BOOTSTRAP_PAT_KEY_ID: ${LAKANA_BOOTSTRAP_PAT_KEY_ID}
       LAKANA_BOOTSTRAP_PAT_SECRET: ${LAKANA_BOOTSTRAP_PAT_SECRET}
       LAKANA_REPO_ROOTS: '["/repos"]'
+      # The browser's address differs from the container's port, so the bundle names it. An
+      # .env from before these keys keeps the interface off at a placeholder address.
+      LAKANA_UI__ENABLED: ${LAKANA_UI__ENABLED:-false}
+      LAKANA_UI__PUBLIC_URL: ${LAKANA_UI__PUBLIC_URL:-http://localhost:8000}
     volumes: ["./repos:/repos:ro"]
     ports: ["${LAKANA_BIND}:${LAKANA_PORT}:8000"]
     # Healthy once the process answers /healthz, as in the image. Not /readyz: that one also

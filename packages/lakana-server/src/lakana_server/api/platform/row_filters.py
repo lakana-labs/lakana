@@ -105,6 +105,9 @@ def create_row_filter(
 ) -> RowFilterOut:
     """Create a row filter.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).
 
@@ -217,6 +220,9 @@ def revoke_row_filter(
     service: RowFilterService = Depends(get_row_filter_service),
 ) -> None:
     """Revoke a row filter.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Answers 409 when an access file manages the scope; `override_managed` with
     `override_reason` overrides it (ADMIN on the instance; audited).

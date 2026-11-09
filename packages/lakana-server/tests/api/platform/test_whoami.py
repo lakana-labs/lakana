@@ -3,6 +3,7 @@
 from fastapi.testclient import TestClient
 
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import create_environment
 
 
 def test_whoami_describes_a_pat_caller(client: TestClient) -> None:
@@ -16,6 +17,8 @@ def test_whoami_describes_a_pat_caller(client: TestClient) -> None:
         "task_token": None,
         "ci_token": None,
         "language": None,
+        "admin": True,
+        "has_access": True,
     }
 
 
@@ -44,6 +47,8 @@ def test_whoami_describes_a_task_token_callers_scope(client: TestClient) -> None
         "task_token": {"environment": "dev", "asset_scope": ["gold.sales"]},
         "ci_token": None,
         "language": None,
+        "admin": True,
+        "has_access": True,
     }
 
 
@@ -109,3 +114,53 @@ def test_a_language_that_is_not_a_tag_is_422(client: TestClient) -> None:
 def test_the_language_field_must_be_sent(client: TestClient) -> None:
     """An empty body changes nothing and is refused."""
     assert client.patch("/api/v1/whoami", headers=AUTH_HEADER, json={}).status_code == 422
+
+
+def _new_person(client: TestClient, name: str) -> dict[str, str]:
+    """Create a user with no grant and a token, and return its auth header.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    name
+        The user's name.
+
+    Returns
+    -------
+    dict of str to str
+        An Authorization header.
+    """
+    created = client.post(
+        "/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "USER"}
+    )
+    assert created.status_code == 201, created.text
+    issued = client.post(
+        f"/api/v1/principals/{name}/tokens", headers=AUTH_HEADER, json={"name": name}
+    )
+    return {"Authorization": f"Bearer {issued.json()['token']}"}
+
+
+def test_whoami_says_a_new_person_has_no_access_yet(client: TestClient) -> None:
+    """A person without any grant is no administrator and has no access."""
+    header = _new_person(client, "kim")
+
+    body = client.get("/api/v1/whoami", headers=header).json()
+
+    assert (body["admin"], body["has_access"]) == (False, False)
+
+
+def test_whoami_counts_a_grant_below_the_instance(client: TestClient) -> None:
+    """A role on one environment is access, though no administration."""
+    create_environment(client, "dev")
+    header = _new_person(client, "kim")
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "kim", "role": "ANALYST", "kind": "ENVIRONMENT", "environment": "dev"},
+    )
+    assert granted.status_code == 201, granted.text
+
+    body = client.get("/api/v1/whoami", headers=header).json()
+
+    assert (body["admin"], body["has_access"]) == (False, True)

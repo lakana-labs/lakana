@@ -4,7 +4,7 @@ import logging
 import os
 import stat
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -30,13 +30,17 @@ from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.principals import PrincipalService
+from lakana_core.identity.sessions import SessionService
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
+    BrowserSession,
     Grant,
+    Passkey,
     PersonalAccessToken,
     Principal,
     PrincipalType,
+    SignInLink,
 )
 
 
@@ -254,6 +258,16 @@ def test_bootstrap_if_needed_creates_grants_and_mints_when_no_admin_exists(
     )
 
 
+def test_bootstrap_pat_is_marked(session: Session) -> None:
+    """The PAT `bootstrap_if_needed` mints is the operator's: `bootstrap` is true."""
+    bootstrap_if_needed(session, "admin", key_id="testkey", secret="testsecret")
+
+    pat = session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.key_id == "testkey")
+    ).scalar_one()
+    assert pat.bootstrap is True
+
+
 def test_bootstrap_if_needed_reactivates_an_inactive_principal(session: Session) -> None:
     """A deactivated bootstrap principal is reactivated as part of recovery."""
     admin = ensure_bootstrap_principal(session, "admin")
@@ -266,6 +280,58 @@ def test_bootstrap_if_needed_reactivates_an_inactive_principal(session: Session)
 
     session.refresh(row)
     assert row.is_active is True
+
+
+def test_reactivating_the_bootstrap_principal_removes_passkeys_sessions_and_links(
+    session: Session,
+) -> None:
+    """Reactivation ends the account's sessions, removes its passkeys and withdraws its links."""
+    admin = ensure_bootstrap_principal(session, "admin")
+    now = datetime.now(UTC)
+    session.add(
+        Passkey(
+            id=uuid.uuid4(),
+            principal_id=admin.id,
+            credential_id="cred",
+            public_key=b"k",
+            sign_count=0,
+            rp_id="localhost",
+            name="key",
+            backup_eligible=False,
+            created_at=now,
+            created_user_agent="u",
+        )
+    )
+    link_id = uuid.uuid4()
+    session.add(
+        SignInLink(
+            id=link_id,
+            public_id="pub",
+            secret_hash="0" * 64,
+            kind="recovery",
+            principal_id=admin.id,
+            created_at=now,
+            expires_at=now + timedelta(hours=1),
+        )
+    )
+    session.commit()
+    started = SessionService(session, AllowAllAuthorization()).start(
+        admin.id, via="passkey", replacing=None, peer="p", user_agent="u", touched=True
+    )
+    row = session.get(Principal, admin.id)
+    assert row is not None
+    row.is_active = False
+    session.commit()
+
+    bootstrap_if_needed(session, "admin", key_id="testkey", secret="testsecret")
+
+    assert session.execute(select(Passkey)).all() == []
+    ended = session.execute(
+        select(BrowserSession).where(BrowserSession.key_id == started.key_id)
+    ).scalar_one()
+    assert ended.end_reason == "reactivated"
+    link = session.get(SignInLink, link_id)
+    assert link is not None and link.withdrawn_at is not None
 
 
 def test_bootstrap_if_needed_regrants_after_the_only_admin_grant_was_revoked(

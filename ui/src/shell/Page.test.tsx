@@ -25,4 +25,15 @@ describe("Page", () => {
     );
     expect(document.title).toBe("Catalog · Lakana");
   });
+
+  it("puts the page's one primary action beside the heading", () => {
+    render(
+      <Page title="Access" action={<button type="button">Invite someone</button>}>
+        <p>Content</p>
+      </Page>,
+    );
+
+    const header = screen.getByRole("heading", { level: 1, name: "Access" }).parentElement;
+    expect(header).toContainElement(screen.getByRole("button", { name: "Invite someone" }));
+  });
 });

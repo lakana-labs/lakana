@@ -42,7 +42,8 @@ def client(settings: Settings) -> Iterator[TestClient]:
         A started client.
     """
     app = create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)}))
-    with TestClient(app) as c:
+    # The public address of the test settings: the Host guard refuses any other name.
+    with TestClient(app, base_url="http://localhost:8000") as c:
         yield c
 
 

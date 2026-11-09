@@ -33,6 +33,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.identifiers import validate_path_component
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AuditEventType,
     Environment,
@@ -219,8 +220,11 @@ class RepositoryService:
             If the name is taken, including by a concurrent create.
         ConflictError
             If the commit fails for a reason other than a name collision.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_REPOSITORY, Securable.instance_scope())
+        require_step_up(p)
         validate_path_component(name, what="Repository name")
         try:
             kind = RepositoryKind(kind)
@@ -387,8 +391,11 @@ class RepositoryService:
             before this commit.
         ValidationError
             If `changes` is empty, a field cannot be changed or the result is invalid.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_REPOSITORY, Securable.instance_scope())
+        require_step_up(p)
         repo = self._find(name)
         if not changes:
             raise ValidationError("Nothing to change; name at least one field.")

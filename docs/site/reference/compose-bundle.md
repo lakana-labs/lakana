@@ -23,10 +23,12 @@ the workers, with its type and default, is in the [settings reference](settings.
 | `LAKANA_WORKERS_INTERACTIVE` | Replicas of `worker-interactive`, workers that take ad-hoc queries only (`0`: none). A bundle whose `.env` predates the key starts none. See [Separate workers for ad-hoc queries and pipelines](../how-to/deploy-with-compose.md#separate-workers-for-ad-hoc-queries-and-pipelines). |
 | `LAKANA_WORKERS_PIPELINE` | Replicas of `worker-pipeline`, workers that take pipeline work only: deploys, tasks, maintenance (`0`: none). A bundle whose `.env` predates the key starts none. |
 | `LAKANA_WORKER_MEMORY` | The memory limit of each worker container, of all three kinds (`4g`). The worker stops itself at 90 percent of it. See [Memory limits](../how-to/deploy-with-compose.md#memory-limits). |
+| `LAKANA_UI__ENABLED` | `true` serves the web interface at `LAKANA_UI__PUBLIC_URL`; `false` (the default, unless `bundle init --ui`) leaves it off. A bundle whose `.env` predates the key leaves it off. |
+| `LAKANA_UI__PUBLIC_URL` | The address people open the web interface at, passed to `server`. `bundle init` writes `--public-url` when its host is a name (scheme, host and port only), otherwise `http://localhost:<LAKANA_PORT>` and says so. A team needs `https://` and a DNS name: browsers tie passkeys to the name, and changing it later leaves every passkey unusable. With `--ui`, an IP address or plain `http://` off `localhost` is refused. A bundle whose `.env` predates the key gets `http://localhost:8000`. See [Sign in to the web interface](../how-to/deploy-with-compose.md#sign-in-to-the-web-interface). |
 | `POSTGRES_PASSWORD` | The `lakana` Postgres user's password (also the catalog's connection string). |
 | `LAKANA_S3_ACCESS_KEY` / `LAKANA_S3_SECRET_KEY` | SeaweedFS's S3-compatible credentials, used by both SeaweedFS's own identity config and the `setup` job that binds them to the `dev` environment. |
 | `LAKANA_SECRETS__MASTER_KEY` | The master key that protects every stored secret: it wraps the key of each secret. Losing it makes every stored secret unrecoverable. |
-| `LAKANA_BOOTSTRAP_PAT_KEY_ID` / `LAKANA_BOOTSTRAP_PAT_SECRET` | The bootstrap admin credential (`lakana_pat_<key id>_<secret>`), saved into the `team` profile so the CLI can authenticate immediately. |
+| `LAKANA_BOOTSTRAP_PAT_KEY_ID` / `LAKANA_BOOTSTRAP_PAT_SECRET` | The bootstrap admin credential (`lakana_pat_<key id>_<secret>`), saved into the `team` profile so the CLI can authenticate immediately. It is also the server operator's credential: only it prints the first administrator's sign-in link (`lakana sign-in setup-link`) and recovers an administrator who lost their passkeys (`lakana recovery create NAME`). |
 
 ## The services
 

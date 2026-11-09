@@ -16,6 +16,7 @@ from lakana_core.models import AuditEventType, ColumnMask, Group, Principal
 from lakana_core.policy.columns import (
     ColumnSource,
     PolicyTarget,
+    authorize_policy_change,
     binding_for,
     list_columns,
     policy_table,
@@ -303,6 +304,8 @@ class ColumnMaskService(PolicyShowing):
 
         Raises
         ------
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         ValidationError
             If the target is a view, or subject fields don't satisfy the exactly-one-of rule, or
             `expression` is outside the mask grammar, or the table has no column `column`
@@ -319,7 +322,7 @@ class ColumnMaskService(PolicyShowing):
             If the acting principal may not manage policies, or lacks READ_TABLE on the
             table (reading its columns needs it).
         """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
+        authorize_policy_change(self._authz, p)
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
         principal_id = self._get_principal(principal).id if principal is not None else None
@@ -504,8 +507,10 @@ class ColumnMaskService(PolicyShowing):
             If no column mask has that id.
         PermissionDenied
             If the acting principal may not manage policies.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
+        authorize_policy_change(self._authz, p)
         row = self._session.get(ColumnMask, column_mask_id)
         if row is None:
             raise NotFoundError(f"No column mask {column_mask_id}.")

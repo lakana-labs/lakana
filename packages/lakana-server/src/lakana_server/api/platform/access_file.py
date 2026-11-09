@@ -153,6 +153,9 @@ def apply_access(
 ) -> AccessApplyOut:
     """Make an access file's changes in one audited transaction, or none of them.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Needs the ADMIN role on the instance. The plan is made again under a lock: 409 when
     the file or access changed since the plan with `plan_fingerprint` (plan again), and 409 when the
     changes would end the caller's last way to administer (apply in two steps). 422 lists

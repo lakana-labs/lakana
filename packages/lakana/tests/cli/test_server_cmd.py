@@ -7,12 +7,15 @@ import signal
 import socket
 import sys
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from conftest import FakeApi, invoke, make_state
+from typer.testing import Result
 
 from lakana.cli import _profiles, server
 from lakana.cli._filelock import try_locked
@@ -358,7 +361,7 @@ def test_a_held_lock_refuses_start_even_if_healthz_does_not_answer(
 
     assert result.exit_code == 2
     assert "already running" in result.stderr
-    assert "at http://127.0.0.1:8765" in result.stderr
+    assert "at http://localhost:8765" in result.stderr
     assert root.server_pid.exists()
 
 
@@ -562,7 +565,7 @@ def test_first_run_bootstraps_the_environment_and_profile(
     )
     assert local["token"] == expected_token
     assert api.requests[0].headers["authorization"] == f"Bearer {local['token']}"
-    assert "Lakana is running at http://127.0.0.1:8765" in result.stdout
+    assert "Lakana is running at http://localhost:8765" in result.stdout
 
 
 class _RecordingStdout:
@@ -1415,7 +1418,7 @@ def test_status_reports_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     payload = json.loads(result.stdout)
     assert payload == {
         "running": True,
-        "url": "http://127.0.0.1:8765",
+        "url": "http://localhost:8765",
         "data_dir": str(data_dir_path),
         "server_pid": 111,
         "worker_pid": 222,
@@ -1671,7 +1674,7 @@ def test_status_reports_the_url_when_the_lock_is_held_and_the_pidfile_has_a_port
         )
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["url"] == "http://127.0.0.1:8765"
+    assert json.loads(result.stdout)["url"] == "http://localhost:8765"
 
 
 def test_status_does_not_create_the_data_directory_or_lock(tmp_path: Path) -> None:
@@ -2000,3 +2003,500 @@ def test_the_ready_line_is_the_last_thing_start_prints(
     assert result.exit_code == 0, result.stderr
     writes = [call for call in fake_stdout.calls if call.startswith("write:")]
     assert writes[-1].startswith("write:Lakana is running at")
+
+
+_LOCAL_LINK = "http://localhost:8765/sign-in/k1#s=topsecret"
+
+
+@dataclass
+class _HandOffRun:
+    """What one `server start --local` with the interface on did.
+
+    Parameters
+    ----------
+    result
+        The CLI result.
+    api
+        The fake API, with every request it received.
+    opened
+        Every URL handed to `webbrowser.open`.
+    seen
+        For each opened `file://` URL: the file's mode and text at the moment it was opened.
+    scheduled
+        Every `(seconds, action)` handed to the removal timer.
+    data_dir
+        The data directory.
+    env
+        The environment the children got.
+    """
+
+    result: Result
+    api: FakeApi
+    opened: list[str]
+    seen: list[tuple[int, str]]
+    scheduled: list[tuple[float, object]]
+    data_dir: Path
+    env: dict[str, str]
+
+
+def _fake_browser(monkeypatch: pytest.MonkeyPatch, open_url: Callable[[str], object]) -> None:
+    """Make `_sign_the_browser_in` hand its file to `open_url`, synchronously.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch fixture.
+    open_url
+        Receives the URL the browser would open.
+    """
+    monkeypatch.setattr(server, "_browser", lambda: SimpleNamespace(open=open_url))
+    monkeypatch.setattr(server, "_start_opener", lambda browser, url: browser.open(url))
+
+
+def _start_with_ui(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    first_run: bool = True,
+    terminal: bool = True,
+    ui: str | None = "true",
+    extra: tuple[str, ...] = (),
+) -> _HandOffRun:
+    """Run `server start --local` against fakes, recording the browser hand-off.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    monkeypatch
+        Pytest's monkeypatch fixture.
+    first_run
+        Whether the data directory is new; otherwise a `local` profile exists.
+    terminal
+        What `_stdout_is_terminal` reports.
+    ui
+        `LAKANA_UI__ENABLED` for the run, or None to leave it unset.
+    extra
+        More command-line arguments.
+
+    Returns
+    -------
+    _HandOffRun
+        The recordings.
+    """
+    import stat
+
+    _stub_environment(monkeypatch)
+    monkeypatch.setattr(server, "pid_alive", lambda pid: False)
+    data_dir_path = tmp_path / "data"
+    fake = FakeSupervisor()
+    _install_fake_supervisor(monkeypatch, fake)
+    api = FakeApi()
+    api.on("POST", "/api/v1/environments", status=201, json=_DEV)
+    api.on("GET", "/api/v1/environments/dev", json=_DEV)
+    api.on(
+        "POST",
+        "/api/v1/sign-in/local-link",
+        json={"url": _LOCAL_LINK, "expires_at": "2026-11-08T10:10:00Z"},
+    )
+    state = make_state(tmp_path, api)
+    if not first_run:
+        prepare_data_dir(data_dir_path).db_path.touch()
+        _profiles.set_profile(
+            state.profile_path(),
+            "local",
+            url="http://127.0.0.1:8765",
+            token="lakana_pat_a_b",
+            default_environment="dev",
+        )
+    opened: list[str] = []
+    seen: list[tuple[int, str]] = []
+
+    def fake_open(url: str) -> bool:
+        opened.append(url)
+        if url.startswith("file://"):
+            path = Path(url.removeprefix("file://"))
+            seen.append((stat.S_IMODE(path.stat().st_mode), path.read_text()))
+        return True
+
+    scheduled: list[tuple[float, object]] = []
+
+    def fake_schedule(seconds: float, action: object) -> object:
+        scheduled.append((seconds, action))
+        return lambda: None
+
+    _fake_browser(monkeypatch, fake_open)
+    monkeypatch.setattr(server, "_schedule", fake_schedule)
+    monkeypatch.setattr(server, "_stdout_is_terminal", lambda: terminal)
+    env = {} if ui is None else {"LAKANA_UI__ENABLED": ui}
+    if ui is None:
+        monkeypatch.delenv("LAKANA_UI__ENABLED", raising=False)
+    result = invoke(state, *_start_args(data_dir_path), *extra, env=env)
+    assert fake.config is not None
+    return _HandOffRun(result, api, opened, seen, scheduled, data_dir_path, fake.config.env)
+
+
+def test_first_run_signs_the_browser_in_without_the_secret_on_a_command_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The link reaches the browser through a 0600 file; only the file's path is passed on."""
+    run = _start_with_ui(tmp_path, monkeypatch)
+
+    assert run.result.exit_code == 0, run.result.stderr
+    hand_off = run.data_dir / "sign-in.html"
+    assert run.opened == [hand_off.as_uri()]
+    assert all("topsecret" not in url and "s=" not in url for url in run.opened)
+    mode, text = run.seen[0]
+    assert mode == 0o600
+    assert 'http-equiv="refresh"' in text and _LOCAL_LINK in text
+    request = next(r for r in run.api.requests if r.url.path == "/api/v1/sign-in/local-link")
+    token = _profiles.load(tmp_path / "lakana" / "config.toml")["profiles"]["local"]["token"]
+    assert request.headers["authorization"] == f"Bearer {token}"
+    assert not hand_off.exists(), "the hand-off file outlives the instance"
+
+
+def test_later_run_signs_the_browser_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An upgraded instance (profile `local` exists) signs in with the profile's own token."""
+    run = _start_with_ui(tmp_path, monkeypatch, first_run=False)
+
+    assert run.result.exit_code == 0, run.result.stderr
+    request = next(r for r in run.api.requests if r.url.path == "/api/v1/sign-in/local-link")
+    assert request.headers["authorization"] == "Bearer lakana_pat_a_b"
+    assert run.opened == [(run.data_dir / "sign-in.html").as_uri()]
+
+
+def test_local_run_sets_local_sign_in_and_prints_localhost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server gets local sign-in and its public address; the person sees `localhost`."""
+    monkeypatch.delenv("LAKANA_UI__PUBLIC_URL", raising=False)
+    run = _start_with_ui(tmp_path, monkeypatch, terminal=False)
+
+    assert run.result.exit_code == 0, run.result.stderr
+    assert run.env["LAKANA_UI__LOCAL_SIGN_IN"] == "true"
+    assert run.env["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8765"
+    assert run.env["LAKANA_HOST"] == "127.0.0.1"
+    assert "Lakana is running at http://localhost:8765" in run.result.stdout
+    assert "127.0.0.1" not in run.result.stdout + run.result.stderr
+
+
+def test_an_inherited_public_url_of_this_instance_is_kept_quietly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The same address the local start would set: no notice."""
+    from typing import cast
+
+    data_dir = cast(
+        "DataDir",
+        SimpleNamespace(database_url="sqlite:///x.db", bootstrap_token_path=Path("/d/t")),
+    )
+    monkeypatch.setenv("LAKANA_UI__PUBLIC_URL", "http://localhost:8765")
+    env = server._child_env(data_dir, 8765, "k", key_id=None, secret=None)
+    assert env["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8765"
+    assert capsys.readouterr().err == ""
+
+
+def test_hand_off_file_is_deleted_after_a_minute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The removal is scheduled for 60 s; running it removes the file, twice is harmless."""
+    run = _start_with_ui(tmp_path, monkeypatch)
+
+    assert run.result.exit_code == 0, run.result.stderr
+    assert [seconds for seconds, _ in run.scheduled] == [60.0]
+    hand_off = run.data_dir / "sign-in.html"
+    hand_off.write_text("again")
+    action = run.scheduled[0][1]
+    assert callable(action)
+    action()
+    assert not hand_off.exists()
+    action()
+
+
+def test_no_browser_flag_prints_nothing_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--no-browser`: no link is asked for, nothing is opened or printed."""
+    run = _start_with_ui(tmp_path, monkeypatch, extra=("--no-browser",))
+
+    assert run.result.exit_code == 0, run.result.stderr
+    assert run.opened == []
+    assert "/api/v1/sign-in/local-link" not in [r.url.path for r in run.api.requests]
+    assert "topsecret" not in run.result.stdout + run.result.stderr
+    assert not (run.data_dir / "sign-in.html").exists()
+
+
+def test_link_is_printed_only_to_a_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A terminal gets the fallback line with the link; a pipe or a file never does."""
+    piped = _start_with_ui(tmp_path / "piped", monkeypatch, terminal=False)
+    shown = _start_with_ui(tmp_path / "shown", monkeypatch, terminal=True)
+
+    assert piped.result.exit_code == 0 and shown.result.exit_code == 0
+    assert "topsecret" not in piped.result.stdout + piped.result.stderr
+    assert (
+        f"If the browser did not open signed in, open this link within 10 minutes: {_LOCAL_LINK}"
+        in shown.result.stdout
+    )
+
+
+def test_with_the_interface_off_one_line_names_the_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No link and no browser while the interface is off; one line says how to turn it on."""
+    run = _start_with_ui(tmp_path, monkeypatch, ui=None)
+
+    assert run.result.exit_code == 0, run.result.stderr
+    assert run.opened == []
+    assert "/api/v1/sign-in/local-link" not in [r.url.path for r in run.api.requests]
+    lines = [line for line in run.result.stdout.splitlines() if "LAKANA_UI__ENABLED" in line]
+    assert len(lines) == 1
+
+
+def test_a_refused_local_link_keeps_the_instance_running_and_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal is a warning naming the cause and the next step, never a stop."""
+    _stub_environment(monkeypatch)
+    monkeypatch.setattr(server, "pid_alive", lambda pid: False)
+    fake = FakeSupervisor()
+    _install_fake_supervisor(monkeypatch, fake)
+    api = FakeApi()
+    api.on("POST", "/api/v1/environments", status=201, json=_DEV)
+    api.on(
+        "POST",
+        "/api/v1/sign-in/local-link",
+        status=403,
+        json={"detail": "A local sign-in link is minted with your own personal access token."},
+    )
+    opened: list[str] = []
+    _fake_browser(monkeypatch, opened.append)
+    result = invoke(
+        make_state(tmp_path, api),
+        *_start_args(tmp_path / "data"),
+        env={"LAKANA_UI__ENABLED": "true"},
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert "watch" in fake.calls
+    assert opened == []
+    err = " ".join(result.stderr.split())
+    assert "personal access token" in err and "http://localhost:8765" in err
+
+
+def _direct_hand_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    link: str = _LOCAL_LINK,
+    token: str | None = "lakana_pat_a_b",
+) -> tuple[object, list[str], FakeApi, DataDir]:
+    """Call `_sign_the_browser_in` itself, with the interface on and the browser faked.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    monkeypatch
+        Pytest's monkeypatch fixture.
+    link
+        The link the fake server answers.
+    token
+        The token handed in.
+
+    Returns
+    -------
+    tuple
+        The hand-off (or None), the opened URLs, the fake API and the data directory.
+    """
+    api = FakeApi()
+    api.on("POST", "/api/v1/sign-in/local-link", json={"url": link, "expires_at": "2026-11-08"})
+    opened: list[str] = []
+    _fake_browser(monkeypatch, opened.append)
+    monkeypatch.setattr(server, "_schedule", lambda seconds, action: lambda: None)
+    monkeypatch.setattr(server, "_stdout_is_terminal", lambda: False)
+    root = prepare_data_dir(tmp_path / "data")
+    hand_off = server._sign_the_browser_in(
+        make_state(tmp_path, api), root, 8765, token, {"LAKANA_UI__ENABLED": "TRUE"}
+    )
+    return hand_off, opened, api, root
+
+
+def test_a_link_that_is_not_a_web_address_is_never_handed_to_the_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Only an `http(s)` link is written into the page the browser opens."""
+    hand_off, opened, _, root = _direct_hand_off(tmp_path, monkeypatch, link="javascript:x()")
+
+    assert hand_off is None and opened == []
+    assert not root.sign_in_path.exists()
+    assert "not a web address" in capsys.readouterr().err
+
+
+def test_an_unwritable_hand_off_file_is_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A directory in the file's place: a warning naming the path and the address to open."""
+    (prepare_data_dir(tmp_path / "data").sign_in_path).mkdir()
+    hand_off, opened, _, root = _direct_hand_off(tmp_path, monkeypatch)
+
+    assert hand_off is None and opened == []
+    err = " ".join(capsys.readouterr().err.split())
+    assert str(root.sign_in_path) in err and "http://localhost:8765" in err
+
+
+def test_without_a_token_of_this_instance_nothing_is_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A later run whose `local` profile is missing or another instance's asks for no link."""
+    hand_off, opened, api, _ = _direct_hand_off(tmp_path, monkeypatch, token=None)
+
+    assert hand_off is None and opened == [] and api.requests == []
+
+
+def test_the_removal_timer_runs_once_and_can_be_cancelled() -> None:
+    """`_schedule` runs the action after the delay; cancelling first keeps it from running."""
+    ran = threading.Event()
+    server._schedule(0.0, ran.set)
+    assert ran.wait(5)
+    late = threading.Event()
+    cancel = server._schedule(30.0, late.set)
+    cancel()
+    assert not late.is_set()
+
+
+def test_stdout_is_a_terminal_asks_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The seam reports what `sys.stdout.isatty` says."""
+    monkeypatch.setattr(server.sys, "stdout", SimpleNamespace(isatty=lambda: True))
+    assert server._stdout_is_terminal() is True
+
+
+def test_a_console_browser_or_no_display_is_never_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A text browser would take over the terminal; without a display nothing can open."""
+    monkeypatch.setattr(server.sys, "platform", "linux")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(server.webbrowser, "get", lambda: server.webbrowser.GenericBrowser("w3m"))
+    assert server._browser() is None
+    graphical = server.webbrowser.BackgroundBrowser("firefox")
+    monkeypatch.setattr(server.webbrowser, "get", lambda: graphical)
+    assert server._browser() is graphical
+    monkeypatch.delenv("DISPLAY")
+    assert server._browser() is None
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    assert server._browser() is graphical
+    in_background = server.webbrowser.BackgroundBrowser("/usr/bin/w3m")
+    monkeypatch.setattr(server.webbrowser, "get", lambda: in_background)
+    assert server._browser() is None
+
+    def no_browser() -> object:
+        raise server.webbrowser.Error("could not locate runnable browser")
+
+    monkeypatch.setattr(server.webbrowser, "get", no_browser)
+    assert server._browser() is None
+
+
+def test_a_browser_that_does_not_return_never_holds_the_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The opener runs on its own thread: start-up goes on while it is still busy."""
+    release = threading.Event()
+    opened: list[str] = []
+
+    def blocking_open(url: str) -> bool:
+        opened.append(url)
+        release.wait(5)
+        return True
+
+    monkeypatch.setattr(server, "_browser", lambda: SimpleNamespace(open=blocking_open))
+    api = FakeApi()
+    api.on(
+        "POST", "/api/v1/sign-in/local-link", json={"url": _LOCAL_LINK, "expires_at": "2026-11-08"}
+    )
+    monkeypatch.setattr(server, "_schedule", lambda seconds, action: lambda: None)
+    monkeypatch.setattr(server, "_stdout_is_terminal", lambda: False)
+    root = prepare_data_dir(tmp_path / "data")
+    began = time.monotonic()
+    hand_off = server._sign_the_browser_in(
+        make_state(tmp_path, api), root, 8765, "lakana_pat_a_b", {"LAKANA_UI__ENABLED": "true"}
+    )
+    took = time.monotonic() - began
+    release.set()
+    assert hand_off is not None
+    assert took < 1.0
+
+
+def test_without_a_browser_a_terminal_still_gets_the_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No usable browser: nothing is started, and a terminal gets the line to open by hand."""
+    monkeypatch.setattr(server, "_browser", lambda: None)
+    started: list[object] = []
+    monkeypatch.setattr(server, "_start_opener", lambda browser, url: started.append(url))
+    api = FakeApi()
+    api.on(
+        "POST", "/api/v1/sign-in/local-link", json={"url": _LOCAL_LINK, "expires_at": "2026-11-08"}
+    )
+    monkeypatch.setattr(server, "_schedule", lambda seconds, action: lambda: None)
+    monkeypatch.setattr(server, "_stdout_is_terminal", lambda: True)
+    root = prepare_data_dir(tmp_path / "data")
+    server._sign_the_browser_in(
+        make_state(tmp_path, api), root, 8765, "lakana_pat_a_b", {"LAKANA_UI__ENABLED": "true"}
+    )
+    assert started == []
+    assert _LOCAL_LINK in capsys.readouterr().out
+
+
+def test_an_inherited_public_url_off_localhost_is_replaced_with_a_notice(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A shell that sourced a bundle's .env still starts locally; one line names the variable."""
+    from typing import cast
+
+    data_dir = cast(
+        "DataDir",
+        SimpleNamespace(database_url="sqlite:///x.db", bootstrap_token_path=Path("/d/t")),
+    )
+    monkeypatch.setenv("LAKANA_UI__PUBLIC_URL", "https://lakana.example.com")
+    env = server._child_env(data_dir, 8765, "k", key_id=None, secret=None)
+    assert env["LAKANA_UI__PUBLIC_URL"] == "http://localhost:8765"
+    err = capsys.readouterr().err
+    assert len(err.splitlines()) == 1
+    assert "LAKANA_UI__PUBLIC_URL=https://lakana.example.com" in err
+    assert "http://localhost:8765" in err
+
+
+def test_a_stale_hand_off_file_is_removed_at_every_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file a killed run left behind goes even when no browser is opened this time."""
+    stale = prepare_data_dir(tmp_path / "data").sign_in_path
+    stale.write_text("old link")
+    run = _start_with_ui(tmp_path, monkeypatch, extra=("--no-browser",))
+    assert run.result.exit_code == 0, run.result.stderr
+    assert not stale.exists()
+
+
+def test_a_symlink_in_place_of_the_hand_off_file_is_replaced_not_followed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The link goes into a new file of its own; the symlink's target is never written."""
+    target = tmp_path / "target.html"
+    target.write_text("untouched")
+    root = prepare_data_dir(tmp_path / "data")
+    root.sign_in_path.symlink_to(target)
+    server._write_hand_off(root.sign_in_path, _LOCAL_LINK)
+    assert target.read_text() == "untouched"
+    assert not root.sign_in_path.is_symlink()
+    assert _LOCAL_LINK in root.sign_in_path.read_text()
+
+
+def test_a_later_run_without_this_instance_s_token_says_why_no_browser_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One line explains that profile 'local' holds no token of this instance."""
+    hand_off, opened, api, _ = _direct_hand_off(tmp_path, monkeypatch, token=None)
+    assert hand_off is None and opened == [] and api.requests == []
+    assert "profile 'local'" in capsys.readouterr().err

@@ -62,6 +62,41 @@ it, and none should be added (a separate `docker compose wait setup` step here u
 `setup`'s own exit on a restart, where it sends two quick `GET`s and exits in under a
 second).
 
+## Sign in to the web interface
+
+The web interface is off unless you ask for it:
+
+1. Generate the bundle with `--ui` and the address people open, an `https://` DNS name behind
+   your reverse proxy ([Exposing it](#exposing-it)):
+   `lakana bundle init --ui --public-url https://lakana.example.com`.
+2. Start it as in the [Quickstart](#quickstart).
+3. Run `lakana sign-in setup-link`.
+
+`lakana sign-in setup-link` prints a link for the first administrator (the bootstrap account,
+`admin`) and nothing else on stdout. Open it within 10 minutes in the browser you will use: it
+works once, signs you in and asks you to register a passkey (a fingerprint, a face or a
+security key); every later sign-in is one touch. Only the bootstrap token in the `team`
+profile may ask for it, and only until the first administrator has a passkey; after that it
+answers with `lakana recovery create`.
+
+Then invite your team with `lakana invite create NAME`, which prints a link to send that
+person yourself (it works once, for 7 days, and creates an account with no rights): confirm
+with them that they signed up before you grant roles. A person who lost their passkeys gets a
+recovery link, `lakana recovery create NAME` (1 hour); recovering an administrator (anyone who
+holds or ever held `ADMIN`) works only with the bootstrap token, so run it where `bundle init`
+saved the `team` profile.
+
+- `--public-url` is the interface's address (`LAKANA_UI__PUBLIC_URL` in `.env`) only when its
+  host is a name. With `--ui`, an IP address (`https://10.0.0.5`) or plain `http://` off
+  `localhost` is refused: browsers tie passkeys to a name and keep them safe only on HTTPS.
+  Without `--public-url` the address is `http://localhost:<port>`, which works only in a
+  browser on the same machine; `init` says so in one line.
+- Changing the address later leaves every passkey unusable: issue recovery links afterwards.
+- To turn the interface on in an existing bundle, set `LAKANA_UI__ENABLED=true` and
+  `LAKANA_UI__PUBLIC_URL` in `.env`, then `docker compose up -d --wait`.
+- Sessions last 12 hours without use and 7 days at most; see and change both with
+  `lakana sign-in settings` (in minutes).
+
 ## Local repositories
 
 `lakana bundle init` creates `repos/` next to `compose.yaml`; the server and the workers see it
@@ -348,6 +383,18 @@ should also keep out what the server would refuse anyway, so that it never reach
 - **A long timeout for a drop.** `lakana artifact drop` removes files inside the request and can run
   for minutes (the client waits up to ten). A proxy that ends it sooner shows the user a 504 for a
   drop that still finishes.
+- **Pass the browser's `Host` header through.** With the web interface on, the server answers a
+  browser only at its public address (`LAKANA_UI__PUBLIC_URL`, for example
+  `https://lakana.example.com`) and refuses any other `Host` with 421 `HostNotAllowed`. Caddy passes
+  it by default; nginx sends its upstream's name (`$proxy_host`) unless you add
+  `proxy_set_header Host $http_host;` (nginx's `$host` drops a port, so a public address on a port
+  other than 443 would still be refused).
+- **List the proxy in `LAKANA_TRUSTED_PROXIES`** so the server believes its `X-Forwarded-For` and
+  `X-Forwarded-Proto`, as a JSON list of addresses or networks. Use the address the server sees the
+  proxy connect from: for a proxy on the host in front of the bundle, Docker's gateway of the
+  bundle's network (`docker network inspect` shows it), for example `'["172.18.0.1"]'`. Unlisted,
+  the audit log and the failed sign-in limit see every client as the proxy. No proxy is trusted by
+  default, also not one on the same machine.
 
 ### Interrupted uploads on an object store
 
@@ -525,12 +572,18 @@ server {
     proxy_read_timeout 300s;         # long-running queries
     location / {
         proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $http_host;   # the interface answers only its public name and port
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
 Then pass `--public-url https://lakana.example.com` to `lakana bundle init` so the saved profile
-(and the URL `init` prints for operators) points at the proxy, not the bind address. A
+(and the URL `init` prints for operators) points at the proxy, not the bind address. `init` also
+writes it as the web interface's address (`LAKANA_UI__PUBLIC_URL`); for the interface, list the
+proxy in `LAKANA_TRUSTED_PROXIES` too
+([A reverse proxy in front of the server](#a-reverse-proxy-in-front-of-the-server)). A
 non-loopback `--public-url` with an `http://` scheme gets the same plain-HTTP warning.
 
 ### `--bind` and the profile URL

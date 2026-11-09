@@ -5272,3 +5272,237 @@ def test_0068_adds_the_attempt_resource_columns_and_downgrades_cleanly(
             assert not figures & {c["name"] for c in inspect(engine).get_columns(table)}
     finally:
         engine.dispose()
+
+
+_REVISION_0069 = "d7f1b3c5e9a2"
+_SIGN_IN_TABLES = {
+    "sign_in_links",
+    "browser_sessions",
+    "passkeys",
+    "webauthn_challenges",
+    "sign_in_notices",
+    "instance_settings",
+}
+
+
+@pytest.mark.usefixtures("_without_fsync")
+@pytest.mark.parametrize("operator", [None, "ops"])
+def test_0069_adds_the_sign_in_tables_and_marks_only_the_operators_bootstrap_pat(
+    tmp_path: Path, migrated_db: MigratedDb, monkeypatch: pytest.MonkeyPatch, operator: str | None
+) -> None:
+    """Revision `0069`: the sign-in tables; only the bootstrap principal's PAT is the operator's.
+
+    Of the PATs that exist before the upgrade, `bootstrap` becomes true only for an unrevoked
+    one named ``bootstrap`` that belongs to the bootstrap principal (`LAKANA_BOOTSTRAP_ADMIN`,
+    default ``admin``); a ``bootstrap`` PAT of another principal, a revoked one, and one with
+    another name stay false. The downgrade drops the tables and both columns.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    monkeypatch
+        Sets `LAKANA_BOOTSTRAP_ADMIN`.
+    operator
+        The configured bootstrap principal's name; `None` leaves the default, ``admin``.
+    """
+    db_path = migrated_db(_REVISION_0068)
+    if operator is not None:
+        monkeypatch.setenv("LAKANA_BOOTSTRAP_ADMIN", operator)
+    bootstrap_name = operator or "admin"
+    other_name = "admin" if operator else "ops"
+    config = Config(str(ALEMBIC_INI))
+    owners = {bootstrap_name: uuid.uuid4().hex, other_name: uuid.uuid4().hex}
+    pats = {
+        "operator": (bootstrap_name, "bootstrap", None),
+        "operator_laptop": (bootstrap_name, "laptop", None),
+        "operator_revoked": (bootstrap_name, "bootstrap", "2026-11-01 00:00:00"),
+        "other_bootstrap": (other_name, "bootstrap", None),
+    }
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as connection:
+            for name, principal_id in owners.items():
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at, "
+                        "updated_at) VALUES (:id, 'USER', :name, 1, :t, :t)"
+                    ),
+                    {"id": principal_id, "name": name, "t": _utc_text()},
+                )
+            for key_id, (owner, name, revoked_at) in pats.items():
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO personal_access_tokens (id, principal_id, key_id, "
+                        "secret_hash, name, created_at, revoked_at) VALUES (:id, :owner, :key, "
+                        "'h', :name, :t, :revoked)"
+                    ),
+                    {
+                        "id": uuid.uuid4().hex,
+                        "owner": owners[owner],
+                        "key": key_id,
+                        "name": name,
+                        "t": _utc_text(),
+                        "revoked": revoked_at,
+                    },
+                )
+    finally:
+        engine.dispose()
+    command.upgrade(config, _REVISION_0069)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert set(inspector.get_table_names()) >= _SIGN_IN_TABLES
+        assert {"webauthn_handle", "display_name"} <= {
+            c["name"] for c in inspector.get_columns("principals")
+        }
+        with engine.connect() as connection:
+            flags = dict(
+                connection.execute(
+                    sa.text("SELECT key_id, bootstrap FROM personal_access_tokens")
+                ).all()
+            )
+        assert {key: bool(flag) for key, flag in flags.items()} == {
+            "operator": True,
+            "operator_laptop": False,
+            "operator_revoked": False,
+            "other_bootstrap": False,
+        }
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0068)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert not _SIGN_IN_TABLES & set(inspector.get_table_names())
+        assert not {"webauthn_handle", "display_name"} & {
+            c["name"] for c in inspector.get_columns("principals")
+        }
+        assert "bootstrap" not in {
+            c["name"] for c in inspector.get_columns("personal_access_tokens")
+        }
+    finally:
+        engine.dispose()
+
+
+_REVISION_0070 = "e8a2c4f6b0d3"
+
+
+def test_0070_marks_everyone_who_ever_held_instance_admin(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0070`: `held_admin`, backfilled from grants and from the audit trail.
+
+    Marked: a person with a revoked direct ADMIN grant, a current member of a group whose ADMIN
+    grant was revoked, a former member of that group known only from `GROUP_MEMBER_ADDED`, and
+    a person whose ADMIN grant is known only from `GRANT_CREATED`. Not marked: a person with an
+    environment-scoped ADMIN grant and one with an instance VIEWER grant. The downgrade drops
+    the column.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0069)
+    config = Config(str(ALEMBIC_INI))
+    names = ["ops", "alice", "bob", "carol", "dave", "erin", "fay"]
+    ids = {name: uuid.uuid4().hex for name in names}
+    group_id = uuid.uuid4().hex
+    now = _utc_text()
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as connection:
+            for name in names:
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at, "
+                        "updated_at) VALUES (:id, 'USER', :name, 1, :t, :t)"
+                    ),
+                    {"id": ids[name], "name": name, "t": now},
+                )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO groups (id, name, created_at, updated_at) "
+                    "VALUES (:id, 'admins', :t, :t)"
+                ),
+                {"id": group_id, "t": now},
+            )
+            connection.execute(
+                sa.text("INSERT INTO group_memberships (group_id, principal_id) VALUES (:g, :p)"),
+                {"g": group_id, "p": ids["bob"]},
+            )
+            grants = [
+                (ids["ops"], None, "ADMIN", "INSTANCE", None, None),
+                (ids["alice"], None, "ADMIN", "INSTANCE", None, now),
+                (None, group_id, "ADMIN", "INSTANCE", None, now),
+                (ids["erin"], None, "ADMIN", "ENVIRONMENT", "prod", None),
+                (ids["fay"], None, "VIEWER", "INSTANCE", None, None),
+            ]
+            for principal_id, grant_group, role, kind, environment, revoked_at in grants:
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO grants (id, principal_id, group_id, role, kind, "
+                        "environment, granted_by, granted_at, revoked_at) VALUES (:id, :p, :g, "
+                        ":role, :kind, :env, :by, :t, :revoked)"
+                    ),
+                    {
+                        "id": uuid.uuid4().hex,
+                        "p": principal_id,
+                        "g": grant_group,
+                        "role": role,
+                        "kind": kind,
+                        "env": environment,
+                        "by": ids["ops"],
+                        "t": now,
+                        "revoked": revoked_at,
+                    },
+                )
+            events = [
+                ("GROUP_MEMBER_ADDED", None, {"group": "admins", "principal": "carol"}),
+                ("GROUP_MEMBER_ADDED", None, {"group": "others", "principal": "fay"}),
+                ("GRANT_CREATED", "INSTANCE", {"principal": "dave", "role": "ADMIN"}),
+                ("GRANT_CREATED", "ENVIRONMENT", {"principal": "erin", "role": "ADMIN"}),
+                ("GRANT_CREATED", "INSTANCE", {"principal": "fay", "role": "VIEWER"}),
+            ]
+            for event_type, kind, detail in events:
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO audit_events (id, occurred_at, principal_id, event_type, "
+                        "securable_kind, detail) VALUES (:id, :t, :p, :type, :kind, :detail)"
+                    ),
+                    {
+                        "id": uuid.uuid4().hex,
+                        "t": now,
+                        "p": ids["ops"],
+                        "type": event_type,
+                        "kind": kind,
+                        "detail": json.dumps(detail),
+                    },
+                )
+    finally:
+        engine.dispose()
+    command.upgrade(config, _REVISION_0070)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.connect() as connection:
+            marked = {
+                name
+                for name, held in connection.execute(
+                    sa.text("SELECT name, held_admin FROM principals")
+                )
+                if held
+            }
+        assert marked == {"ops", "alice", "bob", "carol", "dave"}
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0069)
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        assert "held_admin" not in {c["name"] for c in inspect(engine).get_columns("principals")}
+    finally:
+        engine.dispose()

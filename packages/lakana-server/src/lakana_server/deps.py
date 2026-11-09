@@ -5,7 +5,8 @@ from __future__ import annotations
 import dataclasses
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from datetime import datetime
 
 from fastapi import Depends, Header, Query, Request
 from sqlalchemy.orm import Session
@@ -31,8 +32,12 @@ from lakana_core.errors import AuthenticationError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
+from lakana_core.identity.links import LinkService
+from lakana_core.identity.notices import NoticeService
+from lakana_core.identity.passkeys import PasskeyService, needs_passkey
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.principals import PrincipalService
+from lakana_core.identity.sessions import SessionService, utc_now
 from lakana_core.identity.task_tokens import TaskTokenService
 from lakana_core.identity.tokens import parse_token
 from lakana_core.jobs.service import JobService
@@ -48,6 +53,8 @@ from lakana_core.secrets.keys import EnvKeyProvider, KeyProvider
 from lakana_core.secrets.service import SecretService
 from lakana_core.statement_limit import check_statement_length
 from lakana_core.storage.resolver import StorageResolver
+from lakana_server.browser_session import BACKGROUND_HEADER, CSRF_HEADER, read_session_cookie
+from lakana_server.errors import CsrfRefused, PasskeyRequired, TokenOnlyRoute
 from lakana_server.sign_in_audit import Credential
 
 PRINCIPAL_STATE_KEY = "_lakana_authenticated_principal"
@@ -65,6 +72,47 @@ which stays case-sensitive since it is not a registered scheme token.
 Which credential kind the captured token actually is (PAT, task token or CI
 token) is `parse_token`'s job, not this pattern's.
 """
+
+TOKEN_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {("POST", "/api/v1/task-tokens"), ("DELETE", "/api/v1/task-tokens/{key_id}")}
+)
+"""Operations (method, route template) that refuse the session cookie: they are for code only.
+
+Minting a task token from a browser would put a token in the interface, which never holds one."""
+
+TOKEN_ONLY_MESSAGE = (  # nosec B105 -- a refusal's text, not a credential
+    "Task tokens are for code, not a browser: create one with `lakana` and your own token."
+)
+
+PASSKEY_FIRST_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", "/api/v1/sign-in/session"),
+        ("DELETE", "/api/v1/sign-in/session"),
+        ("POST", "/api/v1/principals/{name}/passkeys/options"),
+        ("POST", "/api/v1/principals/{name}/passkeys"),
+    }
+)
+"""What a session from a setup, invite or recovery link may do before its person has a passkey:
+register one, read the session, and sign out (`lakana_core.identity.passkeys.needs_passkey`)."""
+
+PASSKEY_REQUIRED_MESSAGE = (
+    "Add a passkey first. You signed in with a setup, invite or recovery link, and until your "
+    "account has a passkey this session can only add one, show who is signed in, and sign out. "
+    "Add the passkey in the web interface now; after 15 minutes, ask an administrator for a new "
+    "link instead."
+)
+
+CSRF_MESSAGE = (
+    "This request came with the session cookie but without its page's CSRF token "
+    "(X-Lakana-CSRF), or with another session's, and the cookie alone signs nobody in. "
+    "Sign in again."
+)
+
+_SIGN_IN_OR_TOKEN = (  # nosec B105 -- a refusal's text, not a credential
+    "Not signed in. In the web interface: Sign in again. From code: send a token "
+    "(Authorization: Bearer lakana_pat_<keyid>_<secret>)."
+)
+"""The 401 detail of a request without any credential while the web interface is on."""
 
 _SHAPES = (
     "Authorization header must be 'Bearer lakana_pat_<keyid>_<secret>', "
@@ -164,24 +212,207 @@ def get_task_token_service(
     )
 
 
+def get_clock(request: Request) -> Callable[[], datetime]:
+    """Read the clock the sign-in services of this app use.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach `app.state.clock` (set at start-up; a test may
+        replace it).
+
+    Returns
+    -------
+    Callable
+        The clock; `lakana_core.identity.sessions.utc_now` when the app has none.
+    """
+    return getattr(request.app.state, "clock", utc_now)
+
+
+def get_session_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> SessionService:
+    """Build a SessionService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    SessionService
+        A service using real authorization and the app's clock.
+    """
+    return SessionService(session, authz, clock=get_clock(request))
+
+
+def get_link_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> LinkService:
+    """Build a LinkService for the current request.
+
+    Links are built from the configured public address (`Settings.public_origin`), never
+    from the request; local links are issued only with `LAKANA_UI__LOCAL_SIGN_IN`.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the settings and the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    LinkService
+        A service using real authorization and the app's clock.
+    """
+    settings = request.app.state.settings
+    clock = get_clock(request)
+    return LinkService(
+        session,
+        authz,
+        SessionService(session, authz, clock=clock),
+        origin=settings.public_origin().origin,
+        local_mode=settings.ui.local_sign_in,
+        bootstrap_name=settings.bootstrap_admin,
+        clock=clock,
+    )
+
+
+def get_notice_service(request: Request, session: Session = Depends(get_session)) -> NoticeService:
+    """Build a NoticeService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the app's clock.
+    session
+        The current request's database session.
+
+    Returns
+    -------
+    NoticeService
+        A service using the app's clock.
+    """
+    return NoticeService(session, clock=get_clock(request))
+
+
+def get_passkey_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> PasskeyService:
+    """Build a PasskeyService for the current request.
+
+    The relying-party id is the host of the configured public address and the origin is that
+    address exactly (`Settings.public_origin`), never anything from the request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the settings and the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    PasskeyService
+        A service using real authorization and the app's clock.
+    """
+    public = request.app.state.settings.public_origin()
+    clock = get_clock(request)
+    return PasskeyService(
+        session,
+        authz,
+        SessionService(session, authz, clock=clock),
+        NoticeService(session, clock=clock),
+        rp_id=public.host,
+        origin=public.origin,
+        clock=clock,
+    )
+
+
+def record_failed_passkey(request: Request, session: Session) -> None:
+    """Record a refused passkey sign-in, if the per-address limit admits it.
+
+    The same limiter as a failed token or link. Neither the browser's answer nor the challenge
+    is recorded.
+
+    Parameters
+    ----------
+    request
+        The current request.
+    session
+        The current request's database session; rolled back first, so nothing the refused
+        attempt left pending is committed with the row.
+    """
+    session.rollback()
+    _record_failure(request, AuditService(session), None, {"credential": "passkey"})
+
+
+def record_failed_link(request: Request, session: Session, public_id: str) -> None:
+    """Record a refused use of a sign-in link, if the per-address limit admits it.
+
+    The same limiter as a failed token (`app.state.auth_audit_limiter`), so a client probing
+    links writes no more rows than one probing tokens. The secret is never recorded.
+
+    Parameters
+    ----------
+    request
+        The current request.
+    session
+        The current request's database session.
+    public_id
+        The link's public id as presented, cut to 64 characters.
+    """
+    _record_failure(
+        request,
+        AuditService(session),
+        None,
+        {"credential": "link", "link_id": public_id[:64]},
+    )
+
+
 def get_principal(
     request: Request,
     authorization: str | None = Header(
         None,
         description=(
-            "The credential: `Bearer <token>` with a personal access token, task token or CI token."
+            "The credential: `Bearer <token>` with a personal access token, task token or CI "
+            "token. Without it, the web interface's session cookie counts instead."
         ),
     ),
     session: Session = Depends(get_session),
     pats: PatService = Depends(get_pat_service),
     task_tokens: TaskTokenService = Depends(get_task_token_service),
 ) -> PrincipalRef:
-    """Resolve the acting principal from the Authorization header.
+    """Resolve the acting principal from the Authorization header or the session cookie.
 
     Verifies a real credential: a PAT (`lakana_pat_<key_id>_<secret>`), a
     task token (`lakana_task_<key_id>_<secret>`) or a CI token
     (`lakana_ci_<key_id>_<secret>`, `CiTokenService.verify`, which re-checks its
-    rule and principal every time), dispatched by prefix. This
+    rule and principal every time), dispatched by prefix, or, with no `Authorization` header
+    at all, the browser session cookie (`lakana_server.browser_session.read_session_cookie`:
+    below `/api/v1/` only, never with the interface off). Any `Authorization` header, valid or
+    not, wins: the cookie is then not read, and no CSRF token is asked for. A cookie request is
+    refused on `TOKEN_ONLY_ROUTES` (403 `TokenOnlyRoute`) and, whatever its method, without the
+    session's CSRF token in `X-Lakana-CSRF` (401 `CsrfRefused`); the session's row is then
+    read (`SessionService.verify`), so an ended session fails at once
+    with `SessionEndedError` (401 with `reason`). The returned principal carries its
+    credential kind (`PrincipalRef.credential`). This
     replaces M1's shape-only check — a well-formed header with the wrong
     secret is now rejected, not accepted. Records `AUTHENTICATION_SUCCEEDED`
     for a successful attempt when `app.state.sign_in_audit_limiter`
@@ -196,8 +427,8 @@ def get_principal(
     `app.state.auth_audit_limiter` (`lakana_server.auth_rate_limit.
     AuthAuditLimiter`) admits it for the requesting client
     (`request.client.host`, or `"unknown"` if unavailable; `X-Forwarded-For`
-    is deliberately not trusted, so a proxied deployment rate-limits by the
-    proxy's address, not the original client's — see the threat model). This
+    counts only from `LAKANA_TRUSTED_PROXIES`, so behind an unlisted proxy the
+    limit applies per proxy address — see the threat model). This
     bounds how many rows a client retrying a bad credential can cause to be
     written; the response is still 401 either way. The recorded
     `key_id` is truncated to 64 characters, and the count of attempts
@@ -227,19 +458,32 @@ def get_principal(
     Raises
     ------
     AuthenticationError
-        If the header is missing, does not match either credential shape,
-        or the credential fails verification (unknown, wrong secret,
-        expired, revoked, or its principal is deactivated).
+        If the header is missing (and no session cookie counts), does not match a credential
+        shape, or the credential fails verification (unknown, wrong secret, expired, revoked,
+        ended, or its principal is deactivated).
+    TokenOnlyRoute
+        If a session cookie is presented on a route of `TOKEN_ONLY_ROUTES`.
+    CsrfRefused
+        If a cookie request lacks its session's CSRF token (401).
+    PasskeyRequired
+        If a session from a setup, invite or recovery link, whose person has no usable
+        passkey, asks for anything outside `PASSKEY_FIRST_ROUTES` (403).
     """
     already = getattr(request.state, PRINCIPAL_STATE_KEY, None)
     if isinstance(already, PrincipalRef):
         return already
     audit = AuditService(session)
+    if authorization is None:
+        cookie = read_session_cookie(request)
+        if cookie is not None:
+            return _session_principal(request, cookie, session, audit)
     key_id: str | None = None
     credential: Credential | None = None
     try:
         match = _AUTH_HEADER_PATTERN.match(authorization or "")
         if match is None:
+            if authorization is None and request.app.state.settings.ui.enabled:
+                raise AuthenticationError(_SIGN_IN_OR_TOKEN)
             raise AuthenticationError(_SHAPES)
         raw_token = match.group(1)
         if (parsed := parse_token(raw_token, "lakana_pat")) is not None:
@@ -253,29 +497,123 @@ def get_principal(
             credential = ("task", key_id)
             scope = task_tokens.verify(key_id, secret)
             _record_sign_in(request, audit, credential, scope.principal.id)
-            return scope.principal
+            return dataclasses.replace(scope.principal, credential="task")
         if (parsed := parse_token(raw_token, CI_TOKEN_PREFIX)) is not None:
             key_id, secret = parsed
             credential = ("ci", key_id)
             principal = CiTokenService(session).verify(key_id, secret)
             _record_sign_in(request, audit, credential, principal.id)
-            return principal
+            return dataclasses.replace(principal, credential="ci")
         raise AuthenticationError(_SHAPES)
     except AuthenticationError:
-        if credential is not None:
-            request.app.state.sign_in_audit_limiter.forget(credential)
-        client = request.client.host if request.client else "unknown"
-        admitted, suppressed = request.app.state.auth_audit_limiter.admit(client)
-        if admitted:
-            detail: dict[str, str | int] = {"key_id": (key_id or "")[:64]}
-            if suppressed > 0:
-                detail["suppressed"] = suppressed
-            audit.record(None, AuditEventType.AUTHENTICATION_FAILED, detail=detail, commit=True)
+        _record_failure(request, audit, credential, {"key_id": (key_id or "")[:64]})
         raise
 
 
+def _session_principal(
+    request: Request, cookie: str, session: Session, audit: AuditService
+) -> PrincipalRef:
+    """Authenticate a request by its session cookie.
+
+    Refuses the token-only routes, then any request without the session's CSRF token (the
+    cookie alone is worthless: another `localhost` port receives it too), then verifies the
+    session's row (read on every request, so an ended session fails at once). Only a request the
+    person started extends the idle timeout: one marked `X-Lakana-Background: 1` does not.
+
+    Parameters
+    ----------
+    request
+        The current request.
+    cookie
+        The session cookie's value.
+    session
+        The current request's database session.
+    audit
+        Writes the authentication events.
+
+    Returns
+    -------
+    PrincipalRef
+        The session's principal, with ``credential="session"``.
+
+    Raises
+    ------
+    TokenOnlyRoute
+        On a route of `TOKEN_ONLY_ROUTES` (403); audited as a failed sign-in with
+        ``reason: token_only_route``.
+    CsrfRefused
+        If the request lacks the session's CSRF token or carries another (401); audited with
+        ``reason: csrf``. A cookie that names no session falls through to `verify`.
+    PasskeyRequired
+        If the session must register a passkey first and the route is not one of
+        `PASSKEY_FIRST_ROUTES` (403).
+    AuthenticationError
+        If the cookie names no session or a wrong secret; `SessionEndedError` if the session
+        has ended. Audited as a failed token is.
+    """
+    key_id = cookie.split("_", 1)[0][:64]
+    credential: Credential = ("session", key_id)
+    detail: dict[str, str | int] = {"key_id": key_id, "credential": "session"}
+    route = request.scope.get("route")
+    if (request.method, getattr(route, "path", None)) in TOKEN_ONLY_ROUTES:
+        _record_failure(request, audit, credential, {**detail, "reason": "token_only_route"})
+        raise TokenOnlyRoute(TOKEN_ONLY_MESSAGE)
+    sessions = SessionService(
+        session, get_grant_authorization(request, session), clock=get_clock(request)
+    )
+    if sessions.check_csrf(cookie, request.headers.get(CSRF_HEADER) or "") is False:
+        _record_failure(request, audit, credential, {**detail, "reason": "csrf"})
+        raise CsrfRefused(CSRF_MESSAGE)
+    try:
+        principal = sessions.verify(cookie, extend=request.headers.get(BACKGROUND_HEADER) != "1")
+    except AuthenticationError:
+        _record_failure(request, audit, credential, detail)
+        raise
+    _record_sign_in(request, audit, credential, principal.id, kind="session")
+    rp_id = request.app.state.settings.public_origin().host
+    if (request.method, getattr(route, "path", None)) not in PASSKEY_FIRST_ROUTES and (
+        needs_passkey(session, principal, rp_id)
+    ):
+        raise PasskeyRequired(PASSKEY_REQUIRED_MESSAGE)
+    return principal
+
+
+def _record_failure(
+    request: Request,
+    audit: AuditService,
+    credential: Credential | None,
+    detail: dict[str, str | int],
+) -> None:
+    """Record a failed authentication, if the per-address limit admits it.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach both limiters and the client's address.
+    audit
+        Writes the row, with its own commit.
+    credential
+        The credential the attempt named, if any: its next success is then recorded.
+    detail
+        The row's detail; the count of attempts left out is added as ``suppressed``.
+    """
+    if credential is not None:
+        request.app.state.sign_in_audit_limiter.forget(credential)
+    client = request.client.host if request.client else "unknown"
+    admitted, suppressed = request.app.state.auth_audit_limiter.admit(client)
+    if admitted:
+        if suppressed > 0:
+            detail["suppressed"] = suppressed
+        audit.record(None, AuditEventType.AUTHENTICATION_FAILED, detail=detail, commit=True)
+
+
 def _record_sign_in(
-    request: Request, audit: AuditService, credential: Credential, principal_id: uuid.UUID
+    request: Request,
+    audit: AuditService,
+    credential: Credential,
+    principal_id: uuid.UUID,
+    *,
+    kind: str | None = None,
 ) -> None:
     """Record a successful authentication, if the sign-in window admits it.
 
@@ -289,6 +627,9 @@ def _record_sign_in(
         The verified token's kind and key id.
     principal_id
         The principal the token authenticated.
+    kind
+        Written to the row as ``credential`` when given (``session``); a token's row has
+        only its key id, as before.
 
     Raises
     ------
@@ -301,6 +642,8 @@ def _record_sign_in(
     if not admitted:
         return
     detail: dict[str, str | int] = {"key_id": credential[1]}
+    if kind is not None:
+        detail["credential"] = kind
     if suppressed > 0:
         detail["suppressed"] = suppressed
     try:

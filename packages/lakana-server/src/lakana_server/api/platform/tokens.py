@@ -28,6 +28,9 @@ def issue_token(
 ) -> TokenIssueOut:
     """Issue a personal access token.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Issues a token that signs in as the principal. The answer holds the token's full value,
     which is shown this once and cannot be read again. Needs the `ADMIN` role on the
     instance. Answers 404 when there is no such principal.

@@ -11,7 +11,14 @@ from lakana_core.access.managed import guard_change, lock_access
 from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
-from lakana_core.grants.service import assert_admin_headroom
+from lakana_core.grants.service import assert_admin_headroom, withdraw_links_of_lapsed_issuers
+from lakana_core.identity.links import (
+    invisible_character_problem,
+    name_length_problem,
+    name_unavailable,
+    withdraw_open_links,
+)
+from lakana_core.identity.sessions import SessionService, require_step_up, utc_now
 from lakana_core.languages import canonical_language, language_problem
 from lakana_core.models import AuditEventType, Principal, PrincipalType
 from lakana_core.pagination import Page, name_contains, newest_first
@@ -60,16 +67,32 @@ class PrincipalService:
         Raises
         ------
         AlreadyExistsError
-            If a principal with that name already exists.
+            If a principal with that name already exists, one whose name differs only in
+            letter case (active or deactivated), or an open invite reserves the name
+            (`lakana_core.identity.links.name_unavailable`).
+        ValidationError
+            If the name or its normalised form is over 255 characters
+            (`lakana_core.identity.links.name_length_problem`), or it holds a control or format
+            character, or starts with a combining mark
+            (`lakana_core.identity.links.invisible_character_problem`).
         PermissionDenied
             If the acting principal may not manage principals.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
+        require_step_up(p)
         existing = self._session.execute(
             select(Principal).where(Principal.name == name)
         ).scalar_one_or_none()
         if existing is not None:
             raise AlreadyExistsError(f"Principal {name!r} already exists.")
+        problem = name_length_problem(name) or invisible_character_problem(name)
+        if problem is not None:
+            raise ValidationError(problem)
+        problem = name_unavailable(self._session, name, now=utc_now())
+        if problem is not None:
+            raise AlreadyExistsError(problem)
         self._guard(p, type, f"create service account {name}")
         principal = Principal(id=uuid.uuid4(), type=type, name=name, is_active=True)
         self._session.add(principal)
@@ -121,6 +144,12 @@ class PrincipalService:
     def deactivate_principal(self, p: PrincipalRef, name: str, *, commit: bool = True) -> None:
         """Deactivate a principal, revoking its access without deleting it.
 
+        Every open browser session of the principal ends in the same commit, with reason
+        ``deactivated`` (`SessionService.end_for_principal`), and every open sign-in link bound
+        to it is withdrawn (`lakana_core.identity.links.withdraw_open_links`), and so is every
+        open invite and recovery link it issued
+        (`lakana_core.grants.service.withdraw_links_of_lapsed_issuers`).
+
         Idempotent: deactivating an already-inactive principal is a no-op
         — it records no second `PRINCIPAL_DEACTIVATED` event, and does not
         re-run the admin-headroom check (an already-inactive principal
@@ -144,8 +173,11 @@ class PrincipalService:
             instance admins.
         PermissionDenied
             If the acting principal may not manage principals.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
+        require_step_up(p)
         principal = self.get_principal_by_name(p, name)
         if not principal.is_active:
             return
@@ -159,6 +191,11 @@ class PrincipalService:
             AuditEventType.PRINCIPAL_DEACTIVATED,
             detail={"principal": name, "type": principal.type.value},
         )
+        SessionService(self._session, self._authz).end_for_principal(
+            principal.id, "deactivated", commit=False
+        )
+        withdraw_open_links(self._session, principal.id, now=utc_now(), reason="deactivated")
+        withdraw_links_of_lapsed_issuers(self._session, actor_id=p.id)
         if commit:
             self._session.commit()
 

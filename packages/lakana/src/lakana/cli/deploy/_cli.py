@@ -21,6 +21,8 @@ deploy_app = typer.Typer(help="Generate a team deployment bundle.", no_args_is_h
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _IMAGE_RE = re.compile(r"^[A-Za-z0-9._/:@-]+$")
+_LABEL_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+"""One label of a host name, as the server's `LAKANA_UI__PUBLIC_URL` check accepts it."""
 
 
 def _is_loopback(host: str) -> bool:
@@ -55,6 +57,82 @@ def _validate_public_url(url: str) -> None:
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise CliError(f"--public-url must be an absolute http:// or https:// URL, got {url!r}")
+
+
+def _is_ip_address(host: str) -> bool:
+    """Tell whether a browser would read a URL host as an IP address.
+
+    The same rule as the server's `LAKANA_UI__PUBLIC_URL` check: an IPv4 or IPv6 address, or
+    any name whose last label is a number (`10.1`, `0x7f.1`), which browsers read as IPv4 too.
+
+    Parameters
+    ----------
+    host
+        A URL's hostname, lower case, without brackets.
+
+    Returns
+    -------
+    bool
+        True for an address.
+    """
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        last = host.rstrip(".").rsplit(".", 1)[-1]
+        return last.isdigit() or bool(re.fullmatch(r"0x[0-9a-f]*", last))
+    return True
+
+
+def _interface_url(public_url: str | None, port: int, ui: bool) -> tuple[str, bool]:
+    """Choose the web interface's address (`LAKANA_UI__PUBLIC_URL`) for the bundle.
+
+    Parameters
+    ----------
+    public_url
+        `--public-url`, already checked by `_validate_public_url`, or None.
+    port
+        `--port`, the host port browsers reach the server at.
+    ui
+        `--ui`: whether the bundle turns the interface on.
+
+    Returns
+    -------
+    tuple of (str, bool)
+        The address, and whether it is the `http://localhost:<port>` fallback (which the
+        command then names in one line).
+
+    Raises
+    ------
+    CliError
+        With `--ui`: for an IP address or anything else that is not a host name (passkeys
+        need a name), or plain `http://` off `localhost` (exit 1). Without `--ui` such an address
+        still serves the CLI profile, and the interface gets the fallback.
+    """
+    fallback = f"http://localhost:{port}"
+    if public_url is None:
+        return fallback, True
+    parts = urlsplit(public_url)
+    host = (parts.hostname or "").lower()
+    if _is_loopback(host):
+        return fallback, True
+    if _is_ip_address(host) or not all(_LABEL_RE.fullmatch(p) for p in host.split(".")):
+        if ui:
+            raise CliError(
+                "--public-url must use a host name for the web interface (passkeys are tied to "
+                f"a name): use a DNS name, or leave it out for {fallback}.",
+                1,
+            )
+        return fallback, True
+    if ui and parts.scheme == "http":
+        raise CliError(
+            "--public-url must start with https:// for the web interface on a team server: "
+            "browsers keep passkeys and the sign-in cookie safe only on a secure address. Put "
+            "TLS in front of the server, or leave --public-url out for "
+            f"{fallback} on this machine.",
+            1,
+        )
+    shown = host if parts.port is None else f"{host}:{parts.port}"
+    return f"{parts.scheme}://{shown}", False
 
 
 def _validate_image(image: str, option: str = "--image") -> None:
@@ -188,6 +266,12 @@ def init(
         str | None,
         typer.Option("--task-image", help="Override the task images' reference (without -py3.X)."),
     ] = None,
+    ui: Annotated[
+        bool,
+        typer.Option(
+            "--ui", help="Turn the web interface on; --public-url must then be an https DNS name."
+        ),
+    ] = False,
 ) -> None:
     """Generate compose.yaml and .env for a team deployment, and save a profile.
 
@@ -200,7 +284,9 @@ def init(
     public_url
         The URL the saved profile (and operators) should use; defaults to
         `http://127.0.0.1:<port>` for a loopback or wildcard `--bind`, or
-        to `http://<bind>:<port>` for a specific non-loopback address.
+        to `http://<bind>:<port>` for a specific non-loopback address. With a host name it is
+        also the web interface's address (`LAKANA_UI__PUBLIC_URL`); otherwise that is
+        `http://localhost:<port>`.
     bind
         The host address the server's port is published on: an IP address
         or the literal `localhost`.
@@ -215,12 +301,15 @@ def init(
         The task images' reference without ``-py3.X`` (the launcher appends one per Python);
         defaults to the Lakana image's repository with ``-task`` and the same tag
         (`task_image_for`).
+    ui
+        `--ui`: write `LAKANA_UI__ENABLED=true`, so the server serves the web interface.
 
     Raises
     ------
     CliError
         If `--workers`, `--port`, `--image`, `--task-image`, `--bind` or
-        `--public-url` are invalid (exit 2); if `--image` has no tag and no
+        `--public-url` are invalid (exit 2); with `--ui`, if `--public-url` is an IP address
+        or plain `http://` off `localhost` (exit 1); if `--image` has no tag and no
         `--task-image` is given (exit 2, `task_image_for`); if a bundle
         already exists at `directory` (exit 2, checked before the
         profile-name check so the refusal shown is always the relevant
@@ -242,6 +331,7 @@ def init(
     parsed_bind = _parse_bind(bind)
     if public_url is not None:
         _validate_public_url(public_url)
+    interface_url, fallback = _interface_url(public_url, port, ui)
 
     # Not redundant with write_bundle's own internal check further down: this early call exists
     # purely for
@@ -273,6 +363,8 @@ def init(
         bind=env_bind,
         port=port,
         workers=workers,
+        public_url=interface_url,
+        ui=ui,
     )
 
     created_directory = not directory.exists()
@@ -313,11 +405,18 @@ def init(
                 "the server before exposing it.\n"
             )
 
+    if fallback:
+        sys.stderr.write(
+            f"The web interface's address is {interface_url} (LAKANA_UI__PUBLIC_URL in "
+            f"{directory / '.env'}); for a team, set it to the https:// DNS name people open.\n"
+        )
+
+    sign_in = "  lakana sign-in setup-link   # open it to sign in to the web interface\n"
     sys.stdout.write(
         f"Wrote {directory / TEMPLATE_NAME} and {directory / '.env'}\n\n"
         "Next steps:\n"
         f"  cd {directory} && docker compose up -d --wait\n"
-        '  lakana sql "SELECT 42"\n'
+        '  lakana sql "SELECT 42"\n' + (sign_in if ui else "")
     )
 
 

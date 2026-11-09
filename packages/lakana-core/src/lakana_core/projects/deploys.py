@@ -61,6 +61,7 @@ from lakana_core.connections.service import missing_connections
 from lakana_core.db import db_now
 from lakana_core.errors import ConflictError, GraphBusyError, NotFoundError, ValidationError
 from lakana_core.identifiers import TableRef, shown
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.jobs.audit import start_detail
 from lakana_core.jobs.cron import next_fire_after
 from lakana_core.models import (
@@ -2178,10 +2179,14 @@ class DeployService:
             for both, so names cannot be enumerated).
         ValidationError
             If the service account is deactivated.
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes: the
+            account's rights become those of every run of this deployment.
         """
         self._authz.authorize(
             p, Action.MANAGE_ENVIRONMENT, Securable.environment_scope(environment)
         )
+        require_step_up(p)
         env, repo = self._environment(environment), self._repository(repository)
         self._deployment_row(env, repo)
         row = self._session.execute(

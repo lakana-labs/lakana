@@ -60,6 +60,9 @@ def create_repository(
 ) -> RepositoryOut:
     """Register a git repository.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Registers a repository that environments can deploy, by name, URL and optionally a
     credential secret and known hosts. Deployers pick the name and never the URL. Needs
     `MANAGE_REPOSITORY` on the instance. Answers 409 when the name is taken and 422 for a
@@ -152,6 +155,9 @@ def update_repository(
     service: RepositoryService = Depends(get_repository_service),
 ) -> RepositoryOut:
     """Change a repository.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Changes its URL, credential secret, username, known hosts or default ref. Needs
     `MANAGE_REPOSITORY` on the instance; changing the URL of a repository whose secret is

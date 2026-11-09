@@ -1,0 +1,144 @@
+/* The parts every screen shares: the page head with its one action, tabs, lists, panels, dialogs
+   and fields. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-5);
+  margin: 0 0 var(--space-5);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.tab {
+  padding: var(--space-2) 0;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.tab[aria-current="page"] {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.list {
+  width: 100%;
+  margin: 0 0 var(--space-5);
+  border-collapse: collapse;
+}
+
+.list th {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  font-weight: var(--type-label-weight);
+  text-align: left;
+}
+
+.list td {
+  height: var(--row-height);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+/* A row that opens its object: the name is the link, and its ::after covers the whole row. */
+.list tr {
+  position: relative;
+}
+
+.list tr:hover {
+  background: var(--color-sunk);
+}
+
+.row-name {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.row-name::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+tr:hover .row-name {
+  text-decoration: underline;
+}
+
+.list .button {
+  position: relative;
+}
+
+.second,
+.chevron {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+}
+
+.chevron {
+  width: var(--space-4);
+}
+
+tr:hover .chevron {
+  color: var(--color-accent);
+}
+
+.empty,
+.panel ul {
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+}
+
+.panel li {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+}
+
+.dialog {
+  width: min(520px, 100%);
+  padding: var(--space-5);
+}
+
+.dialog h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-section-size);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-4);
+}
+
+.field input {
+  min-height: 32px;
+  max-width: 320px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.field [slot="description"],
+.field [slot="errorMessage"] {
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+}

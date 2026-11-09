@@ -4,6 +4,7 @@ import base64
 import shutil
 import sqlite3
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -14,14 +15,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, event
 from sqlalchemy.orm import Session
 
+import lakana_server.ui
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.config import DatabaseConfig, SecretsConfig
 from lakana_core.db import create_engine
 from lakana_core.models import Base
 from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
-from lakana_server.settings import Settings
+from lakana_server.settings import Settings, UiConfig
 from lakana_server.sign_in_audit import SignInAuditLimiter
+from lakana_server.ui import CSP_FILE
 
 _TEST_MASTER_KEY = base64.b64encode(b"0" * 32).decode()
 """A valid base64-encoded 32-byte master key, matching the fixed test key
@@ -33,6 +36,101 @@ AUTH_HEADER = {"Authorization": "Bearer lakana_pat_testkey_testsecret"}
 verification now runs (see lakana_server.deps.get_principal) — this
 authenticates because the settings fixture's Settings mints the bootstrap
 principal's PAT with this exact key_id and secret."""
+
+PUBLIC = "http://localhost:8000"
+"""The public origin of the test settings with the interface on: `LAKANA_UI__PUBLIC_URL` unset,
+port 8000."""
+
+
+class SettableClock:
+    """A clock a test sets and moves; the app's sign-in services read it (`app.state.clock`).
+
+    Parameters
+    ----------
+    now
+        The time it starts at.
+    """
+
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        """Read the clock.
+
+        Returns
+        -------
+        datetime
+            The time set so far.
+        """
+        return self.now
+
+    def advance(self, by: timedelta) -> None:
+        """Move the clock forward.
+
+        Parameters
+        ----------
+        by
+            How far.
+        """
+        self.now += by
+
+
+@pytest.fixture
+def clock() -> SettableClock:
+    """Provide a settable clock at the current time; a test installs it on `app.state.clock`.
+
+    Returns
+    -------
+    SettableClock
+        The clock.
+    """
+    return SettableClock(datetime.now(UTC))
+
+
+def write_ui_dist(root: Path) -> Path:
+    """Write the smallest build of the interface the server accepts.
+
+    Parameters
+    ----------
+    root
+        The directory to write the build under.
+
+    Returns
+    -------
+    Path
+        The stand-in build directory.
+    """
+    dist = root / "ui_dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><html><body>stand-in</body></html>")
+    (dist / CSP_FILE).write_text("default-src 'self'")
+    return dist
+
+
+@pytest.fixture
+def ui_client(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
+    """Provide a client for an app with the interface on, as a browser at the public address.
+
+    Parameters
+    ----------
+    settings
+        Configuration pointed at an isolated database.
+    tmp_path
+        Pytest's per-test directory, for the stand-in build.
+    monkeypatch
+        Points `lakana_server.ui.UI_DIST` at the stand-in.
+
+    Yields
+    ------
+    TestClient
+        A started client at `http://localhost:8000` whose requests carry that `Origin`.
+    """
+    monkeypatch.setattr(lakana_server.ui, "UI_DIST", write_ui_dist(tmp_path))
+    app = create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)}))
+    with TestClient(app, base_url=PUBLIC, headers={"Origin": PUBLIC}) as c:
+        yield c
 
 
 @pytest.fixture
@@ -216,8 +314,9 @@ def fake_request(
     """Build a minimal stand-in for `Request`, for calling `get_principal` directly.
 
     Carries only the attributes `get_principal` actually reads: `app.state.
-    auth_audit_limiter`, `app.state.sign_in_audit_limiter`, `client.host` and the per-request
-    `state`. Matches this test suite's
+    auth_audit_limiter`, `app.state.sign_in_audit_limiter`, `app.state.settings.ui` (the interface
+    off, so no cookie is read), `client.host`, the per-request `state`, and an empty request to
+    `/api/v1/whoami` (`scope`, `cookies`, `headers`, `method`). Matches this test suite's
     existing pattern (see `test_deps.py`) of a `SimpleNamespace` `cast` to
     `Request` rather than constructing a real ASGI request.
 
@@ -246,8 +345,17 @@ def fake_request(
         auth_audit_limiter=limiter or AuthAuditLimiter(1000),
         denial_audit_limiter=DenialAuditLimiter(1000),
         sign_in_audit_limiter=sign_in_limiter or SignInAuditLimiter(15 * 60.0),
+        settings=SimpleNamespace(ui=UiConfig()),
     )
     return cast(
         Request,
-        SimpleNamespace(app=SimpleNamespace(state=state), client=client, state=SimpleNamespace()),
+        SimpleNamespace(
+            app=SimpleNamespace(state=state),
+            client=client,
+            state=SimpleNamespace(),
+            scope={"type": "http", "path": "/api/v1/whoami", "root_path": ""},
+            cookies={},
+            headers={},
+            method="GET",
+        ),
     )

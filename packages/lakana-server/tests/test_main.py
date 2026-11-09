@@ -56,6 +56,8 @@ def test_serve_runs_uvicorn_on_the_configured_host_and_port(
         "port": 8765,
         "log_level": "info",
         "access_log": True,
+        "proxy_headers": False,
+        "forwarded_allow_ips": "",
     }
     assert call["log_config"] == uvicorn_log_config()
 
@@ -134,3 +136,33 @@ def test_an_interface_that_is_not_built_stops_the_server_with_its_message_alone(
     assert err.startswith("lakana-server: LAKANA_UI__ENABLED is true, but this installation")
     assert "LAKANA_UI__ENABLED=false" in err
     assert "Traceback" not in err
+
+
+def test_forwarded_headers_are_off_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Uvicorn's own default trusts `X-Forwarded-*` from 127.0.0.1; Lakana trusts no one."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    monkeypatch.delenv("LAKANA_TRUSTED_PROXIES", raising=False)
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(server_main.uvicorn, "run", lambda app, **kw: calls.append(kw))
+
+    server_main.main([])
+
+    assert calls[0]["proxy_headers"] is False
+    assert calls[0]["forwarded_allow_ips"] == ""
+
+
+def test_trusted_proxies_turn_forwarded_headers_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`LAKANA_TRUSTED_PROXIES` names the only peers whose forwarded headers count."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    monkeypatch.setenv("LAKANA_TRUSTED_PROXIES", '["10.0.0.2"]')
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(server_main.uvicorn, "run", lambda app, **kw: calls.append(kw))
+
+    server_main.main([])
+
+    assert calls[0]["proxy_headers"] is True
+    assert calls[0]["forwarded_allow_ips"] == "10.0.0.2"

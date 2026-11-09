@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import exists, or_, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change
@@ -13,11 +13,23 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
 from lakana_core.catalog.identity import namespace_exists, resolve_environment_id, resolve_table_id
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
-from lakana_core.grants.admin import ADMIN_ONLY_ACTIONS, authorize_admin_only
+from lakana_core.grants.admin import (
+    ADMIN_ONLY_ACTIONS,
+    authorize_admin_only,
+    holds_instance_admin,
+)
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
-from lakana_core.models import AuditEventType, Grant, Group, GroupMembership, Principal
+from lakana_core.identity.sessions import require_step_up
+from lakana_core.models import (
+    AuditEventType,
+    Grant,
+    Group,
+    GroupMembership,
+    Principal,
+    SignInLink,
+)
 from lakana_core.pagination import Page, newest_first
 
 _EXPECTED_FIELDS: dict[SecurableKind, frozenset[str]] = {
@@ -366,8 +378,11 @@ class GrantService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GRANT` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
+        require_step_up(p)
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
         guard_change(
@@ -419,6 +434,8 @@ class GrantService:
             },
         )
         self._session.add(row)
+        if role is Role.ADMIN and kind is SecurableKind.INSTANCE:
+            mark_admin_holders(self._session)
         if commit:
             self._session.commit()
         return row
@@ -507,6 +524,50 @@ class GrantService:
             cursor=cursor,
         )
 
+    def is_admin(self, p: PrincipalRef) -> bool:
+        """Say whether the caller holds the `ADMIN` role on the instance.
+
+        About the caller only, so it needs no authorization.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        bool
+            `lakana_core.grants.admin.holds_instance_admin` for the caller.
+        """
+        return holds_instance_admin(self._session, p.id)
+
+    def has_any_grant(self, p: PrincipalRef) -> bool:
+        """Say whether the caller has any right at all, so the interface can tell a new person.
+
+        About the caller only, so it needs no authorization and tells nothing about anyone else.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        bool
+            `True` for an active principal with at least one unrevoked grant, of any role or
+            action and at any scope (instance, environment, namespace or table), held directly
+            or through a group it belongs to; one `EXISTS` query.
+        """
+        groups = select(GroupMembership.group_id).where(GroupMembership.principal_id == p.id)
+        query = select(
+            exists().where(
+                exists().where(Principal.id == p.id, Principal.is_active.is_(True)),
+                Grant.revoked_at.is_(None),
+                or_(Grant.principal_id == p.id, Grant.group_id.in_(groups)),
+            )
+        )
+        return bool(self._session.execute(query).scalar())
+
     def explain(self, p: PrincipalRef, principal_name: str, scope: Securable) -> PermissionReport:
         """Say what a principal may do on an object, and through which grant or group.
 
@@ -569,6 +630,9 @@ class GrantService:
     def revoke(self, p: PrincipalRef, grant_id: uuid.UUID, *, commit: bool = True) -> None:
         """Revoke a grant.
 
+        Revoking an instance ADMIN grant withdraws the open invites and recovery links of
+        everyone it leaves without ADMIN (`withdraw_links_of_lapsed_issuers`).
+
         Idempotent: revoking an already-revoked grant is a no-op — it
         leaves the existing `revoked_at`/`revoked_by` untouched and records
         no second `GRANT_REVOKED` event, matching PATs, task tokens, row
@@ -592,8 +656,11 @@ class GrantService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GRANT` works only with it).
+        StepUpRequired
+            In a browser session whose last passkey touch is older than 15 minutes.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
+        require_step_up(p)
         grant = self._session.get(Grant, grant_id)
         if grant is None:
             raise NotFoundError(f"No grant {grant_id}.")
@@ -621,8 +688,92 @@ class GrantService:
         )
         grant.revoked_at = datetime.now(UTC)
         grant.revoked_by = p.id
+        if grant.role == Role.ADMIN and grant.kind == SecurableKind.INSTANCE:
+            withdraw_links_of_lapsed_issuers(self._session, actor_id=p.id)
         if commit:
             self._session.commit()
+
+
+def _admin_covered_ids(
+    session: Session,
+    *,
+    exclude_grant_id: uuid.UUID | None = None,
+    exclude_membership: tuple[uuid.UUID, uuid.UUID] | None = None,
+) -> set[uuid.UUID]:
+    """Collect every principal an unrevoked instance ADMIN grant covers, active or not.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    exclude_grant_id
+        A grant to leave out (`active_instance_admin_ids`).
+    exclude_membership
+        A ``(group_id, principal_id)`` path to leave out (`active_instance_admin_ids`).
+
+    Returns
+    -------
+    set of uuid.UUID
+        The principals covered directly or through a group, whatever their `is_active`.
+    """
+    admin_grants = (
+        session.execute(
+            select(Grant).where(
+                Grant.role == Role.ADMIN,
+                Grant.kind == SecurableKind.INSTANCE,
+                Grant.revoked_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ids: set[uuid.UUID] = set()
+    for admin_grant in admin_grants:
+        if admin_grant.id == exclude_grant_id:
+            continue
+        if admin_grant.principal_id is not None:
+            ids.add(admin_grant.principal_id)
+        else:
+            member_ids = (
+                session.execute(
+                    select(GroupMembership.principal_id).where(
+                        GroupMembership.group_id == admin_grant.group_id
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            ids.update(
+                member_id
+                for member_id in member_ids
+                if exclude_membership != (admin_grant.group_id, member_id)
+            )
+    return ids
+
+
+def mark_admin_holders(session: Session) -> None:
+    """Mark everyone ADMIN now covers as having held it (`Principal.held_admin`), for good.
+
+    Called wherever ADMIN can become someone's: a new grant (`GrantService.grant`, which also
+    covers a group's members) and a new group membership (`GroupService.add_member`). The mark
+    is never cleared, so an administrator who first loses ADMIN is still recovered only by the
+    server operator (`lakana_core.identity.links.LinkService.issue_recovery`). A deactivated
+    principal is marked too: reactivating them would make ADMIN effective again.
+
+    Parameters
+    ----------
+    session
+        Database session; flushed first so the change being made counts. The caller commits.
+    """
+    session.flush()
+    ids = _admin_covered_ids(session)
+    if ids:
+        session.execute(
+            update(Principal)
+            .where(Principal.id.in_(ids), Principal.held_admin.is_(False))
+            .values(held_admin=True)
+            .execution_options(synchronize_session="fetch")
+        )
 
 
 def active_instance_admin_ids(
@@ -664,38 +815,9 @@ def active_instance_admin_ids(
     `lakana_core.grants.admin.holds_instance_admin` asks the same question for
     one principal; a test asserts the two agree, so change them together.
     """
-    admin_grants = (
-        session.execute(
-            select(Grant).where(
-                Grant.role == Role.ADMIN,
-                Grant.kind == SecurableKind.INSTANCE,
-                Grant.revoked_at.is_(None),
-            )
-        )
-        .scalars()
-        .all()
+    ids = _admin_covered_ids(
+        session, exclude_grant_id=exclude_grant_id, exclude_membership=exclude_membership
     )
-    ids: set[uuid.UUID] = set()
-    for admin_grant in admin_grants:
-        if admin_grant.id == exclude_grant_id:
-            continue
-        if admin_grant.principal_id is not None:
-            ids.add(admin_grant.principal_id)
-        else:
-            member_ids = (
-                session.execute(
-                    select(GroupMembership.principal_id).where(
-                        GroupMembership.group_id == admin_grant.group_id
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            ids.update(
-                member_id
-                for member_id in member_ids
-                if exclude_membership != (admin_grant.group_id, member_id)
-            )
     if not ids:
         return set()
     return set(
@@ -705,6 +827,100 @@ def active_instance_admin_ids(
         .scalars()
         .all()
     )
+
+
+ISSUED_BY_ADMINS = ("invite", "recovery")
+"""The kinds of sign-in link only an administrator issues, and only while one."""
+
+
+def lapsed_issuer_reason(issuer: Principal | None, *, is_admin: bool) -> str | None:
+    """Say why the issuer of an invite or recovery link may no longer stand behind it.
+
+    Parameters
+    ----------
+    issuer
+        The link's issuer (`SignInLink.issued_by`); `None` once that principal is gone.
+    is_admin
+        Whether the issuer holds instance ADMIN now (active, directly or through a group).
+
+    Returns
+    -------
+    str or None
+        ``issuer_gone``, ``issuer_deactivated`` or ``issuer_not_admin``; `None` while the
+        issuer still holds the right the link needed (``ADMIN`` on the instance).
+    """
+    if issuer is None:
+        return "issuer_gone"
+    if not issuer.is_active:
+        return "issuer_deactivated"
+    if not is_admin:
+        return "issuer_not_admin"
+    return None
+
+
+def withdraw_links_of_lapsed_issuers(session: Session, *, actor_id: uuid.UUID | None) -> int:
+    """Withdraw the open invites and recovery links whose issuer lost the right to issue them.
+
+    Called where an issuer can lose it: deactivation
+    (`lakana_core.identity.principals.PrincipalService.deactivate_principal`), revoking an
+    instance ADMIN grant (`GrantService.revoke`, also a group's, which a group's deletion
+    needs first) and leaving a group that holds one (`GroupService.remove_member`). Using a
+    link checks its issuer again (`lakana_core.identity.links.LinkService.redeem`), so this is
+    the early half: the link is shown as withdrawn at once. An unused link past its expiry is
+    withdrawn too; it was unusable already. Each withdrawal is one
+    `SIGN_IN_LINK_WITHDRAWN` event with the reason `lapsed_issuer_reason` gives.
+
+    Parameters
+    ----------
+    session
+        Database session; flushed first so the change being made counts. The caller commits.
+    actor_id
+        Who made the change, for the audit events.
+
+    Returns
+    -------
+    int
+        How many links this call withdrew.
+    """
+    session.flush()
+    rows = session.execute(
+        select(SignInLink.id, SignInLink.kind, SignInLink.issued_by)
+        .where(
+            SignInLink.kind.in_(ISSUED_BY_ADMINS),
+            SignInLink.used_at.is_(None),
+            SignInLink.withdrawn_at.is_(None),
+        )
+        .order_by(SignInLink.created_at, SignInLink.id)
+    ).all()
+    if not rows:
+        return 0
+    admins = active_instance_admin_ids(session)
+    now = datetime.now(UTC)
+    audit = AuditService(session)
+    count = 0
+    for link_id, kind, issued_by in rows:
+        issuer = session.get(Principal, issued_by) if issued_by is not None else None
+        reason = lapsed_issuer_reason(issuer, is_admin=issued_by in admins)
+        if reason is None:
+            continue
+        session.execute(
+            update(SignInLink)
+            .where(SignInLink.id == link_id, SignInLink.used_at.is_(None))
+            .values(withdrawn_at=now, reserved_name=None)
+            .execution_options(synchronize_session="fetch")
+        )
+        audit.record(
+            actor_id,
+            AuditEventType.SIGN_IN_LINK_WITHDRAWN,
+            detail={
+                "kind": kind,
+                "link_id": str(link_id),
+                "issuer": issuer.name if issuer is not None else None,
+                "reason": reason,
+            },
+        )
+        count += 1
+    return count
 
 
 def assert_admin_headroom(

@@ -3217,3 +3217,161 @@ def test_0068_on_postgres() -> None:
             names = {c["name"] for c in sqlalchemy.inspect(engine).get_columns(table)}
             assert not figures & names
         engine.dispose()
+
+
+_SIGN_IN_TABLES = {
+    "sign_in_links",
+    "browser_sessions",
+    "passkeys",
+    "webauthn_challenges",
+    "sign_in_notices",
+    "instance_settings",
+}
+
+
+def test_0069_on_postgres() -> None:
+    """0069 adds the sign-in tables and two columns; downgrade drops them; upgrade again."""
+    revision_0068 = "c4e6a8b0d2f1"
+    revision_0069 = "d7f1b3c5e9a2"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0069)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0069
+        inspector = sqlalchemy.inspect(engine)
+        assert set(inspector.get_table_names()) >= _SIGN_IN_TABLES
+        bootstrap = {c["name"]: c for c in inspector.get_columns("personal_access_tokens")}[
+            "bootstrap"
+        ]
+        assert not bootstrap["nullable"]
+        links = {
+            key["constrained_columns"][0]: key["referred_table"]
+            for key in inspector.get_foreign_keys("sign_in_links")
+        }
+        assert links["session_id"] == "browser_sessions"
+        migrate.downgrade(url, revision_0068)
+        assert _alembic_version(engine) == revision_0068
+        inspector = sqlalchemy.inspect(engine)
+        assert not _SIGN_IN_TABLES & set(inspector.get_table_names())
+        assert "webauthn_handle" not in {c["name"] for c in inspector.get_columns("principals")}
+        migrate.upgrade(url, revision_0069)
+        assert _alembic_version(engine) == revision_0069
+        engine.dispose()
+
+
+def test_0069_marks_the_bootstrap_pat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the bootstrap principal's unrevoked PAT named ``bootstrap`` is marked.
+
+    A ``bootstrap`` PAT of another principal, a revoked one and one with another name stay
+    unmarked (`LAKANA_BOOTSTRAP_ADMIN` unset: the bootstrap principal is ``admin``).
+
+    Parameters
+    ----------
+    monkeypatch
+        Unsets `LAKANA_BOOTSTRAP_ADMIN`, whatever the environment running the test says.
+    """
+    monkeypatch.delenv("LAKANA_BOOTSTRAP_ADMIN", raising=False)
+    revision_0068 = "c4e6a8b0d2f1"
+    revision_0069 = "d7f1b3c5e9a2"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0068)
+        engine = sqlalchemy.create_engine(url)
+        now = datetime.now(UTC)
+        owners = {"admin": uuid.uuid4(), "ops": uuid.uuid4()}
+        pats = {
+            "operator": ("admin", "bootstrap", None),
+            "laptop": ("admin", "laptop", None),
+            "revoked": ("admin", "bootstrap", now),
+            "other": ("ops", "bootstrap", None),
+        }
+        with engine.begin() as conn:
+            for name, principal_id in owners.items():
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at, "
+                        "updated_at) VALUES (:id, 'USER', :name, true, :now, :now)"
+                    ),
+                    {"id": principal_id, "name": name, "now": now},
+                )
+            for key_id, (owner, name, revoked_at) in pats.items():
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO personal_access_tokens (id, principal_id, key_id, "
+                        "secret_hash, name, created_at, revoked_at) VALUES (:id, :owner, :key, "
+                        "'h', :name, :now, :revoked)"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "owner": owners[owner],
+                        "key": key_id,
+                        "name": name,
+                        "now": now,
+                        "revoked": revoked_at,
+                    },
+                )
+        migrate.upgrade(url, revision_0069)
+        assert _alembic_version(engine) == revision_0069
+        with engine.connect() as conn:
+            flags = dict(
+                conn.execute(
+                    sqlalchemy.text("SELECT key_id, bootstrap FROM personal_access_tokens")
+                ).all()
+            )
+        assert flags == {"operator": True, "laptop": False, "revoked": False, "other": False}
+        engine.dispose()
+
+
+def test_0070_backfills_held_admin_on_postgres() -> None:
+    """0070 marks a revoked direct admin and a name from a JSON audit row; downgrade drops it."""
+    revision_0069 = "d7f1b3c5e9a2"
+    revision_0070 = "e8a2c4f6b0d3"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0069)
+        engine = sqlalchemy.create_engine(url)
+        now = datetime.now(UTC)
+        ids = {name: uuid.uuid4() for name in ("ops", "alice", "dave", "fay")}
+        with engine.begin() as conn:
+            for name, principal_id in ids.items():
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at, "
+                        "updated_at) VALUES (:id, 'USER', :name, true, :now, :now)"
+                    ),
+                    {"id": principal_id, "name": name, "now": now},
+                )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO grants (id, principal_id, role, kind, granted_by, granted_at, "
+                    "revoked_at) VALUES (:id, :p, 'ADMIN', 'INSTANCE', :p, :now, :now)"
+                ),
+                {"id": uuid.uuid4(), "p": ids["alice"], "now": now},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO audit_events (id, occurred_at, event_type, securable_kind, "
+                    "detail) VALUES (:id, :now, 'GRANT_CREATED', 'INSTANCE', "
+                    "CAST(:detail AS JSON))"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "now": now,
+                    "detail": '{"principal": "dave", "role": "ADMIN"}',
+                },
+            )
+        migrate.upgrade(url, revision_0070)
+        with engine.connect() as conn:
+            marked = {
+                name
+                for name, held in conn.execute(
+                    sqlalchemy.text("SELECT name, held_admin FROM principals")
+                ).all()
+                if held
+            }
+        assert marked == {"alice", "dave"}
+        migrate.downgrade(url, revision_0069)
+        assert "held_admin" not in {
+            c["name"] for c in sqlalchemy.inspect(engine).get_columns("principals")
+        }
+        engine.dispose()

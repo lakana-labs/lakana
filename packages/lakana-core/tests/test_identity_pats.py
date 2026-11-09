@@ -338,3 +338,33 @@ def test_verify_carries_the_principals_language(session: Session) -> None:
     parsed = parse_token(issued.token, "lakana_pat")
     assert parsed is not None
     assert service.verify(issued.key_id, parsed[1]).language == "fr"
+
+
+def test_verify_carries_the_token_id_and_credential(session: Session) -> None:
+    """A verified PAT names itself on the principal it resolves to."""
+    _add_principal(session, "alice")
+    service = PatService(session, AllowAllAuthorization())
+    issued = service.issue(_admin(session), "alice", name="laptop")
+    parsed = parse_token(issued.token, "lakana_pat")
+    assert parsed is not None
+    row = session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.key_id == issued.key_id)
+    ).scalar_one()
+    p = service.verify(*parsed)
+    assert p.token_id == row.id
+    assert p.credential == "pat"
+    assert p.session is None
+
+
+def test_only_bootstrap_if_needed_marks_a_pat_as_bootstrap(session: Session) -> None:
+    """`issue` marks nothing by default, not even a PAT named like the bootstrap one."""
+    _add_principal(session, "admin")
+    service = PatService(session, AllowAllAuthorization())
+    actor = _admin(session)
+    plain = service.issue(actor, "admin", name="laptop")
+    named = service.issue(actor, "admin", name="bootstrap")
+    marked = service.issue(actor, "admin", name="x", bootstrap=True)
+    flags = dict(
+        session.execute(select(PersonalAccessToken.key_id, PersonalAccessToken.bootstrap)).all()
+    )
+    assert flags == {plain.key_id: False, named.key_id: False, marked.key_id: True}
