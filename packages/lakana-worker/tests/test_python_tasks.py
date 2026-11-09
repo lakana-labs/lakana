@@ -58,6 +58,7 @@ import lakana._artifact_manifest as sdk_manifest
 import lakana.errors as sdk_errors
 import lakana.runner as harness_runner
 import lakana_worker.launcher.requests as launcher_requests
+import lakana_worker.poller as poller_module
 import lakana_worker.python_tasks as python_tasks_module
 import lakana_worker.task_checks as task_checks_module
 import lakana_worker.task_lease as task_lease_module
@@ -1569,6 +1570,54 @@ def test_drain_stops_serving_queries_and_releases_the_task(py: PyWorld) -> None:
         query_run = session.get(QueryRun, queued[0])
         assert query_run is not None and query_run.status is QueryRunStatus.QUEUED
     assert py.tokens()[0].revoked_at is not None
+
+
+def test_a_drain_during_a_query_poll_takes_no_query_queued_after_it(
+    py: PyWorld, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A SIGTERM that lands inside a query poll beside a task: the poll takes nothing.
+
+    The main thread has seen no drain and entered its query-only poll; only then does the
+    script set the drain and queue its query. The poll reads that query (it is committed
+    after the drain was set) and must leave it queued. The window is held open here; on CI
+    it opened by chance (macOS, run 42602069971).
+    """
+    world = py.world
+    drain = threading.Event()
+    submitted = threading.Event()
+    queued: list[uuid.UUID] = []
+    real_poll = poller_module.poll_iteration
+    held: list[bool] = []
+
+    def late(*args: object, **kwargs: object) -> bool:
+        assert submitted.wait(_WAIT), "the script never queued its query"
+        held.append(True)
+        return real_poll(*args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(poller_module, "poll_iteration", late)
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        drain.set()
+        with world.session() as session:
+            queued.append(
+                QueryService(session, AllowAllAuthorization())
+                .submit_query(world.admin, "dev", "SELECT 1")
+                .id
+            )
+        submitted.set()
+        return _until_stopped(task, on_log, stop)
+
+    engine = py.engine(script, drain=drain, grace=0.05)
+    _start(world)
+    run_claimed(engine, _claim(world))
+    with world.session() as session:
+        scheduler_tick(session, datetime.now(UTC), lambda: 0.5)
+    with world.session() as session:
+        assert poll_once(session, AllowAllAuthorization(), engine=engine) is True
+    with world.session() as session:
+        query_run = session.get(QueryRun, queued[0])
+        assert query_run is not None and query_run.status is QueryRunStatus.QUEUED
+    assert held, "the query poll never ran, so the window was not exercised"
 
 
 def test_a_drain_before_the_process_starts_releases_without_a_process(

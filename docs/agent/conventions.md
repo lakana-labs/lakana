@@ -192,9 +192,11 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   `ui-testing-library`); every other tool upgrades alone, like ruff and ty above.
 - **ESLint 9 and TypeScript 6.0, on purpose.** ESLint 10 exists, but `eslint-plugin-jsx-a11y`
   6.10.2 supports ESLint 9 at most, so Dependabot ignores major updates of `eslint` and
-  `@eslint/js` (which moves with it, never ahead). TypeScript 7 is stable, but `typescript-eslint` 8.72.1
-  declares `typescript <6.1.0`; `typescript` and `typescript-eslint` stay in separate Dependabot
-  pull requests, and TypeScript 7 comes in its own pull request once typescript-eslint supports it.
+  `@eslint/js` (which moves with it, never ahead). TypeScript 7 is stable, but
+  `typescript-eslint` 8.72.1 declares `typescript <6.1.0`, so Dependabot gives `typescript`
+  patch updates only; `typescript` and `typescript-eslint` stay in separate Dependabot pull
+  requests, and a newer TypeScript comes in its own pull request once typescript-eslint
+  supports it.
 - **One override, tracked for removal.** `ui/package.json` has
   `"overrides": {"minimatch@^10": "11.0.5"}`: advisory GHSA-g3hv-75wg-m249 (a denial of service
   in minimatch below 11.0.1) reaches the lock through `typescript-eslint`, whose
