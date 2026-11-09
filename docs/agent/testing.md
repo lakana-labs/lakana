@@ -1228,8 +1228,15 @@ the test, the budget, and the next step.
   which `scripts/pytest_selection.py` adds the property `slow=true` to every marked test;
   `test (3.14)` runs `time_budgets.py slow-tests --confirm junit/*.xml` over them. One
   measurement in a busy shard is noisy (between two runs a test of 0.6 s once took 2.4 s), so an
-  unmarked test over the threshold is run again on its own, serially and under coverage, and
-  fails only if it takes `confirm_seconds` (2.5 s, in `scripts/time-budgets.toml` beside the
+  unmarked test over the threshold is run again, serially and under coverage, in a fresh pytest
+  process per package. In that process `scripts/remeasure_warm_up.py` (loaded with `-p`) first
+  runs, untimed, the cheapest other test of the candidate's module that uses all of the
+  candidate's session- and module-scoped fixtures (never a skipped one; without such a test the
+  candidate runs alone), so a fixture such as `catalog_template` is not set up on the
+  candidate's clock. Moving that setup off the candidate is deliberate: in a shard it falls on
+  whichever test of the module runs first, and the rule targets tests that are slow in
+  themselves; the candidate's own function-scoped setup, call and teardown are measured in
+  full. The candidate fails only if it takes `confirm_seconds` (2.5 s, in `scripts/time-budgets.toml` beside the
   threshold) or more there: a margin, because a test that sits at the 2 s threshold passed and
   failed on the same code. The in-shard threshold stays 2 s for flagging; the log names each one
   counted as noise. A new test over

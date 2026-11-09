@@ -40,6 +40,7 @@ BUDGETS = Path("scripts/time-budgets.toml")
 BASELINE = Path("scripts/slow-tests-baseline.json")
 DOCS = "docs/agent/testing.md, 'Time budgets'"
 UPDATE_COMMAND = "uv run python scripts/time_budgets.py slow-tests --update REPORT.xml ..."
+WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"  # read by scripts/remeasure_warm_up.py
 
 
 @dataclass(frozen=True)
@@ -531,8 +532,8 @@ def _package_of(test: TestTime) -> str:
     return "/".join(parts[:2]) if parts[:1] == ("packages",) and len(parts) > 2 else parts[0]
 
 
-def _warm_ups(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> list[TestTime]:
-    """Pick, per file of a group, its fastest other test to run first.
+def _warm_up_plan(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> dict[str, object]:
+    """Write down what the warm-up plugin needs to pick each candidate's warm-up.
 
     Parameters
     ----------
@@ -543,20 +544,18 @@ def _warm_ups(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> list[
 
     Returns
     -------
-    list of TestTime
-        At most one test per file, never a candidate or a skipped test, in the files' order.
+    dict
+        ``candidates``: their node ids; ``seconds``: the shard time of every other test of
+        their files that ran, the only tests that may warm them up.
     """
-    candidates = {test.nodeid for test in group}
-    picks: list[TestTime] = []
-    for file in dict.fromkeys(test.file for test in group):
-        others = [
-            test
-            for test in warm_from
-            if test.file == file and not test.skipped and test.nodeid not in candidates
-        ]
-        if others:
-            picks.append(min(others, key=lambda test: test.seconds))
-    return picks
+    candidates = [test.nodeid for test in group]
+    files = {test.file for test in group}
+    seconds = {
+        test.nodeid: test.seconds
+        for test in warm_from
+        if test.file in files and not test.skipped and test.nodeid not in candidates
+    }
+    return {"candidates": candidates, "seconds": seconds}
 
 
 def remeasure(
@@ -569,9 +568,10 @@ def remeasure(
 
     Each package's tests run in a pytest process of their own: every package has a module
     named `conftest`, and in one process the first one imported would shadow the others. Each
-    process first runs the fastest other test of every candidate's file, which takes the
-    process's one-off setup (session fixtures, first imports) that no shard charges to the
-    candidate; its time is not counted.
+    process collects the candidates' files, and the plugin `scripts.remeasure_warm_up` keeps
+    only the candidates, each after the cheapest other test of its module that uses all its
+    session- and module-scoped fixtures: that test takes the one-off setup a shard charges
+    to whichever test runs first, and its time is not counted.
 
     Parameters
     ----------
@@ -583,8 +583,8 @@ def remeasure(
     run
         Runs the command; `subprocess.run` unless a test replaces it.
     warm_from
-        Every test the reports hold, from which the warm-up tests are picked; empty runs the
-        candidates alone.
+        Every test the reports hold, from which the warm-up tests are picked; empty runs each
+        candidate alone.
 
     Returns
     -------
@@ -599,21 +599,29 @@ def remeasure(
     seconds: dict[str, float] = {}
     for index, group in enumerate(groups.values()):
         report = workdir / f"remeasured-{index}.xml"
+        plan = workdir / f"warm-up-{index}.json"
+        plan.write_text(json.dumps(_warm_up_plan(group, warm_from)))
         command = [
             sys.executable,
             "-m",
             "pytest",
-            *[test.nodeid for test in [*_warm_ups(group, warm_from), *group]],
+            *dict.fromkeys(test.file for test in group),
             "-q",
             "-p",
             "no:cacheprovider",
+            "-p",
+            "scripts.remeasure_warm_up",
             "--cov",
             "--cov-report=",
             f"--junitxml={report}",
             "-o",
             "junit_family=xunit1",
         ]
-        env = {**os.environ, "COVERAGE_FILE": str(workdir / f".coverage.remeasured.{index}")}
+        env = {
+            **os.environ,
+            "COVERAGE_FILE": str(workdir / f".coverage.remeasured.{index}"),
+            WARM_UP_ENV: str(plan),
+        }
         run(command, env=env, check=False)
         try:
             seconds.update(
