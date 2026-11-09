@@ -94,11 +94,26 @@ AUTOMATION_MESSAGE = (
 NOT_OPERATOR_SETUP = "Only the server operator's bootstrap token issues the setup link."
 """The refusal of a setup link to anyone but the operator."""
 
-NOT_OPERATOR_RECOVERY = (
-    "Recovering an administrator is for the server operator: run `lakana recovery create "
-    "<name>` with the bootstrap token where the server runs."
-)
-"""The refusal of an administrator's recovery link to anyone but the operator."""
+
+def not_operator_recovery(name: str) -> str:
+    """Word the refusal of an administrator's recovery to anyone but the server operator.
+
+    Parameters
+    ----------
+    name
+        The person's principal name.
+
+    Returns
+    -------
+    str
+        The cause (they hold or once held ADMIN) and the operator's command.
+    """
+    return (
+        f"{name!r} holds or has held the administrator role, so only the server operator can "
+        f"recover the account: run `lakana recovery create {name}` with the bootstrap token "
+        "where the server runs."
+    )
+
 
 ALREADY_SET_UP = (
     "Already set up: the first administrator has a passkey. Use a recovery link "
@@ -857,7 +872,7 @@ class LinkService:
         ------
         PermissionDenied
             For automation and non-administrators; `StepUpRequired` without a fresh touch; for
-            an administrator's recovery by anyone but the operator.
+            the recovery of anyone who holds or has held ADMIN, by anyone but the operator.
         NotFoundError
             If no principal has the name.
         ConflictError
@@ -888,8 +903,8 @@ class LinkService:
                 "You cannot recover your own account with a link. Use Add passkey in the "
                 "interface while you are signed in, or ask another administrator."
             )
-        if target.id in active_instance_admin_ids(self._session) and not operator:
-            raise PermissionDenied(NOT_OPERATOR_RECOVERY)
+        if self._is_or_was_admin(target) and not operator:
+            raise PermissionDenied(not_operator_recovery(target.name))
         self._withdraw_open(target.id, "recovery", p)
         return self._issue(
             p,
@@ -1070,6 +1085,22 @@ class LinkService:
             )
         self._session.commit()
 
+    def _is_or_was_admin(self, principal: Principal) -> bool:
+        """Say whether a person holds instance ADMIN now or has ever held it.
+
+        Parameters
+        ----------
+        principal
+            The person.
+
+        Returns
+        -------
+        bool
+            `Principal.held_admin`, or ADMIN covering them now (a grant made before the mark
+            existed is backfilled by migration 0070; this is the second net).
+        """
+        return principal.held_admin or principal.id in active_instance_admin_ids(self._session)
+
     def _issued_by_operator(self, row: SignInLink) -> bool:
         """Say whether a recovery link was issued with the operator's bootstrap token.
 
@@ -1116,7 +1147,8 @@ class LinkService:
         _CloseLink
             When a rule checked at issue no longer holds: an invite's name was taken meanwhile,
             the bootstrap account of a setup link has a passkey now, or the person of a recovery
-            link became an administrator and the link was not the operator's. The caller
+            link holds or has held ADMIN (`Principal.held_admin`) and the link was not the
+            operator's. The caller
             withdraws the link and raises the carried error.
         """
         kind = row.kind
@@ -1131,16 +1163,11 @@ class LinkService:
             raise _CloseLink(ConflictError(ALREADY_SET_UP), "already_set_up")
         if (
             kind == "recovery"
-            and principal_id in active_instance_admin_ids(self._session)
+            and self._is_or_was_admin(principal)
             and not self._issued_by_operator(row)
         ):
             raise _CloseLink(
-                PermissionDenied(
-                    f"{principal.name!r} became an administrator after this recovery link was "
-                    "issued, and an administrator is recovered by the server operator only: run "
-                    f"`lakana recovery create {principal.name}` with the bootstrap token where "
-                    "the server runs. This link was closed."
-                ),
+                PermissionDenied(f"{not_operator_recovery(principal.name)} This link was closed."),
                 "became_admin",
             )
         if kind == "recovery":

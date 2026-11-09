@@ -414,9 +414,12 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   owned by the caller, and the caller named `LAKANA_BOOTSTRAP_ADMIN`. A PAT an administrator
   issues for the bootstrap principal, even one named `bootstrap`, a session and every other
   token are not. Only the operator issues the setup link (only while the bootstrap principal
-  has no passkey at all) and a recovery link for an administrator (ADMIN directly or through a
-  group, `active_instance_admin_ids`); an ordinary administrator gets 403 naming
-  `lakana recovery create <name>` where the server runs.
+  has no passkey at all) and a recovery link for an administrator: anyone who holds ADMIN now
+  (`active_instance_admin_ids`) or ever held it, directly or through a group
+  (`Principal.held_admin`, set by `mark_admin_holders` in `GrantService.grant` and
+  `GroupService.add_member`, never cleared, backfilled by migration 0070 from grants and audit
+  rows). An ordinary administrator gets 403 naming `lakana recovery create <name>` where the
+  server runs, at issue and again at use, so revoking ADMIN first does not get around it.
 - **Recovery** is for another person (oneself: "use Add passkey"), except that the operator
   may recover the bootstrap principal itself, which has no other way back in. Issuing an invite
   or a recovery link needs the ADMIN role and, from a browser, step-up. A new recovery link
@@ -433,8 +436,8 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   with a control (`Cc`) or format (`Cf`: zero-width, soft hyphen, direction marks) character,
   or starting with a combining mark, is refused (422, `invisible_character_problem`).
 - **Rules are re-checked when a link is used**, in its claiming transaction: a setup link fails
-  once the bootstrap account has a passkey; a recovery link fails when its person has become an
-  administrator, unless the operator's bootstrap PAT issued it (recorded in `source_pat_id`);
+  once the bootstrap account has a passkey; a recovery link fails when its person holds or has
+  held ADMIN by then (`held_admin`), unless the operator's bootstrap PAT issued it (recorded in `source_pat_id`);
   an invite fails when its name was taken meanwhile. Each such link is then withdrawn (audited
   with the reason, gone from the open lists) and the error names the next step (an
   administrator's recovery: `lakana recovery create NAME`; an invite: `lakana invite create`).

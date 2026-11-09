@@ -54,10 +54,11 @@ def create_recovery_link(
 
     Answers the link to send them, shown only here: it works once, for 1 hour. Using it
     removes their passkeys, ends their sessions and tells them and every administrator. Needs
-    the ADMIN role and, in a browser, a passkey touch in the last 15 minutes. 403 for an
-    administrator unless you are the server operator (run `lakana recovery create <name>`
-    with the bootstrap token where the server runs); 409 for yourself (use Add passkey), a
-    service account or a deactivated account.
+    the ADMIN role and, in a browser, a passkey touch in the last 15 minutes. 403 for anyone
+    who holds or has ever held the ADMIN role, directly or through a group, unless you are the
+    server operator (run `lakana recovery create <name>` with the bootstrap token where the
+    server runs); 409 for yourself (use Add passkey), a service account or a deactivated
+    account.
 
     Parameters
     ----------

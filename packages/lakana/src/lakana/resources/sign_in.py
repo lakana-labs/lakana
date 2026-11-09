@@ -225,9 +225,10 @@ class RecoveryLinks:
         """Issue a recovery link for a person who lost their passkeys.
 
         Using it removes their passkeys, ends their sessions and tells them and every
-        administrator. Needs the ADMIN role. Recovering an administrator needs the server
-        operator's bootstrap token (the profile `lakana bundle init` or `lakana server start
-        --local` saved). A new link withdraws the person's previous open one.
+        administrator. Needs the ADMIN role. Recovering anyone who holds or has ever held the
+        ADMIN role, directly or through a group, needs the server operator's bootstrap token
+        (the profile `lakana bundle init` or `lakana server start --local` saved). A new link
+        withdraws the person's previous open one.
 
         Parameters
         ----------

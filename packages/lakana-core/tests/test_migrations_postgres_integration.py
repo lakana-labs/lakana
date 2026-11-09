@@ -3320,3 +3320,58 @@ def test_0069_marks_the_bootstrap_pat(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         assert flags == {"operator": True, "laptop": False, "revoked": False, "other": False}
         engine.dispose()
+
+
+def test_0070_backfills_held_admin_on_postgres() -> None:
+    """0070 marks a revoked direct admin and a name from a JSON audit row; downgrade drops it."""
+    revision_0069 = "d7f1b3c5e9a2"
+    revision_0070 = "e8a2c4f6b0d3"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0069)
+        engine = sqlalchemy.create_engine(url)
+        now = datetime.now(UTC)
+        ids = {name: uuid.uuid4() for name in ("ops", "alice", "dave", "fay")}
+        with engine.begin() as conn:
+            for name, principal_id in ids.items():
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at, "
+                        "updated_at) VALUES (:id, 'USER', :name, true, :now, :now)"
+                    ),
+                    {"id": principal_id, "name": name, "now": now},
+                )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO grants (id, principal_id, role, kind, granted_by, granted_at, "
+                    "revoked_at) VALUES (:id, :p, 'ADMIN', 'INSTANCE', :p, :now, :now)"
+                ),
+                {"id": uuid.uuid4(), "p": ids["alice"], "now": now},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO audit_events (id, occurred_at, event_type, securable_kind, "
+                    "detail) VALUES (:id, :now, 'GRANT_CREATED', 'INSTANCE', "
+                    "CAST(:detail AS JSON))"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "now": now,
+                    "detail": '{"principal": "dave", "role": "ADMIN"}',
+                },
+            )
+        migrate.upgrade(url, revision_0070)
+        with engine.connect() as conn:
+            marked = {
+                name
+                for name, held in conn.execute(
+                    sqlalchemy.text("SELECT name, held_admin FROM principals")
+                ).all()
+                if held
+            }
+        assert marked == {"alice", "dave"}
+        migrate.downgrade(url, revision_0069)
+        assert "held_admin" not in {
+            c["name"] for c in sqlalchemy.inspect(engine).get_columns("principals")
+        }
+        engine.dispose()

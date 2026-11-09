@@ -58,7 +58,9 @@ Send it only after you have confirmed, as above, that the person asked for it.
 
 An administrator's account is recovered only by the **server operator**, the person who holds the
 instance's bootstrap token: for an administrator the interface shows the command to run where the
-server runs instead of a button. [Lost your passkey](lost-your-passkey.md) has both sides of a
+server runs instead of a button. This covers anyone who has ever held the `ADMIN` role, directly
+or through a group. Taking the role away first does not change it: the server refuses the link
+and names the operator's command. [Lost your passkey](lost-your-passkey.md) has both sides of a
 recovery.
 
 ## Look after a person's sign-in

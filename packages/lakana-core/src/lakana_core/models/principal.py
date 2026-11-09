@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, LargeBinary, String, Uuid
+from sqlalchemy import Boolean, Enum, LargeBinary, String, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, TimestampMixin, UTCDateTime
@@ -48,3 +48,9 @@ class Principal(Base, TimestampMixin):
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
     """A person's name as the interface shows it (an invite's optional display name); `None`
     shows the principal name. Never used to sign in or to look a principal up."""
+    held_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    """Whether this principal has ever held instance ADMIN, directly or through a group, active
+    or not. Set by `lakana_core.grants.service.mark_admin_holders` whenever ADMIN becomes
+    theirs, never cleared: an administrator's account is recovered only by the server operator
+    (`lakana_core.identity.links.LinkService.issue_recovery`), and revoking ADMIN first must not
+    get around that."""

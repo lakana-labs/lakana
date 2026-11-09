@@ -102,8 +102,9 @@ makes no claim of certification or compliance with any standard.
   Lakana limits them: a link works once, for 1 hour; using it removes all of the person's passkeys
   and ends their sessions, so it cannot be used quietly alongside the real owner; every
   administrator gets a notice; and an administrator's account is recovered only by the server
-  operator, never by another administrator. Confirm a request outside Lakana before you send a
-  link.
+  operator, never by another administrator. That holds for anyone who has ever held the `ADMIN`
+  role, directly or through a group: taking the role away first does not let another
+  administrator recover them. Confirm a request outside Lakana before you send a link.
 
 ## Where secrets live
 

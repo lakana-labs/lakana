@@ -46,7 +46,9 @@ calling them: whoever holds the link becomes them for the next hour.
 ## The administrator lost their passkey
 
 An administrator cannot recover another administrator: for an administrator, the interface
-shows the command below instead of issuing a link. Recovering an administrator is for the
+shows the command below instead of issuing a link. That includes anyone who has ever held the
+`ADMIN` role, directly or through a group, even after it was taken away; the server then refuses
+the link and names the command below. Recovering an administrator is for the
 **server operator**: the person who runs the server and holds its bootstrap token. The operator
 runs the same `recovery create` command where the server runs, with the profile that holds the
 bootstrap token:

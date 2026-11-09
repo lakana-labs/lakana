@@ -972,3 +972,123 @@ def test_a_name_whose_normalised_form_is_too_long_is_refused(world: World, name:
         PrincipalService(world.session, world.authz).create_principal(
             world.operator, name=name, type=PrincipalType.USER
         )
+
+
+def _admin_grant_of(world: World, row: Principal) -> uuid.UUID:
+    """Find a person's direct, unrevoked instance ADMIN grant.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    row
+        The person.
+
+    Returns
+    -------
+    uuid.UUID
+        The grant's id.
+    """
+    return world.session.execute(
+        select(Grant.id).where(
+            Grant.principal_id == row.id,
+            Grant.role == Role.ADMIN,
+            Grant.kind == SecurableKind.INSTANCE,
+            Grant.revoked_at.is_(None),
+        )
+    ).scalar_one()
+
+
+def test_recovery_refused_for_a_former_administrator_after_revoking_the_grant(
+    world: World,
+) -> None:
+    """Revoking someone's ADMIN grant first does not let an administrator recover them."""
+    boss = world.person("boss", admin=True)
+    bob = world.person("bob", admin=True)
+    GrantService(world.session, AllowAllAuthorization()).revoke(
+        world.pat(boss), _admin_grant_of(world, bob)
+    )
+    with pytest.raises(PermissionDenied, match="has held the administrator role") as refused:
+        world.links.issue_recovery(world.pat(boss), principal_name="bob")
+    assert "lakana recovery create bob" in str(refused.value)
+    link = world.links.issue_recovery(world.operator, principal_name="bob")
+    assert world.redeem(link).started.principal.id == bob.id
+
+
+@pytest.mark.parametrize("member_first", [True, False])
+def test_recovery_refused_for_a_former_administrator_after_leaving_the_admin_group(
+    world: World, member_first: bool
+) -> None:
+    """Removing someone from the admin group first does not let an administrator recover them.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    member_first
+        Whether the person joins the group before or after the group gets ADMIN.
+    """
+    boss = world.person("boss", admin=True)
+    world.person("bob")
+    allow = AllowAllAuthorization()
+    groups = GroupService(world.session, allow)
+    groups.create_group(world.operator, name="admins")
+    if member_first:
+        groups.add_member(world.operator, "admins", "bob")
+    GrantService(world.session, allow).grant(
+        world.operator, group="admins", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    if not member_first:
+        groups.add_member(world.operator, "admins", "bob")
+    groups.remove_member(world.pat(boss), "admins", "bob")
+    with pytest.raises(PermissionDenied, match="has held the administrator role"):
+        world.links.issue_recovery(world.pat(boss), principal_name="bob")
+    assert world.links.issue_recovery(world.operator, principal_name="bob")
+
+
+def test_recovery_link_refused_at_use_when_the_person_was_an_administrator_meanwhile(
+    world: World,
+) -> None:
+    """ADMIN granted and revoked between issue and use still closes an administrator's link."""
+    boss = world.person("boss", admin=True)
+    bob = world.person("bob")
+    link = world.links.issue_recovery(world.pat(boss), principal_name="bob")
+    ensure_bootstrap_admin_grant(
+        world.session,
+        PrincipalRef(id=bob.id, name=bob.name, type=bob.type),
+        AllowAllAuthorization(),
+    )
+    GrantService(world.session, AllowAllAuthorization()).revoke(
+        world.pat(boss), _admin_grant_of(world, bob)
+    )
+    with pytest.raises(PermissionDenied, match="lakana recovery create bob"):
+        world.redeem(link)
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+
+
+def test_admin_granted_to_a_deactivated_person_counts_as_held(world: World) -> None:
+    """ADMIN given while the person is deactivated still marks them as an administrator."""
+    boss = world.person("boss", admin=True)
+    bob = world.person("bob")
+    PrincipalService(world.session, AllowAllAuthorization()).deactivate_principal(
+        world.operator, "bob"
+    )
+    GrantService(world.session, AllowAllAuthorization()).grant(
+        world.operator, principal="bob", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    world.session.refresh(bob)
+    assert bob.held_admin
+    with pytest.raises(ConflictError, match="deactivated"):
+        world.links.issue_recovery(world.pat(boss), principal_name="bob")
+
+
+def test_a_person_who_never_held_admin_is_recoverable_by_an_administrator(world: World) -> None:
+    """Other grants never mark a person as an administrator."""
+    boss = world.person("boss", admin=True)
+    bob = world.person("bob")
+    GrantService(world.session, AllowAllAuthorization()).grant(
+        world.operator, principal="bob", role=Role.VIEWER, kind=SecurableKind.INSTANCE
+    )
+    world.session.refresh(bob)
+    assert not bob.held_admin
+    assert world.links.issue_recovery(world.pat(boss), principal_name="bob")

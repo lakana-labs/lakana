@@ -82,8 +82,9 @@ answers with `lakana recovery create`.
 Then invite your team with `lakana invite create NAME`, which prints a link to send that
 person yourself (it works once, for 7 days, and creates an account with no rights): confirm
 with them that they signed up before you grant roles. A person who lost their passkeys gets a
-recovery link, `lakana recovery create NAME` (1 hour); recovering an administrator works only
-with the bootstrap token, so run it where `bundle init` saved the `team` profile.
+recovery link, `lakana recovery create NAME` (1 hour); recovering an administrator (anyone who
+holds or ever held `ADMIN`) works only with the bootstrap token, so run it where `bundle init`
+saved the `team` profile.
 
 - `--public-url` is the interface's address (`LAKANA_UI__PUBLIC_URL` in `.env`) only when its
   host is a name. With `--ui`, an IP address (`https://10.0.0.5`) or plain `http://` off

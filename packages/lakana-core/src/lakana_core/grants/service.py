@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, or_, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change
@@ -427,6 +427,8 @@ class GrantService:
             },
         )
         self._session.add(row)
+        if role is Role.ADMIN and kind is SecurableKind.INSTANCE:
+            mark_admin_holders(self._session)
         if commit:
             self._session.commit()
         return row
@@ -680,6 +682,88 @@ class GrantService:
             self._session.commit()
 
 
+def _admin_covered_ids(
+    session: Session,
+    *,
+    exclude_grant_id: uuid.UUID | None = None,
+    exclude_membership: tuple[uuid.UUID, uuid.UUID] | None = None,
+) -> set[uuid.UUID]:
+    """Collect every principal an unrevoked instance ADMIN grant covers, active or not.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    exclude_grant_id
+        A grant to leave out (`active_instance_admin_ids`).
+    exclude_membership
+        A ``(group_id, principal_id)`` path to leave out (`active_instance_admin_ids`).
+
+    Returns
+    -------
+    set of uuid.UUID
+        The principals covered directly or through a group, whatever their `is_active`.
+    """
+    admin_grants = (
+        session.execute(
+            select(Grant).where(
+                Grant.role == Role.ADMIN,
+                Grant.kind == SecurableKind.INSTANCE,
+                Grant.revoked_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ids: set[uuid.UUID] = set()
+    for admin_grant in admin_grants:
+        if admin_grant.id == exclude_grant_id:
+            continue
+        if admin_grant.principal_id is not None:
+            ids.add(admin_grant.principal_id)
+        else:
+            member_ids = (
+                session.execute(
+                    select(GroupMembership.principal_id).where(
+                        GroupMembership.group_id == admin_grant.group_id
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            ids.update(
+                member_id
+                for member_id in member_ids
+                if exclude_membership != (admin_grant.group_id, member_id)
+            )
+    return ids
+
+
+def mark_admin_holders(session: Session) -> None:
+    """Mark everyone ADMIN now covers as having held it (`Principal.held_admin`), for good.
+
+    Called wherever ADMIN can become someone's: a new grant (`GrantService.grant`, which also
+    covers a group's members) and a new group membership (`GroupService.add_member`). The mark
+    is never cleared, so an administrator who first loses ADMIN is still recovered only by the
+    server operator (`lakana_core.identity.links.LinkService.issue_recovery`). A deactivated
+    principal is marked too: reactivating them would make ADMIN effective again.
+
+    Parameters
+    ----------
+    session
+        Database session; flushed first so the change being made counts. The caller commits.
+    """
+    session.flush()
+    ids = _admin_covered_ids(session)
+    if ids:
+        session.execute(
+            update(Principal)
+            .where(Principal.id.in_(ids), Principal.held_admin.is_(False))
+            .values(held_admin=True)
+            .execution_options(synchronize_session="fetch")
+        )
+
+
 def active_instance_admin_ids(
     session: Session,
     *,
@@ -719,38 +803,9 @@ def active_instance_admin_ids(
     `lakana_core.grants.admin.holds_instance_admin` asks the same question for
     one principal; a test asserts the two agree, so change them together.
     """
-    admin_grants = (
-        session.execute(
-            select(Grant).where(
-                Grant.role == Role.ADMIN,
-                Grant.kind == SecurableKind.INSTANCE,
-                Grant.revoked_at.is_(None),
-            )
-        )
-        .scalars()
-        .all()
+    ids = _admin_covered_ids(
+        session, exclude_grant_id=exclude_grant_id, exclude_membership=exclude_membership
     )
-    ids: set[uuid.UUID] = set()
-    for admin_grant in admin_grants:
-        if admin_grant.id == exclude_grant_id:
-            continue
-        if admin_grant.principal_id is not None:
-            ids.add(admin_grant.principal_id)
-        else:
-            member_ids = (
-                session.execute(
-                    select(GroupMembership.principal_id).where(
-                        GroupMembership.group_id == admin_grant.group_id
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            ids.update(
-                member_id
-                for member_id in member_ids
-                if exclude_membership != (admin_grant.group_id, member_id)
-            )
     if not ids:
         return set()
     return set(

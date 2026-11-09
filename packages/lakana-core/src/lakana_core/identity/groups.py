@@ -13,7 +13,7 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.roles import Role
-from lakana_core.grants.service import assert_admin_headroom
+from lakana_core.grants.service import assert_admin_headroom, mark_admin_holders
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AuditEventType,
@@ -328,6 +328,7 @@ class GroupService:
             self._session, p, environment=None, change=f"add {principal_name} to {group_name}"
         )
         self._session.add(GroupMembership(group_id=group.id, principal_id=principal.id))
+        mark_admin_holders(self._session)
         AuditService(self._session).record(
             p.id,
             AuditEventType.GROUP_MEMBER_ADDED,
