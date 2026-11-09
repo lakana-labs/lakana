@@ -531,13 +531,47 @@ def _package_of(test: TestTime) -> str:
     return "/".join(parts[:2]) if parts[:1] == ("packages",) and len(parts) > 2 else parts[0]
 
 
+def _warm_ups(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> list[TestTime]:
+    """Pick, per file of a group, its fastest other test to run first.
+
+    Parameters
+    ----------
+    group
+        The candidates of one package.
+    warm_from
+        Every test the reports hold.
+
+    Returns
+    -------
+    list of TestTime
+        At most one test per file, never a candidate or a skipped test, in the files' order.
+    """
+    candidates = {test.nodeid for test in group}
+    picks: list[TestTime] = []
+    for file in dict.fromkeys(test.file for test in group):
+        others = [
+            test
+            for test in warm_from
+            if test.file == file and not test.skipped and test.nodeid not in candidates
+        ]
+        if others:
+            picks.append(min(others, key=lambda test: test.seconds))
+    return picks
+
+
 def remeasure(
-    tests: Sequence[TestTime], workdir: Path, run: Callable[..., object] = subprocess.run
+    tests: Sequence[TestTime],
+    workdir: Path,
+    run: Callable[..., object] = subprocess.run,
+    warm_from: Sequence[TestTime] = (),
 ) -> dict[str, float]:
     """Run tests again, on their own and serially, under coverage as in the shards.
 
     Each package's tests run in a pytest process of their own: every package has a module
-    named `conftest`, and in one process the first one imported would shadow the others.
+    named `conftest`, and in one process the first one imported would shadow the others. Each
+    process first runs the fastest other test of every candidate's file, which takes the
+    process's one-off setup (session fixtures, first imports) that no shard charges to the
+    candidate; its time is not counted.
 
     Parameters
     ----------
@@ -548,16 +582,20 @@ def remeasure(
         combined report of the run.
     run
         Runs the command; `subprocess.run` unless a test replaces it.
+    warm_from
+        Every test the reports hold, from which the warm-up tests are picked; empty runs the
+        candidates alone.
 
     Returns
     -------
     dict
-        Seconds by node id, for the tests the new reports hold; a package whose report
+        Seconds by node id, for the candidates the new reports hold; a package whose report
         cannot be read adds nothing.
     """
     groups: dict[str, list[TestTime]] = {}
     for test in tests:
         groups.setdefault(_package_of(test), []).append(test)
+    wanted = {test.nodeid for test in tests}
     seconds: dict[str, float] = {}
     for index, group in enumerate(groups.values()):
         report = workdir / f"remeasured-{index}.xml"
@@ -565,7 +603,7 @@ def remeasure(
             sys.executable,
             "-m",
             "pytest",
-            *[test.nodeid for test in group],
+            *[test.nodeid for test in [*_warm_ups(group, warm_from), *group]],
             "-q",
             "-p",
             "no:cacheprovider",
@@ -579,7 +617,11 @@ def remeasure(
         run(command, env=env, check=False)
         try:
             seconds.update(
-                {t.nodeid: t.seconds for t in parse_junit(report.read_text()) if not t.skipped}
+                {
+                    t.nodeid: t.seconds
+                    for t in parse_junit(report.read_text())
+                    if not t.skipped and t.nodeid in wanted
+                }
             )
         except (OSError, ValueError):
             continue
@@ -672,7 +714,11 @@ def _run_slow_tests(args: argparse.Namespace) -> int:
             threshold=budgets.threshold_seconds,
             baseline=baseline,
             confirm_threshold=budgets.confirm_seconds,
-            remeasure=(lambda over: remeasure(over, Path(workdir))) if args.confirm else None,
+            remeasure=(
+                (lambda over: remeasure(over, Path(workdir), warm_from=tests))
+                if args.confirm
+                else None
+            ),
         )
     for note in notes:
         print(note)

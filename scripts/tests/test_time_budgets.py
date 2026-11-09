@@ -658,6 +658,39 @@ def test_remeasure_runs_each_package_in_its_own_process(tmp_path: Path) -> None:
     assert len(reports) == len(calls)
 
 
+def test_remeasure_warms_each_file_up_with_its_fastest_other_test(tmp_path: Path) -> None:
+    """A fresh process charges its one-off setup to the first test; a cheap one takes it.
+
+    Run on its own, a candidate otherwise pays for the session's fixtures and first imports,
+    which no shard charges to it (the run of PR 522 failed on that).
+    """
+    calls: list[list[str]] = []
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
+        calls.append(command)
+        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
+        ids = [c for c in command if "::" in c]
+        report.write_text(_junit(*[_case(i.split("::")[0], i.split("::")[1], 0.3) for i in ids]))
+
+    core = "packages/lakana-core/tests/test_x.py"
+    other = "packages/lakana-core/tests/test_y.py"
+    candidates = [
+        TestTime(core, "slow", 2.6, slow=False, skipped=False),
+        TestTime(other, "lonely", 2.6, slow=False, skipped=False),
+    ]
+    everything = [
+        *candidates,
+        TestTime(core, "quick", 0.01, slow=False, skipped=False),
+        TestTime(core, "quicker_but_skipped", 0.0, slow=False, skipped=True),
+        TestTime(core, "medium", 0.4, slow=False, skipped=False),
+    ]
+    seconds = remeasure(candidates, tmp_path, run=run, warm_from=everything)
+    assert seconds == {f"{core}::slow": 0.3, f"{other}::lonely": 0.3}
+    ((command,),) = [calls]
+    ids = [c for c in command if "::" in c]
+    assert ids == [f"{core}::quick", f"{core}::slow", f"{other}::lonely"]
+
+
 def test_remeasure_without_a_report_answers_nothing(tmp_path: Path) -> None:
     """A re-run that crashed leaves the first measurement standing."""
     tests = [TestTime("a.py", "t", 2.5, slow=False, skipped=False)]
@@ -669,7 +702,9 @@ def test_main_confirms_before_failing(
 ) -> None:
     """``--confirm`` runs the candidates again; without it the first time decides."""
     (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 2.5)))
-    monkeypatch.setattr("scripts.time_budgets.remeasure", lambda tests, workdir: {"a.py::t": 0.5})
+    monkeypatch.setattr(
+        "scripts.time_budgets.remeasure", lambda tests, workdir, warm_from=(): {"a.py::t": 0.5}
+    )
     assert main(["slow-tests", "--confirm", "one.xml"]) == 0
     assert "counted as noise" in capsys.readouterr().out
     assert main(["slow-tests", "one.xml"]) == 1
