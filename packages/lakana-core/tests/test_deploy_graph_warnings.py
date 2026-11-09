@@ -133,13 +133,24 @@ def _stores_without(*, column: bool) -> dict[str, Any]:
     return manifest
 
 
+def _frozen_clock() -> float:
+    """Stand in for the graph check's clock: it never advances, so no budget can run out.
+
+    Returns
+    -------
+    float
+        Always zero.
+    """
+    return 0.0
+
+
 def _deploy(
     star: StarWorld,
     p: PrincipalRef,
     grants: Grants,
     manifest: dict[str, Any],
     kind: DeployKind = DeployKind.DEPLOY,
-    clock: Callable[[], float] = time.monotonic,
+    clock: Callable[[], float] = _frozen_clock,
 ) -> DeployRun:
     """Submit and record a deploy (or dry run) of `stores` with `manifest`, as `p`.
 
@@ -156,7 +167,8 @@ def _deploy(
     kind
         `DeployKind.DEPLOY` or `DeployKind.DRY_RUN`.
     clock
-        The clock of the graph check.
+        The clock of the graph check; the default never advances, so only a test about the
+        2 s budget (which passes its own) can run out of it, however slow the runner.
 
     Returns
     -------
@@ -910,9 +922,8 @@ def test_a_removed_item_the_graph_cannot_read_escapes_its_tables_name(star: Star
     table = "gold.a b\x1b[2J"
     old = {"version": 13, "assets": [{"table": table, "columns": ["id", "c"]}]}
     new = {"version": 13, "assets": [{"table": table, "columns": ["id"]}]}
-    (entry,) = DeployService(star.session, _everything())._impact_warnings(
-        p, "dev", "stores", old, new
-    )
+    service = DeployService(star.session, _everything(), graph_clock=_frozen_clock)
+    (entry,) = service._impact_warnings(p, "dev", "stores", old, new)
     text = str(entry["warning"])
     assert "\x1b" not in text
     assert "`gold.a b\\x1b[2J`" in text
