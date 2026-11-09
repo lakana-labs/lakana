@@ -47,8 +47,10 @@ working if you are deactivated or lose the `ADMIN` role before it is used.
 
 ## The administrator lost their passkey
 
-An administrator cannot recover another administrator: for an administrator, the interface
-shows the command below instead of issuing a link. That includes anyone who has ever held the
+An administrator cannot recover another administrator, nor themselves: for an administrator, the
+interface shows the command below instead of issuing a link, on that person's page in **Access**
+and on the administrator's own **Passkeys and sessions** page, so that it is at hand before it is
+needed. Add a second passkey while you still can. That includes anyone who has ever held the
 `ADMIN` role, directly or through a group, even after it was taken away; the server then refuses
 the link and names the command below. Recovering an administrator is for the
 **server operator**: the person who runs the server and holds its bootstrap token. The operator

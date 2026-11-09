@@ -133,6 +133,9 @@ async function fakeAdministration(page: Page): Promise<{ sent: Request[] }> {
     ];
     return route.fulfill({ status: 201, json: passkeys[0] });
   });
+  await page.route("**/api/v1/principals/admin/permissions", (route) =>
+    route.fulfill({ json: { permissions: [{ via: [{ kind: "grant", role: "ADMIN" }] }] } }),
+  );
   await page.route("**/api/v1/principals/admin/sessions", (route) =>
     route.fulfill({
       json: [
@@ -231,6 +234,7 @@ test.describe("administering sign-in", () => {
       page.getByRole("heading", { level: 1, name: "Passkeys and sessions" }),
     ).toBeVisible();
     await expect(page.getByText("This browser")).toBeVisible();
+    await expect(page.getByText("lakana recovery create admin")).toBeVisible();
     expect(await violations(page), "passkeys and sessions").toEqual([]);
     await page.getByRole("button", { name: "Add a passkey" }).click();
     await expect(page.getByRole("button", { name: "Remove Passkey" })).toBeVisible();
