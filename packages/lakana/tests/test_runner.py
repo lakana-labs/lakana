@@ -1197,7 +1197,7 @@ def test_a_failing_close_does_not_hide_the_outcome(world: _World) -> None:
     def broken() -> None:
         raise RuntimeError("close failed")
 
-    world.client.close = broken  # ty: ignore[invalid-assignment]
+    world.client.close = broken
     assert world.run() == 0
     assert world.record()["status"] == "succeeded"
 

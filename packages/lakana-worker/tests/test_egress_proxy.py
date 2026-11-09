@@ -575,7 +575,7 @@ def _pretending(server: EgressServer) -> None:
         host, port = cast("tuple[str, int]", client_address)
         return real((_PRETENDED.get(port, host), port))
 
-    server.client_network = client_network  # ty: ignore[invalid-assignment]
+    server.client_network = client_network
 
 
 def _connect_from(address: str, port: int, target: str, token: str) -> tuple[bytes, bytes]:

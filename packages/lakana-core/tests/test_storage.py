@@ -289,8 +289,8 @@ def test_a_denied_delete_on_an_object_store_stays_a_permission_error() -> None:
         raise PermissionError(errno.EACCES, "Access Denied", path)
 
     storage._fs = MemoryFileSystem(skip_instance_cache=True)
-    storage._fs.rm_file = refuse  # ty: ignore[invalid-assignment]
-    storage._fs.isdir = lambda path: True  # ty: ignore[invalid-assignment]
+    storage._fs.rm_file = refuse
+    storage._fs.isdir = lambda path: True
     with pytest.raises(PermissionError):
         storage.delete("x")
 

@@ -315,7 +315,7 @@ def test_the_engine_is_disposed_when_bootstrap_fails(
         leases.append(lease_seconds)
         engine = real_create_engine(config, lease_seconds=lease_seconds)
         original = engine.dispose
-        engine.dispose = lambda *a, **k: (disposed.append(True), original(*a, **k))[1]  # ty: ignore[invalid-assignment]
+        engine.dispose = lambda *a, **k: (disposed.append(True), original(*a, **k))[1]
         return engine
 
     def failing_bootstrap(*args: object, **kwargs: object) -> None:
