@@ -514,17 +514,37 @@ def read_baseline(path: Path) -> int:
     return value
 
 
+def _package_of(test: TestTime) -> str:
+    """Name the directory whose tests share one `conftest` tree.
+
+    Parameters
+    ----------
+    test
+        A test from a junit report.
+
+    Returns
+    -------
+    str
+        ``packages/<name>`` for a package's test, otherwise the file's top directory.
+    """
+    parts = Path(test.file).parts
+    return "/".join(parts[:2]) if parts[:1] == ("packages",) and len(parts) > 2 else parts[0]
+
+
 def remeasure(
     tests: Sequence[TestTime], workdir: Path, run: Callable[..., object] = subprocess.run
 ) -> dict[str, float]:
     """Run tests again, on their own and serially, under coverage as in the shards.
+
+    Each package's tests run in a pytest process of their own: every package has a module
+    named `conftest`, and in one process the first one imported would shadow the others.
 
     Parameters
     ----------
     tests
         The tests to measure again.
     workdir
-        A directory for the junit report and the coverage data, so neither touches the
+        A directory for the junit reports and the coverage data, so neither touches the
         combined report of the run.
     run
         Runs the command; `subprocess.run` unless a test replaces it.
@@ -532,29 +552,38 @@ def remeasure(
     Returns
     -------
     dict
-        Seconds by node id, for the tests the new report holds; empty when it cannot be read.
+        Seconds by node id, for the tests the new reports hold; a package whose report
+        cannot be read adds nothing.
     """
-    report = workdir / "remeasured.xml"
-    command = [
-        sys.executable,
-        "-m",
-        "pytest",
-        *[test.nodeid for test in tests],
-        "-q",
-        "-p",
-        "no:cacheprovider",
-        "--cov",
-        "--cov-report=",
-        f"--junitxml={report}",
-        "-o",
-        "junit_family=xunit1",
-    ]
-    env = {**os.environ, "COVERAGE_FILE": str(workdir / ".coverage.remeasured")}
-    run(command, env=env, check=False)
-    try:
-        return {t.nodeid: t.seconds for t in parse_junit(report.read_text()) if not t.skipped}
-    except (OSError, ValueError):
-        return {}
+    groups: dict[str, list[TestTime]] = {}
+    for test in tests:
+        groups.setdefault(_package_of(test), []).append(test)
+    seconds: dict[str, float] = {}
+    for index, group in enumerate(groups.values()):
+        report = workdir / f"remeasured-{index}.xml"
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            *[test.nodeid for test in group],
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--cov",
+            "--cov-report=",
+            f"--junitxml={report}",
+            "-o",
+            "junit_family=xunit1",
+        ]
+        env = {**os.environ, "COVERAGE_FILE": str(workdir / f".coverage.remeasured.{index}")}
+        run(command, env=env, check=False)
+        try:
+            seconds.update(
+                {t.nodeid: t.seconds for t in parse_junit(report.read_text()) if not t.skipped}
+            )
+        except (OSError, ValueError):
+            continue
+    return seconds
 
 
 def _read_reports(paths: Sequence[Path]) -> list[TestTime]:
