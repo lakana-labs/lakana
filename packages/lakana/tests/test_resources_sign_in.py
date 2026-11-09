@@ -216,7 +216,8 @@ def test_sessions_list_and_end_all() -> None:
         "created_at": _WHEN,
         "last_seen_at": _WHEN,
         "absolute_expires_at": _WHEN,
-        "user_agent": "Firefox",
+        "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Firefox/158.0",
+        "browser": "Firefox 158 on Linux",
         "peer": "127.0.0.1",
         "current": False,
     }
@@ -234,11 +235,30 @@ def test_sessions_list_and_end_all() -> None:
             created_at=_AT,
             last_seen_at=_AT,
             absolute_expires_at=_AT,
-            user_agent="Firefox",
+            user_agent="Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Firefox/158.0",
+            browser="Firefox 158 on Linux",
             peer="127.0.0.1",
             current=False,
         )
     ]
+
+
+def test_sessions_from_a_server_without_browser_names_show_the_user_agent() -> None:
+    """A server before `browser` existed: the raw user agent stands in for it."""
+    seen: list[httpx.Request] = []
+    row = {
+        "id": _ID,
+        "via": "passkey",
+        "created_at": _WHEN,
+        "last_seen_at": _WHEN,
+        "absolute_expires_at": _WHEN,
+        "user_agent": "curl/8.5.0",
+        "peer": "127.0.0.1",
+        "current": False,
+    }
+    (listed,) = Sessions(_transport(_recording(seen, 200, [row]))).list("bob")
+
+    assert listed.browser == "curl/8.5.0"
 
 
 def test_passkeys_list_and_remove() -> None:

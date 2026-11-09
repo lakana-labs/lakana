@@ -1568,6 +1568,9 @@ class BrowserSession:
         When it ends at the latest.
     user_agent
         The browser it began in, as the browser named itself.
+    browser
+        The same in plain words for the common browsers ("Firefox 158 on Ubuntu"), otherwise
+        `user_agent` itself (also from a server that does not name browsers yet).
     peer
         The address it began from, as the server saw it.
     current
@@ -1580,6 +1583,7 @@ class BrowserSession:
     last_seen_at: datetime
     absolute_expires_at: datetime
     user_agent: str
+    browser: str
     peer: str
     current: bool
 

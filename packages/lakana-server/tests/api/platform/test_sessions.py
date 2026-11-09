@@ -157,12 +157,26 @@ def test_a_person_lists_their_own_sessions_without_secrets(client: TestClient) -
         "last_seen_at",
         "absolute_expires_at",
         "user_agent",
+        "browser",
         "peer",
         "current",
     }
     for row in _rows(client).values():
         assert row.secret_hash not in r.text
     assert _key(value) not in r.text and _key(other) not in r.text
+
+
+def test_each_session_names_its_browser_in_plain_words(client: TestClient) -> None:
+    """`browser` reads "Firefox 158 on Ubuntu"; `user_agent` keeps what the browser sent."""
+    firefox = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0"
+    name, value, csrf = signed_in(client, "alice", user_agent=firefox)
+    signed_in(client, "alice", user_agent="curl/8.5.0")
+    r = client.get("/api/v1/principals/alice/sessions", headers=session_headers(name, value, csrf))
+    assert r.status_code == 200, r.text
+    assert [(s["browser"], s["user_agent"]) for s in r.json()] == [
+        ("Firefox 158 on Ubuntu", firefox),
+        ("curl/8.5.0", "curl/8.5.0"),
+    ]
 
 
 def test_a_non_administrator_cannot_list_another_persons_sessions(client: TestClient) -> None:

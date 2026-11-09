@@ -14,15 +14,19 @@ so a recovery nobody asked for does not go unnoticed.
 1. Ask an administrator of your instance for a recovery link. Tell them the name you sign in
    with; the sign-in page names nobody, so they need it from you.
 2. Open the link within the hour, in the browser you want to use from now on. The page says
-   "Sign in as" and your name; choose **Continue**.
+   "Sign in as" and your name; choose **Continue**. Where the new passkey can live depends on
+   the browser: on Linux some browsers offer only a USB security key (Firefox, at the time of
+   writing), while Chrome also offers a phone (a QR code, then Bluetooth) or Google Password
+   Manager.
 3. The interface asks you to add a passkey, and nothing else works until you have one. Choose
    **Add a passkey** and follow your browser.
 
 If the page says the link was already used, has expired or was withdrawn, or that whoever issued
 it was deactivated or is no longer an administrator, ask an administrator for a new one: each
-link works once. The interface removes the link from the address bar as soon as the page
-opens, but the browser may still keep it in its own history; once used or expired, a link there
-is useless.
+link works once. The interface removes the link from the address bar and from the tab's Back
+and Forward steps as soon as the page opens, but the browser keeps it in its own history (Ctrl+H)
+and may suggest it in the address bar. A recovery link opened but not continued still works
+from there until its hour is over: use it, or ask the administrator to withdraw it.
 
 ## You still have a passkey
 
@@ -47,8 +51,10 @@ working if you are deactivated or lose the `ADMIN` role before it is used.
 
 ## The administrator lost their passkey
 
-An administrator cannot recover another administrator: for an administrator, the interface
-shows the command below instead of issuing a link. That includes anyone who has ever held the
+An administrator cannot recover another administrator, nor themselves: for an administrator, the
+interface shows the command below instead of issuing a link, on that person's page in **Access**
+and on the administrator's own **Passkeys and sessions** page, so that it is at hand before it is
+needed. Add a second passkey while you still can. That includes anyone who has ever held the
 `ADMIN` role, directly or through a group, even after it was taken away; the server then refuses
 the link and names the command below. Recovering an administrator is for the
 **server operator**: the person who runs the server and holds its bootstrap token. The operator

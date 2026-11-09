@@ -153,7 +153,8 @@ def test_session_list_defaults_to_yourself_and_end_asks_first(tmp_path: Path) ->
                 "created_at": _WHEN,
                 "last_seen_at": _WHEN,
                 "absolute_expires_at": _WHEN,
-                "user_agent": "Firefox",
+                "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Firefox/158.0",
+                "browser": "Firefox 158 on Linux",
                 "peer": "127.0.0.1",
                 "current": False,
             }
@@ -166,7 +167,8 @@ def test_session_list_defaults_to_yourself_and_end_asks_first(tmp_path: Path) ->
     refused = invoke(state, "session", "end", "bob")
     ended = invoke(state, "session", "end", "bob", "--yes")
 
-    assert listed.exit_code == 0 and "Firefox" in listed.stdout, listed.stderr
+    assert listed.exit_code == 0 and "Firefox 158 on Linux" in listed.stdout, listed.stderr
+    assert "Mozilla/5.0" not in listed.stdout
     assert refused.exit_code == 2 and "--yes" in refused.stderr
     assert ended.exit_code == 0 and "bob" in ended.stdout, ended.stderr
     assert [(r.method, r.url.path) for r in api.requests][-1] == (

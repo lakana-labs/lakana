@@ -543,7 +543,11 @@ passkeys (M7 1b)"; the design is `docs/superpowers/specs/2026-11-08-m7-part1b-si
   Python opens it with `os.startfile`, so no launcher command line carries it. Another OS user
   of the machine who reads the process list in that window can sign in as the person.
   The link works once and only for 60 seconds, and the browser normally uses it within a
-  second; the page removes it from the address bar and history before its first request. A
+  second; the page removes it from the address bar and the tab's session history (Back and
+  Forward) before its first request. The browser's global history keeps the address as first
+  opened, with the secret: Chromium's `History` and Firefox's `places.sqlite` both record it
+  (measured with Playwright, 2026-11-09), and no page can remove an entry there. Whoever reads
+  that history later holds a used or expired link. A
   file hand-off would keep it off the command line, but a `file://` URL goes to the `.html`
   handler (a mail program on some desktops) and Snap and Flatpak browsers cannot read the
   hidden data directory, so it failed on ordinary desktops. Accepted because local mode is for

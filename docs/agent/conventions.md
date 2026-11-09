@@ -227,6 +227,12 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   `ui/build/csp.test.ts` counts the places React Aria, React Aria Components, React Stately and
   React Router insert a `<style>` and hashes their texts, so an upgrade that changes or adds one
   fails there; `e2e/shell.spec.ts` "no console error" opens the menu and the palette too.
+- **Every detail page has a breadcrumb** (a person, later a table, a job, a run, a task): pass
+  `trail` to `Page` (`ui/src/shell/Page.tsx`), the parts above the page from its area down, e.g.
+  Access › People › test1 for `/access/people/test1`. `Page` renders the one shared component,
+  `ui/src/shell/Breadcrumbs.tsx`, above the heading: a `nav` landmark named "Breadcrumb", every
+  part but the last a link, `aria-current="page"` on the last, separators hidden from screen
+  readers, wrapping at 320 px. An area's own pages (a list, a tab of the area) have none.
 - **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
   stylesheet and string on (part 1a, Task 3).
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools

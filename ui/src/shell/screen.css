@@ -8,6 +8,39 @@
   gap: var(--space-3);
 }
 
+/* The breadcrumb above a detail page's heading; it wraps rather than scroll at 320 px. */
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+}
+
+.breadcrumbs li {
+  display: flex;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.breadcrumbs a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.breadcrumbs a:hover {
+  text-decoration: underline;
+}
+
+.breadcrumbs [aria-current="page"] {
+  color: var(--color-text);
+}
+
 .tabs {
   display: flex;
   gap: var(--space-5);

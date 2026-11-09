@@ -337,6 +337,7 @@ class Sessions:
                 last_seen_at=_when(row["last_seen_at"]),
                 absolute_expires_at=_when(row["absolute_expires_at"]),
                 user_agent=row["user_agent"],
+                browser=row.get("browser", row["user_agent"]),
                 peer=row["peer"],
                 current=row["current"],
             )

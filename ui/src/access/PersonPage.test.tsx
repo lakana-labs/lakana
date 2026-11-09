@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -19,7 +19,8 @@ const SESSION = {
   created_at: "2026-11-08T09:00:00Z",
   last_seen_at: "2026-11-08T10:00:00Z",
   absolute_expires_at: "2026-11-15T09:00:00Z",
-  user_agent: "Firefox on Linux",
+  user_agent: "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0",
+  browser: "Firefox on Linux",
   peer: "192.0.2.1",
   current: false,
 };
@@ -57,6 +58,21 @@ describe("PersonPage", () => {
     expect(
       await screen.findByRole("button", { name: "Issue a recovery link" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows the breadcrumb Access › People › the person", async () => {
+    renderShell("/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+      },
+    });
+
+    const nav = await screen.findByRole("navigation", { name: "Breadcrumb" });
+    expect(within(nav).getByRole("link", { name: "Access" })).toHaveAttribute("href", "/access");
+    expect(within(nav).getByRole("link", { name: "People" })).toHaveAttribute("href", "/access");
+    expect(within(nav).getByText("kim")).toHaveAttribute("aria-current", "page");
   });
 
   it("shows the operator's command instead of a button for an administrator", async () => {

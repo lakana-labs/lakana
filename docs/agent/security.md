@@ -299,9 +299,11 @@ cookie set for another host.
   `npm --prefix ui run e2e:server` (`ui/e2e-server/`) starts a real lakana-server on port 4174 and
   drives the sign-in in a browser: the secret leaves the address bar, the cookie's flags, the
   127.0.0.1 redirect, a cross-origin POST refused, a used link, passkeys with a virtual
-  authenticator. Chromium runs per pull request (CI `ui`); Firefox and WebKit nightly
-  (`canary.yml`). Not covered: HTTPS (`__Host-` cookie), a reverse proxy, a second origin's
-  passkey, and `lakana server start --local`.
+  authenticator, and the local link's automatic sign-in (the server runs with
+  `LAKANA_UI__LOCAL_SIGN_IN`) with every Back and Forward step free of the secret. Chromium runs
+  per pull request (CI `ui`); Firefox and WebKit nightly (`canary.yml`). Not covered: HTTPS
+  (`__Host-` cookie), a reverse proxy, a second origin's passkey, and the CLI side of
+  `lakana server start --local` (opening the browser).
   `packages/lakana-server/tests/test_ui_real_build.py` still checks the policy header and every
   file the page loads without a browser.
 
@@ -625,8 +627,11 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   process for as long as it runs (by then the link is used or expired); on macOS it goes to
   `osascript` on standard input, on Windows to `os.startfile`, so neither has a command line
   with it. Other OS users of the machine can read it in the process list. The link works once and only for 60 seconds
-  (`LINK_LIFETIMES["local"]`), the page removes it from the address bar and history before its
-  first request (`ui/src/sign-in/fragment.ts`), and local mode is for a machine only one
+  (`LINK_LIFETIMES["local"]`), the page removes it from the address bar and the tab's session
+  history before its first request (`ui/src/sign-in/fragment.ts`, one `replaceState`; the router
+  only replaces after it, so no Back or Forward step holds it: `e2e-server/sign-in.spec.ts` walks
+  every step; the browser's global history still keeps the first address with the secret, in
+  Chromium and Firefox alike, a residual in the threat model), and local mode is for a machine only one
   person uses. A terminal also gets the link printed (never a pipe or a file), which stays in
   its scrollback until it is used or expires. An earlier design handed the link over in a 0600
   `<data dir>/sign-in.html` instead: a `file://` URL goes to the `.html` handler (a mail program

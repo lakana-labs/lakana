@@ -7,6 +7,11 @@ browser. For a team that means a DNS name and HTTPS: passkeys work only at a dom
 at a bare IP address, and over plain HTTP only on `localhost`
 ([Deploying with Compose](deploy-with-compose.md) sets the public address up).
 
+Where a passkey can live depends on the person's browser and system: on Linux some browsers offer
+only a USB security key (Firefox, at the time of writing), while Chrome also offers a phone (a QR
+code, then Bluetooth) or Google Password Manager. Someone on Linux without a security key can
+sign up in Chrome.
+
 An **invite** is a link that creates the person's account the first time it is used. It works
 once, for 7 days, and the account it creates has no rights at all until you grant some.
 
@@ -68,7 +73,9 @@ recovery.
 ## Look after a person's sign-in
 
 Open the person under **Access → People**. Their page lists their passkeys and their open browser
-sessions. **End all sessions** signs them out in every browser, for example after a laptop was
+sessions, each named in plain words ("Firefox 158 on Ubuntu, from 192.0.2.1"; hold the pointer
+over it for exactly what the browser sent, which is also what a browser it does not recognise
+shows). A browser can name itself anything, so treat the name as a hint, not a proof. **End all sessions** signs them out in every browser, for example after a laptop was
 lost; **Remove** next to a passkey removes it and also ends their sessions. Both need a fresh touch
 of your own passkey. Everyone sees their own passkeys and sessions under their name at the bottom
 of the sidebar, in **Passkeys and sessions**, where they add another passkey or sign out
@@ -77,5 +84,7 @@ everywhere.
 ## From the command line
 
 Every step has a command: `invite create`, `invite list` and `invite withdraw`, `recovery create`
-for recovery links, and `session list` and `passkey list` for what a person has. The
+for recovery links, and `session list` and `passkey list` for what a person has (`session list`
+names each browser the same way; `lakana --output json session list` also has the raw
+`user_agent`). The
 [CLI reference](../reference/cli.md#lakana-invite) lists them with their options.

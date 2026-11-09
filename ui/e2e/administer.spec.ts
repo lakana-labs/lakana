@@ -133,6 +133,9 @@ async function fakeAdministration(page: Page): Promise<{ sent: Request[] }> {
     ];
     return route.fulfill({ status: 201, json: passkeys[0] });
   });
+  await page.route("**/api/v1/principals/admin/permissions", (route) =>
+    route.fulfill({ json: { permissions: [{ via: [{ kind: "grant", role: "ADMIN" }] }] } }),
+  );
   await page.route("**/api/v1/principals/admin/sessions", (route) =>
     route.fulfill({
       json: [
@@ -142,7 +145,8 @@ async function fakeAdministration(page: Page): Promise<{ sent: Request[] }> {
           created_at: "2026-11-09T09:00:00Z",
           last_seen_at: "2026-11-09T10:00:00Z",
           absolute_expires_at: "2026-11-16T09:00:00Z",
-          user_agent: "Chromium",
+          user_agent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/155.0.0.0 Safari/537.36",
+          browser: "Chrome 155 on Linux",
           peer: "127.0.0.1",
           current: true,
         },
@@ -230,6 +234,7 @@ test.describe("administering sign-in", () => {
       page.getByRole("heading", { level: 1, name: "Passkeys and sessions" }),
     ).toBeVisible();
     await expect(page.getByText("This browser")).toBeVisible();
+    await expect(page.getByText("lakana recovery create admin")).toBeVisible();
     expect(await violations(page), "passkeys and sessions").toEqual([]);
     await page.getByRole("button", { name: "Add a passkey" }).click();
     await expect(page.getByRole("button", { name: "Remove Passkey" })).toBeVisible();
@@ -257,4 +262,31 @@ test.describe("administering sign-in", () => {
     expect(await violations(page), "settings with a refusal").toEqual([]);
     expect(errors).toEqual([]);
   });
+});
+
+test("a person's page has a breadcrumb that fits 320 px and passes axe", async ({ page }) => {
+  await signInAsAdmin(page);
+  const name = "a-person-with-a-rather-long-principal-name";
+  await page.route(`**/api/v1/principals/${name}/permissions`, (route) =>
+    route.fulfill({ json: { permissions: [] } }),
+  );
+  await page.route(`**/api/v1/principals/${name}/passkeys`, (route) => route.fulfill({ json: [] }));
+  await page.route(`**/api/v1/principals/${name}/sessions`, (route) => route.fulfill({ json: [] }));
+  await page.route(`**/api/v1/principals/${name}`, (route) =>
+    route.fulfill({ json: { name, type: "USER" } }),
+  );
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto(`/access/people/${name}`);
+
+  const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
+  await expect(crumbs.getByText(name)).toHaveAttribute("aria-current", "page");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+  expect(await violations(page), "a person's page at 320 px").toEqual([]);
+
+  await crumbs.getByRole("link", { name: "People" }).click();
+  await expect(page).toHaveURL(/\/access$/);
 });
