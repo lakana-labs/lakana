@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import delete, event, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind
@@ -48,6 +48,8 @@ from lakana_core.models import (
     Base,
     BrowserSession,
     Grant,
+    Group,
+    GroupMembership,
     Passkey,
     PersonalAccessToken,
     Principal,
@@ -1115,3 +1117,316 @@ def test_local_link_is_closed_when_used_after_local_mode_was_turned_off(
         off.redeem(public_id, secret, replacing=None, peer="p", user_agent="u", has_session=False)
     assert world.links.describe(public_id).state == "withdrawn"
     assert world.session.execute(select(BrowserSession)).scalars().all() == []
+
+
+ISSUER_LOSSES = ["deactivated", "admin_revoked", "left_admin_group", "admin_group_deleted"]
+"""The four ways an issuer loses the right to issue invites and recovery links."""
+
+
+def _issuer(world: World, loss: str) -> Principal:
+    """Make an administrator ``boss`` who holds ADMIN the way `loss` takes it away.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    loss
+        One of `ISSUER_LOSSES`: the group losses give ``boss`` ADMIN only through the group
+        ``admins``, the others a direct grant.
+
+    Returns
+    -------
+    Principal
+        The administrator.
+    """
+    if loss in {"deactivated", "admin_revoked"}:
+        return world.person("boss", admin=True)
+    boss = world.person("boss")
+    allow = AllowAllAuthorization()
+    groups = GroupService(world.session, allow)
+    groups.create_group(world.operator, name="admins")
+    groups.add_member(world.operator, "admins", "boss")
+    GrantService(world.session, allow).grant(
+        world.operator, group="admins", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    return boss
+
+
+def _issue_as(world: World, issuer: PrincipalRef, kind: str) -> IssuedLink:
+    """Issue an invite for ``carol`` or a recovery link for the non-administrator ``bob``.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    issuer
+        The administrator issuing it.
+    kind
+        ``invite`` or ``recovery``.
+
+    Returns
+    -------
+    IssuedLink
+        The link.
+    """
+    if kind == "invite":
+        return world.links.issue_invite(issuer, name="carol", display_name=None)
+    world.person("bob")
+    return world.links.issue_recovery(issuer, principal_name="bob")
+
+
+def _group_admin_grant(world: World) -> Grant:
+    """Find the group ``admins``'s unrevoked instance ADMIN grant.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+
+    Returns
+    -------
+    Grant
+        The grant.
+    """
+    return world.session.execute(
+        select(Grant).where(
+            Grant.group_id == select(Group.id).where(Group.name == "admins").scalar_subquery(),
+            Grant.revoked_at.is_(None),
+        )
+    ).scalar_one()
+
+
+def _lose_behind_the_services(world: World, boss: Principal, loss: str) -> None:
+    """Take the right away in the database itself, so no eager withdrawal runs.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    boss
+        The administrator.
+    loss
+        One of `ISSUER_LOSSES`.
+    """
+    if loss == "deactivated":
+        boss.is_active = False
+    elif loss == "admin_revoked":
+        world.session.get_one(Grant, _admin_grant_of(world, boss)).revoked_at = START
+    elif loss == "left_admin_group":
+        world.session.execute(
+            delete(GroupMembership).where(GroupMembership.principal_id == boss.id)
+        )
+    else:
+        grant = _group_admin_grant(world)
+        group_id = grant.group_id
+        grant.revoked_at = START
+        world.session.execute(delete(GroupMembership).where(GroupMembership.group_id == group_id))
+        world.session.execute(delete(Group).where(Group.id == group_id))
+    world.session.commit()
+
+
+def _lose_through_the_services(world: World, boss: Principal, loss: str) -> None:
+    """Take the right away as an administrator would: through the services.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    boss
+        The administrator.
+    loss
+        One of `ISSUER_LOSSES`.
+    """
+    if loss == "deactivated":
+        PrincipalService(world.session, world.authz).deactivate_principal(world.operator, "boss")
+    elif loss == "admin_revoked":
+        GrantService(world.session, world.authz).revoke(
+            world.operator, _admin_grant_of(world, boss)
+        )
+    elif loss == "left_admin_group":
+        GroupService(world.session, world.authz).remove_member(world.operator, "admins", "boss")
+    else:
+        GrantService(world.session, world.authz).revoke(
+            world.operator, _group_admin_grant(world).id
+        )
+        GroupService(world.session, world.authz).delete_group(world.operator, "admins")
+
+
+def _withdrawal_reasons(world: World, link: IssuedLink) -> list[str]:
+    """Collect the reasons of a link's withdrawal events.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    link
+        The link.
+
+    Returns
+    -------
+    list of str
+        Each `SIGN_IN_LINK_WITHDRAWN` event's reason, oldest first.
+    """
+    events = world.session.execute(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == AuditEventType.SIGN_IN_LINK_WITHDRAWN)
+        .order_by(AuditEvent.occurred_at)
+    ).scalars()
+    return [e.detail["reason"] for e in events if e.detail.get("link_id") == str(link.id)]
+
+
+@pytest.mark.parametrize("kind", ["invite", "recovery"])
+@pytest.mark.parametrize("loss", ISSUER_LOSSES)
+def test_link_refused_at_use_once_its_issuer_lost_the_right(
+    world: World, loss: str, kind: str
+) -> None:
+    """Using a link checks its issuer again: a lost right closes it, audited, with a next step.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    loss
+        How the issuer lost the right.
+    kind
+        The link's kind.
+    """
+    boss = _issuer(world, loss)
+    link = _issue_as(world, world.pat(boss), kind)
+    _lose_behind_the_services(world, boss, loss)
+    cause = "deactivated" if loss == "deactivated" else "no longer an administrator"
+    with pytest.raises(PermissionDenied, match=cause) as refused:
+        world.redeem(link)
+    assert "'boss'" in str(refused.value)
+    assert "Ask an administrator for a new link." in str(refused.value)
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+    reason = "issuer_deactivated" if loss == "deactivated" else "issuer_not_admin"
+    assert _withdrawal_reasons(world, link) == [reason]
+    assert world.session.execute(select(BrowserSession)).scalars().all() == []
+    assert world.session.execute(select(Principal).where(Principal.name == "carol")).first() is None
+
+
+@pytest.mark.parametrize("kind", ["invite", "recovery"])
+@pytest.mark.parametrize("loss", ISSUER_LOSSES)
+def test_issuers_open_links_are_withdrawn_when_they_lose_the_right(
+    world: World, loss: str, kind: str
+) -> None:
+    """Deactivation and every loss of ADMIN withdraw the issuer's open links at once, audited.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    loss
+        How the issuer lost the right.
+    kind
+        The link's kind.
+    """
+    boss = _issuer(world, loss)
+    link = _issue_as(world, world.pat(boss), kind)
+    _lose_through_the_services(world, boss, loss)
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+    reason = "issuer_deactivated" if loss == "deactivated" else "issuer_not_admin"
+    assert _withdrawal_reasons(world, link) == [reason]
+    with pytest.raises(LinkUnusableError) as refused:
+        world.redeem(link)
+    assert refused.value.state == "withdrawn"
+
+
+@pytest.mark.parametrize("kind", ["invite", "recovery"])
+def test_operators_links_are_refused_once_the_bootstrap_account_is_deactivated(
+    world: World, kind: str
+) -> None:
+    """The operator's links need the bootstrap account active, like any issuer's.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    kind
+        The link's kind.
+    """
+    world.person("other", admin=True)
+    link = _issue_as(world, world.operator, kind)
+    admin = world.session.execute(select(Principal).where(Principal.name == "admin")).scalar_one()
+    admin.is_active = False
+    world.session.commit()
+    with pytest.raises(PermissionDenied, match=r"'admin'.*deactivated"):
+        world.redeem(link)
+    assert _withdrawal_reasons(world, link) == ["issuer_deactivated"]
+
+
+@pytest.mark.parametrize("kind", ["invite", "recovery"])
+def test_a_link_whose_issuer_is_gone_is_refused(world: World, kind: str) -> None:
+    """A link whose issuer row no longer exists is refused like any other lapsed issuer.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    kind
+        The link's kind.
+    """
+    boss = world.person("boss", admin=True)
+    link = _issue_as(world, world.pat(boss), kind)
+    world.session.get_one(SignInLink, link.id).issued_by = None
+    world.session.commit()
+    with pytest.raises(PermissionDenied, match="no longer exists") as refused:
+        world.redeem(link)
+    assert "Ask an administrator for a new link." in str(refused.value)
+    assert _withdrawal_reasons(world, link) == ["issuer_gone"]
+
+
+@pytest.mark.parametrize("kind", ["invite", "recovery"])
+def test_links_of_an_issuer_who_keeps_the_right_still_work(world: World, kind: str) -> None:
+    """Another administrator's loss, or losing one of two ADMIN paths, leaves a link usable.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    kind
+        The link's kind.
+    """
+    boss = _issuer(world, "left_admin_group")
+    ensure_bootstrap_admin_grant(
+        world.session,
+        PrincipalRef(id=boss.id, name=boss.name, type=boss.type),
+        AllowAllAuthorization(),
+    )
+    other = world.person("other", admin=True)
+    link = _issue_as(world, world.pat(boss), kind)
+    GroupService(world.session, world.authz).remove_member(world.operator, "admins", "boss")
+    PrincipalService(world.session, world.authz).deactivate_principal(world.operator, "other")
+    GrantService(world.session, world.authz).revoke(world.operator, _admin_grant_of(world, other))
+    assert world.links.describe(parts(link.url)[0]).state == "open"
+    assert world.redeem(link).kind == kind
+    assert _withdrawal_reasons(world, link) == []
+
+
+def test_operators_recovery_link_for_an_administrator_fails_once_the_token_expired(
+    world: World,
+) -> None:
+    """The operator's token must still be valid, unexpired too, when the link is used."""
+    world.person("boss", admin=True)
+    link = world.links.issue_recovery(world.operator, principal_name="boss")
+    assert world.operator.token_id is not None
+    pat = world.session.get_one(PersonalAccessToken, world.operator.token_id)
+    pat.expires_at = START - timedelta(minutes=1)
+    world.session.commit()
+    with pytest.raises(PermissionDenied, match="lakana recovery create boss"):
+        world.redeem(link)
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+
+
+def test_operators_recovery_link_for_an_administrator_fails_once_the_token_is_revoked(
+    world: World,
+) -> None:
+    """Revoking the operator's token closes the administrator's recovery link it issued."""
+    world.person("boss", admin=True)
+    link = world.links.issue_recovery(world.operator, principal_name="boss")
+    assert world.operator.token_id is not None
+    world.session.get_one(PersonalAccessToken, world.operator.token_id).revoked_at = START
+    world.session.commit()
+    with pytest.raises(PermissionDenied, match="lakana recovery create boss"):
+        world.redeem(link)

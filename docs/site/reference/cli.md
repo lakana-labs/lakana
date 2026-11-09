@@ -1174,7 +1174,7 @@ Usage: `lakana invite create [OPTIONS] {name}`
 
 Invite a new person as NAME; prints the link to send them.
 
-The link works once, for 7 days, and creates the account NAME with no rights. Confirm with the person that they signed up before you grant roles. Only the link goes to stdout.
+The link works once, for 7 days, and creates the account NAME with no rights. It stops working if you are deactivated or lose the ADMIN role first. Confirm with the person that they signed up before you grant roles. Only the link goes to stdout.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -1209,7 +1209,7 @@ Usage: `lakana recovery create [OPTIONS] {name}`
 
 Issue a recovery link for NAME, who lost their passkeys; prints the link to send them.
 
-The link works once, for 1 hour. Using it removes NAME's passkeys, ends their sessions and tells them and every administrator. Recovering an administrator, meaning anyone who holds or has ever held the ADMIN role, directly or through a group, is for the server operator only: run this where the server runs, with the profile that holds the bootstrap token (the one 'lakana bundle init' or 'lakana server start --local' saved). Only the link goes to stdout.
+The link works once, for 1 hour, and stops working if you are deactivated or lose the ADMIN role first. Using it removes NAME's passkeys, ends their sessions and tells them and every administrator. Recovering an administrator, meaning anyone who holds or has ever held the ADMIN role, directly or through a group, is for the server operator only: run this where the server runs, with the profile that holds the bootstrap token (the one 'lakana bundle init' or 'lakana server start --local' saved). Only the link goes to stdout.
 
 | Name | Type | Default | Description |
 |---|---|---|---|

@@ -113,6 +113,13 @@ makes no claim of certification or compliance with any standard.
   operator, never by another administrator. That holds for anyone who has ever held the `ADMIN`
   role, directly or through a group: taking the role away first does not let another
   administrator recover them. Confirm a request outside Lakana before you send a link.
+- **A link stands only while its issuer does.** Deactivating the administrator who issued an
+  invite or a recovery link, or taking their `ADMIN` role away (revoking the grant, or removing
+  them from the group that gives it), withdraws their open links at once, and every link is
+  checked again when it is used: the person is told why and to ask an administrator for a new
+  link. So deactivating an administrator whose browser or token was stolen also ends the links
+  the thief issued. The server operator's links need the bootstrap account active and holding
+  `ADMIN`, like anyone's.
 
 ## Where secrets live
 

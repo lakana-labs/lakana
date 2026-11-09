@@ -11,7 +11,7 @@ from lakana_core.access.managed import guard_change, lock_access
 from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
-from lakana_core.grants.service import assert_admin_headroom
+from lakana_core.grants.service import assert_admin_headroom, withdraw_links_of_lapsed_issuers
 from lakana_core.identity.links import (
     invisible_character_problem,
     name_length_problem,
@@ -146,7 +146,9 @@ class PrincipalService:
 
         Every open browser session of the principal ends in the same commit, with reason
         ``deactivated`` (`SessionService.end_for_principal`), and every open sign-in link bound
-        to it is withdrawn (`lakana_core.identity.links.withdraw_open_links`).
+        to it is withdrawn (`lakana_core.identity.links.withdraw_open_links`), and so is every
+        open invite and recovery link it issued
+        (`lakana_core.grants.service.withdraw_links_of_lapsed_issuers`).
 
         Idempotent: deactivating an already-inactive principal is a no-op
         — it records no second `PRINCIPAL_DEACTIVATED` event, and does not
@@ -193,6 +195,7 @@ class PrincipalService:
             principal.id, "deactivated", commit=False
         )
         withdraw_open_links(self._session, principal.id, now=utc_now(), reason="deactivated")
+        withdraw_links_of_lapsed_issuers(self._session, actor_id=p.id)
         if commit:
             self._session.commit()
 

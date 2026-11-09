@@ -26,8 +26,9 @@ def create(
 ) -> None:
     """Invite a new person as NAME; prints the link to send them.
 
-    The link works once, for 7 days, and creates the account NAME with no rights. Confirm with
-    the person that they signed up before you grant roles. Only the link goes to stdout.
+    The link works once, for 7 days, and creates the account NAME with no rights. It stops
+    working if you are deactivated or lose the ADMIN role first. Confirm with the person that
+    they signed up before you grant roles. Only the link goes to stdout.
 
     Parameters
     ----------

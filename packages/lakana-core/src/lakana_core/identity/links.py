@@ -23,6 +23,10 @@ Rules (the spec's "Decided rules", and the security reviews S3, S4, S9, N4 to N8
 - An open invite reserves its name, compared in any letter case (`name_unavailable`), so no
   principal and no second invite can take it meanwhile; using it fails if the name was taken
   anyway.
+- An invite or recovery link stands only while its issuer does: an active account holding
+  ADMIN on the instance, the server operator included. Losing either withdraws the issuer's
+  open links (`lakana_core.grants.service.withdraw_links_of_lapsed_issuers`), and using one
+  checks again (`LinkService._check_issuer`).
 - A local link (only with `LAKANA_UI__LOCAL_SIGN_IN`) is minted with the person's own PAT and
   signs in without a passkey touch; it is never used over a session the browser already has.
 """
@@ -52,8 +56,12 @@ from lakana_core.errors import (
     PermissionDenied,
     ValidationError,
 )
-from lakana_core.grants.admin import acts_as_instance_admin
-from lakana_core.grants.service import active_instance_admin_ids
+from lakana_core.grants.admin import acts_as_instance_admin, holds_instance_admin
+from lakana_core.grants.service import (
+    ISSUED_BY_ADMINS,
+    active_instance_admin_ids,
+    lapsed_issuer_reason,
+)
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.sessions import (
     SessionService,
@@ -1129,12 +1137,53 @@ class LinkService:
         Returns
         -------
         bool
-            Whether `source_pat_id` names a bootstrap PAT that is still unrevoked.
+            Whether `source_pat_id` names a bootstrap PAT that is still unrevoked and
+            unexpired, as `is_operator` asks at issue.
         """
         if row.source_pat_id is None:
             return False
         pat = self._session.get(PersonalAccessToken, row.source_pat_id)
-        return pat is not None and pat.bootstrap and pat.revoked_at is None
+        if pat is None or not pat.bootstrap or pat.revoked_at is not None:
+            return False
+        return pat.expires_at is None or pat.expires_at > self._clock()
+
+    def _check_issuer(self, row: SignInLink) -> None:
+        """Refuse an invite or recovery link whose issuer no longer stands behind it.
+
+        The issuer needed ``ADMIN`` on the instance to issue it (`_require_admin`), the server
+        operator included, so they still need it, and an active account, when it is used.
+        Deactivating an administrator or taking their ADMIN away withdraws their open links at
+        once (`lakana_core.grants.service.withdraw_links_of_lapsed_issuers`); this is the check
+        that holds even where that did not run.
+
+        Parameters
+        ----------
+        row
+            The claimed link.
+
+        Raises
+        ------
+        _CloseLink
+            With `PermissionDenied` naming the cause and the next step, and the reason
+            ``issuer_gone``, ``issuer_deactivated`` or ``issuer_not_admin``.
+        """
+        issuer = self._session.get(Principal, row.issued_by) if row.issued_by else None
+        is_admin = issuer is not None and holds_instance_admin(self._session, issuer.id)
+        reason = lapsed_issuer_reason(issuer, is_admin=is_admin)
+        if reason is None:
+            return
+        if issuer is None:
+            cause = "The account that issued this link no longer exists"
+        elif reason == "issuer_deactivated":
+            cause = f"{issuer.name!r}, who issued this link, has been deactivated"
+        else:
+            cause = f"{issuer.name!r}, who issued this link, is no longer an administrator"
+        raise _CloseLink(
+            PermissionDenied(
+                f"{cause}, so the link was closed. Ask an administrator for a new link."
+            ),
+            reason,
+        )
 
     def _complete(
         self, row: SignInLink, now: datetime, *, replacing: str | None, peer: str, user_agent: str
@@ -1162,13 +1211,16 @@ class LinkService:
         Raises
         ------
         _CloseLink
-            When a rule checked at issue no longer holds: an invite's name was taken meanwhile,
+            When a rule checked at issue no longer holds: the issuer of an invite or recovery
+            link lost the right to issue it (`_check_issuer`), an invite's name was taken meanwhile,
             a local link is used on a server no longer in local mode, the bootstrap account of a
             setup link has a passkey now, or the person of a recovery
             link holds or has held ADMIN (`Principal.held_admin`) and the link was not the
             operator's. The caller withdraws the link and raises the carried error.
         """
         kind = row.kind
+        if kind in ISSUED_BY_ADMINS:
+            self._check_issuer(row)
         if kind == "invite":
             principal_id = self._create_invitee(row)
         else:

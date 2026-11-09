@@ -13,7 +13,11 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.roles import Role
-from lakana_core.grants.service import assert_admin_headroom, mark_admin_holders
+from lakana_core.grants.service import (
+    assert_admin_headroom,
+    mark_admin_holders,
+    withdraw_links_of_lapsed_issuers,
+)
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AuditEventType,
@@ -342,6 +346,10 @@ class GroupService:
     ) -> None:
         """Remove a principal from a group.
 
+        Leaving a group that holds instance ADMIN withdraws the person's open invites and
+        recovery links if that was their last way to ADMIN
+        (`lakana_core.grants.service.withdraw_links_of_lapsed_issuers`).
+
         Parameters
         ----------
         p
@@ -382,7 +390,8 @@ class GroupService:
         guard_change(
             self._session, p, environment=None, change=f"remove {principal_name} from {group_name}"
         )
-        if self._grants_instance_admin(group.id):
+        admin_group = self._grants_instance_admin(group.id)
+        if admin_group:
             assert_admin_headroom(self._session, excluding_membership=(group.id, principal.id))
         self._session.delete(membership)
         AuditService(self._session).record(
@@ -390,6 +399,8 @@ class GroupService:
             AuditEventType.GROUP_MEMBER_REMOVED,
             detail={"group": group_name, "principal": principal_name},
         )
+        if admin_group:
+            withdraw_links_of_lapsed_issuers(self._session, actor_id=p.id)
         if commit:
             self._session.commit()
 

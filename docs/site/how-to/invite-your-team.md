@@ -27,7 +27,9 @@ The person opens the link, reads "Join Lakana as sam", chooses **Continue** and 
 their fingerprint, face, PIN or security key. From then on the passkey signs them in.
 
 The open invites are listed on the same tab. **Withdraw** stops a link that is no longer wanted,
-for example one sent to the wrong address; its name is free again at once.
+for example one sent to the wrong address; its name is free again at once. An invite also stops
+working when the administrator who issued it is deactivated or loses the `ADMIN` role; the
+person then sees why, and another administrator issues a new one.
 
 ## Confirm the person before you grant a role
 

@@ -510,6 +510,16 @@ passkeys (M7 1b)"; the design is `docs/superpowers/specs/2026-11-08-m7-part1b-si
   disables that passkey and ends every session of its person at once (any of them may be the
   copy's); the person and every administrator get a notice, and it is audited.
 - **Fixation.** A presented session id is never adopted; every sign-in issues a fresh one.
+- **A link outliving its issuer's right.** An invite or recovery link stands only while its
+  issuer is an active account holding instance `ADMIN` (the operator included). Deactivation,
+  revoking an instance `ADMIN` grant (also a group's, which deleting the group needs first) and
+  leaving a group that holds one withdraw the open links of every issuer left without it, in
+  the same commit (`withdraw_links_of_lapsed_issuers`; `SIGN_IN_LINK_WITHDRAWN` with
+  `issuer_deactivated` or `issuer_not_admin`). Using a link checks again in its claiming
+  transaction (`LinkService._check_issuer`): a lapsed issuer closes the link, audited, with a
+  403 naming the cause and "Ask an administrator for a new link". So deactivating a compromised
+  administrator also ends the recovery links its attacker issued; before, they stayed usable
+  for their hour (an invite for its 7 days).
 - **Probing.** A refused cookie is audited, rate-limited per client address; another person's
   sessions answer 403 to a non-administrator whether the name exists or not.
 

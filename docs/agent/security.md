@@ -446,7 +446,10 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   once the bootstrap account has a passkey; a local link fails on a server no longer in local
   mode; a recovery link fails when its person holds or has
   held ADMIN by then (`held_admin`), unless the operator's bootstrap PAT issued it (recorded in `source_pat_id`);
-  an invite fails when its name was taken meanwhile. Each such link is then withdrawn (audited
+  an invite fails when its name was taken meanwhile; an invite or recovery link fails when its
+  issuer is gone, deactivated or no longer holds instance ADMIN (`_check_issuer`, reasons
+  `issuer_gone`, `issuer_deactivated`, `issuer_not_admin`; the operator's links too, and an
+  operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired). Each such link is then withdrawn (audited
   with the reason, gone from the open lists) and the error names the next step (an
   administrator's recovery: `lakana recovery create NAME`; an invite: `lakana invite create`).
 - **A local link** (`POST /api/v1/sign-in/local-link`) exists only with
@@ -457,7 +460,10 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   *offers* a passkey. It is never used while the browser presents an open session (409; the
   link stays usable), so a page cannot sign a signed-in person in as someone else.
 - **Reactivation and deactivation.** Deactivating a person withdraws their open links in the
-  same commit; reactivating the bootstrap principal (`bootstrap_if_needed`) removes its
+  same commit, and also the open invites and recovery links they issued; revoking an instance
+  ADMIN grant and leaving a group that holds one do the same for everyone left without ADMIN
+  (`lakana_core.grants.service.withdraw_links_of_lapsed_issuers`, audited per link). Deleting a
+  group needs its grants revoked first, so that path goes through the revoke; reactivating the bootstrap principal (`bootstrap_if_needed`) removes its
   passkeys, ends its sessions (`reactivated`) and withdraws its links.
 
 ### Passkeys (WebAuthn) and step-up

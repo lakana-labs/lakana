@@ -22,7 +22,14 @@ from lakana_core.grants.explain import PermissionReport, explain_permissions, gr
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
 from lakana_core.identity.sessions import require_step_up
-from lakana_core.models import AuditEventType, Grant, Group, GroupMembership, Principal
+from lakana_core.models import (
+    AuditEventType,
+    Grant,
+    Group,
+    GroupMembership,
+    Principal,
+    SignInLink,
+)
 from lakana_core.pagination import Page, newest_first
 
 _EXPECTED_FIELDS: dict[SecurableKind, frozenset[str]] = {
@@ -623,6 +630,9 @@ class GrantService:
     def revoke(self, p: PrincipalRef, grant_id: uuid.UUID, *, commit: bool = True) -> None:
         """Revoke a grant.
 
+        Revoking an instance ADMIN grant withdraws the open invites and recovery links of
+        everyone it leaves without ADMIN (`withdraw_links_of_lapsed_issuers`).
+
         Idempotent: revoking an already-revoked grant is a no-op — it
         leaves the existing `revoked_at`/`revoked_by` untouched and records
         no second `GRANT_REVOKED` event, matching PATs, task tokens, row
@@ -678,6 +688,8 @@ class GrantService:
         )
         grant.revoked_at = datetime.now(UTC)
         grant.revoked_by = p.id
+        if grant.role == Role.ADMIN and grant.kind == SecurableKind.INSTANCE:
+            withdraw_links_of_lapsed_issuers(self._session, actor_id=p.id)
         if commit:
             self._session.commit()
 
@@ -815,6 +827,100 @@ def active_instance_admin_ids(
         .scalars()
         .all()
     )
+
+
+ISSUED_BY_ADMINS = ("invite", "recovery")
+"""The kinds of sign-in link only an administrator issues, and only while one."""
+
+
+def lapsed_issuer_reason(issuer: Principal | None, *, is_admin: bool) -> str | None:
+    """Say why the issuer of an invite or recovery link may no longer stand behind it.
+
+    Parameters
+    ----------
+    issuer
+        The link's issuer (`SignInLink.issued_by`); `None` once that principal is gone.
+    is_admin
+        Whether the issuer holds instance ADMIN now (active, directly or through a group).
+
+    Returns
+    -------
+    str or None
+        ``issuer_gone``, ``issuer_deactivated`` or ``issuer_not_admin``; `None` while the
+        issuer still holds the right the link needed (``ADMIN`` on the instance).
+    """
+    if issuer is None:
+        return "issuer_gone"
+    if not issuer.is_active:
+        return "issuer_deactivated"
+    if not is_admin:
+        return "issuer_not_admin"
+    return None
+
+
+def withdraw_links_of_lapsed_issuers(session: Session, *, actor_id: uuid.UUID | None) -> int:
+    """Withdraw the open invites and recovery links whose issuer lost the right to issue them.
+
+    Called where an issuer can lose it: deactivation
+    (`lakana_core.identity.principals.PrincipalService.deactivate_principal`), revoking an
+    instance ADMIN grant (`GrantService.revoke`, also a group's, which a group's deletion
+    needs first) and leaving a group that holds one (`GroupService.remove_member`). Using a
+    link checks its issuer again (`lakana_core.identity.links.LinkService.redeem`), so this is
+    the early half: the link is shown as withdrawn at once. An unused link past its expiry is
+    withdrawn too; it was unusable already. Each withdrawal is one
+    `SIGN_IN_LINK_WITHDRAWN` event with the reason `lapsed_issuer_reason` gives.
+
+    Parameters
+    ----------
+    session
+        Database session; flushed first so the change being made counts. The caller commits.
+    actor_id
+        Who made the change, for the audit events.
+
+    Returns
+    -------
+    int
+        How many links this call withdrew.
+    """
+    session.flush()
+    rows = session.execute(
+        select(SignInLink.id, SignInLink.kind, SignInLink.issued_by)
+        .where(
+            SignInLink.kind.in_(ISSUED_BY_ADMINS),
+            SignInLink.used_at.is_(None),
+            SignInLink.withdrawn_at.is_(None),
+        )
+        .order_by(SignInLink.created_at, SignInLink.id)
+    ).all()
+    if not rows:
+        return 0
+    admins = active_instance_admin_ids(session)
+    now = datetime.now(UTC)
+    audit = AuditService(session)
+    count = 0
+    for link_id, kind, issued_by in rows:
+        issuer = session.get(Principal, issued_by) if issued_by is not None else None
+        reason = lapsed_issuer_reason(issuer, is_admin=issued_by in admins)
+        if reason is None:
+            continue
+        session.execute(
+            update(SignInLink)
+            .where(SignInLink.id == link_id, SignInLink.used_at.is_(None))
+            .values(withdrawn_at=now, reserved_name=None)
+            .execution_options(synchronize_session="fetch")
+        )
+        audit.record(
+            actor_id,
+            AuditEventType.SIGN_IN_LINK_WITHDRAWN,
+            detail={
+                "kind": kind,
+                "link_id": str(link_id),
+                "issuer": issuer.name if issuer is not None else None,
+                "reason": reason,
+            },
+        )
+        count += 1
+    return count
 
 
 def assert_admin_headroom(

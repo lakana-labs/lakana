@@ -18,8 +18,9 @@ so a recovery nobody asked for does not go unnoticed.
 3. The interface asks you to add a passkey, and nothing else works until you have one. Choose
    **Add a passkey** and follow your browser.
 
-If the page says the link was already used, has expired or was withdrawn, ask for a new one:
-each link works once. The interface removes the link from the address bar as soon as the page
+If the page says the link was already used, has expired or was withdrawn, or that whoever issued
+it was deactivated or is no longer an administrator, ask an administrator for a new one: each
+link works once. The interface removes the link from the address bar as soon as the page
 opens, but the browser may still keep it in its own history; once used or expired, a link there
 is useless.
 
@@ -41,7 +42,8 @@ does the same; the [CLI reference](../reference/cli.md#lakana-recovery) lists th
 list the open links and withdraw one.
 
 Confirm that the request really comes from that person before you send a link, for example by
-calling them: whoever holds the link becomes them for the next hour.
+calling them: whoever holds the link becomes them for the next hour. A link you issued stops
+working if you are deactivated or lose the `ADMIN` role before it is used.
 
 ## The administrator lost their passkey
 
