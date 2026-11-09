@@ -2516,7 +2516,7 @@ def test_an_interrupt_during_the_commit_does_not_withdraw_the_upload(tmp_path: P
             raise KeyboardInterrupt
         return real(request)
 
-    api.handle = interrupted  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
+    api.handle = interrupted  # type: ignore[method-assign]
     with pytest.raises(KeyboardInterrupt):
         api.artifacts().upload("dev", "models.churn", tmp_path)
     assert api.aborts == []

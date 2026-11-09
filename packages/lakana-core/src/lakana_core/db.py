@@ -201,7 +201,7 @@ def _ping_that_survives_a_reset(engine: Engine) -> None:
         except OSError:
             return False  # a false ping makes the pool discard the connection and open a new one
 
-    dialect.do_ping = _ping  # ty: ignore[invalid-assignment]
+    dialect.do_ping = _ping
 
     @event.listens_for(engine, "handle_error")
     def _classify(context: ExceptionContext) -> None:

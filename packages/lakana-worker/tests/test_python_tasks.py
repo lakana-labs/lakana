@@ -6872,7 +6872,7 @@ def test_a_drain_puts_a_set_back_claim_back_with_the_flag_and_the_attempt(
             real_start()
             keeper.renew_once()  # the drain's grace is zero: the keeper learns of it now
 
-        keeper.start = start  # ty: ignore[invalid-assignment]
+        keeper.start = start
         return keeper
 
     monkeypatch.setattr(tasks_module, "keeper_for", draining)

@@ -607,6 +607,17 @@ def test_dependabot_holds_eslint_and_its_rules_on_the_same_major() -> None:
     assert held.get("@eslint/js") == ["version-update:semver-major"]
 
 
+def test_dependabot_gives_typescript_only_what_typescript_eslint_accepts() -> None:
+    """typescript-eslint declares `typescript <6.1.0`; a newer one breaks `npm ci` (PR 527)."""
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
+    (ui,) = [e for e in config["updates"] if e["directory"] == "/ui"]
+    held = {rule["dependency-name"]: rule["update-types"] for rule in ui.get("ignore", [])}
+    assert held.get("typescript") == [
+        "version-update:semver-major",
+        "version-update:semver-minor",
+    ]
+
+
 def test_dependabot_watches_the_pinned_jscpd() -> None:
     """The lockfile of the duplication check is updated by Dependabot, as a hidden `ci` change."""
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
