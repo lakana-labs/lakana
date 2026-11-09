@@ -25,10 +25,14 @@ export function useFocusAfter<T extends HTMLElement>(change: unknown): FocusAfte
   const target = useRef<T>(null);
   const armed = useRef(false);
   useEffect(() => {
-    if (armed.current) {
-      armed.current = false;
-      target.current?.focus();
-    }
+    if (!armed.current) return undefined;
+    armed.current = false;
+    // A closing React Aria dialog hands focus back to its trigger in the next animation frame;
+    // moving it in a frame too, scheduled after the dialog's, keeps the move from being undone.
+    const frame = requestAnimationFrame(() => target.current?.focus());
+    return () => {
+      cancelAnimationFrame(frame);
+    };
   }, [change]);
   const arm = useCallback(() => {
     armed.current = true;

@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -111,7 +111,9 @@ describe("PasskeysPanel", () => {
     expect(await screen.findByRole("button", { name: "Remove Passkey" })).toBeInTheDocument();
     expect(screen.queryByText("Laptop")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Passkeys" })).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "Passkeys" })).toHaveFocus();
+    });
     expect(server.sent.filter((request) => request.method === "DELETE")).toHaveLength(1);
   });
 
@@ -128,7 +130,10 @@ describe("PasskeysPanel", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(remove).toHaveFocus();
+    // React Aria hands focus back to the trigger in the next animation frame, not at once.
+    await waitFor(() => {
+      expect(remove).toHaveFocus();
+    });
     expect(server.sent.some((request) => request.method === "DELETE")).toBe(false);
   });
 
