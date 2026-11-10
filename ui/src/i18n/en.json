@@ -125,7 +125,7 @@
   "passkey": {
     "cancelled": "The passkey request was cancelled or took too long. Try again when you are ready.",
     "unsupported": "This browser cannot use passkeys. Use a current version of Chrome, Edge, Firefox or Safari.",
-    "duplicate": "This device already holds a passkey for this account. Use another device or security key, or sign in with the passkey you have.",
+    "duplicate": "This browser or password manager already holds a passkey for this account. To add another, choose a different place in the browser's window, such as a phone or tablet or a security key; or sign in with the passkey you have.",
     "wrongAddress": "Passkeys work only at the address Lakana was set up with. Open Lakana at that address and try again.",
     "failed": "The browser could not use the passkey ({{name}}). Try again, or use another device."
   },

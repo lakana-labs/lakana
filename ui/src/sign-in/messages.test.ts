@@ -11,7 +11,10 @@ describe("problemText", () => {
   it.each([
     ["NotAllowedError", "The passkey request was cancelled or took too long."],
     ["NotSupportedError", "This browser cannot use passkeys."],
-    ["InvalidStateError", "This device already holds a passkey for this account."],
+    [
+      "InvalidStateError",
+      "This browser or password manager already holds a passkey for this account. To add another",
+    ],
     ["SecurityError", "Passkeys work only at the address Lakana was set up with."],
     ["AbortError", "The browser could not use the passkey (AbortError)."],
   ])("names the browser's %s", (name, start) => {
