@@ -30,8 +30,9 @@ and a brand colour that looks like a warning would teach people to ignore warnin
 ## The tokens
 
 Every colour, size, space and duration comes from one reviewed file, `ui/src/styles/tokens.css`.
-A screen never writes its own value; if no token fits, the token file changes in its own
-reviewed step. Its tests check the contrast of every pair that is used together.
+A screen takes its colours, type sizes, spacing, radii and durations from it; only
+hairline borders, layout bounds and a few small optical adjustments are written as plain values.
+If no token fits, the token file changes in its own reviewed step. Its tests check the contrast of every pair that is used together.
 
 **Colour.** Ground, surface, sunk and float are the four surfaces; text, muted and faint
 the three text levels; line and edge the hairlines and control borders; accent with its hover
@@ -82,10 +83,12 @@ deuteranopia and tritanopia (the matrices of Machado, Oliveira and Fernandes, 20
 severity) and of achromatopsia (luminance only), in light and dark. The result:
 
 - every glyph keeps at least 3:1 against every surface it is drawn on (WCAG 1.4.11, non-text
-  contrast) under every simulation; the lowest is 4.17:1, the failed glyph in light under
-  deuteranopia;
+  contrast) under every simulation, also while the running glyph pulses. At rest the lowest is
+  4.17:1, the failed glyph in light under deuteranopia; at the faintest point of its pulse
+  (opacity 0.75) the running glyph measures at least 3.15:1, in light under protanopia on the
+  sunk surface;
 - every knock-out mark (the tick, the cross, the exclamation mark) keeps at least 3:1 against
-  its glyph; the lowest is 5.34:1, in the same case;
+  its glyph; the lowest is 5.34:1, the failed glyph in light under deuteranopia;
 - the colours alone do **not** tell the states apart: succeeded, failed and warning differ in
   lightness by a ratio of 1.0 to 1.45 under the simulations, and the three ring states share one
   colour. That is by design: every pair of the seven glyphs differs in shape, and the test

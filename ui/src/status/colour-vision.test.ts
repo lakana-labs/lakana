@@ -65,6 +65,41 @@ function seen(mode: string, vision: Vision, first: string, second: string): numb
 }
 
 /**
+ * The lowest opacity of the running glyph's pulse, as status.css's keyframes set it.
+ *
+ * @returns The opacity between 0 and 1.
+ */
+function pulseLow(): number {
+  const keyframes = /@keyframes status-pulse\s*\{([^}]*\}[^}]*)\}/.exec(statusCss)?.[1] ?? "";
+  const opacity = /opacity:\s*([\d.]+)/.exec(keyframes)?.[1];
+  if (opacity === undefined) {
+    throw new Error("no opacity in @keyframes status-pulse");
+  }
+  return Number(opacity);
+}
+
+/**
+ * A colour drawn at an opacity over a background, composited per channel in sRGB as browsers do.
+ *
+ * @param foreground - The colour, `#RRGGBB`.
+ * @param background - The background, `#RRGGBB`.
+ * @param opacity - The foreground's opacity, 0 to 1.
+ * @returns The colour seen, `#RRGGBB`.
+ */
+function over(foreground: string, background: string, opacity: number): string {
+  const channels = (hex: string): number[] =>
+    [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  const back = channels(background);
+  return `#${channels(foreground)
+    .map((channel, index) =>
+      Math.round(opacity * channel + (1 - opacity) * (back[index] ?? 0))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+/**
  * The silhouette of a glyph: its markup, which carries no colour (only `currentColor`).
  *
  * @param kind - The glyph.
@@ -107,6 +142,28 @@ describe("the status glyphs through simulated colour vision", () => {
       }
     }
   });
+
+  it("reads the pulse's lowest opacity from status.css", () => {
+    expect(pulseLow()).toBeGreaterThan(0);
+    expect(pulseLow()).toBeLessThan(1);
+    expect(over("#000000", "#ffffff", 0.5)).toBe("#808080");
+  });
+
+  it.each(CASES)(
+    "the running glyph stays at 3:1 at the lowest point of its pulse (%s, %s)",
+    (mode, vision) => {
+      const palette = PALETTES[mode] ?? {};
+      const colour = palette[TOKENS.running] ?? "";
+      for (const background of BACKGROUNDS) {
+        const ground = palette[background] ?? "";
+        const faded = over(colour, ground, pulseLow());
+        expect(
+          ratio(luminanceOf(simulate(faded, vision)), luminanceOf(simulate(ground, vision))),
+          `running at opacity ${String(pulseLow())} on ${background}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    },
+  );
 
   it.each(CASES)("each knock-out mark stays at 3:1 on its glyph (%s, %s)", (mode, vision) => {
     for (const kind of KNOCKED_OUT) {

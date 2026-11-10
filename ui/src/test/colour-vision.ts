@@ -13,8 +13,11 @@
 import type { LinearRgb } from "./palette";
 import { linear, luminanceOf } from "./palette";
 
+/** One row of a 3×3 matrix. */
+type Row = readonly [number, number, number];
+
 /** A 3×3 matrix by rows. */
-type Matrix = readonly [LinearRgb, LinearRgb, LinearRgb];
+type Matrix = readonly [Row, Row, Row];
 
 /** The simulated kinds of colour vision, and normal vision. */
 export const VISIONS = [
