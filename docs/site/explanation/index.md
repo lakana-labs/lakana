@@ -17,5 +17,6 @@ Pages:
 - [When a table's columns change](when-columns-change.md): what `evolve_schema` does to a table, and what a removed column means for queries, views, downstream assets and old snapshots.
 - [Known gaps of the Compose bundle](compose-known-gaps.md): what the bundle does not do or protect, and why.
 - [Security overview](security.md): who may do what, where secrets live, what the audit log records and how a query is kept inside its limits.
+- [How Lakana looks and why](how-lakana-looks.md): the look of the web interface, its tokens, status glyphs and patterns, and what was weighed; for anyone who changes a screen.
 
 Pages are added here as they are written.
