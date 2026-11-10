@@ -233,6 +233,12 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   `ui/src/shell/Breadcrumbs.tsx`, above the heading: a `nav` landmark named "Breadcrumb", every
   part but the last a link, `aria-current="page"` on the last, separators hidden from screen
   readers, wrapping at 320 px. An area's own pages (a list, a tab of the area) have none.
+- **Every screen pull request is checked against the project skill `lakana-ui`**
+  (`.claude/skills/lakana-ui/SKILL.md`): the Still Water tokens and component rules, one pattern
+  per area, rows that open their object, breadcrumbs, refusals that name the cause and the next
+  step, the accessibility rules and the forbidden list (what makes an interface look generated).
+  The reasons are on the contributor page `docs/site/explanation/how-lakana-looks.md`; change
+  the skill and the page together.
 - **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
   stylesheet and string on (part 1a, Task 3).
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools
