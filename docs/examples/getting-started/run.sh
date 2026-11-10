@@ -165,6 +165,12 @@ lakana deploys list --env dev --repo analytics --limit 20
 out=$(lakana --output json deploys list --env dev --repo analytics --limit 20)
 python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert len(d) == 1 and d[0]["repository"] == "analytics", d' "$out"
 
+# docs:start status
+lakana status
+# docs:end status
+out=$(lakana --output json status)
+python3 -c 'import json,sys; s=json.loads(sys.argv[1]); assert s["state"] == "healthy" and s["causes"] == [] and s["workers_alive"] == 1 and s["detail"]["slots_total"] == 2, s' "$out"
+
 # docs:start worker-list
 lakana worker list
 # docs:end worker-list

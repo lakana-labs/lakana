@@ -179,6 +179,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "check rows": ("checks.rows", "query_run.wait", "query_run.result"),
     "scheduler status": ("scheduler.status",),
     "worker list": ("workers.list",),
+    "status": ("client.status",),
     "audit list": ("audit_events.list", "audit_events.iter"),
 }
 

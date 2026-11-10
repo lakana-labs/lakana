@@ -70,6 +70,7 @@ from lakana_core.runs.resources import AttemptResources
 from lakana_core.runs.scheduler import COMMITTED_BEFORE_STOPPED_MESSAGE
 from lakana_core.runs.store import committed_write
 from lakana_core.runs.tasks import FailureKind, record_attempt
+from lakana_core.runs.workers import MemoryUse
 from lakana_worker.activity import ACTIVITY, Activity, TaskClaim
 from lakana_worker.query_process import REGISTRY, Registry
 from lakana_worker.runners import TASKS, TaskRegistry
@@ -755,6 +756,12 @@ class MemoryWatchdog:
         Called with the measured bytes when over the limit, before `on_exceeded`; returns
         whether it stopped something. The watchdog then measures again and leaves the worker
         alone if that was enough.
+
+    Attributes
+    ----------
+    latest
+        The bytes it measured last, kept before it acts on them; `None` before its first
+        measurement. The heartbeat reports it (`use`).
     """
 
     def __init__(
@@ -774,6 +781,29 @@ class MemoryWatchdog:
         self._stop = threading.Event()
         self._wait = wait if wait is not None else self._stop.wait
         self._failed_once = False
+        self.latest: int | None = None
+
+    @property
+    def limit_bytes(self) -> int:
+        """The limit it enforces.
+
+        Returns
+        -------
+        int
+            Bytes.
+        """
+        return self._limit
+
+    def use(self) -> MemoryUse | None:
+        """Say what the worker uses of its memory, as last measured.
+
+        Returns
+        -------
+        MemoryUse or None
+            `latest` against the limit; `None` before the first measurement.
+        """
+        latest = self.latest
+        return None if latest is None else MemoryUse(used_bytes=latest, limit_bytes=self._limit)
 
     def check_once(self) -> bool:
         """Measure and act once: a query first, the worker only if that was not enough.
@@ -783,11 +813,11 @@ class MemoryWatchdog:
         bool
             Whether the limit was exceeded.
         """
-        total = self._measure()
+        total = self.latest = self._measure()
         if total <= self._limit:
             return False
         if self._relieve is not None and self._relieved(total):
-            total = self._measure()
+            total = self.latest = self._measure()
             if total <= self._limit:
                 return True
         self._on_exceeded(total)

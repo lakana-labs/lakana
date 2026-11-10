@@ -25,6 +25,7 @@ from lakana._models import (
     TaskLog,
     WorkerCaches,
     WorkerInfo,
+    WorkerMemory,
 )
 from lakana._routes import ROUTES
 from lakana.errors import RunFailed
@@ -777,6 +778,57 @@ def _caches(data: object) -> WorkerCaches | None:
     )
 
 
+def _memory(data: object) -> WorkerMemory | None:
+    """Read a worker's memory figures.
+
+    Parameters
+    ----------
+    data
+        The entry's `memory`: an object, `null`, or absent from a server of an earlier release.
+
+    Returns
+    -------
+    WorkerMemory or None
+        `None` unless it is an object.
+    """
+    if not isinstance(data, dict):
+        return None
+    return WorkerMemory(
+        used_bytes=data["used_bytes"],
+        limit_bytes=data["limit_bytes"],
+        measured_at=datetime.fromisoformat(data["measured_at"]),
+    )
+
+
+def worker_info(item: dict[str, Any]) -> WorkerInfo:
+    """Read one worker as the server lists it (`WorkerOut`).
+
+    Parameters
+    ----------
+    item
+        The JSON object.
+
+    Returns
+    -------
+    WorkerInfo
+        The worker; `takes` is `all` when a server of an earlier release sends none.
+    """
+    return WorkerInfo(
+        id=item["id"],
+        host=item["host"],
+        version=item["version"],
+        started_at=datetime.fromisoformat(item["started_at"]),
+        heartbeat_at=datetime.fromisoformat(item["heartbeat_at"]),
+        status=item["status"],
+        takes=item["takes"] if isinstance(item.get("takes"), str) else "all",
+        query_run_id=item["query_run_id"],
+        deploy_run_id=item["deploy_run_id"],
+        task_run_id=item["task_run_id"],
+        caches=_caches(item.get("caches")),
+        memory=_memory(item.get("memory")),
+    )
+
+
 class Workers:
     """The workers of this instance (admin).
 
@@ -796,7 +848,8 @@ class Workers:
         after that; a lost worker's row is kept for an hour. Each entry shows the run ids of
         what the worker is doing (a query, a deploy, a pipeline task), never SQL, and `takes`
         says which work it takes: `all`, `interactive` or `pipeline` (`all` when the server is
-        of an earlier release and sends none). `caches` has the sizes of the worker's caches.
+        of an earlier release and sends none). `caches` has the sizes of the worker's caches,
+        `memory` the memory it last reported.
 
         Returns
         -------
@@ -809,18 +862,5 @@ class Workers:
             Without `MANAGE_ENVIRONMENT` on the instance (as `scheduler.status`).
         """
         return [
-            WorkerInfo(
-                id=item["id"],
-                host=item["host"],
-                version=item["version"],
-                started_at=datetime.fromisoformat(item["started_at"]),
-                heartbeat_at=datetime.fromisoformat(item["heartbeat_at"]),
-                status=item["status"],
-                takes=item["takes"] if isinstance(item.get("takes"), str) else "all",
-                query_run_id=item["query_run_id"],
-                deploy_run_id=item["deploy_run_id"],
-                task_run_id=item["task_run_id"],
-                caches=_caches(item.get("caches")),
-            )
-            for item in self._transport.request(ROUTES["workers.list"]).json()
+            worker_info(item) for item in self._transport.request(ROUTES["workers.list"]).json()
         ]

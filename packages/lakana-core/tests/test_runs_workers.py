@@ -429,3 +429,37 @@ def test_a_registration_with_cache_sizes_stores_them(session: Session) -> None:
     assert (row.cache_packages_bytes, row.cache_complete) == (2, True)
     assert workers.cache_sizes(row) == sizes
     assert workers.cache_sizes(Worker(id="new")) is None
+
+
+def test_beat_writes_memory_with_the_database_time(session: Session) -> None:
+    register(session, "w1", host="h", version="v")
+    session.commit()
+    row = session.get(Worker, "w1")
+    assert row is not None and workers.memory_use(row) is None
+    used = workers.MemoryUse(used_bytes=3 * 1024**3, limit_bytes=4 * 1024**3)
+    assert beat(session, "w1", memory=used)
+    session.commit()
+    session.expire_all()
+    row = session.get(Worker, "w1")
+    assert row is not None
+    assert (row.memory_used_bytes, row.memory_limit_bytes) == (3 * 1024**3, 4 * 1024**3)
+    assert row.memory_measured_at is not None
+    assert row.memory_measured_at == row.heartbeat_at
+    assert workers.memory_use(row) == used
+
+
+def test_beat_without_memory_leaves_the_stored_figures(session: Session) -> None:
+    used = workers.MemoryUse(used_bytes=10, limit_bytes=None)
+    register(session, "w1", host="h", version="v", memory=used)
+    session.commit()
+    row = session.get(Worker, "w1")
+    assert row is not None
+    measured = row.memory_measured_at
+    assert measured is not None
+    assert beat(session, "w1")
+    register(session, "w1", host="h", version="v")
+    session.commit()
+    session.expire_all()
+    row = session.get(Worker, "w1")
+    assert row is not None
+    assert (workers.memory_use(row), row.memory_measured_at) == (used, measured)

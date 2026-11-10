@@ -94,6 +94,7 @@ from lakana_core.runs.checks import (
 )
 from lakana_core.runs.failures import Failure, attempt_failure, task_failure
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
+from lakana_core.runs.instance_status import InstanceStatus, status_from
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.selection import (
     ManifestGraph,
@@ -112,7 +113,7 @@ from lakana_core.runs.waiting import (
     task_wait_reason,
     with_work,
 )
-from lakana_core.runs.workers import CacheSizes, alive_ids, cache_sizes
+from lakana_core.runs.workers import CacheSizes, MemoryUse, alive_ids, cache_sizes, memory_use
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.storage.resolver import StorageResolver
 
@@ -646,6 +647,13 @@ class WorkerView:
         The sizes of its caches it last measured; `None` before its first measurement.
     caches_measured_at
         When it stored them (the database's time); `None` with `caches`.
+    query_run_is_adhoc
+        Whether one of its `RUNNING` query runs is an ad-hoc query (it belongs to no pipeline
+        task); a pipeline SQL task's query run is not one.
+    memory
+        The memory use it last reported; `None` before its first report.
+    memory_measured_at
+        When it stored it (the database's time); `None` with `memory`.
     """
 
     id: str
@@ -660,6 +668,9 @@ class WorkerView:
     task_run_id: uuid.UUID | None
     caches: CacheSizes | None = None
     caches_measured_at: datetime | None = None
+    query_run_is_adhoc: bool = False
+    memory: MemoryUse | None = None
+    memory_measured_at: datetime | None = None
 
 
 def _entries(manifest: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
@@ -2774,15 +2785,55 @@ class RunService:
             Without MANAGE_ENVIRONMENT at instance scope (as `scheduler_status`).
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        return self._worker_views()
+
+    def instance_status(self, p: PrincipalRef, failed: Sequence[str]) -> InstanceStatus:
+        """Say whether the instance is healthy, degraded or down, and why (any caller).
+
+        Every authenticated caller may ask: Home shows the status to everyone. A caller who may
+        manage environments on the instance (who may list the workers) also gets which checks
+        failed, a worker's high memory, and the detail: slots, memory and the workers. That
+        question is asked with `permits`, so a "no" is no denial and is not audited. The workers
+        are read as `list_workers` reads them, in the same six statements.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        failed
+            The readiness checks that fail now (`database`, `storage`, `worker`), as the
+            server's cached readiness check answers them.
+
+        Returns
+        -------
+        InstanceStatus
+            The state, its causes as far as the caller may see them, the counts of workers and,
+            for an administrator, the detail.
+        """
+        admin = self._authz.permits(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        return status_from(failed, self._worker_views(), admin=admin)
+
+    def _worker_views(self) -> list[WorkerView]:
+        """Read every worker's row and what it is doing, without asking who may see it.
+
+        Returns
+        -------
+        list of WorkerView
+            One per row of `workers`, by id.
+        """
         workers = list(self._session.scalars(select(Worker).order_by(Worker.id)))
         alive = alive_ids(self._session, db_now(self._session), self._lease_seconds)
-        query_runs = self._oldest_per_worker(
+        query_rows = list(
             self._session.execute(
-                select(QueryRun.worker_id, QueryRun.id)
+                select(QueryRun.worker_id, QueryRun.id, QueryRun.task_run_id)
                 .where(QueryRun.status == QueryRunStatus.RUNNING, QueryRun.worker_id.is_not(None))
                 .order_by(func.coalesce(QueryRun.started_at, QueryRun.created_at), QueryRun.id)
             )
         )
+        query_runs = self._oldest_per_worker(
+            (w, run_id) for w, run_id, _ in query_rows if w is not None
+        )
+        adhoc = {w for w, _, task_run_id in query_rows if task_run_id is None}
         deploy_runs = self._oldest_per_worker(
             self._session.execute(
                 select(DeployRun.worker_id, DeployRun.id)
@@ -2811,6 +2862,9 @@ class RunService:
                 task_run_id=task_runs.get(w.id),
                 caches=cache_sizes(w),
                 caches_measured_at=w.cache_measured_at,
+                query_run_is_adhoc=w.id in adhoc,
+                memory=memory_use(w),
+                memory_measured_at=w.memory_measured_at,
             )
             for w in workers
         ]

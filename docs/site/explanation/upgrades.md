@@ -167,6 +167,17 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   `lakana token list <bootstrap admin>` after upgrading and revoke any `bootstrap` token you do
   not recognise as the one the server wrote.
 
+### The instance status and the workers' memory
+
+- Migration `0071` adds three empty columns to `workers`: the memory a worker last reported, its
+  limit then, and when. Each worker of this release reports its memory with its heartbeat; a
+  worker of an earlier release reports none, and `lakana status` then says that a worker reports
+  no limit until it is upgraded.
+- `lakana status` (`GET /api/v1/status`, `client.status()`) is new: `Healthy`, `Degraded` or
+  `Down` with the reason, and for an administrator the busy task slots, the workers' memory and
+  the workers ([What the status says](../how-to/instance-health.md#what-the-status-says)).
+  `lakana worker list` has a new column `memory`.
+
 ### The Compose bundle's web interface settings
 
 - A new bundle's `.env` has two more keys, which `compose.yaml` passes to `server`:

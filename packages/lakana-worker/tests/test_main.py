@@ -1695,6 +1695,7 @@ def test_main_starts_the_heartbeat_before_the_loop_and_hands_the_loop_its_id_and
         "lease_seconds": settings.run.lease_seconds,
         "takes": "all",
         "caches": poll.call_args.kwargs["engine"].python.caches.latest,
+        "memory": None,  # conftest starts no watchdog
     }
     assert worker_id.count(":") == 2
     assert poll.call_args.kwargs["may_claim"] == heartbeat.may_claim
@@ -1702,6 +1703,21 @@ def test_main_starts_the_heartbeat_before_the_loop_and_hands_the_loop_its_id_and
     # `install_heartbeat` was handed the stale check, and conftest resets it after the test.
     stale = executor_module._WORKER_STALE
     assert stale is not None and stale == heartbeat.stale
+
+
+def test_main_hands_the_heartbeat_the_watchdogs_memory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    heartbeat_stand_in: list[_StandInHeartbeat],
+) -> None:
+    from lakana_worker.memory import MemoryWatchdog
+
+    dog = MemoryWatchdog(100, lambda: 0, lambda total: None)
+    monkeypatch.setattr("lakana_worker.__main__.start_watchdog", lambda *args: dog)
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    (heartbeat,) = heartbeat_stand_in
+    assert heartbeat.kwargs["memory"] == dog.use
 
 
 def test_main_stops_and_joins_the_heartbeat_thread_on_every_exit(

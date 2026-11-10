@@ -21,9 +21,11 @@ from lakana._models import (
     CiToken,
     CiTokenScope,
     InstanceInfo,
+    InstanceStatus,
     QueryStatus,
     SearchHit,
     SearchPage,
+    StatusDetail,
     TaskTokenScope,
     Whoami,
     known_fields,
@@ -50,7 +52,7 @@ from lakana.resources.principals import Principals
 from lakana.resources.queries import Queries
 from lakana.resources.repositories import Repositories
 from lakana.resources.row_filters import RowFilters
-from lakana.resources.runs import Runs, Scheduler, Workers
+from lakana.resources.runs import Runs, Scheduler, Workers, worker_info
 from lakana.resources.secrets import Secrets
 from lakana.resources.sign_in import (
     Invites,
@@ -492,6 +494,44 @@ class Client:
         if not isinstance(body, dict) or not isinstance(body.get("version"), str):
             raise InvalidResponse(f"{self.url} did not answer like a Lakana server")
         return InstanceInfo(version=body["version"])
+
+    def status(self) -> InstanceStatus:
+        """Ask whether the instance is healthy, degraded or down, and why.
+
+        Any signed-in caller may ask. With `MANAGE_ENVIRONMENT` on the instance the answer also
+        names every cause and has the detail: busy and total task slots, the workers' memory
+        against their limits, and the workers.
+
+        Returns
+        -------
+        InstanceStatus
+            The state, the causes the caller may see, the counts of workers and, for an
+            administrator, the detail.
+
+        Raises
+        ------
+        lakana.errors.AuthenticationError
+            If the credential is invalid, expired or revoked.
+        lakana.errors.NotFound
+            If the server predates the endpoint.
+        """
+        body = self._transport.request(ROUTES["status"]).json()
+        detail = body["detail"]
+        return InstanceStatus(
+            state=body["state"],
+            causes=list(body["causes"]),
+            workers_alive=body["workers_alive"],
+            workers_total=body["workers_total"],
+            detail=None
+            if detail is None
+            else StatusDetail(
+                slots_busy=detail["slots_busy"],
+                slots_total=detail["slots_total"],
+                memory_used_bytes=detail["memory_used_bytes"],
+                memory_limit_bytes=detail["memory_limit_bytes"],
+                workers=[worker_info(item) for item in detail["workers"]],
+            ),
+        )
 
     def close(self) -> None:
         """Close the underlying HTTP transport."""

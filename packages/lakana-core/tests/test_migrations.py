@@ -5506,3 +5506,47 @@ def test_0070_marks_everyone_who_ever_held_instance_admin(
         assert "held_admin" not in {c["name"] for c in inspect(engine).get_columns("principals")}
     finally:
         engine.dispose()
+
+
+_REVISION_0071 = "f3c7a9e1d5b2"
+_MEMORY_COLUMNS = {"memory_used_bytes", "memory_limit_bytes", "memory_measured_at"}
+
+
+def test_0071_adds_the_workers_memory_columns_empty(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0071`: the memory a worker last reported, three nullable columns.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0070)
+    config = Config(str(ALEMBIC_INI))
+
+    def columns() -> dict[str, bool]:
+        """Read the memory columns of `workers` that exist.
+
+        Returns
+        -------
+        dict of str to bool
+            Each memory column present with whether it is nullable.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            return {
+                c["name"]: c["nullable"]
+                for c in inspect(engine).get_columns("workers")
+                if c["name"] in _MEMORY_COLUMNS
+            }
+        finally:
+            engine.dispose()
+
+    assert columns() == {}
+    command.upgrade(config, _REVISION_0071)
+    assert columns() == dict.fromkeys(_MEMORY_COLUMNS, True)
+    command.downgrade(config, _REVISION_0070)
+    assert columns() == {}

@@ -280,4 +280,5 @@ ROUTES: dict[str, Route] = {
     "graph.impact": Route("GET", "/api/v1/environments/{env}/graph/impact"),
     "graph.join_path": Route("GET", "/api/v1/environments/{env}/graph/join-path"),
     "info": Route("GET", "/api/v1/info"),
+    "status": Route("GET", "/api/v1/status"),
 }

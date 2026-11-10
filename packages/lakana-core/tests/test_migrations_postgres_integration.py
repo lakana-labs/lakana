@@ -3375,3 +3375,26 @@ def test_0070_backfills_held_admin_on_postgres() -> None:
             c["name"] for c in sqlalchemy.inspect(engine).get_columns("principals")
         }
         engine.dispose()
+
+
+def test_0071_on_postgres() -> None:
+    """0071 adds the workers' memory columns, empty and nullable, and drops them down."""
+    revision_0070 = "e8a2c4f6b0d3"
+    revision_0071 = "f3c7a9e1d5b2"
+    wanted = {"memory_used_bytes", "memory_limit_bytes", "memory_measured_at"}
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0070)
+        engine = sqlalchemy.create_engine(url)
+
+        migrate.upgrade(url, revision_0071)
+        assert _alembic_version(engine) == revision_0071
+        found = {
+            c["name"]: c["nullable"] for c in sqlalchemy.inspect(engine).get_columns("workers")
+        }
+        assert {name: found.get(name) for name in wanted} == dict.fromkeys(wanted, True)
+
+        migrate.downgrade(url, revision_0070)
+        assert _alembic_version(engine) == revision_0070
+        assert not wanted & {c["name"] for c in sqlalchemy.inspect(engine).get_columns("workers")}
+        engine.dispose()

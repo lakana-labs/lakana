@@ -4263,6 +4263,25 @@ class WorkerCachesOut(BaseModel):
     measured_at: datetime
 
 
+class WorkerMemoryOut(BaseModel):
+    """The memory a worker last reported.
+
+    Parameters
+    ----------
+    used_bytes
+        The resident memory of the worker and of every process it started.
+    limit_bytes
+        Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `null` when it has none.
+    measured_at
+        When the worker stored the figures. A worker writes them with a heartbeat once they
+        moved by 1 MiB or more.
+    """
+
+    used_bytes: int
+    limit_bytes: int | None
+    measured_at: datetime
+
+
 class WorkerOut(BaseModel):
     """A registered worker.
 
@@ -4291,6 +4310,9 @@ class WorkerOut(BaseModel):
         The running task whose lease it holds, if any.
     caches
         The sizes of its caches; `null` before its first measurement.
+    memory
+        The memory it last reported; `null` before its first report and for a worker without
+        a memory limit.
     """
 
     id: str
@@ -4304,6 +4326,59 @@ class WorkerOut(BaseModel):
     deploy_run_id: str | None
     task_run_id: str | None
     caches: WorkerCachesOut | None = None
+    memory: WorkerMemoryOut | None = None
+
+
+class StatusDetailOut(BaseModel):
+    """What an administrator sees of the instance beyond its state.
+
+    Parameters
+    ----------
+    slots_busy
+        The busy task slots of the alive workers: an `all` worker has two (one for ad-hoc
+        queries, one for pipeline tasks and deploys), an `interactive` or `pipeline` one has one.
+    slots_total
+        All task slots of the alive workers.
+    memory_used_bytes
+        The memory the alive workers last reported, added up.
+    memory_limit_bytes
+        Their limits, added up; `null` when an alive worker reports no limit or none is alive.
+    workers
+        Every registered worker, as `GET /api/v1/workers` lists them.
+    """
+
+    slots_busy: int
+    slots_total: int
+    memory_used_bytes: int
+    memory_limit_bytes: int | None
+    workers: list[WorkerOut]
+
+
+class InstanceStatusOut(BaseModel):
+    """Whether the instance works, as the caller may see it.
+
+    Parameters
+    ----------
+    state
+        `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).
+    causes
+        Why, in this order: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`.
+        A caller who may not manage environments on the instance sees only `no_worker` and
+        `worker_lost`; a failed database or storage still makes their state `down`.
+    workers_alive
+        The workers whose heartbeat is younger than the lease.
+    workers_total
+        Every registered worker, alive and lost.
+    detail
+        Compute, memory and the workers; `null` unless the caller may manage environments on
+        the instance.
+    """
+
+    state: str
+    causes: list[str]
+    workers_alive: int
+    workers_total: int
+    detail: StatusDetailOut | None
 
 
 class SchedulerOut(BaseModel):

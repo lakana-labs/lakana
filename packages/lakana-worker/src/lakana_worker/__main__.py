@@ -484,7 +484,8 @@ def main() -> None:
     The tokens it mints for those tasks are capped by `LAKANA_TASK_TOKENS__MAX_TTL_SECONDS`.
     Before anything else a watchdog thread starts (`LAKANA_WORKER__MEMORY_LIMIT`, default
     4GB): over the limit the worker records why against what it runs, kills its tasks and exits with
-    `lakana_worker.memory.EXIT_CODE`. While it holds the scheduler role it
+    `lakana_worker.memory.EXIT_CODE`; what it measures goes out with the heartbeat
+    (`lakana status`, Home), nothing without a limit. While it holds the scheduler role it
     also sweeps the artifact store every `LAKANA_RUN__SWEEP_INTERVAL` seconds (expired uploads,
     files and manifest objects no version names) and the table locations (the files of creates
     that never finished, after `LAKANA_TABLES__ABANDONED_GRACE_HOURS` or the end of their run),
@@ -529,7 +530,7 @@ def main() -> None:
     engine = create_engine(settings.database, lease_seconds=settings.run.lease_seconds)
     session_factory = functools.partial(Session, engine)
     worker_id = make_worker_id(socket.gethostname())
-    start_watchdog(
+    watchdog = start_watchdog(
         settings.worker.memory_limit, session_factory, secrets.SystemRandom().random, worker_id
     )
     sweep_spill_directories()
@@ -608,6 +609,7 @@ def main() -> None:
         lease_seconds=settings.run.lease_seconds,
         takes=settings.worker.takes,
         caches=None if runtime.caches is None else runtime.caches.latest,
+        memory=None if watchdog is None else watchdog.use,
     )
     install_heartbeat(heartbeat.stale)
 

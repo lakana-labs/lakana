@@ -21087,6 +21087,68 @@
           }
         }
       }
+    },
+    "/api/v1/status": {
+      "get": {
+        "tags": [
+          "status"
+        ],
+        "summary": "Show whether the instance is healthy",
+        "description": "Says whether the instance is healthy, degraded or down, and why. Any authenticated caller may ask. A caller with `MANAGE_ENVIRONMENT` on the instance also sees every cause and the detail: busy and total task slots, the workers' memory against their limits, and the workers.",
+        "operationId": "instance_status_api_v1_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceStatusOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -25447,6 +25509,49 @@
         "title": "InfoOut",
         "description": "Response body for `GET /api/v1/info`.\n\nParameters\n----------\nversion\n    The platform version the server runs. A project's `lakana[assets]` pin must be\n    compatible with it.\nartifact_limits\n    The artifact limits the operator set, so a client can check a tree against them before\n    it sends a byte. An older server does not send it.\nupload_max_bytes\n    The largest Arrow body one append, replace, merge or load may send\n    (`LAKANA_APPEND__MAX_BYTES`), so `lakana load` can refuse a file before it reads or\n    sends it. An older server does not send it."
       },
+      "InstanceStatusOut": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "causes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Causes"
+          },
+          "workers_alive": {
+            "type": "integer",
+            "title": "Workers Alive"
+          },
+          "workers_total": {
+            "type": "integer",
+            "title": "Workers Total"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatusDetailOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "causes",
+          "workers_alive",
+          "workers_total",
+          "detail"
+        ],
+        "title": "InstanceStatusOut",
+        "description": "Whether the instance works, as the caller may see it.\n\nParameters\n----------\nstate\n    `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).\ncauses\n    Why, in this order: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`.\n    A caller who may not manage environments on the instance sees only `no_worker` and\n    `worker_lost`; a failed database or storage still makes their state `down`.\nworkers_alive\n    The workers whose heartbeat is younger than the lease.\nworkers_total\n    Every registered worker, alive and lost.\ndetail\n    Compute, memory and the workers; `null` unless the caller may manage environments on\n    the instance."
+      },
       "InviteIn": {
         "properties": {
           "name": {
@@ -29365,6 +29470,50 @@
         "title": "SignInSettingsOut",
         "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_minutes\n    How long a session lasts at most, in minutes.\nbounds\n    The limits both may be chosen between."
       },
+      "StatusDetailOut": {
+        "properties": {
+          "slots_busy": {
+            "type": "integer",
+            "title": "Slots Busy"
+          },
+          "slots_total": {
+            "type": "integer",
+            "title": "Slots Total"
+          },
+          "memory_used_bytes": {
+            "type": "integer",
+            "title": "Memory Used Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerOut"
+            },
+            "type": "array",
+            "title": "Workers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slots_busy",
+          "slots_total",
+          "memory_used_bytes",
+          "memory_limit_bytes",
+          "workers"
+        ],
+        "title": "StatusDetailOut",
+        "description": "What an administrator sees of the instance beyond its state.\n\nParameters\n----------\nslots_busy\n    The busy task slots of the alive workers: an `all` worker has two (one for ad-hoc\n    queries, one for pipeline tasks and deploys), an `interactive` or `pipeline` one has one.\nslots_total\n    All task slots of the alive workers.\nmemory_used_bytes\n    The memory the alive workers last reported, added up.\nmemory_limit_bytes\n    Their limits, added up; `null` when an alive worker reports no limit or none is alive.\nworkers\n    Every registered worker, as `GET /api/v1/workers` lists them."
+      },
       "StepUpOut": {
         "properties": {
           "step_up_until": {
@@ -31392,6 +31541,38 @@
         "title": "WorkerCachesOut",
         "description": "The sizes of a worker's caches, as it last measured them.\n\nParameters\n----------\nenvironments_bytes\n    The Python environments of projects.\npackages_bytes\n    uv's package download cache, without the files it shares with an environment.\ntasks_bytes\n    The working directories of Python tasks.\ncomplete\n    `false` when the measurement stopped at its time limit: the figures are a floor.\nmeasured_at\n    When the worker stored them."
       },
+      "WorkerMemoryOut": {
+        "properties": {
+          "used_bytes": {
+            "type": "integer",
+            "title": "Used Bytes"
+          },
+          "limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Bytes"
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "used_bytes",
+          "limit_bytes",
+          "measured_at"
+        ],
+        "title": "WorkerMemoryOut",
+        "description": "The memory a worker last reported.\n\nParameters\n----------\nused_bytes\n    The resident memory of the worker and of every process it started.\nlimit_bytes\n    Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `null` when it has none.\nmeasured_at\n    When the worker stored the figures. A worker writes them with a heartbeat once they\n    moved by 1 MiB or more."
+      },
       "WorkerOut": {
         "properties": {
           "id": {
@@ -31466,6 +31647,16 @@
                 "type": "null"
               }
             ]
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkerMemoryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -31482,7 +31673,7 @@
           "task_run_id"
         ],
         "title": "WorkerOut",
-        "description": "A registered worker.\n\nParameters\n----------\nid\n    The worker's id.\nhost\n    Its host name.\nversion\n    The Lakana version it runs.\nstarted_at\n    When it registered.\nheartbeat_at\n    Its last heartbeat.\nstatus\n    `alive` (heartbeat younger than the lease) or `lost`.\ntakes\n    The work it takes: `all`, `interactive` (ad-hoc queries) or `pipeline` (deploys, pipeline\n    tasks and table maintenance).\nquery_run_id\n    Its oldest running query, if any.\ndeploy_run_id\n    Its oldest running deploy, if any.\ntask_run_id\n    The running task whose lease it holds, if any.\ncaches\n    The sizes of its caches; `null` before its first measurement."
+        "description": "A registered worker.\n\nParameters\n----------\nid\n    The worker's id.\nhost\n    Its host name.\nversion\n    The Lakana version it runs.\nstarted_at\n    When it registered.\nheartbeat_at\n    Its last heartbeat.\nstatus\n    `alive` (heartbeat younger than the lease) or `lost`.\ntakes\n    The work it takes: `all`, `interactive` (ad-hoc queries) or `pipeline` (deploys, pipeline\n    tasks and table maintenance).\nquery_run_id\n    Its oldest running query, if any.\ndeploy_run_id\n    Its oldest running deploy, if any.\ntask_run_id\n    The running task whose lease it holds, if any.\ncaches\n    The sizes of its caches; `null` before its first measurement.\nmemory\n    The memory it last reported; `null` before its first report and for a worker without\n    a memory limit."
       },
       "WriteTargetIn": {
         "properties": {

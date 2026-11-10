@@ -3576,6 +3576,9 @@ class WorkerInfo:
     caches
         The sizes of its caches, as it last measured them; `None` before its first measurement
         and from a server of an earlier release.
+    memory
+        The memory it last reported; `None` before its first report, for a worker without a
+        memory limit, and from a server of an earlier release.
     """
 
     id: str
@@ -3589,6 +3592,79 @@ class WorkerInfo:
     deploy_run_id: str | None
     task_run_id: str | None
     caches: WorkerCaches | None = None
+    memory: WorkerMemory | None = None
+
+
+@dataclass(frozen=True)
+class WorkerMemory:
+    """The memory a worker last reported (with a heartbeat, once it moved by 1 MiB or more).
+
+    Parameters
+    ----------
+    used_bytes
+        The resident memory of the worker and of every process it started.
+    limit_bytes
+        Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `None` when it has none.
+    measured_at
+        When the worker stored the figures.
+    """
+
+    used_bytes: int
+    limit_bytes: int | None
+    measured_at: datetime
+
+
+@dataclass(frozen=True)
+class StatusDetail:
+    """What an administrator sees of the instance beyond its state.
+
+    Parameters
+    ----------
+    slots_busy
+        The busy task slots of the alive workers: an `all` worker has two (ad-hoc queries;
+        pipeline tasks and deploys), an `interactive` or `pipeline` worker one.
+    slots_total
+        All task slots of the alive workers.
+    memory_used_bytes
+        The memory the alive workers last reported, added up.
+    memory_limit_bytes
+        Their limits, added up; `None` when an alive worker reports no limit or none is alive.
+    workers
+        Every registered worker, as `client.workers.list()` lists them.
+    """
+
+    slots_busy: int
+    slots_total: int
+    memory_used_bytes: int
+    memory_limit_bytes: int | None
+    workers: list[WorkerInfo]
+
+
+@dataclass(frozen=True)
+class InstanceStatus:
+    """Whether the instance works, as the caller may see it.
+
+    Parameters
+    ----------
+    state
+        `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).
+    causes
+        Why: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`, in that order.
+        Without `MANAGE_ENVIRONMENT` on the instance only `no_worker` and `worker_lost` are
+        named. A newer server may add codes; treat an unknown one as "ask an administrator".
+    workers_alive
+        The workers whose heartbeat is recent.
+    workers_total
+        Every registered worker, alive and lost.
+    detail
+        Compute, memory and the workers; `None` without `MANAGE_ENVIRONMENT` on the instance.
+    """
+
+    state: str
+    causes: list[str]
+    workers_alive: int
+    workers_total: int
+    detail: StatusDetail | None
 
 
 @dataclass(frozen=True)

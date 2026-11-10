@@ -21,6 +21,7 @@ from test_runners import Harness, _alive
 
 from lakana_core.config import QueryLimitsConfig, parse_memory_limit
 from lakana_core.runs.failures import FailureCode
+from lakana_core.runs.workers import MemoryUse
 from lakana_worker import memory
 from lakana_worker.activity import Activity, TaskClaim
 from lakana_worker.executor import OutOfMemoryQuery, execute_query
@@ -371,6 +372,27 @@ def test_the_watchdog_acts_only_over_the_limit() -> None:
     assert dog.check_once() is False
     assert dog.check_once() is True
     assert seen == [101]
+
+
+def test_watchdog_keeps_its_latest_measurement() -> None:
+    """Each check keeps what it measured, before acting on it; the heartbeat reports it."""
+    seen: list[int] = []
+    sizes = iter([40, 101])
+    dog = MemoryWatchdog(100, lambda: next(sizes), seen.append)
+    assert (dog.latest, dog.limit_bytes, dog.use()) == (None, 100, None)
+    dog.check_once()
+    assert dog.latest == 40
+    assert dog.use() == MemoryUse(used_bytes=40, limit_bytes=100)
+    dog.check_once()
+    assert (dog.latest, seen) == (101, [101])
+
+
+def test_the_watchdog_keeps_the_measurement_after_relief() -> None:
+    """When a relief brought the worker under its limit, the second measurement is kept."""
+    sizes = iter([150, 60])
+    dog = MemoryWatchdog(100, lambda: next(sizes), lambda total: None, relieve=lambda total: True)
+    assert dog.check_once() is True
+    assert dog.latest == 60
 
 
 def test_the_loop_survives_an_exception_and_logs_it_once(

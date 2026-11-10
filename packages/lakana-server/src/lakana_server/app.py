@@ -63,6 +63,7 @@ from lakana_server.api.platform.sign_in import open_router as passkey_sign_in_ro
 from lakana_server.api.platform.sign_in import router as sign_in_links_router
 from lakana_server.api.platform.sign_in_notices import router as sign_in_notices_router
 from lakana_server.api.platform.sign_in_settings import router as sign_in_settings_router
+from lakana_server.api.platform.status import router as status_router
 from lakana_server.api.platform.tables import dropped_router as dropped_tables_router
 from lakana_server.api.platform.tables import expiring_router as expiring_tables_router
 from lakana_server.api.platform.tables import router as tables_router
@@ -129,6 +130,7 @@ ROUTERS = (
     passkeys_router,
     sign_in_settings_router,
     info_router,
+    status_router,
 )
 """Every router the application includes, in the order they are included."""
 

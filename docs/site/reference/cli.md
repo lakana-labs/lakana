@@ -164,6 +164,14 @@ Run REPO's deployed project version; exit 0 on success, 1 otherwise, 7 if one is
 | `--no-wait` | flag | off | Print the run id and exit. |
 | `--timeout` | number | none | Seconds to wait. |
 
+## `lakana status`
+
+Usage: `lakana status [OPTIONS]`
+
+Show whether the instance is healthy, degraded or down, and why.
+
+Prints one line: Healthy, Degraded or Down, and a sentence that says why. An administrator (who may manage environments on the instance) also sees the busy task slots, the workers' memory against their limits, and the workers as lakana worker list shows them. Degraded means work gets done, slower or at risk; Down means nothing gets done.
+
 ## `lakana search`
 
 Usage: `lakana search [OPTIONS] {TEXT}`
@@ -2189,7 +2197,7 @@ Usage: `lakana worker list [OPTIONS]`
 
 List the registered workers and what each is doing (admin).
 
-A worker is alive while its heartbeat is recent and lost after that; a lost worker's row stays for an hour, and the query or deploy it held is ended by the scheduler. The column takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys, pipeline tasks and table maintenance). The column caches is the disk its caches take, as it last measured them (hourly).
+A worker is alive while its heartbeat is recent and lost after that; a lost worker's row stays for an hour, and the query or deploy it held is ended by the scheduler. The column takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys, pipeline tasks and table maintenance). The column memory is the memory it last reported against its limit (LAKANA_WORKER__MEMORY_LIMIT). The column caches is the disk its caches take, as it last measured them (hourly).
 
 ## `lakana term`
 
