@@ -25,6 +25,17 @@ describe("Sidebar", () => {
     ]);
   });
 
+  it("shows the mark beside the product name, without naming it twice", async () => {
+    renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+
+    const product = screen.getByText("Lakana", { selector: ".sidebar-product" });
+    const mark = product.querySelector("svg.lakana-mark");
+    expect(mark).not.toBeNull();
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(product).toHaveTextContent(/^Lakana$/);
+  });
+
   it("leaves out the admin list when no admin area is visible", async () => {
     renderShell("/", { access: new Set(["home"]) });
     await screen.findByRole("heading", { level: 1, name: "Home" });

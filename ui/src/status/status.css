@@ -29,9 +29,11 @@
   animation: status-pulse var(--pulse) var(--ease) infinite;
 }
 
+/* The lowest point keeps the glyph at 3:1 on every surface, also through the colour-vision
+   simulations (src/status/colour-vision.test.ts); 0.75 measures 3.15:1 at worst. */
 @keyframes status-pulse {
   50% {
-    opacity: 0.45;
+    opacity: 0.75;
   }
 }
 

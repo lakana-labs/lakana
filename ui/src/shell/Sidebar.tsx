@@ -1,5 +1,5 @@
 /**
- * The sidebar: the product name, Search, the areas in words and the user menu.
+ * The sidebar: the mark and the product name, Search, the areas in words and the user menu.
  *
  * @packageDocumentation
  */
@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
 
 import type { ShippedArea } from "./areas";
+import { LakanaMark } from "./LakanaMark";
 import { shortcutLabel } from "./shortcut";
 import { UserMenu } from "./UserMenu";
 
@@ -77,7 +78,11 @@ export function Sidebar({ areas, onSearch }: SidebarProps): JSX.Element {
   return (
     <header className="sidebar">
       <div className="sidebar-bar">
-        <p className="sidebar-product">{t("shell.product")}</p>
+        {/* The word names the product, so the mark beside it is decorative (read once, not twice). */}
+        <p className="sidebar-product">
+          <LakanaMark />
+          {t("shell.product")}
+        </p>
         {/* Shown only on narrow screens (shell.css), where the panel below is folded away. */}
         <button
           className="sidebar-toggle"
