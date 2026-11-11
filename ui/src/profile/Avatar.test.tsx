@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { pictureUrl, removePicture } from "../api";
+import { removePicture } from "../api";
 import { fakeServer } from "../test/server";
 import { Avatar } from "./Avatar";
 
@@ -61,16 +61,62 @@ describe("Avatar", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
-  it("shows nothing it read after it was gone", async () => {
-    const server = fakeServer({ "GET /api/v1/principals/kim.lee/picture": WEBP });
-    const { unmount } = render(<Avatar name="kim.lee" displayName={null} etag="e1" size={24} />);
+  it("keeps the newer picture when the older one's answer comes last", async () => {
+    const answers: ((value: typeof WEBP) => void)[] = [];
+    fakeServer({
+      "GET /api/v1/principals/kim.lee/picture": () =>
+        new Promise((resolve) => {
+          answers.push(resolve);
+        }),
+    });
+    const { container, rerender } = render(
+      <Avatar name="kim.lee" displayName={null} etag="e1" size={24} />,
+    );
+    await vi.waitFor(() => {
+      expect(answers).toHaveLength(1);
+    });
+    rerender(<Avatar name="kim.lee" displayName={null} etag="e2" size={24} />);
+    await vi.waitFor(() => {
+      expect(answers).toHaveLength(2);
+    });
 
-    unmount();
+    answers[1]?.(WEBP);
+    const image = await screen.findByRole("presentation", { hidden: true });
+    const newer = image.getAttribute("src");
+    await act(async () => {
+      answers[0]?.(WEBP);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(newer);
+  });
+
+  it("shows two etags of one person side by side", async () => {
+    fakeServer({ "GET /api/v1/principals/kim.lee/picture": WEBP });
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+
+    const { container, unmount } = render(
+      <>
+        <Avatar name="kim.lee" displayName={null} etag="e1" size={24} />
+        <Avatar name="kim.lee" displayName={null} etag="e2" size={32} />
+      </>,
+    );
 
     await vi.waitFor(() => {
-      expect(server.sent).toHaveLength(1);
+      expect(container.querySelectorAll("img")).toHaveLength(2);
     });
-    await expect(pictureUrl("kim.lee", "e1")).resolves.toMatch(/^blob:/);
+    const [older, newer] = [...container.querySelectorAll("img")].map((image) =>
+      image.getAttribute("src"),
+    );
+    expect(older).not.toBe(newer);
+    expect(revoke).not.toHaveBeenCalled();
+
+    unmount();
+    await vi.waitFor(() => {
+      expect(revoke).toHaveBeenCalledWith(older);
+    });
+    expect(revoke).not.toHaveBeenCalledWith(newer);
+    revoke.mockRestore();
   });
 
   it("is named by the person when no visible name stands beside it", () => {

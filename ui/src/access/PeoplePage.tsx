@@ -61,20 +61,23 @@ export function PeoplePage(): JSX.Element {
                   {found.map((person) => (
                     <tr key={person.name}>
                       <td>
-                        <Avatar
-                          name={person.name}
-                          displayName={null}
-                          etag={person.picture}
-                          size={24}
-                        />{" "}
-                        <Link className="row-name" to={personPath(person.name)}>
-                          {person.name}
-                        </Link>
-                        <span className="second">
-                          {person.type === "USER"
-                            ? t("access.people.person")
-                            : t("access.people.service")}
-                        </span>
+                        {/* The picture beside both lines: the kind starts under the name. */}
+                        <div className="person-cell">
+                          <Avatar
+                            name={person.name}
+                            displayName={null}
+                            etag={person.picture}
+                            size={24}
+                          />
+                          <Link className="row-name" to={personPath(person.name)}>
+                            {person.name}
+                          </Link>
+                          <span className="second">
+                            {person.type === "USER"
+                              ? t("access.people.person")
+                              : t("access.people.service")}
+                          </span>
+                        </div>
                       </td>
                       <td>{person.is_active ? "" : t("access.people.deactivated")}</td>
                       <td>

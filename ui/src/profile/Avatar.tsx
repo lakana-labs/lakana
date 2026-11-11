@@ -7,7 +7,7 @@ import "./profile.css";
 
 import { type JSX, useEffect, useState, useSyncExternalStore } from "react";
 
-import { changedPicture, pictureUrl, watchPictures } from "../api";
+import { changedPicture, pictureUrl, releasePicture, watchPictures } from "../api";
 import { initials } from "./initials";
 
 /**
@@ -60,6 +60,7 @@ export function Avatar({ name, displayName, etag, size, label }: AvatarProps): J
     if (typeof current !== "string") {
       return;
     }
+    // An older read that answers after a newer one must not replace it.
     let live = true;
     pictureUrl(name, current).then(
       (url) => {
@@ -72,6 +73,7 @@ export function Avatar({ name, displayName, etag, size, label }: AvatarProps): J
     );
     return () => {
       live = false;
+      releasePicture(name, current);
     };
   }, [name, current]);
   const url = shown !== null && shown.key === key ? shown.url : null;

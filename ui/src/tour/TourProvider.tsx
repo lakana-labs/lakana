@@ -69,10 +69,21 @@ function returnFocus(target: HTMLElement | null, afterSteps: boolean): void {
 }
 
 /**
+ * Whether a dialog is open, such as Profile picture or the palette, opened before the person's
+ * state arrived.
+ *
+ * @returns True while one is in the document.
+ */
+function dialogOpen(): boolean {
+  return document.querySelector('[role="dialog"], [role="alertdialog"]') !== null;
+}
+
+/**
  * Provides {@link useTour} and shows the tour while it runs. The welcome opens once, when the
  * person's state says they never saw the tour, and only once they have access (until then
  * Home asks them to ask an administrator, and the places would be closed to them); closing it
- * or the tour in any way records that.
+ * or the tour in any way records that. A dialog the person already opened is never covered:
+ * the welcome waits until no dialog is open, then opens by itself.
  *
  * @param props - The areas and the shell.
  * @param props.areas - The areas the person sees.
@@ -90,11 +101,31 @@ export function TourProvider({ areas, children }: TourProviderProps): JSX.Elemen
   const [run, setRun] = useState(0);
 
   useEffect(() => {
-    if (state?.tour_seen === false && !noAccessYet && !welcomed.current) {
-      welcomed.current = true;
-      opener.current = null;
-      setMode("welcome");
+    if (state?.tour_seen !== false || noAccessYet || welcomed.current) {
+      return;
     }
+    const welcome = (): void => {
+      // Help or the palette may have started the tour meanwhile.
+      if (!welcomed.current) {
+        welcomed.current = true;
+        opener.current = null;
+        setMode("welcome");
+      }
+    };
+    if (!dialogOpen()) {
+      welcome();
+      return;
+    }
+    const watcher = new MutationObserver(() => {
+      if (!dialogOpen()) {
+        watcher.disconnect();
+        welcome();
+      }
+    });
+    watcher.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      watcher.disconnect();
+    };
   }, [state, noAccessYet]);
 
   useEffect(() => {

@@ -43,6 +43,22 @@
   gap: var(--space-3);
 }
 
+/* A row of people: the circle to the left of both lines, the second under the name. */
+.person-cell {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: var(--space-2);
+}
+
+.person-cell .avatar {
+  grid-row: span 2;
+}
+
+.person-cell .second {
+  grid-column: 2;
+}
+
 /* The file field's own button, drawn like the interface's buttons in both themes. */
 .person-file::file-selector-button {
   min-height: 32px;

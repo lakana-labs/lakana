@@ -3,10 +3,14 @@
  *
  * @remarks
  * A picture is read through {@link api}.blob, with the session's CSRF token, and shown from a
- * `blob:` URL (the policy's `img-src 'self' blob:`). Each name keeps one URL, for its current
- * etag, so a list of people reads each picture once; the URL is revoked when the name's etag
- * changes, when the picture is removed, and when the session ends. What this tab set or removed
- * is remembered per name, so every place that shows the person follows at once.
+ * `blob:` URL (the policy's `img-src 'self' blob:`). URLs are kept per name and etag and
+ * counted: every place that shows a picture holds it ({@link pictureUrl}) and lets it go
+ * ({@link releasePicture}), so a list of people reads each picture once and two places showing
+ * two etags of one person never revoke each other's URL. A URL nothing shows is revoked once a
+ * newer etag of that person is asked for or set, once the picture is removed, and at the end of
+ * the session; the newest stays for the next place that shows the person. What this tab set or
+ * removed overrides what the server answers for that name until the session ends, so a change
+ * made on another device after it shows here only after signing in again.
  * @packageDocumentation
  */
 import { api, onUnauthorized } from "./client";
@@ -17,15 +21,20 @@ export const PICTURE_MAX_BYTES = 5 * 1024 * 1024;
 /** The media types the server takes. */
 export const PICTURE_TYPES: readonly string[] = ["image/jpeg", "image/png", "image/webp"];
 
-/** One name's picture: its etag and its object URL, once read. */
+/** One picture of one person: its object URL, once read, and how many places show it. */
 interface Cached {
+  /** The person's principal name. */
+  readonly name: string;
   /** The etag the URL shows. */
   readonly etag: string;
   /** The object URL, or the read under way. */
   readonly url: Promise<string>;
+  /** How many places show it now. */
+  refs: number;
 }
 
 const cache = new Map<string, Cached>();
+const newest = new Map<string, string | null>();
 const changed = new Map<string, string | null>();
 const listeners = new Set<() => void>();
 
@@ -37,6 +46,17 @@ const listeners = new Set<() => void>();
  */
 function picturePath(name: string): string {
   return `/api/v1/principals/${encodeURIComponent(name)}/picture`;
+}
+
+/**
+ * The cache key of one picture.
+ *
+ * @param name - The principal name.
+ * @param etag - The etag.
+ * @returns The key; no name or etag contains a NUL.
+ */
+function keyOf(name: string, etag: string): string {
+  return `${name}\u0000${etag}`;
 }
 
 /**
@@ -54,7 +74,23 @@ function revoke(entry: Cached): void {
 }
 
 /**
- * Reads a person's picture into an object URL, once per name and etag.
+ * Revokes a person's pictures that nothing shows and that are not the newest etag.
+ *
+ * @param name - The principal name.
+ */
+function sweep(name: string): void {
+  const keep = newest.get(name);
+  for (const [key, entry] of cache) {
+    if (entry.name === name && entry.refs === 0 && entry.etag !== keep) {
+      revoke(entry);
+      cache.delete(key);
+    }
+  }
+}
+
+/**
+ * Holds a person's picture as an object URL, read once per name and etag; let it go with
+ * {@link releasePicture} when it is no longer shown.
  *
  * @param name - The principal name.
  * @param etag - The picture's etag, from whoami or the principal.
@@ -62,22 +98,39 @@ function revoke(entry: Cached): void {
  * @throws {ApiError} when the picture could not be read; the next call tries again.
  */
 export function pictureUrl(name: string, etag: string): Promise<string> {
-  const known = cache.get(name);
-  if (known?.etag === etag) {
-    return known.url;
+  newest.set(name, etag);
+  const key = keyOf(name, etag);
+  let entry = cache.get(key);
+  if (entry === undefined) {
+    const url = api.blob(picturePath(name)).then((blob) => URL.createObjectURL(blob));
+    const created: Cached = { name, etag, url, refs: 0 };
+    cache.set(key, created);
+    url.catch(() => {
+      if (cache.get(key) === created) {
+        cache.delete(key);
+      }
+    });
+    entry = created;
   }
-  if (known !== undefined) {
-    revoke(known);
+  entry.refs += 1;
+  sweep(name);
+  return entry.url;
+}
+
+/**
+ * Lets go of a picture a place no longer shows; revoked when nothing shows it and a newer one
+ * is known.
+ *
+ * @param name - The principal name.
+ * @param etag - The etag the place held.
+ */
+export function releasePicture(name: string, etag: string): void {
+  const entry = cache.get(keyOf(name, etag));
+  if (entry === undefined) {
+    return;
   }
-  const url = api.blob(picturePath(name)).then((blob) => URL.createObjectURL(blob));
-  const entry: Cached = { etag, url };
-  cache.set(name, entry);
-  url.catch(() => {
-    if (cache.get(name) === entry) {
-      cache.delete(name);
-    }
-  });
-  return url;
+  entry.refs -= 1;
+  sweep(name);
 }
 
 /**
@@ -88,11 +141,8 @@ export function pictureUrl(name: string, etag: string): Promise<string> {
  */
 function noteChange(name: string, etag: string | null): void {
   changed.set(name, etag);
-  const known = cache.get(name);
-  if (etag === null && known !== undefined) {
-    revoke(known);
-    cache.delete(name);
-  }
+  newest.set(name, etag);
+  sweep(name);
   for (const listener of listeners) {
     listener();
   }
@@ -151,6 +201,7 @@ export function forgetPictures(): void {
     revoke(entry);
   }
   cache.clear();
+  newest.clear();
   changed.clear();
 }
 

@@ -105,5 +105,12 @@ describe("PeoplePage", () => {
     // The picture is decorative beside the name: the link is named by the name alone.
     expect(within(rows[0] as HTMLElement).getByRole("link", { name: "kim.lee" })).toBeVisible();
     expect(server.sent.filter((request) => request.path.endsWith("/picture"))).toHaveLength(1);
+    // The picture stands beside both lines, so the second line starts under the name.
+    const cell = rows[1]?.querySelector(".person-cell");
+    expect([...(cell?.children ?? [])].map((child) => child.className)).toEqual([
+      "avatar avatar-24",
+      "row-name",
+      "second",
+    ]);
   });
 });

@@ -62,6 +62,22 @@ export function inviteLink(request: APIRequestContext, name: string): Promise<st
 }
 
 /**
+ * Records that the bootstrap administrator saw the tour, so the welcome does not open in a test
+ * about something else.
+ *
+ * @param request - The request context.
+ */
+export async function skipTheTour(request: APIRequestContext): Promise<void> {
+  const response = await request.patch("/api/v1/principals/admin/interface-state", {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+    data: { tour_seen: true },
+  });
+  if (!response.ok()) {
+    throw new Error(`PATCH interface-state answered ${String(response.status())}`);
+  }
+}
+
+/**
  * A name no earlier test of this run used.
  *
  * @param prefix - The start of the name.

@@ -123,11 +123,40 @@ describe("PictureDialog", () => {
     );
     expect(uploads(server)).toHaveLength(1);
 
-    await user.click(screen.getByRole("button", { name: "Try again" }));
+    // From the keyboard: the pressed button has focus, then goes away.
+    screen.getByRole("button", { name: "Try again" }).focus();
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Your picture is saved.")).toBeInTheDocument();
     expect(uploads(server)).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    // The pressed button is gone: focus is on the file field, never on the page behind.
+    expect(screen.getByLabelText("Choose a picture")).toHaveFocus();
+  });
+
+  it("keeps focus on the file field while a picture uploads, and ignores another choice", async () => {
+    let answer: (value: { status: number; body: unknown }) => void = () => undefined;
+    const { user, server } = open(null, {
+      [`PUT ${PICTURE}`]: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const field = screen.getByLabelText("Choose a picture");
+    const png = new File(["png"], "kim.png", { type: "image/png" });
+
+    await user.upload(field, png);
+    expect(await screen.findByText("Working…")).toBeInTheDocument();
+    expect(field).toHaveFocus();
+    expect(field).toBeEnabled();
+    expect(field).toHaveAttribute("aria-disabled", "true");
+    await user.upload(field, png);
+    answer({ status: 200, body: { etag: "e2" } });
+
+    expect(await screen.findByText("Your picture is saved.")).toBeInTheDocument();
+    expect(uploads(server)).toHaveLength(1);
+    expect(field).toHaveFocus();
+    expect(field).not.toHaveAttribute("aria-disabled");
   });
 
   it("shows the server's sentence for a file it cannot read, without a retry", async () => {
@@ -152,12 +181,34 @@ describe("PictureDialog", () => {
   it("removes the picture when one is set", async () => {
     const { user, server } = open("e1", { [`DELETE ${PICTURE}`]: { status: 204 } });
 
-    await user.click(screen.getByRole("button", { name: "Remove picture" }));
+    screen.getByRole("button", { name: "Remove picture" }).focus();
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Your picture is removed.")).toBeInTheDocument();
     expect(server.sent.some((request) => request.method === "DELETE")).toBe(true);
     expect(screen.queryByRole("button", { name: "Remove picture" })).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Kim Lee" })).toHaveTextContent("KL");
+    expect(screen.getByLabelText("Choose a picture")).toHaveFocus();
+  });
+
+  it("hands focus to the file field while Remove picture works, before the button is disabled", async () => {
+    let answer: (value: { status: number }) => void = () => undefined;
+    const { user } = open("e1", {
+      [`DELETE ${PICTURE}`]: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const remove = screen.getByRole("button", { name: "Remove picture" });
+    remove.focus();
+
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("Working…")).toBeInTheDocument();
+    expect(remove).toBeDisabled();
+    expect(screen.getByLabelText("Choose a picture")).toHaveFocus();
+    answer({ status: 204 });
+    expect(await screen.findByText("Your picture is removed.")).toBeInTheDocument();
   });
 
   it("closes with Done", async () => {

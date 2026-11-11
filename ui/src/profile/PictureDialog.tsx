@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import { type ChangeEvent, type JSX, useId, useState } from "react";
+import { type ChangeEvent, type JSX, useId, useRef, useState } from "react";
 import { Button, Heading } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -48,6 +48,12 @@ export function PictureDialog({
   const current = useCurrentPicture(name, etag);
   const [done, setDone] = useState<string | null>(null);
   const [retry, setRetry] = useState<File | null>(null);
+  // The file field is the dialog's one stable control: Remove picture and Try again hand focus
+  // to it before they act, since they are disabled while busy and gone once they succeeded.
+  const input = useRef<HTMLInputElement>(null);
+  const focusField = (): void => {
+    input.current?.focus();
+  };
   const upload = (file: File): void => {
     setDone(null);
     setRetry(null);
@@ -75,7 +81,8 @@ export function PictureDialog({
     const file = event.target.files?.[0];
     // Cleared, so choosing the same file again is a new choice.
     event.target.value = "";
-    if (file === undefined) {
+    // While a picture is sent the field keeps focus and is only marked as unavailable.
+    if (file === undefined || attempt.busy) {
       return;
     }
     if (!PICTURE_TYPES.includes(file.type)) {
@@ -106,7 +113,8 @@ export function PictureDialog({
           className="person-file"
           type="file"
           accept={PICTURE_TYPES.join(",")}
-          disabled={attempt.busy}
+          ref={input}
+          aria-disabled={attempt.busy || undefined}
           onChange={chosen}
         />
       </div>
@@ -116,6 +124,7 @@ export function PictureDialog({
             className="button"
             isDisabled={attempt.busy}
             onPress={() => {
+              focusField();
               upload(retry);
             }}
           >
@@ -127,6 +136,7 @@ export function PictureDialog({
             className="button"
             isDisabled={attempt.busy}
             onPress={() => {
+              focusField();
               setDone(null);
               setRetry(null);
               attempt.run(async () => {

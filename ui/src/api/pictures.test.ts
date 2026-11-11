@@ -6,6 +6,7 @@ import {
   forgetPictures,
   PICTURE_MAX_BYTES,
   pictureUrl,
+  releasePicture,
   removePicture,
   setPicture,
   watchPictures,
@@ -43,14 +44,47 @@ describe("pictureUrl", () => {
     expect(server.sent).toHaveLength(1);
   });
 
-  it("revokes the old object URL when the picture changes", async () => {
+  it("keeps both URLs while two places show two etags of one person", async () => {
+    const server = fakeServer({ [PATH]: WEBP });
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+
+    const old = await pictureUrl("kim.lee", "e1");
+    const fresh = await pictureUrl("kim.lee", "e2");
+    await Promise.resolve();
+
+    expect(fresh).not.toBe(old);
+    expect(revoke).not.toHaveBeenCalled();
+    expect(server.sent).toHaveLength(2);
+  });
+
+  it("revokes the old object URL once nothing shows it, and keeps the newest", async () => {
+    const server = fakeServer({ [PATH]: WEBP });
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const old = await pictureUrl("kim.lee", "e1");
+    const fresh = await pictureUrl("kim.lee", "e2");
+
+    releasePicture("kim.lee", "e1");
+    releasePicture("kim.lee", "e2");
+
+    await vi.waitFor(() => {
+      expect(revoke).toHaveBeenCalledWith(old);
+    });
+    expect(revoke).not.toHaveBeenCalledWith(fresh);
+    // The newest stays for the next place that shows the person: no second read.
+    await expect(pictureUrl("kim.lee", "e2")).resolves.toBe(fresh);
+    expect(server.sent).toHaveLength(2);
+    releasePicture("nobody", "e9");
+  });
+
+  it("revokes an older picture nothing shows as soon as a newer one is asked for", async () => {
     fakeServer({ [PATH]: WEBP });
     const revoke = vi.spyOn(URL, "revokeObjectURL");
     const old = await pictureUrl("kim.lee", "e1");
+    releasePicture("kim.lee", "e1");
+    expect(revoke).not.toHaveBeenCalled();
 
-    const fresh = await pictureUrl("kim.lee", "e2");
+    await pictureUrl("kim.lee", "e2");
 
-    expect(fresh).not.toBe(old);
     await vi.waitFor(() => {
       expect(revoke).toHaveBeenCalledWith(old);
     });
@@ -121,6 +155,9 @@ describe("setPicture and removePicture", () => {
 
     expect(changedPicture("kim.lee")).toBeNull();
     expect(changedPicture("someone.else")).toBeUndefined();
+    // Still shown until the place that shows it follows the removal.
+    expect(revoke).not.toHaveBeenCalled();
+    releasePicture("kim.lee", "e1");
     await vi.waitFor(() => {
       expect(revoke).toHaveBeenCalledWith(url);
     });

@@ -39,6 +39,7 @@ export {
   PICTURE_TYPES,
   changedPicture,
   pictureUrl,
+  releasePicture,
   removePicture,
   setPicture,
   watchPictures,
