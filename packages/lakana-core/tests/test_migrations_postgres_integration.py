@@ -3375,3 +3375,89 @@ def test_0070_backfills_held_admin_on_postgres() -> None:
             c["name"] for c in sqlalchemy.inspect(engine).get_columns("principals")
         }
         engine.dispose()
+
+
+def test_0071_on_postgres() -> None:
+    """0071 adds the workers' memory columns, empty and nullable, and drops them down."""
+    revision_0070 = "e8a2c4f6b0d3"
+    revision_0071 = "f3c7a9e1d5b2"
+    wanted = {"memory_used_bytes", "memory_limit_bytes", "memory_measured_at"}
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0070)
+        engine = sqlalchemy.create_engine(url)
+
+        migrate.upgrade(url, revision_0071)
+        assert _alembic_version(engine) == revision_0071
+        found = {
+            c["name"]: c["nullable"] for c in sqlalchemy.inspect(engine).get_columns("workers")
+        }
+        assert {name: found.get(name) for name in wanted} == dict.fromkeys(wanted, True)
+
+        migrate.downgrade(url, revision_0070)
+        assert _alembic_version(engine) == revision_0070
+        assert not wanted & {c["name"] for c in sqlalchemy.inspect(engine).get_columns("workers")}
+        engine.dispose()
+
+
+def test_0072_on_postgres() -> None:
+    """0072 creates the interface state tables, and the downgrade drops them."""
+    revision_0071 = "f3c7a9e1d5b2"
+    revision_0072 = "c109929efd3f"
+    wanted = {"interface_states", "recent_opens"}
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0071)
+        engine = sqlalchemy.create_engine(url)
+
+        migrate.upgrade(url, revision_0072)
+        assert _alembic_version(engine) == revision_0072
+        assert wanted <= set(sqlalchemy.inspect(engine).get_table_names())
+
+        migrate.downgrade(url, revision_0071)
+        assert _alembic_version(engine) == revision_0071
+        assert not wanted & set(sqlalchemy.inspect(engine).get_table_names())
+        engine.dispose()
+
+
+def test_0073_on_postgres() -> None:
+    """0073 creates the profile pictures table, and the downgrade drops it."""
+    revision_0072 = "c109929efd3f"
+    revision_0073 = "d4a7e2b9c613"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0072)
+        engine = sqlalchemy.create_engine(url)
+
+        migrate.upgrade(url, revision_0073)
+        assert _alembic_version(engine) == revision_0073
+        assert "profile_pictures" in sqlalchemy.inspect(engine).get_table_names()
+
+        migrate.downgrade(url, revision_0072)
+        assert _alembic_version(engine) == revision_0072
+        assert "profile_pictures" not in sqlalchemy.inspect(engine).get_table_names()
+        engine.dispose()
+
+
+def test_0074_on_postgres() -> None:
+    """0074 creates the probe table and the deploy-key columns, and the downgrade drops them."""
+    revision_0073 = "d4a7e2b9c613"
+    revision_0074 = "e5b8c1f4a297"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0073)
+        engine = sqlalchemy.create_engine(url)
+
+        migrate.upgrade(url, revision_0074)
+        assert _alembic_version(engine) == revision_0074
+        inspector = sqlalchemy.inspect(engine)
+        assert "repository_probes" in inspector.get_table_names()
+        added = {"generated_for", "public_key"}
+        assert added <= {c["name"] for c in inspector.get_columns("secrets")}
+
+        migrate.downgrade(url, revision_0073)
+        assert _alembic_version(engine) == revision_0073
+        inspector = sqlalchemy.inspect(engine)
+        assert "repository_probes" not in inspector.get_table_names()
+        assert not added & {c["name"] for c in inspector.get_columns("secrets")}
+        engine.dispose()

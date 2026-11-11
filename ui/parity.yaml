@@ -113,9 +113,12 @@
 "recovery list": { class: ui, part: 1 }
 "recovery withdraw": { class: ui, part: 1 }
 "repo add": { class: ui, part: 8 }
+"repo deploy-key": { class: ui, part: 2 }
+"repo host-keys": { class: ui, part: 2 }
 "repo list": { class: ui, part: 8 }
 "repo remove": { class: ui, part: 8 }
 "repo show": { class: ui, part: 8 }
+"repo test": { class: ui, part: 2 }
 "repo update": { class: ui, part: 8 }
 "rollback": { class: ui, part: 5 }
 "row-filter create": { class: ui, part: 7 }
@@ -144,6 +147,7 @@
 "sign-in setup-link":
   { class: git, reason: "local deployment tooling: prints the first administrator's link" }
 "sql": { class: ui, part: 4, note: "--into (write into a table) is Git, see table append" }
+"status": { class: read, part: 2 }
 "table append":
   {
     class: git,
@@ -210,6 +214,7 @@
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
 "DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
+"DELETE /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7 }
 "DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1 }
@@ -281,6 +286,9 @@
 "GET /api/v1/grants": { class: ui, part: 7 }
 "GET /api/v1/groups": { class: ui, part: 7 }
 "GET /api/v1/groups/{name}/members": { class: ui, part: 7 }
+"GET /api/v1/home/attention": { class: read, part: 2 }
+"GET /api/v1/home/get-started": { class: ui, part: 2 }
+"GET /api/v1/home/work": { class: read, part: 2 }
 "GET /api/v1/info": { class: read, part: 8 }
 "GET /api/v1/invites": { class: ui, part: 1 }
 "GET /api/v1/package-indexes": { class: ui, part: 8 }
@@ -293,20 +301,25 @@
   }
 "GET /api/v1/principals/{name}":
   { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }
+"GET /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions":
   { class: ui, part: 7, note: "1b asks it whether a person is an administrator (recovery links)" }
+"GET /api/v1/principals/{name}/picture": { class: ui, part: 2 }
+"GET /api/v1/principals/{name}/recent": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "GET /api/v1/recovery-links": { class: ui, part: 1 }
 "GET /api/v1/repositories": { class: ui, part: 8 }
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
+"GET /api/v1/repository-probes/{probe_id}": { class: ui, part: 2 }
 "GET /api/v1/row-filters": { class: ui, part: 7 }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
 "GET /api/v1/settings/sign-in":
   { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }
 "GET /api/v1/sign-in/session": { class: ui, part: 1 }
+"GET /api/v1/status": { class: read, part: 2 }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
 "GET /api/v1/whoami": { class: read, part: 1 }
@@ -319,6 +332,7 @@
 "PATCH /api/v1/environments/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8 }
 "PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
+"PATCH /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/settings/sign-in":
   { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
@@ -398,9 +412,13 @@
 "POST /api/v1/principals": { class: ui, part: 7 }
 "POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1 }
+"POST /api/v1/principals/{name}/recent":
+  { class: ui, part: 2, note: "called by the detail pages from part 3" }
 "POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "POST /api/v1/repositories": { class: ui, part: 8 }
+"POST /api/v1/repositories/{name}/deploy-key": { class: ui, part: 2 }
+"POST /api/v1/repository-probes": { class: ui, part: 2 }
 "POST /api/v1/row-filters": { class: ui, part: 7 }
 "POST /api/v1/sign-in/links/describe": { class: ui, part: 1 }
 "POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }
@@ -428,3 +446,4 @@
 "PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
 "PUT /api/v1/environments/{name}/retention": { class: ui, part: 8 }
 "PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
+"PUT /api/v1/principals/{name}/picture": { class: ui, part: 2 }

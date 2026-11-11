@@ -43,6 +43,7 @@ from lakana_core.models import (
 )
 from lakana_core.projects.git_input import resolve_local_path, validate_ref, validate_repo_url
 from lakana_core.projects.lookups import live_environment_names
+from lakana_core.projects.probes import known_hosts_fingerprints
 from lakana_core.secrets.uses import (
     SecretBindingRefused,
     SecretUse,
@@ -101,6 +102,24 @@ def _validate(repo: Repository, repo_roots: Sequence[str]) -> None:
         raise ValidationError("credential_secret must be a secret name with no spaces.")
     if repo.default_ref is not None:
         validate_ref(repo.default_ref)
+
+
+def _trusted(known_hosts: str | None) -> dict[str, list[str]]:
+    """Name the host keys a repository trusts, for its audit event.
+
+    Parameters
+    ----------
+    known_hosts
+        Its `ssh_known_hosts`; `None` for a repository that is not ssh.
+
+    Returns
+    -------
+    dict
+        ``host_key_fingerprints`` with the sorted fingerprints; empty for `None`.
+    """
+    if known_hosts is None:
+        return {}
+    return {"host_key_fingerprints": known_hosts_fingerprints(known_hosts)}
 
 
 class RepositoryService:
@@ -269,6 +288,7 @@ class RepositoryService:
                 "kind": kind.value,
                 "url": url,
                 "credential_secret": credential_secret,
+                **_trusted(ssh_known_hosts),
             },
         )
         self._session.add(repo)
@@ -287,11 +307,12 @@ class RepositoryService:
             ) from exc
         return repo
 
-    def _lock(self, repo: Repository) -> Repository:
+    def lock(self, repo: Repository) -> Repository:
         """Lock a repository's row and read it afresh, before anything about it is decided.
 
-        A bind, a naming and a URL change of one repository take this lock first, so they run
-        one after the other, and the one that waits sees what the other committed.
+        A bind, a naming, a URL change and a deploy key (`lakana_core.projects.deploy_keys`) of one
+        repository take this lock first, so they run one after the other, and the one that waits
+        sees what the other committed.
 
         Parameters
         ----------
@@ -404,7 +425,7 @@ class RepositoryService:
             raise ValidationError(f"{', '.join(sorted(fixed))} cannot be changed.")
         if "url" in changes and changes["url"] is None:
             raise ValidationError("url cannot be cleared.")
-        repo = self._lock(repo)
+        repo = self.lock(repo)
         previous_url, previous_secret = repo.url, repo.credential_secret
         try:
             for field, value in changes.items():
@@ -445,6 +466,7 @@ class RepositoryService:
                 "name": name,
                 "changed": sorted(changes),
                 "credential_secret": repo.credential_secret,
+                **(_trusted(repo.ssh_known_hosts or "") if "ssh_known_hosts" in changes else {}),
             },
         )
         try:

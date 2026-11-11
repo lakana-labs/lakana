@@ -27,11 +27,13 @@ from lakana_core.errors import (
     NoCheckedSnapshotError,
     NotFoundError,
     NotPublishedError,
+    NoWorkerError,
     PasskeyRefused,
     PermissionDenied,
     SessionEndedError,
     StorageRefusedError,
     StorageUnavailableError,
+    UnsupportedPicture,
     ValidationError,
 )
 
@@ -134,6 +136,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
     ValidationError: 422,
     PermissionDenied: 403,
     PayloadTooLargeError: 413,
+    UnsupportedPicture: 415,
     AppendReadTimeoutError: 408,
     AppendConcurrencyLimitError: 503,
     DownloadConcurrencyLimitError: 503,
@@ -142,6 +145,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
     StorageRefusedError: 502,
     AuditUnavailableError: 503,
     GraphBusyError: 503,
+    NoWorkerError: 503,
 }
 
 _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
@@ -151,6 +155,7 @@ _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
     StorageUnavailableError: "5",
     AuditUnavailableError: "5",
     GraphBusyError: "5",
+    NoWorkerError: "30",
 }
 """Extra `Retry-After` header value, by exception type, beyond the plain
 status/body mapping `_STATUS_CODES` covers. Kept as its own small table

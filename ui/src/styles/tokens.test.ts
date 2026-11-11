@@ -127,6 +127,19 @@ describe("tokens", () => {
     }
   });
 
+  it("keeps three radii: controls, panels and a person's circle", () => {
+    const body = properties(block(tokens, ":root"));
+    const radii = Object.fromEntries(
+      Object.entries(body).filter(([name]) => name.startsWith("--radius-")),
+    );
+
+    expect(radii).toEqual({
+      "--radius-control": "4px",
+      "--radius-panel": "6px",
+      "--radius-round": "50%",
+    });
+  });
+
   it("turns every duration off under reduced motion", () => {
     const body = properties(block(tokens, ":root"));
     const durations = Object.keys(body).filter((name) => /^--(motion-|pulse)/.test(name));

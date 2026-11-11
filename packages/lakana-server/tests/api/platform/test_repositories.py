@@ -120,7 +120,7 @@ def test_local_repository_honours_repo_roots(settings: Settings, tmp_path: Path)
 
 
 def test_responses_carry_the_secret_name_never_a_value(client: TestClient) -> None:
-    """Only the bound secret's name is returned; known_hosts may be."""
+    """Only the bound secret's name is returned; known_hosts and public deploy keys may be."""
     created = client.post(
         "/api/v1/repositories",
         headers=AUTH_HEADER,
@@ -147,7 +147,9 @@ def test_responses_carry_the_secret_name_never_a_value(client: TestClient) -> No
         "created_by",
         "created_at",
         "updated_at",
+        "deploy_keys",
     }
+    assert created.json()["deploy_keys"] == []
 
 
 def test_unknown_repository_is_not_revealed_to_a_caller_without_read_rights(

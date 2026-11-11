@@ -40,3 +40,9 @@ class Worker(Base):
     """Whether the last measurement finished; a measurement cut off by its time limit is a floor."""
     cache_measured_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     """When the figures were written (the database's time); `None` before the first measurement."""
+    memory_used_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """The resident memory of the worker and the processes it started, as it last reported it."""
+    memory_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """The worker's memory limit when it reported its use; `None` for no limit."""
+    memory_measured_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    """When the memory figures were written (the database's time); `None` before the first."""

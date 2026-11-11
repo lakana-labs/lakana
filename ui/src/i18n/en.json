@@ -73,7 +73,7 @@
       "en": "English"
     },
     "menu": "Menu",
-    "signedInAs": "Signed in as {{name}}",
+    "signedInAs": "<hidden>Signed in as</hidden> {{name}}",
     "account": "Account",
     "signOut": "Sign out",
     "signOutEverywhere": "Sign out everywhere",
@@ -82,11 +82,11 @@
   },
   "palette": {
     "placeholder": "Go to a place or run a command",
-    "places": "Places",
     "goTo": "Go to {{area}}",
-    "results_one": "{{count}} place",
-    "results_other": "{{count}} places",
-    "empty": "Nothing matches “{{query}}”."
+    "results_one": "{{count}} result",
+    "results_other": "{{count}} results",
+    "empty": "Nothing matches “{{query}}”.",
+    "commands": "Places and commands"
   },
   "notFound": {
     "title": "This page does not exist",
@@ -99,7 +99,121 @@
     "action": "Go to Home"
   },
   "home": {
-    "noAccessYet": "You have no access yet; ask an administrator."
+    "noAccessYet": "You have no access yet; ask an administrator.",
+    "environment": "Environment",
+    "wholeInstance": "Instance",
+    "newTab": "(opens in a new tab)",
+    "update": {
+      "text": "Lakana was updated to {{version}}:",
+      "whatsNew": "what's new",
+      "hide": "Hide the update note"
+    },
+    "getStarted": {
+      "title": "Get started",
+      "hide": "Hide",
+      "done": "Done",
+      "steps": {
+        "connect_repository": {
+          "text": "Connect the Git repository that holds your project, so Lakana can deploy it.",
+          "action": "Connect a repository"
+        },
+        "invite_team": {
+          "text": "Invite your colleagues; each signs in with their own passkey.",
+          "action": "Invite your team"
+        },
+        "add_passkey": {
+          "text": "Add a passkey, so you sign in with your fingerprint, face, PIN or security key.",
+          "action": "Add a passkey"
+        },
+        "deploy_project": {
+          "text": "Deploy your first project: the tutorial walks you through it, or run this in your project’s folder.",
+          "action": "Open the tutorial"
+        },
+        "deploy_project_local": {
+          "text": "Deploy your first project from a folder on this machine: the tutorial walks you through it, and this command starts it in the folder.",
+          "action": "Open the tutorial"
+        },
+        "ci_deploy": {
+          "text": "Let CI deploy for you whenever a change is merged.",
+          "action": "Deploy from GitHub Actions"
+        },
+        "open_table": {
+          "text": "Open a table in the Catalog to see its columns, health and lineage.",
+          "action": "Open the Catalog"
+        },
+        "run_query": {
+          "text": "Run your first query: write SQL and see the result.",
+          "action": "Open Queries"
+        }
+      }
+    },
+    "status": {
+      "title": "Status",
+      "states": {
+        "healthy": "Healthy",
+        "degraded": "Degraded",
+        "down": "Down"
+      },
+      "without": {
+        "healthy": "Everything works.",
+        "degraded": "Lakana works, but slower than usual.",
+        "down": "Lakana cannot get work done right now. Tell an administrator."
+      },
+      "causes": {
+        "database": "The database cannot be reached, so nothing gets done. Check that the database runs, then read the server’s log.",
+        "storage": "The object storage cannot be reached, so tables cannot be read or written. Check that it runs and that the server may reach it.",
+        "no_worker": "No worker is running, so queries and jobs wait until one starts.",
+        "worker_lost_one": "Queries are slower: {{count}} of {{total}} workers is down.",
+        "worker_lost_other": "Queries are slower: {{count}} of {{total}} workers are down.",
+        "memory_high": "The workers are close to their memory limit, so a large query may be stopped."
+      },
+      "compute": "Compute",
+      "slots": "{{busy}} of {{total}} slots busy",
+      "noSlots": "No worker is running.",
+      "memory": "Memory",
+      "memoryOf": "{{used}} of {{limit}}",
+      "memoryNoLimit": "{{used}} in use, limit unknown",
+      "gib": "{{value}} GiB",
+      "workers": "Workers",
+      "workersAlive": "{{alive}} alive",
+      "workersDown": "{{alive}} alive, {{lost}} down",
+      "details": "Details"
+    },
+    "attention": {
+      "title": "Needs your attention",
+      "none": "Nothing needs your attention.",
+      "truncated": "Showing the newest {{count}}.",
+      "kinds": {
+        "run_failed": "Run failed",
+        "table_late": "Late",
+        "check_failed": "Check failed",
+        "query_failed": "Query failed",
+        "recovery_link_open": "Recovery link open",
+        "worker_lost": "Worker down"
+      }
+    },
+    "recent": {
+      "title": "Recently opened",
+      "none": "Nothing opened yet. The tables, queries, jobs and runs you open will show here once the Catalog, Queries and Jobs pages arrive in a later release.",
+      "toCatalog": "Find a table in the Catalog",
+      "opened": "Opened",
+      "queryName": "Query {{id}}",
+      "runName": "Run {{id}}",
+      "kinds": {
+        "table": "Table",
+        "query": "Query",
+        "job": "Job",
+        "run": "Run"
+      }
+    },
+    "work": {
+      "title": "Your work",
+      "none": "Nothing yet: the repositories you connect or deploy, and their jobs, show here.",
+      "repositories": "Your repositories",
+      "lastRun": "Last run",
+      "neverRun": "Not run yet",
+      "neverDeployed": "Not deployed yet"
+    }
   },
   "session": {
     "loading": "Loading…",
@@ -300,6 +414,10 @@
   },
   "settings": {
     "tabs": "Settings sections",
+    "status": {
+      "tab": "Status",
+      "intro": "The instance in detail: each worker with its work and memory, and why the instance is degraded or down."
+    },
     "signIn": {
       "tab": "Sign-in",
       "intro": "How long a browser session lasts. API tokens are not affected. Saving asks for a passkey touch when yours is older than 15 minutes.",
@@ -313,6 +431,87 @@
       "idleOutOfBounds": "The idle timeout is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
       "absoluteOutOfBounds": "The longest session is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
       "shorterThanIdle": "The longest session cannot be shorter than the idle timeout ({{idle}} minutes). Make it longer, or the idle timeout shorter."
+    },
+    "connect": {
+      "title": "Connect a repository",
+      "intro": "Lakana deploys a project from its Git repository over SSH, with a deploy key it makes for you. Nothing is stored until you confirm the host's keys.",
+      "hosts": {
+        "github": "GitHub",
+        "gitlab": "GitLab",
+        "bitbucket": "Bitbucket"
+      },
+      "where": {
+        "heading": "1. The repository",
+        "url": "Repository URL",
+        "urlHelp": "The address you clone it with, such as git@github.com:team/analytics.git or https://github.com/team/analytics.",
+        "name": "Name in Lakana",
+        "nameHelp": "Deploys and the command line use it. No dots, slashes, percent signs or spaces.",
+        "known": "A {{host}} repository. Lakana connects to it over SSH: {{url}}",
+        "other": "Lakana connects to it over SSH: {{url}}",
+        "urlEmpty": "Enter the repository's URL, the one you clone it with.",
+        "urlBad": "This is not a repository URL. Enter it as git@host:team/repo.git, ssh://git@host/team/repo.git or https://host/team/repo.",
+        "httpsOther": "Lakana cannot tell this host's SSH address. Enter the SSH URL (the host's Clone button shows it, such as git@host:team/repo.git), or use a token instead.",
+        "nameEmpty": "Enter a name for the repository.",
+        "nameBad": "A name has no dots, slashes, percent signs or spaces. Try {{suggestion}}.",
+        "queryOrFragment": "A repository URL has no '?' or '#'. Copy the address from the host's Clone button."
+      },
+      "token": {
+        "toggle": "Use a token instead",
+        "body": "Register the HTTPS URL with an access token stored as a secret. A token belongs to a person and expires: when they leave or it runs out, deploys stop. A deploy key belongs to the repository.",
+        "command": "lakana repo add {{name}} --kind https --url {{url}} --credential-secret {{name}}",
+        "how": "How to store the token and register the repository"
+      },
+      "keys": {
+        "heading": "2. Confirm the host's keys",
+        "body": "A worker fetches the host's SSH keys. Compare each fingerprint with the ones the host publishes, and tick only the keys that match.",
+        "fetch": "Fetch the host's keys",
+        "waiting": "Asking a worker to fetch the keys…",
+        "published": "{{host}}'s published fingerprints",
+        "compareOther": "Ask the host's administrator for its fingerprints, or find them in the host's documentation.",
+        "matches": "This matches",
+        "matchesFor": "This matches: {{type}}",
+        "showOthers": "Show other key types ({{count}})",
+        "othersNote": "Tick another key type only when you compared its fingerprint too.",
+        "found_one": "Found {{count}} key of the host. Compare its fingerprint, then tick it if it matches.",
+        "found_other": "Found {{count}} keys of the host. Compare each fingerprint, then tick the ones that match.",
+        "none": "The host offered no SSH key. Check that the URL is the SSH address of your Git host, then fetch again.",
+        "noWorker": "No worker answered within two minutes. Start one (docker compose up -d worker, or lakana server start --local), then try again."
+      },
+      "create": {
+        "heading": "3. Create the repository and its keys",
+        "body": "Lakana registers the repository with the keys you ticked, then makes a key pair for each environment. The private keys stay on the server as secrets; you see only the public keys. This asks for a passkey touch.",
+        "action": "Create the repository and its keys",
+        "tick": "Tick each key that matches, above, first.",
+        "working": "Creating the repository and its keys…",
+        "notMade": "The repository is registered; its keys are not made yet.",
+        "retry": "Make the keys",
+        "done": "Made keys for {{environments}}. Add each one at your Git host, then test access below.",
+        "already": "{{name}} was already registered with this URL, so Lakana went on to its keys.",
+        "otherKeys": "A repository with this address is already registered with other host keys. Check them with {{show}}. If the keys ticked here are the right ones, save them with {{save}} and run {{update}}.",
+        "otherKind": "A {{kind}} repository with this address is already registered as {{name}}. Check it with {{show}}, or choose another name above.",
+        "unread": "Lakana could not read it to compare. Check it with {{show}}, or choose another name above.",
+        "conflict": "Try again; if it happens again, the server's log has the details.",
+        "taken": "A repository named {{name}} already exists with another URL. Choose another name above.",
+        "add": "Add each key as a read-only deploy key at your Git host.",
+        "page": "Open {{host}}'s deploy-key page",
+        "pageOther": "At your Git host, open the repository's settings and its deploy keys.",
+        "readOnly": "Keep it read-only: leave write access off. Lakana only reads, and a key that may push could change what your production environment deploys.",
+        "earlier": "made earlier",
+        "copy": "Copy key",
+        "skipped": "No key in {{environments}}: you may not manage secrets there. Someone who may runs lakana repo deploy-key {{name}}.",
+        "none": "No environment got a key.",
+        "later": "An environment created later has no key yet: make one with lakana repo deploy-key {{name}} and add it as an additional deploy key at your Git host; the other environments' keys keep working."
+      },
+      "test": {
+        "heading": "4. Test access",
+        "body": "A worker reads the repository with the key of {{environment}}, as a deploy would. Add that key at your Git host first.",
+        "action": "Test access in {{environment}}",
+        "waiting": "Asking a worker to read the repository…",
+        "next": "Next: deploy it, by hand or from CI.",
+        "github": "Deploy from GitHub Actions",
+        "gitlab": "Deploy from GitLab CI",
+        "deploy": "lakana deploy {{name}} --env {{environment}}"
+      }
     }
   },
   "duration": {
@@ -322,5 +521,102 @@
     "hours_other": "{{count}} hours",
     "days_one": "{{count}} day",
     "days_other": "{{count}} days"
+  },
+  "help": {
+    "title": "Help",
+    "tour": "Take the tour again",
+    "gettingStarted": "Getting started",
+    "howTo": "How-to guides",
+    "documentation": "Documentation",
+    "shortcuts": "Keyboard shortcuts",
+    "showGetStarted": "Show “Get started” again",
+    "showFailed": "Showing Get started again did not work: {{detail}}",
+    "version": "Lakana {{version}}"
+  },
+  "shortcuts": {
+    "title": "Keyboard shortcuts",
+    "close": "Close",
+    "search": {
+      "text": "Open search: go to a place or run a command."
+    },
+    "escape": {
+      "keys": "Esc",
+      "text": "Close a menu, a dialog or the tour."
+    },
+    "tab": {
+      "keys": "Tab, Shift Tab",
+      "text": "Move to the next or the previous control."
+    },
+    "enter": {
+      "keys": "Enter",
+      "text": "Open the row that has focus."
+    }
+  },
+  "tour": {
+    "welcome": {
+      "title": "Welcome to Lakana",
+      "text": "Lakana keeps your team’s tables in one place, with the jobs that build them, the checks that guard them and who may read them. Every change comes from your project’s Git repository.",
+      "tour": "This short tour shows where things are, one place at a time. You can leave it at any step, and Help brings it back.",
+      "start": "Start the tour",
+      "skip": "Skip"
+    },
+    "progress": "Step {{current}} of {{total}}",
+    "back": "Back",
+    "next": "Next",
+    "skip": "Skip tour",
+    "finish": "Finish",
+    "inMenu": "In the menu: {{place}}",
+    "nextStep": "Your next step:",
+    "connectFirst": "Connect your first repository",
+    "reading": "Read further",
+    "links": {
+      "tutorial": "The getting-started tutorial",
+      "howTo": "How-to guides",
+      "docs": "The documentation overview"
+    },
+    "steps": {
+      "home": {
+        "text": "Where every sign-in lands: whether the instance is well, what needs your attention and what you opened recently."
+      },
+      "catalog": {
+        "text": "Every table you may read, with its columns, its health and where its data comes from."
+      },
+      "queries": {
+        "text": "Write SQL against the tables you may read, and see or download the result."
+      },
+      "jobs": {
+        "text": "The jobs your projects deploy and their runs: what ran, what failed and what runs next."
+      },
+      "connections": {
+        "text": "The databases and services your project loads its data from."
+      },
+      "access": {
+        "text": "Who may sign in, and what each person, group and token may do."
+      },
+      "settings": {
+        "text": "The instance’s status, its environments and how this server is set up."
+      },
+      "search": {
+        "text": "Press {{keys}} anywhere to go to a place or run a command by typing a few letters."
+      },
+      "help": {
+        "text": "Help brings back this tour and Get started, opens the documentation and lists the keyboard shortcuts."
+      }
+    }
+  },
+  "profile": {
+    "menuItem": "Profile picture…",
+    "title": "Profile picture",
+    "intro": "A JPEG, PNG or WebP image of up to 5 MB and 40 megapixels. Lakana keeps a square cut from the centre and removes the file's details, such as where a photo was taken.",
+    "choose": "Choose a picture",
+    "wrongType": "Use a JPEG, PNG or WebP image.",
+    "tooLarge": "This picture is larger than 5 MB. Choose a smaller JPEG, PNG or WebP image.",
+    "saved": "Your picture is saved.",
+    "stillSending": "A picture is still being sent, so this one was not. Choose it again once the first is saved.",
+    "removed": "Your picture is removed.",
+    "remove": "Remove picture",
+    "tryAgain": "Try again",
+    "removeTitle": "Remove {{name}}'s picture?",
+    "removeBody": "{{name}} sees their initials instead, and can set a new picture from the menu under their name."
   }
 }

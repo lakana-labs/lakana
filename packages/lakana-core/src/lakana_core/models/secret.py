@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
     Uuid,
 )
@@ -99,3 +100,11 @@ class Secret(Base):
         SAEnum(SecretUseKind, native_enum=False, length=16), nullable=True
     )
     use_target_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    generated_for: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    """The repository a deploy key Lakana made is for (`lakana_core.projects.deploy_keys`);
+    `None` for a secret a person stored. Such a key is never bound to another use or rotated by
+    hand. Like `use_target_id`, it keeps the id of a repository that is removed."""
+    public_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """The public half of a deploy key Lakana made (`ssh-ed25519 <base64> <comment>`), to add at
+    the git host; `None` for any other secret. Never secret: the private half is in the
+    ciphertext."""

@@ -16,14 +16,20 @@ interface SentRequest {
   readonly headers: Record<string, string>;
   /** The parsed JSON body, or undefined without one. */
   readonly body: unknown;
+  /** A body that is not text (an uploaded file), as sent. */
+  readonly raw?: unknown;
+  /** The request's cache mode, when one was set. */
+  readonly cache?: RequestCache;
 }
 
-/** What a route answers: a status and an optional JSON body. */
+/** What a route answers: a status and an optional JSON body, or a file. */
 interface FakeAnswer {
   /** The status code. */
   readonly status: number;
   /** The JSON body. */
   readonly body?: unknown;
+  /** A file to answer instead of JSON, such as a picture. */
+  readonly blob?: Blob;
 }
 
 /** A route's answer, fixed or computed from the request. */
@@ -55,9 +61,15 @@ export const ADMIN_SESSION = {
  * @param name - The principal name.
  * @param admin - Whether the person holds the ADMIN role on the instance.
  * @param hasAccess - Whether the person has any grant at all.
+ * @param mayDeploy - Whether the person may deploy in at least one environment.
  * @returns The body.
  */
-export function whoami(name: string, admin: boolean, hasAccess = admin): unknown {
+export function whoami(
+  name: string,
+  admin: boolean,
+  hasAccess = admin,
+  mayDeploy = admin,
+): unknown {
   return {
     name,
     type: "USER",
@@ -66,6 +78,8 @@ export function whoami(name: string, admin: boolean, hasAccess = admin): unknown
     language: null,
     admin,
     has_access: hasAccess,
+    may_deploy: mayDeploy,
+    picture: null,
   };
 }
 
@@ -103,6 +117,8 @@ export function fakeServer(routes: Record<string, FakeRoute> = {}): FakeServer {
       path: url.pathname + url.search,
       headers: headersOf(init),
       body: text === undefined ? undefined : JSON.parse(text),
+      ...(init?.body instanceof Blob ? { raw: init.body } : {}),
+      ...(init?.cache === undefined ? {} : { cache: init.cache }),
     };
     sent.push(request);
     const handler = table.get(`${request.method} ${decodeURIComponent(url.pathname)}`);
@@ -114,6 +130,10 @@ export function fakeServer(routes: Record<string, FakeRoute> = {}): FakeServer {
           : handler;
     if (answer.status === 204) {
       return new Response(null, { status: 204 });
+    }
+    if (answer.blob !== undefined) {
+      // As bytes: the fetch of Node does not read a Blob of jsdom.
+      return new Response(await answer.blob.arrayBuffer(), { status: answer.status });
     }
     return new Response(JSON.stringify(answer.body ?? null), {
       status: answer.status,

@@ -174,8 +174,11 @@ def test_the_worker_list_is_refused_like_the_scheduler_status(client: TestClient
         "deploy_run_id",
         "task_run_id",
         "caches",
+        "memory",
+        "replaced",
     }
     assert row["caches"] is None  # not measured yet
+    assert row["memory"] is None  # not reported yet
     assert row["takes"] == "all"  # the column's default: a worker that did not say
     assert (row["id"], row["host"], row["version"], row["status"]) == ("w-1", "box", "1.0", "alive")
     assert (row["query_run_id"], row["deploy_run_id"], row["task_run_id"]) == (None, None, None)

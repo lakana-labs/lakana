@@ -167,6 +167,55 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   `lakana token list <bootstrap admin>` after upgrading and revoke any `bootstrap` token you do
   not recognise as the one the server wrote.
 
+### The instance status and the workers' memory
+
+- Migration `0071` adds three empty columns to `workers`: the memory a worker last reported, its
+  limit then, and when. Each worker of this release reports its memory with its heartbeat; a
+  worker of an earlier release reports none, and `lakana status` then says the memory limit is
+  unknown until it is upgraded.
+- `lakana status` (`GET /api/v1/status`, `client.status()`) is new: `Healthy`, `Degraded` or
+  `Down` with the reason, and for an administrator the busy task slots, the workers' memory and
+  the workers ([What the status says](../how-to/instance-health.md#what-the-status-says)).
+  It exits 12 when the instance is `Down`. `lakana worker list` has a new column `memory`, and
+  shows a lost worker that a restart on its host replaced as `lost (replaced)`.
+
+### What the web interface remembers per person
+
+- Migration `0072` adds two empty tables: `interface_states` (whether a person saw the tour, hid
+  Get started, and the last update note they saw) and `recent_opens` (what they opened
+  recently). Nobody has a row after the upgrade, so every existing person is shown the tour once
+  on their next sign-in, sees Get started, and gets no update note for this release.
+- `GET /api/v1/whoami` has a new field `may_deploy`: whether you may deploy in at least one
+  environment.
+
+### Profile pictures, repository checks and deploy keys
+
+- Migration `0073` adds an empty table `profile_pictures`: every existing person is shown with
+  their initials until they set a picture. A downgrade drops the table and every picture in it.
+- Migration `0074` adds an empty table `repository_probes` (the host-key and access checks a
+  worker runs, kept for a day) and two nullable columns to `secrets`, `generated_for` and
+  `public_key`, empty on every existing secret. A downgrade drops all three: pending and
+  finished checks are gone, and a deploy key Lakana made becomes an ordinary secret bound to its
+  repository. Its private key stays and deploys keep working, but its public half is no longer
+  shown, and it can then be rotated and bound by hand.
+- `lakana-core` has a new dependency, Pillow (HPND licence), which reads and re-encodes uploaded
+  pictures. An installation from the published packages or images gets it with the upgrade; a
+  hand-built environment needs `uv sync` (or `pip install`) again.
+- New fields in REST answers: `picture` (the etag of a person's picture, or `null`) in
+  `GET /api/v1/whoami` and in each principal of `GET /api/v1/principals` and each member of
+  `GET /api/v1/groups/{name}/members`, and `deploy_keys` (the
+  public key Lakana made in each environment) in each repository of `GET /api/v1/repositories`.
+  A client that rejects unknown fields must accept them.
+- New commands: `lakana repo host-keys URL` (a worker fetches the host's SSH keys for you to
+  compare), `lakana repo test NAME --env ENV` (a worker reads the repository with that
+  environment's credential) and `lakana repo deploy-key NAME` (Lakana makes a deploy key per
+  environment) ([Connect a repository](../how-to/connect-a-repository.md)).
+- **Upgrade every worker that takes pipeline work before you use Connect a repository,
+  `lakana repo host-keys` or `lakana repo test`.** The checks run only on workers of this
+  release. With an older worker running, a check is accepted but nothing takes it, and after two
+  minutes it ends `no_worker` with "No worker answered within two minutes", although a worker is
+  running: it is only too old.
+
 ### The Compose bundle's web interface settings
 
 - A new bundle's `.env` has two more keys, which `compose.yaml` passes to `server`:

@@ -2833,3 +2833,90 @@ def test_only_a_table_that_blocks_on_a_health_signal_gets_a_task_with_checks(
         "gold.weekly": False,
         "silver.clean": True,
     }
+
+
+def test_a_workers_query_says_whether_it_is_ad_hoc(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    for name in ("adhoc", "pipeline"):
+        _register(session, name, 5)
+    dev = session.scalars(select(Environment)).one()
+    started = _service(session).start(principal, "dev", "analytics", Selection())
+    _running_run(session, started.id, silver__clean=TaskStatus.RUNNING)
+    task = session.scalars(select(TaskRun).where(TaskRun.status == TaskStatus.RUNNING)).one()
+    task.lease_owner = "pipeline"
+    for worker_id, task_run_id in (("adhoc", None), ("pipeline", task.id)):
+        session.add(
+            QueryRun(
+                id=uuid.uuid4(),
+                environment_id=dev.id,
+                sql_text="SELECT 1",
+                status=QueryRunStatus.RUNNING,
+                worker_id=worker_id,
+                task_run_id=task_run_id,
+            )
+        )
+    session.commit()
+    views = {v.id: v for v in _service(session).list_workers(principal)}
+    assert (views["adhoc"].query_run_is_adhoc, views["pipeline"].query_run_is_adhoc) == (
+        True,
+        False,
+    )
+
+
+def test_the_worker_list_carries_memory(session: Session, principal: PrincipalRef) -> None:
+    _register(session, "w", 5)
+    assert _service(session).list_workers(principal)[0].memory is None
+    used = workers.MemoryUse(used_bytes=7, limit_bytes=9)
+    assert workers.beat(session, "w", memory=used)
+    session.commit()
+    (view,) = _service(session).list_workers(principal)
+    assert (view.memory, view.memory_measured_at is not None) == (used, True)
+
+
+def test_instance_status_answers_anyone_and_details_only_for_environment_managers(
+    session: Session, principal: PrincipalRef
+) -> None:
+    _register(session, "w", 5)
+    nobody = ActionAllowList()
+    status = _service(session, nobody).instance_status(principal, ())
+    assert (status.state, status.causes, status.workers_alive, status.detail) == (
+        "healthy",
+        (),
+        1,
+        None,
+    )
+    assert nobody.seen == []  # asked with `permits`: a "no" is not a denial
+    admin = _service(session, ActionAllowList(Action.MANAGE_ENVIRONMENT))
+    detailed = admin.instance_status(principal, ("storage",))
+    assert (detailed.state, detailed.causes) == ("down", ("storage",))
+    assert detailed.detail is not None
+    assert [w.id for w in detailed.detail.workers] == ["w"]
+
+
+def test_a_worker_restarted_on_its_host_marks_the_lost_row_replaced(
+    session: Session, principal: PrincipalRef
+) -> None:
+    now = db_now(session)
+    for worker_id, host, started, beat in (
+        ("box:1:a", "box", now - timedelta(hours=1), now - timedelta(seconds=120)),
+        ("box:2:b", "box", now - timedelta(seconds=100), now - timedelta(seconds=5)),
+        ("far:1:a", "far", now - timedelta(hours=1), now - timedelta(seconds=120)),
+    ):
+        session.add(
+            Worker(id=worker_id, host=host, version="1", started_at=started, heartbeat_at=beat)
+        )
+    session.commit()
+    views = {v.id: v for v in _service(session).list_workers(principal)}
+    assert {k: (v.status, v.replaced) for k, v in views.items()} == {
+        "box:1:a": ("lost", True),
+        "box:2:b": ("alive", False),
+        "far:1:a": ("lost", False),
+    }
+    status = _service(session, ActionAllowList()).instance_status(principal, ())
+    assert (status.state, status.causes, status.workers_alive, status.workers_total) == (
+        "degraded",
+        ("worker_lost",),
+        1,
+        2,
+    )

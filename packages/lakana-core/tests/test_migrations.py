@@ -1704,6 +1704,9 @@ def test_0022_adds_workers_the_worker_ids_and_the_status_index_and_downgrades_cl
             "cache_tasks_bytes",
             "cache_complete",
             "cache_measured_at",
+            "memory_used_bytes",
+            "memory_limit_bytes",
+            "memory_measured_at",
         }
         for table in ("query_runs", "deploy_runs"):
             column = {c["name"]: c for c in inspect(engine).get_columns(table)}["worker_id"]
@@ -5506,3 +5509,210 @@ def test_0070_marks_everyone_who_ever_held_instance_admin(
         assert "held_admin" not in {c["name"] for c in inspect(engine).get_columns("principals")}
     finally:
         engine.dispose()
+
+
+_REVISION_0071 = "f3c7a9e1d5b2"
+_MEMORY_COLUMNS = {"memory_used_bytes", "memory_limit_bytes", "memory_measured_at"}
+
+
+def test_0071_adds_the_workers_memory_columns_empty(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0071`: the memory a worker last reported, three nullable columns.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0070)
+    config = Config(str(ALEMBIC_INI))
+
+    def columns() -> dict[str, bool]:
+        """Read the memory columns of `workers` that exist.
+
+        Returns
+        -------
+        dict of str to bool
+            Each memory column present with whether it is nullable.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            return {
+                c["name"]: c["nullable"]
+                for c in inspect(engine).get_columns("workers")
+                if c["name"] in _MEMORY_COLUMNS
+            }
+        finally:
+            engine.dispose()
+
+    assert columns() == {}
+    command.upgrade(config, _REVISION_0071)
+    assert columns() == dict.fromkeys(_MEMORY_COLUMNS, True)
+    command.downgrade(config, _REVISION_0070)
+    assert columns() == {}
+
+
+_REVISION_0072 = "c109929efd3f"
+
+
+def test_0072_adds_the_interface_state_tables_empty(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0072`: per-person interface state and recently opened, two empty tables.
+
+    A row inserted without `get_started_hidden` reads `false`, so code that predates the
+    column cannot hide Get started by accident.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0071)
+    config = Config(str(ALEMBIC_INI))
+
+    def tables() -> set[str]:
+        """Read which of the two tables exist.
+
+        Returns
+        -------
+        set of str
+            The names present.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            return {"interface_states", "recent_opens"} & set(inspect(engine).get_table_names())
+        finally:
+            engine.dispose()
+
+    assert tables() == set()
+    command.upgrade(config, _REVISION_0072)
+    assert tables() == {"interface_states", "recent_opens"}
+    with sqlite3.connect(db_path) as connection:
+        person = uuid.uuid4().hex
+        connection.execute(
+            "INSERT INTO principals (id, type, name, is_active, created_at, updated_at) "
+            "VALUES (?, 'USER', 'kim', 1, '2026-11-11', '2026-11-11')",
+            (person,),
+        )
+        connection.execute(
+            "INSERT INTO interface_states (principal_id, updated_at) VALUES (?, '2026-11-11')",
+            (person,),
+        )
+        hidden = connection.execute("SELECT get_started_hidden FROM interface_states").fetchone()
+    assert hidden == (0,)
+    command.downgrade(config, _REVISION_0071)
+    assert tables() == set()
+
+
+_REVISION_0073 = "d4a7e2b9c613"
+
+
+def test_0073_adds_the_profile_pictures_table_empty(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0073`: profile pictures, one empty table that goes with its principal.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0072)
+    config = Config(str(ALEMBIC_INI))
+
+    def columns() -> set[str]:
+        """Read the table's columns, if it exists.
+
+        Returns
+        -------
+        set of str
+            The column names, empty without the table.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            inspector = inspect(engine)
+            if "profile_pictures" not in inspector.get_table_names():
+                return set()
+            return {c["name"] for c in inspector.get_columns("profile_pictures")}
+        finally:
+            engine.dispose()
+
+    assert columns() == set()
+    command.upgrade(config, _REVISION_0073)
+    assert columns() == {"principal_id", "image", "etag", "updated_at"}
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT count(*) FROM profile_pictures").fetchone() == (0,)
+    command.downgrade(config, _REVISION_0072)
+    assert columns() == set()
+
+
+_REVISION_0074 = "e5b8c1f4a297"
+
+
+def test_0074_adds_the_repository_probes_and_the_deploy_key_columns_empty(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0074`: an empty probe table, and deploy-key columns every secret starts without.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0073)
+    config = Config(str(ALEMBIC_INI))
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO secrets (id, environment_id, name, ciphertext, nonce, wrapped_data_key, "
+            "format_version, key_id, created_by, created_at) VALUES "
+            "('00000000000000000000000000000001', '00000000000000000000000000000002', 'k', "
+            "x'00', x'00', x'00', 2, 'env', '00000000000000000000000000000003', "
+            "'2026-11-11 00:00:00')"
+        )
+
+    def shape() -> tuple[set[str], set[str]]:
+        """Read the probe table's columns and the secrets' columns.
+
+        Returns
+        -------
+        tuple of set of str
+            The probe table's columns (empty without it) and the secrets' columns.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            inspector = inspect(engine)
+            probes = (
+                {c["name"] for c in inspector.get_columns("repository_probes")}
+                if "repository_probes" in inspector.get_table_names()
+                else set()
+            )
+            return probes, {c["name"] for c in inspector.get_columns("secrets")}
+        finally:
+            engine.dispose()
+
+    added = {"generated_for", "public_key"}
+    probes, secrets = shape()
+    assert probes == set() and not added & secrets
+    command.upgrade(config, _REVISION_0074)
+    probes, secrets = shape()
+    assert {"kind", "url", "state", "outcome", "host_keys", "lease_expires_at"} <= probes
+    assert added <= secrets
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT generated_for, public_key, name FROM secrets"
+        ).fetchall() == [(None, None, "k")]
+    command.downgrade(config, _REVISION_0073)
+    probes, secrets = shape()
+    assert probes == set() and not added & secrets
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT name FROM secrets").fetchall() == [("k",)]

@@ -41,17 +41,22 @@ from lakana_server.api.platform.environments import router as environments_route
 from lakana_server.api.platform.grants import router as grants_router
 from lakana_server.api.platform.graph import router as graph_router
 from lakana_server.api.platform.groups import router as groups_router
+from lakana_server.api.platform.home import router as home_router
 from lakana_server.api.platform.info import router as info_router
+from lakana_server.api.platform.interface_state import router as interface_state_router
 from lakana_server.api.platform.invites import router as invites_router
 from lakana_server.api.platform.jobs import router as jobs_router
 from lakana_server.api.platform.namespaces import router as namespaces_router
 from lakana_server.api.platform.package_indexes import router as package_indexes_router
 from lakana_server.api.platform.passkeys import router as passkeys_router
+from lakana_server.api.platform.pictures import PICTURE_DECODE_SLOTS
+from lakana_server.api.platform.pictures import router as pictures_router
 from lakana_server.api.platform.principals import router as principals_router
 from lakana_server.api.platform.queries import router as queries_router
 from lakana_server.api.platform.recovery_links import links_router as recovery_links_router
 from lakana_server.api.platform.recovery_links import router as recovery_link_router
 from lakana_server.api.platform.repositories import router as repositories_router
+from lakana_server.api.platform.repository_probes import router as repository_probes_router
 from lakana_server.api.platform.row_filters import router as row_filters_router
 from lakana_server.api.platform.runs import router as runs_router
 from lakana_server.api.platform.runs import scheduler_router
@@ -63,6 +68,7 @@ from lakana_server.api.platform.sign_in import open_router as passkey_sign_in_ro
 from lakana_server.api.platform.sign_in import router as sign_in_links_router
 from lakana_server.api.platform.sign_in_notices import router as sign_in_notices_router
 from lakana_server.api.platform.sign_in_settings import router as sign_in_settings_router
+from lakana_server.api.platform.status import router as status_router
 from lakana_server.api.platform.tables import dropped_router as dropped_tables_router
 from lakana_server.api.platform.tables import expiring_router as expiring_tables_router
 from lakana_server.api.platform.tables import router as tables_router
@@ -108,6 +114,7 @@ ROUTERS = (
     connections_router,
     task_connections_router,
     repositories_router,
+    repository_probes_router,
     package_indexes_router,
     deploys_router,
     runs_router,
@@ -129,6 +136,10 @@ ROUTERS = (
     passkeys_router,
     sign_in_settings_router,
     info_router,
+    status_router,
+    interface_state_router,
+    pictures_router,
+    home_router,
 )
 """Every router the application includes, in the order they are included."""
 
@@ -218,6 +229,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.manifest_decode_slots = asyncio.Semaphore(MANIFEST_DECODE_SLOTS)
         app.state.manifest_principals = set()
+        app.state.picture_decode_slots = asyncio.Semaphore(PICTURE_DECODE_SLOTS)
+        app.state.picture_principals = set()
         app.state.download_slots = AppendConcurrencyLimiter(MAX_CONCURRENT_DOWNLOADS)
         readiness = resolved_settings.readiness
         app.state.readiness = ReadinessCheck(

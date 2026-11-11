@@ -248,6 +248,73 @@ describe("send", () => {
   });
 });
 
+describe("api.upload and api.blob", () => {
+  it("uploads a file as the body, with its type and the CSRF header", async () => {
+    const server = fakeServer({
+      "PUT /api/v1/principals/admin/picture": { status: 200, body: { etag: "e1" } },
+    });
+    setCsrfToken("csrf-1");
+    const file = new Blob(["png"], { type: "image/png" });
+
+    await expect(
+      api.upload("PUT", "/api/v1/principals/admin/picture", file, "image/png"),
+    ).resolves.toEqual({ etag: "e1" });
+
+    expect(server.sent[0]?.headers).toMatchObject({
+      "content-type": "image/png",
+      "x-lakana-csrf": "csrf-1",
+    });
+    expect(server.sent[0]?.raw).toBe(file);
+  });
+
+  it("reads a file with the CSRF header, as a background request", async () => {
+    const server = fakeServer({
+      "GET /api/v1/principals/admin/picture": {
+        status: 200,
+        blob: new Blob(["webp"], { type: "image/webp" }),
+      },
+    });
+    setCsrfToken("csrf-1");
+
+    const read = await api.blob("/api/v1/principals/admin/picture");
+
+    expect(read.size).toBe(4);
+    expect(server.sent[0]?.headers["x-lakana-csrf"]).toBe("csrf-1");
+    expect(server.sent[0]?.headers["x-lakana-background"]).toBe("1");
+  });
+
+  it("asks the server again before showing a file the browser has cached", async () => {
+    // A replaced picture keeps its URL; only the etag changes, so a cached copy must be checked.
+    const server = fakeServer({
+      "GET /api/v1/principals/admin/picture": {
+        status: 200,
+        blob: new Blob(["webp"], { type: "image/webp" }),
+      },
+    });
+
+    await api.blob("/api/v1/principals/admin/picture");
+
+    expect(server.sent[0]?.cache).toBe("no-cache");
+  });
+
+  it("turns a refused upload or read into an ApiError", async () => {
+    fakeServer({
+      "PUT /api/v1/principals/admin/picture": {
+        status: 422,
+        body: { detail: "The file is not a readable PNG image.", type: "ValidationError" },
+      },
+      "GET /api/v1/principals/admin/picture": { status: 404, body: { detail: "No picture." } },
+    });
+
+    await expect(
+      api.upload("PUT", "/api/v1/principals/admin/picture", new Blob(["x"]), "image/png"),
+    ).rejects.toMatchObject({ status: 422, detail: "The file is not a readable PNG image." });
+    await expect(api.blob("/api/v1/principals/admin/picture")).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+});
+
 describe("api.request", () => {
   const STEP_UP = { status: 403, body: { detail: "Touch your passkey.", type: "StepUpRequired" } };
 

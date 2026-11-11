@@ -66,7 +66,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -243,7 +243,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -345,7 +345,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -435,7 +435,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -536,7 +536,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -648,7 +648,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -740,7 +740,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -842,7 +842,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -945,7 +945,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1067,7 +1067,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1189,7 +1189,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1293,7 +1293,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1395,7 +1395,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1507,7 +1507,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1688,7 +1688,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1798,7 +1798,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1901,7 +1901,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2004,7 +2004,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2115,7 +2115,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2237,7 +2237,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2387,7 +2387,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2527,7 +2527,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2675,7 +2675,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2808,7 +2808,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2937,7 +2937,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3140,7 +3140,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3290,7 +3290,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3430,7 +3430,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3542,7 +3542,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3664,7 +3664,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3786,7 +3786,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3908,7 +3908,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4028,7 +4028,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4140,7 +4140,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4339,7 +4339,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4577,7 +4577,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4820,7 +4820,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5092,7 +5092,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5307,7 +5307,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5453,7 +5453,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5566,7 +5566,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5747,7 +5747,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5924,7 +5924,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6044,7 +6044,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6825,7 +6825,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7018,7 +7018,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7210,7 +7210,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7336,7 +7336,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7487,7 +7487,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7617,7 +7617,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7741,7 +7741,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7861,7 +7861,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7977,7 +7977,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8106,7 +8106,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8257,7 +8257,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8371,7 +8371,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8494,7 +8494,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8627,7 +8627,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8709,7 +8709,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8823,7 +8823,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8979,7 +8979,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9102,7 +9102,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9235,7 +9235,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9341,7 +9341,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9447,7 +9447,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9573,7 +9573,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9707,7 +9707,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9819,7 +9819,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9913,7 +9913,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10008,7 +10008,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10100,7 +10100,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10185,7 +10185,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10308,7 +10308,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10541,7 +10541,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10658,7 +10658,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10791,7 +10791,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10970,7 +10970,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11087,7 +11087,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11220,7 +11220,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11399,7 +11399,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11516,7 +11516,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11628,7 +11628,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11732,7 +11732,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11844,7 +11844,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11937,7 +11937,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12049,7 +12049,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12151,7 +12151,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12282,7 +12282,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12384,7 +12384,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12494,7 +12494,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12597,7 +12597,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12709,7 +12709,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12831,7 +12831,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12925,7 +12925,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13007,7 +13007,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13091,7 +13091,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13173,7 +13173,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13273,7 +13273,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13356,7 +13356,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13377,6 +13377,319 @@
           },
           "409": {
             "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repositories/{name}/deploy-key": {
+      "post": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "Make an SSH deploy key for each environment, kept as that environment's secret",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nEach environment gets a key pair of its own; the private key is stored as the environment's secret at once and never shown, the public keys are answered to add at the git host as read-only deploy keys. By default every environment where you may manage secrets and the repository has no key yet gets one, and the others are listed unchanged (`made` false) or as `skipped`. `environments` narrows the call; with `replace` their keys are replaced, and the old keys stop working. The repository then names the secret as its credential.\n\nNeeds `MANAGE_REPOSITORY` on the instance and `MANAGE_SECRET` in each environment written, and an ssh repository with confirmed host keys. Answers 404 when no repository (or named environment) has that name, 409 when a secret of that name there is revoked, is not a key made for this repository or the repository names another secret, and 422 for `replace` without `environments` or a secret name that cannot be a credential.",
+        "operationId": "make_deploy_key_api_v1_repositories__name__deploy_key_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "The repository's registered name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DeployKeyIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeployKeyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repository-probes": {
+      "post": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "Queue a repository check; poll it with `GET /api/v1/repository-probes/{probe_id}`",
+        "description": "``host_keys`` fetches the SSH host keys of `url`'s host and port, for the person to compare with the git host's published fingerprints before trusting any. ``access`` runs `git ls-remote` for registered `repository` with `environment`'s credential and the repository's own known hosts. Needs `MANAGE_REPOSITORY` (and `READ_ENVIRONMENT` on the environment for ``access``). Answers 422 for a body without exactly its kind's fields or an unsafe URL, 404 for an unknown repository or environment, 409 while the caller has five checks waiting or running, and 503 when no worker that takes pipeline work is running. A check no worker takes within two minutes ends ``no_worker``; one a worker took ends at most 90 seconds later, so every check ends within three and a half minutes of its request.",
+        "operationId": "request_repository_probe_api_v1_repository_probes_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoryProbeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryProbeOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repository-probes/{probe_id}": {
+      "get": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "Show one of the caller's repository checks",
+        "description": "Answers 404 for a check of another person, an unknown id, or one older than 24 hours.",
+        "operationId": "get_repository_probe_api_v1_repository_probes__probe_id__get",
+        "parameters": [
+          {
+            "name": "probe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Probe Id"
+            },
+            "description": "The check's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryProbeOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13458,7 +13771,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13542,7 +13855,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13624,7 +13937,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13724,7 +14037,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13817,7 +14130,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13919,7 +14232,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14062,7 +14375,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14165,7 +14478,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14261,7 +14574,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14373,7 +14686,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14473,7 +14786,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14568,7 +14881,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14681,7 +14994,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14773,7 +15086,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14875,7 +15188,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15094,7 +15407,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15257,7 +15570,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15370,7 +15683,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15477,7 +15790,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15590,7 +15903,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15741,7 +16054,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15844,7 +16157,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15957,7 +16270,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16099,7 +16412,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16213,7 +16526,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16335,7 +16648,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16469,7 +16782,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16593,7 +16906,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16717,7 +17030,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16831,7 +17144,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16944,7 +17257,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17026,7 +17339,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17102,7 +17415,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17312,7 +17625,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17435,7 +17748,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17529,7 +17842,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17611,7 +17924,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17694,7 +18007,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17826,7 +18139,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17951,7 +18264,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18085,7 +18398,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18219,7 +18532,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18328,7 +18641,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18410,7 +18723,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18502,7 +18815,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18594,7 +18907,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18678,7 +18991,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18706,7 +19019,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any grant at all (any scope, directly or through a group): the web interface shows the administration areas, or tells a new person to ask for access, from these two.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment: the web interface shows the administration areas, tells a new person to ask for access, and shows the deploy steps of Home from these three. `picture` is the etag of your profile picture, or `null` without one.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -18820,7 +19133,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19017,7 +19330,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19089,7 +19402,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19181,7 +19494,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19263,7 +19576,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19437,7 +19750,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19805,7 +20118,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19889,7 +20202,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19975,7 +20288,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20077,7 +20390,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20173,7 +20486,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20259,7 +20572,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20365,7 +20678,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20448,7 +20761,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20554,7 +20867,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20664,7 +20977,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20756,7 +21069,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20852,7 +21165,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21004,7 +21317,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21067,6 +21380,963 @@
           },
           "401": {
             "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "tags": [
+          "status"
+        ],
+        "summary": "Show whether the instance is healthy",
+        "description": "Says whether the instance is healthy, degraded or down, and why. Any authenticated caller may ask. A caller with `MANAGE_ENVIRONMENT` on the instance also sees every cause and the detail: busy and total task slots, the workers' memory against their limits, and the workers.",
+        "operationId": "instance_status_api_v1_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceStatusOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/interface-state": {
+      "get": {
+        "tags": [
+          "interface"
+        ],
+        "summary": "Show what the web interface remembers for you",
+        "description": "Only your own (403 for another person's name, and for a task or CI token). A person who never changed anything gets the defaults: the tour not seen, Get started shown, no update note seen.",
+        "operationId": "get_interface_state_api_v1_principals__name__interface_state_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceStateOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "interface"
+        ],
+        "summary": "Change what the web interface remembers for you",
+        "description": "Changes only the fields sent. `update_note_seen` takes a release version, `x.y.z`; anything else, a development build's version too, is refused with 422 and nothing in the request is stored. So the interface records the tour in a request of its own, which no version can hold up. Only your own (403 otherwise, and for a task or CI token).",
+        "operationId": "change_interface_state_api_v1_principals__name__interface_state_patch",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterfaceStateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceStateOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/recent": {
+      "get": {
+        "tags": [
+          "interface"
+        ],
+        "summary": "List what you opened recently, newest first",
+        "description": "At most 20. Something you may no longer read, or that no longer exists, is left out. Only your own (403 otherwise, and for a task or CI token).",
+        "operationId": "list_recent_api_v1_principals__name__recent_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecentOut"
+                  },
+                  "title": "Response List Recent Api V1 Principals  Name  Recent Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "interface"
+        ],
+        "summary": "Record that you opened a table, a query, a job or a run",
+        "description": "The web interface's detail pages call it. Opening the same object again within a minute changes nothing; only the newest 20 are kept. Answers 404 when the object does not exist or you may not read it (the same answer for both). Only your own (403 otherwise, and for a task or CI token).",
+        "operationId": "record_recent_api_v1_principals__name__recent_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecentIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/picture": {
+      "put": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Set your profile picture",
+        "description": "Send the image file as the body, with its type as `Content-Type`: `image/jpeg`, `image/png` or `image/webp` (415 for any other, SVG included). At most 5 MB (413) and 40 megapixels (422). The server keeps a new 256 x 256 picture cut from the centre and turned upright, with none of the file's metadata (location, camera); 422 when the file is not a readable image of the type sent. Only your own (403 for another name, and for a task or CI token). One upload of yours at a time, and a few in all per server: otherwise 503, try again after `Retry-After`. Audited.",
+        "operationId": "set_picture_api_v1_principals__name__picture_put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PictureOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The client closed the connection before the request body arrived in full.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "No part of the request body arrived within the read timeout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The request body is of a type the server does not accept; the message names the ones it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Show a person's profile picture",
+        "description": "Your own always; anyone's once you have access (any grant, or the `ADMIN` role); 403 for a person without access yet, and for a task or CI token. 404 when the person has no picture. The answer carries an `ETag` (the `picture` field of the principal and of whoami) and is cached privately for a day; send `If-None-Match` for a 304.",
+        "operationId": "get_picture_api_v1_principals__name__picture_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "The person's principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The picture, a 256 x 256 WebP.",
+            "content": {
+              "image/webp": {}
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The picture is still the one `If-None-Match` names."
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Remove a profile picture",
+        "description": "Your own, or anyone's with `MANAGE_PRINCIPAL` on the instance (an administrator removing an unsuitable picture); 403 otherwise, and for a task or CI token. 404 when no principal has that name; removing a picture that is not there answers 204. Audited.",
+        "operationId": "remove_picture_api_v1_principals__name__picture_delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "The person's principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/home/get-started": {
+      "get": {
+        "tags": [
+          "home"
+        ],
+        "summary": "Show your Get started list",
+        "description": "The steps follow what you may do: an administrator connects a repository, invites the team, adds a passkey, deploys the first project and lets CI deploy; a person who may deploy deploys, opens a table and runs a query; a person who may read opens a table and runs a query; a person without access yet gets no steps. In local mode (`lakana server start --local`) an administrator gets add a passkey, deploy from a local folder, open a table and run a query. Each step is ticked from the server's state. A task or CI token is refused with 403.",
+        "operationId": "read_get_started_api_v1_home_get_started_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetStartedOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/home/attention": {
+      "get": {
+        "tags": [
+          "home"
+        ],
+        "summary": "Show what needs your attention",
+        "description": "An administrator sees the jobs whose newest finished run failed in the last seven days, the late tables, the checks whose newest result failed or errored, the open recovery links, the lost workers and their own queries that failed in that time. Anyone else sees the late tables and failed checks among the tables they read in the last seven days or opened, and their own queries that failed in that time. A row you may no longer read is left out, never refused. At most 50 rows, newest first. A task or CI token is refused with 403: this is a person's list.",
+        "operationId": "read_attention_api_v1_home_attention_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/home/work": {
+      "get": {
+        "tags": [
+          "home"
+        ],
+        "summary": "Show your work: the repositories you created or deployed, and their jobs",
+        "description": "Only for a person who may deploy somewhere; anyone else gets two empty lists. Environments and jobs are shown where you may read the environment. At most 20 of each. A task or CI token is refused with 403.",
+        "operationId": "read_work_api_v1_home_work_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22147,6 +23417,78 @@
         "title": "ArtifactVersionOut",
         "description": "One version of an artifact.\n\nParameters\n----------\nversion\n    The number; versions can have gaps, since a number is never reused.\nmanifest_sha256\n    The digest of the canonical manifest: the identity of the content.\nsize_bytes\n    The summed size of its files.\nfile_count\n    The number of its files.\nis_directory\n    Whether it is a directory (otherwise one file).\ntask_run_id\n    The task run that committed it, if one did.\nrun_id\n    That task run's run.\nproject_version_id\n    The project version the run executed.\ncommit_sha\n    The commit of that project version.\ncreated_by\n    The name of the principal that committed it.\ncreated_at\n    When it was committed.\ndeleted_at\n    When it was deleted; `None` while it is live.\ndeleted_by\n    The name of the principal that deleted it.\nfiles\n    Its files; empty in a listing and for a deleted version.\ndeleted_versions\n    The numbers of the versions this commit pruned (`keep_versions`)."
       },
+      "AttentionItemOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run_failed",
+              "table_late",
+              "check_failed",
+              "query_failed",
+              "recovery_link_open",
+              "worker_lost"
+            ],
+            "title": "Kind"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "environment",
+          "title",
+          "ref",
+          "at"
+        ],
+        "title": "AttentionItemOut",
+        "description": "One row of Needs your attention on Home.\n\nParameters\n----------\nkind\n    `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal\n    fired), `check_failed` (a check's newest result failed or errored), `query_failed`\n    (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two,\n    and failed runs, only for administrators.\nenvironment\n    The environment's name; `null` for a recovery link and a worker.\ntitle\n    The object's name: a job, a dotted table name, a check, `Query` and the first eight\n    characters of its id, the person a recovery link signs in, a worker's host. Never a\n    value, an error text or SQL.\nref\n    The object the row opens: a run's id (a failed run or check), a dotted table name, a\n    query's id, a recovery link's id or a worker's id.\nat\n    When it happened."
+      },
+      "AttentionOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AttentionItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "title": "AttentionOut",
+        "description": "Needs your attention on Home.\n\nParameters\n----------\nitems\n    At most 50 rows, newest first; empty when nothing needs you.\ntruncated\n    Whether more rows were left out."
+      },
       "AuditEventOut": {
         "properties": {
           "id": {
@@ -22373,7 +23715,11 @@
           "SIGN_IN_LINK_USED",
           "PASSKEY_ADDED",
           "PASSKEY_REMOVED",
-          "PASSKEY_DISABLED"
+          "PASSKEY_DISABLED",
+          "PROFILE_PICTURE_SET",
+          "PROFILE_PICTURE_REMOVED",
+          "REPOSITORY_PROBE_REQUESTED",
+          "DEPLOY_KEY_GENERATED"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."
@@ -24000,6 +25346,121 @@
         "title": "DeployJobStartOut",
         "description": "What a deploy did with one job that starts after each deploy (`on_deploy: true`).\n\nParameters\n----------\njob\n    The job's name.\noutcome\n    ``pending`` (the worker has not started it yet), ``started``, ``waiting`` (the project\n    was busy; the start waits) or ``not_started``.\nrun_id\n    For ``started``, the queued run.\nwaits_for_run_id\n    For ``waiting``, the active run the start waits for.\nreason\n    For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),\n    ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker\n    stopped before it recorded the start, which may or may not have been made).\nmessage\n    For ``not_started``, one sentence that names the cause and the next step."
       },
+      "DeployKeyIn": {
+        "properties": {
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          },
+          "environments": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environments"
+          },
+          "replace": {
+            "type": "boolean",
+            "title": "Replace",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DeployKeyIn",
+        "description": "Request body for making deploy keys; every field is optional.\n\nParameters\n----------\nsecret\n    The secret name the keys are stored under; ``<repository>-deploy-key`` by default.\nenvironments\n    Only these environments; by default every environment where you may manage secrets\n    and the repository has no key yet.\nreplace\n    Replace the keys of `environments` (required with it). The old key of each stops\n    working."
+      },
+      "DeployKeyMadeOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "public_key": {
+            "type": "string",
+            "title": "Public Key"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "made": {
+            "type": "boolean",
+            "title": "Made"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "public_key",
+          "fingerprint",
+          "made"
+        ],
+        "title": "DeployKeyMadeOut",
+        "description": "One environment's deploy key in the answer of a call that makes keys.\n\nParameters\n----------\nenvironment\n    The environment whose secret holds the private half.\npublic_key\n    ``ssh-ed25519 <base64> <comment>``.\nfingerprint\n    ``SHA256:…``.\nmade\n    Whether this call made it; `false` for a key made earlier, listed unchanged."
+      },
+      "DeployKeyOut": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/DeployKeyMadeOut"
+            },
+            "type": "array",
+            "title": "Keys"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped"
+          },
+          "replaced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Replaced"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret",
+          "keys",
+          "skipped",
+          "replaced",
+          "notes"
+        ],
+        "title": "DeployKeyOut",
+        "description": "Response body of a call that makes deploy keys. Never carries a private key.\n\nParameters\n----------\nsecret\n    The secret name every key is stored under; now the repository's credential.\nkeys\n    One per environment the call wrote or found a key in, by environment name.\nskipped\n    Environments without a key where you may not manage secrets: someone who may makes\n    theirs.\nreplaced\n    Environments whose key this call replaced.\nnotes\n    For each replaced key: the old key stops working, replace it at the git host now."
+      },
       "DeployOut": {
         "properties": {
           "id": {
@@ -24727,6 +26188,78 @@
         "title": "FailureOut",
         "description": "Why a task or an attempt failed.\n\nParameters\n----------\ncode\n    A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,\n    `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`,\n    `checks_unfinished`, `query_invalid`, `permission_denied`, `not_found`, `memory`,\n    `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`; `unknown` for a failure\n    recorded before the codes existed\n    (never stored). A client treats a code it does not know like `internal`.\ncause\n    One sentence: what happened. The sentences may be reworded; the codes do not change.\nnext_step\n    One sentence: what to do about it."
       },
+      "GetStartedOut": {
+        "properties": {
+          "audience": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "deployer",
+              "reader",
+              "none"
+            ],
+            "title": "Audience"
+          },
+          "local": {
+            "type": "boolean",
+            "title": "Local"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/GetStartedStepOut"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "hidden": {
+            "type": "boolean",
+            "title": "Hidden"
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "Complete"
+          }
+        },
+        "type": "object",
+        "required": [
+          "audience",
+          "local",
+          "steps",
+          "hidden",
+          "complete"
+        ],
+        "title": "GetStartedOut",
+        "description": "Your Get started list on Home.\n\nParameters\n----------\naudience\n    `admin`, `deployer` (may deploy somewhere), `reader` (has other access) or `none` (no\n    access yet: the interface says to ask an administrator).\nlocal\n    Whether the server runs in local mode (`lakana server start --local`), which leaves out\n    what needs a team: inviting, CI, connecting a repository.\nsteps\n    The rows in order, each with whether it is done; empty for `none`.\nhidden\n    Whether you hid the list.\ncomplete\n    Whether every step is done; the interface then shows the list no more."
+      },
+      "GetStartedStepOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "connect_repository",
+              "invite_team",
+              "add_passkey",
+              "deploy_project",
+              "deploy_project_local",
+              "ci_deploy",
+              "open_table",
+              "run_query"
+            ],
+            "title": "Id"
+          },
+          "done": {
+            "type": "boolean",
+            "title": "Done"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "done"
+        ],
+        "title": "GetStartedStepOut",
+        "description": "One row of Get started.\n\nParameters\n----------\nid\n    The step: `connect_repository`, `invite_team`, `add_passkey`, `deploy_project`,\n    `deploy_project_local`, `ci_deploy`, `open_table` or `run_query`.\ndone\n    Whether the server's state shows it done."
+      },
       "GrantCreate": {
         "properties": {
           "principal": {
@@ -25369,6 +26902,30 @@
         "title": "HistoryOut",
         "description": "What a history write answers: the snapshot and how many versions it opened and closed.\n\nParameters\n----------\nsnapshot_id\n    The committed snapshot; `None` when the rows matched the open versions already.\nversions_opened\n    New versions: a key seen for the first time, or a key with changed values.\nversions_closed\n    Ended versions: a key with changed values, or a key the rows lack (`close_missing`).\nclosed_missing\n    The part of `versions_closed` that ended because the key is gone from the rows.\ncreated\n    `True` when this write created the table (`expected_snapshot_id=none`)."
       },
+      "HostKeyOut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "line": {
+            "type": "string",
+            "title": "Line"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "fingerprint",
+          "line"
+        ],
+        "title": "HostKeyOut",
+        "description": "One SSH host key a check found.\n\nParameters\n----------\ntype\n    The key type, e.g. ``ssh-ed25519``.\nfingerprint\n    ``SHA256:…``, as `ssh-keygen -l` prints it: compare it with the git host's published\n    fingerprints.\nline\n    The known_hosts line for the repository's `ssh_known_hosts`."
+      },
       "ImpactUseOut": {
         "properties": {
           "kind": {
@@ -25446,6 +27003,122 @@
         ],
         "title": "InfoOut",
         "description": "Response body for `GET /api/v1/info`.\n\nParameters\n----------\nversion\n    The platform version the server runs. A project's `lakana[assets]` pin must be\n    compatible with it.\nartifact_limits\n    The artifact limits the operator set, so a client can check a tree against them before\n    it sends a byte. An older server does not send it.\nupload_max_bytes\n    The largest Arrow body one append, replace, merge or load may send\n    (`LAKANA_APPEND__MAX_BYTES`), so `lakana load` can refuse a file before it reads or\n    sends it. An older server does not send it."
+      },
+      "InstanceStatusOut": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "causes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Causes"
+          },
+          "workers_alive": {
+            "type": "integer",
+            "title": "Workers Alive"
+          },
+          "workers_total": {
+            "type": "integer",
+            "title": "Workers Total"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatusDetailOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "causes",
+          "workers_alive",
+          "workers_total",
+          "detail"
+        ],
+        "title": "InstanceStatusOut",
+        "description": "Whether the instance works, as the caller may see it.\n\nParameters\n----------\nstate\n    `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).\ncauses\n    Why, in this order: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`.\n    A caller who may not manage environments on the instance sees only `no_worker` and\n    `worker_lost`; a failed database or storage still makes their state `down`.\nworkers_alive\n    The workers whose heartbeat is younger than the lease.\nworkers_total\n    Every registered worker, alive and lost, except lost ones a restart on their host\n    replaced.\ndetail\n    Compute, memory and the workers; `null` unless the caller may manage environments on\n    the instance."
+      },
+      "InterfaceStateIn": {
+        "properties": {
+          "tour_seen": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tour Seen"
+          },
+          "get_started_hidden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Get Started Hidden"
+          },
+          "update_note_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Note Seen"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InterfaceStateIn",
+        "description": "Request body that changes what the web interface remembers for you.\n\nEvery field is optional: a field left out stays as it is. A refused request changes\nnothing, so send `tour_seen` on its own whenever `update_note_seen` might be refused.\n\nParameters\n----------\ntour_seen\n    `true` once you finished or skipped the tour, `false` to see it again.\nget_started_hidden\n    `true` to hide Get started, `false` to show it again.\nupdate_note_seen\n    The release whose update note you saw, as `x.y.z` (for example `0.23.0`); a development\n    build's version is refused (422). `null` clears it."
+      },
+      "InterfaceStateOut": {
+        "properties": {
+          "tour_seen": {
+            "type": "boolean",
+            "title": "Tour Seen"
+          },
+          "get_started_hidden": {
+            "type": "boolean",
+            "title": "Get Started Hidden"
+          },
+          "update_note_seen": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Note Seen"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tour_seen",
+          "get_started_hidden",
+          "update_note_seen"
+        ],
+        "title": "InterfaceStateOut",
+        "description": "What the web interface remembers for you.\n\nParameters\n----------\ntour_seen\n    Whether you finished or skipped the tour; `false` until then, so it shows on your next\n    sign-in.\nget_started_hidden\n    Whether you hid Get started on Home.\nupdate_note_seen\n    The last release whose update note you saw (`x.y.z`), or `null`."
       },
       "InviteIn": {
         "properties": {
@@ -27265,6 +28938,20 @@
         "title": "PermissionsOut",
         "description": "A principal's effective permissions on one object.\n\nParameters\n----------\nprincipal\n    The principal's name.\nactive\n    Whether it may sign in.\nscope\n    The object asked about.\npermissions\n    One per action the routes ask for on an object of this kind.\nnote\n    Set for a deactivated principal: its tokens no longer work, whatever its grants allow."
       },
+      "PictureOut": {
+        "properties": {
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "etag"
+        ],
+        "title": "PictureOut",
+        "description": "Response body for `PUT /api/v1/principals/{name}/picture`.\n\nParameters\n----------\netag\n    The stored picture's etag: the SHA-256 of the re-encoded WebP, in hex."
+      },
       "PolicyWarningOut": {
         "properties": {
           "kind": {
@@ -27336,6 +29023,17 @@
           "is_active": {
             "type": "boolean",
             "title": "Is Active"
+          },
+          "picture": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picture"
           }
         },
         "type": "object",
@@ -27345,7 +29043,7 @@
           "is_active"
         ],
         "title": "PrincipalOut",
-        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate."
+        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does."
       },
       "ProfileIn": {
         "properties": {
@@ -27810,6 +29508,74 @@
         "title": "ReaderOut",
         "description": "A principal's use of a table over the window.\n\nParameters\n----------\nprincipal\n    The principal's name.\nread_count\n    How many of its succeeded queries named the table.\nlast_read_at\n    When the last of them completed."
       },
+      "RecentIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "table",
+              "query",
+              "job",
+              "run"
+            ],
+            "title": "Kind"
+          },
+          "environment": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Environment"
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 1024,
+            "title": "Ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "environment",
+          "ref"
+        ],
+        "title": "RecentIn",
+        "description": "Request body that records that you opened an object.\n\nParameters\n----------\nkind\n    `table`, `query`, `job` or `run`.\nenvironment\n    The object's environment.\nref\n    The object: a dotted table name (`gold.sales`), a query's or a run's id, or\n    `repository/job`."
+      },
+      "RecentOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "table",
+              "query",
+              "job",
+              "run"
+            ],
+            "title": "Kind"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Opened At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "environment",
+          "ref",
+          "opened_at"
+        ],
+        "title": "RecentOut",
+        "description": "One object you opened recently.\n\nParameters\n----------\nkind\n    `table`, `query`, `job` or `run`.\nenvironment\n    The object's environment.\nref\n    The object, as it was recorded.\nopened_at\n    When you last opened it."
+      },
       "RecoveryLinkOut": {
         "properties": {
           "id": {
@@ -27997,6 +29763,30 @@
         "title": "RepositoryCreate",
         "description": "Request body for registering a repository.\n\nParameters\n----------\nname\n    Unique name; no dots.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    ``https://…``, ``ssh://…``, ``[user@]host:path``, or an absolute path.\ncredential_secret\n    Secret name resolved in the target environment at deploy time.\ncredential_username\n    HTTPS username; default ``oauth2``.\nssh_known_hosts\n    ``known_hosts`` lines; required for ``ssh``.\ndefault_ref\n    Ref deployed when none is given."
       },
+      "RepositoryDeployKeyOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "public_key": {
+            "type": "string",
+            "title": "Public Key"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "public_key",
+          "fingerprint"
+        ],
+        "title": "RepositoryDeployKeyOut",
+        "description": "The public half of one environment's deploy key.\n\nParameters\n----------\nenvironment\n    The environment whose secret holds the private half.\npublic_key\n    ``ssh-ed25519 <base64> <comment>``: add it at the git host as a read-only deploy key.\nfingerprint\n    ``SHA256:…``, as `ssh-keygen -l` and the git host show it."
+      },
       "RepositoryOut": {
         "properties": {
           "id": {
@@ -28081,6 +29871,14 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "deploy_keys": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryDeployKeyOut"
+            },
+            "type": "array",
+            "title": "Deploy Keys",
+            "default": []
           }
         },
         "type": "object",
@@ -28098,7 +29896,145 @@
           "updated_at"
         ],
         "title": "RepositoryOut",
-        "description": "Response body for a repository. Carries a secret's name, never a value.\n\nParameters\n----------\nid\n    The repository's id.\nname\n    Its name.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    Its URL.\ncredential_secret\n    The bound secret's name.\ncredential_username\n    HTTPS username, or `None` for ``oauth2``.\nssh_known_hosts\n    Trusted host keys.\ndefault_ref\n    Default ref.\ncreated_by\n    Who registered it.\ncreated_at\n    When.\nupdated_at\n    Last change."
+        "description": "Response body for a repository. Carries a secret's name, never a value.\n\nParameters\n----------\nid\n    The repository's id.\nname\n    Its name.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    Its URL.\ncredential_secret\n    The bound secret's name.\ncredential_username\n    HTTPS username, or `None` for ``oauth2``.\nssh_known_hosts\n    Trusted host keys.\ndefault_ref\n    Default ref.\ncreated_by\n    Who registered it.\ncreated_at\n    When.\nupdated_at\n    Last change.\ndeploy_keys\n    The public deploy keys Lakana made for it, one per environment you may read, to add at\n    the git host; empty when it names no such key. Never a private key."
+      },
+      "RepositoryProbeIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "host_keys",
+              "access"
+            ],
+            "title": "Kind"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "RepositoryProbeIn",
+        "description": "Request body that queues a repository check; a worker runs it.\n\nSend exactly the fields of its kind: ``host_keys`` takes `url`; ``access`` takes\n`repository` and `environment`.\n\nParameters\n----------\nkind\n    ``host_keys`` fetches the SSH host keys of the URL's host; ``access`` tests that a\n    worker can read a registered repository with an environment's credential.\nurl\n    The SSH repository URL whose host is scanned (``host_keys`` only).\nrepository\n    The registered repository's name (``access`` only).\nenvironment\n    The environment whose secret of the repository's credential is used (``access`` only)."
+      },
+      "RepositoryProbeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "host_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HostKeyOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Keys"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "outcome",
+          "message",
+          "host_keys",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "RepositoryProbeOut",
+        "description": "Response body for a repository check.\n\nParameters\n----------\nid\n    The check's id.\nkind\n    ``host_keys`` or ``access``.\nstate\n    ``queued``, ``running`` or ``done``.\noutcome\n    What it found once ``done``: ``ok``, ``host_key_changed``, ``host_key_unknown``,\n    ``auth_refused``, ``not_found``, ``unreachable``, ``refused_address``, ``timeout``,\n    ``no_worker`` or ``failed``; `null` before.\nmessage\n    What it found, with the next step; `null` before it is done.\nhost_keys\n    The keys of a ``host_keys`` check that found some; `null` otherwise.\ncreated_at\n    When it was requested.\nfinished_at\n    When it was done; `null` before."
       },
       "RepositoryUpdate": {
         "properties": {
@@ -29364,6 +31300,50 @@
         ],
         "title": "SignInSettingsOut",
         "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_minutes\n    How long a session lasts at most, in minutes.\nbounds\n    The limits both may be chosen between."
+      },
+      "StatusDetailOut": {
+        "properties": {
+          "slots_busy": {
+            "type": "integer",
+            "title": "Slots Busy"
+          },
+          "slots_total": {
+            "type": "integer",
+            "title": "Slots Total"
+          },
+          "memory_used_bytes": {
+            "type": "integer",
+            "title": "Memory Used Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerOut"
+            },
+            "type": "array",
+            "title": "Workers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slots_busy",
+          "slots_total",
+          "memory_used_bytes",
+          "memory_limit_bytes",
+          "workers"
+        ],
+        "title": "StatusDetailOut",
+        "description": "What an administrator sees of the instance beyond its state.\n\nParameters\n----------\nslots_busy\n    The busy task slots of the alive workers: an `all` worker has two (one for ad-hoc\n    queries, one for pipeline tasks and deploys), an `interactive` or `pipeline` one has one.\nslots_total\n    All task slots of the alive workers.\nmemory_used_bytes\n    The memory the alive workers last reported, added up.\nmemory_limit_bytes\n    Their limits, added up; `null` when an alive worker reports no limit or none is alive.\nworkers\n    Every registered worker, as `GET /api/v1/workers` lists them."
       },
       "StepUpOut": {
         "properties": {
@@ -31346,6 +33326,22 @@
             "type": "boolean",
             "title": "Has Access",
             "default": false
+          },
+          "may_deploy": {
+            "type": "boolean",
+            "title": "May Deploy",
+            "default": false
+          },
+          "picture": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picture"
           }
         },
         "type": "object",
@@ -31355,7 +33351,142 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\npicture\n    The etag of your profile picture, or `null` without one."
+      },
+      "WorkEnvironmentOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "last_deploy_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Deploy Status"
+          },
+          "last_deploy_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Deploy At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "last_deploy_status",
+          "last_deploy_at"
+        ],
+        "title": "WorkEnvironmentOut",
+        "description": "Where one of your repositories is deployed.\n\nParameters\n----------\nenvironment\n    The environment's name.\nlast_deploy_status\n    How the newest deploy there ended: `queued`, `running`, `succeeded` or `failed`;\n    `null` when no deploy run is recorded.\nlast_deploy_at\n    When that deploy ended, or was requested while it has not."
+      },
+      "WorkJobOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "job": {
+            "type": "string",
+            "title": "Job"
+          },
+          "last_run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run Status"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "repository",
+          "job",
+          "last_run_status",
+          "last_run_at"
+        ],
+        "title": "WorkJobOut",
+        "description": "A job of one of your repositories.\n\nParameters\n----------\nenvironment\n    The environment's name.\nrepository\n    The repository's name.\njob\n    The job's name.\nlast_run_status\n    The state of its newest run; `null` before the first.\nlast_run_at\n    When that run was started."
+      },
+      "WorkOut": {
+        "properties": {
+          "repositories": {
+            "items": {
+              "$ref": "#/components/schemas/WorkRepositoryOut"
+            },
+            "type": "array",
+            "title": "Repositories"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/WorkJobOut"
+            },
+            "type": "array",
+            "title": "Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repositories",
+          "jobs"
+        ],
+        "title": "WorkOut",
+        "description": "Your work on Home: only for people who may deploy somewhere.\n\nParameters\n----------\nrepositories\n    At most 20, the most recently deployed (else created) first.\njobs\n    At most 20 of their jobs, the most recently run first."
+      },
+      "WorkRepositoryOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/WorkEnvironmentOut"
+            },
+            "type": "array",
+            "title": "Environments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "environments"
+        ],
+        "title": "WorkRepositoryOut",
+        "description": "A repository you created or deployed.\n\nParameters\n----------\nname\n    The repository's name.\nenvironments\n    The environments you may read where it is deployed, by name."
       },
       "WorkerCachesOut": {
         "properties": {
@@ -31391,6 +33522,38 @@
         ],
         "title": "WorkerCachesOut",
         "description": "The sizes of a worker's caches, as it last measured them.\n\nParameters\n----------\nenvironments_bytes\n    The Python environments of projects.\npackages_bytes\n    uv's package download cache, without the files it shares with an environment.\ntasks_bytes\n    The working directories of Python tasks.\ncomplete\n    `false` when the measurement stopped at its time limit: the figures are a floor.\nmeasured_at\n    When the worker stored them."
+      },
+      "WorkerMemoryOut": {
+        "properties": {
+          "used_bytes": {
+            "type": "integer",
+            "title": "Used Bytes"
+          },
+          "limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Bytes"
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "used_bytes",
+          "limit_bytes",
+          "measured_at"
+        ],
+        "title": "WorkerMemoryOut",
+        "description": "The memory a worker last reported.\n\nParameters\n----------\nused_bytes\n    The resident memory of the worker and of every process it started.\nlimit_bytes\n    Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `null` when it has none.\nmeasured_at\n    When the worker last wrote the figures, not when it last measured: it writes them with a\n    heartbeat only once they moved by 1 MiB or more, so steady use keeps an old time."
       },
       "WorkerOut": {
         "properties": {
@@ -31466,6 +33629,21 @@
                 "type": "null"
               }
             ]
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkerMemoryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replaced": {
+            "type": "boolean",
+            "title": "Replaced",
+            "default": false
           }
         },
         "type": "object",
@@ -31482,7 +33660,7 @@
           "task_run_id"
         ],
         "title": "WorkerOut",
-        "description": "A registered worker.\n\nParameters\n----------\nid\n    The worker's id.\nhost\n    Its host name.\nversion\n    The Lakana version it runs.\nstarted_at\n    When it registered.\nheartbeat_at\n    Its last heartbeat.\nstatus\n    `alive` (heartbeat younger than the lease) or `lost`.\ntakes\n    The work it takes: `all`, `interactive` (ad-hoc queries) or `pipeline` (deploys, pipeline\n    tasks and table maintenance).\nquery_run_id\n    Its oldest running query, if any.\ndeploy_run_id\n    Its oldest running deploy, if any.\ntask_run_id\n    The running task whose lease it holds, if any.\ncaches\n    The sizes of its caches; `null` before its first measurement."
+        "description": "A registered worker.\n\nParameters\n----------\nid\n    The worker's id.\nhost\n    Its host name.\nversion\n    The Lakana version it runs.\nstarted_at\n    When it registered.\nheartbeat_at\n    Its last heartbeat.\nstatus\n    `alive` (heartbeat younger than the lease) or `lost`.\ntakes\n    The work it takes: `all`, `interactive` (ad-hoc queries) or `pipeline` (deploys, pipeline\n    tasks and table maintenance).\nquery_run_id\n    Its oldest running query, if any.\ndeploy_run_id\n    Its oldest running deploy, if any.\ntask_run_id\n    The running task whose lease it holds, if any.\ncaches\n    The sizes of its caches; `null` before its first measurement.\nmemory\n    The memory it last reported; `null` before its first report and for a worker without\n    a memory limit.\nreplaced\n    `true` for a lost worker that a worker restarted on the same host replaced (it started\n    after this one's last heartbeat); such a row does not count as a worker that is down."
       },
       "WriteTargetIn": {
         "properties": {

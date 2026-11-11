@@ -55,6 +55,14 @@ from lakana_core.models.check_result import CheckOutcome, CheckResult, RollbackO
 from lakana_core.models.job import JobFire, JobSchedule
 from lakana_core.models.notification import NotificationDelivery, NotificationState
 from lakana_core.models.worker import Worker
+from lakana_core.models.interface_state import InterfaceState, RecentOpen
+from lakana_core.models.profile_picture import ProfilePicture
+from lakana_core.models.repository_probe import (
+    ProbeOutcome,
+    RepositoryProbe,
+    RepositoryProbeKind,
+    RepositoryProbeState,
+)
 from lakana_core.models.sign_in import (
     BrowserSession,
     InstanceSetting,
@@ -116,6 +124,7 @@ __all__ = [
     "GroupMembership",
     "IncrementalFileRead",
     "InstanceSetting",
+    "InterfaceState",
     "JobFire",
     "JobSchedule",
     "JobVersion",
@@ -128,11 +137,17 @@ __all__ = [
     "PersonalAccessToken",
     "Principal",
     "PrincipalType",
+    "ProbeOutcome",
+    "ProfilePicture",
     "QueryErrorCause",
     "QueryRun",
     "QueryRunStatus",
+    "RecentOpen",
     "Repository",
     "RepositoryKind",
+    "RepositoryProbe",
+    "RepositoryProbeKind",
+    "RepositoryProbeState",
     "RollbackOutcome",
     "RowFilter",
     "Run",

@@ -31,11 +31,15 @@ from lakana_core.connections.service import ConnectionService
 from lakana_core.errors import AuthenticationError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
+from lakana_core.home.attention import AttentionService
+from lakana_core.home.recent import RecentService
 from lakana_core.identity.groups import GroupService
+from lakana_core.identity.interface_state import InterfaceStateService
 from lakana_core.identity.links import LinkService
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.passkeys import PasskeyService, needs_passkey
 from lakana_core.identity.pats import PatService
+from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService, utc_now
 from lakana_core.identity.task_tokens import TaskTokenService
@@ -44,8 +48,10 @@ from lakana_core.jobs.service import JobService
 from lakana_core.models import AuditEventType
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.row_filters import RowFilterService
+from lakana_core.projects.deploy_keys import DeployKeyService
 from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.package_indexes import PackageIndexService
+from lakana_core.projects.probes import RepositoryProbeService
 from lakana_core.projects.repositories import RepositoryService
 from lakana_core.projects.run_policy import RunCaps
 from lakana_core.runs.service import RunService
@@ -1072,6 +1078,95 @@ def get_principal_service(
     return PrincipalService(session, authz)
 
 
+def get_interface_state_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> InterfaceStateService:
+    """Build an InterfaceStateService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    InterfaceStateService
+        The service for the caller's own interface state.
+    """
+    return InterfaceStateService(session, authz)
+
+
+def get_picture_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> PictureService:
+    """Build a PictureService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    PictureService
+        The service for profile pictures.
+    """
+    return PictureService(session, authz)
+
+
+def get_recent_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> RecentService:
+    """Build a RecentService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service, asked with `permits` only.
+
+    Returns
+    -------
+    RecentService
+        The service for the caller's recently opened list.
+    """
+    return RecentService(session, authz)
+
+
+def get_attention_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> AttentionService:
+    """Build an AttentionService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, for the run lease (`LAKANA_RUN__LEASE_SECONDS`).
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service, asked with `permits` only.
+
+    Returns
+    -------
+    AttentionService
+        The service for the caller's Needs your attention.
+    """
+    return AttentionService(
+        session, authz, lease_seconds=request.app.state.settings.run.lease_seconds
+    )
+
+
 def get_group_service(
     session: Session = Depends(get_session),
     authz: AuthorizationService = Depends(get_grant_authorization),
@@ -1318,6 +1413,32 @@ def get_lineage_service(
     return LineageService(session, authz)
 
 
+def get_repository_probe_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> RepositoryProbeService:
+    """Build a RepositoryProbeService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, for the worker lease (`LAKANA_RUN__LEASE_SECONDS`).
+    session
+        The current request's database session.
+    authz
+        The real, auditing-wrapped authorization service.
+
+    Returns
+    -------
+    RepositoryProbeService
+        The service.
+    """
+    return RepositoryProbeService(
+        session, authz, lease_seconds=request.app.state.settings.run.lease_seconds
+    )
+
+
 def get_repository_service(
     request: Request,
     session: Session = Depends(get_session),
@@ -1340,6 +1461,30 @@ def get_repository_service(
         A service confined to the configured repo roots.
     """
     return RepositoryService(session, authz, repo_roots=request.app.state.settings.repo_roots)
+
+
+def get_deploy_key_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+    key_provider: KeyProvider = Depends(get_key_provider),
+) -> DeployKeyService:
+    """Build a DeployKeyService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, auditing-wrapped authorization service.
+    key_provider
+        Wraps the data key of each new deploy key's secret.
+
+    Returns
+    -------
+    DeployKeyService
+        The service.
+    """
+    return DeployKeyService(session, authz, key_provider)
 
 
 def get_package_index_service(

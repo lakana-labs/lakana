@@ -139,6 +139,9 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "repo show": ("repositories.get",),
     "repo update": ("repositories.update",),
     "repo remove": ("repositories.delete",),
+    "repo host-keys": ("repositories.host_keys", "repositories.probe"),
+    "repo test": ("repositories.test_access", "repositories.probe"),
+    "repo deploy-key": ("repositories.deploy_key",),
     "index add": ("package_indexes.create",),
     "index list": ("package_indexes.list",),
     "index show": ("package_indexes.get",),
@@ -179,6 +182,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "check rows": ("checks.rows", "query_run.wait", "query_run.result"),
     "scheduler status": ("scheduler.status",),
     "worker list": ("workers.list",),
+    "status": ("client.status",),
     "audit list": ("audit_events.list", "audit_events.iter"),
 }
 

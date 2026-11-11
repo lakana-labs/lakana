@@ -22,7 +22,7 @@ instance administrator overrides it ([Changes outside the file](access-file.md#c
 | Principals | `lakana principal list` | `GET /api/v1/principals` | `MANAGE_PRINCIPAL` on the instance |
 | Groups | `lakana group list` | `GET /api/v1/groups` | the `ADMIN` role on the instance |
 
-A refusal is `403` and is recorded in the audit log, like every other refusal.
+A refusal of these reads is `403` and is recorded in the audit log.
 
 ## Grants
 

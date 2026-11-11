@@ -189,6 +189,29 @@ def test_the_scope_narrows_and_never_widens(session: Session, world: CiWorld) ->
         GrantAuthorization(session).authorize(ci, Action.DEPLOY, Securable.environment_scope("dev"))
 
 
+def test_may_deploy_somewhere_for_a_ci_token_is_its_scope_only_and_records_nothing(
+    session: Session, world: CiWorld, ci: PrincipalRef
+) -> None:
+    grants = GrantService(session, _authz(session))
+    before = session.execute(select(AuditEvent.id)).all()
+    assert grants.may_deploy_somewhere(ci) is True  # prod, its scope
+    session.execute(
+        update(Grant).where(Grant.principal_id == world.deployer.id).values(revoked_at=NOW)
+    )
+    GrantService(session, AllowAllAuthorization()).grant(
+        world.admin,
+        principal="deployer",
+        action=Action.DEPLOY,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="dev",
+    )
+    # The person may deploy to dev, but the token is scoped to prod.
+    assert grants.may_deploy_somewhere(world.deployer) is True
+    assert grants.may_deploy_somewhere(ci) is False
+    after = session.execute(select(AuditEvent.id)).all()
+    assert len(after) == len(before) + 1  # only the grant just made (GRANT_CREATED)
+
+
 # -- DeployService.submit ------------------------------------------------------------------
 
 
@@ -592,6 +615,10 @@ _DEPLOY_CHECKS = {
         "the narrowing",
     ),
     "lakana-core/src/lakana_core/ci_oidc/scope.py:ci_refusal": (1, "audits a refusal, no check"),
+    "lakana-core/src/lakana_core/grants/service.py:GrantService.may_deploy_somewhere": (
+        1,
+        "a question, no check; a CI token sees only its own scope",
+    ),
 }
 """Every function in the source tree that names the `DEPLOY` action, by qualified name, with how
 many times it names it, and what a CI token meets there.

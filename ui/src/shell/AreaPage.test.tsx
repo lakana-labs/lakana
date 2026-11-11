@@ -21,17 +21,4 @@ describe("AreaPage", () => {
     expect(screen.getByText("lakana search <words>")).toBeInTheDocument();
     expect(document.title).toBe("Catalog · Lakana");
   });
-
-  it("shows 'You have no access yet; ask an administrator' on an empty Home", () => {
-    const home = visibleAreas(ALL_SHIPPED).find((area) => area.id === "home");
-    if (home === undefined) {
-      throw new Error("the home area is missing");
-    }
-    const { rerender } = render(<AreaPage area={home} noAccessYet />);
-
-    expect(screen.getByText("You have no access yet; ask an administrator.")).toBeInTheDocument();
-
-    rerender(<AreaPage area={home} />);
-    expect(screen.queryByText(/no access yet/)).not.toBeInTheDocument();
-  });
 });

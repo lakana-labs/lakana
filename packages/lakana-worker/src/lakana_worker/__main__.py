@@ -73,6 +73,7 @@ from lakana_worker.poller import WorkerPool, poll_forever
 from lakana_worker.processes import UnsafeDirectory, prepare_private_directory
 from lakana_worker.python_support import PythonSupport, detect, worker_cache_dir
 from lakana_worker.python_tasks import PythonRuntime, token_ttl
+from lakana_worker.repository_probes import RepositoryProbeLoop
 from lakana_worker.runners import DockerRunner, LocalProcessRunner, Runner
 from lakana_worker.scheduler import SchedulerLoop
 from lakana_worker.spill import sweep_spill_directories
@@ -484,7 +485,8 @@ def main() -> None:
     The tokens it mints for those tasks are capped by `LAKANA_TASK_TOKENS__MAX_TTL_SECONDS`.
     Before anything else a watchdog thread starts (`LAKANA_WORKER__MEMORY_LIMIT`, default
     4GB): over the limit the worker records why against what it runs, kills its tasks and exits with
-    `lakana_worker.memory.EXIT_CODE`. While it holds the scheduler role it
+    `lakana_worker.memory.EXIT_CODE`; what it measures goes out with the heartbeat
+    (`lakana status`, Home), nothing without a limit. While it holds the scheduler role it
     also sweeps the artifact store every `LAKANA_RUN__SWEEP_INTERVAL` seconds (expired uploads,
     files and manifest objects no version names) and the table locations (the files of creates
     that never finished, after `LAKANA_TABLES__ABANDONED_GRACE_HOURS` or the end of their run),
@@ -501,7 +503,9 @@ def main() -> None:
     test` queues: under the local runner as a subprocess of the worker's Python, under the Docker
     runner in a container of the task image through the launcher (`DockerCheck`: the runtime's
     launcher client, owner, attempt directory and trust bundle); a drain stops it claiming, and
-    it holds no test then.
+    it holds no test then. A worker that takes pipeline work (`all` or `pipeline`) runs the
+    repository checks (`RepositoryProbeLoop`: host keys and "Test access") on a thread of its
+    own, with the deploy's git settings; a drain stops it claiming too.
     Job notifications are delivered by a thread of their own (`DeliveryLoop`) unless
     `LAKANA_WORKER__NOTIFICATIONS=false`; a drain stops it claiming (it holds no unsent row). A
     worker with no usable secrets master key starts none and says so.
@@ -529,7 +533,7 @@ def main() -> None:
     engine = create_engine(settings.database, lease_seconds=settings.run.lease_seconds)
     session_factory = functools.partial(Session, engine)
     worker_id = make_worker_id(socket.gethostname())
-    start_watchdog(
+    watchdog = start_watchdog(
         settings.worker.memory_limit, session_factory, secrets.SystemRandom().random, worker_id
     )
     sweep_spill_directories()
@@ -608,6 +612,7 @@ def main() -> None:
         lease_seconds=settings.run.lease_seconds,
         takes=settings.worker.takes,
         caches=None if runtime.caches is None else runtime.caches.latest,
+        memory=None if watchdog is None else watchdog.use,
     )
     install_heartbeat(heartbeat.stale)
 
@@ -826,22 +831,32 @@ def main() -> None:
         trust=runtime.venvs.ca_bundle,
     )
     connection_tests_thread = connection_tests.start()
+    deploy = DeploySettings(
+        repo_roots=tuple(settings.repo_roots),
+        caps=RunCaps.from_config(settings.query_limits, settings.run),
+        limits=DeployLimits(statement_chars=settings.query_limits.max_statement_chars),
+        ca_bundle=settings.git.ca_bundle,
+        https_proxy=_secret(settings.git.https_proxy),
+        no_proxy=settings.git.no_proxy,
+        index_url=_secret(settings.run.index_url),
+        python=python,
+    )
+    # Repository checks are pipeline work: the git settings are the deploy's own.
+    probes = (
+        RepositoryProbeLoop(
+            engine, owner=worker_id, key_provider=key_provider, settings=deploy, stop=drain
+        )
+        if settings.worker.takes in ("all", "pipeline")
+        else None
+    )
+    probes_thread = probes.start() if probes is not None else None
     try:
         poll_forever(
             session_factory,
             authorization,
             key_provider,
             limits=settings.query_limits,
-            deploy=DeploySettings(
-                repo_roots=tuple(settings.repo_roots),
-                caps=RunCaps.from_config(settings.query_limits, settings.run),
-                limits=DeployLimits(statement_chars=settings.query_limits.max_statement_chars),
-                ca_bundle=settings.git.ca_bundle,
-                https_proxy=_secret(settings.git.https_proxy),
-                no_proxy=settings.git.no_proxy,
-                index_url=_secret(settings.run.index_url),
-                python=python,
-            ),
+            deploy=deploy,
             engine=run_engine,
             drain=drain,
             maintenance=runtime.maintain,
@@ -868,6 +883,13 @@ def main() -> None:
         connection_tests_thread.join(timeout=join_timeout)
         if connection_tests_thread.is_alive():
             logger.warning("The connection test thread did not stop within %.0f s.", join_timeout)
+        if probes is not None and probes_thread is not None:
+            probes.stop()
+            probes_thread.join(timeout=join_timeout)
+            if probes_thread.is_alive():
+                logger.warning(
+                    "The repository check thread did not stop within %.0f s.", join_timeout
+                )
         heartbeat.stop()
         heartbeat_thread.join(timeout=_SCHEDULER_JOIN_FLOOR_SECONDS)
         heartbeat_ended = not heartbeat_thread.is_alive()

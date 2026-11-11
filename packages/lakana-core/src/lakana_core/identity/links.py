@@ -568,6 +568,46 @@ def _state(row: SignInLink, now: datetime) -> LinkState:
     return "open"
 
 
+def open_links(
+    session: Session,
+    kind: Literal["invite", "recovery"],
+    now: datetime,
+    *,
+    newest: int | None = None,
+) -> list[SignInLink]:
+    """List the open links of one kind, oldest first, with no authorization.
+
+    The caller decides who may see them: `LinkService.list_open` for an administrator, Home's
+    Needs your attention (`lakana_core.home.attention`) for one.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    kind
+        ``invite`` or ``recovery``.
+    now
+        The time a link must expire after.
+    newest
+        Read only this many, the newest; `None` for all.
+
+    Returns
+    -------
+    list of SignInLink
+        Links neither used, withdrawn nor expired.
+    """
+    query = select(SignInLink).where(
+        SignInLink.kind == kind,
+        SignInLink.used_at.is_(None),
+        SignInLink.withdrawn_at.is_(None),
+        SignInLink.expires_at > now,
+    )
+    if newest is not None:
+        query = query.order_by(SignInLink.created_at.desc(), SignInLink.id.desc()).limit(newest)
+        return list(reversed(session.execute(query).scalars().all()))
+    return list(session.execute(query.order_by(SignInLink.created_at, SignInLink.id)).scalars())
+
+
 class LinkService:
     """Issue, describe, use, list and withdraw sign-in links.
 
@@ -1434,18 +1474,7 @@ class LinkService:
             For non-administrators.
         """
         self._require_admin(p)
-        return list(
-            self._session.execute(
-                select(SignInLink)
-                .where(
-                    SignInLink.kind == kind,
-                    SignInLink.used_at.is_(None),
-                    SignInLink.withdrawn_at.is_(None),
-                    SignInLink.expires_at > self._clock(),
-                )
-                .order_by(SignInLink.created_at, SignInLink.id)
-            ).scalars()
-        )
+        return open_links(self._session, kind, self._clock())
 
     def name_of(self, row: SignInLink) -> str:
         """Name the principal a link signs in as.

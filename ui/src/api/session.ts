@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { api, setCsrfToken } from "./client";
+import { forgetPictures } from "./pictures";
 
 /** The browser session, as `GET /api/v1/sign-in/session` answers it. */
 export interface SessionOut {
@@ -28,10 +29,16 @@ export interface SessionOut {
 
 /** What a person may use, as far as the interface's areas go. */
 export interface AccessOut {
+  /** The person's principal name. */
+  readonly name: string;
   /** True for a holder of the ADMIN role on the instance. */
   readonly admin: boolean;
   /** True when the person has no right anywhere yet. */
   readonly noAccessYet: boolean;
+  /** True when the person may deploy in at least one environment (Home shows Your work). */
+  readonly mayDeploy: boolean;
+  /** The etag of the person's profile picture, or null without one. */
+  readonly picture: string | null;
 }
 
 /** A sign-in notice, as `GET /api/v1/sign-in/notices` answers it. */
@@ -48,10 +55,16 @@ export interface NoticeOut {
 
 /** What `GET /api/v1/whoami` answers about access. */
 interface WhoamiOut {
+  /** The caller's principal name. */
+  readonly name: string;
   /** True for a holder of the ADMIN role on the instance. */
   readonly admin: boolean;
   /** True when the person has any grant at all, at any scope. */
   readonly has_access: boolean;
+  /** True when the person may deploy in at least one environment. */
+  readonly may_deploy: boolean;
+  /** The etag of the caller's profile picture, or null without one. */
+  readonly picture: string | null;
 }
 
 /**
@@ -65,12 +78,13 @@ export async function getSession(): Promise<SessionOut> {
   return api.request<SessionOut>("GET", "/api/v1/sign-in/session");
 }
 
-/** Ends this browser's session and forgets its CSRF token, even when the server failed. */
+/** Ends this browser's session; forgets its CSRF token and pictures even if the server failed. */
 export async function signOut(): Promise<void> {
   try {
     await api.request("DELETE", "/api/v1/sign-in/session");
   } finally {
     setCsrfToken(null);
+    forgetPictures();
   }
 }
 
@@ -82,17 +96,25 @@ export async function signOut(): Promise<void> {
 export async function signOutEverywhere(name: string): Promise<void> {
   await api.request("DELETE", `/api/v1/principals/${encodeURIComponent(name)}/sessions`);
   setCsrfToken(null);
+  forgetPictures();
 }
 
 /**
- * Finds out what the signed-in person may use: administrators see Access and Settings, and a
- * person with no grant anywhere is told to ask for one.
+ * Finds out what the signed-in person may use: administrators see Access and Settings, a
+ * person who may deploy sees Your work on Home, and a person with no grant anywhere is told to
+ * ask for one.
  *
  * @returns The access, from `GET /api/v1/whoami`.
  */
 export async function myAccess(): Promise<AccessOut> {
   const me = await api.request<WhoamiOut>("GET", "/api/v1/whoami");
-  return { admin: me.admin, noAccessYet: !me.has_access };
+  return {
+    name: me.name,
+    admin: me.admin,
+    noAccessYet: !me.has_access,
+    mayDeploy: me.may_deploy,
+    picture: me.picture,
+  };
 }
 
 /**

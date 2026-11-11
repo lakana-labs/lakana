@@ -92,6 +92,63 @@ def cache_sizes(row: Worker) -> CacheSizes | None:
     )
 
 
+@dataclass(frozen=True)
+class MemoryUse:
+    """What a worker measured of its memory.
+
+    Parameters
+    ----------
+    used_bytes
+        The resident memory of the worker and of every process it started.
+    limit_bytes
+        Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, or what it derived from its container's);
+        `None` when it has none.
+    """
+
+    used_bytes: int
+    limit_bytes: int | None
+
+
+def _memory_values(memory: MemoryUse, now: datetime) -> dict[str, object]:
+    """Map a memory use to the columns of the worker's row.
+
+    Parameters
+    ----------
+    memory
+        The use.
+    now
+        The database's time, stored as when it was measured.
+
+    Returns
+    -------
+    dict of str to object
+        By attribute name.
+    """
+    return {
+        "memory_used_bytes": memory.used_bytes,
+        "memory_limit_bytes": memory.limit_bytes,
+        "memory_measured_at": now,
+    }
+
+
+def memory_use(row: Worker) -> MemoryUse | None:
+    """Read the memory use a worker stored.
+
+    Parameters
+    ----------
+    row
+        The worker's row.
+
+    Returns
+    -------
+    MemoryUse or None
+        `None` before the worker's first report.
+    """
+    if row.memory_measured_at is None:
+        return None
+    return MemoryUse(used_bytes=row.memory_used_bytes or 0, limit_bytes=row.memory_limit_bytes)
+
+
 def _heartbeat_is_younger_than(cutoff: datetime) -> ColumnElement[bool]:
     """Build the one definition of "alive": the heartbeat is younger than the cutoff.
 
@@ -117,6 +174,7 @@ def register(
     started_at: datetime | None = None,
     takes: str = "all",
     caches: CacheSizes | None = None,
+    memory: MemoryUse | None = None,
 ) -> datetime:
     """Insert the worker's row, or refresh it.
 
@@ -139,6 +197,8 @@ def register(
     caches
         The sizes of its caches, when it has measured them; a refresh without leaves the
         stored ones.
+    memory
+        Its memory use, when it has measured it; a refresh without leaves the stored one.
 
     Returns
     -------
@@ -159,14 +219,22 @@ def register(
         session.add(row)
     else:
         row.host, row.version, row.heartbeat_at, row.takes = host[:255], version[:64], now, takes
-    if caches is not None:
-        for key, value in _cache_values(caches, now).items():
-            setattr(row, key, value)
+    values = {
+        **({} if caches is None else _cache_values(caches, now)),
+        **({} if memory is None else _memory_values(memory, now)),
+    }
+    for key, value in values.items():
+        setattr(row, key, value)
     return row.started_at
 
 
-def beat(session: Session, worker_id: str, caches: CacheSizes | None = None) -> bool:
-    """Set the worker's heartbeat to the database's time, and its cache sizes when given.
+def beat(
+    session: Session,
+    worker_id: str,
+    caches: CacheSizes | None = None,
+    memory: MemoryUse | None = None,
+) -> bool:
+    """Set the worker's heartbeat to the database's time, and its caches and memory when given.
 
     The time is read in the same transaction and bound, the way a task lease is renewed, not
     written as `CURRENT_TIMESTAMP`: SQLite's is text without a fraction.
@@ -179,6 +247,8 @@ def beat(session: Session, worker_id: str, caches: CacheSizes | None = None) -> 
         The worker's id.
     caches
         The sizes of its caches it measured since its last beat; `None` leaves the stored ones.
+    memory
+        Its memory use, when it changed enough to be written; `None` leaves the stored one.
 
     Returns
     -------
@@ -189,7 +259,11 @@ def beat(session: Session, worker_id: str, caches: CacheSizes | None = None) -> 
     result = session.execute(
         update(Worker)
         .where(Worker.id == worker_id)
-        .values(heartbeat_at=now, **({} if caches is None else _cache_values(caches, now)))
+        .values(
+            heartbeat_at=now,
+            **({} if caches is None else _cache_values(caches, now)),
+            **({} if memory is None else _memory_values(memory, now)),
+        )
         .execution_options(synchronize_session=False)
     )
     return rowcount(result) == 1

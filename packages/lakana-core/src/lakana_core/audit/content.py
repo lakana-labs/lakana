@@ -86,6 +86,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "asset",
         "asset_scope",
         "attempt",
+        # the administrator who removed another person's profile picture
+        "by",
         # a change made by hand in a scope an access file manages (`MANAGED_SCOPE_OVERRIDDEN`)
         "change",
         "check",
@@ -116,6 +118,11 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "group",
         "group_id",
         "holder_run_id",
+        # the host and port a repository check reaches (`lakana_core.projects.probes`), never a
+        # credential
+        "host",
+        # the SHA256 fingerprints of the SSH host keys a repository trusts, never a key
+        "host_key_fingerprints",
         "id",
         "issuer",
         "job",
@@ -131,6 +138,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "link_id",
         "location",
         "locations",
+        # a deploy key Lakana made: environment -> fingerprint of the new public key, never a key
+        "made",
         "manifest_sha256",
         "mode",
         "name",
@@ -140,8 +149,10 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "path",
         # the client's address and browser of a sign-in, as the server saw them
         "peer",
+        "port",
         "principal",
         "principal_id",
+        "probe_id",
         "project_version_id",
         "query_id",
         "ref",
@@ -204,6 +215,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "reset",
         "secret_ref_set",
         "shortened",
+        # the environments a deploy key was not made in: their secrets are not the caller's
+        "skipped",
         "state",
         "status",
         "stopped",
@@ -249,6 +262,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "others_shown",
         "presented_count",
         "previous",
+        "previous_credential_secret",
         "previous_days",
         "purge_after",
         "removed",

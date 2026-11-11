@@ -27,6 +27,22 @@ class ValidationError(LakanaError):
     """Input was structurally invalid."""
 
 
+class UnsupportedPicture(ValidationError):
+    """A profile picture was sent as a type Lakana does not read (only JPEG, PNG and WebP).
+
+    Raised by `lakana_core.identity.pictures.reencode_picture` for any other media type,
+    SVG among them, before a byte is decoded. Mapped to 415 by the server.
+    """
+
+
+class NoWorkerError(LakanaError):
+    """No worker is running that could take the job, so queueing it would only make it wait.
+
+    Raised by `lakana_core.projects.probes.RepositoryProbeService` before a repository check is
+    queued. Mapped to 503 by the server.
+    """
+
+
 class PermissionDenied(LakanaError):
     """The principal is not permitted to perform this action."""
 

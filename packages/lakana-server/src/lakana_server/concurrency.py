@@ -10,6 +10,13 @@ elsewhere. `AppendConcurrencyLimiter.try_acquire` never waits.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import uuid
+from collections.abc import AsyncGenerator
+
+from lakana_server.errors import AppendConcurrencyLimitError
+
 
 class AppendConcurrencyLimiter:
     """A non-blocking counting limiter for concurrent governed appends.
@@ -48,3 +55,59 @@ class AppendConcurrencyLimiter:
     def release(self) -> None:
         """Return a slot previously claimed by a successful `try_acquire`."""
         self._available += 1
+
+
+@contextlib.asynccontextmanager
+async def hold_one_per_principal(
+    slots: asyncio.Semaphore,
+    holders: set[uuid.UUID],
+    principal_id: uuid.UUID,
+    *,
+    own_busy: str,
+    all_busy: str,
+) -> AsyncGenerator[None]:
+    """Hold one of a few slots and the caller's place in line, refusing instead of waiting.
+
+    A principal may have one such request at a time, and the request takes a slot before it
+    reads its body: otherwise requests that send a few bytes and stall would hold every slot,
+    a body each and a database connection each for the whole read timeout. The checks and the
+    take have no suspension point between them, so no other request can slip in. The
+    principal's id leaves the set when the block ends, however it ends (a normal end, an
+    exception, a disconnect, cancellation), so the set never holds more ids than there are
+    slots.
+
+    Parameters
+    ----------
+    slots
+        The slots; never waited on.
+    holders
+        The principals holding a slot now.
+    principal_id
+        The authenticated caller.
+    own_busy
+        The message when the caller already holds a slot.
+    all_busy
+        The message when every slot is taken.
+
+    Yields
+    ------
+    None
+        While both holds are taken.
+
+    Raises
+    ------
+    AppendConcurrencyLimitError
+        With `own_busy` or `all_busy` (503, `Retry-After: 1`).
+    """
+    # `locked()` and the acquire below have no suspension point between them, so no other
+    # request can take the slot this one just saw free.
+    if principal_id in holders:
+        raise AppendConcurrencyLimitError(own_busy)
+    if slots.locked():
+        raise AppendConcurrencyLimitError(all_busy)
+    holders.add(principal_id)
+    try:
+        async with slots:
+            yield
+    finally:
+        holders.discard(principal_id)

@@ -1169,7 +1169,7 @@ def test_a_repository_deleted_before_it_is_locked_is_reported_by_name(
     session.commit()
 
     with pytest.raises(NotFoundError, match="No repository named 'r'"):
-        _repositories(session)._lock(repository)
+        _repositories(session).lock(repository)
 
 
 @pytest.mark.parametrize(

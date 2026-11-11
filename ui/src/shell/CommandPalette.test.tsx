@@ -62,7 +62,7 @@ describe("CommandPalette", () => {
     expect(await screen.findByRole("dialog", { name: "Search" })).toBeInTheDocument();
   });
 
-  it("lists one Go-to command per visible area", async () => {
+  it("lists one Go-to command per visible area, then Help's commands", async () => {
     const { user } = await shellAtHome({ access: new Set(["home", "catalog", "access"]) });
 
     await user.keyboard("{Control>}k{/Control}");
@@ -72,7 +72,13 @@ describe("CommandPalette", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Go to Home", "Go to Catalog", "Go to Access"]);
+    ).toEqual([
+      "Go to Home",
+      "Go to Catalog",
+      "Go to Access",
+      "Take the tour again",
+      "Keyboard shortcuts",
+    ]);
     expect(screen.getByRole("searchbox")).toHaveAttribute(
       "placeholder",
       "Go to a place or run a command",
@@ -92,11 +98,13 @@ describe("CommandPalette", () => {
     await user.keyboard("zz");
     expect(screen.queryAllByRole("menuitem", { name: /^Go to/ })).toEqual([]);
     expect(
-      within(screen.getByRole("menu", { name: "Places" })).getByText("Nothing matches “connzz”."),
+      within(screen.getByRole("menu", { name: "Places and commands" })).getByText(
+        "Nothing matches “connzz”.",
+      ),
     ).toBeInTheDocument();
   });
 
-  it("announces how many places match, or that none does", async () => {
+  it("announces how many commands match, or that none does", async () => {
     const { user } = await shellAtHome();
     await user.keyboard("{Control>}k{/Control}");
     const dialog = await screen.findByRole("dialog", { name: "Search" });
@@ -105,19 +113,19 @@ describe("CommandPalette", () => {
     expect(status).toHaveClass("visually-hidden");
 
     await user.keyboard("go");
-    expect(status).toHaveTextContent("7 places");
+    expect(status).toHaveTextContent("7 results");
     await user.keyboard("{Backspace}{Backspace}conn");
-    expect(status).toHaveTextContent("1 place");
+    expect(status).toHaveTextContent("1 result");
     await user.keyboard("zz");
     expect(within(dialog).getByRole("status")).toBe(status);
     expect(status).toHaveTextContent("Nothing matches “connzz”.");
   });
 
-  it("names the list of places apart from the dialog and the field", async () => {
+  it("names the list of commands apart from the dialog and the field", async () => {
     const { user } = await shellAtHome();
     await user.keyboard("{Control>}k{/Control}");
 
-    expect(await screen.findByRole("menu", { name: "Places" })).toBeInTheDocument();
+    expect(await screen.findByRole("menu", { name: "Places and commands" })).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search" })).toBeInTheDocument();
   });
 
@@ -149,6 +157,6 @@ describe("CommandPalette", () => {
     await user.click(screen.getByRole("button", { name: "Search" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Search" });
-    expect(within(dialog).getAllByRole("menuitem")).toHaveLength(7);
+    expect(within(dialog).getAllByRole("menuitem")).toHaveLength(9);
   });
 });

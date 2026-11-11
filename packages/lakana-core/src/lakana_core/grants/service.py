@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
+from lakana_core.auth import (
+    Action,
+    AuthorizationService,
+    PrincipalRef,
+    Securable,
+    SecurableKind,
+    permits_each,
+)
 from lakana_core.catalog.identity import namespace_exists, resolve_environment_id, resolve_table_id
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.grants.admin import (
@@ -23,7 +30,9 @@ from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
+    LIVE_ENVIRONMENT,
     AuditEventType,
+    Environment,
     Grant,
     Group,
     GroupMembership,
@@ -567,6 +576,27 @@ class GrantService:
             )
         )
         return bool(self._session.execute(query).scalar())
+
+    def may_deploy_somewhere(self, p: PrincipalRef) -> bool:
+        """Say whether the caller may deploy in at least one environment.
+
+        About the caller only, so it needs no authorization; asked with `permits`, so it records
+        nothing. The web interface shows the deploy steps and Your work from it.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        bool
+            Whether `permits(DEPLOY)` holds on any environment that is not deleted; `False`
+            without one.
+        """
+        names = self._session.execute(select(Environment.name).where(LIVE_ENVIRONMENT)).scalars()
+        questions = [(Action.DEPLOY, Securable.environment_scope(name)) for name in names]
+        return any(permits_each(self._authz, p, questions))
 
     def explain(self, p: PrincipalRef, principal_name: str, scope: Securable) -> PermissionReport:
         """Say what a principal may do on an object, and through which grant or group.

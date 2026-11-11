@@ -1,5 +1,5 @@
 /**
- * The sidebar: the mark and the product name, Search, the areas in words and the user menu.
+ * The sidebar: the mark and the product name, Search, the areas in words, Help and the user menu.
  *
  * @packageDocumentation
  */
@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
 
 import type { ShippedArea } from "./areas";
+import { HelpMenu } from "./HelpMenu";
 import { LakanaMark } from "./LakanaMark";
 import { shortcutLabel } from "./shortcut";
 import { UserMenu } from "./UserMenu";
@@ -19,6 +20,8 @@ export interface SidebarProps {
   readonly areas: readonly ShippedArea[];
   /** Opens the command palette. */
   readonly onSearch: () => void;
+  /** Opens the keyboard shortcuts (Help). */
+  readonly onShortcuts: () => void;
 }
 
 /**
@@ -37,15 +40,16 @@ function isCurrent(area: ShippedArea, pathname: string): boolean {
 
 /**
  * Renders the sidebar. Below 640 px it folds into a bar with the product name and a Menu button
- * that shows the same search, area list and user menu (WCAG 1.4.10, reflow at 320 px). The current area is marked with `aria-current="page"`, an accent bar
+ * that shows the same search, area list, Help and user menu (WCAG 1.4.10, reflow at 320 px). The current area is marked with `aria-current="page"`, an accent bar
  * and a heavier weight, never by colour alone.
  *
- * @param props - The areas and the search action.
+ * @param props - The areas, the search action and the shortcuts action.
  * @param props.areas - The areas the user sees.
  * @param props.onSearch - Opens the command palette.
+ * @param props.onShortcuts - Opens the keyboard shortcuts.
  * @returns The sidebar as the page's banner.
  */
-export function Sidebar({ areas, onSearch }: SidebarProps): JSX.Element {
+export function Sidebar({ areas, onSearch, onShortcuts }: SidebarProps): JSX.Element {
   const { t } = useTranslation();
   const { pathname } = useLocation();
   const groups = [
@@ -104,6 +108,7 @@ export function Sidebar({ areas, onSearch }: SidebarProps): JSX.Element {
           type="button"
           onClick={onSearch}
           aria-keyshortcuts="Control+K Meta+K"
+          data-tour="search"
         >
           <span>{t("shell.search")}</span>
           <kbd aria-hidden="true">{t(`shell.searchShortcut.${shortcutLabel(navigator)}`)}</kbd>
@@ -115,6 +120,7 @@ export function Sidebar({ areas, onSearch }: SidebarProps): JSX.Element {
                 <li key={area.id}>
                   <Link
                     className="sidebar-link"
+                    data-tour={area.id}
                     href={area.path}
                     aria-current={isCurrent(area, pathname) ? "page" : false}
                   >
@@ -125,6 +131,7 @@ export function Sidebar({ areas, onSearch }: SidebarProps): JSX.Element {
             </ul>
           ))}
         </nav>
+        <HelpMenu onShortcuts={onShortcuts} />
         <UserMenu />
       </div>
     </header>

@@ -555,3 +555,42 @@ def test_a_local_repository_is_refused_when_no_repo_roots_are_configured(
     service = RepositoryService(session, AllowAllAuthorization())
     with pytest.raises(ValidationError, match="LAKANA_REPO_ROOTS is empty"):
         service.create(principal, name="r", kind=RepositoryKind.LOCAL, url=str(tmp_path))
+
+
+_ED25519 = "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR"
+_ED25519_FINGERPRINT = "SHA256:BbeSiQQjnjpybq7nV8S8tEVnQiZNHfceXjKvrLVxecI"
+
+
+def test_repository_creation_audits_the_trusted_fingerprints(
+    session: Session, service: RepositoryService, principal: PrincipalRef
+) -> None:
+    """Creating an ssh repository, and changing its known hosts, record what is trusted."""
+    hosts = (
+        "# fetched with lakana repo host-keys\n"
+        f"github.com ssh-ed25519 {_ED25519}\n"
+        f"@cert-authority *.example.com ssh-ed25519 {_ED25519}\n"
+        "broken ssh-rsa not-base64!\n"
+    )
+    service.create(
+        principal,
+        name="viassh",
+        kind=RepositoryKind.SSH,
+        url="git@github.com:acme/a.git",
+        ssh_known_hosts=hosts,
+    )
+    service.update(principal, "viassh", {"ssh_known_hosts": "h ssh-ed25519 AAAA"})
+    service.update(principal, "viassh", {"default_ref": "main"})
+
+    created, *updated = session.execute(
+        select(AuditEvent)
+        .where(
+            AuditEvent.event_type.in_(
+                [AuditEventType.REPOSITORY_CREATED, AuditEventType.REPOSITORY_UPDATED]
+            )
+        )
+        .order_by(AuditEvent.occurred_at)
+    ).scalars()
+    assert created.detail["host_key_fingerprints"] == [_ED25519_FINGERPRINT]
+    assert len(updated[0].detail["host_key_fingerprints"]) == 1
+    assert updated[0].detail["host_key_fingerprints"] != [_ED25519_FINGERPRINT]
+    assert "host_key_fingerprints" not in updated[1].detail

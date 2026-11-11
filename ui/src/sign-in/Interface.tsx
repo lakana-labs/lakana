@@ -30,8 +30,16 @@ import { SignInPage } from "./SignInPage";
  */
 export type RouterFactory = (routes: RouteObject[], at: string | undefined) => DataRouter;
 
-/** Access for a person whose rights cannot be read: the administration areas stay hidden. */
-const NO_KNOWN_RIGHTS: AccessOut = { admin: false, noAccessYet: false };
+/**
+ * Access for a person whose rights cannot be read: the administration areas and Your work stay
+ * hidden.
+ *
+ * @param name - The person's principal name, from the session.
+ * @returns The access.
+ */
+function noKnownRights(name: string): AccessOut {
+  return { name, admin: false, noAccessYet: false, mayDeploy: false, picture: null };
+}
 
 /**
  * The path a page that sent the browser to sign-in left in the history state.
@@ -127,13 +135,12 @@ function Gate({ ready }: GateProps): JSX.Element {
  */
 function useAccess(session: SessionValue): AccessOut | null {
   const signedIn = session.state === "signed-in" ? session.session : undefined;
-  const key =
-    signedIn === undefined || signedIn.needs_passkey
-      ? null
-      : `${signedIn.name} ${signedIn.absolute_expires_at}`;
+  const live = signedIn === undefined || signedIn.needs_passkey ? null : signedIn;
+  const name = live === null ? null : live.name;
+  const key = live === null ? null : `${live.name} ${live.absolute_expires_at}`;
   const [found, setFound] = useState<{ key: string; access: AccessOut } | null>(null);
   useEffect(() => {
-    if (key === null) {
+    if (key === null || name === null) {
       return;
     }
     myAccess().then(
@@ -141,10 +148,10 @@ function useAccess(session: SessionValue): AccessOut | null {
         setFound({ key, access });
       },
       () => {
-        setFound({ key, access: NO_KNOWN_RIGHTS });
+        setFound({ key, access: noKnownRights(name) });
       },
     );
-  }, [key]);
+  }, [key, name]);
   return found !== null && found.key === key ? found.access : null;
 }
 
@@ -217,7 +224,7 @@ function Routed({ createRouter, pages, link, onLinkDone }: RoutedProps): JSX.Ele
       { path: "/sign-in", element: <SignInRoute link={link} onLinkDone={onLinkDone} /> },
       {
         element: <Gate ready={access !== null} />,
-        children: appRoutes(areasFor(access?.admin === true), pages, access?.noAccessYet === true),
+        children: appRoutes(areasFor(access?.admin === true), pages, access ?? noKnownRights("")),
       },
     ],
     [access, pages, link, onLinkDone],

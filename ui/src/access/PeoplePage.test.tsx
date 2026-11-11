@@ -78,4 +78,39 @@ describe("PeoplePage", () => {
 
     expect(await screen.findByText("Nobody matches.")).toBeInTheDocument();
   });
+
+  it("shows each person's picture, or their initials without one, fetching nothing for them", async () => {
+    const { server } = renderShell("/access", {
+      routes: {
+        "GET /api/v1/principals": {
+          status: 200,
+          body: [
+            { name: "kim.lee", type: "USER", is_active: true, picture: "e1" },
+            { name: "loader", type: "SERVICE", is_active: true, picture: null },
+          ],
+        },
+        "GET /api/v1/principals/kim.lee/picture": {
+          status: 200,
+          blob: new Blob(["webp"], { type: "image/webp" }),
+        },
+      },
+    });
+
+    const rows = (await screen.findAllByRole("row")).slice(1);
+    await waitFor(() => {
+      expect(rows[0]?.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
+    });
+    expect(rows[1]?.querySelector("img")).toBeNull();
+    expect(within(rows[1] as HTMLElement).getByText("L")).toHaveAttribute("aria-hidden", "true");
+    // The picture is decorative beside the name: the link is named by the name alone.
+    expect(within(rows[0] as HTMLElement).getByRole("link", { name: "kim.lee" })).toBeVisible();
+    expect(server.sent.filter((request) => request.path.endsWith("/picture"))).toHaveLength(1);
+    // The picture stands beside both lines, so the second line starts under the name.
+    const cell = rows[1]?.querySelector(".person-cell");
+    expect([...(cell?.children ?? [])].map((child) => child.className)).toEqual([
+      "avatar avatar-24",
+      "row-name",
+      "second",
+    ]);
+  });
 });

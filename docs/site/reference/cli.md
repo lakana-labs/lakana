@@ -164,6 +164,16 @@ Run REPO's deployed project version; exit 0 on success, 1 otherwise, 7 if one is
 | `--no-wait` | flag | off | Print the run id and exit. |
 | `--timeout` | number | none | Seconds to wait. |
 
+## `lakana status`
+
+Usage: `lakana status [OPTIONS]`
+
+Show whether the instance is healthy, degraded or down, and why.
+
+Prints one line: Healthy, Degraded or Down, and a sentence that says why. An administrator (who may manage environments on the instance) also sees the busy task slots, the workers' memory against their limits, and the workers as lakana worker list shows them. Degraded means work gets done, slower or at risk; Down means nothing gets done.
+
+Exit code: 0 for Healthy and for Degraded, 12 for Down (also with --output json), so a script can branch on it. While the catalog database is down the command cannot check who you are and fails with the server's error (exit code 11); the address /readyz still answers then.
+
 ## `lakana search`
 
 Usage: `lakana search [OPTIONS] {TEXT}`
@@ -1846,6 +1856,49 @@ Delete repository NAME and its deploy history.
 | `NAME` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
 
+### `lakana repo host-keys`
+
+Usage: `lakana repo host-keys [OPTIONS] {url}`
+
+Fetch the SSH host keys of URL's host and print their fingerprints.
+
+A worker connects to the host (the server never does); the command waits up to 60 seconds. Compare each fingerprint with your git host's published fingerprints before you trust a key. Exits 1 unless the worker found keys.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `URL` | text | required |  |
+| `--save` | path | none | Write the known_hosts line of the strongest key (ssh-ed25519 when offered) to FILE, for `repo add --known-hosts-file`. |
+| `--type` | text, repeatable | none | With --save: write this key type instead (repeatable), e.g. ssh-rsa. |
+| `--force` | flag | off | With --save: replace FILE if it already exists. |
+
+### `lakana repo test`
+
+Usage: `lakana repo test [OPTIONS] {name}`
+
+Test that a worker can read repository NAME with ENV's credential.
+
+The worker runs `git ls-remote` with the repository's known hosts and ENV's secret, as a deploy would, and fetches nothing. Prints ``ok: …`` or ``<outcome>: …`` with what to do next; exits 1 unless the outcome is ``ok``. Waits up to 120 seconds.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--env` | text | none | Environment (default: the profile's). |
+
+### `lakana repo deploy-key`
+
+Usage: `lakana repo deploy-key [OPTIONS] {name}`
+
+Make an SSH deploy key for repository NAME in each environment.
+
+The server makes one key pair per environment and keeps the private key as that environment's secret; it is never shown. The command prints each environment's public key: add each one at your git host as a read-only deploy key. An environment that has a key keeps it unless you name it with --environment and --replace.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--environment`, `--env` | text, repeatable | none | Only this environment (repeatable). Default: every environment you may manage secrets in that has no key yet. |
+| `--replace` | flag | off | Replace the key of each --environment; the old key stops working. |
+| `--secret` | text | none | Secret name for the keys (default: NAME-deploy-key). |
+
 ## `lakana index`
 
 Usage: `lakana index [OPTIONS] COMMAND [ARGS]...`
@@ -2189,7 +2242,7 @@ Usage: `lakana worker list [OPTIONS]`
 
 List the registered workers and what each is doing (admin).
 
-A worker is alive while its heartbeat is recent and lost after that; a lost worker's row stays for an hour, and the query or deploy it held is ended by the scheduler. The column takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys, pipeline tasks and table maintenance). The column caches is the disk its caches take, as it last measured them (hourly).
+A worker is alive while its heartbeat is recent and lost after that; a lost worker's row stays for an hour, and the query or deploy it held is ended by the scheduler; it shows as lost (replaced) once a worker restarted on the same host. The column takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys, pipeline tasks and table maintenance). The column memory is the memory it last reported against its limit (LAKANA_WORKER__MEMORY_LIMIT). The column caches is the disk its caches take, as it last measured them (hourly).
 
 ## `lakana term`
 

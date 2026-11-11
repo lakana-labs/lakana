@@ -17,7 +17,7 @@ from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.runs.check_rows import submit_check_rows
 from lakana_core.runs.checks import CheckResultView
 from lakana_core.runs.selection import Selection
-from lakana_core.runs.service import RunService, RunView, TaskLogView, TaskRunView
+from lakana_core.runs.service import RunService, RunView, TaskLogView, TaskRunView, WorkerView
 from lakana_server.api.platform.listing import set_next_cursor, split_values
 from lakana_server.api.platform.schemas import (
     CheckResultOut,
@@ -34,6 +34,7 @@ from lakana_server.api.platform.schemas import (
     TaskLogOut,
     TaskRunOut,
     WorkerCachesOut,
+    WorkerMemoryOut,
     WorkerOut,
 )
 from lakana_server.api.responses import errors
@@ -619,23 +620,41 @@ def list_workers(
     -------
     list of WorkerOut
         By id. `status` is `alive` or `lost`; `takes` is `all`, `interactive` or `pipeline`;
-        the three run ids say what it is doing; `caches` the sizes of its caches.
+        the three run ids say what it is doing; `caches` the sizes of its caches; `memory`
+        the memory it last reported.
     """
-    return [
-        WorkerOut(
-            id=w.id,
-            host=w.host,
-            version=w.version,
-            started_at=w.started_at,
-            heartbeat_at=w.heartbeat_at,
-            status=w.status,
-            takes=w.takes,
-            query_run_id=None if w.query_run_id is None else str(w.query_run_id),
-            deploy_run_id=None if w.deploy_run_id is None else str(w.deploy_run_id),
-            task_run_id=None if w.task_run_id is None else str(w.task_run_id),
-            caches=None
-            if w.caches is None or w.caches_measured_at is None
-            else WorkerCachesOut(**dataclasses.asdict(w.caches), measured_at=w.caches_measured_at),
-        )
-        for w in service.list_workers(principal)
-    ]
+    return [worker_out(w) for w in service.list_workers(principal)]
+
+
+def worker_out(w: WorkerView) -> WorkerOut:
+    """Write a worker as the API shows it, in the worker list and the instance status.
+
+    Parameters
+    ----------
+    w
+        The worker.
+
+    Returns
+    -------
+    WorkerOut
+        The worker, run ids as text.
+    """
+    return WorkerOut(
+        id=w.id,
+        host=w.host,
+        version=w.version,
+        started_at=w.started_at,
+        heartbeat_at=w.heartbeat_at,
+        status=w.status,
+        takes=w.takes,
+        query_run_id=None if w.query_run_id is None else str(w.query_run_id),
+        deploy_run_id=None if w.deploy_run_id is None else str(w.deploy_run_id),
+        task_run_id=None if w.task_run_id is None else str(w.task_run_id),
+        caches=None
+        if w.caches is None or w.caches_measured_at is None
+        else WorkerCachesOut(**dataclasses.asdict(w.caches), measured_at=w.caches_measured_at),
+        memory=None
+        if w.memory is None or w.memory_measured_at is None
+        else WorkerMemoryOut(**dataclasses.asdict(w.memory), measured_at=w.memory_measured_at),
+        replaced=w.replaced,
+    )

@@ -12,7 +12,19 @@ which lines of the logs matter, and you know what to collect before you ask a qu
 
 ## The short version
 
-Run these in order. The first that looks wrong is where to read on.
+One command gives the answer first:
+
+<!-- source: docs/examples/getting-started/run.sh#status -->
+```bash
+lakana status
+```
+
+It prints `Healthy`, `Degraded` or `Down` and one sentence that says why. An administrator also
+sees how busy the workers are, their memory, and the workers themselves
+([What the status says](#what-the-status-says)). Home in the web interface shows the same status.
+The command exits 0 for `Healthy` and `Degraded` and 12 for `Down`, so a script can check it.
+When it is not `Healthy`, or to look closer, run these in order. The first that looks wrong is
+where to read on.
 
 1. `docker compose ps --all`: every service is `running` and `healthy`, and the one-off services
    (`migrate`, `bucket`, `setup`) have `Exited (0)`. ([The services](#the-services))
@@ -23,6 +35,39 @@ Run these in order. The first that looks wrong is where to read on.
 
 Nothing here is a service level, and none of it replaces looking at what your own people notice:
 a dashboard that is slow or a job that did not run is a signal too.
+
+## What the status says
+
+`lakana status` and Home read the same answer. Anyone who is signed in may ask.
+
+- **Healthy.** The catalog database and the storage answer, and every registered worker is alive
+  or was replaced by a restart on its host.
+- **Degraded.** Work gets done, but slower or at risk: a worker stopped reporting while another
+  is still alive, or an alive worker uses 90 % or more of its memory limit. Near its limit a
+  worker ends its largest query or task to stay alive ([Which task needs the most
+  memory](#which-task-needs-the-most-memory)), so raise `LAKANA_WORKER__MEMORY_LIMIT` (4 GB by
+  default) or start another worker. A worker that restarted on the same host (after its memory
+  watchdog stopped it, a crash, or a killed container) replaces the row it left: that row is
+  not counted as a worker that is down, and `lakana worker list` shows it as `lost (replaced)`
+  until it is removed an hour later.
+- **Down.** Nothing gets done: a checked environment's storage does not answer (the same check
+  as [`/readyz`](#the-health-routes)), or no worker is alive. While the catalog database is down,
+  `lakana status` cannot check who you are and fails with the server's error (exit code 11),
+  and Home cannot load; the address `/readyz` still answers and names `database`.
+
+Only an administrator (who may manage environments on the instance) is told which check failed
+and about the memory; everyone else sees `Down` without the cause, and only a missing or
+lost worker by name. An administrator also sees:
+
+- **Compute: busy slots of all slots.** A worker that takes `all` work has two slots, one for
+  ad-hoc queries and one for pipeline tasks and deploys; an `interactive` or a `pipeline` worker
+  has one. A pipeline's SQL task fills the pipeline slot only. All slots busy means new work
+  waits.
+- **Memory: in use of the limit.** What the alive workers last reported, added up, against their
+  limits added up. A worker reports its memory with its heartbeat once it moved by 1 MiB or
+  more. When an alive worker has reported nothing yet (it just started, or runs an earlier
+  release) or runs without a limit, the total limit is unknown and the line says so.
+- **The workers,** as `lakana worker list` shows them ([The workers](#the-workers)).
 
 ## The services
 
@@ -137,6 +182,10 @@ Healthy looks like this:
   cannot reach the database; a row with the status `lost` is one that stopped reporting.
 - **Every kind of work you use has an `alive` worker.** The column `takes` says `all`,
   `interactive` or `pipeline`. See [Seeing that a kind has no worker](deploy-with-compose.md#seeing-that-a-kind-has-no-worker).
+- **The workers have memory to spare.** The column `memory` shows what a worker last reported
+  against its limit (`LAKANA_WORKER__MEMORY_LIMIT`), and `-` before its first report or when it
+  has no limit. At 90 % or more the status says `Degraded` ([What the status
+  says](#what-the-status-says)).
 - **The workers take work.** The column `doing` shows `idle` or the query, deploy or task a worker
   runs. An `alive` worker that stays `idle` while queries wait is the case to look into: the
   reason of each waiting query says why (see [A stuck run](#a-stuck-run-and-why)).

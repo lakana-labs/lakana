@@ -14,6 +14,7 @@ import "./styles/base.css";
 import "./status/status.css";
 import "./shell/shell.css";
 import "./shell/screen.css";
+import "./home/home.css";
 import "./sign-in/sign-in.css";
 
 const root = document.getElementById("root");

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
 from lakana_core.models import Base, Worker
-from lakana_core.runs.workers import CacheSizes
+from lakana_core.runs.workers import CacheSizes, MemoryUse
 from lakana_worker.heartbeat import RETRY_SECONDS, WorkerHeartbeat
 
 _THREAD_BOUND_SECONDS = 10.0
@@ -47,6 +47,7 @@ def _heartbeat(
     fail: list[bool] | None = None,
     takes: str = "all",
     caches: Callable[[], CacheSizes | None] | None = None,
+    memory: Callable[[], MemoryUse | None] | None = None,
 ) -> WorkerHeartbeat:
     """Build a heartbeat on the test's session; `fail[0]` makes the next writes raise.
 
@@ -62,6 +63,8 @@ def _heartbeat(
         What the worker takes.
     caches
         Returns the latest cache sizes.
+    memory
+        Returns the latest memory use.
 
     Returns
     -------
@@ -85,6 +88,7 @@ def _heartbeat(
         takes=takes,
         monotonic=clock,
         caches=caches,
+        memory=memory,
     )
 
 
@@ -378,3 +382,59 @@ def test_cache_sizes_that_could_not_be_written_are_written_with_the_next_beat(
     assert heartbeat.beat_once()
     session.expire_all()
     assert session.scalars(select(Worker.cache_packages_bytes)).one() == 2
+
+
+_MIB = 1024 * 1024
+
+
+def _stored_memory(session: Session) -> tuple[int | None, int | None]:
+    """Read the memory figures of the one worker row.
+
+    Parameters
+    ----------
+    session
+        The test's session.
+
+    Returns
+    -------
+    tuple of (int or None, int or None)
+        Used and limit bytes as stored.
+    """
+    session.expire_all()
+    row = session.scalars(select(Worker)).one()
+    return row.memory_used_bytes, row.memory_limit_bytes
+
+
+def test_heartbeat_sends_the_watchdogs_latest_memory(session: Session) -> None:
+    latest: list[MemoryUse | None] = [None]
+    heartbeat = _heartbeat(session, _Clock(), memory=lambda: latest[0])
+    assert heartbeat.beat_once()
+    assert _stored_memory(session) == (None, None)
+    latest[0] = MemoryUse(used_bytes=100 * _MIB, limit_bytes=4096 * _MIB)
+    assert heartbeat.beat_once()
+    assert _stored_memory(session) == (100 * _MIB, 4096 * _MIB)
+
+
+def test_heartbeat_writes_memory_only_after_a_change_of_a_mebibyte(session: Session) -> None:
+    latest = [MemoryUse(used_bytes=100 * _MIB, limit_bytes=4096 * _MIB)]
+    heartbeat = _heartbeat(session, _Clock(), memory=lambda: latest[0])
+    assert heartbeat.beat_once()
+    latest[0] = MemoryUse(used_bytes=101 * _MIB - 1, limit_bytes=4096 * _MIB)
+    assert heartbeat.beat_once()
+    assert _stored_memory(session) == (100 * _MIB, 4096 * _MIB)
+    latest[0] = MemoryUse(used_bytes=99 * _MIB, limit_bytes=4096 * _MIB)
+    assert heartbeat.beat_once()
+    assert _stored_memory(session) == (99 * _MIB, 4096 * _MIB)
+    latest[0] = MemoryUse(used_bytes=99 * _MIB, limit_bytes=None)
+    assert heartbeat.beat_once()
+    assert _stored_memory(session) == (99 * _MIB, None)
+
+
+def test_memory_is_written_again_with_a_new_registration(session: Session) -> None:
+    latest = MemoryUse(used_bytes=5 * _MIB, limit_bytes=None)
+    heartbeat = _heartbeat(session, _Clock(), memory=lambda: latest)
+    assert heartbeat.beat_once()
+    session.execute(delete(Worker))
+    session.commit()
+    assert heartbeat.beat_once()
+    assert _stored_memory(session) == (5 * _MIB, None)

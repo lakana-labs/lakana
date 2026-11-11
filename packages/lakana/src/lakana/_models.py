@@ -2114,6 +2114,9 @@ class Repository:
         When.
     updated_at
         Last change.
+    deploy_keys
+        The public deploy keys Lakana made for it, one per environment you may read; empty
+        when it names no such key.
     """
 
     id: str
@@ -2127,6 +2130,55 @@ class Repository:
     created_by: str | None
     created_at: datetime
     updated_at: datetime
+    deploy_keys: list[DeployKey] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DeployKey:
+    """The public half of one environment's deploy key. Never the private key.
+
+    Parameters
+    ----------
+    environment
+        The environment that keeps the private key as its secret.
+    public_key
+        The OpenSSH public key line; your git host takes it as a read-only deploy key.
+    fingerprint
+        Its ``SHA256:`` fingerprint, to compare with the one your git host lists.
+    made
+        Whether the call that answered made it; `False` for a key made earlier, and for every
+        key `Repository.deploy_keys` lists.
+    """
+
+    environment: str
+    public_key: str
+    fingerprint: str
+    made: bool = False
+
+
+@dataclass(frozen=True)
+class DeployKeys:
+    """What `Repositories.deploy_key` made.
+
+    Parameters
+    ----------
+    secret
+        The secret name every key is stored under; now the repository's credential.
+    keys
+        One per environment the call wrote or found a key in, by environment name.
+    skipped
+        Environments without a key where you may not manage secrets.
+    replaced
+        Environments whose key the call replaced.
+    notes
+        For each replaced key: the old one stops working, replace it at the git host now.
+    """
+
+    secret: str
+    keys: list[DeployKey]
+    skipped: list[str]
+    replaced: list[str]
+    notes: list[str]
 
 
 @dataclass(frozen=True)
@@ -2240,6 +2292,62 @@ class ConnectionTest:
     state: str
     outcome: str | None
     message: str | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class HostKey:
+    """One SSH host key a repository check found.
+
+    Parameters
+    ----------
+    type
+        The key type, e.g. ``ssh-ed25519``.
+    fingerprint
+        ``SHA256:…``, as `ssh-keygen -l` prints it: compare it with the git host's published
+        fingerprints before you trust the key.
+    line
+        The known_hosts line for the repository's `ssh_known_hosts`.
+    """
+
+    type: str
+    fingerprint: str
+    line: str
+
+
+@dataclass(frozen=True)
+class RepositoryProbe:
+    """A repository check: queued, taken by a worker, then done with an outcome.
+
+    Parameters
+    ----------
+    id
+        The check's id.
+    kind
+        ``host_keys`` or ``access``.
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        Once done: ``ok``, ``host_key_changed``, ``host_key_unknown``, ``auth_refused``,
+        ``not_found``, ``unreachable``, ``refused_address``, ``timeout``, ``no_worker`` or
+        ``failed``; `None` before.
+    message
+        What it found, with the next step; `None` before it is done.
+    host_keys
+        The keys a ``host_keys`` check found; `None` otherwise.
+    created_at
+        When it was requested.
+    finished_at
+        When it was done; `None` before.
+    """
+
+    id: str
+    kind: str
+    state: str
+    outcome: str | None
+    message: str | None
+    host_keys: list[HostKey] | None
     created_at: datetime
     finished_at: datetime | None
 
@@ -3576,6 +3684,12 @@ class WorkerInfo:
     caches
         The sizes of its caches, as it last measured them; `None` before its first measurement
         and from a server of an earlier release.
+    memory
+        The memory it last reported; `None` before its first report, for a worker without a
+        memory limit, and from a server of an earlier release.
+    replaced
+        `True` for a lost worker that a worker restarted on the same host replaced; such a row
+        does not count as a worker that is down. `False` from a server of an earlier release.
     """
 
     id: str
@@ -3589,6 +3703,82 @@ class WorkerInfo:
     deploy_run_id: str | None
     task_run_id: str | None
     caches: WorkerCaches | None = None
+    memory: WorkerMemory | None = None
+    replaced: bool = False
+
+
+@dataclass(frozen=True)
+class WorkerMemory:
+    """The memory a worker last reported (with a heartbeat, once it moved by 1 MiB or more).
+
+    Parameters
+    ----------
+    used_bytes
+        The resident memory of the worker and of every process it started.
+    limit_bytes
+        Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `None` when it has none.
+    measured_at
+        When the worker last wrote the figures, not when it last measured: steady use (moving
+        less than 1 MiB) keeps an old time.
+    """
+
+    used_bytes: int
+    limit_bytes: int | None
+    measured_at: datetime
+
+
+@dataclass(frozen=True)
+class StatusDetail:
+    """What an administrator sees of the instance beyond its state.
+
+    Parameters
+    ----------
+    slots_busy
+        The busy task slots of the alive workers: an `all` worker has two (ad-hoc queries;
+        pipeline tasks and deploys), an `interactive` or `pipeline` worker one.
+    slots_total
+        All task slots of the alive workers.
+    memory_used_bytes
+        The memory the alive workers last reported, added up.
+    memory_limit_bytes
+        Their limits, added up; `None` when an alive worker reports no limit or none is alive.
+    workers
+        Every registered worker, as `client.workers.list()` lists them.
+    """
+
+    slots_busy: int
+    slots_total: int
+    memory_used_bytes: int
+    memory_limit_bytes: int | None
+    workers: list[WorkerInfo]
+
+
+@dataclass(frozen=True)
+class InstanceStatus:
+    """Whether the instance works, as the caller may see it.
+
+    Parameters
+    ----------
+    state
+        `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).
+    causes
+        Why: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`, in that order.
+        Without `MANAGE_ENVIRONMENT` on the instance only `no_worker` and `worker_lost` are
+        named. A newer server may add codes; treat an unknown one as "ask an administrator".
+    workers_alive
+        The workers whose heartbeat is recent.
+    workers_total
+        Every registered worker, alive and lost, except lost ones a restart on their host
+        replaced.
+    detail
+        Compute, memory and the workers; `None` without `MANAGE_ENVIRONMENT` on the instance.
+    """
+
+    state: str
+    causes: list[str]
+    workers_alive: int
+    workers_total: int
+    detail: StatusDetail | None
 
 
 @dataclass(frozen=True)

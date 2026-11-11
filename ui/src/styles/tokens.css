@@ -64,6 +64,7 @@
   --row-height: 44px;
   --radius-control: 4px;
   --radius-panel: 6px;
+  --radius-round: 50%;
   --sidebar-width: 200px;
   --focus-ring: 2px solid var(--color-accent);
   --focus-offset: 2px;

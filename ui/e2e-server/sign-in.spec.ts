@@ -1,7 +1,14 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Browser, expect, type Page, test } from "@playwright/test";
 
-import { addAuthenticator, inviteLink, localLink, setupLink, uniqueName } from "./helpers";
+import {
+  addAuthenticator,
+  interfaceState,
+  inviteLink,
+  localLink,
+  setupLink,
+  uniqueName,
+} from "./helpers";
 
 const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const ORIGIN = "http://localhost:4174";
@@ -68,6 +75,8 @@ test.describe("the first administrator", () => {
     browserName,
   }) => {
     test.skip(browserName !== "chromium", NOT_CHROMIUM);
+    // As at a first sign-in, whatever another file's tests left.
+    await interfaceState(request, { tour_seen: false });
     await page.goto(await setupLink(request));
 
     await expect(page.getByRole("heading", { level: 1, name: "Sign in as admin" })).toBeVisible();
@@ -77,6 +86,11 @@ test.describe("the first administrator", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Access" })).toBeVisible();
+    // A first sign-in opens the welcome; Skip records on the server that it was seen.
+    const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
+    await expect(welcome).toBeVisible();
+    await welcome.getByRole("button", { name: "Skip" }).click();
+    await expect(welcome).toBeHidden();
   });
 
   test("passkey sign-in after sign out", async ({ browserName }) => {
@@ -88,8 +102,15 @@ test.describe("the first administrator", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Sign in to Lakana" })).toBeVisible();
     expect(await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY)).toBeNull();
 
+    // The tour was recorded as seen: the second sign-in reads it so and does not welcome again.
+    const state = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/interface-state") && response.request().method() === "GET",
+    );
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    expect(await (await state).json()).toMatchObject({ tour_seen: true });
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     const after = await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY);
     expect(after).toBeTruthy();
     expect(after).not.toBe(before);

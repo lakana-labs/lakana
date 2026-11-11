@@ -774,6 +774,8 @@ def _worker(worker_id: str = "box:41:ab12", **more: object) -> dict[str, object]
         "deploy_run_id": None,
         "task_run_id": None,
         "caches": None,
+        "memory": None,
+        "replaced": False,
         **more,
     }
 
@@ -873,7 +875,7 @@ def test_doing_folds_the_three_ids(tmp_path: Path) -> None:
     )
     result = invoke(make_state(tmp_path, api), "worker", "list", env={"COLUMNS": "400"})
     rows = [line for line in result.stdout.splitlines() if line.startswith("│")]
-    doing = [re.split(r"\s+│\s*", row.strip("│ "))[-2] for row in rows]
+    doing = [re.split(r"\s+│\s*", row.strip("│ "))[-3] for row in rows]
     assert doing == [
         "query 11111111",
         "deploy 22222222",
@@ -939,6 +941,31 @@ def test_worker_list_shows_the_size_of_the_caches(tmp_path: Path) -> None:
     )
     assert whole[0]["caches"]["packages_bytes"] == 2 * 1024**3
     assert whole[2]["caches"] is None
+
+
+@pytest.mark.usefixtures("_worker_clock")
+def test_worker_list_shows_the_memory_of_each_worker(tmp_path: Path) -> None:
+    measured = _WNOW.isoformat()
+    api = FakeApi()
+    api.on(
+        "GET",
+        _WORKERS,
+        json=[
+            _worker(
+                "a:1:x",
+                memory={"used_bytes": 1024**3, "limit_bytes": 4 * 1024**3, "measured_at": measured},
+            ),
+            _worker(
+                "b:2:y",
+                memory={"used_bytes": 1024**3, "limit_bytes": None, "measured_at": measured},
+            ),
+            _worker("c:3:z", memory=None),
+        ],
+    )
+    result = invoke(make_state(tmp_path, api), "worker", "list", env={"COLUMNS": "300"})
+    rows = [line for line in result.stdout.splitlines() if line.startswith("│")]
+    memory = [re.split(r"\s+│\s*", row.strip("│ "))[-2] for row in rows]
+    assert memory == ["1.0 GiB of 4.0 GiB", "1.0 GiB", "-"]
 
 
 def test_worker_list_is_refused_with_the_servers_message(tmp_path: Path) -> None:

@@ -158,7 +158,10 @@ sequence, so it can forge a log record or recolour a terminal.
   integrity inside a line; uvicorn passes a request's query string raw into its quoted request
   line, so a client can still write text that looks like a field there. With
   `LAKANA_DATABASE__ECHO=true` SQLAlchemy adds a handler of its own; `lakana_core.db.create_engine`
-  gives it the same formatter.
+  gives it the same formatter. The engine has `hide_parameters=True`, so neither the echo nor
+  the text of a `StatementError` (an `IntegrityError`, an `OperationalError`) ever carries bound
+  values such as a secret's ciphertext, nonce or wrapped key; a debugging session sees the
+  statement without its parameters (pin: `test_the_echo_and_statement_errors_never_show_parameters`).
 - **CLI** (`lakana.cli._output`): `inline` makes one name safe for a line; `done` and `emit` of a
   plain string pass the whole text through `safe_text`, which escapes every control character and
   keeps the lines. Escaping is idempotent, so `done(state, f"Deleted {inline(name)}")` is escaped
@@ -249,7 +252,13 @@ cookie set for another host.
   `default-src`), refuses the start. The other headers are
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY`.
   The policy allows only the own origin, no inline script, inline style only for the two
-  hashed library texts, no `data:` URL, no frames. Content types come from a fixed table, not
+  hashed library texts, no `data:` URL, no frames; images also from `blob:` (`img-src 'self'
+  blob:`, M7 part 2), for profile pictures: a picture read needs the CSRF header like every
+  cookie request, which an `<img src>` cannot send, so the interface reads it with `fetch` and
+  shows an object URL. Only this origin's script can make one, from bytes it read from its own
+  API, and an image executes nothing; `ui/build/csp.test.ts` pins every directive, and the
+  smoke and server Playwright tests load a picture under the policy with no console error.
+  Content types come from a fixed table, not
   the machine's MIME database; an unknown suffix is `application/octet-stream`. API responses
   get none of these headers. An addition to the policy or a relaxed header needs its reason in
   the pull request that makes it.
@@ -783,6 +792,8 @@ SQLite alike.
 | Read | `READ_TABLE`, as the table itself | |
 | Translated texts and labels: read, edit, deploy (#251) | as a description | Read only after `READ_TABLE` (`CatalogService.describe_table` authorizes before `translation_rows` is read; the listing describes only tables the caller may read). An edit in any language (`?lang=`, `--lang`) goes through `set_table_description`/`set_column_description`, so it needs the owner or `DROP_TABLE` and then `READ_TABLE` first, like a description; there is no separate action and no other write path to `text_translations` edits. The service validates everything `edit_translation` takes: subject and field are fixed by the call, the language is a canonical tag (an edit naming the table's main language goes onto the main-language edit, never a translation row), the column must be in the schema the caller reads, texts follow the deploy's `checked_text` rules (stripped; control, line separator and bidi characters refused; a description's `\r\n` and lone `\r` normalised to `\n` first, a label's refused) and `null` resets; an edit cannot add a language once the table has 50 besides its main one (`MAX_EDIT_LANGUAGES`; a deploy is bounded by its 50 files, `MAX_LANGUAGES`, and does not count edit languages, so a table holds at most 50 from files plus those edits added before). Every writer of a table's texts, an edit and the deploy sync alike, locks the table row first (`translations.lock_table`, `SELECT … FOR UPDATE`), so concurrent writers cannot lose a language from `text_languages` or delete an edit made meanwhile; an edit reads the rows unguarded and relists them, repairing a list that misses one. Pins: `test_an_edit_locks_the_table_row_before_it_reads_any_text`, `test_text_edit_race_integration.py`. A deploy's texts are compared with the project's own assets only and name only tables the project builds. `?lang=` and `Accept-Language` select among texts the reader may already see; they never widen what is read. |
 | Set one's own language (`PATCH /api/v1/whoami`, `lakana me set`) | any authenticated person, for themself only | `PrincipalService.set_own_language` writes only the caller's own row; a task or CI token is refused (`403`, `a task or CI token cannot change its principal's profile; use a personal access token`), so a run cannot change its principal's profile. Not audited: a display preference that changes nothing anyone else sees. The tag is validated and stored canonically. |
+| Read and change one's own interface state (`GET`/`PATCH /api/v1/principals/{name}/interface-state`: tour seen, Get started hidden, last update note seen) | any authenticated person, for themself only | `InterfaceStateService` (`lakana_core.identity.interface_state.require_self`): another name is `403` (`You can only read and change your own interface state.`), a task or CI token is `403`. Not audited, like the language. `update_note_seen` must be a release version `x.y.z` (ASCII digits, at most 64 characters) or `422`, and a refused `PATCH` stores nothing, and two first writes of one person at once both land (the second's insert, in a savepoint, finds the first's row and applies its fields to it); the interface therefore sends `tour_seen` in a request of its own, so a development build's version (`0.22.0.dev3+g…`) never keeps the tour from being recorded (pre-flight ruling H1). |
+| Record and list what one opened recently (`POST`/`GET /api/v1/principals/{name}/recent`) | for themself only, as the interface state; recording needs the object to exist and be readable | `lakana_core.home.recent.RecentService`, `permits` only (nothing recorded): a table needs `READ_TABLE` (asked before the table is looked up), a job (`repository/job`) `READ_ENVIRONMENT`, a run `RUN` or `READ_ENVIRONMENT` (as the run's page), a query only its submitter while they still hold `SUBMIT_QUERY` there (the query page's rule; `READ_QUERY_TEXT` opens nothing here, so Home never lists a row whose page answers 404). A missing and an unreadable object get the same `404` (`No <kind> <ref> in <environment> that you can read.`). The list asks the same again for every entry and leaves out what fails, so a revoked grant or a dropped table removes the row with no `403` and nothing about it shown (pin: `test_recent_hides_an_object_the_person_can_no_longer_read`). At most 20 per person, a repeat within 60 s writes nothing; a control character in the environment or the reference is a `422`. Not audited. |
 
 Audited in the same transaction (`TABLE_DESCRIBED`, `COLUMN_DESCRIBED`; `detail`: `table`, `column`, `language`, `old_length`/`new_length` (description sent), `label_old_length`/`label_new_length` (label sent), `reset`); the text is never in `detail`. A deploy writes only `description_project` and the project rows of `column_descriptions`; it never touches an edit (`catalog/descriptions.py`). Pins: `test_descriptions.py`.
 
@@ -1068,6 +1079,113 @@ empty page, the same as for one that exists. `MAX_SCANNED` (5,000) bounds the ca
 search so a caller with few rights cannot make one search read an environment. `table_columns` holds
 names and types only, in the same transaction as the schema change; a column mask hides values, not
 names, as `table get` does. Pins: `test_catalog_search.py`, `test_search.py`.
+
+## Home: what a person's lists may show
+
+`GET /api/v1/home/attention` (`lakana_core.home.attention.AttentionService`) and `GET /api/v1/home/work`
+(`lakana_core.home.work.your_work`) answer any authenticated caller about themself. Every row is asked
+with `permits` when the list is read, never `authorize`: reading a list is no attempt, so it writes no
+audit event, and a refused right leaves a row out instead of answering `403` (pin:
+`test_attention_writes_no_audit_event`). A revoked grant (on the environment or on one table), a dropped
+table or a deleted environment makes the row disappear and nothing about the object is shown (pins:
+`test_attention_drops_a_table_the_person_can_no_longer_read`,
+`test_attention_drops_the_rows_of_one_table_whose_right_was_revoked`); only an administrator still sees
+a dropped table's failed check, whose run still exists. Both lists, and `GET /api/v1/home/get-started`,
+are a person's: a task or CI token is `403` (`A task or CI token cannot read or change a person's …; sign
+in to the web interface or use a personal access token.`, `refuse_tokens`, as the interface-state
+routes; not audited), even one of an administrator, whose grants `holds_instance_admin` reads without
+the token's scope (pins: `test_a_task_or_ci_token_of_an_administrator_is_refused`,
+`test_a_task_token_of_an_administrator_gets_no_home`). `GET /api/v1/status` answers such a token
+without `detail`: it is asked with `permits(MANAGE_ENVIRONMENT)`, which applies the token's scope (pin:
+`test_a_task_or_ci_token_of_an_administrator_gets_no_status_detail`).
+
+| List | Who | Kinds and the right asked per row |
+|---|---|---|
+| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin`) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables whose newest freshness row is fired, ranked in one statement, since the sweep records a row only on a change), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host: `replaced_by_restart`, shared with the instance status), `query_failed` (their own, as for anyone else). The `ADMIN` role holds every right these need, so nothing more is asked. |
+| Needs your attention | anyone else | `table_late` and `check_failed` only among the tables they read within 7 days (`table_reads`) or opened (`recent_opens`), each kept while `READ_TABLE` holds on it now (one `permits_each` for all of them: a fixed number of statements per environment, however many tables; pin: `test_a_readers_attention_costs_the_same_for_five_tables_or_forty`); a check also needs `READ_ENVIRONMENT` (the check list's right) and is left out when it is a generated reference check whose target they may not read (`ReferenceCheckFilter`, as `check list`). `query_failed`: their own failed ad-hoc queries within 7 days (`task_run_id IS NULL`; a pipeline's query is its run's failure), only where they still hold `SUBMIT_QUERY`, as the query's own page shows it only to its submitter. No runs, links or workers. |
+| Your work | a caller with `may_deploy_somewhere` | The repositories they created (`created_by`) or deployed (`deploy_runs.principal_id`); environments and jobs (`JobService.list`, asked only after `permits(READ_ENVIRONMENT)`) only where they may read the environment; nothing without a readable environment (the repository listing's right). Anyone else gets two empty lists. |
+
+A row's `title` is a name: a job (the repository for a run of no job), a dotted table name, a check's
+name, `Query` and the first eight characters of its id, the principal a recovery link signs in, a
+worker's host. Never a value, a check's error text, a run's error message or SQL (pin:
+`test_attention_titles_carry_no_values_or_sql`). Its `ref` is a run's id (a failed run or check), a
+dotted table name, a query's id, a link's id or a worker's id, so a row never points at a page its
+reader cannot open. Each source reads at most 200 rows, newest first; the merged list is cut at 50
+(`truncated`), Your work at 20 repositories and 20 jobs.
+
+## Profile pictures (M7 part 2)
+
+`PUT/GET/DELETE /api/v1/principals/{name}/picture` (`lakana_core.identity.pictures`,
+`lakana_server.api.platform.pictures`). An upload is untrusted bytes handed to Pillow's native
+decoders, so the decode is fenced in and what is stored is never the upload.
+
+- **Who.** Setting is self only (`require_self`: `403 You can only read and change your own
+  profile picture.` for another name). Removing: one's own, or anyone's with `MANAGE_PRINCIPAL` on
+  the instance (`authorize`, so a refusal is audited as any denial). Reading: one's own always;
+  another person's for a caller with any grant (`GrantService.has_any_grant`) or `ADMIN`; anyone
+  else `403 Pictures are shown to people who have access.` (not audited: the caller asked about
+  nothing they may not know). A missing person and a person without a picture are the same `404`.
+  A task or CI token is `403` on all three (`refuse_tokens`), as on the other per-person routes.
+  No step-up: a picture grants and removes no access (`NO_STEP_UP`). Audited:
+  `PROFILE_PICTURE_SET` (`principal`), `PROFILE_PICTURE_REMOVED` (`principal`, and `by` when an
+  administrator removed another person's; both shown fields); a removal of nothing records nothing.
+  Pins: `test_set_is_self_only`, `test_get_is_for_people_with_access`,
+  `test_admin_may_remove_anothers_picture_and_it_is_audited`, `test_a_task_token_may_not_read_a_picture`.
+- **Before a byte is read.** The route is `async` and `@streams_its_own_body`: it checks the caller
+  and the `Content-Type` first (`check_can_set`; `415 Use a JPEG, PNG or WebP image. SVG and other
+  formats are refused.`), refuses a declared `Content-Length` over 5 MiB, then reads the stream and
+  stops at 5 MiB + 1 byte (`413 The picture is larger than 5 MB. Choose a smaller image or crop it
+  first.`), within 120 s (`PICTURE_READ_TIMEOUT_SECONDS`) or the shorter append read timeout, so
+  two slow uploaders hold both slots for at most two minutes of reading (pin:
+  `test_a_picture_has_its_own_shorter_deadline_than_an_append`). Nothing beyond 5 MiB is ever
+  buffered (pin:
+  `test_over_five_megabytes_is_refused_naming_the_limit`, chunked and declared).
+- **Two at a time, refused rather than queued.** Before the body is read the route takes one of
+  `PICTURE_DECODE_SLOTS` (2) per process and the caller's place (one upload per person), as the
+  manifest route does (`lakana_server.concurrency.hold_one_per_principal`): a second upload of the
+  same person is `503 Another picture upload of yours is still in progress. Wait for it to finish,
+  then try again.`, and one while both slots are taken `503 The server is busy with other picture
+  uploads. Try again in a moment.`, both with `Retry-After: 1`. So no request waits holding a
+  body and a database connection; two slow uploaders of different people hold the slots for at
+  most the read timeout (pins: `test_a_second_upload_of_the_same_person_is_503_before_its_body_is_read`,
+  `test_an_upload_when_every_decode_slot_is_taken_is_503_before_its_body_is_read`,
+  `test_the_hold_is_given_back_however_the_upload_ends`).
+- **The decode.** In the threadpool (`run_in_threadpool`). The bytes are
+  opened with `Image.open(..., formats=[the one format the media type names])`: the content decides,
+  never a filename, and an SVG, HTML or GIF sent as `image/png` is `422` (pins:
+  `test_an_svg_named_as_a_png_is_refused`, `test_bytes_that_are_not_the_declared_type_are_refused`).
+  The declared width x height is checked against 40 megapixels on the header, before any decode,
+  with its own `422` naming the limit and to scale the picture down (pin: `test_a_huge_declared_size_is_refused_by_lakanas_own_check_without_decoding`, `load` never
+  called). Nothing process-wide is changed: Pillow's `MAX_IMAGE_PIXELS` stays at its default
+  (about 89 million pixels), and a local `warnings.catch_warnings()` turns its
+  `DecompressionBombWarning` into that same pixel refusal, as its bomb error (pins: `test_a_decompression_bomb_is_refused`,
+  `test_pillows_bomb_warning_is_the_same_refusal`,
+  `test_importing_pictures_changes_no_process_wide_pillow_or_warning_setting`). A JPEG is decoded
+  at a reduced scale (`draft`). The picture is converted to RGB, or RGBA with transparency, before
+  a large one is reduced by a whole factor (`reduce` refuses palette, 1-bit and 16-bit images; pin:
+  `test_large_palette_bilevel_and_sixteen_bit_pngs_are_read`), the decoded original closed, and
+  turned afterwards. Peak memory per slot for 40 megapixels: about 160 MB (RGB, which Pillow keeps
+  at 4 bytes a pixel), about 320 MB with transparency (`reduce` premultiplies RGBA in a second
+  full copy); 640 MB for both slots at worst. Only the first
+  frame of an animation is read. `LOAD_TRUNCATED_IMAGES` stays false: a truncated file is `422`.
+  Every Pillow failure (`OSError`, `ValueError`, `EOFError`, `SyntaxError`, `struct.error`) is one `422` naming the formats and the next step; a fuzz pin flips bytes of a
+  PNG and asserts nothing else escapes (`test_garbage_and_flipped_bytes_never_escape_as_another_error`).
+- **Re-encoding is the metadata strip.** The EXIF orientation is applied (`ImageOps.exif_transpose`),
+  the square cut from the centre (`ImageOps.fit`, 256 x 256), and the pixels copied into a new
+  image (`Image.frombytes`) before saving as WebP quality 85: `convert`, `resize` and `fit` carry the
+  upload's `info` (EXIF with GPS, XMP, ICC profile, comments) along, and the WebP writer would save
+  some of it. No EXIF, XMP, ICC, comment, trailing bytes or second frame survives (pins:
+  `test_exif_orientation_applied_and_metadata_gone`, `test_a_polyglot_keeps_nothing_but_pixels`,
+  `test_only_the_first_frame_of_an_animation_is_kept`). The etag is the SHA-256 of the stored WebP.
+- **Serving.** Only the stored WebP, as `image/webp`, with `ETag`, `Cache-Control: private,
+  max-age=86400`, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src
+  'none'; sandbox` (inert if opened as a document), on the 304 for `If-None-Match` too (pin:
+  `test_picture_response_headers_and_304`). Reads need the caller's credential and, from a browser,
+  the CSRF header, so the interface fetches the picture and shows it as a `blob:` URL.
+- **Residual.** Pillow's decoders (libjpeg-turbo, libpng/zlib, libwebp) are native code: a memory
+  bug in one is reachable by any signed-in person. The format allow-list keeps every other decoder
+  (TIFF, JPEG 2000, AVIF, PSD...) unreachable, and Dependabot keeps Pillow current. Colours of a
+  wide-gamut (Display P3) photo shift slightly, as the ICC profile is dropped, not converted.
 
 ## Jobs: who may start, pause and resume (M5d-b)
 
@@ -4790,6 +4908,62 @@ exists. The 409 names the deployed repositories; undeploy each first.
   `ENVIRONMENT_STORAGE_UPDATED`'s is `{"options_keys", "secret_ref_set"}` — never option
   values or the secret reference's own value.
 
+### A deploy key the server makes (M7 part 2)
+
+`lakana repo deploy-key NAME` (`POST /api/v1/repositories/{name}/deploy-key`,
+`lakana_core.projects.deploy_keys.DeployKeyService.generate`) makes an SSH deploy key for an ssh
+repository with confirmed host keys. Each line below is pinned by a test in
+`packages/lakana-core/tests/test_deploy_keys.py` or `packages/lakana-server/tests/test_deploy_key_route.py`.
+
+- **One key pair per environment (R1).** Each environment's secret holds its own ed25519 key
+  (`Ed25519PrivateKey.generate()`, OpenSSH PEM without a passphrase); making one never reads or
+  changes another environment's key, and the server never decrypts a key to copy it: nothing
+  new decrypts a secret. A call makes a key only where none
+  exists; `--environment E --replace` replaces the named environments' keys, and `--replace`
+  without `--environment` is refused.
+- **The private key never leaves the write (T1).** It exists in plain text only inside
+  `generate_deploy_key` (`DeployKeyPair.private_key` is `repr=False`) and the
+  `insert_secret`/`rotate_values` encryption. The answer, `RepositoryOut.deploy_keys`, every
+  audit event and the logs carry the public key at most; the T1 test looks for every PEM body
+  line and the base64 of the raw seed in the answer, each audit detail, the captured log and the
+  OpenAPI document, also when the third environment's write raises (M7).
+- **Written only where the caller manages secrets (T5, I4, M11).** By default the environments
+  where `permits(MANAGE_SECRET)` holds get a key and the others are `skipped`; a named
+  environment goes through `authorize` (a recorded denial); none at all is a recorded denial
+  naming `MANAGE_SECRET`. Rows of the name in an environment the caller cannot manage are not
+  written and do not stop the call. A new `--secret` name that would leave an environment the
+  caller cannot manage on its old key is refused as a recorded denial naming that environment.
+- **Decided under locks, all or nothing (T5, I1, I2).** Inside `refuse_concurrent_change` the
+  repository row is locked (`RepositoryService.lock`), then every secret of the name in every
+  environment, revoked ones included, `FOR UPDATE OF secrets` with `populate_existing` (the
+  order `require_secret_management_for_url_change` takes). Before the first write each
+  environment to write is checked: a revoked row, a row that is not a live key made for this
+  repository's id (unbound, bound elsewhere, a hand-made secret, a key of a removed repository
+  of the same name), and a name its storage or a webhook uses each refuse with `ConflictError`
+  naming the environment and `--secret OTHER-NAME`. Any error after the first write rolls the
+  session back; the commit's `IntegrityError` becomes a fixed-text `ConflictError`. A
+  repository that names a secret Lakana did not make is refused (`--clear credential_secret`
+  first).
+- **A made key stays with its repository (I5 (a)).** `secrets.generated_for` (migration
+  `0074`) holds the repository's id and `secrets.public_key` the public half.
+  `SecretService.bind` refuses to move such a secret to any other use and `rotate` refuses to
+  change it (only `--replace` does); `revoke` stays allowed. So a person who manages secrets in
+  one environment cannot route a key to a task-readable connection; the docs tell the reader to
+  keep the deploy key read-only at the git host.
+- **What is shown (M8).** `RepositoryOut.deploy_keys` lists the live keys made for the
+  repository and named by its current `credential_secret`, only in environments the reader may
+  read (`permits(READ_ENVIRONMENT)`, unaudited): naming another secret drops the list.
+- **Step-up and audit (T6, T7, M6).** The route steps up (`require_step_up`) after
+  `MANAGE_REPOSITORY` on the instance; no task token may call it (`MANAGE_REPOSITORY` is not a
+  task-token action) and a CI token only deploys. `DEPLOY_KEY_GENERATED` records
+  `repository`, `secret`, `made` (environment → fingerprint), `kept`, `replaced`,
+  `skipped` and `previous_credential_secret`, never a key; `REPOSITORY_CREATED` and
+  `REPOSITORY_UPDATED` (when `ssh_known_hosts` changes) record `host_key_fingerprints`.
+
+**Residuals.** Who may add a key at the git host decides what it may do there: Lakana cannot see
+whether write access was ticked. A key revoked in Lakana keeps working at the host until it is
+removed there; the how-to's "Replace a leaked key" starts with the host for that reason.
+
 ## Package index credentials (M5c2c)
 
 A project's lock may name the URL of a registered package index (`lakana index add`, which
@@ -5351,8 +5525,9 @@ already allows.
   cursor is an opaque keyset position on `(occurred_at, id)`: it grants nothing, since every
   page re-runs authorization and the caller's filters, and a malformed one is a 422.
 - `GET /api/v1/whoami` requires authentication but performs **no authorization check**:
-  it only describes the caller back to itself (name, type, and task-token scope), which
-  reveals nothing a 200-versus-401 probe of any other route doesn't. `lakana login` uses it
+  it only describes the caller back to itself (name, type, task-token scope, and its own
+  access flags `admin`, `has_access` and `may_deploy`, each about the caller only and asked with
+  `permits`), which reveals nothing a 200-versus-401 probe of any other route doesn't. `lakana login` uses it
   to confirm a credential before saving it.
 - `GET /api/v1/info` likewise requires authentication, performs no authorization check and
   returns only the platform version (`importlib.metadata`, never a string in the code) and the
@@ -6103,6 +6278,9 @@ User documentation: `docs/site/reference/ci-trust-rules.md`. Threat model: "CI O
     `test_deploy_ci_token.py`.
   - `test_ci_token_enforcement.py::test_every_deploy_check_is_covered` lists every function in
     `packages/*/src` that names `DEPLOY` and fails on a new one; add it there with a test.
+    `GrantService.may_deploy_somewhere` (whoami's `may_deploy`) only asks, with `permits` under
+    the token's scope: a CI token answers for its own environment only, and nothing is audited
+    (pin: `test_may_deploy_somewhere_for_a_ci_token_is_its_scope_only_and_records_nothing`).
 - **No foreign key on `deploy_runs.ci_token_id`** (like `QueryRun.task_token_id`): a missing
   token row must not make the run look like one no CI token queued; the worker refuses it.
 - **Tests:** `test_ci_trust_rules.py`, `test_ci_oidc_exchange.py`, `test_ci_token_enforcement.py`
@@ -6116,9 +6294,10 @@ User documentation: `docs/site/reference/ci-trust-rules.md`. Threat model: "CI O
 
 ## Git fetch hardening (M5b)
 
-`lakana_worker.git.fetch_commit` is the only code that runs git. It lives in the worker so git,
-network egress and temp disk never touch the API server. Every change to it keeps this
-checklist true; `packages/lakana-worker/tests/test_git.py` pins each line.
+`lakana_worker.git.fetch_commit` and `check_access` (one shared setup, `_prepared`) are the only
+code that runs git. They live in the worker so git, network egress and temp disk never touch the
+API server. Every change to them keeps this checklist true; `packages/lakana-worker/tests/test_git.py`
+pins each line.
 
 - **Deployers never choose a URL.** Only `MANAGE_REPOSITORY` registers one; a deploy names a
   repository. URL, ref and local path are re-validated in the worker
@@ -6247,6 +6426,78 @@ checklist true; `packages/lakana-worker/tests/test_git.py` pins each line.
   hide it) that `DeploySettings` leaves out of its `repr`. **Residual:** the proxy URL is in the
   git process's command-scope config (its environment), like the repository URL. SSH ignores all
   three settings; `ProxyCommand` is unsupported.
+
+### Repository checks (M7 part 2)
+
+`lakana repo host-keys URL` (fetch a host's SSH keys) and `lakana repo test NAME --env ENV`
+("Test access") are rows of `repository_probes` that a worker runs
+(`lakana_core.projects.probes`, `lakana_worker.repository_probes`); the server only queues and
+answers them. Each line below is pinned by a test in `packages/lakana-core/tests/test_repository_probes.py`,
+`packages/lakana-worker/tests/test_worker_repository_probes.py` or `test_git_access.py`.
+
+- **No request from the server (T3).** `RepositoryProbeService` writes a row and reads it back; it
+  never resolves or connects. A request is refused with `NoWorkerError` (503, naming
+  `docker compose up -d worker` and `lakana server start --local`) while no worker that takes
+  `all` or `pipeline` work is alive, and the loop runs only on such workers.
+- **The host-key scan reaches only addresses it checked (T3).** `scan_host_keys` resolves the name
+  once; any address that `is_never_reachable` (loopback, link-local and metadata, multicast,
+  reserved, IPv4 inside IPv6) refuses the probe as `refused_address` before `ssh-keyscan` runs.
+  Otherwise `ssh-keyscan -T 5 -p PORT -t ed25519,ecdsa,rsa -- ADDRESS` runs on each checked
+  address in turn (duplicates once, the name never resolved again) until one offers a key, so a
+  dual-stack host answers at its IPv4 address on a worker with no IPv6 route; an argv list, no
+  shell, `stdin` closed, an environment of `PATH` and `LC_ALL` only, and one 25 s limit over
+  every address (pins: `test_every_address_is_checked_before_any_is_scanned`,
+  `test_a_dual_stack_host_is_scanned_at_its_next_address_without_resolving_again`,
+  `test_the_addresses_share_one_time_budget`).
+- **The access check refuses never-reachable names too (T3, M5),** before git runs, then runs
+  `git ls-remote --heads --tags --end-of-options origin` through `_prepared`, the same
+  environment, protocol allow-list, `core.sshCommand` (`StrictHostKeyChecking=yes` against the
+  repository row's own `ssh_known_hosts`, never a probe's), askpass and redaction as
+  `fetch_commit`, with a deadline 15 s inside the 90 s lease. Nothing is fetched. A name the
+  worker cannot resolve itself (only its proxy can) is left to git.
+- **No injection through the URL (T4).** `ssh_endpoint` runs `validate_repo_url` and then requires
+  a port of 1–65535 and an ASCII host of `[a-z0-9.-]` (lower-cased) or a bracketed IPv6 literal:
+  `ssh://a,b/r` (a known_hosts line for two hosts), `ssh://*.x/r` (a pattern) and a non-ASCII
+  name (which Python's resolver IDNA-encodes and ssh does not) are refused before a row exists,
+  and again in the worker. `parse_keyscan` keeps a line only with exactly three fields, a type in
+  `KEY_TYPES`, base64 decoded with `validate=True` and a blob that starts with that same type,
+  and rewrites the host field to the URL's host (`[host]:port` off port 22); at most 10 keys.
+- **Fixed text, never a tool's output (M3, T8).** Every outcome has a fixed sentence with its next
+  step: neither ssh-keyscan's output (a non-SSH service's banner) nor git's stderr reaches a
+  probe. An access failure Lakana does not recognise is "The check failed; the worker's log has
+  the details.", and its stderr, redacted with every form of the credential, goes to the worker's
+  log. `host_key_changed` is answered only on ssh's "REMOTE HOST IDENTIFICATION HAS CHANGED"; any
+  other host-key failure is `host_key_unknown`. A resolved credential's error (missing or unbound
+  secret) is Lakana's own sentence; any other exception is logged by its type only.
+- **Private, short-lived results (T8).** `get` answers only the requester (404 for anyone else,
+  the same as an unknown id); a person has at most 5 probes queued or running, counted and
+  inserted in one transaction behind `requester_lock` (`FOR UPDATE` on the principal's row), so
+  parallel requests cannot pass the cap; a request, a read
+  and a claim each delete up to 500 probes older than 24 hours. The audit record
+  (`REPOSITORY_PROBE_REQUESTED`, T7) holds kind, host, port, repository, environment and the
+  probe id, never a credential; the `MANAGE_REPOSITORY` denial is audited by `authorize`. An
+  access check also needs `READ_ENVIRONMENT` on its environment (`permits`). No step-up
+  (`NO_STEP_UP`): a probe stores no credential, changes nothing and discloses no secret.
+- **One run per probe (M2).** A probe is claimed once, by an `UPDATE … WHERE state = 'queued'`
+  checked by its row count, and only while it is younger than two minutes; a probe still queued
+  then is answered (and stored) `no_worker` by the same kind of conditional update, so a late
+  worker cannot take it. A probe whose lease ran out is finished `failed` and never taken again
+  (a second run would use the credential again). `finish` records only under the owner's
+  unexpired lease.
+- **Each stored key is one a person compared (T2, I3).** `repo host-keys --save` writes one line,
+  the `ssh-ed25519` key when offered (else the strongest), and prints "Compare this fingerprint
+  with your host's published fingerprints before you use the file."; `--type` picks others,
+  each named with its fingerprint (`--type` without `--save` is refused). `--save` creates the
+  file with `O_EXCL` (an existing one only with `--force`) and `O_NOFOLLOW`, and refuses a
+  symbolic link, dangling or not, even with `--force`, before a worker is asked.
+  `ssh-keyscan` opens one connection per key type, so a key
+  nobody compared could be an on-path attacker's.
+
+**Residuals.** Trust on first use: the server cannot prove a person compared a fingerprint; what
+is stored is what the `MANAGE_REPOSITORY` holder sent. The access check, like a deploy, connects
+by name, so DNS may answer differently than for its own check or for the host-key scan
+(rebinding). A `MANAGE_REPOSITORY` holder learns whether a host and port inside the network
+answers SSH (or HTTPS), as a deploy's error already tells them.
 
 ## Local mode (M4c)
 

@@ -12,6 +12,7 @@ actually happens.
 
 from __future__ import annotations
 
+import shlex
 import uuid
 from datetime import UTC, datetime
 
@@ -44,6 +45,7 @@ from lakana_core.secrets.uses import (
     lock_connections,
     lock_entry,
     own_secret_steps,
+    plain,
     record_binding,
     require_connection_takes,
     resolve_use,
@@ -61,6 +63,8 @@ def insert_secret(
     name: str,
     values: dict[str, str],
     use: SecretUse | None,
+    generated_for: uuid.UUID | None = None,
+    public_key: str | None = None,
 ) -> Secret:
     """Encrypt and add a new secret, born bound to `use`; no authorization, no commit.
 
@@ -84,6 +88,11 @@ def insert_secret(
         The plaintext values.
     use
         What the secret is for; `None` leaves it unbound.
+    generated_for
+        The repository a deploy key Lakana made is for (`Secret.generated_for`); `None` for
+        a secret a person stores.
+    public_key
+        The public half of that deploy key; `None` otherwise.
 
     Returns
     -------
@@ -126,6 +135,8 @@ def insert_secret(
         key_id=encrypted.key_id,
         created_by=p.id,
         created_at=datetime.now(UTC),
+        generated_for=generated_for,
+        public_key=public_key,
     )
     scope = Securable.environment_scope(environment.name)
     AuditService(session).record(
@@ -462,6 +473,14 @@ class SecretService:
             )
         if secret.revoked_at is not None:
             raise ValidationError(f"Secret {secret.id} has been revoked and cannot be bound.")
+        if secret.generated_for is not None and not (
+            use.kind is SecretUseKind.REPOSITORY and use.target_id == secret.generated_for
+        ):
+            raise ValidationError(
+                f"Secret '{shown(secret.name)}' is the deploy key Lakana made for "
+                f"{self._made_for(secret)}, so it is never bound to another use. Give "
+                f"{use.wanted()} a secret of its own: {self._own_steps(env.name, use)}."
+            )
         if use.kind is not SecretUseKind.ENVIRONMENT and env.storage_secret_ref == secret.name:
             raise ValidationError(
                 f"Secret '{shown(secret.name)}' is the storage secret of environment "
@@ -475,6 +494,65 @@ class SecretService:
         record_binding(self._session, p, secret, scope, use)
         adopt_connection_secret(self._session, p, secret, env.name)
         self._session.commit()
+
+    @staticmethod
+    def _own_steps(environment: str, use: SecretUse) -> str:
+        """Write the commands that give a use a secret of its own, the environment's use too.
+
+        Parameters
+        ----------
+        environment
+            The secret's environment.
+        use
+            The use.
+
+        Returns
+        -------
+        str
+            `own_secret_steps`, or for the environment's own use its `secret create`.
+        """
+        if use.kind is SecretUseKind.ENVIRONMENT:
+            return (
+                f"`lakana secret create NEW --env {shlex.quote(plain(environment))} --own-env "
+                "--values-stdin`"
+            )
+        return own_secret_steps(environment, use)
+
+    def _made_for_name(self, secret: Secret) -> str:
+        """Name the repository a deploy key was made for, as a command argument.
+
+        Parameters
+        ----------
+        secret
+            A deploy key Lakana made (`generated_for` is set).
+
+        Returns
+        -------
+        str
+            The repository's name, quoted for a shell; ``NAME`` when it was removed.
+        """
+        row = target_row(self._session, SecretUseKind.REPOSITORY, secret.generated_for)
+        return shlex.quote(plain(row.name)) if row is not None else "NAME"
+
+    def _made_for(self, secret: Secret) -> str:
+        """Name the repository a deploy key was made for, for a message.
+
+        Parameters
+        ----------
+        secret
+            A deploy key Lakana made (`generated_for` is set).
+
+        Returns
+        -------
+        str
+            ``repository 'NAME'``, or ``a repository that was removed``.
+        """
+        row = target_row(self._session, SecretUseKind.REPOSITORY, secret.generated_for)
+        return (
+            f"repository '{shown(row.name)}'"
+            if row is not None
+            else "a repository that was removed"
+        )
 
     def use_from_names(
         self, p: PrincipalRef, environment: str, kind: SecretUseKind, target: str | None
@@ -640,6 +718,14 @@ class SecretService:
         require_step_up(p)
         if secret.revoked_at is not None:
             raise ValidationError(f"Secret {secret_id} has been revoked and cannot be rotated.")
+        if secret.generated_for is not None:
+            raise ValidationError(
+                f"Secret '{shown(secret.name)}' is the deploy key Lakana made for "
+                f"{self._made_for(secret)}; only Lakana replaces it, so its private key never "
+                "passes through anyone's hands. Make a new one: lakana repo deploy-key "
+                f"{self._made_for_name(secret)} --environment {shlex.quote(plain(env.name))} "
+                "--replace (then replace the key at your git host)."
+            )
         rotate_values(self._session, self._key_provider, p, secret, values)
         self._session.commit()
         return secret

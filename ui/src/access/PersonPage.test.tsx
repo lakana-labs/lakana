@@ -1,5 +1,5 @@
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { renderShell } from "../test/render";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -188,5 +188,58 @@ describe("PersonPage", () => {
     expect(await screen.findByText(/signs in with its API token/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Issue a recovery link" })).not.toBeInTheDocument();
     expect(server.sent.some((request) => request.path.endsWith("/permissions"))).toBe(false);
+  });
+
+  it("lets an administrator remove another person's picture", async () => {
+    const { user, server } = renderShell("/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": {
+          status: 200,
+          body: { name: "kim", type: "USER", is_active: true, picture: "e1" },
+        },
+        "GET /api/v1/principals/kim/picture": {
+          status: 200,
+          blob: new Blob(["webp"], { type: "image/webp" }),
+        },
+        "DELETE /api/v1/principals/kim/picture": { status: 204 },
+        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Remove picture" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove picture" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove kim's picture?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove picture" }));
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Remove picture" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "kim" })).toHaveFocus();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(server.sent.some((request) => request.method === "DELETE")).toBe(true);
+  });
+
+  it("offers no removal for a person without a picture, nor on one's own page", async () => {
+    renderShell("/access/people/admin", {
+      me: { picture: "e1" },
+      routes: {
+        "GET /api/v1/principals/admin/picture": {
+          status: 200,
+          blob: new Blob(["webp"], { type: "image/webp" }),
+        },
+        "GET /api/v1/principals/admin/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/admin/sessions": { status: 200, body: [] },
+      },
+    });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "admin" })).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(screen.getByRole("main").querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
+    });
+    expect(screen.queryByRole("button", { name: "Remove picture" })).not.toBeInTheDocument();
   });
 });

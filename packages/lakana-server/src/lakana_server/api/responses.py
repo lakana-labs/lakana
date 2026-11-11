@@ -53,7 +53,7 @@ ERROR_MEANING: dict[int, str] = {
         "Not signed in: the token or browser session is missing, wrong, expired or revoked; an "
         "ended session says why in `reason`."
     ),
-    403: "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+    403: "Signed in, but not allowed to do this; the message says why and what to do next.",
     404: "What the request names does not exist, or the caller may not know that it does.",
     408: "No part of the request body arrived within the read timeout.",
     409: "The request conflicts with the current state; the message says what to change.",
@@ -62,6 +62,10 @@ ERROR_MEANING: dict[int, str] = {
         "or is not known; ask for a new link."
     ),
     413: "The request body is larger than the server accepts.",
+    415: (
+        "The request body is of a type the server does not accept; the message names the ones "
+        "it does."
+    ),
     429: "Too many attempts from this address; ask again after the time in `Retry-After`.",
     502: (
         "A service behind the server, such as the environment's storage, refused it; the message "

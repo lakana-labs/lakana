@@ -1,0 +1,257 @@
+/* Home: sections under plain headings, separated by space and hairlines, never cards. */
+.home-section {
+  margin: 0 0 var(--space-6);
+}
+
+.home-section h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.home-section h3 {
+  margin: var(--space-5) 0 var(--space-1);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: 500;
+}
+
+.home-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* Links: the accent, underlined on hover; the rows' names have their own. */
+.home-section p a,
+.home-steps a,
+.home-update a,
+.home-more {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+/* A link inside a sentence is underlined always: colour alone does not set it apart from the
+   muted text around it (WCAG 1.4.1, axe's link-in-text-block). */
+.home-section p a,
+.home-update a {
+  text-decoration: underline;
+}
+
+.home-section p a:hover,
+.home-steps a:hover,
+.home-update a:hover,
+.home-more:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+/* The update note: one line with the notice bar, and × at its end. */
+.home-update {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-5);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-control);
+  background: var(--color-accent-bg);
+}
+
+.home-update p {
+  flex: 1;
+  margin: 0;
+}
+
+.home-update .step-error {
+  flex-basis: 100%;
+}
+
+.home-update-hide {
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.home-update-hide[data-hovered] {
+  border-color: var(--color-edge);
+  color: var(--color-text);
+}
+
+/* Get started: one row per step, its sentence first and its one way after. */
+.home-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--color-line);
+}
+
+.home-steps li {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.home-steps p {
+  margin: 0 0 var(--space-1);
+}
+
+/* The command of a step: no room kept below it for the copy hint until there is one. */
+.home-steps .copy-line {
+  margin-bottom: 0;
+}
+
+.home-steps .copy-hint {
+  min-height: 0;
+  margin: 0;
+}
+
+.home-step-done p {
+  color: var(--color-text-muted);
+}
+
+/* The status box: a hairline frame, no shadow. */
+.home-status {
+  padding: var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+}
+
+.home-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+  font-weight: 500;
+}
+
+.home-sentence {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-muted);
+}
+
+/* The figures: the name, the bar, the number right-aligned with its unit. */
+.home-figures {
+  margin: var(--space-4) 0 var(--space-3);
+}
+
+.home-figures > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.home-figures dt {
+  flex-basis: 96px;
+  color: var(--color-text-muted);
+}
+
+.home-figures dd {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.home-figures meter {
+  flex: 1 1 96px;
+  min-height: 8px;
+  max-height: 8px;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-sunk);
+  appearance: none;
+}
+
+.home-figures meter::-webkit-meter-bar {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.home-figures meter::-webkit-meter-optimum-value {
+  background: var(--color-text-muted);
+}
+
+.home-figures meter::-moz-meter-bar {
+  background: var(--color-text-muted);
+}
+
+.home-number {
+  flex: 0 0 160px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Your work's repositories: not rows that open, so a plain list. */
+.home-repos {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-repos > li {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.home-repo-name {
+  font-weight: 500;
+}
+
+.home-deploys {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-deploys li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.home-when {
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+}
+
+/* The environment of a row: a quiet label, never colour alone. */
+.env-label {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  vertical-align: 1px;
+}
+
+@media (forced-colors: active) {
+  .home-figures meter {
+    border-color: CanvasText;
+  }
+}

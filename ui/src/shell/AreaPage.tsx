@@ -14,8 +14,6 @@ import { Page } from "./Page";
 export interface AreaPageProps {
   /** The area. */
   readonly area: ShippedArea;
-  /** Whether to say that the person has no access yet (Home only). */
-  readonly noAccessYet?: boolean;
 }
 
 /**
@@ -23,14 +21,12 @@ export interface AreaPageProps {
  *
  * @param props - The area.
  * @param props.area - The area.
- * @param props.noAccessYet - Whether to say that the person has no access yet.
  * @returns The page.
  */
-export function AreaPage({ area, noAccessYet = false }: AreaPageProps): JSX.Element {
+export function AreaPage({ area }: AreaPageProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <Page title={t(`areas.${area.id}.name`)}>
-      {noAccessYet && <p className="page-notice">{t("home.noAccessYet")}</p>}
       <p className="page-purpose">{t(`areas.${area.id}.purpose`)}</p>
       <ComingSoon part={area.part} cli={area.cli} />
     </Page>

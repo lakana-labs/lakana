@@ -3,6 +3,7 @@
  "audit-export": 9,
  "bind-a-secret": 12.7,
  "check-your-data": 112,
+ "connect-a-repository": 12,
  "connections": 14,
  "describe-a-table": 11,
  "drop-and-restore-a-table": 20.3,

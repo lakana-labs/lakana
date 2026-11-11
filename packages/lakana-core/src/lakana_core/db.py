@@ -244,7 +244,9 @@ def create_engine(config: DatabaseConfig, *, lease_seconds: int = DEFAULT_LEASE_
     """
     echo_logger = logging.getLogger("sqlalchemy.engine.Engine")
     before = list(echo_logger.handlers)
-    engine = sqlalchemy.create_engine(config.url, echo=config.echo, pool_pre_ping=True)
+    engine = sqlalchemy.create_engine(
+        config.url, echo=config.echo, pool_pre_ping=True, hide_parameters=True
+    )
     _ping_that_survives_a_reset(engine)
     event.listen(engine, "connect", _configure_sqlite)
     if engine.dialect.name == "postgresql":

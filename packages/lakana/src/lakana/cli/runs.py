@@ -13,6 +13,7 @@ from lakana._models import CheckResult, Notification, Run, RunTask, WorkerInfo
 from lakana.cli import _output
 from lakana.cli._paging import more_results, parse_since
 from lakana.cli._state import CliState, resolve_environment, state_of
+from lakana.cli.artifacts import human_size
 from lakana.cli.checks import check_shown, withheld_line
 from lakana.cli.deploys import resolve_repository
 from lakana.cli.environments import cache_size_cell
@@ -71,13 +72,14 @@ _WORKER_COLUMNS = [
     "status",
     "takes",
     "doing",
+    "memory",
     "caches",
 ]
 _ID_SHOWN = 8
 """How many characters of a run id the `doing` column shows."""
 _DOING_NOTE = "doing shows 8 characters of each run id; --output json has them whole."
 _CACHES_NOTE = "caches: the disk its caches take (+ a floor, - not measured); see lakana env usage."
-_WORKER_DROPPABLE = ["started_at", "version", "host", "caches"]
+_WORKER_DROPPABLE = ["started_at", "version", "host", "caches", "memory"]
 """What `worker list` leaves out first on a narrow terminal: the id, state and work stay."""
 
 
@@ -1138,10 +1140,12 @@ def list_workers(ctx: typer.Context) -> None:
     """List the registered workers and what each is doing (admin).
 
     A worker is alive while its heartbeat is recent and lost after that; a lost worker's row
-    stays for an hour, and the query or deploy it held is ended by the scheduler. The column
+    stays for an hour, and the query or deploy it held is ended by the scheduler; it shows as
+    lost (replaced) once a worker restarted on the same host. The column
     takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys,
-    pipeline tasks and table maintenance). The column caches is the disk its caches take, as it
-    last measured them (hourly).
+    pipeline tasks and table maintenance). The column memory is the memory it last reported
+    against its limit (LAKANA_WORKER__MEMORY_LIMIT). The column caches is the disk its caches
+    take, as it last measured them (hourly).
 
     Parameters
     ----------
@@ -1156,6 +1160,55 @@ def list_workers(ctx: typer.Context) -> None:
             "'lakana server start --local'."
         )
         return
+    emit_workers(state, workers)
+
+
+def _status_cell(worker: WorkerInfo) -> str:
+    """Write a worker's state, saying when a restart on its host replaced a lost one.
+
+    Parameters
+    ----------
+    worker
+        The worker.
+
+    Returns
+    -------
+    str
+        `alive`, `lost`, or `lost (replaced)`.
+    """
+    return f"{worker.status} (replaced)" if worker.replaced else worker.status
+
+
+def memory_cell(worker: WorkerInfo) -> str:
+    """Write the memory a worker last reported.
+
+    Parameters
+    ----------
+    worker
+        The worker.
+
+    Returns
+    -------
+    str
+        ``1.2 GiB of 4.0 GiB``; only the use without a limit; ``-`` before its first report.
+    """
+    memory = worker.memory
+    if memory is None:
+        return "-"
+    used = human_size(memory.used_bytes)
+    return used if memory.limit_bytes is None else f"{used} of {human_size(memory.limit_bytes)}"
+
+
+def emit_workers(state: CliState, workers: list[WorkerInfo]) -> None:
+    """Print workers as `lakana worker list` does (`lakana status` prints them the same way).
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    workers
+        The workers.
+    """
     _output.emit(
         state,
         workers,
@@ -1164,9 +1217,11 @@ def list_workers(ctx: typer.Context) -> None:
         derived={
             "last_seen": _last_seen,
             "doing": _doing,
+            "status": _status_cell,
+            "memory": memory_cell,
             "caches": lambda w: cache_size_cell(w, "total_bytes"),
         },
-        whole=["takes", "doing", "caches"],
+        whole=["status", "takes", "doing", "memory", "caches"],
         footnotes={
             **({"doing": _DOING_NOTE} if any(_doing(w) != "idle" for w in workers) else {}),
             "caches": _CACHES_NOTE,

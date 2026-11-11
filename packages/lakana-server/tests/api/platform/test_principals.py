@@ -13,7 +13,12 @@ def test_create_and_get_principal(client: TestClient) -> None:
         json={"name": "ci-bot", "type": "SERVICE_ACCOUNT"},
     )
     assert response.status_code == 201, response.text
-    assert response.json() == {"name": "ci-bot", "type": "SERVICE_ACCOUNT", "is_active": True}
+    assert response.json() == {
+        "name": "ci-bot",
+        "type": "SERVICE_ACCOUNT",
+        "is_active": True,
+        "picture": None,
+    }
 
     fetched = client.get("/api/v1/principals/ci-bot", headers=AUTH_HEADER)
     assert fetched.status_code == 200

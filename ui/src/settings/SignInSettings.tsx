@@ -10,10 +10,9 @@ import { useTranslation } from "react-i18next";
 
 import { changeSignInSettings, getSignInSettings, type SignInSettingsOut } from "../api";
 import { Loaded } from "../shell/Loaded";
-import { Page } from "../shell/Page";
-import { SectionTabs } from "../shell/SectionTabs";
 import { useResource } from "../shell/useResource";
 import { useAttempt } from "../sign-in/Attempt";
+import { SettingsFrame } from "./SettingsFrame";
 
 const HOUR = 60;
 const DAY = 24 * HOUR;
@@ -170,13 +169,9 @@ export function SignInSettings(): JSX.Element {
   const { t } = useTranslation();
   const settings = useResource(getSignInSettings);
   return (
-    <Page title={t("areas.settings.name")}>
-      <SectionTabs
-        label={t("settings.tabs")}
-        tabs={[{ to: "/settings/sign-in", label: t("settings.signIn.tab") }]}
-      />
+    <SettingsFrame>
       <p className="page-purpose">{t("settings.signIn.intro")}</p>
       <Loaded resource={settings}>{(current) => <LengthsForm current={current} />}</Loaded>
-    </Page>
+    </SettingsFrame>
   );
 }

@@ -129,7 +129,6 @@ describe("UserMenu", () => {
   it("shows the signed-in name in the user menu", async () => {
     renderShell("/");
     await screen.findByRole("heading", { level: 1, name: "Home" });
-
     const button = screen.getByRole("button", { name: "Signed in as admin" });
     expect(button).toHaveTextContent("admin");
     expect(screen.queryByText(/Preview/)).not.toBeInTheDocument();
@@ -153,6 +152,59 @@ describe("UserMenu", () => {
     await user.click(screen.getByRole("button", { name: "Signed in as admin" }));
     await user.click(await screen.findByRole("menuitem", { name: "Sign out everywhere" }));
     expect(session.signOutEverywhere).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows initials in the menu's button without a picture", async () => {
+    const { server } = renderShell("/");
+    const button = await screen.findByRole("button", { name: "Signed in as admin" });
+
+    expect(button.querySelector(".avatar")).toHaveTextContent("A");
+    expect(button.querySelector("img")).toBeNull();
+    // The initials are text, so an aria-label would no longer contain all of it (WCAG 2.5.3):
+    // the name comes from the content, the initials hidden and "Signed in as" visually hidden.
+    expect(button).not.toHaveAttribute("aria-label");
+    expect(button.querySelector(".visually-hidden")).toHaveTextContent("Signed in as");
+    expect(server.sent.some((request) => request.path.endsWith("/picture"))).toBe(false);
+  });
+
+  it("shows the picture in the user menu and on Access", async () => {
+    const { user } = renderShell("/", {
+      me: { picture: "e1" },
+      routes: {
+        "GET /api/v1/principals/admin/picture": {
+          status: 200,
+          blob: new Blob(["webp"], { type: "image/webp" }),
+        },
+        "GET /api/v1/principals": {
+          status: 200,
+          body: [{ name: "admin", type: "USER", is_active: true, picture: "e1" }],
+        },
+      },
+    });
+    const button = await screen.findByRole("button", { name: "Signed in as admin" });
+    await waitFor(() => {
+      expect(button.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
+    });
+
+    await user.click(screen.getByRole("link", { name: "Access" }));
+
+    const row = (await screen.findAllByRole("row"))[1] as HTMLElement;
+    await waitFor(() => {
+      expect(row.querySelector("img")?.getAttribute("src")).toBe(
+        button.querySelector("img")?.getAttribute("src"),
+      );
+    });
+  });
+
+  it("opens the profile picture from the Account section", async () => {
+    const { user } = await openMenu();
+
+    await user.click(screen.getByRole("menuitem", { name: "Profile picture…" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Profile picture" });
+    expect(within(dialog).getByLabelText("Choose a picture")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("says why signing out did not work", async () => {

@@ -32,6 +32,7 @@ nav:
   - How-to guides:
       - how-to/index.md
       - how-to/projects.md
+      - how-to/connect-a-repository.md
       - how-to/load-data-from-a-source.md
       - how-to/read-from-a-sql-server-database.md
       - how-to/deploy-from-github-actions.md
@@ -45,6 +46,7 @@ nav:
       - how-to/instance-health.md
       - how-to/export-and-keep-the-audit-log.md
       - how-to/install-without-internet-access.md
+      - how-to/start-in-the-web-interface.md
       - how-to/invite-your-team.md
       - how-to/give-a-second-person-access.md
       - how-to/lost-your-passkey.md

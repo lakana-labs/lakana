@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { listPeople, PEOPLE_LIMIT } from "../api";
+import { Avatar } from "../profile/Avatar";
 import { ListHead } from "../shell/ListHead";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
@@ -19,8 +20,9 @@ import { personPath } from "./paths";
 const SEARCH_PAUSE_MS = 250;
 
 /**
- * Renders the search field and the list; every row opens its person. The list is read again
- * once typing pauses, and says when it shows only the first {@link PEOPLE_LIMIT}.
+ * Renders the search field and the list; every row opens its person and shows their picture or
+ * initials. The list is read again once typing pauses, and says when it shows only the first
+ * {@link PEOPLE_LIMIT}.
  *
  * @returns The place.
  */
@@ -59,14 +61,23 @@ export function PeoplePage(): JSX.Element {
                   {found.map((person) => (
                     <tr key={person.name}>
                       <td>
-                        <Link className="row-name" to={personPath(person.name)}>
-                          {person.name}
-                        </Link>
-                        <span className="second">
-                          {person.type === "USER"
-                            ? t("access.people.person")
-                            : t("access.people.service")}
-                        </span>
+                        {/* The picture beside both lines: the kind starts under the name. */}
+                        <div className="person-cell">
+                          <Avatar
+                            name={person.name}
+                            displayName={null}
+                            etag={person.picture}
+                            size={24}
+                          />
+                          <Link className="row-name" to={personPath(person.name)}>
+                            {person.name}
+                          </Link>
+                          <span className="second">
+                            {person.type === "USER"
+                              ? t("access.people.person")
+                              : t("access.people.service")}
+                          </span>
+                        </div>
                       </td>
                       <td>{person.is_active ? "" : t("access.people.deactivated")}</td>
                       <td>

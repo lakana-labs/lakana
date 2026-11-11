@@ -73,6 +73,9 @@ for (const theme of ["light", "dark"] as const) {
         await page.getByRole("button", { name: "Signed in as admin" }).click();
         await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
         expect(await violations(page), "user menu").toEqual([]);
+        await page.getByRole("menuitem", { name: "Profile picture…" }).click();
+        await expect(page.getByRole("dialog", { name: "Profile picture" })).toBeVisible();
+        expect(await violations(page), "profile picture").toEqual([]);
         await page.keyboard.press("Escape");
         await page.getByRole("button", { name: "Search" }).click();
         await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
@@ -115,6 +118,13 @@ for (const theme of ["light", "dark"] as const) {
           await page.goto(path);
           await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
         }
+        // The picture is read with the CSRF header and shown from a blob: URL, which the policy
+        // allows; a blocked one would not load and would show up as an error.
+        const picture = page.getByRole("button", { name: "Signed in as admin" }).locator("img");
+        await expect(picture).toHaveAttribute("src", /^blob:/);
+        await expect
+          .poll(() => picture.evaluate((image: HTMLImageElement) => image.naturalWidth))
+          .toBeGreaterThan(0);
         // The floating surfaces: React Aria inserts its own styles for them.
         await page.getByRole("button", { name: "Signed in as admin" }).click();
         await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
@@ -229,7 +239,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
       const order: string[] = [];
-      for (let stop = 0; stop < 10; stop += 1) {
+      for (let stop = 0; stop < 11; stop += 1) {
         await page.keyboard.press("Tab");
         order.push(await page.evaluate(() => document.activeElement?.textContent.trim() ?? ""));
       }
@@ -242,8 +252,11 @@ for (const theme of ["light", "dark"] as const) {
         "Connections",
         "Access",
         "Settings",
-        "admin",
-        "Copy command",
+        "Help",
+        // The user menu's text: "Signed in as" is visually hidden before the name.
+        "Signed in as admin",
+        // Home's first stop: the update note's link.
+        "what's new › (opens in a new tab)",
       ]);
       await expect(page.getByRole("link", { name: "Home" })).toHaveAttribute(
         "aria-current",
@@ -283,6 +296,134 @@ for (const theme of ["light", "dark"] as const) {
       expect(overflow).toBeLessThanOrEqual(0);
     });
   });
+}
+
+/**
+ * Answers the administrator's interface state as for a first sign-in: the tour not yet seen.
+ *
+ * @param page - The page, after {@link signInAsAdmin} (a later route wins).
+ */
+async function firstSignIn(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.pathname === "/api/v1/principals/admin/interface-state",
+    (route) =>
+      route.fulfill({
+        json: { tour_seen: false, get_started_hidden: true, update_note_seen: null },
+      }),
+  );
+}
+
+/**
+ * Whether two boxes overlap.
+ *
+ * @param a - One box.
+ * @param b - The other.
+ * @returns True when they share any area.
+ */
+function overlap(
+  a: { x: number; y: number; width: number; height: number } | null,
+  b: { x: number; y: number; width: number; height: number } | null,
+): boolean {
+  if (a === null || b === null) {
+    return true;
+  }
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+for (const theme of ["light", "dark"] as const) {
+  for (const width of [1280, 320]) {
+    test.describe(`Help, the shortcuts and the tour, ${theme}, ${String(width)} px`, () => {
+      test.use({ viewport: { width, height: width === 320 ? 640 : 800 } });
+
+      test.beforeEach(async ({ page }) => {
+        await signInAsAdmin(page);
+        await firstSignIn(page);
+        await page.addInitScript(
+          ([key, value]) => {
+            window.localStorage.setItem(key ?? "", value ?? "");
+          },
+          [KEY, JSON.stringify({ theme, density: "roomy", language: "en" })],
+        );
+      });
+
+      test("the welcome and the steps fit, keep focus inside and have no axe violations", async ({
+        page,
+      }) => {
+        await page.goto("/");
+        const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
+        await expect(welcome).toBeVisible();
+        await expect(welcome).toBeInViewport({ ratio: 1 });
+        expect(await violations(page), "welcome").toEqual([]);
+
+        await welcome.getByRole("button", { name: "Start the tour" }).click();
+        const name = width === 320 ? "In the menu: Home" : "Home";
+        const step = page.getByRole("dialog", { name, exact: true });
+        await expect(step).toBeVisible();
+        await expect(step).toBeInViewport({ ratio: 1 });
+        expect(await step.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+        expect(await violations(page), "first step").toEqual([]);
+        if (width === 1280) {
+          // The step sits beside its place, never over it (WCAG 2.4.11).
+          const place = page.getByRole("link", { name: "Home", exact: true });
+          await expect(place).toHaveClass(/tour-target/);
+          expect(overlap(await step.boundingBox(), await place.boundingBox())).toBe(false);
+        }
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+
+        // On to the last step.
+        for (let index = 0; index < 8; index += 1) {
+          await page.getByRole("button", { name: "Next" }).click();
+        }
+        const last = page.getByRole("dialog", {
+          name: width === 320 ? "In the menu: Help" : "Help",
+        });
+        await expect(last).toBeVisible();
+        await expect(
+          // The first open step of the stubbed Get started: the repository is connected.
+          last.getByRole("link", { name: "Invite your team" }),
+        ).toBeVisible();
+        expect(await violations(page), "last step").toEqual([]);
+
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        // Begun at the welcome, the tour had no place to return to: focus goes to the heading.
+        await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeFocused();
+      });
+
+      test("Help and the shortcuts have no axe violations", async ({ page }) => {
+        await page.goto("/");
+        await page
+          .getByRole("dialog", { name: "Welcome to Lakana" })
+          .getByRole("button", { name: "Skip" })
+          .click();
+        if (width === 320) {
+          await page.getByRole("button", { name: "Menu" }).click();
+        }
+
+        const help = page.getByRole("button", { name: "Help" });
+        await help.click();
+        const menu = page.getByRole("menu", { name: "Help" });
+        await expect(menu).toBeVisible();
+        await expect(page.getByText("Lakana 0.23.0")).toBeVisible();
+        await expect(
+          menu.getByRole("menuitem", { name: "Show “Get started” again" }),
+        ).toBeVisible();
+        expect(await violations(page), "Help").toEqual([]);
+
+        await menu.getByRole("menuitem", { name: "Keyboard shortcuts" }).click();
+        const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+        await expect(dialog).toBeVisible();
+        await expect(dialog).toBeInViewport({ ratio: 1 });
+        expect(await violations(page), "shortcuts").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(help).toBeFocused();
+      });
+    });
+  }
 }
 
 /**

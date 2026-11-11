@@ -23,12 +23,37 @@ from sqlalchemy.orm import Session
 
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.runs import workers
-from lakana_core.runs.workers import CacheSizes
+from lakana_core.runs.workers import CacheSizes, MemoryUse
 
 logger = logging.getLogger(__name__)
 
 RETRY_SECONDS = 5.0
 """How long the thread waits after a failed write before it tries again."""
+
+MEMORY_STEP_BYTES = 1024 * 1024
+"""How far the worker's memory must move from the figure last written before a beat writes it."""
+
+
+def _moved(current: MemoryUse, written: MemoryUse | None) -> bool:
+    """Say whether a memory use differs enough from the one last written to write it.
+
+    Parameters
+    ----------
+    current
+        The use measured now.
+    written
+        The use last written; `None` when none was.
+
+    Returns
+    -------
+    bool
+        `True` for a first figure, a changed limit, or a use that moved `MEMORY_STEP_BYTES` or more.
+    """
+    return (
+        written is None
+        or current.limit_bytes != written.limit_bytes
+        or abs(current.used_bytes - written.used_bytes) >= MEMORY_STEP_BYTES
+    )
 
 
 class WorkerHeartbeat:
@@ -56,6 +81,10 @@ class WorkerHeartbeat:
     caches
         Returns the sizes of the worker's caches it last measured (`CacheKeeper.latest`); new
         figures are written with the next beat, and with every registration. `None` writes none.
+    memory
+        Returns the worker's memory use as its watchdog last measured it
+        (`MemoryWatchdog.use`); a beat writes it when it moved `MEMORY_STEP_BYTES` or more
+        since the figure last written, and every registration writes it. `None` writes none.
     """
 
     def __init__(
@@ -70,6 +99,7 @@ class WorkerHeartbeat:
         takes: str = "all",
         monotonic: Callable[[], float] = time.monotonic,
         caches: Callable[[], CacheSizes | None] | None = None,
+        memory: Callable[[], MemoryUse | None] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._worker_id = worker_id
@@ -81,6 +111,8 @@ class WorkerHeartbeat:
         self._monotonic = monotonic
         self._caches = caches
         self._written: CacheSizes | None = None
+        self._memory = memory
+        self._memory_written: MemoryUse | None = None
         self._started_at: datetime | None = None
         self._registered = False
         self._failures = 0
@@ -105,9 +137,15 @@ class WorkerHeartbeat:
         started = self._monotonic()
         current = None if self._caches is None else self._caches()
         fresh = None if current == self._written else current
+        memory = None if self._memory is None else self._memory()
+        moved = None if memory is None or not _moved(memory, self._memory_written) else memory
+        sent = moved
         try:
             with self._session_factory() as session:
-                if not self._registered or not workers.beat(session, self._worker_id, caches=fresh):
+                if not self._registered or not workers.beat(
+                    session, self._worker_id, caches=fresh, memory=moved
+                ):
+                    sent = memory
                     self._started_at = workers.register(
                         session,
                         self._worker_id,
@@ -116,6 +154,7 @@ class WorkerHeartbeat:
                         started_at=self._started_at,
                         takes=self._takes,
                         caches=current,
+                        memory=memory,
                     )
                 session.commit()
         except Exception as error:
@@ -152,6 +191,8 @@ class WorkerHeartbeat:
             )
         self._failures = 0
         self._written = current
+        if sent is not None:
+            self._memory_written = sent
         with self._lock:
             self._registered = True
             self._last_success = started

@@ -29,6 +29,7 @@ from lakana_core.catalog.orphaned_locations import DEFAULT_OLDER_THAN_DAYS
 from lakana_core.catalog.writes import MAX_SOURCE_NAME, MAX_SOURCE_VERSIONS
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.grants.roles import Role
+from lakana_core.home.attention import AttentionKind
 from lakana_core.models import AuditEventType
 
 
@@ -1638,13 +1639,29 @@ class PrincipalOut(BaseModel):
         Whether this is a human user or a service account.
     is_active
         Whether this principal can currently authenticate.
+    picture
+        The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),
+        or `null` without one; it changes whenever the picture does.
     """
 
     name: str
     type: str
     is_active: bool
+    picture: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class PictureOut(BaseModel):
+    """Response body for `PUT /api/v1/principals/{name}/picture`.
+
+    Parameters
+    ----------
+    etag
+        The stored picture's etag: the SHA-256 of the re-encoded WebP, in hex.
+    """
+
+    etag: str
 
 
 class GroupCreate(BaseModel):
@@ -2361,6 +2378,11 @@ class WhoamiOut(BaseModel):
     has_access
         Whether you have any grant at all, at any scope, directly or through a group; `false`
         for a new person nobody has granted anything yet.
+    may_deploy
+        Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role
+        or a group); the web interface shows the deploy steps and Your work from it.
+    picture
+        The etag of your profile picture, or `null` without one.
     """
 
     name: str
@@ -2370,6 +2392,8 @@ class WhoamiOut(BaseModel):
     language: str | None = None
     admin: bool = False
     has_access: bool = False
+    may_deploy: bool = False
+    picture: str | None = None
 
 
 class ProfileIn(BaseModel):
@@ -2382,6 +2406,258 @@ class ProfileIn(BaseModel):
     """
 
     language: str | None
+
+
+class InterfaceStateOut(BaseModel):
+    """What the web interface remembers for you.
+
+    Parameters
+    ----------
+    tour_seen
+        Whether you finished or skipped the tour; `false` until then, so it shows on your next
+        sign-in.
+    get_started_hidden
+        Whether you hid Get started on Home.
+    update_note_seen
+        The last release whose update note you saw (`x.y.z`), or `null`.
+    """
+
+    tour_seen: bool
+    get_started_hidden: bool
+    update_note_seen: str | None
+
+
+class InterfaceStateIn(BaseModel):
+    """Request body that changes what the web interface remembers for you.
+
+    Every field is optional: a field left out stays as it is. A refused request changes
+    nothing, so send `tour_seen` on its own whenever `update_note_seen` might be refused.
+
+    Parameters
+    ----------
+    tour_seen
+        `true` once you finished or skipped the tour, `false` to see it again.
+    get_started_hidden
+        `true` to hide Get started, `false` to show it again.
+    update_note_seen
+        The release whose update note you saw, as `x.y.z` (for example `0.23.0`); a development
+        build's version is refused (422). `null` clears it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tour_seen: bool | None = None
+    get_started_hidden: bool | None = None
+    update_note_seen: str | None = Field(default=None, max_length=64)
+
+
+class RecentIn(BaseModel):
+    """Request body that records that you opened an object.
+
+    Parameters
+    ----------
+    kind
+        `table`, `query`, `job` or `run`.
+    environment
+        The object's environment.
+    ref
+        The object: a dotted table name (`gold.sales`), a query's or a run's id, or
+        `repository/job`.
+    """
+
+    kind: Literal["table", "query", "job", "run"]
+    environment: str = Field(max_length=255)
+    ref: str = Field(max_length=1024)
+
+
+class RecentOut(BaseModel):
+    """One object you opened recently.
+
+    Parameters
+    ----------
+    kind
+        `table`, `query`, `job` or `run`.
+    environment
+        The object's environment.
+    ref
+        The object, as it was recorded.
+    opened_at
+        When you last opened it.
+    """
+
+    kind: Literal["table", "query", "job", "run"]
+    environment: str
+    ref: str
+    opened_at: datetime
+
+
+class GetStartedStepOut(BaseModel):
+    """One row of Get started.
+
+    Parameters
+    ----------
+    id
+        The step: `connect_repository`, `invite_team`, `add_passkey`, `deploy_project`,
+        `deploy_project_local`, `ci_deploy`, `open_table` or `run_query`.
+    done
+        Whether the server's state shows it done.
+    """
+
+    id: Literal[
+        "connect_repository",
+        "invite_team",
+        "add_passkey",
+        "deploy_project",
+        "deploy_project_local",
+        "ci_deploy",
+        "open_table",
+        "run_query",
+    ]
+    done: bool
+
+
+class GetStartedOut(BaseModel):
+    """Your Get started list on Home.
+
+    Parameters
+    ----------
+    audience
+        `admin`, `deployer` (may deploy somewhere), `reader` (has other access) or `none` (no
+        access yet: the interface says to ask an administrator).
+    local
+        Whether the server runs in local mode (`lakana server start --local`), which leaves out
+        what needs a team: inviting, CI, connecting a repository.
+    steps
+        The rows in order, each with whether it is done; empty for `none`.
+    hidden
+        Whether you hid the list.
+    complete
+        Whether every step is done; the interface then shows the list no more.
+    """
+
+    audience: Literal["admin", "deployer", "reader", "none"]
+    local: bool
+    steps: list[GetStartedStepOut]
+    hidden: bool
+    complete: bool
+
+
+class AttentionItemOut(BaseModel):
+    """One row of Needs your attention on Home.
+
+    Parameters
+    ----------
+    kind
+        `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal
+        fired), `check_failed` (a check's newest result failed or errored), `query_failed`
+        (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two,
+        and failed runs, only for administrators.
+    environment
+        The environment's name; `null` for a recovery link and a worker.
+    title
+        The object's name: a job, a dotted table name, a check, `Query` and the first eight
+        characters of its id, the person a recovery link signs in, a worker's host. Never a
+        value, an error text or SQL.
+    ref
+        The object the row opens: a run's id (a failed run or check), a dotted table name, a
+        query's id, a recovery link's id or a worker's id.
+    at
+        When it happened.
+    """
+
+    kind: AttentionKind
+    environment: str | None
+    title: str
+    ref: str
+    at: datetime
+
+
+class AttentionOut(BaseModel):
+    """Needs your attention on Home.
+
+    Parameters
+    ----------
+    items
+        At most 50 rows, newest first; empty when nothing needs you.
+    truncated
+        Whether more rows were left out.
+    """
+
+    items: list[AttentionItemOut]
+    truncated: bool
+
+
+class WorkEnvironmentOut(BaseModel):
+    """Where one of your repositories is deployed.
+
+    Parameters
+    ----------
+    environment
+        The environment's name.
+    last_deploy_status
+        How the newest deploy there ended: `queued`, `running`, `succeeded` or `failed`;
+        `null` when no deploy run is recorded.
+    last_deploy_at
+        When that deploy ended, or was requested while it has not.
+    """
+
+    environment: str
+    last_deploy_status: str | None
+    last_deploy_at: datetime | None
+
+
+class WorkRepositoryOut(BaseModel):
+    """A repository you created or deployed.
+
+    Parameters
+    ----------
+    name
+        The repository's name.
+    environments
+        The environments you may read where it is deployed, by name.
+    """
+
+    name: str
+    environments: list[WorkEnvironmentOut]
+
+
+class WorkJobOut(BaseModel):
+    """A job of one of your repositories.
+
+    Parameters
+    ----------
+    environment
+        The environment's name.
+    repository
+        The repository's name.
+    job
+        The job's name.
+    last_run_status
+        The state of its newest run; `null` before the first.
+    last_run_at
+        When that run was started.
+    """
+
+    environment: str
+    repository: str
+    job: str
+    last_run_status: str | None
+    last_run_at: datetime | None
+
+
+class WorkOut(BaseModel):
+    """Your work on Home: only for people who may deploy somewhere.
+
+    Parameters
+    ----------
+    repositories
+        At most 20, the most recently deployed (else created) first.
+    jobs
+        At most 20 of their jobs, the most recently run first.
+    """
+
+    repositories: list[WorkRepositoryOut]
+    jobs: list[WorkJobOut]
 
 
 class EnvironmentStorageUpdate(BaseModel):
@@ -2459,6 +2735,24 @@ class RepositoryUpdate(BaseModel):
     default_ref: str | None = None
 
 
+class RepositoryDeployKeyOut(BaseModel):
+    """The public half of one environment's deploy key.
+
+    Parameters
+    ----------
+    environment
+        The environment whose secret holds the private half.
+    public_key
+        ``ssh-ed25519 <base64> <comment>``: add it at the git host as a read-only deploy key.
+    fingerprint
+        ``SHA256:…``, as `ssh-keygen -l` and the git host show it.
+    """
+
+    environment: str
+    public_key: str
+    fingerprint: str
+
+
 class RepositoryOut(BaseModel):
     """Response body for a repository. Carries a secret's name, never a value.
 
@@ -2486,6 +2780,9 @@ class RepositoryOut(BaseModel):
         When.
     updated_at
         Last change.
+    deploy_keys
+        The public deploy keys Lakana made for it, one per environment you may read, to add at
+        the git host; empty when it names no such key. Never a private key.
     """
 
     id: uuid.UUID
@@ -2499,6 +2796,72 @@ class RepositoryOut(BaseModel):
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    deploy_keys: list[RepositoryDeployKeyOut] = []
+
+
+class DeployKeyIn(BaseModel):
+    """Request body for making deploy keys; every field is optional.
+
+    Parameters
+    ----------
+    secret
+        The secret name the keys are stored under; ``<repository>-deploy-key`` by default.
+    environments
+        Only these environments; by default every environment where you may manage secrets
+        and the repository has no key yet.
+    replace
+        Replace the keys of `environments` (required with it). The old key of each stops
+        working.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    secret: str | None = Field(default=None, max_length=255)
+    environments: list[str] | None = Field(default=None, max_length=100)
+    replace: bool = False
+
+
+class DeployKeyMadeOut(RepositoryDeployKeyOut):
+    """One environment's deploy key in the answer of a call that makes keys.
+
+    Parameters
+    ----------
+    environment
+        The environment whose secret holds the private half.
+    public_key
+        ``ssh-ed25519 <base64> <comment>``.
+    fingerprint
+        ``SHA256:…``.
+    made
+        Whether this call made it; `false` for a key made earlier, listed unchanged.
+    """
+
+    made: bool
+
+
+class DeployKeyOut(BaseModel):
+    """Response body of a call that makes deploy keys. Never carries a private key.
+
+    Parameters
+    ----------
+    secret
+        The secret name every key is stored under; now the repository's credential.
+    keys
+        One per environment the call wrote or found a key in, by environment name.
+    skipped
+        Environments without a key where you may not manage secrets: someone who may makes
+        theirs.
+    replaced
+        Environments whose key this call replaced.
+    notes
+        For each replaced key: the old key stops working, replace it at the git host now.
+    """
+
+    secret: str
+    keys: list[DeployKeyMadeOut]
+    skipped: list[str]
+    replaced: list[str]
+    notes: list[str]
 
 
 class PackageIndexCreate(BaseModel):
@@ -3036,6 +3399,110 @@ class ConnectionTestOut(BaseModel):
     state: str
     outcome: str | None
     message: str | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class RepositoryProbeIn(BaseModel):
+    """Request body that queues a repository check; a worker runs it.
+
+    Send exactly the fields of its kind: ``host_keys`` takes `url`; ``access`` takes
+    `repository` and `environment`.
+
+    Parameters
+    ----------
+    kind
+        ``host_keys`` fetches the SSH host keys of the URL's host; ``access`` tests that a
+        worker can read a registered repository with an environment's credential.
+    url
+        The SSH repository URL whose host is scanned (``host_keys`` only).
+    repository
+        The registered repository's name (``access`` only).
+    environment
+        The environment whose secret of the repository's credential is used (``access`` only).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["host_keys", "access"]
+    url: str | None = Field(default=None, max_length=2048)
+    repository: str | None = Field(default=None, max_length=255)
+    environment: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def _fields_of_its_kind(self) -> RepositoryProbeIn:
+        """Refuse a body that lacks a field of its kind or sends one of the other kind.
+
+        Returns
+        -------
+        RepositoryProbeIn
+            `self`.
+
+        Raises
+        ------
+        ValueError
+            When the fields do not match the kind.
+        """
+        sent = {name for name in ("url", "repository", "environment") if getattr(self, name)}
+        wanted = {"url"} if self.kind == "host_keys" else {"repository", "environment"}
+        if sent != wanted:
+            raise ValueError(
+                "a host_keys check takes exactly `url`; an access check takes exactly "
+                "`repository` and `environment`"
+            )
+        return self
+
+
+class HostKeyOut(BaseModel):
+    """One SSH host key a check found.
+
+    Parameters
+    ----------
+    type
+        The key type, e.g. ``ssh-ed25519``.
+    fingerprint
+        ``SHA256:…``, as `ssh-keygen -l` prints it: compare it with the git host's published
+        fingerprints.
+    line
+        The known_hosts line for the repository's `ssh_known_hosts`.
+    """
+
+    type: str
+    fingerprint: str
+    line: str
+
+
+class RepositoryProbeOut(BaseModel):
+    """Response body for a repository check.
+
+    Parameters
+    ----------
+    id
+        The check's id.
+    kind
+        ``host_keys`` or ``access``.
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        What it found once ``done``: ``ok``, ``host_key_changed``, ``host_key_unknown``,
+        ``auth_refused``, ``not_found``, ``unreachable``, ``refused_address``, ``timeout``,
+        ``no_worker`` or ``failed``; `null` before.
+    message
+        What it found, with the next step; `null` before it is done.
+    host_keys
+        The keys of a ``host_keys`` check that found some; `null` otherwise.
+    created_at
+        When it was requested.
+    finished_at
+        When it was done; `null` before.
+    """
+
+    id: uuid.UUID
+    kind: str
+    state: str
+    outcome: str | None
+    message: str | None
+    host_keys: list[HostKeyOut] | None
     created_at: datetime
     finished_at: datetime | None
 
@@ -4263,6 +4730,25 @@ class WorkerCachesOut(BaseModel):
     measured_at: datetime
 
 
+class WorkerMemoryOut(BaseModel):
+    """The memory a worker last reported.
+
+    Parameters
+    ----------
+    used_bytes
+        The resident memory of the worker and of every process it started.
+    limit_bytes
+        Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `null` when it has none.
+    measured_at
+        When the worker last wrote the figures, not when it last measured: it writes them with a
+        heartbeat only once they moved by 1 MiB or more, so steady use keeps an old time.
+    """
+
+    used_bytes: int
+    limit_bytes: int | None
+    measured_at: datetime
+
+
 class WorkerOut(BaseModel):
     """A registered worker.
 
@@ -4291,6 +4777,12 @@ class WorkerOut(BaseModel):
         The running task whose lease it holds, if any.
     caches
         The sizes of its caches; `null` before its first measurement.
+    memory
+        The memory it last reported; `null` before its first report and for a worker without
+        a memory limit.
+    replaced
+        `true` for a lost worker that a worker restarted on the same host replaced (it started
+        after this one's last heartbeat); such a row does not count as a worker that is down.
     """
 
     id: str
@@ -4304,6 +4796,61 @@ class WorkerOut(BaseModel):
     deploy_run_id: str | None
     task_run_id: str | None
     caches: WorkerCachesOut | None = None
+    memory: WorkerMemoryOut | None = None
+    replaced: bool = False
+
+
+class StatusDetailOut(BaseModel):
+    """What an administrator sees of the instance beyond its state.
+
+    Parameters
+    ----------
+    slots_busy
+        The busy task slots of the alive workers: an `all` worker has two (one for ad-hoc
+        queries, one for pipeline tasks and deploys), an `interactive` or `pipeline` one has one.
+    slots_total
+        All task slots of the alive workers.
+    memory_used_bytes
+        The memory the alive workers last reported, added up.
+    memory_limit_bytes
+        Their limits, added up; `null` when an alive worker reports no limit or none is alive.
+    workers
+        Every registered worker, as `GET /api/v1/workers` lists them.
+    """
+
+    slots_busy: int
+    slots_total: int
+    memory_used_bytes: int
+    memory_limit_bytes: int | None
+    workers: list[WorkerOut]
+
+
+class InstanceStatusOut(BaseModel):
+    """Whether the instance works, as the caller may see it.
+
+    Parameters
+    ----------
+    state
+        `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).
+    causes
+        Why, in this order: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`.
+        A caller who may not manage environments on the instance sees only `no_worker` and
+        `worker_lost`; a failed database or storage still makes their state `down`.
+    workers_alive
+        The workers whose heartbeat is younger than the lease.
+    workers_total
+        Every registered worker, alive and lost, except lost ones a restart on their host
+        replaced.
+    detail
+        Compute, memory and the workers; `null` unless the caller may manage environments on
+        the instance.
+    """
+
+    state: str
+    causes: list[str]
+    workers_alive: int
+    workers_total: int
+    detail: StatusDetailOut | None
 
 
 class SchedulerOut(BaseModel):

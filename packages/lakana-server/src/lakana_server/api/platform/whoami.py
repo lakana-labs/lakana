@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.grants.service import GrantService
+from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_server.api.platform.schemas import (
     CiTokenScopeOut,
@@ -24,7 +25,12 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_grant_service, get_principal, get_principal_service
+from lakana_server.deps import (
+    get_grant_service,
+    get_picture_service,
+    get_principal,
+    get_principal_service,
+)
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -38,14 +44,17 @@ router = APIRouter(
 def whoami(
     principal: PrincipalRef = Depends(get_principal),
     grants: GrantService = Depends(get_grant_service),
+    pictures: PictureService = Depends(get_picture_service),
 ) -> WhoamiOut:
     """Show who is calling.
 
     Answers with the name and type of the principal the credential signs in as and, for a
     task or CI token, the scope of that token. Any valid credential may ask. `admin` says
     whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any
-    grant at all (any scope, directly or through a group): the web interface shows the
-    administration areas, or tells a new person to ask for access, from these two.
+    grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in
+    at least one environment: the web interface shows the administration areas, tells a new
+    person to ask for access, and shows the deploy steps of Home from these three. `picture`
+    is the etag of your profile picture, or `null` without one.
 
     Parameters
     ----------
@@ -53,6 +62,8 @@ def whoami(
         The authenticated caller.
     grants
         The grant service for this request, asked about the caller only.
+    pictures
+        The picture service, for the caller's picture etag.
 
     Returns
     -------
@@ -60,10 +71,10 @@ def whoami(
         The caller's name, type, preferred language and access, plus its task-token scope or
         its CI token's scope if it authenticated with one of those.
     """
-    return _describe(principal, grants)
+    return _describe(principal, grants, pictures)
 
 
-def _describe(principal: PrincipalRef, grants: GrantService) -> WhoamiOut:
+def _describe(principal: PrincipalRef, grants: GrantService, pictures: PictureService) -> WhoamiOut:
     """Describe the caller.
 
     Parameters
@@ -72,6 +83,8 @@ def _describe(principal: PrincipalRef, grants: GrantService) -> WhoamiOut:
         The authenticated caller.
     grants
         The grant service, asked about the caller only.
+    pictures
+        The picture service, asked for the caller's picture etag only.
 
     Returns
     -------
@@ -100,6 +113,8 @@ def _describe(principal: PrincipalRef, grants: GrantService) -> WhoamiOut:
         language=principal.language,
         admin=grants.is_admin(principal),
         has_access=grants.has_any_grant(principal),
+        may_deploy=grants.may_deploy_somewhere(principal),
+        picture=pictures.etag_of(principal.id),
     )
 
 
@@ -109,6 +124,7 @@ def set_profile(
     principal: PrincipalRef = Depends(get_principal),
     principals: PrincipalService = Depends(get_principal_service),
     grants: GrantService = Depends(get_grant_service),
+    pictures: PictureService = Depends(get_picture_service),
 ) -> WhoamiOut:
     """Set your preferred language.
 
@@ -126,6 +142,8 @@ def set_profile(
         The principal service for this request.
     grants
         The grant service for this request, asked about the caller only.
+    pictures
+        The picture service, for the caller's picture etag.
 
     Returns
     -------
@@ -133,4 +151,4 @@ def set_profile(
         Who you are, with the language now stored.
     """
     stored = principals.set_own_language(principal, body.language)
-    return _describe(replace(principal, language=stored), grants)
+    return _describe(replace(principal, language=stored), grants, pictures)

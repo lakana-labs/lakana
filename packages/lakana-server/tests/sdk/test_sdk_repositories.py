@@ -56,3 +56,33 @@ def test_a_non_admin_gets_permission_denied_for_repository_changes(
             bob.repositories.delete("analytics")
         with pytest.raises(PermissionDenied):
             bob.repositories.list()
+
+
+_HOSTS = (
+    "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR\n"
+)
+
+
+def test_deploy_key_round_trip(lakana_client: lakana.Client, storage_root: str) -> None:
+    """`deploy_key` makes a key per environment; `get` then shows its public half."""
+    lakana_client.environments.create("dev", storage={"scheme": "file", "root": storage_root})
+    lakana_client.repositories.create(
+        "analytics", "ssh", "git@github.com:acme/analytics.git", ssh_known_hosts=_HOSTS
+    )
+
+    made = lakana_client.repositories.deploy_key("analytics")
+
+    assert made.secret == "analytics-deploy-key"
+    assert [(k.environment, k.made) for k in made.keys] == [("dev", True)]
+    assert made.keys[0].public_key.startswith("ssh-ed25519 ")
+    assert (made.skipped, made.replaced, made.notes) == ([], [], [])
+    shown = lakana_client.repositories.get("analytics")
+    assert [(k.environment, k.fingerprint) for k in shown.deploy_keys] == [
+        ("dev", made.keys[0].fingerprint)
+    ]
+    replaced = lakana_client.repositories.deploy_key(
+        "analytics", environments=["dev"], replace=True
+    )
+    assert replaced.replaced == ["dev"] and len(replaced.notes) == 1
+    with pytest.raises(ValidationError, match="--environment"):
+        lakana_client.repositories.deploy_key("analytics", replace=True)

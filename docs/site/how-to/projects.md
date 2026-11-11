@@ -258,8 +258,10 @@ secret goes.
 - `https`: the secret's `token` is sent as the password with username `oauth2`, or with
   `--credential-username` (GitLab deploy tokens have their own).
 - Behind a corporate proxy, or with an internal CA? See [Git network settings](../reference/network-settings.md#git-network-settings).
-- `ssh`: the secret's `private_key` (OpenSSH format) and `--known-hosts-file` are required;
-  unknown host keys are refused.
+- `ssh`: `--known-hosts-file` is required and unknown host keys are refused. Lakana makes the
+  key for you, one per environment, and a worker fetches the host keys: see
+  [Connect a repository](connect-a-repository.md). A secret of your own with a `private_key`
+  (OpenSSH format) works too.
 - `local`: an absolute path under `LAKANA_REPO_ROOTS` (a JSON list, e.g. `'["/srv/repos"]'`; empty
   refuses local repositories). Local mode allows your home directory; the Compose bundle mounts
   `./repos` at `/repos`. Only committed state is deployed. Treat the roots as **trusted content
@@ -267,7 +269,35 @@ secret goes.
   outside the roots, so never put repositories you did not create under one.
 
 `lakana repo remove NAME --yes` deletes a repository and its deploy history, but only while no
-environment has a current deployment from it: undeploy it there first.
+environment has a current deployment from it: undeploy it there first. Deploy keys Lakana made
+for it stay valid until you remove them at the git host and revoke their secrets
+([Connect a repository](connect-a-repository.md#remove-a-repository)).
+
+### Test access
+
+Once a repository is registered and its secret exists, check that a worker can read it with an
+environment's credential, before the first deploy:
+
+<!-- not tested: a worker connects to the reader's own git host -->
+```bash
+lakana repo test analytics --env prod
+```
+
+The worker runs `git ls-remote` exactly as a deploy fetches (the repository's own known hosts,
+the environment's secret) and fetches nothing. It prints `ok: …`, or the outcome and the next
+step, and exits 1 unless it is `ok`:
+
+| Outcome | What to do |
+|---|---|
+| `auth_refused` | Add the public key as a read-only deploy key at your git host (or check the token), then test again. |
+| `not_found` | Check the URL, and that the key or token is given access to this repository. |
+| `host_key_unknown` | The host offered no key the repository trusts: fetch and compare the keys again (`lakana repo host-keys`), then `lakana repo update NAME --known-hosts-file FILE`. |
+| `host_key_changed` | The host's key is not the one you confirmed. Check its published fingerprints before you connect again: this is what an attack looks like. |
+| `unreachable`, `timeout`, `refused_address`, `no_worker` | As for `repo host-keys`: see [Confirm the host keys](connect-a-repository.md#confirm-the-host-keys). |
+| `failed` | The worker's log has the details (`docker compose logs worker`). |
+
+Both checks need `MANAGE_REPOSITORY`; `repo test` also needs read access to the environment.
+You can have five checks waiting at once; each is kept for 24 hours and only you can see it.
 
 ## Deploy, dry-run, roll back
 

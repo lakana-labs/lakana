@@ -291,6 +291,79 @@ def connection_test_loop_stand_in(monkeypatch: pytest.MonkeyPatch) -> mock.Magic
     return loop
 
 
+@pytest.fixture(autouse=True)
+def repository_probe_loop_stand_in(monkeypatch: pytest.MonkeyPatch) -> mock.MagicMock:
+    """Keep `main()` from starting a real repository probe thread on an un-migrated SQLite file.
+
+    Parameters
+    ----------
+    monkeypatch
+        The pytest fixture.
+
+    Returns
+    -------
+    mock.MagicMock
+        The stand-in for the `RepositoryProbeLoop` class.
+    """
+    loop = mock.MagicMock()
+    loop.return_value.start.return_value.is_alive.return_value = False
+    monkeypatch.setattr("lakana_worker.__main__.RepositoryProbeLoop", loop)
+    return loop
+
+
+@pytest.mark.parametrize("takes", ["all", "pipeline"])
+def test_a_worker_that_takes_pipeline_work_runs_the_repository_probe_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repository_probe_loop_stand_in: mock.MagicMock,
+    takes: str,
+) -> None:
+    """The probe loop shares the deploy's git settings and stops with the drain.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the database file.
+    monkeypatch
+        Sets the environment.
+    repository_probe_loop_stand_in
+        The loop's stand-in.
+    takes
+        `LAKANA_WORKER__TAKES`.
+    """
+    monkeypatch.setenv("LAKANA_WORKER__TAKES", takes)
+    monkeypatch.setenv("LAKANA_GIT__NO_PROXY", "git.corp")
+    poll = _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    repository_probe_loop_stand_in.assert_called_once()
+    kwargs = repository_probe_loop_stand_in.call_args.kwargs
+    assert kwargs["stop"] is poll.call_args.kwargs["drain"]
+    assert kwargs["settings"] is poll.call_args.kwargs["deploy"]
+    assert kwargs["settings"].no_proxy == "git.corp"
+    loop = repository_probe_loop_stand_in.return_value
+    loop.start.assert_called_once()
+    loop.stop.assert_called_once()
+    loop.start.return_value.join.assert_called_once()
+
+
+def test_an_interactive_worker_runs_no_repository_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repository_probe_loop_stand_in: mock.MagicMock
+) -> None:
+    """Probes are pipeline work: an interactive worker leaves them to another.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the database file.
+    monkeypatch
+        Sets the environment.
+    repository_probe_loop_stand_in
+        The loop's stand-in.
+    """
+    monkeypatch.setenv("LAKANA_WORKER__TAKES", "interactive")
+    _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    repository_probe_loop_stand_in.assert_not_called()
+
+
 def test_main_runs_the_connection_test_loop_under_the_local_runner_and_stops_it_with_the_drain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -494,6 +567,34 @@ def test_main_warns_when_the_connection_test_thread_does_not_stop(
         _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
     thread.join.assert_called_once_with(timeout=5.0)
     assert "The connection test thread did not stop within 5 s" in caplog.text
+
+
+def test_main_warns_when_the_repository_check_thread_does_not_stop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repository_probe_loop_stand_in: mock.MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A probe thread stuck in a git call delays shutdown by a bounded time, and says so.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the database file.
+    monkeypatch
+        Sets the environment.
+    repository_probe_loop_stand_in
+        The loop's stand-in.
+    caplog
+        Captures the warning.
+    """
+    monkeypatch.setenv("LAKANA_RUN__DRAIN_GRACE_SECONDS", "1")
+    thread = repository_probe_loop_stand_in.return_value.start.return_value
+    thread.is_alive.return_value = True
+    with caplog.at_level("WARNING", logger="lakana_worker.__main__"):
+        _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    thread.join.assert_called_once_with(timeout=5.0)
+    assert "The repository check thread did not stop within 5 s" in caplog.text
 
 
 def test_main_refuses_a_ca_bundle_the_worker_cannot_read(
@@ -1695,6 +1796,7 @@ def test_main_starts_the_heartbeat_before_the_loop_and_hands_the_loop_its_id_and
         "lease_seconds": settings.run.lease_seconds,
         "takes": "all",
         "caches": poll.call_args.kwargs["engine"].python.caches.latest,
+        "memory": None,  # conftest starts no watchdog
     }
     assert worker_id.count(":") == 2
     assert poll.call_args.kwargs["may_claim"] == heartbeat.may_claim
@@ -1702,6 +1804,21 @@ def test_main_starts_the_heartbeat_before_the_loop_and_hands_the_loop_its_id_and
     # `install_heartbeat` was handed the stale check, and conftest resets it after the test.
     stale = executor_module._WORKER_STALE
     assert stale is not None and stale == heartbeat.stale
+
+
+def test_main_hands_the_heartbeat_the_watchdogs_memory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    heartbeat_stand_in: list[_StandInHeartbeat],
+) -> None:
+    from lakana_worker.memory import MemoryWatchdog
+
+    dog = MemoryWatchdog(100, lambda: 0, lambda total: None)
+    monkeypatch.setattr("lakana_worker.__main__.start_watchdog", lambda *args: dog)
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
+    _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    (heartbeat,) = heartbeat_stand_in
+    assert heartbeat.kwargs["memory"] == dog.use
 
 
 def test_main_stops_and_joins_the_heartbeat_thread_on_every_exit(

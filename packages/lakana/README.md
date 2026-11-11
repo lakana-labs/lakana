@@ -325,6 +325,7 @@ lakana search orders --kind column --limit 10 [--offset N]  # tables, columns, d
 | 130 | Ctrl-C in `lakana sql` or `lakana query wait`; the query was cancelled if the server could be reached |
 | 10 | Payload too large (413) |
 | 11 | Server error (5xx), connection failure, or a server too old for the command |
+| 12 | `lakana status`: the instance is Down (the command itself worked; Healthy and Degraded exit 0) |
 
 ### Repositories
 
