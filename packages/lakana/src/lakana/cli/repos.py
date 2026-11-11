@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -229,7 +230,7 @@ _clock = time.monotonic
 STATUS_AFTER_SECONDS = 1.0
 """How long a check may wait before the command says it waits."""
 
-_STRONGEST_FIRST = (
+HOST_KEY_TYPES = (
     "ssh-ed25519",
     "ecdsa-sha2-nistp256",
     "ecdsa-sha2-nistp384",
@@ -326,8 +327,8 @@ def _chosen_keys(keys: list[HostKey], types: list[str] | None) -> list[HostKey]:
     """
     if not types:
         ranked = sorted(
-            (k for k in keys if k.type in _STRONGEST_FIRST),
-            key=lambda k: _STRONGEST_FIRST.index(k.type),
+            (k for k in keys if k.type in HOST_KEY_TYPES),
+            key=lambda k: HOST_KEY_TYPES.index(k.type),
         )
         return ranked[:1]
     offered = {k.type for k in keys}
@@ -338,6 +339,79 @@ def _chosen_keys(keys: list[HostKey], types: list[str] | None) -> list[HostKey]:
             f"{', '.join(sorted(offered)) or 'none'}. Pick one of those with --type."
         )
     return [k for k in keys if k.type in types]
+
+
+def _refuse_link(path: Path) -> None:
+    """Refuse a `--save` target that is a symbolic link.
+
+    Parameters
+    ----------
+    path
+        The target.
+
+    Raises
+    ------
+    CliError
+        If it is a symbolic link, dangling or not (exit 2).
+    """
+    if path.is_symlink():
+        raise CliError(
+            f"{path} is a symbolic link; --save never writes through one, so it cannot replace "
+            "a file elsewhere. Name the real file, or a new path."
+        )
+
+
+def _check_target(path: Path, force: bool) -> None:
+    """Refuse a `--save` target before a worker is asked.
+
+    Parameters
+    ----------
+    path
+        The target.
+    force
+        Whether an existing file may be replaced.
+
+    Raises
+    ------
+    CliError
+        For a symbolic link, or an existing file without `force` (exit 2).
+    """
+    _refuse_link(path)
+    if path.exists() and not force:
+        raise CliError(
+            f"{path} already exists; --save would replace it (if it is your own known_hosts, "
+            "its keys would be lost). Name a new file, or add --force to replace it."
+        )
+
+
+def _write_known_hosts(path: Path, text: str, *, force: bool) -> None:
+    """Write the chosen known_hosts lines, never through a symbolic link.
+
+    Parameters
+    ----------
+    path
+        The target.
+    text
+        The lines.
+    force
+        Whether an existing file may be replaced; without it the file must be new.
+
+    Raises
+    ------
+    CliError
+        If the target became a link or appeared meanwhile, or cannot be written (exit 2).
+    """
+    _refuse_link(path)
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    flags |= os.O_TRUNC if force else os.O_EXCL
+    try:
+        fd = os.open(path, flags, 0o644)
+    except FileExistsError as exc:
+        raise CliError(f"{path} already exists; add --force to replace it.") from exc
+    except OSError as exc:
+        raise CliError(f"Can't write {path}: {exc.strerror or exc}") from exc
+    with os.fdopen(fd, "w") as handle:
+        handle.write(text)
 
 
 @repo_app.command("host-keys")
@@ -358,6 +432,9 @@ def host_keys(
             "--type", help="With --save: write this key type instead (repeatable), e.g. ssh-rsa."
         ),
     ] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="With --save: replace FILE if it already exists.")
+    ] = False,
 ) -> None:
     """Fetch the SSH host keys of URL's host and print their fingerprints.
 
@@ -372,17 +449,29 @@ def host_keys(
     url
         An SSH repository URL, e.g. ``git@github.com:team/analytics.git``.
     save
-        A file to write the chosen known_hosts line(s) to.
+        A file to write the chosen known_hosts line(s) to; an existing one only with `force`,
+        a symbolic link never.
     key_type
         Key types to write instead of the strongest one.
+    force
+        Replace an existing `save` file.
 
     Raises
     ------
     CliError
-        If no worker finished the check in time (exit 1), or the file cannot be written or a
-        `--type` was not offered (exit 2).
+        If no worker finished the check in time (exit 1); or, before anything is asked, for
+        `--type` or `--force` without `--save`, an existing FILE without `--force` or a FILE
+        that is a symbolic link; or if the file cannot be written or a `--type` was not offered
+        (exit 2).
     """
     state = state_of(ctx)
+    if save is None and (key_type or force):
+        raise CliError(
+            f"{'--type' if key_type else '--force'} only says what --save writes; add "
+            "--save FILE, or leave it out to just print the fingerprints."
+        )
+    if save is not None:
+        _check_target(save, force)
     try:
         probe = state.client().repositories.host_keys(
             url, on_update=_StatusLine(state, f"the host keys of {_output.inline(url)}")
@@ -394,10 +483,7 @@ def host_keys(
             sys.stdout.write(_output.safe_text(f"{key.type}  {key.fingerprint}") + "\n")
     if probe.outcome == "ok" and save is not None:
         chosen = _chosen_keys(probe.host_keys or [], key_type)
-        try:
-            save.write_text("".join(k.line + "\n" for k in chosen))
-        except OSError as exc:
-            raise CliError(f"Can't write {save}: {exc}") from exc
+        _write_known_hosts(save, "".join(k.line + "\n" for k in chosen), force=force)
         for key in chosen:
             _output.next_step(state, f"Saved {key.type} {key.fingerprint} to {save}.")
         _output.next_step(state, COMPARE)

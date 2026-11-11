@@ -284,7 +284,9 @@ lakana repo add analytics --kind ssh --url git@github.com:acme/analytics.git \
 
 The first command prints each key's type and fingerprint and, with `--save`, writes the
 known_hosts line of one key: `ssh-ed25519` when the host offers it, else the strongest one
-offered (`--type ssh-rsa`, repeatable, picks others). **Compare that fingerprint with the
+offered (`--type ssh-rsa`, repeatable, picks others; `--type` needs `--save`). `--save` never
+replaces an existing file unless you add `--force`, so your own `~/.ssh/known_hosts` is safe,
+and it refuses a symbolic link even with `--force`. **Compare that fingerprint with the
 fingerprints your git host publishes** (GitHub, GitLab and Bitbucket each have a page for
 them) before you register the repository. The keys are fetched over the network, so a
 fingerprint you did not compare proves nothing.
@@ -297,6 +299,7 @@ It waits up to 60 seconds for a worker that takes pipeline work. What it may ans
 | `unreachable` | Check the host and port in the URL, and that the worker's network may reach it on SSH. |
 | `timeout` | The host did not answer; check the network path from the worker. |
 | `no_worker` | No worker took the check within two minutes: start one (`docker compose up -d worker`, or `lakana server start --local`). |
+| `failed` | The worker could not run the scan (its image lacks `ssh-keyscan`, or it refused the URL); the message says which, and the worker's log has the details (`docker compose logs worker`). |
 
 A URL's host must be a plain name (letters, digits, dots, hyphens) or an IPv6 address in
 brackets; a URL with a comma, a wildcard or an option-like part is refused.

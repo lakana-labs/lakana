@@ -50,7 +50,7 @@ from lakana_core.projects.probes import HostKey, RepositoryProbeQueue, parse_key
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.secrets.uses import SecretUseRefused
 from lakana_worker.deploy import DeploySettings, resolve_credential
-from lakana_worker.git import check_access
+from lakana_worker.git import REFUSED_ADDRESS_MESSAGE, check_access
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +73,7 @@ FAILURE_LOG_SECONDS = 60.0
 """Least time between two log lines about a failing step."""
 
 SCAN_MESSAGES = {
-    ProbeOutcome.REFUSED_ADDRESS: (
-        "The host's name resolves to an address no Lakana worker may reach (loopback, "
-        "link-local or a cloud metadata address). Use the git host's public name."
-    ),
+    ProbeOutcome.REFUSED_ADDRESS: REFUSED_ADDRESS_MESSAGE,
     ProbeOutcome.UNREACHABLE: (
         "The worker got no SSH host key from that host and port. Check the URL's host and port, "
         "and that the host accepts SSH connections from the worker's network."

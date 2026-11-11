@@ -12,8 +12,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy import update as sa_update
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.authorization import AuditingAuthorization
@@ -473,6 +474,35 @@ def test_sixth_open_probe_is_refused(world: World) -> None:
     with pytest.raises(ConflictError, match="5"):
         service.request_host_keys(world.admin, URL)
     service.request_host_keys(world.other_admin, URL)
+
+
+def test_the_cap_is_counted_under_a_lock_on_the_requester(world: World) -> None:
+    """Parallel requests of one person queue behind a row lock taken before the count (M2).
+
+    SQLite has no row locks, so this pins the order on its statement log: the requester's
+    principal row is selected `FOR UPDATE` (as Postgres compiles it), then the open probes are
+    counted, then the probe is inserted, all in one transaction.
+    """
+    statements: list[str] = []
+
+    def record(conn: object, cursor: object, statement: str, *args: object) -> None:
+        statements.append(" ".join(statement.split()).upper())
+
+    engine = world.session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        world.service().request_host_keys(world.admin, URL)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    lock = next(i for i, s in enumerate(statements) if s.startswith("SELECT PRINCIPALS.ID"))
+    count = next(i for i, s in enumerate(statements) if "COUNT(" in s)
+    insert = next(
+        i for i, s in enumerate(statements) if s.startswith("INSERT INTO REPOSITORY_PROBES")
+    )
+    assert lock < count < insert
+    assert not any(s.startswith(("COMMIT", "BEGIN")) for s in statements[lock:insert])
+    compiled = str(probes.requester_lock(world.admin.id).compile(dialect=postgresql.dialect()))
+    assert compiled.rstrip().endswith("FOR UPDATE")
 
 
 def test_probes_need_manage_repository_and_the_denial_is_audited(world: World) -> None:

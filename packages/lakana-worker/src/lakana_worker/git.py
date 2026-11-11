@@ -1173,6 +1173,12 @@ HOST_KEY_CHANGED_MESSAGE = (
 )
 """The message of an access check whose host offered a key other than the confirmed one."""
 
+REFUSED_ADDRESS_MESSAGE = (
+    "The host's name resolves to an address no Lakana worker may reach (loopback, "
+    "link-local or a cloud metadata address). Use the git host's public name."
+)
+"""The message of an access check or a host-key scan refused for its address."""
+
 _ACCESS_MESSAGES = {
     ProbeOutcome.OK: "The worker reached the repository and could read its branches and tags.",
     ProbeOutcome.HOST_KEY_CHANGED: HOST_KEY_CHANGED_MESSAGE,
@@ -1193,10 +1199,7 @@ _ACCESS_MESSAGES = {
         "The worker could not reach the host. Check the URL's host and port, and that the "
         "worker's network may connect to it."
     ),
-    ProbeOutcome.REFUSED_ADDRESS: (
-        "The host's name resolves to an address no Lakana worker may reach (loopback, "
-        "link-local or a cloud metadata address). Use the git host's public name."
-    ),
+    ProbeOutcome.REFUSED_ADDRESS: REFUSED_ADDRESS_MESSAGE,
     ProbeOutcome.TIMEOUT: (
         "The host did not answer in time. Check the URL's host and port and the network path "
         "from the worker to it, then test again."

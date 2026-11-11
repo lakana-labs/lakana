@@ -38,7 +38,7 @@ from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.secrets.service import insert_secret
 from lakana_core.secrets.uses import SecretUse
 from lakana_worker.deploy import DeploySettings
-from lakana_worker.git import GitCredential
+from lakana_worker.git import REFUSED_ADDRESS_MESSAGE, GitCredential
 from lakana_worker.repository_probes import LEASE_SECONDS, RepositoryProbeLoop, scan_host_keys
 
 ED25519_B64 = "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR"
@@ -149,6 +149,15 @@ def test_scan_connects_to_the_checked_address_with_an_argv_list() -> None:
             line=f"[git.example.com]:2222 ssh-ed25519 {ED25519_B64}",
         )
     ]
+
+
+def test_both_checks_refuse_an_address_in_the_same_words() -> None:
+    """The scan and the access check share one `refused_address` sentence."""
+    _outcome, message, _keys = scan_host_keys(
+        "h", 22, resolve=resolves_to("169.254.169.254"), run=Runs()
+    )
+    assert message is REFUSED_ADDRESS_MESSAGE
+    assert "public name" in message
 
 
 def test_scan_maps_timeout_and_refusal() -> None:

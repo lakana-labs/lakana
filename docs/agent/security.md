@@ -6399,7 +6399,9 @@ answers them. Each line below is pinned by a test in `packages/lakana-core/tests
   other host-key failure is `host_key_unknown`. A resolved credential's error (missing or unbound
   secret) is Lakana's own sentence; any other exception is logged by its type only.
 - **Private, short-lived results (T8).** `get` answers only the requester (404 for anyone else,
-  the same as an unknown id); a person has at most 5 probes queued or running; a request, a read
+  the same as an unknown id); a person has at most 5 probes queued or running, counted and
+  inserted in one transaction behind `requester_lock` (`FOR UPDATE` on the principal's row), so
+  parallel requests cannot pass the cap; a request, a read
   and a claim each delete up to 500 probes older than 24 hours. The audit record
   (`REPOSITORY_PROBE_REQUESTED`, T7) holds kind, host, port, repository, environment and the
   probe id, never a credential; the `MANAGE_REPOSITORY` denial is audited by `authorize`. An
@@ -6414,7 +6416,10 @@ answers them. Each line below is pinned by a test in `packages/lakana-core/tests
 - **Each stored key is one a person compared (T2, I3).** `repo host-keys --save` writes one line,
   the `ssh-ed25519` key when offered (else the strongest), and prints "Compare this fingerprint
   with your host's published fingerprints before you use the file."; `--type` picks others,
-  each named with its fingerprint. `ssh-keyscan` opens one connection per key type, so a key
+  each named with its fingerprint (`--type` without `--save` is refused). `--save` creates the
+  file with `O_EXCL` (an existing one only with `--force`) and `O_NOFOLLOW`, and refuses a
+  symbolic link, dangling or not, even with `--force`, before a worker is asked.
+  `ssh-keyscan` opens one connection per key type, so a key
   nobody compared could be an on-path attacker's.
 
 **Residuals.** Trust on first use: the server cannot prove a person compared a fingerprint; what

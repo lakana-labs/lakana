@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
@@ -38,6 +38,7 @@ from lakana_core.errors import (
 from lakana_core.identifiers import shown
 from lakana_core.models import (
     AuditEventType,
+    Principal,
     ProbeOutcome,
     RepositoryKind,
     RepositoryProbe,
@@ -286,6 +287,26 @@ def _https_endpoint(url: str) -> tuple[str, int]:
     return parts.hostname or "", parts.port or 443
 
 
+def requester_lock(principal_id: uuid.UUID) -> Select[uuid.UUID]:
+    """Build the lock one person's probe requests queue behind.
+
+    `_queue` executes it before it counts the person's open probes, so two parallel requests
+    of one person count and insert one after the other and the cap holds (`FOR UPDATE` on the
+    principal's row; SQLite, which has no row locks, serialises writers anyway).
+
+    Parameters
+    ----------
+    principal_id
+        The requester.
+
+    Returns
+    -------
+    Select
+        ``SELECT principals.id … FOR UPDATE``.
+    """
+    return select(Principal.id).where(Principal.id == principal_id).with_for_update()
+
+
 def _purge(session: Session, now: datetime) -> None:
     """Delete up to `PURGE_BATCH` probes older than `PROBE_KEEP`; the caller commits.
 
@@ -474,6 +495,7 @@ class RepositoryProbeService:
         if not _TAKES_PIPELINE & set(takes.values()):
             self._session.rollback()
             raise NoWorkerError(NO_WORKER)
+        self._session.execute(requester_lock(p.id))
         self._settle(now, requested_by=p.id)
         open_count = self._session.scalar(
             select(func.count())

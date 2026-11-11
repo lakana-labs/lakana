@@ -1869,6 +1869,7 @@ A worker connects to the host (the server never does); the command waits up to 6
 | `URL` | text | required |  |
 | `--save` | path | none | Write the known_hosts line of the strongest key (ssh-ed25519 when offered) to FILE, for `repo add --known-hosts-file`. |
 | `--type` | text, repeatable | none | With --save: write this key type instead (repeatable), e.g. ssh-rsa. |
+| `--force` | flag | off | With --save: replace FILE if it already exists. |
 
 ### `lakana repo test`
 

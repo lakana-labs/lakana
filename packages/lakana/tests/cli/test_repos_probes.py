@@ -137,12 +137,13 @@ def test_cli_saves_only_the_ed25519_line_by_default(tmp_path: Path) -> None:
         "host-keys",
         _URL,
         "--save",
-        str(target),
+        str(tmp_path / "other"),
         "--type",
         "ecdsa-sha2-nistp521",
     )
     assert missing.exit_code == 2
     assert "ecdsa-sha2-nistp521" in missing.output
+    assert not (tmp_path / "other").exists()
 
 
 def test_cli_without_ed25519_saves_the_strongest_key_only(tmp_path: Path) -> None:
@@ -239,6 +240,84 @@ def test_cli_repo_test_ok_exits_0(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     assert result.stdout.strip() == "ok: Read it."
+
+
+def _ok_api() -> FakeApi:
+    """Build an API whose host-key check finds the three keys.
+
+    Returns
+    -------
+    FakeApi
+        The API.
+    """
+    api = FakeApi()
+    api.on("POST", _PROBES, status=202, json=_probe("queued"))
+    api.on("GET", f"{_PROBES}/{_ID}", json=_probe("done", "ok", "found", _KEYS))
+    return api
+
+
+def test_save_refuses_an_existing_file_unless_forced(tmp_path: Path) -> None:
+    """An existing FILE (your own known_hosts, say) is kept; `--force` replaces it."""
+    target = tmp_path / "known_hosts"
+    target.write_text("mine\n")
+    api = _ok_api()
+
+    refused = invoke(make_state(tmp_path, api), "repo", "host-keys", _URL, "--save", str(target))
+
+    assert refused.exit_code == 2
+    assert "already exists" in refused.output and "--force" in refused.output
+    assert target.read_text() == "mine\n"
+    assert api.requests == [], "refused before a worker is asked"
+    forced = invoke(
+        make_state(tmp_path, api), "repo", "host-keys", _URL, "--save", str(target), "--force"
+    )
+    assert forced.exit_code == 0, forced.output
+    assert target.read_text() == f"github.com ssh-ed25519 {_ED}\n"
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_save_never_follows_a_symlink(tmp_path: Path, force: bool) -> None:
+    """A symlink is refused even with `--force`; neither it nor its target changes.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's directory.
+    force
+        Whether `--force` is given.
+    """
+    real = tmp_path / "real"
+    real.write_text("mine\n")
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    dangling = tmp_path / "dangling"
+    dangling.symlink_to(tmp_path / "nowhere")
+    for path in (link, dangling):
+        args = ["repo", "host-keys", _URL, "--save", str(path), *(["--force"] if force else [])]
+        result = invoke(make_state(tmp_path, _ok_api()), *args)
+        assert result.exit_code == 2
+        assert "symbolic link" in result.output
+    assert real.read_text() == "mine\n"
+    assert not (tmp_path / "nowhere").exists()
+
+
+def test_type_without_save_is_refused(tmp_path: Path) -> None:
+    """`--type` picks what `--save` writes; alone it is refused, naming `--save`."""
+    api = _ok_api()
+
+    result = invoke(make_state(tmp_path, api), "repo", "host-keys", _URL, "--type", "ssh-rsa")
+
+    assert result.exit_code == 2
+    assert "--save" in result.output
+    assert api.requests == []
+
+
+def test_force_without_save_is_refused(tmp_path: Path) -> None:
+    """`--force` alone is refused too."""
+    result = invoke(make_state(tmp_path, _ok_api()), "repo", "host-keys", _URL, "--force")
+
+    assert result.exit_code == 2
+    assert "--save" in result.output
 
 
 def test_cli_json_output_is_the_probe(tmp_path: Path) -> None:
