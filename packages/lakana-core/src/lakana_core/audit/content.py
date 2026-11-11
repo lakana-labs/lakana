@@ -121,6 +121,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # the host and port a repository check reaches (`lakana_core.projects.probes`), never a
         # credential
         "host",
+        # the SHA256 fingerprints of the SSH host keys a repository trusts, never a key
+        "host_key_fingerprints",
         "id",
         "issuer",
         "job",
@@ -136,6 +138,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "link_id",
         "location",
         "locations",
+        # a deploy key Lakana made: environment -> fingerprint of the new public key, never a key
+        "made",
         "manifest_sha256",
         "mode",
         "name",
@@ -211,6 +215,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "reset",
         "secret_ref_set",
         "shortened",
+        # the environments a deploy key was not made in: their secrets are not the caller's
+        "skipped",
         "state",
         "status",
         "stopped",
@@ -256,6 +262,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "others_shown",
         "presented_count",
         "previous",
+        "previous_credential_secret",
         "previous_days",
         "purge_after",
         "removed",

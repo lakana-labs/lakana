@@ -136,6 +136,37 @@ def key_fingerprint(blob: bytes) -> str:
     return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
 
 
+def known_hosts_fingerprints(text: str) -> list[str]:
+    """Fingerprint every key of a known_hosts text, for the audit log.
+
+    A line is ``[@marker] <hosts> <type> <base64> [comment]``; blank lines and comments are
+    skipped, and so is a line whose key is not base64 (ssh skips it too).
+
+    Parameters
+    ----------
+    text
+        The known_hosts lines a repository trusts.
+
+    Returns
+    -------
+    list of str
+        The distinct fingerprints (`key_fingerprint`), sorted.
+    """
+    found: set[str] = set()
+    for line in text.splitlines():
+        fields = line.split()
+        if fields and fields[0].startswith("@"):
+            fields = fields[1:]
+        if len(fields) < 3 or fields[0].startswith("#"):
+            continue
+        try:
+            blob = base64.b64decode(fields[2], validate=True)
+        except ValueError:
+            continue
+        found.add(key_fingerprint(blob))
+    return sorted(found)
+
+
 def _blob_type(blob: bytes) -> str | None:
     """Read the key type a key blob starts with.
 

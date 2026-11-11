@@ -412,6 +412,32 @@ def _repository(client: TestClient) -> str:
     return str(body["name"])
 
 
+def _ssh_repository(client: TestClient) -> str:
+    """Register an ssh repository with confirmed host keys, for a deploy key.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its name.
+    """
+    body = {
+        "name": _unique("k"),
+        "kind": "ssh",
+        "url": "git@github.com:o/a.git",
+        "ssh_known_hosts": (
+            "github.com ssh-ed25519 "
+            "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR\n"
+        ),
+    }
+    _ok(client.post("/api/v1/repositories", headers=AUTH_HEADER, json=body))
+    return str(body["name"])
+
+
 @dataclass(frozen=True)
 class Case:
     """A request a step-up route answers with success once the session has a fresh touch.
@@ -726,6 +752,9 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
     ("PATCH", "/api/v1/repositories/{name}"): Case(
         lambda c: (f"/api/v1/repositories/{_repository(c)}", {"url": "https://github.com/o/b.git"}),
         200,
+    ),
+    ("POST", "/api/v1/repositories/{name}/deploy-key"): Case(
+        lambda c: (f"/api/v1/repositories/{_ssh_repository(c)}/deploy-key", None), 201
     ),
 }
 """Each operation that needs a fresh passkey touch in a browser session (`require_step_up`),

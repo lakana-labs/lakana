@@ -1884,6 +1884,21 @@ The worker runs `git ls-remote` with the repository's known hosts and ENV's secr
 | `NAME` | text | required |  |
 | `--env` | text | none | Environment (default: the profile's). |
 
+### `lakana repo deploy-key`
+
+Usage: `lakana repo deploy-key [OPTIONS] {name}`
+
+Make an SSH deploy key for repository NAME in each environment.
+
+The server makes one key pair per environment and keeps the private key as that environment's secret; it is never shown. The command prints each environment's public key: add each one at your git host as a read-only deploy key. An environment that has a key keeps it unless you name it with --environment and --replace.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--environment`, `--env` | text, repeatable | none | Only this environment (repeatable). Default: every environment you may manage secrets in that has no key yet. |
+| `--replace` | flag | off | Replace the key of each --environment; the old key stops working. |
+| `--secret` | text | none | Secret name for the keys (default: NAME-deploy-key). |
+
 ## `lakana index`
 
 Usage: `lakana index [OPTIONS] COMMAND [ARGS]...`

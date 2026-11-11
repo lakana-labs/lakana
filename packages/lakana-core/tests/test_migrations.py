@@ -5657,10 +5657,10 @@ def test_0073_adds_the_profile_pictures_table_empty(
 _REVISION_0074 = "e5b8c1f4a297"
 
 
-def test_0074_adds_the_repository_probes_and_the_public_deploy_key_empty(
+def test_0074_adds_the_repository_probes_and_the_deploy_key_columns_empty(
     tmp_path: Path, migrated_db: MigratedDb
 ) -> None:
-    """Revision `0074`: an empty probe table, and a public key every repository starts without.
+    """Revision `0074`: an empty probe table, and deploy-key columns every secret starts without.
 
     Parameters
     ----------
@@ -5673,18 +5673,20 @@ def test_0074_adds_the_repository_probes_and_the_public_deploy_key_empty(
     config = Config(str(ALEMBIC_INI))
     with sqlite3.connect(db_path) as connection:
         connection.execute(
-            "INSERT INTO repositories (id, name, kind, url, created_at, updated_at) VALUES "
-            "('00000000000000000000000000000001', 'analytics', 'SSH', 'git@h:r', "
-            "'2026-11-11 00:00:00', '2026-11-11 00:00:00')"
+            "INSERT INTO secrets (id, environment_id, name, ciphertext, nonce, wrapped_data_key, "
+            "format_version, key_id, created_by, created_at) VALUES "
+            "('00000000000000000000000000000001', '00000000000000000000000000000002', 'k', "
+            "x'00', x'00', x'00', 2, 'env', '00000000000000000000000000000003', "
+            "'2026-11-11 00:00:00')"
         )
 
     def shape() -> tuple[set[str], set[str]]:
-        """Read the probe table's columns and the repositories' columns.
+        """Read the probe table's columns and the secrets' columns.
 
         Returns
         -------
         tuple of set of str
-            The probe table's columns (empty without it) and the repositories' columns.
+            The probe table's columns (empty without it) and the secrets' columns.
         """
         engine = create_engine(f"sqlite:///{db_path}")
         try:
@@ -5694,20 +5696,23 @@ def test_0074_adds_the_repository_probes_and_the_public_deploy_key_empty(
                 if "repository_probes" in inspector.get_table_names()
                 else set()
             )
-            return probes, {c["name"] for c in inspector.get_columns("repositories")}
+            return probes, {c["name"] for c in inspector.get_columns("secrets")}
         finally:
             engine.dispose()
 
-    probes, repositories = shape()
-    assert probes == set() and "deploy_public_key" not in repositories
+    added = {"generated_for", "public_key"}
+    probes, secrets = shape()
+    assert probes == set() and not added & secrets
     command.upgrade(config, _REVISION_0074)
-    probes, repositories = shape()
+    probes, secrets = shape()
     assert {"kind", "url", "state", "outcome", "host_keys", "lease_expires_at"} <= probes
-    assert "deploy_public_key" in repositories
+    assert added <= secrets
     with sqlite3.connect(db_path) as connection:
-        assert connection.execute("SELECT deploy_public_key FROM repositories").fetchall() == [
-            (None,)
-        ]
+        assert connection.execute(
+            "SELECT generated_for, public_key, name FROM secrets"
+        ).fetchall() == [(None, None, "k")]
     command.downgrade(config, _REVISION_0073)
-    probes, repositories = shape()
-    assert probes == set() and "deploy_public_key" not in repositories
+    probes, secrets = shape()
+    assert probes == set() and not added & secrets
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT name FROM secrets").fetchall() == [("k",)]

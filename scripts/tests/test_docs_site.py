@@ -17,7 +17,7 @@ EXEMPT = (
     "scripts/tests/test_docs_site.py",
     "scripts/tests/test_docs_only.py",
 )
-NOT_TESTED_CEILING = 61
+NOT_TESTED_CEILING = 62
 UNCHECKED_OUTPUT_CEILING = 80
 """Blocks marked as not tested; it only goes down, apart from the rises below.
 
@@ -136,6 +136,11 @@ The projects page rose it from 59 to 61 with "SSH host keys" and "Test access": 
 commands send a worker to the reader's own git host, which no example can reach. The
 commands' tests (`test_repos_probes.py`, the probe tests of core, worker and server) run them
 against a fake API and a fake scan.
+
+"Connect a repository" rose it from 61 to 62: the "SSH host keys" block moved there from the
+projects page, and the page adds the `repo test` of each environment, which needs the reader's
+git host too. Its other commands (registering, making, replacing and renewing deploy keys) run
+in the example `connect-a-repository`.
 
 `UNCHECKED_OUTPUT_CEILING` rose from 77 to 78 with the Model block of `lakana table get` in
 "See a table's model" (`describe-a-table.md`): the page shows that block only, not the whole

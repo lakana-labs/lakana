@@ -4897,6 +4897,62 @@ exists. The 409 names the deployed repositories; undeploy each first.
   `ENVIRONMENT_STORAGE_UPDATED`'s is `{"options_keys", "secret_ref_set"}` — never option
   values or the secret reference's own value.
 
+### A deploy key the server makes (M7 part 2)
+
+`lakana repo deploy-key NAME` (`POST /api/v1/repositories/{name}/deploy-key`,
+`lakana_core.projects.deploy_keys.DeployKeyService.generate`) makes an SSH deploy key for an ssh
+repository with confirmed host keys. Each line below is pinned by a test in
+`packages/lakana-core/tests/test_deploy_keys.py` or `packages/lakana-server/tests/test_deploy_key_route.py`.
+
+- **One key pair per environment (R1).** Each environment's secret holds its own ed25519 key
+  (`Ed25519PrivateKey.generate()`, OpenSSH PEM without a passphrase); making one never reads or
+  changes another environment's key, and the server never decrypts a key to copy it: nothing
+  new decrypts a secret. A call makes a key only where none
+  exists; `--environment E --replace` replaces the named environments' keys, and `--replace`
+  without `--environment` is refused.
+- **The private key never leaves the write (T1).** It exists in plain text only inside
+  `generate_deploy_key` (`DeployKeyPair.private_key` is `repr=False`) and the
+  `insert_secret`/`rotate_values` encryption. The answer, `RepositoryOut.deploy_keys`, every
+  audit event and the logs carry the public key at most; the T1 test looks for every PEM body
+  line and the base64 of the raw seed in the answer, each audit detail, the captured log and the
+  OpenAPI document, also when the third environment's write raises (M7).
+- **Written only where the caller manages secrets (T5, I4, M11).** By default the environments
+  where `permits(MANAGE_SECRET)` holds get a key and the others are `skipped`; a named
+  environment goes through `authorize` (a recorded denial); none at all is a recorded denial
+  naming `MANAGE_SECRET`. Rows of the name in an environment the caller cannot manage are not
+  written and do not stop the call. A new `--secret` name that would leave an environment the
+  caller cannot manage on its old key is refused as a recorded denial naming that environment.
+- **Decided under locks, all or nothing (T5, I1, I2).** Inside `refuse_concurrent_change` the
+  repository row is locked (`RepositoryService.lock`), then every secret of the name in every
+  environment, revoked ones included, `FOR UPDATE OF secrets` with `populate_existing` (the
+  order `require_secret_management_for_url_change` takes). Before the first write each
+  environment to write is checked: a revoked row, a row that is not a live key made for this
+  repository's id (unbound, bound elsewhere, a hand-made secret, a key of a removed repository
+  of the same name), and a name its storage or a webhook uses each refuse with `ConflictError`
+  naming the environment and `--secret OTHER-NAME`. Any error after the first write rolls the
+  session back; the commit's `IntegrityError` becomes a fixed-text `ConflictError`. A
+  repository that names a secret Lakana did not make is refused (`--clear credential_secret`
+  first).
+- **A made key stays with its repository (I5 (a)).** `secrets.generated_for` (migration
+  `0074`) holds the repository's id and `secrets.public_key` the public half.
+  `SecretService.bind` refuses to move such a secret to any other use and `rotate` refuses to
+  change it (only `--replace` does); `revoke` stays allowed. So a person who manages secrets in
+  one environment cannot route a key to a task-readable connection; the docs tell the reader to
+  keep the deploy key read-only at the git host.
+- **What is shown (M8).** `RepositoryOut.deploy_keys` lists the live keys made for the
+  repository and named by its current `credential_secret`, only in environments the reader may
+  read (`permits(READ_ENVIRONMENT)`, unaudited): naming another secret drops the list.
+- **Step-up and audit (T6, T7, M6).** The route steps up (`require_step_up`) after
+  `MANAGE_REPOSITORY` on the instance; no task token may call it (`MANAGE_REPOSITORY` is not a
+  task-token action) and a CI token only deploys. `DEPLOY_KEY_GENERATED` records
+  `repository`, `secret`, `made` (environment → fingerprint), `kept`, `replaced`,
+  `skipped` and `previous_credential_secret`, never a key; `REPOSITORY_CREATED` and
+  `REPOSITORY_UPDATED` (when `ssh_known_hosts` changes) record `host_key_fingerprints`.
+
+**Residuals.** Who may add a key at the git host decides what it may do there: Lakana cannot see
+whether write access was ticked. A key revoked in Lakana keeps working at the host until it is
+removed there; the how-to's "Replace a leaked key" starts with the host for that reason.
+
 ## Package index credentials (M5c2c)
 
 A project's lock may name the URL of a registered package index (`lakana index add`, which

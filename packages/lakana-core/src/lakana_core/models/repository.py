@@ -46,10 +46,6 @@ class Repository(Base, TimestampMixin):
     credential_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
     credential_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ssh_known_hosts: Mapped[str | None] = mapped_column(Text, nullable=True)
-    deploy_public_key: Mapped[str | None] = mapped_column(Text, nullable=True)
-    """The public half of the SSH deploy key Lakana made for this repository, to add at the git
-    host; `None` until one is made. Never the private key, which is a secret of each
-    environment."""
     default_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("principals.id", ondelete="SET NULL"), nullable=True

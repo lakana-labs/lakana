@@ -2735,6 +2735,24 @@ class RepositoryUpdate(BaseModel):
     default_ref: str | None = None
 
 
+class RepositoryDeployKeyOut(BaseModel):
+    """The public half of one environment's deploy key.
+
+    Parameters
+    ----------
+    environment
+        The environment whose secret holds the private half.
+    public_key
+        ``ssh-ed25519 <base64> <comment>``: add it at the git host as a read-only deploy key.
+    fingerprint
+        ``SHA256:…``, as `ssh-keygen -l` and the git host show it.
+    """
+
+    environment: str
+    public_key: str
+    fingerprint: str
+
+
 class RepositoryOut(BaseModel):
     """Response body for a repository. Carries a secret's name, never a value.
 
@@ -2762,6 +2780,9 @@ class RepositoryOut(BaseModel):
         When.
     updated_at
         Last change.
+    deploy_keys
+        The public deploy keys Lakana made for it, one per environment you may read, to add at
+        the git host; empty when it names no such key. Never a private key.
     """
 
     id: uuid.UUID
@@ -2775,6 +2796,72 @@ class RepositoryOut(BaseModel):
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    deploy_keys: list[RepositoryDeployKeyOut] = []
+
+
+class DeployKeyIn(BaseModel):
+    """Request body for making deploy keys; every field is optional.
+
+    Parameters
+    ----------
+    secret
+        The secret name the keys are stored under; ``<repository>-deploy-key`` by default.
+    environments
+        Only these environments; by default every environment where you may manage secrets
+        and the repository has no key yet.
+    replace
+        Replace the keys of `environments` (required with it). The old key of each stops
+        working.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    secret: str | None = Field(default=None, max_length=255)
+    environments: list[str] | None = Field(default=None, max_length=100)
+    replace: bool = False
+
+
+class DeployKeyMadeOut(RepositoryDeployKeyOut):
+    """One environment's deploy key in the answer of a call that makes keys.
+
+    Parameters
+    ----------
+    environment
+        The environment whose secret holds the private half.
+    public_key
+        ``ssh-ed25519 <base64> <comment>``.
+    fingerprint
+        ``SHA256:…``.
+    made
+        Whether this call made it; `false` for a key made earlier, listed unchanged.
+    """
+
+    made: bool
+
+
+class DeployKeyOut(BaseModel):
+    """Response body of a call that makes deploy keys. Never carries a private key.
+
+    Parameters
+    ----------
+    secret
+        The secret name every key is stored under; now the repository's credential.
+    keys
+        One per environment the call wrote or found a key in, by environment name.
+    skipped
+        Environments without a key where you may not manage secrets: someone who may makes
+        theirs.
+    replaced
+        Environments whose key this call replaced.
+    notes
+        For each replaced key: the old key stops working, replace it at the git host now.
+    """
+
+    secret: str
+    keys: list[DeployKeyMadeOut]
+    skipped: list[str]
+    replaced: list[str]
+    notes: list[str]
 
 
 class PackageIndexCreate(BaseModel):

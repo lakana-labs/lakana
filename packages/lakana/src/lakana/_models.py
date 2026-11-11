@@ -2114,6 +2114,9 @@ class Repository:
         When.
     updated_at
         Last change.
+    deploy_keys
+        The public deploy keys Lakana made for it, one per environment you may read; empty
+        when it names no such key.
     """
 
     id: str
@@ -2127,6 +2130,55 @@ class Repository:
     created_by: str | None
     created_at: datetime
     updated_at: datetime
+    deploy_keys: list[DeployKey] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DeployKey:
+    """The public half of one environment's deploy key. Never the private key.
+
+    Parameters
+    ----------
+    environment
+        The environment that keeps the private key as its secret.
+    public_key
+        The OpenSSH public key line; your git host takes it as a read-only deploy key.
+    fingerprint
+        Its ``SHA256:`` fingerprint, to compare with the one your git host lists.
+    made
+        Whether the call that answered made it; `False` for a key made earlier, and for every
+        key `Repository.deploy_keys` lists.
+    """
+
+    environment: str
+    public_key: str
+    fingerprint: str
+    made: bool = False
+
+
+@dataclass(frozen=True)
+class DeployKeys:
+    """What `Repositories.deploy_key` made.
+
+    Parameters
+    ----------
+    secret
+        The secret name every key is stored under; now the repository's credential.
+    keys
+        One per environment the call wrote or found a key in, by environment name.
+    skipped
+        Environments without a key where you may not manage secrets.
+    replaced
+        Environments whose key the call replaced.
+    notes
+        For each replaced key: the old one stops working, replace it at the git host now.
+    """
+
+    secret: str
+    keys: list[DeployKey]
+    skipped: list[str]
+    replaced: list[str]
+    notes: list[str]
 
 
 @dataclass(frozen=True)

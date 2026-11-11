@@ -48,6 +48,7 @@ from lakana_core.jobs.service import JobService
 from lakana_core.models import AuditEventType
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.row_filters import RowFilterService
+from lakana_core.projects.deploy_keys import DeployKeyService
 from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.package_indexes import PackageIndexService
 from lakana_core.projects.probes import RepositoryProbeService
@@ -1460,6 +1461,30 @@ def get_repository_service(
         A service confined to the configured repo roots.
     """
     return RepositoryService(session, authz, repo_roots=request.app.state.settings.repo_roots)
+
+
+def get_deploy_key_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+    key_provider: KeyProvider = Depends(get_key_provider),
+) -> DeployKeyService:
+    """Build a DeployKeyService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, auditing-wrapped authorization service.
+    key_provider
+        Wraps the data key of each new deploy key's secret.
+
+    Returns
+    -------
+    DeployKeyService
+        The service.
+    """
+    return DeployKeyService(session, authz, key_provider)
 
 
 def get_package_index_service(

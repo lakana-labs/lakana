@@ -113,6 +113,7 @@
 "recovery list": { class: ui, part: 1 }
 "recovery withdraw": { class: ui, part: 1 }
 "repo add": { class: ui, part: 8 }
+"repo deploy-key": { class: ui, part: 2 }
 "repo host-keys": { class: ui, part: 2 }
 "repo list": { class: ui, part: 8 }
 "repo remove": { class: ui, part: 8 }
@@ -416,6 +417,7 @@
 "POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "POST /api/v1/repositories": { class: ui, part: 8 }
+"POST /api/v1/repositories/{name}/deploy-key": { class: ui, part: 2 }
 "POST /api/v1/repository-probes": { class: ui, part: 2 }
 "POST /api/v1/row-filters": { class: ui, part: 7 }
 "POST /api/v1/sign-in/links/describe": { class: ui, part: 1 }

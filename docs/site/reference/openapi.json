@@ -13398,6 +13398,125 @@
         }
       }
     },
+    "/api/v1/repositories/{name}/deploy-key": {
+      "post": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "Make an SSH deploy key for each environment, kept as that environment's secret",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nEach environment gets a key pair of its own; the private key is stored as the environment's secret at once and never shown, the public keys are answered to add at the git host as read-only deploy keys. By default every environment where you may manage secrets and the repository has no key yet gets one, and the others are listed unchanged (`made` false) or as `skipped`. `environments` narrows the call; with `replace` their keys are replaced, and the old keys stop working. The repository then names the secret as its credential.\n\nNeeds `MANAGE_REPOSITORY` on the instance and `MANAGE_SECRET` in each environment written, and an ssh repository with confirmed host keys. Answers 404 when no repository (or named environment) has that name, 409 when a secret of that name there is revoked, is not a key made for this repository or the repository names another secret, and 422 for `replace` without `environments` or a secret name that cannot be a credential.",
+        "operationId": "make_deploy_key_api_v1_repositories__name__deploy_key_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "The repository's registered name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DeployKeyIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeployKeyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/repository-probes": {
       "post": {
         "tags": [
@@ -23599,7 +23718,8 @@
           "PASSKEY_DISABLED",
           "PROFILE_PICTURE_SET",
           "PROFILE_PICTURE_REMOVED",
-          "REPOSITORY_PROBE_REQUESTED"
+          "REPOSITORY_PROBE_REQUESTED",
+          "DEPLOY_KEY_GENERATED"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."
@@ -25225,6 +25345,121 @@
         ],
         "title": "DeployJobStartOut",
         "description": "What a deploy did with one job that starts after each deploy (`on_deploy: true`).\n\nParameters\n----------\njob\n    The job's name.\noutcome\n    ``pending`` (the worker has not started it yet), ``started``, ``waiting`` (the project\n    was busy; the start waits) or ``not_started``.\nrun_id\n    For ``started``, the queued run.\nwaits_for_run_id\n    For ``waiting``, the active run the start waits for.\nreason\n    For ``not_started``: ``lacks_run`` (the deployer may not `RUN` in the environment),\n    ``refused`` (refused as a start by hand would be), ``error`` or ``lost`` (the worker\n    stopped before it recorded the start, which may or may not have been made).\nmessage\n    For ``not_started``, one sentence that names the cause and the next step."
+      },
+      "DeployKeyIn": {
+        "properties": {
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          },
+          "environments": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environments"
+          },
+          "replace": {
+            "type": "boolean",
+            "title": "Replace",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DeployKeyIn",
+        "description": "Request body for making deploy keys; every field is optional.\n\nParameters\n----------\nsecret\n    The secret name the keys are stored under; ``<repository>-deploy-key`` by default.\nenvironments\n    Only these environments; by default every environment where you may manage secrets\n    and the repository has no key yet.\nreplace\n    Replace the keys of `environments` (required with it). The old key of each stops\n    working."
+      },
+      "DeployKeyMadeOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "public_key": {
+            "type": "string",
+            "title": "Public Key"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "made": {
+            "type": "boolean",
+            "title": "Made"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "public_key",
+          "fingerprint",
+          "made"
+        ],
+        "title": "DeployKeyMadeOut",
+        "description": "One environment's deploy key in the answer of a call that makes keys.\n\nParameters\n----------\nenvironment\n    The environment whose secret holds the private half.\npublic_key\n    ``ssh-ed25519 <base64> <comment>``.\nfingerprint\n    ``SHA256:…``.\nmade\n    Whether this call made it; `false` for a key made earlier, listed unchanged."
+      },
+      "DeployKeyOut": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/DeployKeyMadeOut"
+            },
+            "type": "array",
+            "title": "Keys"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped"
+          },
+          "replaced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Replaced"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret",
+          "keys",
+          "skipped",
+          "replaced",
+          "notes"
+        ],
+        "title": "DeployKeyOut",
+        "description": "Response body of a call that makes deploy keys. Never carries a private key.\n\nParameters\n----------\nsecret\n    The secret name every key is stored under; now the repository's credential.\nkeys\n    One per environment the call wrote or found a key in, by environment name.\nskipped\n    Environments without a key where you may not manage secrets: someone who may makes\n    theirs.\nreplaced\n    Environments whose key this call replaced.\nnotes\n    For each replaced key: the old key stops working, replace it at the git host now."
       },
       "DeployOut": {
         "properties": {
@@ -29528,6 +29763,30 @@
         "title": "RepositoryCreate",
         "description": "Request body for registering a repository.\n\nParameters\n----------\nname\n    Unique name; no dots.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    ``https://…``, ``ssh://…``, ``[user@]host:path``, or an absolute path.\ncredential_secret\n    Secret name resolved in the target environment at deploy time.\ncredential_username\n    HTTPS username; default ``oauth2``.\nssh_known_hosts\n    ``known_hosts`` lines; required for ``ssh``.\ndefault_ref\n    Ref deployed when none is given."
       },
+      "RepositoryDeployKeyOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "public_key": {
+            "type": "string",
+            "title": "Public Key"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "public_key",
+          "fingerprint"
+        ],
+        "title": "RepositoryDeployKeyOut",
+        "description": "The public half of one environment's deploy key.\n\nParameters\n----------\nenvironment\n    The environment whose secret holds the private half.\npublic_key\n    ``ssh-ed25519 <base64> <comment>``: add it at the git host as a read-only deploy key.\nfingerprint\n    ``SHA256:…``, as `ssh-keygen -l` and the git host show it."
+      },
       "RepositoryOut": {
         "properties": {
           "id": {
@@ -29612,6 +29871,14 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "deploy_keys": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryDeployKeyOut"
+            },
+            "type": "array",
+            "title": "Deploy Keys",
+            "default": []
           }
         },
         "type": "object",
@@ -29629,7 +29896,7 @@
           "updated_at"
         ],
         "title": "RepositoryOut",
-        "description": "Response body for a repository. Carries a secret's name, never a value.\n\nParameters\n----------\nid\n    The repository's id.\nname\n    Its name.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    Its URL.\ncredential_secret\n    The bound secret's name.\ncredential_username\n    HTTPS username, or `None` for ``oauth2``.\nssh_known_hosts\n    Trusted host keys.\ndefault_ref\n    Default ref.\ncreated_by\n    Who registered it.\ncreated_at\n    When.\nupdated_at\n    Last change."
+        "description": "Response body for a repository. Carries a secret's name, never a value.\n\nParameters\n----------\nid\n    The repository's id.\nname\n    Its name.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    Its URL.\ncredential_secret\n    The bound secret's name.\ncredential_username\n    HTTPS username, or `None` for ``oauth2``.\nssh_known_hosts\n    Trusted host keys.\ndefault_ref\n    Default ref.\ncreated_by\n    Who registered it.\ncreated_at\n    When.\nupdated_at\n    Last change.\ndeploy_keys\n    The public deploy keys Lakana made for it, one per environment you may read, to add at\n    the git host; empty when it names no such key. Never a private key."
       },
       "RepositoryProbeIn": {
         "properties": {

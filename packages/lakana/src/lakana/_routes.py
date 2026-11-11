@@ -264,6 +264,7 @@ ROUTES: dict[str, Route] = {
     "repositories.get": Route("GET", "/api/v1/repositories/{name}"),
     "repositories.update": Route("PATCH", "/api/v1/repositories/{name}"),
     "repositories.delete": Route("DELETE", "/api/v1/repositories/{name}"),
+    "repositories.deploy_key": Route("POST", "/api/v1/repositories/{name}/deploy-key"),
     "repositories.probe": Route("POST", "/api/v1/repository-probes"),
     "repositories.probe_get": Route("GET", "/api/v1/repository-probes/{probe_id}"),
     "package_indexes.create": Route("POST", "/api/v1/package-indexes"),

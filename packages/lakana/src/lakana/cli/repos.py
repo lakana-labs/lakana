@@ -536,6 +536,79 @@ def test_access(
     _finish(state, probe)
 
 
+@repo_app.command("deploy-key")
+def deploy_key(
+    ctx: typer.Context,
+    name: str,
+    environment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--environment",
+            "--env",
+            help="Only this environment (repeatable). Default: every environment you may manage "
+            "secrets in that has no key yet.",
+        ),
+    ] = None,
+    replace: Annotated[
+        bool,
+        typer.Option(
+            "--replace",
+            help="Replace the key of each --environment; the old key stops working.",
+        ),
+    ] = False,
+    secret: Annotated[
+        str | None,
+        typer.Option("--secret", help="Secret name for the keys (default: NAME-deploy-key)."),
+    ] = None,
+) -> None:
+    """Make an SSH deploy key for repository NAME in each environment.
+
+    The server makes one key pair per environment and keeps the private key as that
+    environment's secret; it is never shown. The command prints each environment's public key:
+    add each one at your git host as a read-only deploy key. An environment that has a key
+    keeps it unless you name it with --environment and --replace.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The repository's name; an ssh repository with confirmed host keys.
+    environment
+        Environments to limit the call to.
+    replace
+        Replace the keys of `environment`.
+    secret
+        The secret name.
+    """
+    state = state_of(ctx)
+    made = state.client().repositories.deploy_key(
+        name, secret=secret, environments=environment, replace=replace
+    )
+    if state.output == "json":
+        _output.print_json(made)
+        return
+    for key in made.keys:
+        status = "new" if key.made else "made earlier"
+        sys.stdout.write(_output.safe_text(f"{key.environment} ({status}):") + "\n")
+        sys.stdout.write(_output.safe_text(key.public_key) + "\n")
+    for note in made.notes:
+        _output.next_step(state, note)
+    for skipped in made.skipped:
+        _output.next_step(
+            state,
+            f"No key in {_output.inline(skipped)}: you may not manage its secrets. Someone who "
+            f"may runs: lakana repo deploy-key {_output.inline(name)}",
+        )
+    if made.keys:
+        _output.next_step(state, "Add each key as a read-only deploy key at your git host.")
+        _output.next_step(
+            state,
+            f"Then: lakana repo test {_output.inline(name)} --env "
+            f"{_output.inline(made.keys[0].environment)}",
+        )
+
+
 def register(app: typer.Typer) -> None:
     """Add the `repo` group to the root app.
 

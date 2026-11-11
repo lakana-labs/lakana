@@ -1177,6 +1177,39 @@ def test_ssh_credential_is_the_private_key(
     assert resolve_credential(session, _KEY, environment, repository) is None
 
 
+def test_the_worker_resolves_the_generated_key(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """A deploy key Lakana made is what a deploy reads: the private half of the shown key."""
+    from cryptography.hazmat.primitives import serialization
+
+    from lakana_core.models import Environment
+    from lakana_core.projects.deploy_keys import DeployKeyService
+    from lakana_core.projects.repositories import RepositoryService
+
+    repository = RepositoryService(session, AllowAllAuthorization()).create(
+        principal,
+        name="viassh",
+        kind=RepositoryKind.SSH,
+        url="git@github.com:acme/viassh.git",
+        ssh_known_hosts=(
+            "github.com ssh-ed25519 "
+            "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR\n"
+        ),
+    )
+    result = DeployKeyService(session, AllowAllAuthorization(), _KEY).generate(principal, "viassh")
+    environment = session.execute(select(Environment)).scalar_one()
+
+    credential = resolve_credential(session, _KEY, environment, repository)
+
+    assert credential is not None and credential.private_key is not None
+    key = serialization.load_ssh_private_key(credential.private_key.encode(), password=None)
+    public = key.public_key().public_bytes(
+        serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH
+    )
+    assert result.keys[0].public_key.startswith(public.decode() + " ")
+
+
 def test_run_settings_above_the_operator_caps_fail_the_deploy(
     session: Session, principal: PrincipalRef, world: World
 ) -> None:

@@ -118,6 +118,12 @@ the storage options of an environment that has a storage secret: `lakana env set
 example `--option s3.endpoint=URL --option s3.region=REGION`). Sending the options the
 environment already has changes nothing and needs no extra right.
 
+A deploy key that Lakana made (`lakana repo deploy-key`, see
+[Connect a repository](connect-a-repository.md)) stays with its repository: `lakana secret bind`
+refuses to move it to another use, and `lakana secret rotate` refuses to change it. Replace it
+with `lakana repo deploy-key NAME --environment ENV --replace` instead; `lakana secret revoke`
+works as for any secret.
+
 Attaching a secret to an environment (`--secret-ref`) approves the options it has then: check
 `s3.endpoint` first. The audit event records that endpoint.
 

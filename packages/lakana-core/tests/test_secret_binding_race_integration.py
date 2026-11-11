@@ -21,6 +21,7 @@ from lakana_core.config import DatabaseConfig
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import ConnectionService
 from lakana_core.db import create_engine
+from lakana_core.errors import ConflictError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
@@ -31,10 +32,13 @@ from lakana_core.models import (
     PackageIndex,
     Principal,
     PrincipalType,
+    RepositoryKind,
     Secret,
     SecretUseKind,
 )
+from lakana_core.projects.deploy_keys import DeployKeyService
 from lakana_core.projects.package_indexes import PackageIndexService
+from lakana_core.projects.repositories import RepositoryService
 from lakana_core.secrets import service as secret_service_module
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.secrets.service import SecretService
@@ -350,3 +354,51 @@ def test_two_moves_between_the_same_connections_in_opposite_directions_both_comm
         assert (a.secret_id, b.secret_id) == (ids["s2"], ids["s1"])
         assert (s1.use_kind, s1.use_target_id) == (SecretUseKind.CONNECTION, ids["b"])
         assert (s2.use_kind, s2.use_target_id) == (SecretUseKind.CONNECTION, ids["a"])
+
+
+def test_a_key_revoked_while_it_is_replaced_is_not_rotated(engine: Engine) -> None:
+    """The revoke commits first; the replacement then sees a revoked key and writes nothing.
+
+    Without the lock on the secret rows, the replacement would rotate the revoked row, which no
+    deploy reads, and report success.
+    """
+    tag = uuid.uuid4().hex[:8]
+    env, repo = f"env-{tag}", f"repo-{tag}"
+    with Session(engine) as session:
+        session.add(Environment(id=uuid.uuid4(), name=env, storage_root=f"file:///srv/{tag}"))
+        session.commit()
+        admin = _principal(session, f"admin-{tag}")
+        RepositoryService(session, AllowAllAuthorization()).create(
+            admin,
+            name=repo,
+            kind=RepositoryKind.SSH,
+            url="git@git.example.com:acme/a.git",
+            ssh_known_hosts=(
+                "git.example.com ssh-ed25519 "
+                "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR\n"
+            ),
+        )
+        DeployKeyService(session, AllowAllAuthorization(), _KEYS).generate(admin, repo)
+        secret = session.execute(
+            select(Secret).where(Secret.name == f"{repo}-deploy-key")
+        ).scalar_one()
+        secret_id, ciphertext = secret.id, secret.ciphertext
+
+    def _revoke(session: Session) -> None:
+        with patch.object(session, "commit"):
+            SecretService(session, AllowAllAuthorization(), _KEYS).revoke(admin, secret_id)
+        session.flush()  # takes the row lock the replacement waits for
+
+    def _replace(session: Session) -> None:
+        DeployKeyService(session, AllowAllAuthorization(), _KEYS).generate(
+            admin, repo, environments=[env], replace=True
+        )
+
+    outcome = _race(engine, _revoke, _replace)
+
+    assert isinstance(outcome, ConflictError), outcome
+    assert "revoked" in str(outcome)
+    with Session(engine) as session:
+        secret = session.get(Secret, secret_id)
+        assert secret is not None
+        assert secret.revoked_at is not None and secret.ciphertext == ciphertext

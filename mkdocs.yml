@@ -32,6 +32,7 @@ nav:
   - How-to guides:
       - how-to/index.md
       - how-to/projects.md
+      - how-to/connect-a-repository.md
       - how-to/load-data-from-a-source.md
       - how-to/read-from-a-sql-server-database.md
       - how-to/deploy-from-github-actions.md

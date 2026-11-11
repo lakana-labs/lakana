@@ -141,6 +141,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "repo remove": ("repositories.delete",),
     "repo host-keys": ("repositories.host_keys", "repositories.probe"),
     "repo test": ("repositories.test_access", "repositories.probe"),
+    "repo deploy-key": ("repositories.deploy_key",),
     "index add": ("package_indexes.create",),
     "index list": ("package_indexes.list",),
     "index show": ("package_indexes.get",),

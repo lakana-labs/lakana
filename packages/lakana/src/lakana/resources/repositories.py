@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
 
 from lakana._http import HttpTransport
-from lakana._models import HostKey, Repository, RepositoryProbe
+from lakana._models import DeployKey, DeployKeys, HostKey, Repository, RepositoryProbe
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
 from lakana.resources.artifacts import _ODD_ANSWER, _object
@@ -93,6 +93,28 @@ def _repository_from_json(data: dict[str, Any]) -> Repository:
         created_by=data["created_by"],
         created_at=datetime.fromisoformat(data["created_at"]),
         updated_at=datetime.fromisoformat(data["updated_at"]),
+        deploy_keys=[_deploy_key_from_json(k) for k in data.get("deploy_keys") or ()],
+    )
+
+
+def _deploy_key_from_json(data: dict[str, Any]) -> DeployKey:
+    """Build a `DeployKey` from one key of an answer.
+
+    Parameters
+    ----------
+    data
+        A `RepositoryDeployKeyOut` or `DeployKeyMadeOut` body.
+
+    Returns
+    -------
+    DeployKey
+        The key; `made` is `False` when the body has none.
+    """
+    return DeployKey(
+        environment=str(data["environment"]),
+        public_key=str(data["public_key"]),
+        fingerprint=str(data["fingerprint"]),
+        made=bool(data.get("made")),
     )
 
 
@@ -243,6 +265,70 @@ class Repositories:
             While any environment deploys it.
         """
         self._transport.request(ROUTES["repositories.delete"], path_params={"name": name})
+
+    def deploy_key(
+        self,
+        name: str,
+        *,
+        secret: str | None = None,
+        environments: Sequence[str] | None = None,
+        replace: bool = False,
+    ) -> DeployKeys:
+        """Make an SSH deploy key for each environment; the server keeps the private halves.
+
+        Needs `MANAGE_REPOSITORY` and `MANAGE_SECRET` in each environment written, and an ssh
+        repository with confirmed host keys. By default every environment you may manage
+        secrets in that has no key yet gets one; add each public key at your git host as a
+        read-only deploy key.
+
+        Parameters
+        ----------
+        name
+            The repository's name.
+        secret
+            The secret name; ``<name>-deploy-key`` by default.
+        environments
+            Only these environments.
+        replace
+            Replace the keys of `environments` (required with it); the old keys stop working.
+
+        Returns
+        -------
+        DeployKeys
+            The public keys, by environment.
+
+        Raises
+        ------
+        lakana.errors.ValidationError
+            For a repository that is not ssh or has no host keys, or `replace` alone.
+        lakana.errors.Conflict
+            If a secret of the name is revoked or is not a key made for this repository.
+        lakana.errors.PermissionDenied
+            Without the rights above.
+        InvalidResponse
+            If the answer is not a deploy key answer.
+        """
+        body: dict[str, object] = {}
+        if secret is not None:
+            body["secret"] = secret
+        if environments:
+            body["environments"] = list(environments)
+        if replace:
+            body["replace"] = True
+        response = self._transport.request(
+            ROUTES["repositories.deploy_key"], path_params={"name": name}, json=body
+        )
+        data = _object(response, "a deploy key")
+        try:
+            return DeployKeys(
+                secret=str(data["secret"]),
+                keys=[_deploy_key_from_json(k) for k in data["keys"]],
+                skipped=[str(e) for e in data["skipped"]],
+                replaced=[str(e) for e in data["replaced"]],
+                notes=[str(n) for n in data["notes"]],
+            )
+        except (KeyError, TypeError, ValueError):
+            raise InvalidResponse(_ODD_ANSWER.format(what="a deploy key")) from None
 
     def host_keys(
         self,

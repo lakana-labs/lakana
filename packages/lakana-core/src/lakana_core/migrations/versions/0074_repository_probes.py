@@ -1,4 +1,4 @@
-"""repository_probes: repository checks a worker runs, and a repository's public deploy key.
+"""repository_probes: repository checks a worker runs, and the deploy keys Lakana makes.
 
 Revision ID: e5b8c1f4a297
 Revises: d4a7e2b9c613
@@ -36,8 +36,10 @@ _OUTCOMES = (
 def upgrade() -> None:
     """Upgrade schema.
 
-    One empty table, and a nullable column every existing repository starts without: no
-    repository has a key Lakana made yet.
+    One empty table, and two nullable columns every existing secret starts without: no secret
+    is a deploy key Lakana made yet. `generated_for` is the id of the repository a key was made
+    for (no foreign key: like `use_target_id`, it keeps the id of a repository that is removed),
+    `public_key` the public half shown to add at the git host.
     """
     op.create_table(
         "repository_probes",
@@ -95,18 +97,21 @@ def upgrade() -> None:
         ["state", "lease_expires_at"],
         unique=False,
     )
-    with op.batch_alter_table("repositories") as batch_op:
-        batch_op.add_column(sa.Column("deploy_public_key", sa.Text(), nullable=True))
+    with op.batch_alter_table("secrets") as batch_op:
+        batch_op.add_column(sa.Column("generated_for", sa.Uuid(), nullable=True))
+        batch_op.add_column(sa.Column("public_key", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema.
 
-    Drops the table and the column: every pending or finished check is gone (they are kept for a
-    day only), and a public deploy key shown on a repository is no longer shown; the private
-    keys stay in the environments' secrets.
+    Drops the table and the two columns: every pending or finished check is gone (they are kept
+    for a day only), and a deploy key Lakana made becomes an ordinary secret bound to its
+    repository: its private key stays and deploys keep working, its public half is no longer
+    shown, and it can then be rotated and bound by hand.
     """
-    with op.batch_alter_table("repositories") as batch_op:
-        batch_op.drop_column("deploy_public_key")
+    with op.batch_alter_table("secrets") as batch_op:
+        batch_op.drop_column("public_key")
+        batch_op.drop_column("generated_for")
     op.drop_index("ix_repository_probes_claim", table_name="repository_probes")
     op.drop_table("repository_probes")
