@@ -569,6 +569,34 @@ def test_main_warns_when_the_connection_test_thread_does_not_stop(
     assert "The connection test thread did not stop within 5 s" in caplog.text
 
 
+def test_main_warns_when_the_repository_check_thread_does_not_stop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repository_probe_loop_stand_in: mock.MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A probe thread stuck in a git call delays shutdown by a bounded time, and says so.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the database file.
+    monkeypatch
+        Sets the environment.
+    repository_probe_loop_stand_in
+        The loop's stand-in.
+    caplog
+        Captures the warning.
+    """
+    monkeypatch.setenv("LAKANA_RUN__DRAIN_GRACE_SECONDS", "1")
+    thread = repository_probe_loop_stand_in.return_value.start.return_value
+    thread.is_alive.return_value = True
+    with caplog.at_level("WARNING", logger="lakana_worker.__main__"):
+        _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    thread.join.assert_called_once_with(timeout=5.0)
+    assert "The repository check thread did not stop within 5 s" in caplog.text
+
+
 def test_main_refuses_a_ca_bundle_the_worker_cannot_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

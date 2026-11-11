@@ -660,3 +660,84 @@ def test_finish_cuts_the_message(world: World) -> None:
         probe.id, "w1", outcome=ProbeOutcome.FAILED, message="x" * 5000, host_keys=None
     )
     assert len(world.probes()[0].message or "") == 1000
+
+
+def test_parse_keyscan_of_no_output_is_no_keys() -> None:
+    """A host that answers nothing yields no keys."""
+    assert parse_keyscan("", host="h", port=22) == []
+
+
+@pytest.mark.parametrize(
+    "blob",
+    [
+        b"\x00\x00",
+        b"\x00\x00\x00\x0bssh-ed",
+        b"\x00\x00\x00\x0bssh-ed2551\xff",
+    ],
+    ids=["shorter-than-a-length", "type-cut-short", "type-not-ascii"],
+)
+def test_parse_keyscan_drops_a_blob_without_a_readable_type(blob: bytes) -> None:
+    """A blob too short for its type string, or with a type that is not ASCII, is dropped.
+
+    Parameters
+    ----------
+    blob
+        The key blob.
+    """
+    line = f"x ssh-ed25519 {base64.b64encode(blob).decode()}\n"
+    assert parse_keyscan(line, host="h", port=22) == []
+
+
+def test_a_bracketed_host_that_is_not_ipv6_is_refused() -> None:
+    """``[v1.fe]`` passes URL parsing as a future IP literal but is no IPv6 address."""
+    with pytest.raises(ValidationError, match="must be an IPv6 address"):
+        ssh_endpoint("ssh://git@[v1.fe]/r")
+
+
+@pytest.mark.parametrize(
+    ("url", "port"),
+    [("https://Git.Example.com/team/r.git", 443), ("https://git.example.com:8443/r.git", 8443)],
+)
+def test_access_probe_of_an_https_repository_audits_its_host_and_port(
+    world: World, url: str, port: int
+) -> None:
+    """An https repository is probed at its host, on 443 unless the URL names a port.
+
+    Parameters
+    ----------
+    world
+        The world.
+    url
+        The repository's URL.
+    port
+        The port the audit names.
+    """
+    world.session.add(
+        Repository(
+            id=uuid.uuid4(),
+            name="web",
+            kind=RepositoryKind.HTTPS,
+            url=url,
+            credential_secret="web-token",
+        )
+    )
+    world.session.commit()
+
+    probe = world.service().request_access(world.admin, "web", "prod")
+
+    assert probe.kind is RepositoryProbeKind.ACCESS
+    (event,) = world.events(AuditEventType.REPOSITORY_PROBE_REQUESTED)
+    assert (event.detail["host"], event.detail["port"]) == ("git.example.com", port)
+
+
+def test_a_claim_another_worker_won_is_rolled_back(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the guarded update changes no row, the claim returns `None` and changes nothing."""
+    world.service().request_host_keys(world.admin, URL)
+    monkeypatch.setattr(probes, "rowcount", lambda _result: 0)
+
+    assert world.queue().claim("w1", lease_seconds=90, now=NOW) is None
+    (probe,) = world.probes()
+    assert probe.state is RepositoryProbeState.QUEUED
+    assert probe.lease_owner is None

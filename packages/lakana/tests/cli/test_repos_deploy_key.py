@@ -123,3 +123,29 @@ def test_cli_deploy_key_refusal_names_the_next_step(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "--secret OTHER-NAME" in result.output
+
+
+def test_cli_deploy_key_without_keys_names_no_git_host_step(tmp_path: Path) -> None:
+    """Nothing made anywhere: the skipped environment is named, no step at the git host."""
+    api = FakeApi()
+    api.on("POST", _ROUTE, status=201, json=_answer(keys=[]))
+
+    result = invoke(make_state(tmp_path, api), "repo", "deploy-key", "analytics")
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == ""
+    assert "staging" in result.stderr
+    assert "git host" not in result.stderr and "lakana repo test" not in result.stderr
+
+
+def test_cli_deploy_key_refuses_an_answer_without_its_fields(tmp_path: Path) -> None:
+    """An answer that lacks the keys is not read as a deploy key; the error names the URL."""
+    api = FakeApi()
+    api.on("POST", _ROUTE, status=201, json={"secret": "analytics-deploy-key"})
+
+    result = invoke(make_state(tmp_path, api), "repo", "deploy-key", "analytics")
+
+    assert result.exit_code != 0
+    assert "answer to a deploy key was not what a Lakana server sends" in " ".join(
+        result.output.split()
+    )

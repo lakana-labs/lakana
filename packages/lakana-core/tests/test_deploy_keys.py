@@ -816,3 +816,60 @@ def test_a_hand_made_credential_where_the_caller_manages_nothing_is_not_named(wo
     assert "ADMIN" in str(refused.value)
     assert world.denials() == ["credential_not_made_by_lakana"]
     assert world.secrets("analytics-2") == {}
+
+
+def test_no_environment_at_all_is_refused_naming_env_create(session: Session) -> None:
+    """Without any environment there is nowhere to keep a key; the error names the next step.
+
+    Parameters
+    ----------
+    session
+        Database session, without environments.
+    """
+    admin = _principal(session, "admin")
+    GrantService(session, AllowAllAuthorization()).grant(
+        admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    RepositoryService(session, AllowAllAuthorization()).create(
+        admin, name="analytics", kind=RepositoryKind.SSH, url=_URL, ssh_known_hosts=_HOSTS
+    )
+    service = DeployKeyService(session, GrantAuthorization(session), _KEYS)
+
+    with pytest.raises(ValidationError, match="lakana env create"):
+        service.generate(admin, "analytics")
+    assert session.execute(select(Secret)).scalars().all() == []
+
+
+def test_a_new_name_for_every_environment_with_a_key_leaves_keyless_ones_alone(
+    world: World,
+) -> None:
+    """Environments that hold no key under the old name do not stop a switch."""
+    world.service().generate(world.admin, "analytics", environments=["dev"])
+
+    result = world.service().generate(world.admin, "analytics", secret="k2", environments=["dev"])
+
+    assert result.secret == "k2"
+    assert list(world.secrets("k2")) == ["dev"]
+    world.session.refresh(world.repo)
+    assert world.repo.credential_secret == "k2"
+
+
+def test_the_listing_asks_once_per_environment_for_several_repositories(world: World) -> None:
+    """Two repositories with keys in the same environment are both listed there."""
+    other = RepositoryService(world.session, AllowAllAuthorization()).create(
+        world.admin, name="other", kind=RepositoryKind.SSH, url=_URL, ssh_known_hosts=_HOSTS
+    )
+    service = world.service()
+    service.generate(world.admin, "analytics", environments=["dev"])
+    service.generate(world.admin, "other", environments=["dev"])
+
+    shown = service.deploy_keys(world.devops, [world.repo, other])
+
+    assert [k.environment for k in shown[world.repo.id]] == ["dev"]
+    assert [k.environment for k in shown[other.id]] == ["dev"]
+    assert shown[world.repo.id][0].fingerprint != shown[other.id][0].fingerprint
+
+
+def test_the_listing_of_no_repositories_is_empty(world: World) -> None:
+    """Listing no repositories asks nothing and returns an empty mapping."""
+    assert world.service().deploy_keys(world.admin, []) == {}

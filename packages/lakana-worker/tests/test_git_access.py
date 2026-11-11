@@ -69,6 +69,8 @@ def _check(
     deadline: float | None = None,
     ca_bundle: Path | None = None,
     resolve: Callable[..., list[Any]] = PUBLIC,
+    repo_roots: Sequence[str] = (),
+    https_proxy: str | None = None,
 ) -> tuple[ProbeOutcome, str]:
     """Call `check_access` with test defaults.
 
@@ -90,6 +92,10 @@ def _check(
         A CA file for HTTPS.
     resolve
         The resolver.
+    repo_roots
+        The directories a local repository may be under; none by default.
+    https_proxy
+        The proxy for HTTPS, if any.
 
     Returns
     -------
@@ -105,9 +111,10 @@ def _check(
         known_hosts=known_hosts,
         workdir=work,
         limits=DeployLimits(),
-        repo_roots=[],
+        repo_roots=list(repo_roots),
         deadline=deadline if deadline is not None else time.monotonic() + 60,
         ca_bundle=ca_bundle,
+        https_proxy=https_proxy,
         resolve=resolve,
     )
 
@@ -389,3 +396,50 @@ def test_check_access_reads_a_real_repository_over_https(tmp_path: Path) -> None
     assert good[0] is ProbeOutcome.OK
     assert bad[0] is ProbeOutcome.AUTH_REFUSED
     assert "wrong-token-value" not in bad[1]
+
+
+def test_check_access_refuses_a_proxy_that_is_not_an_http_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A malformed proxy setting is refused before git runs, naming the form it needs."""
+    calls = _fake_runs(monkeypatch)
+    outcome, message = _check(
+        tmp_path,
+        kind=RepositoryKind.HTTPS,
+        url="https://git.example.com/team/r.git",
+        known_hosts=None,
+        https_proxy="ftp://proxy.corp:3128",
+    )
+    assert outcome is ProbeOutcome.FAILED
+    assert "http://proxy.corp:3128" in message
+    assert calls == []
+
+
+def test_check_access_reads_a_local_repository_without_resolving_a_host(tmp_path: Path) -> None:
+    """A local repository under the roots has no network host to check; git reads it."""
+    make_repo(tmp_path / "src", {"lakana.yaml": "repo: analytics\n"})
+
+    def never(*args: object, **kwargs: object) -> list[Any]:
+        raise AssertionError("a local repository is not resolved")
+
+    outcome, _ = _check(
+        tmp_path,
+        kind=RepositoryKind.LOCAL,
+        url=str(tmp_path / "src"),
+        known_hosts=None,
+        resolve=never,
+        repo_roots=[str(tmp_path)],
+    )
+    assert outcome is ProbeOutcome.OK
+
+
+def test_a_git_error_that_is_no_timeout_is_failed_and_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Git refused before it ran (no local roots): a fixed sentence, the cause in the log."""
+    with caplog.at_level(logging.WARNING, logger="lakana_worker.git"):
+        outcome, message = _check(
+            tmp_path, kind=RepositoryKind.LOCAL, url=str(tmp_path / "src"), known_hosts=None
+        )
+    assert (outcome, message) == (ProbeOutcome.FAILED, FAILED_MESSAGE)
+    assert "LAKANA_REPO_ROOTS is empty" in caplog.text

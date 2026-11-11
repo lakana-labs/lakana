@@ -203,3 +203,12 @@ def test_repo_update_refuses_clearing_and_setting_the_same_field(tmp_path: Path)
     assert "default_ref" in _plain(result.output)
     assert "both" in _plain(result.output)
     assert api.requests == []
+
+
+def test_sdk_update_refuses_an_unknown_field_before_asking(tmp_path: Path) -> None:
+    """A field a repository cannot change is a `TypeError` naming it; nothing is sent."""
+    api = FakeApi()
+
+    with pytest.raises(TypeError, match="unexpected field\\(s\\): kind"):
+        make_state(tmp_path, api).client().repositories.update("analytics", kind="ssh")
+    assert api.requests == []

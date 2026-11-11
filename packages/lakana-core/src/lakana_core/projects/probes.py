@@ -248,7 +248,7 @@ def parse_keyscan(output: str, *, host: str, port: int) -> list[HostKey]:
         line = f"{known_hosts_host(host, port)} {key_type} {encoded}"
         keys.append(HostKey(type=key_type, fingerprint=key_fingerprint(blob), line=line))
         if len(keys) == MAX_HOST_KEYS:
-            break
+            return keys
     return keys
 
 

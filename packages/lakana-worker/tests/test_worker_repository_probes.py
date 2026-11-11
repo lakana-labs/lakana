@@ -39,7 +39,7 @@ from lakana_core.secrets.service import insert_secret
 from lakana_core.secrets.uses import SecretUse
 from lakana_worker.deploy import DeploySettings
 from lakana_worker.git import REFUSED_ADDRESS_MESSAGE, GitCredential
-from lakana_worker.repository_probes import LEASE_SECONDS, RepositoryProbeLoop, scan_host_keys
+from lakana_worker.repository_probes import GONE, LEASE_SECONDS, RepositoryProbeLoop, scan_host_keys
 
 ED25519_B64 = "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR"
 KEYS = EnvKeyProvider(base64.b64encode(b"7" * 32).decode())
@@ -545,3 +545,65 @@ def test_the_loop_thread_starts_and_stops(world: World, tmp_path: Path) -> None:
     probes.stop()
     thread.join(timeout=5)
     assert not thread.is_alive()
+
+
+def test_a_name_that_resolves_to_no_address_is_unreachable() -> None:
+    """A resolver answering with no address at all is unreachable; ssh-keyscan never runs."""
+    run = Runs()
+    outcome, _message, keys = scan_host_keys("h", 22, resolve=resolves_to(), run=run)
+    assert (outcome, keys, run.calls) == (ProbeOutcome.UNREACHABLE, [], [])
+
+
+def test_an_access_probe_whose_repository_is_gone_fails_saying_so(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A probe whose repository was deleted (its id cleared) fails naming why; git never runs."""
+    ran: list[object] = []
+    monkeypatch.setattr(module, "check_access", lambda **kwargs: ran.append(kwargs))
+    probe_id = world.probe(RepositoryProbeKind.ACCESS)
+    with Session(world.engine) as session:
+        session.execute(
+            update(RepositoryProbe).where(RepositoryProbe.id == probe_id).values(repository_id=None)
+        )
+        session.commit()
+    assert loop(world, tmp_path).step()
+    row = world.read(probe_id)
+    assert (row.outcome, row.message) == (ProbeOutcome.FAILED, GONE)
+    assert ran == []
+
+
+def test_a_host_key_probe_of_a_refused_url_fails_without_scanning(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A URL the endpoint check refuses fails the probe with the reason; nothing is scanned."""
+    scanned: list[object] = []
+    monkeypatch.setattr(module, "scan_host_keys", lambda *args: scanned.append(args))
+    probe_id = world.probe(RepositoryProbeKind.HOST_KEYS, "-oProxyCommand=x:r")
+    assert loop(world, tmp_path).step()
+    row = world.read(probe_id)
+    assert row.outcome is ProbeOutcome.FAILED
+    assert (row.message or "").startswith("The URL is refused: ")
+    assert scanned == []
+
+
+def test_the_loop_logs_a_failing_step_once_by_type_and_carries_on(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Two failing steps log one warning naming the type; a working step runs without a sleep."""
+    probes = loop(world, tmp_path)
+    steps: list[str] = []
+
+    def step() -> bool:
+        steps.append("x")
+        if len(steps) <= 2:
+            raise ConnectionError("database text")
+        if len(steps) == 4:
+            probes.stop()
+        return True
+
+    monkeypatch.setattr(probes, "step", step)
+    with caplog.at_level(logging.WARNING, logger="lakana_worker.repository_probes"):
+        probes.run()
+    assert len(steps) == 4
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == ["A repository check step failed (ConnectionError)."]

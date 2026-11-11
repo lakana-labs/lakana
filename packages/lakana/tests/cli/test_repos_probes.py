@@ -359,3 +359,77 @@ def test_cli_json_output_is_the_probe(tmp_path: Path) -> None:
     body = json.loads(result.stdout)
     assert body["outcome"] == "ok"
     assert [k["type"] for k in body["host_keys"]] == [k["type"] for k in _KEYS]
+
+
+def test_cli_repo_test_that_times_out_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An access check no worker finished in time exits 1 naming the wait."""
+    api = FakeApi()
+    api.on("POST", _PROBES, status=202, json=_probe("queued", kind="access"))
+    api.on("GET", f"{_PROBES}/{_ID}", json=_probe("queued", kind="access"))
+    clock = iter(float(i) for i in range(0, 1000, 10))
+    monkeypatch.setattr(resource_module, "_monotonic", lambda: next(clock))
+
+    result = invoke(make_state(tmp_path, api), "repo", "test", "analytics", "--env", "prod")
+
+    assert result.exit_code == 1
+    assert "no worker has taken it" in " ".join(result.output.split())
+
+
+def test_cli_refuses_a_probe_answer_without_its_fields(tmp_path: Path) -> None:
+    """A check answer that lacks fields is not read as a check; the error names the URL."""
+    api = FakeApi()
+    api.on("POST", _PROBES, status=202, json={"id": _ID, "kind": "host_keys"})
+
+    result = invoke(make_state(tmp_path, api), "repo", "host-keys", _URL)
+
+    assert result.exit_code != 0
+    assert "answer to a repository check was not what a Lakana server sends" in " ".join(
+        result.output.split()
+    )
+
+
+def test_save_that_appears_meanwhile_is_kept(tmp_path: Path) -> None:
+    """A FILE made while the worker checked is not replaced without `--force`."""
+    target = tmp_path / "known_hosts"
+    api = FakeApi()
+    api.on("POST", _PROBES, status=202, json=_probe("queued"))
+
+    def done_after_someone_wrote(request: httpx.Request) -> httpx.Response:
+        target.write_text("mine\n")
+        return httpx.Response(200, json=_probe("done", "ok", "found", _KEYS))
+
+    api.routes["GET", f"{_PROBES}/{_ID}"] = done_after_someone_wrote
+
+    result = invoke(make_state(tmp_path, api), "repo", "host-keys", _URL, "--save", str(target))
+
+    assert result.exit_code == 2
+    assert "already exists" in result.output and "--force" in result.output
+    assert target.read_text() == "mine\n"
+
+
+def test_save_into_a_missing_directory_names_the_cause(tmp_path: Path) -> None:
+    """A FILE that cannot be written is refused with the system's reason."""
+    target = tmp_path / "missing" / "known_hosts"
+
+    result = invoke(
+        make_state(tmp_path, _ok_api()), "repo", "host-keys", _URL, "--save", str(target)
+    )
+
+    assert result.exit_code == 2
+    assert "Can't write" in result.output
+    assert "No such file or directory" in result.output
+
+
+def test_waiting_without_a_callback_polls_until_done(tmp_path: Path) -> None:
+    """The SDK waits for a check without reporting progress when no callback is given."""
+    answers = iter([_probe("running"), _probe("done", "ok", "found", _KEYS)])
+    api = FakeApi()
+    api.on("POST", _PROBES, status=202, json=_probe("queued"))
+    api.routes["GET", f"{_PROBES}/{_ID}"] = lambda request: httpx.Response(200, json=next(answers))
+
+    probe = make_state(tmp_path, api).client().repositories.host_keys(_URL)
+
+    assert (probe.state, probe.outcome) == ("done", "ok")
+    assert len(api.requests) == 3
