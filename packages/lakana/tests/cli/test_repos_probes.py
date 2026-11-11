@@ -209,6 +209,33 @@ def test_cli_host_keys_that_time_out_say_how_to_look_again(
     assert len(api.requests) < 20
 
 
+@pytest.mark.parametrize(
+    ("state", "phrases"),
+    [
+        ("queued", ["no worker has taken it"]),
+        ("running", ["a worker is still running it", "Run the same command again"]),
+    ],
+)
+def test_cli_probe_timeout_message_names_the_next_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, phrases: list[str]
+) -> None:
+    """A timeout says what to do next, depending on whether a worker has taken the check."""
+    api = FakeApi()
+    api.on("POST", _PROBES, status=202, json=_probe(state))
+    api.on("GET", f"{_PROBES}/{_ID}", json=_probe(state))
+    clock = iter(float(i) for i in range(0, 1000, 10))
+    monkeypatch.setattr(resource_module, "_monotonic", lambda: next(clock))
+
+    result = invoke(make_state(tmp_path, api), "repo", "host-keys", _URL)
+
+    assert result.exit_code == 1
+    flat = " ".join(result.output.split())
+    for phrase in phrases:
+        assert phrase in flat
+    if state == "running":
+        assert "docker compose logs worker" in flat
+
+
 def test_cli_repo_test_prints_the_outcome(tmp_path: Path) -> None:
     """`repo test` queues an access check of NAME in ENV and prints what it found."""
     api = FakeApi()

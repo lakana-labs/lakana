@@ -483,8 +483,9 @@ class Repositories:
                         "work is running (`docker compose ps worker`, or the `lakana local` "
                         "terminal)."
                         if probe.state == "queued"
-                        else "a worker is running it; its log has the details "
-                        "(`docker compose logs worker`)."
+                        else "a worker is still running it. Run the same command again in a "
+                        "minute for a fresh result, or read the worker's log "
+                        "(`docker compose logs worker`, or the `lakana local` terminal)."
                     )
                 )
             _sleep(interval)

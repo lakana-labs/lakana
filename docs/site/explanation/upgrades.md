@@ -202,7 +202,8 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   pictures. An installation from the published packages or images gets it with the upgrade; a
   hand-built environment needs `uv sync` (or `pip install`) again.
 - New fields in REST answers: `picture` (the etag of a person's picture, or `null`) in
-  `GET /api/v1/whoami` and in each principal of `GET /api/v1/principals`, and `deploy_keys` (the
+  `GET /api/v1/whoami` and in each principal of `GET /api/v1/principals` and each member of
+  `GET /api/v1/groups/{name}/members`, and `deploy_keys` (the
   public key Lakana made in each environment) in each repository of `GET /api/v1/repositories`.
   A client that rejects unknown fields must accept them.
 - New commands: `lakana repo host-keys URL` (a worker fetches the host's SSH keys for you to
