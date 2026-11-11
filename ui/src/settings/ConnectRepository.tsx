@@ -533,8 +533,9 @@ function sameLines(stored: string | null, ticked: string): boolean {
 /**
  * Registers the repository. When the name is taken by this very repository, with the same
  * address and exactly the host keys ticked here (the answer of an earlier try was lost), that
- * counts as registered; with other host keys, or when another repository has the name, the
- * refusal names the cause and the next step.
+ * counts as registered. Every other refusal names its own cause and next step: another
+ * address under the name, the same address as another kind or with other host keys, a
+ * repository that cannot be read to compare, or a write that failed for another reason.
  *
  * @param t - The translation function.
  * @param body - The repository.
@@ -552,26 +553,34 @@ async function register(
     if (!(error instanceof ApiError) || error.status !== 409) {
       throw error;
     }
+    const refused = (sentence: string): ApiError =>
+      new ApiError(error.status, error.type, sentence);
+    if (error.type !== "AlreadyExistsError") {
+      throw refused(`${error.detail} ${t("settings.connect.create.conflict")}`);
+    }
+    const show = `lakana repo show ${shellQuote(body.name)}`;
     const existing = await getRepository(body.name).catch(() => null);
-    if (existing?.kind === "ssh" && existing.url === body.url) {
-      if (sameLines(existing.ssh_known_hosts, body.ssh_known_hosts)) {
-        return true;
-      }
-      const name = shellQuote(body.name);
-      throw new ApiError(
-        error.status,
-        error.type,
+    if (existing === null) {
+      throw refused(`${error.detail} ${t("settings.connect.create.unread", { show })}`);
+    }
+    if (existing.url !== body.url) {
+      throw refused(`${error.detail} ${t("settings.connect.create.taken", { name: body.name })}`);
+    }
+    if (existing.kind !== "ssh") {
+      throw refused(
+        t("settings.connect.create.otherKind", { kind: existing.kind, name: body.name, show }),
+      );
+    }
+    if (!sameLines(existing.ssh_known_hosts, body.ssh_known_hosts)) {
+      throw refused(
         t("settings.connect.create.otherKeys", {
-          show: `lakana repo show ${name}`,
-          update: `lakana repo update ${name} --known-hosts-file known_hosts`,
+          show,
+          save: `lakana repo host-keys ${shellQuote(body.url)} --save known_hosts`,
+          update: `lakana repo update ${shellQuote(body.name)} --known-hosts-file known_hosts`,
         }),
       );
     }
-    throw new ApiError(
-      error.status,
-      error.type,
-      `${error.detail} ${t("settings.connect.create.taken", { name: body.name })}`,
-    );
+    return true;
   }
 }
 
@@ -611,7 +620,11 @@ export function ConnectRepository(): JSX.Element {
       setName(recognised.name.replace(NOT_IN_NAME_RUNS, "-"));
     }
   };
+  // Create stays enabled while it runs, so a failure leaves focus on it; a second press waits.
   const create = (): void => {
+    if (attempt.busy) {
+      return;
+    }
     attempt.run(async () => {
       if (!registered) {
         setAlready(
@@ -766,7 +779,7 @@ export function ConnectRepository(): JSX.Element {
             <>
               <Button
                 className="button button-primary"
-                isDisabled={ticked.size === 0 || nameError !== null || attempt.busy}
+                isDisabled={ticked.size === 0 || nameError !== null}
                 onPress={create}
               >
                 {t(registered ? "settings.connect.create.retry" : "settings.connect.create.action")}

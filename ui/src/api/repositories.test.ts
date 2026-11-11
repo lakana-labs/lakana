@@ -91,18 +91,25 @@ describe("repositories", () => {
     expect(server.sent[1]?.body).toEqual({});
   });
 
-  it("reads a registered repository's name, kind and URL", async () => {
+  it("reads a registered repository's name, kind, URL and trusted host keys", async () => {
     fakeServer({
       "GET /api/v1/repositories/analytics": {
         status: 200,
-        body: { name: "analytics", kind: "ssh", url: "git@github.com:acme/a.git", deploy_keys: [] },
+        body: {
+          name: "analytics",
+          kind: "ssh",
+          url: "git@github.com:acme/a.git",
+          ssh_known_hosts: "github.com ssh-ed25519 AAAA\n",
+          deploy_keys: [],
+        },
       },
     });
 
-    expect(await getRepository("analytics")).toEqual({
+    expect(await getRepository("analytics")).toStrictEqual({
       name: "analytics",
       kind: "ssh",
       url: "git@github.com:acme/a.git",
+      ssh_known_hosts: "github.com ssh-ed25519 AAAA\n",
     });
   });
 });

@@ -162,10 +162,10 @@ export async function createRepository(body: RepositoryCreate): Promise<void> {
 }
 
 /**
- * Reads a registered repository.
+ * Reads a registered repository, to compare it with the one the page registers.
  *
  * @param name - Its name.
- * @returns Its name, kind and URL.
+ * @returns Its name, kind, URL and trusted host keys.
  */
 export async function getRepository(name: string): Promise<RepositoryOut> {
   const repository = await api.request<RepositoryOut>(

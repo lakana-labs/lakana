@@ -39,8 +39,9 @@ before it is done.
    tries only the keys again. If the repository was already registered with the same URL and
    exactly the host keys you ticked (an earlier try whose answer was lost), the page says so
    and goes on to the keys. With other host keys it stops and names `lakana repo show NAME`
-   to check them and `lakana repo update NAME --known-hosts-file known_hosts` to change them;
-   if another repository has the name, choose another name.
+   to check them, and `lakana repo host-keys URL --save known_hosts` with `lakana repo update
+   NAME --known-hosts-file known_hosts` to change them; if another repository has the name,
+   choose another name.
 4. **Test access.** **Test access in** *environment* lets a worker read the repository with the
    key of the first environment written. It answers with the outcome and what to do about it;
    on success it shows the command to deploy and, for GitHub and GitLab, the CI how-to.

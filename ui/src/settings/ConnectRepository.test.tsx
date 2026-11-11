@@ -548,31 +548,110 @@ describe("ConnectRepository", () => {
     expect(alert).toHaveTextContent(
       "lakana repo update 'analytics' --known-hosts-file known_hosts",
     );
+    expect(alert).toHaveTextContent(
+      "lakana repo host-keys 'git@github.com:acme/analytics.git' --save known_hosts",
+    );
+    expect(alert).not.toHaveTextContent("write them to a file");
     expect(screen.queryByText(/its keys are not made yet/)).not.toBeInTheDocument();
     expect(ui.create()).toBeEnabled();
     expect(posts(shell)).not.toContain("/api/v1/repositories/analytics/deploy-key");
   });
 
-  it("names the next step when the name is taken by another repository", async () => {
+  const TAKEN = {
+    status: 409,
+    body: { type: "AlreadyExistsError", detail: "A repository named 'analytics' already exists." },
+  };
+  it.each<[string, FakeRoute, FakeRoute, string[]]>([
+    [
+      "the name is taken by another address",
+      TAKEN,
+      {
+        status: 200,
+        body: {
+          name: "analytics",
+          kind: "ssh",
+          url: "git@github.com:acme/other.git",
+          ssh_known_hosts: null,
+        },
+      },
+      [
+        "already exists",
+        "A repository named analytics already exists with another URL. Choose another name above.",
+      ],
+    ],
+    [
+      "the same address is registered as another kind",
+      TAKEN,
+      {
+        status: 200,
+        body: { name: "analytics", kind: "https", url: SSH_URL, ssh_known_hosts: null },
+      },
+      [
+        "A https repository with this address is already registered as analytics.",
+        "lakana repo show 'analytics'",
+        "or choose another name above.",
+      ],
+    ],
+    [
+      "the repository cannot be read to compare",
+      TAKEN,
+      { status: 500, body: { type: "HttpError", detail: "Internal error." } },
+      ["already exists", "Lakana could not read it to compare.", "lakana repo show 'analytics'"],
+    ],
+    [
+      "the write failed for another reason",
+      {
+        status: 409,
+        body: { type: "ConflictError", detail: "The repository could not be saved." },
+      },
+      { status: 500, body: null },
+      [
+        "The repository could not be saved.",
+        "Try again; if it happens again, the server's log has the details.",
+      ],
+    ],
+  ])("names the cause and next step when %s", async (_, created, existing, sentences) => {
     const shell = await fetched(
       flow({
-        "POST /api/v1/repositories": {
-          status: 409,
-          body: {
-            type: "AlreadyExistsError",
-            detail: "A repository named 'analytics' already exists.",
-          },
-        },
+        "POST /api/v1/repositories": created,
+        "GET /api/v1/repositories/analytics": existing,
       }),
     );
     await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
     await shell.user.click(ui.create());
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("already exists");
-    expect(alert).toHaveTextContent("Choose another name above.");
+    for (const sentence of sentences) {
+      expect(alert).toHaveTextContent(sentence);
+    }
+    expect(alert).not.toHaveTextContent("its keys are not made yet");
     expect(ui.name()).toBeEnabled();
     expect(posts(shell)).not.toContain("/api/v1/repositories/analytics/deploy-key");
+  });
+
+  it("keeps focus on Create while it runs and after it fails, and creates once", async () => {
+    let answer: (value: { status: number; body: unknown }) => void = () => undefined;
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repositories": () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      }),
+    );
+    await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await shell.user.click(ui.create());
+    await shell.user.click(ui.create());
+    expect(ui.create()).toHaveFocus();
+
+    await act(async () => {
+      answer({ status: 422, body: { type: "ValidationError", detail: "Not a valid name." } });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Not a valid name.");
+    expect(ui.create()).toHaveFocus();
+    expect(posts(shell).filter((path) => path === "/api/v1/repositories")).toHaveLength(1);
   });
 
   it("shows the server's notes on the keys", async () => {
