@@ -16,8 +16,10 @@ An administrator opens **Connect a repository** from Home's **Get started** list
 before it is done.
 
 1. **The repository.** Paste the **Repository URL**, the one you clone it with. For GitHub,
-   GitLab and Bitbucket an HTTPS URL works too: the page names the host and shows the SSH
-   address it connects to. **Name in Lakana** is proposed from the URL's last part. For an
+   GitLab and Bitbucket an HTTPS URL works too, even the address of a page of the repository
+   (`…/tree/main`): the page names the host and shows the SSH address it connects to. A URL with
+   `?` or `#` is refused. **Name in Lakana** is proposed from the URL's last part, a dot
+   turned into a hyphen. For an
    HTTPS URL of another host the page cannot tell its SSH address: enter the SSH URL (the
    host's Clone button shows it). **Use a token instead** shows the command that registers the
    HTTPS URL with a token, for every host; a token belongs to a person and expires, a deploy
@@ -27,14 +29,16 @@ before it is done.
    the host's published fingerprints. Compare each one, and tick **This matches** only for the
    keys whose fingerprint you compared. The `ssh-ed25519` key is offered first; **Show other
    key types** shows the others. Nothing is stored yet.
-3. **Create the repository and its keys.** **Create the repository and its key** registers the
+3. **Create the repository and its keys.** **Create the repository and its keys** registers the
    repository with the keys you ticked, and only those, then makes a key pair for every
    environment where you may manage secrets. It asks for one passkey touch for both. The page
    lists each environment's public key with **Copy key** (a key made before is marked *made
    earlier*), links the host's deploy-key page, and names the environments it could not write.
    Add each key as a read-only deploy key at your git host (below). If the repository was
-   registered but its key could not be made, the page says so with the cause; **Make the key**
-   tries only the key again.
+   registered but its keys could not be made, the page says so with the cause; **Make the keys**
+   tries only the keys again. If the repository was already registered with the same URL (an
+   earlier try whose answer was lost), the page says so and goes on to the keys; if another
+   repository has the name, choose another name.
 4. **Test access.** **Test access in** *environment* lets a worker read the repository with the
    key of the first environment written. It answers with the outcome and what to do about it;
    on success it shows the command to deploy and, for GitHub and GitLab, the CI how-to.
@@ -119,8 +123,8 @@ environment is not added at the git host yet.
 
 ## An environment created later
 
-An environment created later has no key yet: make one with `lakana repo deploy-key NAME` (or
-the page again) and add it as an additional deploy key at your git host; the other
+An environment created later has no key yet: make one with `lakana repo deploy-key NAME` and
+add it as an additional deploy key at your git host; the other
 environments' keys keep working.
 
 ## Replace a key

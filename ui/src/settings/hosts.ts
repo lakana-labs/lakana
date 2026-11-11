@@ -34,6 +34,19 @@ interface HostFacts {
   readonly fingerprints: string;
   /** The deploy-key page of a repository, from its encoded path parts; null for a bad path. */
   readonly deployKeys: (parts: readonly string[]) => string | null;
+  /** The repository's own path parts, from those of an address the browser shows. */
+  readonly repository: (parts: readonly string[]) => readonly string[];
+}
+
+/**
+ * The first two path parts: a repository of GitHub or Bitbucket is `owner/repo`, and what
+ * follows (`tree/main`, `blob/…`, `src/…`) is a page of it.
+ *
+ * @param parts - The path parts.
+ * @returns The repository's parts.
+ */
+function firstTwo(parts: readonly string[]): readonly string[] {
+  return parts.slice(0, 2);
 }
 
 /**
@@ -53,18 +66,22 @@ const HOSTS: Readonly<Record<KnownHost, HostFacts>> = {
     fingerprints:
       "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints",
     deployKeys: ownerRepo("https://github.com", "settings/keys/new"),
+    repository: firstTwo,
   },
   gitlab: {
     hostname: "gitlab.com",
     fingerprints: "https://docs.gitlab.com/user/gitlab_com/#ssh-host-keys-fingerprints",
     deployKeys: (parts) =>
       parts.length >= 2 ? `https://gitlab.com/${parts.join("/")}/-/settings/repository` : null,
+    // A GitLab page of a repository starts with `/-/` (`/-/tree/main`).
+    repository: (parts) => (parts.includes("-") ? parts.slice(0, parts.indexOf("-")) : parts),
   },
   bitbucket: {
     hostname: "bitbucket.org",
     fingerprints:
       "https://support.atlassian.com/bitbucket-cloud/docs/configure-ssh-and-two-step-verification/",
     deployKeys: ownerRepo("https://bitbucket.org", "admin/access-keys/"),
+    repository: firstTwo,
   },
 };
 
@@ -79,7 +96,18 @@ interface Parsed {
 }
 
 /** `[user@]host:path`, the short SSH form git accepts. */
-const SCP_FORM = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(\S+)$/;
+const SCP_FORM = /^(?:[^@/\s]+@)?([^@:/\s]+):(?!\/)(\S+)$/;
+
+/**
+ * Whether a URL has a `?` or `#`, which the server refuses in a repository URL: in the
+ * short SSH form either can hide the real host (`git@github.com?@evil.example:o/r`).
+ *
+ * @param url - What the person entered.
+ * @returns True when it has one.
+ */
+export function queryOrFragment(url: string): boolean {
+  return /[?#]/.test(url);
+}
 
 /**
  * Reads a URL into its scheme, host and path parts.
@@ -88,6 +116,9 @@ const SCP_FORM = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(\S+)$/;
  * @returns The parts, or null for anything but an `https://`, `ssh://` or `host:path` URL.
  */
 function parse(url: string): Parsed | null {
+  if (queryOrFragment(url)) {
+    return null;
+  }
   const scp = SCP_FORM.exec(url.trim());
   // The short form's host is read through URL too, so every host is compared the same way.
   let parsed: URL;
@@ -101,12 +132,23 @@ function parse(url: string): Parsed | null {
     return null;
   }
   const path = scp === null ? parsed.pathname.split("/").map(decoded) : String(scp[2]).split("/");
-  const parts = path.filter((part) => part !== "");
-  const last = parts.length - 1;
-  if (last >= 0) {
-    parts[last] = String(parts[last]).replace(/\.git$/, "");
+  // An SSH URL's host is not lower-cased by URL; a trailing dot names the same host.
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  return { scheme, hostname, parts: withoutGit(path.filter((part) => part !== "")) };
+}
+
+/**
+ * Path parts with `.git` taken off the last one; an emptied last part is dropped.
+ *
+ * @param parts - The path parts.
+ * @returns The parts.
+ */
+function withoutGit(parts: readonly string[]): readonly string[] {
+  const last = parts.at(-1);
+  if (last === undefined) {
+    return parts;
   }
-  return { scheme, hostname: parsed.hostname, parts: parts.filter((part) => part !== "") };
+  return [...parts.slice(0, -1), last.replace(/\.git$/, "")].filter((part) => part !== "");
 }
 
 /**
@@ -137,8 +179,9 @@ function known(hostname: string): KnownHost | undefined {
  * Recognises a repository's host from its URL.
  *
  * @param url - The repository's URL as the person entered it.
- * @returns What the page knows about the host; for an HTTPS URL of GitHub, GitLab or Bitbucket
- * the SSH form, for another host's HTTPS URL no SSH form.
+ * @returns What the page knows about the host; for GitHub, GitLab or Bitbucket the repository's
+ * SSH form (also from an HTTPS URL or a page of it in the browser), for another host's HTTPS URL
+ * and for a URL with `?` or `#` no SSH form.
  */
 export function recogniseHost(url: string): RecognisedHost {
   const parsed = parse(url);
@@ -155,14 +198,15 @@ export function recogniseHost(url: string): RecognisedHost {
     };
   }
   const facts = HOSTS[id];
-  if (parts.length === 0) {
+  const repository = withoutGit(facts.repository(parts));
+  if (repository.length === 0) {
     return { host: id, sshUrl: null, name, deployKeyPage: null, fingerprintsPage: null };
   }
   return {
     host: id,
-    sshUrl: parsed.scheme === "ssh" ? url.trim() : `git@${facts.hostname}:${parts.join("/")}.git`,
-    name,
-    deployKeyPage: facts.deployKeys(parts.map(encodeURIComponent)),
+    sshUrl: `git@${facts.hostname}:${repository.join("/")}.git`,
+    name: String(repository.at(-1)),
+    deployKeyPage: facts.deployKeys(repository.map(encodeURIComponent)),
     fingerprintsPage: facts.fingerprints,
   };
 }

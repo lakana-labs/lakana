@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { httpsForm, recogniseHost, shellQuote } from "./hosts";
+import { httpsForm, queryOrFragment, recogniseHost, shellQuote } from "./hosts";
 
 describe("recogniseHost", () => {
   it("turns a GitHub HTTPS URL into its SSH form and proposes the name", () => {
@@ -41,11 +41,43 @@ describe("recogniseHost", () => {
       "https://evil.example/github.com/acme/analytics.git",
       "git@github.com.evil.example:acme/analytics.git",
       "https://github.com@evil.example/acme/analytics.git",
+      "git@github.com?@evil.example:acme/analytics.git",
+      "git@github.com#@evil.example:acme/analytics.git",
+      "git@a@github.com:acme/analytics.git",
     ]) {
       const host = recogniseHost(url);
       expect(host.host, url).toBe("other");
       expect(host.deployKeyPage, url).toBeNull();
       expect(host.fingerprintsPage, url).toBeNull();
+    }
+  });
+
+  it.each([
+    ["https://github.com/acme/analytics/tree/main/models", "git@github.com:acme/analytics.git"],
+    [
+      "https://github.com/acme/analytics/blob/main/lakana.yaml",
+      "git@github.com:acme/analytics.git",
+    ],
+    ["https://bitbucket.org/acme/analytics/src/main/", "git@bitbucket.org:acme/analytics.git"],
+    [
+      "https://gitlab.com/acme/data/analytics/-/tree/main",
+      "git@gitlab.com:acme/data/analytics.git",
+    ],
+  ])("reduces the browser address %s to the repository", (url, ssh) => {
+    expect(recogniseHost(url)).toMatchObject({ sshUrl: ssh, name: "analytics" });
+  });
+
+  it("recognises a host written in capitals or with a trailing dot", () => {
+    for (const url of [
+      "git@GitHub.com:acme/analytics.git",
+      "ssh://git@GITHUB.COM/acme/analytics.git",
+      "https://GitHub.com/acme/analytics",
+      "git@github.com.:acme/analytics.git",
+    ]) {
+      expect(recogniseHost(url), url).toMatchObject({
+        host: "github",
+        sshUrl: "git@github.com:acme/analytics.git",
+      });
     }
   });
 
@@ -79,12 +111,22 @@ describe("recogniseHost", () => {
     expect(recogniseHost("https://github.com/acme/a%3Fb.git").deployKeyPage).toBe(
       "https://github.com/acme/a%3Fb/settings/keys/new",
     );
-    expect(recogniseHost("git@github.com:acme/a?b#c.git").deployKeyPage).toBe(
-      "https://github.com/acme/a%3Fb%23c/settings/keys/new",
-    );
     expect(recogniseHost("https://github.com/acme/a%E0%A4%A").deployKeyPage).toBe(
       "https://github.com/acme/a%25E0%25A4%25A/settings/keys/new",
     );
+  });
+});
+
+describe("queryOrFragment", () => {
+  it("finds the '?' or '#' the server refuses in a repository URL", () => {
+    expect(queryOrFragment("git@github.com:acme/a?b#c.git")).toBe(true);
+    expect(queryOrFragment("https://github.com/acme/analytics#readme")).toBe(true);
+    expect(queryOrFragment("https://github.com/acme/a%3Fb.git")).toBe(false);
+    expect(recogniseHost("git@github.com:acme/a?b#c.git")).toMatchObject({
+      host: "other",
+      sshUrl: null,
+      deployKeyPage: null,
+    });
   });
 });
 

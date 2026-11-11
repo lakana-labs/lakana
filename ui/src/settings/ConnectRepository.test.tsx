@@ -91,7 +91,7 @@ const ui = {
   url: () => screen.getByRole("textbox", { name: "Repository URL" }),
   name: () => screen.getByRole("textbox", { name: "Name in Lakana" }),
   fetch: () => screen.getByRole("button", { name: "Fetch the host's keys" }),
-  create: () => screen.getByRole("button", { name: "Create the repository and its key" }),
+  create: () => screen.getByRole("button", { name: "Create the repository and its keys" }),
 };
 
 /**
@@ -213,14 +213,21 @@ describe("ConnectRepository", () => {
     await user.type(ui.url(), "git@git.example.com:team/my.analytics.git");
     await user.tab();
     expect(screen.queryByText(/This is not a repository URL/)).not.toBeInTheDocument();
-    expect(ui.name()).toHaveValue("my.analytics");
-    await user.click(ui.name());
+    expect(ui.name()).toHaveValue("my-analytics");
+    expect(screen.getByText(/Lakana connects to it over SSH/)).toBeInTheDocument();
+    expect(ui.fetch()).toBeEnabled();
+    await user.type(ui.name(), ".v2");
     await user.tab();
     expect(screen.getByText(/no dots, slashes, percent signs or spaces/)).toHaveTextContent(
-      "Try my-analytics.",
+      "Try my-analytics-v2.",
     );
-    expect(screen.getByText(/Lakana connects to it over SSH/)).toBeInTheDocument();
     expect(ui.fetch()).toBeDisabled();
+
+    await user.clear(ui.url());
+    await user.type(ui.url(), "git@github.com?@evil.example:acme/analytics.git");
+    await user.tab();
+    expect(screen.getByText(/A repository URL has no/)).toBeInTheDocument();
+    expect(screen.queryByText(/A GitHub repository/)).not.toBeInTheDocument();
 
     await user.clear(ui.name());
     await user.tab();
@@ -306,6 +313,17 @@ describe("ConnectRepository", () => {
 
     expect(await screen.findByText(/The host offered no SSH key/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /published fingerprints/ })).toBeNull();
+  });
+
+  it("announces the keys found and keeps focus on the fetch", async () => {
+    await fetched();
+
+    expect(
+      screen.getByText(
+        "Found 3 keys of the host. Compare each fingerprint, then tick the ones that match.",
+      ),
+    ).toHaveAttribute("role", "status");
+    expect(ui.fetch()).toHaveFocus();
   });
 
   it("stores nothing before the fingerprints are confirmed", async () => {
@@ -400,7 +418,9 @@ describe("ConnectRepository", () => {
     );
     expect(screen.getByText(/An environment created later has no key yet/)).toBeInTheDocument();
     expect(ui.url()).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Create the repository and its key" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create the repository and its keys" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "4. Test access" })).toHaveFocus();
+    expect(screen.getByText(/^Made keys for dev, prod\./)).toHaveAttribute("role", "status");
   });
 
   it("retries only the key after a failed key call", async () => {
@@ -425,9 +445,9 @@ describe("ConnectRepository", () => {
     await shell.user.click(ui.create());
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("The repository is registered; its key is not made yet.");
+    expect(alert).toHaveTextContent("The repository is registered; its keys are not made yet.");
     expect(alert).toHaveTextContent("is not a key made for analytics");
-    await shell.user.click(screen.getByRole("button", { name: "Make the key" }));
+    await shell.user.click(screen.getByRole("button", { name: "Make the keys" }));
 
     expect(await screen.findByText(DEV_KEY.public_key)).toBeInTheDocument();
     expect(posts(shell)).toEqual([
@@ -436,9 +456,56 @@ describe("ConnectRepository", () => {
       "/api/v1/repositories/analytics/deploy-key",
       "/api/v1/repositories/analytics/deploy-key",
     ]);
+    expect(screen.getByRole("heading", { level: 2, name: "4. Test access" })).toHaveFocus();
   });
 
   it("keeps the step when registering is refused", async () => {
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repositories": {
+          status: 422,
+          body: { type: "ValidationError", detail: "Repository name must not contain '$'." },
+        },
+      }),
+    );
+    await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await shell.user.click(ui.create());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("must not contain");
+    expect(ui.create()).toBeEnabled();
+    expect(ui.name()).toBeEnabled();
+    expect(posts(shell)).not.toContain("/api/v1/repositories/analytics/deploy-key");
+  });
+
+  it("goes on to the keys when the same repository is already registered", async () => {
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repositories": {
+          status: 409,
+          body: {
+            type: "AlreadyExistsError",
+            detail: "A repository named 'analytics' already exists.",
+          },
+        },
+        "GET /api/v1/repositories/analytics": {
+          status: 200,
+          body: { name: "analytics", kind: "ssh", url: SSH_URL, deploy_keys: [] },
+        },
+      }),
+    );
+    await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await shell.user.click(ui.create());
+
+    expect(await screen.findByText(DEV_KEY.public_key)).toBeInTheDocument();
+    expect(screen.getByText(/analytics was already registered with this URL/)).toBeInTheDocument();
+    expect(posts(shell)).toEqual([
+      "/api/v1/repository-probes",
+      "/api/v1/repositories",
+      "/api/v1/repositories/analytics/deploy-key",
+    ]);
+  });
+
+  it("names the next step when the name is taken by another repository", async () => {
     const shell = await fetched(
       flow({
         "POST /api/v1/repositories": {
@@ -453,10 +520,27 @@ describe("ConnectRepository", () => {
     await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
     await shell.user.click(ui.create());
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("already exists");
-    expect(ui.create()).toBeEnabled();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("already exists");
+    expect(alert).toHaveTextContent("Choose another name above.");
     expect(ui.name()).toBeEnabled();
     expect(posts(shell)).not.toContain("/api/v1/repositories/analytics/deploy-key");
+  });
+
+  it("shows the server's notes on the keys", async () => {
+    const note = "The old key for dev stops working: replace it at your git host now.";
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repositories/analytics/deploy-key": {
+          status: 201,
+          body: { ...DEPLOY_KEY, replaced: ["dev"], notes: [note] },
+        },
+      }),
+    );
+    await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await shell.user.click(ui.create());
+
+    expect(await screen.findByText(note)).toBeInTheDocument();
   });
 
   it("says who makes the key when no environment got one", async () => {
@@ -472,7 +556,10 @@ describe("ConnectRepository", () => {
     await shell.user.click(ui.create());
 
     expect(await screen.findByText(/No key in dev, prod/)).toBeInTheDocument();
-    expect(screen.getByText(/No environment got a key/)).toBeInTheDocument();
+    expect(screen.getByText(/No environment got a key/)).toHaveAttribute("role", "alert");
+    expect(
+      screen.getByRole("heading", { level: 2, name: "3. Create the repository and its keys" }),
+    ).toHaveFocus();
     expect(screen.queryByRole("button", { name: /Test access/ })).not.toBeInTheDocument();
   });
 
@@ -560,6 +647,10 @@ describe("ConnectRepository", () => {
     );
     await user.click(ui.fetch());
     expect(screen.queryByText("Asking a worker to fetch the keys…")).not.toBeInTheDocument();
+    // The button keeps focus while the worker runs the check; a second press asks nothing more.
+    await user.click(ui.fetch());
+    expect(ui.fetch()).toHaveFocus();
+    expect(server.sent.filter((request) => request.method === "POST")).toHaveLength(1);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
@@ -616,7 +707,8 @@ describe("ConnectRepository", () => {
 
     await shell.user.click(await screen.findByRole("button", { name: "Test access in dev" }));
 
-    expect(await screen.findByText(ACCESS_OK.message)).toBeInTheDocument();
+    expect(await screen.findByText(ACCESS_OK.message)).toHaveAttribute("role", "status");
+    expect(screen.getByRole("button", { name: "Test access in dev" })).toHaveFocus();
     expect(shell.server.sent.at(-1)?.body).toEqual({
       kind: "access",
       repository: "analytics",

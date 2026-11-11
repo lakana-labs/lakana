@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createRepository, generateDeployKey, requestProbe, waitForProbe } from "./repositories";
+import {
+  createRepository,
+  generateDeployKey,
+  getRepository,
+  requestProbe,
+  waitForProbe,
+} from "./repositories";
 
 import { fakeServer } from "../test/server";
 
@@ -83,5 +89,20 @@ describe("repositories", () => {
       "/api/v1/repositories/a%20b/deploy-key",
     ]);
     expect(server.sent[1]?.body).toEqual({});
+  });
+
+  it("reads a registered repository's name, kind and URL", async () => {
+    fakeServer({
+      "GET /api/v1/repositories/analytics": {
+        status: 200,
+        body: { name: "analytics", kind: "ssh", url: "git@github.com:acme/a.git", deploy_keys: [] },
+      },
+    });
+
+    expect(await getRepository("analytics")).toEqual({
+      name: "analytics",
+      kind: "ssh",
+      url: "git@github.com:acme/a.git",
+    });
   });
 });

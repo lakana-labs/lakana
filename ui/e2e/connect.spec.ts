@@ -111,7 +111,7 @@ async function walk(page: Page): Promise<Record<string, string[]>> {
   await page.getByRole("button", { name: "Show other key types (1)" }).click();
   await page.getByRole("checkbox", { name: "This matches: ssh-ed25519" }).check();
   found["the host's keys"] = await violations(page);
-  await page.getByRole("button", { name: "Create the repository and its key" }).click();
+  await page.getByRole("button", { name: "Create the repository and its keys" }).click();
   await expect(page.getByText(DEPLOY_KEY.keys[0]?.public_key ?? "")).toBeVisible();
   found["the keys"] = await violations(page);
   await page.getByRole("button", { name: "Test access in dev" }).click();

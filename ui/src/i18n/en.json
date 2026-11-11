@@ -452,7 +452,8 @@
         "urlBad": "This is not a repository URL. Enter it as git@host:team/repo.git, ssh://git@host/team/repo.git or https://host/team/repo.",
         "httpsOther": "Lakana cannot tell this host's SSH address. Enter the SSH URL (the host's Clone button shows it, such as git@host:team/repo.git), or use a token instead.",
         "nameEmpty": "Enter a name for the repository.",
-        "nameBad": "A name has no dots, slashes, percent signs or spaces. Try {{suggestion}}."
+        "nameBad": "A name has no dots, slashes, percent signs or spaces. Try {{suggestion}}.",
+        "queryOrFragment": "A repository URL has no '?' or '#'. Copy the address from the host's Clone button."
       },
       "token": {
         "toggle": "Use a token instead",
@@ -471,17 +472,22 @@
         "matchesFor": "This matches: {{type}}",
         "showOthers": "Show other key types ({{count}})",
         "othersNote": "Tick another key type only when you compared its fingerprint too.",
+        "found_one": "Found {{count}} key of the host. Compare its fingerprint, then tick it if it matches.",
+        "found_other": "Found {{count}} keys of the host. Compare each fingerprint, then tick the ones that match.",
         "none": "The host offered no SSH key. Check that the URL is the SSH address of your Git host, then fetch again.",
         "noWorker": "No worker answered within two minutes. Start one (docker compose up -d worker, or lakana server start --local), then try again."
       },
       "create": {
         "heading": "3. Create the repository and its keys",
         "body": "Lakana registers the repository with the keys you ticked, then makes a key pair for each environment. The private keys stay on the server as secrets; you see only the public keys. This asks for a passkey touch.",
-        "action": "Create the repository and its key",
+        "action": "Create the repository and its keys",
         "tick": "Tick each key that matches, above, first.",
         "working": "Creating the repository and its keys…",
-        "notMade": "The repository is registered; its key is not made yet.",
-        "retry": "Make the key",
+        "notMade": "The repository is registered; its keys are not made yet.",
+        "retry": "Make the keys",
+        "done": "Made keys for {{environments}}. Add each one at your Git host, then test access below.",
+        "already": "{{name}} was already registered with this URL, so Lakana went on to its keys.",
+        "taken": "A repository named {{name}} already exists with another URL. Choose another name above.",
         "add": "Add each key as a read-only deploy key at your Git host.",
         "page": "Open {{host}}'s deploy-key page",
         "pageOther": "At your Git host, open the repository's settings and its deploy keys.",

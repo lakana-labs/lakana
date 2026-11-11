@@ -9,15 +9,18 @@
  * stay on the server: no request sends one and nothing here keeps one.
  * @packageDocumentation
  */
-import { type JSX, useCallback, useEffect, useRef, useState } from "react";
+import { type JSX, type Ref, useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import {
+  ApiError,
   createRepository,
   type DeployKeyOut,
   generateDeployKey,
+  getRepository,
   type HostKeyOut,
+  type RepositoryCreate,
   type RepositoryProbeIn,
   type RepositoryProbeOut,
   requestProbe,
@@ -27,9 +30,16 @@ import { EnvironmentLabel } from "../home/EnvironmentLabel";
 import { CopyLine } from "../shell/CopyLine";
 import { HOW_TO_URL } from "../shell/docs";
 import { Page } from "../shell/Page";
+import { useFocusAfter } from "../shell/useFocusAfter";
 import { useAttempt } from "../sign-in/Attempt";
 import { problemText } from "../sign-in/messages";
-import { httpsForm, type RecognisedHost, recogniseHost, shellQuote } from "./hosts";
+import {
+  httpsForm,
+  queryOrFragment,
+  type RecognisedHost,
+  recogniseHost,
+  shellQuote,
+} from "./hosts";
 import "./connect.css";
 
 /** How long a check runs before the page says what it waits for. */
@@ -99,6 +109,8 @@ function useCheck(): Check {
   const { t } = useTranslation();
   const [state, setState] = useState<CheckState>(IDLE);
   const leaving = useRef(new AbortController());
+  // The button stays enabled while a check runs, so it keeps focus; a second press waits.
+  const running = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
     leaving.current = controller;
@@ -108,6 +120,10 @@ function useCheck(): Check {
   }, []);
   const run = useCallback(
     (body: RepositoryProbeIn) => {
+      if (running.current) {
+        return;
+      }
+      running.current = true;
       setState({ busy: true, probe: null, error: null });
       const signal = leaving.current.signal;
       void (async () => {
@@ -117,6 +133,8 @@ function useCheck(): Check {
           setState({ busy: false, probe, error: null });
         } catch (error) {
           setState({ busy: false, probe: null, error: problemText(t, error) });
+        } finally {
+          running.current = false;
         }
       })();
     },
@@ -148,6 +166,8 @@ interface CheckOutcomeProps {
   readonly check: Check;
   /** What the page says while it waits. */
   readonly waiting: string;
+  /** What the page announces once the check succeeded; empty before. */
+  readonly done: string;
 }
 
 /**
@@ -156,9 +176,10 @@ interface CheckOutcomeProps {
  * @param props - The check.
  * @param props.check - The check.
  * @param props.waiting - What the page says while it waits.
- * @returns The sentences.
+ * @param props.done - What the page announces once the check succeeded.
+ * @returns The sentences: the status region stays mounted, so its changes are announced.
  */
-function CheckOutcome({ check, waiting }: CheckOutcomeProps): JSX.Element {
+function CheckOutcome({ check, waiting, done }: CheckOutcomeProps): JSX.Element {
   const { t } = useTranslation();
   const failed =
     check.error ??
@@ -166,7 +187,7 @@ function CheckOutcome({ check, waiting }: CheckOutcomeProps): JSX.Element {
   return (
     <>
       <p className="step-status" role="status">
-        {check.slow ? waiting : ""}
+        {check.slow ? waiting : done}
       </p>
       {failed !== null && (
         <p className="step-error" role="alert">
@@ -192,6 +213,9 @@ function urlProblem(
 ): string | null {
   if (host.sshUrl !== null) {
     return null;
+  }
+  if (queryOrFragment(url)) {
+    return t("settings.connect.where.queryOrFragment");
   }
   if (url.trim() === "") {
     return t("settings.connect.where.urlEmpty");
@@ -363,7 +387,9 @@ function MadeKeys({ made, name, host }: MadeKeysProps): JSX.Element {
   return (
     <>
       {made.keys.length === 0 ? (
-        <p className="step-error">{t("settings.connect.create.none")}</p>
+        <p className="step-error" role="alert">
+          {t("settings.connect.create.none")}
+        </p>
       ) : (
         <>
           <p>{t("settings.connect.create.add")}</p>
@@ -391,6 +417,11 @@ function MadeKeys({ made, name, host }: MadeKeysProps): JSX.Element {
           <p className="page-notice">{t("settings.connect.create.readOnly")}</p>
         </>
       )}
+      {made.notes.map((note) => (
+        <p key={note} className="page-notice">
+          {note}
+        </p>
+      ))}
       {made.skipped.length > 0 && (
         <p>
           {t("settings.connect.create.skipped", { environments: made.skipped.join(", "), name })}
@@ -409,6 +440,8 @@ interface TestAccessProps {
   readonly environment: string;
   /** What the page knows about the host. */
   readonly host: RecognisedHost;
+  /** The heading, focused when the keys are made. */
+  readonly headingRef: Ref<HTMLHeadingElement>;
 }
 
 /**
@@ -419,30 +452,35 @@ interface TestAccessProps {
  * @param props.name - The repository's name.
  * @param props.environment - The environment whose key is tested.
  * @param props.host - What the page knows about the host.
+ * @param props.headingRef - The heading, focused when the keys are made.
  * @returns The step.
  */
-function TestAccess({ name, environment, host }: TestAccessProps): JSX.Element {
+function TestAccess({ name, environment, host, headingRef }: TestAccessProps): JSX.Element {
   const { t } = useTranslation();
   const check = useCheck();
   const ok = check.probe?.outcome === "ok" ? check.probe : null;
   const ci = host.host === "github" || host.host === "gitlab" ? host.host : null;
   return (
     <section className="connect-step" aria-labelledby="connect-test">
-      <h2 id="connect-test">{t("settings.connect.test.heading")}</h2>
+      <h2 id="connect-test" ref={headingRef} tabIndex={-1}>
+        {t("settings.connect.test.heading")}
+      </h2>
       <p>{t("settings.connect.test.body", { environment })}</p>
       <Button
         className="button button-primary"
-        isDisabled={check.busy}
         onPress={() => {
           check.run({ kind: "access", repository: name, environment });
         }}
       >
         {t("settings.connect.test.action", { environment })}
       </Button>
-      <CheckOutcome check={check} waiting={t("settings.connect.test.waiting")} />
+      <CheckOutcome
+        check={check}
+        waiting={t("settings.connect.test.waiting")}
+        done={ok?.message ?? ""}
+      />
       {ok !== null && (
         <>
-          <p className="page-notice">{ok.message}</p>
           <p>{t("settings.connect.test.next")}</p>
           <CopyLine
             text={t("settings.connect.test.deploy", {
@@ -465,6 +503,39 @@ function TestAccess({ name, environment, host }: TestAccessProps): JSX.Element {
 }
 
 /**
+ * Registers the repository. When the name is taken by this very repository (the answer of an
+ * earlier try was lost), that counts as registered; when another repository has it, the
+ * refusal names the next step.
+ *
+ * @param t - The translation function.
+ * @param body - The repository.
+ * @returns True when it was registered already, false when this call registered it.
+ * @throws {ApiError} for a refusal, with the next step for a name another repository has.
+ */
+async function register(
+  t: ReturnType<typeof useTranslation>["t"],
+  body: RepositoryCreate,
+): Promise<boolean> {
+  try {
+    await createRepository(body);
+    return false;
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 409) {
+      throw error;
+    }
+    const existing = await getRepository(body.name).catch(() => null);
+    if (existing?.kind === "ssh" && existing.url === body.url) {
+      return true;
+    }
+    throw new ApiError(
+      error.status,
+      error.type,
+      `${error.detail} ${t("settings.connect.create.taken", { name: body.name })}`,
+    );
+  }
+}
+
+/**
  * Renders the page at `/settings/repositories/new`.
  *
  * @returns The page.
@@ -479,8 +550,11 @@ export function ConnectRepository(): JSX.Element {
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [registered, setRegistered] = useState(false);
   const [made, setMade] = useState<DeployKeyOut | null>(null);
+  const [already, setAlready] = useState(false);
   const keys = useCheck();
   const attempt = useAttempt();
+  // Once the keys are made, the button that made them is gone: focus the next step's heading.
+  const focus = useFocusAfter<HTMLHeadingElement>(made);
 
   const urlError = host === null ? null : urlProblem(t, url, host);
   const nameError = nameProblem(t, name);
@@ -494,28 +568,33 @@ export function ConnectRepository(): JSX.Element {
     const recognised = recogniseHost(url);
     setHost(recognised);
     if (!named && recognised.name !== "") {
-      setName(recognised.name);
+      setName(recognised.name.replace(NOT_IN_NAME_RUNS, "-"));
     }
   };
   const create = (): void => {
     attempt.run(async () => {
       if (!registered) {
-        await createRepository({
-          name,
-          kind: "ssh",
-          url: String(ssh),
-          ssh_known_hosts: offered
-            .filter((key) => ticked.has(key.line))
-            .map((key) => `${key.line}\n`)
-            .join(""),
-        });
+        setAlready(
+          await register(t, {
+            name,
+            kind: "ssh",
+            url: String(ssh),
+            ssh_known_hosts: offered
+              .filter((key) => ticked.has(key.line))
+              .map((key) => `${key.line}\n`)
+              .join(""),
+          }),
+        );
         setRegistered(true);
       }
       const answer = await generateDeployKey(name);
+      focus.arm();
       setMade({
         secret: answer.secret,
         keys: answer.keys.map(publicHalf),
         skipped: answer.skipped,
+        replaced: answer.replaced,
+        notes: answer.notes,
       });
     });
   };
@@ -596,7 +675,7 @@ export function ConnectRepository(): JSX.Element {
           </p>
           <Button
             className="button"
-            isDisabled={keys.busy || registered || nameError !== null}
+            isDisabled={registered || nameError !== null}
             onPress={() => {
               setTicked(new Set());
               keys.run({ kind: "host_keys", url: ssh });
@@ -604,7 +683,13 @@ export function ConnectRepository(): JSX.Element {
           >
             {t("settings.connect.keys.fetch")}
           </Button>
-          <CheckOutcome check={keys} waiting={t("settings.connect.keys.waiting")} />
+          <CheckOutcome
+            check={keys}
+            waiting={t("settings.connect.keys.waiting")}
+            done={
+              offered.length > 0 ? t("settings.connect.keys.found", { count: offered.length }) : ""
+            }
+          />
           {found !== null && found.length === 0 && (
             <p className="step-error" role="alert">
               {t("settings.connect.keys.none")}
@@ -629,7 +714,13 @@ export function ConnectRepository(): JSX.Element {
 
       {ssh !== null && host !== null && found !== null && found.length > 0 && (
         <section className="connect-step" aria-labelledby="connect-create">
-          <h2 id="connect-create">{t("settings.connect.create.heading")}</h2>
+          <h2
+            id="connect-create"
+            ref={tested === undefined ? focus.target : undefined}
+            tabIndex={-1}
+          >
+            {t("settings.connect.create.heading")}
+          </h2>
           <p>{t("settings.connect.create.body")}</p>
           {made === null && (
             <>
@@ -643,9 +734,15 @@ export function ConnectRepository(): JSX.Element {
               {ticked.size === 0 && (
                 <p className="step-hint">{t("settings.connect.create.tick")}</p>
               )}
-              <p className="step-status" role="status">
-                {attempt.busy ? t("settings.connect.create.working") : ""}
-              </p>
+            </>
+          )}
+          <p className="step-status" role="status">
+            {attempt.busy
+              ? t("settings.connect.create.working")
+              : createdText(t, made, already ? name : null)}
+          </p>
+          {made === null && (
+            <>
               {attempt.error !== null && (
                 <p className="step-error" role="alert">
                   {registered ? `${t("settings.connect.create.notMade")} ` : ""}
@@ -659,10 +756,39 @@ export function ConnectRepository(): JSX.Element {
       )}
 
       {tested !== undefined && host !== null && (
-        <TestAccess name={name} environment={tested.environment} host={host} />
+        <TestAccess
+          name={name}
+          environment={tested.environment}
+          host={host}
+          headingRef={focus.target}
+        />
       )}
     </Page>
   );
+}
+
+/**
+ * What the page announces once the keys are made.
+ *
+ * @param t - The translation function.
+ * @param made - The answer of the call that made the keys, or null before.
+ * @param already - The repository's name when it was registered before this page tried.
+ * @returns The sentence; empty before, and when no key was made (an alert says so).
+ */
+function createdText(
+  t: ReturnType<typeof useTranslation>["t"],
+  made: DeployKeyOut | null,
+  already: string | null,
+): string {
+  if (made === null || made.keys.length === 0) {
+    return "";
+  }
+  const done = t("settings.connect.create.done", {
+    environments: made.keys.map((key) => key.environment).join(", "),
+  });
+  return already === null
+    ? done
+    : `${t("settings.connect.create.already", { name: already })} ${done}`;
 }
 
 /**

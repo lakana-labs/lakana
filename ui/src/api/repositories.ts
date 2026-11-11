@@ -75,6 +75,20 @@ export interface DeployKeyOut {
   readonly keys: readonly DeployKeyMadeOut[];
   /** Environments without a key where the person may not manage secrets. */
   readonly skipped: readonly string[];
+  /** Environments whose key this call replaced. */
+  readonly replaced: readonly string[];
+  /** For each replaced key: the old key stops working, replace it at the git host now. */
+  readonly notes: readonly string[];
+}
+
+/** A registered repository, as far as the page reads it. */
+interface RepositoryOut {
+  /** Its name. */
+  readonly name: string;
+  /** `local`, `https` or `ssh`. */
+  readonly kind: string;
+  /** Its URL. */
+  readonly url: string;
 }
 
 /**
@@ -143,6 +157,20 @@ export async function waitForProbe(id: string, signal: AbortSignal): Promise<Rep
  */
 export async function createRepository(body: RepositoryCreate): Promise<void> {
   await api.request("POST", "/api/v1/repositories", body);
+}
+
+/**
+ * Reads a registered repository.
+ *
+ * @param name - Its name.
+ * @returns Its name, kind and URL.
+ */
+export async function getRepository(name: string): Promise<RepositoryOut> {
+  const repository = await api.request<RepositoryOut>(
+    "GET",
+    `/api/v1/repositories/${encodeURIComponent(name)}`,
+  );
+  return { name: repository.name, kind: repository.kind, url: repository.url };
 }
 
 /**
