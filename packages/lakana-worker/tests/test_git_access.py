@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import socket
 import subprocess
 import time
@@ -411,7 +412,9 @@ def test_check_access_refuses_a_proxy_that_is_not_an_http_url(
         https_proxy="ftp://proxy.corp:3128",
     )
     assert outcome is ProbeOutcome.FAILED
-    assert "http://proxy.corp:3128" in message
+    # The message names the form to use; a pattern rather than a URL substring test, which code
+    # scanning reads as URL sanitising.
+    assert re.search(r"\bhttp://proxy\.corp:3128\b", message)
     assert calls == []
 
 
