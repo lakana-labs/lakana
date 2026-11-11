@@ -253,7 +253,8 @@ for (const theme of ["light", "dark"] as const) {
         "Access",
         "Settings",
         "Help",
-        "admin",
+        // The user menu's text: "Signed in as" is visually hidden before the name.
+        "Signed in as admin",
         // Home's first stop: the update note's link.
         "what's new › (opens in a new tab)",
       ]);

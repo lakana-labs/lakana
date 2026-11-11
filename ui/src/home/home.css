@@ -25,13 +25,20 @@
   gap: var(--space-3);
 }
 
-/* Links inside a sentence: the accent, underlined on hover; the rows' names have their own. */
+/* Links: the accent, underlined on hover; the rows' names have their own. */
 .home-section p a,
 .home-steps a,
 .home-update a,
 .home-more {
   color: var(--color-accent);
   text-decoration: none;
+}
+
+/* A link inside a sentence is underlined always: colour alone does not set it apart from the
+   muted text around it (WCAG 1.4.1, axe's link-in-text-block). */
+.home-section p a,
+.home-update a {
+  text-decoration: underline;
 }
 
 .home-section p a:hover,

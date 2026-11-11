@@ -129,7 +129,6 @@ describe("UserMenu", () => {
   it("shows the signed-in name in the user menu", async () => {
     renderShell("/");
     await screen.findByRole("heading", { level: 1, name: "Home" });
-
     const button = screen.getByRole("button", { name: "Signed in as admin" });
     expect(button).toHaveTextContent("admin");
     expect(screen.queryByText(/Preview/)).not.toBeInTheDocument();
@@ -161,6 +160,10 @@ describe("UserMenu", () => {
 
     expect(button.querySelector(".avatar")).toHaveTextContent("A");
     expect(button.querySelector("img")).toBeNull();
+    // The initials are text, so an aria-label would no longer contain all of it (WCAG 2.5.3):
+    // the name comes from the content, the initials hidden and "Signed in as" visually hidden.
+    expect(button).not.toHaveAttribute("aria-label");
+    expect(button.querySelector(".visually-hidden")).toHaveTextContent("Signed in as");
     expect(server.sent.some((request) => request.path.endsWith("/picture"))).toBe(false);
   });
 

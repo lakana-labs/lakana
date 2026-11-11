@@ -14,7 +14,7 @@ import {
   MenuTrigger,
   Popover,
 } from "react-aria-components";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 
 import { usePreferences } from "../preferences/PreferencesProvider";
 import { Avatar } from "../profile/Avatar";
@@ -124,10 +124,16 @@ export function UserMenu(): JSX.Element {
   return (
     <div className="user-menu">
       <MenuTrigger>
-        {/* The name is what shows; the accessible name says what it is (it contains the name). */}
-        <Button className="user-menu-button" aria-label={t("shell.signedInAs", { name })}>
+        {/* The name is what shows; "Signed in as" is visually hidden around it. Not an
+            aria-label: the initials are text, and a label must contain all that shows (2.5.3). */}
+        <Button className="user-menu-button">
           <Avatar name={me.name} displayName={displayName} etag={me.picture} size={24} />
-          {name}
+          <Trans
+            t={t}
+            i18nKey="shell.signedInAs"
+            values={{ name }}
+            components={{ hidden: <span className="visually-hidden" /> }}
+          />
         </Button>
         <Popover className="float" placement="top start">
           <p className="menu-title" id={title}>
