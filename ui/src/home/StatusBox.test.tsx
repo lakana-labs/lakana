@@ -62,6 +62,18 @@ describe("StatusBox", () => {
     );
   });
 
+  it("shows the figures but no Details to a non-administrator who may manage the instance", async () => {
+    renderShell("/", {
+      access: new Set(["home", "catalog", "queries", "jobs", "connections"]),
+      me: { name: "kim", admin: false, mayDeploy: true },
+      routes: { "GET /api/v1/status": { status: 200, body: { ...HEALTHY, detail: DETAIL } } },
+    });
+
+    const region = await box();
+    expect(await within(region).findByRole("meter", { name: "Compute" })).toBeInTheDocument();
+    expect(within(region).queryByRole("link", { name: "Details" })).not.toBeInTheDocument();
+  });
+
   it("hides the bars from a person who may not manage the instance", async () => {
     withStatus(HEALTHY);
 
@@ -159,7 +171,7 @@ describe("StatusBox", () => {
     expect(sent.every((request) => request.headers["x-lakana-background"] === "1")).toBe(true);
   });
 
-  it("does not poll while the page is hidden", async () => {
+  it("does not poll while the page is hidden, and polls again once visible", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { server } = withStatus(HEALTHY);
     await within(await box()).findByText("Healthy");
@@ -171,5 +183,10 @@ describe("StatusBox", () => {
 
     expect(server.sent.filter((request) => request.path === "/api/v1/status")).toHaveLength(1);
     hidden.mockRestore();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(server.sent.filter((request) => request.path === "/api/v1/status")).toHaveLength(2);
   });
 });

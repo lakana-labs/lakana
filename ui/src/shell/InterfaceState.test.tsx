@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { InterfaceStateProvider, useInterfaceState } from "./InterfaceState";
@@ -51,26 +51,45 @@ describe("InterfaceState", () => {
     expect(screen.getByText("null null")).toBeInTheDocument();
   });
 
-  it("drops answers that arrive after it is gone", async () => {
-    const server = fakeServer({
-      "GET /api/v1/principals/kim/interface-state": { status: 200, body: STATE },
-      "GET /api/v1/info": { status: 200, body: { version: "0.23.0" } },
+  it("drops an answer for a person it no longer shows", async () => {
+    let answerKim: () => void = () => undefined;
+    const kimAnswered = new Promise<void>((resolve) => {
+      answerKim = resolve;
     });
-    const error = vi.spyOn(console, "error");
+    const late = async (body: unknown): Promise<{ status: number; body: unknown }> => {
+      await kimAnswered;
+      return { status: 200, body };
+    };
+    const sam = { ...STATE, get_started_hidden: true };
+    const server = fakeServer({
+      "GET /api/v1/principals/kim/interface-state": () => late(STATE),
+      "GET /api/v1/principals/sam/interface-state": { status: 200, body: sam },
+      "GET /api/v1/info": () => late({ version: "0.22.0" }),
+    });
 
-    const { unmount } = render(
+    const { rerender } = render(
       <InterfaceStateProvider name="kim">
         <Probe />
       </InterfaceStateProvider>,
     );
-    unmount();
-    await vi.waitFor(() => {
-      expect(server.sent).toHaveLength(2);
+    rerender(
+      <InterfaceStateProvider name="sam">
+        <Probe />
+      </InterfaceStateProvider>,
+    );
+    expect(await screen.findByText(`${JSON.stringify(sam)} null`)).toBeVisible();
+    await act(async () => {
+      answerKim();
+      await kimAnswered;
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => {
+      expect(server.sent).toHaveLength(4);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
-    expect(error).not.toHaveBeenCalled();
-    error.mockRestore();
+    expect(screen.getByText(`${JSON.stringify(sam)} 0.22.0`)).toBeVisible();
   });
 
   it("is used inside its provider only", () => {

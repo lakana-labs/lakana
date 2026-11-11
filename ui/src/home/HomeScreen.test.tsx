@@ -63,6 +63,7 @@ describe("HomeScreen", () => {
       get_started_hidden: true,
     });
     expect(screen.queryByRole("region", { name: "Get started" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Home" })).toHaveFocus();
     cleanup();
 
     renderShell("/", {

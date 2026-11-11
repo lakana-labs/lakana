@@ -47,10 +47,10 @@ you.
   the cause only when it affects them, for example "Queries are slower: 1 of 2 workers is down."
 - **Down**: nothing gets done. Tell an administrator; they see why.
 
-An administrator (who may manage environments on the instance) also sees every cause, how many
-task slots of the workers are busy and how much of their memory limit they use, as two bars with
-the numbers beside them, the workers by state, and **Details ›**, which leads to Settings →
-Status. The same answer is on the command line:
+Whoever may manage environments on the instance also sees every cause, how many task slots of
+the workers are busy and how much of their memory limit they use, as two bars with the numbers
+beside them, and the workers by state. An administrator (the `ADMIN` role on the instance) also
+gets **Details ›**, which leads to Settings → Status. The same answer is on the command line:
 
 <!-- source: docs/examples/getting-started/run.sh#status -->
 ```bash

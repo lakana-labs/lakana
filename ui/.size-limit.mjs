@@ -15,9 +15,9 @@ const ON_DEMAND_LIMIT = "2.96 kB";
 // Screens larger than ON_DEMAND_LIMIT, each with a limit of its own; a chunk's file name is the
 // screen's module name, a dash and a hash, so the start of the name finds it in every build.
 const NAMED_LIMITS = [
-  // Measured 3.82 kB (Home: the status box, Needs your attention, Recently opened, Your work,
-  // Get started and the update note, 2026-11-11) + 10 %.
-  { name: "Home", prefix: "HomeScreen-", limit: "4.2 kB" },
+  // Measured 3.91 kB (Home: the status box, Needs your attention, Recently opened, Your work,
+  // Get started and the update note, after review, 2026-11-11) + 10 %.
+  { name: "Home", prefix: "HomeScreen-", limit: "4.3 kB" },
 ];
 
 /**
@@ -78,7 +78,7 @@ export default [
     limit: "192 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
-  // Measured 4.03 kB (with Home's stylesheet, 2026-11-11) + 10 %.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "4.43 kB" },
+  // Measured 4.06 kB (with Home's stylesheet, 2026-11-11) + 10 %.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "4.47 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

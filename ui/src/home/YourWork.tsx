@@ -77,6 +77,7 @@ function Repository({ repository }: RepositoryProps): JSX.Element {
 export function YourWork(): JSX.Element {
   const { t } = useTranslation();
   const heading = useId();
+  const repositories = useId();
   const work = useResource(getWork);
   return (
     <section className="home-section" aria-labelledby={heading}>
@@ -108,11 +109,14 @@ export function YourWork(): JSX.Element {
                 </ObjectTable>
               )}
               {found.repositories.length > 0 && (
-                <ul className="home-repos" aria-label={t("home.work.repositories")}>
-                  {found.repositories.map((repository) => (
-                    <Repository key={repository.name} repository={repository} />
-                  ))}
-                </ul>
+                <>
+                  <h3 id={repositories}>{t("home.work.repositories")}</h3>
+                  <ul className="home-repos" aria-labelledby={repositories}>
+                    {found.repositories.map((repository) => (
+                      <Repository key={repository.name} repository={repository} />
+                    ))}
+                  </ul>
+                </>
               )}
             </>
           )

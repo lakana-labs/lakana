@@ -11,6 +11,7 @@ import { Link } from "react-router";
 
 import { getStatus, type InstanceStatusOut, type StatusDetailOut } from "../api";
 import { Loaded } from "../shell/Loaded";
+import { useMe } from "../shell/me";
 import { StatusGlyph } from "../status/StatusGlyph";
 import type { StatusKind } from "../status/status";
 import { usePolled } from "./usePolled";
@@ -68,8 +69,8 @@ interface FiguresProps {
 }
 
 /**
- * Compute and memory as two bars with their numbers, the workers by state, and the way to the
- * details.
+ * Compute and memory as two bars with their numbers, the workers by state, and for an
+ * administrator (who may open Settings) the way to the details.
  *
  * @param props - The detail and the status.
  * @param props.detail - What the person sees beyond the state.
@@ -78,6 +79,7 @@ interface FiguresProps {
  */
 function Figures({ detail, status }: FiguresProps): JSX.Element {
   const { t } = useTranslation();
+  const { admin } = useMe();
   const compute = useId();
   const memory = useId();
   const lost = status.workers_total - status.workers_alive;
@@ -141,10 +143,12 @@ function Figures({ detail, status }: FiguresProps): JSX.Element {
           </dd>
         </div>
       </dl>
-      <Link className="home-more" to="/settings/status">
-        {t("home.status.details")}
-        <span aria-hidden="true"> ›</span>
-      </Link>
+      {admin && (
+        <Link className="home-more" to="/settings/status">
+          {t("home.status.details")}
+          <span aria-hidden="true"> ›</span>
+        </Link>
+      )}
     </>
   );
 }

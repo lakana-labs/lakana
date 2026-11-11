@@ -40,6 +40,7 @@ describe("UpdateNote", () => {
     await user.click(screen.getByRole("button", { name: "Hide the update note" }));
 
     expect(screen.queryByText(/Lakana was updated/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Home" })).toHaveFocus();
     const patches = server.sent.filter((request) => request.method === "PATCH");
     expect(patches.map((request) => request.body)).toEqual([{ update_note_seen: "0.23.0" }]);
     cleanup();

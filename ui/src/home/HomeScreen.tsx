@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import type { JSX } from "react";
+import { type JSX, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getGetStarted } from "../api";
@@ -22,20 +22,22 @@ import { YourWork } from "./YourWork";
  * Home's boxes in the same order for everyone; what the person may do changes what is inside
  * them, and Your work is only for people who may deploy.
  *
+ * @param props - Where focus goes.
+ * @param props.onGone - Moves focus to the page's heading once a box the person hid is gone.
  * @returns The boxes.
  */
-function Boxes(): JSX.Element {
+function Boxes({ onGone }: { readonly onGone: () => void }): JSX.Element {
   const { mayDeploy } = useMe();
   const getStarted = useResource(getGetStarted);
   return (
     <>
-      <UpdateNote />
+      <UpdateNote onGone={onGone} />
       {getStarted.error !== null && (
         <p className="step-error" role="alert">
           {getStarted.error}
         </p>
       )}
-      {getStarted.data !== undefined && <GetStarted list={getStarted.data} />}
+      {getStarted.data !== undefined && <GetStarted list={getStarted.data} onGone={onGone} />}
       <StatusBox />
       <Attention />
       <Recent />
@@ -52,9 +54,17 @@ function Boxes(): JSX.Element {
 export function AreaScreen(): JSX.Element {
   const { t } = useTranslation();
   const { noAccessYet } = useMe();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const onGone = useCallback(() => {
+    heading.current?.focus();
+  }, []);
   return (
-    <Page title={t("areas.home.name")}>
-      {noAccessYet ? <p className="page-notice">{t("home.noAccessYet")}</p> : <Boxes />}
+    <Page title={t("areas.home.name")} headingRef={heading}>
+      {noAccessYet ? (
+        <p className="page-notice">{t("home.noAccessYet")}</p>
+      ) : (
+        <Boxes onGone={onGone} />
+      )}
     </Page>
   );
 }

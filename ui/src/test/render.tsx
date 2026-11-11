@@ -37,9 +37,7 @@ export interface ShellOptions {
   readonly storage?: Storage;
   /** Area pages loaded on demand; none by default. */
   readonly pages?: AreaPages;
-  /** Whether Home says the person has no access yet; false by default. */
-  readonly noAccessYet?: boolean;
-  /** What the person may do, beyond `noAccessYet`; an administrator named `admin` by default. */
+  /** What the person may do; an administrator named `admin`, with access, by default. */
   readonly me?: Partial<AccessOut>;
   /** The session; a signed-in administrator by default. */
   readonly session?: SessionValue;
@@ -61,7 +59,7 @@ export function renderShell(path = "/", options: ShellOptions = {}): RenderedShe
     name: "admin",
     admin: true,
     mayDeploy: true,
-    noAccessYet: options.noAccessYet ?? false,
+    noAccessYet: false,
     ...options.me,
   };
   const server = fakeServer({

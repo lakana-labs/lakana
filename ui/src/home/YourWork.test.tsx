@@ -68,6 +68,12 @@ describe("YourWork", () => {
 
     const work = await region();
     const repository = await within(work).findByRole("listitem", { name: "analytics" });
+    expect(
+      within(work).getByRole("heading", { level: 3, name: "Your repositories" }),
+    ).toBeVisible();
+    expect(within(work).getByRole("list", { name: "Your repositories" })).toContainElement(
+      repository,
+    );
     expect(within(repository).getByText("Succeeded")).toBeInTheDocument();
     expect(within(repository).getByText("Not deployed yet")).toBeInTheDocument();
     expect(within(repository).getByText("prod")).toHaveClass("env-label");

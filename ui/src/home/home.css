@@ -10,6 +10,13 @@
   font-weight: var(--type-section-weight);
 }
 
+.home-section h3 {
+  margin: var(--space-5) 0 var(--space-1);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: 500;
+}
+
 .home-section-head {
   display: flex;
   flex-wrap: wrap;
@@ -89,6 +96,16 @@
 
 .home-steps p {
   margin: 0 0 var(--space-1);
+}
+
+/* The command of a step: no room kept below it for the copy hint until there is one. */
+.home-steps .copy-line {
+  margin-bottom: 0;
+}
+
+.home-steps .copy-hint {
+  min-height: 0;
+  margin: 0;
 }
 
 .home-step-done p {
@@ -178,7 +195,7 @@
 
 /* Your work's repositories: not rows that open, so a plain list. */
 .home-repos {
-  margin: var(--space-3) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }

@@ -11,6 +11,12 @@ import { useInterfaceState } from "../shell/InterfaceState";
 import { useAttempt } from "../sign-in/Attempt";
 import { releaseNotesUrl } from "./links";
 
+/** Properties of {@link UpdateNote}. */
+export interface UpdateNoteProps {
+  /** Called once × worked, so focus does not fall to the page's body with the button. */
+  readonly onGone: () => void;
+}
+
 /**
  * Shows the note when the server runs a release the person has not seen the note of, and only
  * after they saw one before: a person new to Lakana, or one whose first release with this note
@@ -18,9 +24,11 @@ import { releaseNotesUrl } from "./links";
  * version by recording the version, alone in its request, since the server refuses a request
  * whose version is not a release.
  *
+ * @param props - Where focus goes.
+ * @param props.onGone - Called once × worked.
  * @returns The note, or nothing.
  */
-export function UpdateNote(): JSX.Element | null {
+export function UpdateNote({ onGone }: UpdateNoteProps): JSX.Element | null {
   const { t } = useTranslation();
   const { state, change, version } = useInterfaceState();
   const attempt = useAttempt();
@@ -45,7 +53,10 @@ export function UpdateNote(): JSX.Element | null {
         aria-label={t("home.update.hide")}
         isDisabled={attempt.busy}
         onPress={() => {
-          attempt.run(() => change({ update_note_seen: version }));
+          attempt.run(async () => {
+            await change({ update_note_seen: version });
+            onGone();
+          });
         }}
       >
         <span aria-hidden="true">×</span>

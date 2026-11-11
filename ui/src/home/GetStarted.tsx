@@ -75,6 +75,8 @@ function StepWay({ id }: StepWayProps): JSX.Element {
 export interface GetStartedProps {
   /** The list, as the server answered it. */
   readonly list: GetStartedOut;
+  /** Called once Hide worked, so focus does not fall to the page's body with the button. */
+  readonly onGone: () => void;
 }
 
 /**
@@ -83,9 +85,10 @@ export interface GetStartedProps {
  *
  * @param props - The list.
  * @param props.list - The list, as the server answered it.
+ * @param props.onGone - Called once Hide worked.
  * @returns The section, or nothing once complete or hidden.
  */
-export function GetStarted({ list }: GetStartedProps): JSX.Element | null {
+export function GetStarted({ list, onGone }: GetStartedProps): JSX.Element | null {
   const { t } = useTranslation();
   const heading = useId();
   const { state, change } = useInterfaceState();
@@ -104,7 +107,10 @@ export function GetStarted({ list }: GetStartedProps): JSX.Element | null {
           className="button"
           isDisabled={attempt.busy}
           onPress={() => {
-            attempt.run(() => change({ get_started_hidden: true }));
+            attempt.run(async () => {
+              await change({ get_started_hidden: true });
+              onGone();
+            });
           }}
         >
           {t("home.getStarted.hide")}
