@@ -96,7 +96,7 @@ describe("SignInPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Sign in with a passkey" }));
 
-    expectPending(screen.getByRole("button", { name: "Sign in with a passkey" }));
+    expectPending(screen.getByRole("button", { name: /^Sign in with a passkey/ }));
     request.release({ status: 503, body: { type: "Busy", detail: "Busy." } });
     await screen.findByRole("alert");
   });

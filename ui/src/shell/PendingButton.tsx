@@ -3,8 +3,9 @@
  *
  * @packageDocumentation
  */
-import type { JSX, ReactNode } from "react";
-import { Button, type ButtonProps } from "react-aria-components";
+import { type JSX, type ReactNode, useId } from "react";
+import { Button, type ButtonProps, ProgressBar } from "react-aria-components";
+import { useTranslation } from "react-i18next";
 
 /** Properties of {@link PendingButton}. */
 export interface PendingButtonProps extends Omit<ButtonProps, "isPending" | "children"> {
@@ -16,8 +17,11 @@ export interface PendingButtonProps extends Omit<ButtonProps, "isPending" | "chi
 
 /**
  * A React Aria button that, while `pending`, shows a small turning ring before its label. React
- * Aria keeps focus on the button, ignores presses and announces the pending state itself, so
- * the ring is hidden from assistive technology.
+ * Aria keeps focus on the button, ignores presses and, when the button has focus, announces its
+ * label plus the indeterminate progress bar inside it. The ring is that progress bar, named
+ * "Working…", so a screen reader hears "Save, Working…". The label is named for the button
+ * unless the caller gives an `aria-label` or `aria-labelledby`, because React Aria adds the
+ * progress bar only to a name it can already refer to.
  *
  * @param props - The button's own properties and whether it is pending.
  * @param props.children - The label.
@@ -25,10 +29,15 @@ export interface PendingButtonProps extends Omit<ButtonProps, "isPending" | "chi
  * @returns The button.
  */
 export function PendingButton({ children, pending, ...rest }: PendingButtonProps): JSX.Element {
+  const { t } = useTranslation();
+  const labelId = useId();
+  const named = rest["aria-label"] !== undefined || rest["aria-labelledby"] !== undefined;
   return (
-    <Button {...rest} isPending={pending}>
-      {pending && <span className="pending-sign" aria-hidden="true" />}
-      {children}
+    <Button {...rest} {...(named ? {} : { "aria-labelledby": labelId })} isPending={pending}>
+      {pending && (
+        <ProgressBar className="pending-sign" isIndeterminate aria-label={t("common.working")} />
+      )}
+      {named ? children : <span id={labelId}>{children}</span>}
     </Button>
   );
 }

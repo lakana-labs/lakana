@@ -289,7 +289,8 @@
     "add": "Add a passkey",
     "notNow": "Not now",
     "signOut": "Sign out",
-    "waiting": "Waiting for your passkey…"
+    "waiting": "Waiting for your passkey…",
+    "signingOut": "Signing you out…"
   },
   "notices": {
     "label": "Sign-in notices",

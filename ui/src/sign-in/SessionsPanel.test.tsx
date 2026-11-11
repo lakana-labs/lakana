@@ -56,7 +56,7 @@ describe("SessionsPanel", () => {
 
     await user.click(await screen.findByRole("button", { name: "Sign out everywhere" }));
 
-    expectPending(screen.getByRole("button", { name: "Sign out everywhere" }));
+    expectPending(screen.getByRole("button", { name: /^Sign out everywhere/ }));
   });
 
   it("signs out everywhere through the session, so this browser signs out too", async () => {

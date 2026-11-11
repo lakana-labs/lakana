@@ -110,8 +110,9 @@ function useCheck(): Check {
   const { t } = useTranslation();
   const [state, setState] = useState<CheckState>(IDLE);
   const leaving = useRef(new AbortController());
-  // The button is pending, not disabled, while a check runs, so it keeps focus; React Aria
-  // ignores a press during the wait, and the guard covers one that comes before the sign is drawn.
+  // The button is pending, not disabled, while a check runs, so it keeps focus. React Aria
+  // ignores presses only once the pending state has rendered; this ref refuses a second press
+  // that arrives before that render.
   const running = useRef(false);
   useEffect(() => {
     const controller = new AbortController();

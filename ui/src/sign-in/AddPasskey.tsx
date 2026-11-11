@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import type { JSX } from "react";
+import { type JSX, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -35,6 +35,7 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
   const { t } = useTranslation();
   const session = useSession();
   const attempt = useAttempt();
+  const [pressed, setPressed] = useState<"add" | "signOut">("add");
   return (
     <Step title={t("addPasskey.title")}>
       <p className="step-who">
@@ -44,8 +45,10 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
       <div className="step-actions">
         <PendingButton
           className="button button-primary"
-          pending={attempt.busy}
+          pending={attempt.busy && pressed === "add"}
+          isDisabled={attempt.busy && pressed !== "add"}
           onPress={() => {
+            setPressed("add");
             attempt.run(async () => {
               await addPasskey(account.name);
               await session.refresh();
@@ -55,21 +58,27 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
           {t("addPasskey.add")}
         </PendingButton>
         {required ? (
-          <Button
+          <PendingButton
             className="button"
+            pending={attempt.busy && pressed === "signOut"}
+            isDisabled={attempt.busy && pressed !== "signOut"}
             onPress={() => {
+              setPressed("signOut");
               attempt.run(session.signOut);
             }}
           >
             {t("addPasskey.signOut")}
-          </Button>
+          </PendingButton>
         ) : (
           <Button className="button" onPress={session.skipPasskey}>
             {t("addPasskey.notNow")}
           </Button>
         )}
       </div>
-      <AttemptStatus attempt={attempt} waiting={t("addPasskey.waiting")} />
+      <AttemptStatus
+        attempt={attempt}
+        waiting={pressed === "signOut" ? t("addPasskey.signingOut") : t("addPasskey.waiting")}
+      />
     </Step>
   );
 }

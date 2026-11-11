@@ -248,7 +248,10 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   the skill and the page together.
 - **A button that waits for the server is a `PendingButton`** (`ui/src/shell/PendingButton.tsx`):
   it shows the pending sign from the first moment and cannot be pressed again; words that say
-  what the person waits for follow within 1 s. Never `isDisabled` for the pressed button, which
+  what the person waits for follow within 1 s. The sign is an indeterminate React Aria
+  `ProgressBar` named "Working…", which React Aria adds to the button's accessible name and
+  announces when the pending state starts and ends; the button therefore always has a name for it
+  to extend. Where several buttons share one request, only the pressed one is `pending`. Never `isDisabled` for the pressed button, which
   drops focus; other disabling conditions stay `isDisabled` beside `pending`.
 - **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
   stylesheet and string on (part 1a, Task 3).

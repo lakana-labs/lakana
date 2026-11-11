@@ -111,6 +111,7 @@ export function InvitesPage(): JSX.Element {
   const when = useWhen();
   const invites = useResource(listInvites);
   const withdraw = useAttempt();
+  const [pressed, setPressed] = useState<string | null>(null);
   const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(invites.data);
   const [inviting, setInviting] = useState(false);
   return (
@@ -154,8 +155,10 @@ export function InvitesPage(): JSX.Element {
                       <PendingButton
                         className="button"
                         aria-label={t("access.invites.withdrawOf", { name: invite.name })}
-                        pending={withdraw.busy}
+                        pending={withdraw.busy && pressed === invite.id}
+                        isDisabled={withdraw.busy && pressed !== invite.id}
                         onPress={() => {
+                          setPressed(invite.id);
                           withdraw.run(async () => {
                             await withdrawInvite(invite.id);
                             armFocus();

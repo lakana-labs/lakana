@@ -124,7 +124,7 @@ describe("GetStarted", () => {
 
     await user.click(within(region).getByRole("button", { name: "Hide" }));
 
-    expectPending(within(region).getByRole("button", { name: "Hide" }));
+    expectPending(within(region).getByRole("button", { name: /^Hide/ }));
     request.release({ status: 200, body: { ...STATE, get_started_hidden: true } });
     await waitFor(() => {
       expect(screen.queryByRole("region", { name: "Get started" })).not.toBeInTheDocument();

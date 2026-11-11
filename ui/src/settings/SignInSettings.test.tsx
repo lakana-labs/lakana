@@ -103,7 +103,7 @@ describe("SignInSettings", () => {
 
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expectPending(screen.getByRole("button", { name: "Save" }));
+    expectPending(screen.getByRole("button", { name: /^Save/ }));
     request.release({ status: 200, body: SETTINGS });
     expect(await screen.findByText("Saved. New sessions use these lengths.")).toBeInTheDocument();
   });

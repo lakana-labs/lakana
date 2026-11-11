@@ -110,8 +110,10 @@
  * and a little of the padding, so a button grows by about a ring while it waits.
  */
 .pending-sign {
+  display: inline-block;
   box-sizing: border-box;
   flex: none;
+  vertical-align: middle;
   width: 1em;
   height: 1em;
   margin-inline: calc(-1 * var(--space-1));

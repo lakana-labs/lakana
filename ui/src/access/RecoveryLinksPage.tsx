@@ -31,6 +31,7 @@ export function RecoveryLinksPage(): JSX.Element {
   const when = useWhen();
   const links = useResource(listRecoveryLinks);
   const withdraw = useAttempt();
+  const [pressed, setPressed] = useState<string | null>(null);
   const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(links.data);
   const [issuing, setIssuing] = useState(false);
   return (
@@ -71,8 +72,10 @@ export function RecoveryLinksPage(): JSX.Element {
                       <PendingButton
                         className="button"
                         aria-label={t("access.recovery.withdrawOf", { name: link.name })}
-                        pending={withdraw.busy}
+                        pending={withdraw.busy && pressed === link.id}
+                        isDisabled={withdraw.busy && pressed !== link.id}
                         onPress={() => {
+                          setPressed(link.id);
                           withdraw.run(async () => {
                             await withdrawRecoveryLink(link.id);
                             armFocus();

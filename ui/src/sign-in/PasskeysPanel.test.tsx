@@ -60,7 +60,7 @@ describe("PasskeysPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Add a passkey" }));
 
-    expectPending(screen.getByRole("button", { name: "Add a passkey" }));
+    expectPending(screen.getByRole("button", { name: /^Add a passkey/ }));
     request.release({ status: 503, body: { type: "Busy", detail: "Busy." } });
     await screen.findByRole("alert");
   });

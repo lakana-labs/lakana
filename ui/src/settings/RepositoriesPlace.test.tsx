@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -49,5 +52,14 @@ describe("RepositoriesPlace", () => {
       `/settings/${place}`,
     );
     expect(screen.queryByText("This page does not exist")).not.toBeInTheDocument();
+  });
+
+  it("has a tab for every first-level route of the Settings screen", () => {
+    const source = readFileSync(resolve(import.meta.dirname, "SettingsScreen.tsx"), "utf8");
+    const routes = [...source.matchAll(/<Route\s+path="([^"*]+)"/g)].map((match) => match[1]);
+    const firstLevel = new Set(routes.map((path) => (path as string).split("/")[0]));
+
+    expect(firstLevel.size).toBeGreaterThan(0);
+    expect([...firstLevel].sort()).toEqual([...SETTINGS_PLACES].sort());
   });
 });

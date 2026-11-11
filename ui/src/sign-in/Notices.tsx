@@ -4,10 +4,10 @@
  * @packageDocumentation
  */
 import { type JSX, useEffect, useRef, useState } from "react";
-import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { dismissNotice, listNotices, type NoticeOut } from "../api";
+import { PendingButton } from "../shell/PendingButton";
 import { problemText } from "./messages";
 import { useSession } from "./SessionProvider";
 
@@ -25,6 +25,7 @@ export function Notices(): JSX.Element | null {
   const session = useSession();
   const [notices, setNotices] = useState<readonly NoticeOut[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [dismissing, setDismissing] = useState<string | null>(null);
   const region = useRef<HTMLElement>(null);
   const moveFocus = useRef(false);
 
@@ -55,12 +56,15 @@ export function Notices(): JSX.Element | null {
   });
   const dismiss = (id: string): void => {
     setError(null);
+    setDismissing(id);
     dismissNotice(id).then(
       () => {
+        setDismissing(null);
         moveFocus.current = true;
         setNotices(notices.filter((notice) => notice.id !== id));
       },
       (failure: unknown) => {
+        setDismissing(null);
         setError(t("notices.dismissFailed", { detail: problemText(t, failure) }));
       },
     );
@@ -79,14 +83,16 @@ export function Notices(): JSX.Element | null {
                   date: format.format(new Date(notice.created_at)),
                 })}
               </p>
-              <Button
+              <PendingButton
                 className="button"
+                pending={dismissing === notice.id}
+                isDisabled={dismissing !== null && dismissing !== notice.id}
                 onPress={() => {
                   dismiss(notice.id);
                 }}
               >
                 {t("notices.dismiss")}
-              </Button>
+              </PendingButton>
             </li>
           );
         })}

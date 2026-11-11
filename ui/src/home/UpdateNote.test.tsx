@@ -66,7 +66,7 @@ describe("UpdateNote", () => {
 
     await user.click(await screen.findByRole("button", { name: "Hide the update note" }));
 
-    expectPending(screen.getByRole("button", { name: "Hide the update note" }));
+    expectPending(screen.getByRole("button", { name: /^Hide the update note/ }));
     request.release({ status: 200, body: { ...STATE, update_note_seen: "0.23.0" } });
     await waitFor(() => {
       expect(screen.queryByText(/Lakana was updated/)).not.toBeInTheDocument();

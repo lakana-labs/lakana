@@ -226,7 +226,7 @@ describe("LinkLanding", () => {
 
     await user.click(await screen.findByRole("button", { name: "Continue" }));
 
-    expectPending(screen.getByRole("button", { name: "Continue" }));
+    expectPending(screen.getByRole("button", { name: /^Continue/ }));
     request.release({ status: 503, body: { detail: "Busy.", type: "Busy" } });
     await screen.findByRole("alert");
   });

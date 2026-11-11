@@ -159,7 +159,7 @@ describe("InvitesPage", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Create the invite" }));
 
-    expectPending(within(dialog).getByRole("button", { name: "Create the invite" }));
+    expectPending(within(dialog).getByRole("button", { name: /^Create the invite/ }));
     expect(within(dialog).getByRole("button", { name: "Cancel" })).not.toHaveAttribute(
       "data-pending",
     );
@@ -178,12 +178,33 @@ describe("InvitesPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Withdraw the invite of kim" }));
 
-    const button = screen.getByRole("button", { name: "Withdraw the invite of kim" });
+    const button = screen.getByRole("button", { name: /^Withdraw the invite of kim/ });
     expectPending(button);
     request.release({ status: 204 });
     await waitFor(() => {
       expect(button.querySelector(".pending-sign")).toBeNull();
     });
+  });
+
+  it("shows the pending sign only on the Withdraw that was pressed", async () => {
+    const request = held();
+    const { user } = renderShell("/access/invites", {
+      routes: {
+        "GET /api/v1/invites": {
+          status: 200,
+          body: [OPEN, { ...OPEN, id: "i-3", name: "sam", display_name: null }],
+        },
+        "DELETE /api/v1/invites/i-1": request.route,
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Withdraw the invite of kim" }));
+
+    expectPending(screen.getByRole("button", { name: /^Withdraw the invite of kim/ }));
+    const other = screen.getByRole("button", { name: "Withdraw the invite of sam" });
+    expect(other.querySelector(".pending-sign")).toBeNull();
+    expect(other).toBeDisabled();
+    request.release({ status: 204 });
   });
 
   it("withdraws an invite and removes its row", async () => {

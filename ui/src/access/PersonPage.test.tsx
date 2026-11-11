@@ -144,7 +144,7 @@ describe("PersonPage", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     const dialog = screen.getByRole("dialog");
-    expectPending(within(dialog).getByRole("button", { name: "Continue" }));
+    expectPending(within(dialog).getByRole("button", { name: /^Continue/ }));
     expect(within(dialog).getByRole("button", { name: "Cancel" })).not.toHaveAttribute(
       "data-pending",
     );
@@ -175,7 +175,7 @@ describe("PersonPage", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Remove picture" }));
 
-    expectPending(within(dialog).getByRole("button", { name: "Remove picture" }));
+    expectPending(within(dialog).getByRole("button", { name: /^Remove picture/ }));
     request.release({ status: 204 });
     await vi.waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

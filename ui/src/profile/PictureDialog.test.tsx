@@ -216,7 +216,7 @@ describe("PictureDialog", () => {
     );
     await user.click(await screen.findByRole("button", { name: "Try again" }));
 
-    expectPending(screen.getByRole("button", { name: "Try again" }));
+    expectPending(screen.getByRole("button", { name: /^Try again/ }));
     const remove = screen.getByRole("button", { name: "Remove picture" });
     expect(remove).toBeDisabled();
     expect(remove.querySelector(".pending-sign")).toBeNull();

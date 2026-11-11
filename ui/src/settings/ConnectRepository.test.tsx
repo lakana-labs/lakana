@@ -91,8 +91,8 @@ function flow(more: Record<string, FakeRoute> = {}): Record<string, FakeRoute> {
 const ui = {
   url: () => screen.getByRole("textbox", { name: "Repository URL" }),
   name: () => screen.getByRole("textbox", { name: "Name in Lakana" }),
-  fetch: () => screen.getByRole("button", { name: "Fetch the host's keys" }),
-  create: () => screen.getByRole("button", { name: "Create the repository and its keys" }),
+  fetch: () => screen.getByRole("button", { name: /^Fetch the host's keys/ }),
+  create: () => screen.getByRole("button", { name: /^Create the repository and its keys/ }),
 };
 
 /**
