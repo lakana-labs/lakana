@@ -396,6 +396,8 @@ _EXEMPT = {
     "nothing about anyone else and writing nothing",
     ("GrantService", "is_admin"): "answers about the caller only (`whoami`), reading nothing "
     "about anyone else and writing nothing",
+    ("GrantService", "may_deploy_somewhere"): "answers about the caller only (`whoami`, Get "
+    "started) with `permits`, reading nothing about anyone else and writing nothing",
     ("CiTrustRuleService", "check_rule"): "validates without writing; its caller "
     "(`grant`/`create`, or `AccessService`) has authorized",
 }

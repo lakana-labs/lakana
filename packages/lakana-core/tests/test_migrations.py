@@ -5553,3 +5553,58 @@ def test_0071_adds_the_workers_memory_columns_empty(
     assert columns() == dict.fromkeys(_MEMORY_COLUMNS, True)
     command.downgrade(config, _REVISION_0070)
     assert columns() == {}
+
+
+_REVISION_0072 = "c109929efd3f"
+
+
+def test_0072_adds_the_interface_state_tables_empty(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0072`: per-person interface state and recently opened, two empty tables.
+
+    A row inserted without `get_started_hidden` reads `false`, so code that predates the
+    column cannot hide Get started by accident.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0071)
+    config = Config(str(ALEMBIC_INI))
+
+    def tables() -> set[str]:
+        """Read which of the two tables exist.
+
+        Returns
+        -------
+        set of str
+            The names present.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            return {"interface_states", "recent_opens"} & set(inspect(engine).get_table_names())
+        finally:
+            engine.dispose()
+
+    assert tables() == set()
+    command.upgrade(config, _REVISION_0072)
+    assert tables() == {"interface_states", "recent_opens"}
+    with sqlite3.connect(db_path) as connection:
+        person = uuid.uuid4().hex
+        connection.execute(
+            "INSERT INTO principals (id, type, name, is_active, created_at, updated_at) "
+            "VALUES (?, 'USER', 'kim', 1, '2026-11-11', '2026-11-11')",
+            (person,),
+        )
+        connection.execute(
+            "INSERT INTO interface_states (principal_id, updated_at) VALUES (?, '2026-11-11')",
+            (person,),
+        )
+        hidden = connection.execute("SELECT get_started_hidden FROM interface_states").fetchone()
+    assert hidden == (0,)
+    command.downgrade(config, _REVISION_0071)
+    assert tables() == set()

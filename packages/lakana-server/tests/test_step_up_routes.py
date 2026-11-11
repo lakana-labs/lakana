@@ -745,6 +745,10 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
         "answers a registration challenge that only the step-up options route hands out"
     ),
     ("PATCH", "/api/v1/whoami"): "one's own interface language",
+    ("PATCH", "/api/v1/principals/{name}/interface-state"): (
+        "one's own tour, Get started and update note, self only"
+    ),
+    ("POST", "/api/v1/principals/{name}/recent"): "recording what one opened, self only",
     ("DELETE", "/api/v1/sign-in/session"): "signing one's own browser out",
     ("DELETE", "/api/v1/sign-in/notices/{notice_id}"): "dismissing one's own notice",
     ("POST", "/api/v1/sign-in/passkey/options"): "signing in: the passkey is the proof",

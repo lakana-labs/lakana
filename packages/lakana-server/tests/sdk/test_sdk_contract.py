@@ -53,6 +53,8 @@ def test_every_sdk_route_exists_on_the_server(settings: Settings) -> None:
 
 _WEBAUTHN = "a WebAuthn ceremony: only a browser holding the passkey can answer it"
 _BROWSER_SESSION = "describes or ends the browser session of the request; a token has none (409)"
+_INTERFACE_STATE = "what the web interface remembers for a person: tour, Get started, update note"
+_RECENT = "the objects a person opened in the web interface, for Home's Recently opened"
 
 BROWSER_ONLY: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/sign-in/links/describe"): (
@@ -75,6 +77,14 @@ BROWSER_ONLY: dict[tuple[str, str], str] = {
     ),
     ("DELETE", "/api/v1/sign-in/notices/{notice_id}"): (
         "dismissing a notice the interface showed; the audit log keeps the event"
+    ),
+    ("GET", "/api/v1/principals/{name}/interface-state"): _INTERFACE_STATE,
+    ("PATCH", "/api/v1/principals/{name}/interface-state"): _INTERFACE_STATE,
+    ("GET", "/api/v1/principals/{name}/recent"): _RECENT,
+    ("POST", "/api/v1/principals/{name}/recent"): _RECENT,
+    ("GET", "/api/v1/home/get-started"): (
+        "Home's list of first steps; a program reads the same facts from the routes they come "
+        "from (repositories, deploys, queries)"
     ),
 }
 """Platform routes only a browser uses, so the SDK has no method for them, with the reason."""

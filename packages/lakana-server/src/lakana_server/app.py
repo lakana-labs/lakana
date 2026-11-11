@@ -41,7 +41,9 @@ from lakana_server.api.platform.environments import router as environments_route
 from lakana_server.api.platform.grants import router as grants_router
 from lakana_server.api.platform.graph import router as graph_router
 from lakana_server.api.platform.groups import router as groups_router
+from lakana_server.api.platform.home import router as home_router
 from lakana_server.api.platform.info import router as info_router
+from lakana_server.api.platform.interface_state import router as interface_state_router
 from lakana_server.api.platform.invites import router as invites_router
 from lakana_server.api.platform.jobs import router as jobs_router
 from lakana_server.api.platform.namespaces import router as namespaces_router
@@ -131,6 +133,8 @@ ROUTERS = (
     sign_in_settings_router,
     info_router,
     status_router,
+    interface_state_router,
+    home_router,
 )
 """Every router the application includes, in the order they are included."""
 

@@ -19,6 +19,7 @@ def test_whoami_describes_a_pat_caller(client: TestClient) -> None:
         "language": None,
         "admin": True,
         "has_access": True,
+        "may_deploy": False,
     }
 
 
@@ -49,6 +50,7 @@ def test_whoami_describes_a_task_token_callers_scope(client: TestClient) -> None
         "language": None,
         "admin": True,
         "has_access": True,
+        "may_deploy": False,
     }
 
 

@@ -44,8 +44,9 @@ def whoami(
     Answers with the name and type of the principal the credential signs in as and, for a
     task or CI token, the scope of that token. Any valid credential may ask. `admin` says
     whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any
-    grant at all (any scope, directly or through a group): the web interface shows the
-    administration areas, or tells a new person to ask for access, from these two.
+    grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in
+    at least one environment: the web interface shows the administration areas, tells a new
+    person to ask for access, and shows the deploy steps of Home from these three.
 
     Parameters
     ----------
@@ -100,6 +101,7 @@ def _describe(principal: PrincipalRef, grants: GrantService) -> WhoamiOut:
         language=principal.language,
         admin=grants.is_admin(principal),
         has_access=grants.has_any_grant(principal),
+        may_deploy=grants.may_deploy_somewhere(principal),
     )
 
 

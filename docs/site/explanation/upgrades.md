@@ -179,6 +179,15 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   It exits 12 when the instance is `Down`. `lakana worker list` has a new column `memory`, and
   shows a lost worker that a restart on its host replaced as `lost (replaced)`.
 
+### What the web interface remembers per person
+
+- Migration `0072` adds two empty tables: `interface_states` (whether a person saw the tour, hid
+  Get started, and the last update note they saw) and `recent_opens` (what they opened
+  recently). Nobody has a row after the upgrade, so every existing person is shown the tour once
+  on their next sign-in, sees Get started, and gets no update note for this release.
+- `GET /api/v1/whoami` has a new field `may_deploy`: whether you may deploy in at least one
+  environment.
+
 ### The Compose bundle's web interface settings
 
 - A new bundle's `.env` has two more keys, which `compose.yaml` passes to `server`:

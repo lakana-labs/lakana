@@ -2361,6 +2361,9 @@ class WhoamiOut(BaseModel):
     has_access
         Whether you have any grant at all, at any scope, directly or through a group; `false`
         for a new person nobody has granted anything yet.
+    may_deploy
+        Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role
+        or a group); the web interface shows the deploy steps and Your work from it.
     """
 
     name: str
@@ -2370,6 +2373,7 @@ class WhoamiOut(BaseModel):
     language: str | None = None
     admin: bool = False
     has_access: bool = False
+    may_deploy: bool = False
 
 
 class ProfileIn(BaseModel):
@@ -2382,6 +2386,131 @@ class ProfileIn(BaseModel):
     """
 
     language: str | None
+
+
+class InterfaceStateOut(BaseModel):
+    """What the web interface remembers for you.
+
+    Parameters
+    ----------
+    tour_seen
+        Whether you finished or skipped the tour; `false` until then, so it shows on your next
+        sign-in.
+    get_started_hidden
+        Whether you hid Get started on Home.
+    update_note_seen
+        The last release whose update note you saw (`x.y.z`), or `null`.
+    """
+
+    tour_seen: bool
+    get_started_hidden: bool
+    update_note_seen: str | None
+
+
+class InterfaceStateIn(BaseModel):
+    """Request body that changes what the web interface remembers for you.
+
+    Every field is optional: a field left out stays as it is. A refused request changes
+    nothing, so send `tour_seen` on its own whenever `update_note_seen` might be refused.
+
+    Parameters
+    ----------
+    tour_seen
+        `true` once you finished or skipped the tour, `false` to see it again.
+    get_started_hidden
+        `true` to hide Get started, `false` to show it again.
+    update_note_seen
+        The release whose update note you saw, as `x.y.z` (for example `0.23.0`); a development
+        build's version is refused (422). `null` clears it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tour_seen: bool | None = None
+    get_started_hidden: bool | None = None
+    update_note_seen: str | None = Field(default=None, max_length=64)
+
+
+class RecentIn(BaseModel):
+    """Request body that records that you opened an object.
+
+    Parameters
+    ----------
+    kind
+        `table`, `query`, `job` or `run`.
+    environment
+        The object's environment.
+    ref
+        The object: a dotted table name (`gold.sales`), a query's or a run's id, or
+        `repository/job`.
+    """
+
+    kind: Literal["table", "query", "job", "run"]
+    environment: str = Field(max_length=255)
+    ref: str = Field(max_length=1024)
+
+
+class RecentOut(BaseModel):
+    """One object you opened recently.
+
+    Parameters
+    ----------
+    kind
+        `table`, `query`, `job` or `run`.
+    environment
+        The object's environment.
+    ref
+        The object, as it was recorded.
+    opened_at
+        When you last opened it.
+    """
+
+    kind: str
+    environment: str
+    ref: str
+    opened_at: datetime
+
+
+class GetStartedStepOut(BaseModel):
+    """One row of Get started.
+
+    Parameters
+    ----------
+    id
+        The step: `connect_repository`, `invite_team`, `add_passkey`, `deploy_project`,
+        `deploy_project_local`, `ci_deploy`, `open_table` or `run_query`.
+    done
+        Whether the server's state shows it done.
+    """
+
+    id: str
+    done: bool
+
+
+class GetStartedOut(BaseModel):
+    """Your Get started list on Home.
+
+    Parameters
+    ----------
+    audience
+        `admin`, `deployer` (may deploy somewhere), `reader` (has other access) or `none` (no
+        access yet: the interface says to ask an administrator).
+    local
+        Whether the server runs in local mode (`lakana server start --local`), which leaves out
+        what needs a team: inviting, CI, connecting a repository.
+    steps
+        The rows in order, each with whether it is done; empty for `none`.
+    hidden
+        Whether you hid the list.
+    complete
+        Whether every step is done; the interface then shows the list no more.
+    """
+
+    audience: Literal["admin", "deployer", "reader", "none"]
+    local: bool
+    steps: list[GetStartedStepOut]
+    hidden: bool
+    complete: bool
 
 
 class EnvironmentStorageUpdate(BaseModel):

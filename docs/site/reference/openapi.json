@@ -18706,7 +18706,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any grant at all (any scope, directly or through a group): the web interface shows the administration areas, or tells a new person to ask for access, from these two.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment: the web interface shows the administration areas, tells a new person to ask for access, and shows the deploy steps of Home from these three.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -21123,6 +21123,427 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InstanceStatusOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/interface-state": {
+      "get": {
+        "tags": [
+          "interface"
+        ],
+        "summary": "Show what the web interface remembers for you",
+        "description": "Only your own (403 for another person's name, and for a task or CI token). A person who never changed anything gets the defaults: the tour not seen, Get started shown, no update note seen.",
+        "operationId": "get_interface_state_api_v1_principals__name__interface_state_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceStateOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "interface"
+        ],
+        "summary": "Change what the web interface remembers for you",
+        "description": "Changes only the fields sent. `update_note_seen` takes a release version, `x.y.z`; anything else, a development build's version too, is refused with 422 and nothing in the request is stored. So the interface records the tour in a request of its own, which no version can hold up. Only your own (403 otherwise, and for a task or CI token).",
+        "operationId": "change_interface_state_api_v1_principals__name__interface_state_patch",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterfaceStateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterfaceStateOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/principals/{name}/recent": {
+      "get": {
+        "tags": [
+          "interface"
+        ],
+        "summary": "List what you opened recently, newest first",
+        "description": "At most 20. Something you may no longer read, or that no longer exists, is left out. Only your own (403 otherwise, and for a task or CI token).",
+        "operationId": "list_recent_api_v1_principals__name__recent_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecentOut"
+                  },
+                  "title": "Response List Recent Api V1 Principals  Name  Recent Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "interface"
+        ],
+        "summary": "Record that you opened a table, a query, a job or a run",
+        "description": "The web interface's detail pages call it. Opening the same object again within a minute changes nothing; only the newest 20 are kept. Answers 404 when the object does not exist or you may not read it (the same answer for both). Only your own (403 otherwise, and for a task or CI token).",
+        "operationId": "record_recent_api_v1_principals__name__recent_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecentIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/home/get-started": {
+      "get": {
+        "tags": [
+          "home"
+        ],
+        "summary": "Show your Get started list",
+        "description": "The steps follow what you may do: an administrator connects a repository, invites the team, adds a passkey, deploys the first project and lets CI deploy; a person who may deploy deploys, opens a table and runs a query; a person who may read opens a table and runs a query; a person without access yet gets no steps. In local mode (`lakana server start --local`) an administrator gets add a passkey, deploy from a local folder, open a table and run a query. Each step is ticked from the server's state.",
+        "operationId": "read_get_started_api_v1_home_get_started_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetStartedOut"
                 }
               }
             }
@@ -24789,6 +25210,68 @@
         "title": "FailureOut",
         "description": "Why a task or an attempt failed.\n\nParameters\n----------\ncode\n    A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,\n    `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`,\n    `checks_unfinished`, `query_invalid`, `permission_denied`, `not_found`, `memory`,\n    `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`; `unknown` for a failure\n    recorded before the codes existed\n    (never stored). A client treats a code it does not know like `internal`.\ncause\n    One sentence: what happened. The sentences may be reworded; the codes do not change.\nnext_step\n    One sentence: what to do about it."
       },
+      "GetStartedOut": {
+        "properties": {
+          "audience": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "deployer",
+              "reader",
+              "none"
+            ],
+            "title": "Audience"
+          },
+          "local": {
+            "type": "boolean",
+            "title": "Local"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/GetStartedStepOut"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "hidden": {
+            "type": "boolean",
+            "title": "Hidden"
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "Complete"
+          }
+        },
+        "type": "object",
+        "required": [
+          "audience",
+          "local",
+          "steps",
+          "hidden",
+          "complete"
+        ],
+        "title": "GetStartedOut",
+        "description": "Your Get started list on Home.\n\nParameters\n----------\naudience\n    `admin`, `deployer` (may deploy somewhere), `reader` (has other access) or `none` (no\n    access yet: the interface says to ask an administrator).\nlocal\n    Whether the server runs in local mode (`lakana server start --local`), which leaves out\n    what needs a team: inviting, CI, connecting a repository.\nsteps\n    The rows in order, each with whether it is done; empty for `none`.\nhidden\n    Whether you hid the list.\ncomplete\n    Whether every step is done; the interface then shows the list no more."
+      },
+      "GetStartedStepOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "done": {
+            "type": "boolean",
+            "title": "Done"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "done"
+        ],
+        "title": "GetStartedStepOut",
+        "description": "One row of Get started.\n\nParameters\n----------\nid\n    The step: `connect_repository`, `invite_team`, `add_passkey`, `deploy_project`,\n    `deploy_project_local`, `ci_deploy`, `open_table` or `run_query`.\ndone\n    Whether the server's state shows it done."
+      },
       "GrantCreate": {
         "properties": {
           "principal": {
@@ -25551,6 +26034,79 @@
         ],
         "title": "InstanceStatusOut",
         "description": "Whether the instance works, as the caller may see it.\n\nParameters\n----------\nstate\n    `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).\ncauses\n    Why, in this order: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`.\n    A caller who may not manage environments on the instance sees only `no_worker` and\n    `worker_lost`; a failed database or storage still makes their state `down`.\nworkers_alive\n    The workers whose heartbeat is younger than the lease.\nworkers_total\n    Every registered worker, alive and lost, except lost ones a restart on their host\n    replaced.\ndetail\n    Compute, memory and the workers; `null` unless the caller may manage environments on\n    the instance."
+      },
+      "InterfaceStateIn": {
+        "properties": {
+          "tour_seen": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tour Seen"
+          },
+          "get_started_hidden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Get Started Hidden"
+          },
+          "update_note_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Note Seen"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InterfaceStateIn",
+        "description": "Request body that changes what the web interface remembers for you.\n\nEvery field is optional: a field left out stays as it is. A refused request changes\nnothing, so send `tour_seen` on its own whenever `update_note_seen` might be refused.\n\nParameters\n----------\ntour_seen\n    `true` once you finished or skipped the tour, `false` to see it again.\nget_started_hidden\n    `true` to hide Get started, `false` to show it again.\nupdate_note_seen\n    The release whose update note you saw, as `x.y.z` (for example `0.23.0`); a development\n    build's version is refused (422). `null` clears it."
+      },
+      "InterfaceStateOut": {
+        "properties": {
+          "tour_seen": {
+            "type": "boolean",
+            "title": "Tour Seen"
+          },
+          "get_started_hidden": {
+            "type": "boolean",
+            "title": "Get Started Hidden"
+          },
+          "update_note_seen": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Note Seen"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tour_seen",
+          "get_started_hidden",
+          "update_note_seen"
+        ],
+        "title": "InterfaceStateOut",
+        "description": "What the web interface remembers for you.\n\nParameters\n----------\ntour_seen\n    Whether you finished or skipped the tour; `false` until then, so it shows on your next\n    sign-in.\nget_started_hidden\n    Whether you hid Get started on Home.\nupdate_note_seen\n    The last release whose update note you saw (`x.y.z`), or `null`."
       },
       "InviteIn": {
         "properties": {
@@ -27914,6 +28470,68 @@
         ],
         "title": "ReaderOut",
         "description": "A principal's use of a table over the window.\n\nParameters\n----------\nprincipal\n    The principal's name.\nread_count\n    How many of its succeeded queries named the table.\nlast_read_at\n    When the last of them completed."
+      },
+      "RecentIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "table",
+              "query",
+              "job",
+              "run"
+            ],
+            "title": "Kind"
+          },
+          "environment": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Environment"
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 1024,
+            "title": "Ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "environment",
+          "ref"
+        ],
+        "title": "RecentIn",
+        "description": "Request body that records that you opened an object.\n\nParameters\n----------\nkind\n    `table`, `query`, `job` or `run`.\nenvironment\n    The object's environment.\nref\n    The object: a dotted table name (`gold.sales`), a query's or a run's id, or\n    `repository/job`."
+      },
+      "RecentOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Opened At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "environment",
+          "ref",
+          "opened_at"
+        ],
+        "title": "RecentOut",
+        "description": "One object you opened recently.\n\nParameters\n----------\nkind\n    `table`, `query`, `job` or `run`.\nenvironment\n    The object's environment.\nref\n    The object, as it was recorded.\nopened_at\n    When you last opened it."
       },
       "RecoveryLinkOut": {
         "properties": {
@@ -31495,6 +32113,11 @@
             "type": "boolean",
             "title": "Has Access",
             "default": false
+          },
+          "may_deploy": {
+            "type": "boolean",
+            "title": "May Deploy",
+            "default": false
           }
         },
         "type": "object",
@@ -31504,7 +32127,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it."
       },
       "WorkerCachesOut": {
         "properties": {

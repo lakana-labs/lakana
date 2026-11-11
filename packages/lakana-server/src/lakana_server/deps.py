@@ -31,7 +31,9 @@ from lakana_core.connections.service import ConnectionService
 from lakana_core.errors import AuthenticationError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
+from lakana_core.home.recent import RecentService
 from lakana_core.identity.groups import GroupService
+from lakana_core.identity.interface_state import InterfaceStateService
 from lakana_core.identity.links import LinkService
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.passkeys import PasskeyService, needs_passkey
@@ -1070,6 +1072,48 @@ def get_principal_service(
         A service using real authorization.
     """
     return PrincipalService(session, authz)
+
+
+def get_interface_state_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> InterfaceStateService:
+    """Build an InterfaceStateService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    InterfaceStateService
+        The service for the caller's own interface state.
+    """
+    return InterfaceStateService(session, authz)
+
+
+def get_recent_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> RecentService:
+    """Build a RecentService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service, asked with `permits` only.
+
+    Returns
+    -------
+    RecentService
+        The service for the caller's recently opened list.
+    """
+    return RecentService(session, authz)
 
 
 def get_group_service(

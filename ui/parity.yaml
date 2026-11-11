@@ -282,6 +282,7 @@
 "GET /api/v1/grants": { class: ui, part: 7 }
 "GET /api/v1/groups": { class: ui, part: 7 }
 "GET /api/v1/groups/{name}/members": { class: ui, part: 7 }
+"GET /api/v1/home/get-started": { class: ui, part: 2 }
 "GET /api/v1/info": { class: read, part: 8 }
 "GET /api/v1/invites": { class: ui, part: 1 }
 "GET /api/v1/package-indexes": { class: ui, part: 8 }
@@ -294,9 +295,11 @@
   }
 "GET /api/v1/principals/{name}":
   { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }
+"GET /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions":
   { class: ui, part: 7, note: "1b asks it whether a person is an administrator (recovery links)" }
+"GET /api/v1/principals/{name}/recent": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "GET /api/v1/recovery-links": { class: ui, part: 1 }
@@ -321,6 +324,7 @@
 "PATCH /api/v1/environments/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8 }
 "PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
+"PATCH /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/settings/sign-in":
   { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
@@ -400,6 +404,8 @@
 "POST /api/v1/principals": { class: ui, part: 7 }
 "POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1 }
+"POST /api/v1/principals/{name}/recent":
+  { class: ui, part: 2, note: "called by the detail pages from part 3" }
 "POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "POST /api/v1/repositories": { class: ui, part: 8 }

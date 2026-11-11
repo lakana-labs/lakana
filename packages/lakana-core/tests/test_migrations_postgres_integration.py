@@ -3398,3 +3398,23 @@ def test_0071_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0070
         assert not wanted & {c["name"] for c in sqlalchemy.inspect(engine).get_columns("workers")}
         engine.dispose()
+
+
+def test_0072_on_postgres() -> None:
+    """0072 creates the interface state tables, and the downgrade drops them."""
+    revision_0071 = "f3c7a9e1d5b2"
+    revision_0072 = "c109929efd3f"
+    wanted = {"interface_states", "recent_opens"}
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0071)
+        engine = sqlalchemy.create_engine(url)
+
+        migrate.upgrade(url, revision_0072)
+        assert _alembic_version(engine) == revision_0072
+        assert wanted <= set(sqlalchemy.inspect(engine).get_table_names())
+
+        migrate.downgrade(url, revision_0071)
+        assert _alembic_version(engine) == revision_0071
+        assert not wanted & set(sqlalchemy.inspect(engine).get_table_names())
+        engine.dispose()
