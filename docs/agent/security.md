@@ -1071,6 +1071,30 @@ search so a caller with few rights cannot make one search read an environment. `
 names and types only, in the same transaction as the schema change; a column mask hides values, not
 names, as `table get` does. Pins: `test_catalog_search.py`, `test_search.py`.
 
+## Home: what a person's lists may show
+
+`GET /api/v1/home/attention` (`lakana_core.home.attention.AttentionService`) and `GET /api/v1/home/work`
+(`lakana_core.home.work.your_work`) answer any authenticated caller about themself. Every row is asked
+with `permits` when the list is read, never `authorize`: reading a list is no attempt, so it writes no
+audit event, and a refused right leaves a row out instead of answering `403` (pin:
+`test_attention_writes_no_audit_event`). A revoked grant, a dropped table or a deleted environment makes
+the row disappear and nothing about the object is shown (pin:
+`test_attention_drops_a_table_the_person_can_no_longer_read`).
+
+| List | Who | Kinds and the right asked per row |
+|---|---|---|
+| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin`) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables with a fired row), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host, as the instance status counts it). The `ADMIN` role holds every right these need, so nothing more is asked. |
+| Needs your attention | anyone else | `table_late` and `check_failed` only among the tables they read within 7 days (`table_reads`) or opened (`recent_opens`), each kept while `READ_TABLE` holds on it now; a check also needs `READ_ENVIRONMENT` (the check list's right) and is left out when it is a generated reference check whose target they may not read (`ReferenceCheckFilter`, as `check list`). `query_failed`: their own failed ad-hoc queries within 7 days (`task_run_id IS NULL`; a pipeline's query is its run's failure), only where they still hold `SUBMIT_QUERY`, as the query's own page shows it only to its submitter. No runs, links or workers. |
+| Your work | a caller with `may_deploy_somewhere` | The repositories they created (`created_by`) or deployed (`deploy_runs.principal_id`); environments and jobs (`JobService.list`, asked only after `permits(READ_ENVIRONMENT)`) only where they may read the environment; nothing without a readable environment (the repository listing's right). Anyone else gets two empty lists. |
+
+A row's `title` is a name: a job (the repository for a run of no job), a dotted table name, a check's
+name, `Query` and the first eight characters of its id, the principal a recovery link signs in, a
+worker's host. Never a value, a check's error text, a run's error message or SQL (pin:
+`test_attention_titles_carry_no_values_or_sql`). Its `ref` is a run's id (a failed run or check), a
+dotted table name, a query's id, a link's id or a worker's id, so a row never points at a page its
+reader cannot open. Each source reads at most 200 rows, newest first; the merged list is cut at 50
+(`truncated`), Your work at 20 repositories and 20 jobs.
+
 ## Jobs: who may start, pause and resume (M5d-b)
 
 A job is a named selection in the manifest; starting one is starting a run, so it has the run's

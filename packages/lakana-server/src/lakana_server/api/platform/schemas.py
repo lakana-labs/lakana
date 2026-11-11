@@ -29,6 +29,7 @@ from lakana_core.catalog.orphaned_locations import DEFAULT_OLDER_THAN_DAYS
 from lakana_core.catalog.writes import MAX_SOURCE_NAME, MAX_SOURCE_VERSIONS
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.grants.roles import Role
+from lakana_core.home.attention import AttentionKind
 from lakana_core.models import AuditEventType
 
 
@@ -2520,6 +2521,124 @@ class GetStartedOut(BaseModel):
     steps: list[GetStartedStepOut]
     hidden: bool
     complete: bool
+
+
+class AttentionItemOut(BaseModel):
+    """One row of Needs your attention on Home.
+
+    Parameters
+    ----------
+    kind
+        `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal
+        fired), `check_failed` (a check's newest result failed or errored), `query_failed`
+        (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two,
+        and failed runs, only for administrators.
+    environment
+        The environment's name; `null` for a recovery link and a worker.
+    title
+        The object's name: a job, a dotted table name, a check, `Query` and the first eight
+        characters of its id, the person a recovery link signs in, a worker's host. Never a
+        value, an error text or SQL.
+    ref
+        The object the row opens: a run's id (a failed run or check), a dotted table name, a
+        query's id, a recovery link's id or a worker's id.
+    at
+        When it happened.
+    """
+
+    kind: AttentionKind
+    environment: str | None
+    title: str
+    ref: str
+    at: datetime
+
+
+class AttentionOut(BaseModel):
+    """Needs your attention on Home.
+
+    Parameters
+    ----------
+    items
+        At most 50 rows, newest first; empty when nothing needs you.
+    truncated
+        Whether more rows were left out.
+    """
+
+    items: list[AttentionItemOut]
+    truncated: bool
+
+
+class WorkEnvironmentOut(BaseModel):
+    """Where one of your repositories is deployed.
+
+    Parameters
+    ----------
+    environment
+        The environment's name.
+    last_deploy_status
+        How the newest deploy there ended: `queued`, `running`, `succeeded` or `failed`;
+        `null` when no deploy run is recorded.
+    last_deploy_at
+        When that deploy ended, or was requested while it has not.
+    """
+
+    environment: str
+    last_deploy_status: str | None
+    last_deploy_at: datetime | None
+
+
+class WorkRepositoryOut(BaseModel):
+    """A repository you created or deployed.
+
+    Parameters
+    ----------
+    name
+        The repository's name.
+    environments
+        The environments you may read where it is deployed, by name.
+    """
+
+    name: str
+    environments: list[WorkEnvironmentOut]
+
+
+class WorkJobOut(BaseModel):
+    """A job of one of your repositories.
+
+    Parameters
+    ----------
+    environment
+        The environment's name.
+    repository
+        The repository's name.
+    job
+        The job's name.
+    last_run_status
+        The state of its newest run; `null` before the first.
+    last_run_at
+        When that run was started.
+    """
+
+    environment: str
+    repository: str
+    job: str
+    last_run_status: str | None
+    last_run_at: datetime | None
+
+
+class WorkOut(BaseModel):
+    """Your work on Home: only for people who may deploy somewhere.
+
+    Parameters
+    ----------
+    repositories
+        At most 20, the most recently deployed (else created) first.
+    jobs
+        At most 20 of their jobs, the most recently run first.
+    """
+
+    repositories: list[WorkRepositoryOut]
+    jobs: list[WorkJobOut]
 
 
 class EnvironmentStorageUpdate(BaseModel):

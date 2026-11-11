@@ -21570,6 +21570,130 @@
           }
         }
       }
+    },
+    "/api/v1/home/attention": {
+      "get": {
+        "tags": [
+          "home"
+        ],
+        "summary": "Show what needs your attention",
+        "description": "An administrator sees the jobs whose newest finished run failed in the last seven days, the late tables, the checks whose newest result failed or errored, the open recovery links and the lost workers. Anyone else sees the late tables and failed checks among the tables they read in the last seven days or opened, and their own queries that failed in that time. A row you may no longer read is left out, never refused. At most 50 rows, newest first.",
+        "operationId": "read_attention_api_v1_home_attention_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/home/work": {
+      "get": {
+        "tags": [
+          "home"
+        ],
+        "summary": "Show your work: the repositories you created or deployed, and their jobs",
+        "description": "Only for a person who may deploy somewhere; anyone else gets two empty lists. Environments and jobs are shown where you may read the environment. At most 20 of each.",
+        "operationId": "read_work_api_v1_home_work_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -22629,6 +22753,78 @@
         ],
         "title": "ArtifactVersionOut",
         "description": "One version of an artifact.\n\nParameters\n----------\nversion\n    The number; versions can have gaps, since a number is never reused.\nmanifest_sha256\n    The digest of the canonical manifest: the identity of the content.\nsize_bytes\n    The summed size of its files.\nfile_count\n    The number of its files.\nis_directory\n    Whether it is a directory (otherwise one file).\ntask_run_id\n    The task run that committed it, if one did.\nrun_id\n    That task run's run.\nproject_version_id\n    The project version the run executed.\ncommit_sha\n    The commit of that project version.\ncreated_by\n    The name of the principal that committed it.\ncreated_at\n    When it was committed.\ndeleted_at\n    When it was deleted; `None` while it is live.\ndeleted_by\n    The name of the principal that deleted it.\nfiles\n    Its files; empty in a listing and for a deleted version.\ndeleted_versions\n    The numbers of the versions this commit pruned (`keep_versions`)."
+      },
+      "AttentionItemOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run_failed",
+              "table_late",
+              "check_failed",
+              "query_failed",
+              "recovery_link_open",
+              "worker_lost"
+            ],
+            "title": "Kind"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "ref": {
+            "type": "string",
+            "title": "Ref"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "environment",
+          "title",
+          "ref",
+          "at"
+        ],
+        "title": "AttentionItemOut",
+        "description": "One row of Needs your attention on Home.\n\nParameters\n----------\nkind\n    `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal\n    fired), `check_failed` (a check's newest result failed or errored), `query_failed`\n    (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two,\n    and failed runs, only for administrators.\nenvironment\n    The environment's name; `null` for a recovery link and a worker.\ntitle\n    The object's name: a job, a dotted table name, a check, `Query` and the first eight\n    characters of its id, the person a recovery link signs in, a worker's host. Never a\n    value, an error text or SQL.\nref\n    The object the row opens: a run's id (a failed run or check), a dotted table name, a\n    query's id, a recovery link's id or a worker's id.\nat\n    When it happened."
+      },
+      "AttentionOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AttentionItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "title": "AttentionOut",
+        "description": "Needs your attention on Home.\n\nParameters\n----------\nitems\n    At most 50 rows, newest first; empty when nothing needs you.\ntruncated\n    Whether more rows were left out."
       },
       "AuditEventOut": {
         "properties": {
@@ -32144,6 +32340,141 @@
         ],
         "title": "WhoamiOut",
         "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it."
+      },
+      "WorkEnvironmentOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "last_deploy_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Deploy Status"
+          },
+          "last_deploy_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Deploy At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "last_deploy_status",
+          "last_deploy_at"
+        ],
+        "title": "WorkEnvironmentOut",
+        "description": "Where one of your repositories is deployed.\n\nParameters\n----------\nenvironment\n    The environment's name.\nlast_deploy_status\n    How the newest deploy there ended: `queued`, `running`, `succeeded` or `failed`;\n    `null` when no deploy run is recorded.\nlast_deploy_at\n    When that deploy ended, or was requested while it has not."
+      },
+      "WorkJobOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "job": {
+            "type": "string",
+            "title": "Job"
+          },
+          "last_run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run Status"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "repository",
+          "job",
+          "last_run_status",
+          "last_run_at"
+        ],
+        "title": "WorkJobOut",
+        "description": "A job of one of your repositories.\n\nParameters\n----------\nenvironment\n    The environment's name.\nrepository\n    The repository's name.\njob\n    The job's name.\nlast_run_status\n    The state of its newest run; `null` before the first.\nlast_run_at\n    When that run was started."
+      },
+      "WorkOut": {
+        "properties": {
+          "repositories": {
+            "items": {
+              "$ref": "#/components/schemas/WorkRepositoryOut"
+            },
+            "type": "array",
+            "title": "Repositories"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/WorkJobOut"
+            },
+            "type": "array",
+            "title": "Jobs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repositories",
+          "jobs"
+        ],
+        "title": "WorkOut",
+        "description": "Your work on Home: only for people who may deploy somewhere.\n\nParameters\n----------\nrepositories\n    At most 20, the most recently deployed (else created) first.\njobs\n    At most 20 of their jobs, the most recently run first."
+      },
+      "WorkRepositoryOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/WorkEnvironmentOut"
+            },
+            "type": "array",
+            "title": "Environments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "environments"
+        ],
+        "title": "WorkRepositoryOut",
+        "description": "A repository you created or deployed.\n\nParameters\n----------\nname\n    The repository's name.\nenvironments\n    The environments you may read where it is deployed, by name."
       },
       "WorkerCachesOut": {
         "properties": {

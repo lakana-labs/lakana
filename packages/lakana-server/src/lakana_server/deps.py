@@ -31,6 +31,7 @@ from lakana_core.connections.service import ConnectionService
 from lakana_core.errors import AuthenticationError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
+from lakana_core.home.attention import AttentionService
 from lakana_core.home.recent import RecentService
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.interface_state import InterfaceStateService
@@ -1114,6 +1115,32 @@ def get_recent_service(
         The service for the caller's recently opened list.
     """
     return RecentService(session, authz)
+
+
+def get_attention_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> AttentionService:
+    """Build an AttentionService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, for the run lease (`LAKANA_RUN__LEASE_SECONDS`).
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service, asked with `permits` only.
+
+    Returns
+    -------
+    AttentionService
+        The service for the caller's Needs your attention.
+    """
+    return AttentionService(
+        session, authz, lease_seconds=request.app.state.settings.run.lease_seconds
+    )
 
 
 def get_group_service(

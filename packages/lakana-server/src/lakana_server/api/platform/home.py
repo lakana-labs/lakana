@@ -1,8 +1,9 @@
-"""Home in the web interface: the caller's Get started list.
+"""Home in the web interface: the caller's Get started list, Needs your attention and Your work.
 
-Any authenticated caller may ask; the answer is about the caller and the instance's own state
-(a repository exists, a deploy succeeded), so the route asks no authorization and records
-nothing.
+Any authenticated caller may ask. Get started is about the caller and the instance's own state
+(a repository exists, a deploy succeeded), so it asks no authorization. Needs your attention and
+Your work show only what the caller may read now, each row asked with `permits`. None of the
+routes records anything.
 """
 
 from __future__ import annotations
@@ -10,13 +11,32 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import PrincipalRef
+from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.grants.service import GrantService
+from lakana_core.home.attention import AttentionService
 from lakana_core.home.get_started import get_started
-from lakana_server.api.platform.schemas import GetStartedOut, GetStartedStepOut
+from lakana_core.home.work import your_work
+from lakana_core.jobs.service import JobService
+from lakana_server.api.platform.schemas import (
+    AttentionItemOut,
+    AttentionOut,
+    GetStartedOut,
+    GetStartedStepOut,
+    WorkEnvironmentOut,
+    WorkJobOut,
+    WorkOut,
+    WorkRepositoryOut,
+)
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_grant_service, get_principal, get_session
+from lakana_server.deps import (
+    get_attention_service,
+    get_grant_authorization,
+    get_grant_service,
+    get_job_service,
+    get_principal,
+    get_session,
+)
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -68,4 +88,100 @@ def read_get_started(
         steps=[GetStartedStepOut(id=step, done=done) for step, done in answer.steps],
         hidden=answer.hidden,
         complete=answer.complete,
+    )
+
+
+@router.get("/attention", response_model=AttentionOut)
+def read_attention(
+    principal: PrincipalRef = Depends(get_principal),
+    service: AttentionService = Depends(get_attention_service),
+) -> AttentionOut:
+    """Show what needs your attention.
+
+    An administrator sees the jobs whose newest finished run failed in the last seven days, the
+    late tables, the checks whose newest result failed or errored, the open recovery links and
+    the lost workers. Anyone else sees the late tables and failed checks among the tables they
+    read in the last seven days or opened, and their own queries that failed in that time. A
+    row you may no longer read is left out, never refused. At most 50 rows, newest first.
+
+    Parameters
+    ----------
+    principal
+        The authenticated caller.
+    service
+        The attention service.
+
+    Returns
+    -------
+    AttentionOut
+        The rows and whether more were left out.
+    """
+    items, truncated = service.for_caller(principal)
+    return AttentionOut(
+        items=[
+            AttentionItemOut(
+                kind=item.kind,
+                environment=item.environment,
+                title=item.title,
+                ref=item.ref,
+                at=item.at,
+            )
+            for item in items
+        ],
+        truncated=truncated,
+    )
+
+
+@router.get("/work", response_model=WorkOut)
+def read_work(
+    principal: PrincipalRef = Depends(get_principal),
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+    jobs: JobService = Depends(get_job_service),
+) -> WorkOut:
+    """Show your work: the repositories you created or deployed, and their jobs.
+
+    Only for a person who may deploy somewhere; anyone else gets two empty lists. Environments
+    and jobs are shown where you may read the environment. At most 20 of each.
+
+    Parameters
+    ----------
+    principal
+        The authenticated caller.
+    session
+        The request's database session.
+    authz
+        The grant-backed authorization service, asked with `permits` only.
+    jobs
+        The job service.
+
+    Returns
+    -------
+    WorkOut
+        The repositories and their jobs.
+    """
+    repositories, found = your_work(session, authz, jobs, principal)
+    return WorkOut(
+        repositories=[
+            WorkRepositoryOut(
+                name=repo.name,
+                environments=[
+                    WorkEnvironmentOut(
+                        environment=env, last_deploy_status=status, last_deploy_at=at
+                    )
+                    for env, status, at in repo.environments
+                ],
+            )
+            for repo in repositories
+        ],
+        jobs=[
+            WorkJobOut(
+                environment=job.environment,
+                repository=job.repository,
+                job=job.job,
+                last_run_status=job.last_run_status,
+                last_run_at=job.last_run_at,
+            )
+            for job in found
+        ],
     )

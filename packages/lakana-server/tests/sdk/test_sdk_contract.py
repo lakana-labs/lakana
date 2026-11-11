@@ -86,6 +86,14 @@ BROWSER_ONLY: dict[tuple[str, str], str] = {
         "Home's list of first steps; a program reads the same facts from the routes they come "
         "from (repositories, deploys, queries)"
     ),
+    ("GET", "/api/v1/home/attention"): (
+        "Home's list of what failed or is late; a program reads the same facts from the routes "
+        "they come from (runs, table health, checks, queries, recovery links, workers)"
+    ),
+    ("GET", "/api/v1/home/work"): (
+        "Home's list of one's repositories and jobs; a program reads them from the repository, "
+        "deploy and job routes"
+    ),
 }
 """Platform routes only a browser uses, so the SDK has no method for them, with the reason."""
 

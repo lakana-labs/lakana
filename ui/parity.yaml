@@ -282,7 +282,9 @@
 "GET /api/v1/grants": { class: ui, part: 7 }
 "GET /api/v1/groups": { class: ui, part: 7 }
 "GET /api/v1/groups/{name}/members": { class: ui, part: 7 }
+"GET /api/v1/home/attention": { class: read, part: 2 }
 "GET /api/v1/home/get-started": { class: ui, part: 2 }
+"GET /api/v1/home/work": { class: read, part: 2 }
 "GET /api/v1/info": { class: read, part: 8 }
 "GET /api/v1/invites": { class: ui, part: 1 }
 "GET /api/v1/package-indexes": { class: ui, part: 8 }
