@@ -47,7 +47,9 @@ before it is done.
    on success it shows the command to deploy and, for GitHub and GitLab, the CI how-to.
 
 While a worker has not answered after a second, the page says what it waits for. If no worker
-takes the check within two minutes, it says so and how to start one.
+takes the check within two minutes, it says so and how to start one. Every check ends at most
+three and a half minutes after it was asked: two minutes for a worker to take it, then at most
+90 seconds to run.
 
 The sections below take the same steps with the command line, and cover what comes later:
 another environment, replacing a key.
@@ -76,7 +78,7 @@ It waits up to 60 seconds for a worker that takes pipeline work. What it may ans
 | Outcome | What to do |
 |---|---|
 | `refused_address` | The name resolves to an address no worker may reach (loopback, link-local, cloud metadata). Use the git host's public name. |
-| `unreachable` | Check the host and port in the URL, and that the worker's network may reach it on SSH. |
+| `unreachable` | No address of the host offered a key (the worker tries each one, IPv6 and IPv4). Check the host and port in the URL, and that the worker's network may reach it on SSH. |
 | `timeout` | The host did not answer; check the network path from the worker. |
 | `no_worker` | No worker took the check within two minutes: start one (`docker compose up -d worker`, or `lakana server start --local`). |
 | `failed` | The worker could not run the scan (its image lacks `ssh-keyscan`, or it refused the URL); the message says which, and the worker's log has the details (`docker compose logs worker`). |
@@ -156,6 +158,20 @@ lakana repo deploy-key analytics --secret analytics-deploy-key-2
 
 Add the new public keys at your git host, and test each environment.
 
+## Remove a repository
+
+`lakana repo remove NAME --yes` removes the repository, but not its keys: each environment's
+`NAME-deploy-key` secret stays stored, and its public key still reads the repository at your git
+host. When you no longer need them, remove the deploy keys at your git host first, then revoke
+the secret in each environment that held one, for example
+`lakana secret revoke analytics-deploy-key --env dev --yes`.
+
+A repository connected again under the same name gets new keys under another secret name: the
+old keys belonged to the repository you removed, and a revoked name is never used again. The
+page's **Make the keys** is refused then and names the command; run
+`lakana repo deploy-key analytics --secret analytics-deploy-key-2`, then add the new public keys
+at your git host.
+
 ## What is refused, and why
 
 | Message names | Why, and what to do |
@@ -163,7 +179,7 @@ Add the new public keys at your git host, and test each environment.
 | a repository that is `https` or `local` | A deploy key is an SSH key. Register the SSH URL as a repository, or give the https repository a token secret ([Projects](projects.md#register-the-repository-admin)). |
 | no confirmed host keys | Confirm them first (above), then `lakana repo update NAME --known-hosts-file known_hosts`. |
 | a secret the repository already names | The repository has a credential you chose. Lakana does not replace it: clear it with `lakana repo update NAME --clear credential_secret` first. |
-| a secret of that name in an environment | The name is taken there by a secret Lakana did not make for this repository, by a revoked one, or by the environment's storage or a webhook. Pick another name with `--secret`. |
+| a secret of that name in an environment | The name is taken there by a secret Lakana did not make for this repository, by a revoked one, by a key made for a repository of the same name that was removed ([above](#remove-a-repository)), or by the environment's storage or a webhook. Pick another name with `lakana repo deploy-key NAME --secret OTHER-NAME`; the page has no field for it. |
 | `MANAGE_SECRET` | You may not manage secrets in any environment, or in one you named. Someone with the ADMIN role there makes the key. |
 | an environment left on the old key | A new `--secret` name has to reach every environment that has a key. Someone who manages secrets in that environment makes the keys. |
 

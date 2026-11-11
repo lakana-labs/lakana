@@ -66,7 +66,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -243,7 +243,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -345,7 +345,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -435,7 +435,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -536,7 +536,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -648,7 +648,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -740,7 +740,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -842,7 +842,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -945,7 +945,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1067,7 +1067,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1189,7 +1189,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1293,7 +1293,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1395,7 +1395,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1507,7 +1507,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1688,7 +1688,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1798,7 +1798,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1901,7 +1901,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2004,7 +2004,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2115,7 +2115,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2237,7 +2237,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2387,7 +2387,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2527,7 +2527,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2675,7 +2675,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2808,7 +2808,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2937,7 +2937,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3140,7 +3140,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3290,7 +3290,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3430,7 +3430,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3542,7 +3542,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3664,7 +3664,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3786,7 +3786,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3908,7 +3908,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4028,7 +4028,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4140,7 +4140,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4339,7 +4339,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4577,7 +4577,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4820,7 +4820,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5092,7 +5092,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5307,7 +5307,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5453,7 +5453,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5566,7 +5566,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5747,7 +5747,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5924,7 +5924,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6044,7 +6044,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6825,7 +6825,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7018,7 +7018,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7210,7 +7210,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7336,7 +7336,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7487,7 +7487,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7617,7 +7617,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7741,7 +7741,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7861,7 +7861,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7977,7 +7977,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8106,7 +8106,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8257,7 +8257,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8371,7 +8371,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8494,7 +8494,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8627,7 +8627,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8709,7 +8709,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8823,7 +8823,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8979,7 +8979,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9102,7 +9102,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9235,7 +9235,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9341,7 +9341,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9447,7 +9447,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9573,7 +9573,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9707,7 +9707,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9819,7 +9819,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9913,7 +9913,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10008,7 +10008,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10100,7 +10100,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10185,7 +10185,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10308,7 +10308,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10541,7 +10541,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10658,7 +10658,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10791,7 +10791,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10970,7 +10970,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11087,7 +11087,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11220,7 +11220,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11399,7 +11399,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11516,7 +11516,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11628,7 +11628,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11732,7 +11732,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11844,7 +11844,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11937,7 +11937,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12049,7 +12049,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12151,7 +12151,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12282,7 +12282,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12384,7 +12384,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12494,7 +12494,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12597,7 +12597,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12709,7 +12709,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12831,7 +12831,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12925,7 +12925,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13007,7 +13007,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13091,7 +13091,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13173,7 +13173,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13273,7 +13273,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13356,7 +13356,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13475,7 +13475,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13523,7 +13523,7 @@
           "repositories"
         ],
         "summary": "Queue a repository check; poll it with `GET /api/v1/repository-probes/{probe_id}`",
-        "description": "``host_keys`` fetches the SSH host keys of `url`'s host and port, for the person to compare with the git host's published fingerprints before trusting any. ``access`` runs `git ls-remote` for registered `repository` with `environment`'s credential and the repository's own known hosts. Needs `MANAGE_REPOSITORY` (and `READ_ENVIRONMENT` on the environment for ``access``). Answers 422 for a body without exactly its kind's fields or an unsafe URL, 404 for an unknown repository or environment, 409 while the caller has five checks waiting or running, and 503 when no worker that takes pipeline work is running. A check no worker takes within two minutes ends ``no_worker``.",
+        "description": "``host_keys`` fetches the SSH host keys of `url`'s host and port, for the person to compare with the git host's published fingerprints before trusting any. ``access`` runs `git ls-remote` for registered `repository` with `environment`'s credential and the repository's own known hosts. Needs `MANAGE_REPOSITORY` (and `READ_ENVIRONMENT` on the environment for ``access``). Answers 422 for a body without exactly its kind's fields or an unsafe URL, 404 for an unknown repository or environment, 409 while the caller has five checks waiting or running, and 503 when no worker that takes pipeline work is running. A check no worker takes within two minutes ends ``no_worker``; one a worker took ends at most 90 seconds later, so every check ends within three and a half minutes of its request.",
         "operationId": "request_repository_probe_api_v1_repository_probes_post",
         "parameters": [
           {
@@ -13577,7 +13577,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13771,7 +13771,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13855,7 +13855,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13937,7 +13937,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14037,7 +14037,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14130,7 +14130,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14232,7 +14232,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14375,7 +14375,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14478,7 +14478,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14574,7 +14574,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14686,7 +14686,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14786,7 +14786,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14881,7 +14881,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14994,7 +14994,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15086,7 +15086,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15188,7 +15188,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15407,7 +15407,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15570,7 +15570,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15683,7 +15683,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15790,7 +15790,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15903,7 +15903,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16054,7 +16054,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16157,7 +16157,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16270,7 +16270,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16412,7 +16412,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16526,7 +16526,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16648,7 +16648,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16782,7 +16782,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16906,7 +16906,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17030,7 +17030,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17144,7 +17144,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17257,7 +17257,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17339,7 +17339,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17415,7 +17415,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17625,7 +17625,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17748,7 +17748,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17842,7 +17842,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17924,7 +17924,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18007,7 +18007,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18139,7 +18139,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18264,7 +18264,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18398,7 +18398,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18532,7 +18532,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18641,7 +18641,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18723,7 +18723,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18815,7 +18815,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18907,7 +18907,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18991,7 +18991,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19133,7 +19133,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19330,7 +19330,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19402,7 +19402,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19494,7 +19494,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19576,7 +19576,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19750,7 +19750,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20118,7 +20118,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20202,7 +20202,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20288,7 +20288,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20390,7 +20390,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20486,7 +20486,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20572,7 +20572,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20678,7 +20678,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20761,7 +20761,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20867,7 +20867,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20977,7 +20977,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21069,7 +21069,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21165,7 +21165,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21317,7 +21317,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21525,7 +21525,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21617,7 +21617,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21705,7 +21705,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21790,7 +21790,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21828,7 +21828,7 @@
           "principals"
         ],
         "summary": "Set your profile picture",
-        "description": "Send the image file as the body, with its type as `Content-Type`: `image/jpeg`, `image/png` or `image/webp` (415 for any other, SVG included). At most 5 MB (413). The server keeps a new 256 x 256 picture cut from the centre and turned upright, with none of the file's metadata (location, camera); 422 when the file is not a readable image of the type sent. Only your own (403 for another name, and for a task or CI token). One upload of yours at a time, and a few in all per server: otherwise 503, try again after `Retry-After`. Audited.",
+        "description": "Send the image file as the body, with its type as `Content-Type`: `image/jpeg`, `image/png` or `image/webp` (415 for any other, SVG included). At most 5 MB (413) and 40 megapixels (422). The server keeps a new 256 x 256 picture cut from the centre and turned upright, with none of the file's metadata (location, camera); 422 when the file is not a readable image of the type sent. Only your own (403 for another name, and for a task or CI token). One upload of yours at a time, and a few in all per server: otherwise 503, try again after `Retry-After`. Audited.",
         "operationId": "set_picture_api_v1_principals__name__picture_put",
         "parameters": [
           {
@@ -21884,7 +21884,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22022,7 +22022,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22110,7 +22110,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22192,7 +22192,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22264,7 +22264,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22336,7 +22336,7 @@
             }
           },
           "403": {
-            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {

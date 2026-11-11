@@ -158,7 +158,10 @@ sequence, so it can forge a log record or recolour a terminal.
   integrity inside a line; uvicorn passes a request's query string raw into its quoted request
   line, so a client can still write text that looks like a field there. With
   `LAKANA_DATABASE__ECHO=true` SQLAlchemy adds a handler of its own; `lakana_core.db.create_engine`
-  gives it the same formatter.
+  gives it the same formatter. The engine has `hide_parameters=True`, so neither the echo nor
+  the text of a `StatementError` (an `IntegrityError`, an `OperationalError`) ever carries bound
+  values such as a secret's ciphertext, nonce or wrapped key; a debugging session sees the
+  statement without its parameters (pin: `test_the_echo_and_statement_errors_never_show_parameters`).
 - **CLI** (`lakana.cli._output`): `inline` makes one name safe for a line; `done` and `emit` of a
   plain string pass the whole text through `safe_text`, which escapes every control character and
   keeps the lines. Escaping is idempotent, so `done(state, f"Deleted {inline(name)}")` is escaped
@@ -1132,7 +1135,10 @@ decoders, so the decode is fenced in and what is stored is never the upload.
   and the `Content-Type` first (`check_can_set`; `415 Use a JPEG, PNG or WebP image. SVG and other
   formats are refused.`), refuses a declared `Content-Length` over 5 MiB, then reads the stream and
   stops at 5 MiB + 1 byte (`413 The picture is larger than 5 MB. Choose a smaller image or crop it
-  first.`), within the append read timeout. Nothing beyond 5 MiB is ever buffered (pin:
+  first.`), within 120 s (`PICTURE_READ_TIMEOUT_SECONDS`) or the shorter append read timeout, so
+  two slow uploaders hold both slots for at most two minutes of reading (pin:
+  `test_a_picture_has_its_own_shorter_deadline_than_an_append`). Nothing beyond 5 MiB is ever
+  buffered (pin:
   `test_over_five_megabytes_is_refused_naming_the_limit`, chunked and declared).
 - **Two at a time, refused rather than queued.** Before the body is read the route takes one of
   `PICTURE_DECODE_SLOTS` (2) per process and the caller's place (one upload per person), as the
@@ -1148,11 +1154,11 @@ decoders, so the decode is fenced in and what is stored is never the upload.
   opened with `Image.open(..., formats=[the one format the media type names])`: the content decides,
   never a filename, and an SVG, HTML or GIF sent as `image/png` is `422` (pins:
   `test_an_svg_named_as_a_png_is_refused`, `test_bytes_that_are_not_the_declared_type_are_refused`).
-  The declared width x height is checked against 40 megapixels on the header, before any decode
-  (pin: `test_a_huge_declared_size_is_refused_by_lakanas_own_check_without_decoding`, `load` never
+  The declared width x height is checked against 40 megapixels on the header, before any decode,
+  with its own `422` naming the limit and to scale the picture down (pin: `test_a_huge_declared_size_is_refused_by_lakanas_own_check_without_decoding`, `load` never
   called). Nothing process-wide is changed: Pillow's `MAX_IMAGE_PIXELS` stays at its default
   (about 89 million pixels), and a local `warnings.catch_warnings()` turns its
-  `DecompressionBombWarning` into the same refusal (pins: `test_a_decompression_bomb_is_refused`,
+  `DecompressionBombWarning` into that same pixel refusal, as its bomb error (pins: `test_a_decompression_bomb_is_refused`,
   `test_pillows_bomb_warning_is_the_same_refusal`,
   `test_importing_pictures_changes_no_process_wide_pillow_or_warning_setting`). A JPEG is decoded
   at a reduced scale (`draft`). The picture is converted to RGB, or RGBA with transparency, before
@@ -1162,8 +1168,7 @@ decoders, so the decode is fenced in and what is stored is never the upload.
   at 4 bytes a pixel), about 320 MB with transparency (`reduce` premultiplies RGBA in a second
   full copy); 640 MB for both slots at worst. Only the first
   frame of an animation is read. `LOAD_TRUNCATED_IMAGES` stays false: a truncated file is `422`.
-  Every Pillow failure (`OSError`, `ValueError`, `EOFError`, `SyntaxError`, `struct.error`, the bomb
-  error and warning) is one `422` naming the formats and the next step; a fuzz pin flips bytes of a
+  Every Pillow failure (`OSError`, `ValueError`, `EOFError`, `SyntaxError`, `struct.error`) is one `422` naming the formats and the next step; a fuzz pin flips bytes of a
   PNG and asserts nothing else escapes (`test_garbage_and_flipped_bytes_never_escape_as_another_error`).
 - **Re-encoding is the metadata strip.** The EXIF orientation is applied (`ImageOps.exif_transpose`),
   the square cut from the centre (`ImageOps.fit`, 256 x 256), and the pixels copied into a new
@@ -6434,12 +6439,16 @@ answers them. Each line below is pinned by a test in `packages/lakana-core/tests
   never resolves or connects. A request is refused with `NoWorkerError` (503, naming
   `docker compose up -d worker` and `lakana server start --local`) while no worker that takes
   `all` or `pipeline` work is alive, and the loop runs only on such workers.
-- **The host-key scan reaches the address it checked (T3).** `scan_host_keys` resolves the name
+- **The host-key scan reaches only addresses it checked (T3).** `scan_host_keys` resolves the name
   once; any address that `is_never_reachable` (loopback, link-local and metadata, multicast,
   reserved, IPv4 inside IPv6) refuses the probe as `refused_address` before `ssh-keyscan` runs.
-  Otherwise `ssh-keyscan -T 5 -p PORT -t ed25519,ecdsa,rsa -- ADDRESS` runs on the first checked
-  address with an argv list, no shell, `stdin` closed, an environment of `PATH` and `LC_ALL`
-  only, and a 25 s limit.
+  Otherwise `ssh-keyscan -T 5 -p PORT -t ed25519,ecdsa,rsa -- ADDRESS` runs on each checked
+  address in turn (duplicates once, the name never resolved again) until one offers a key, so a
+  dual-stack host answers at its IPv4 address on a worker with no IPv6 route; an argv list, no
+  shell, `stdin` closed, an environment of `PATH` and `LC_ALL` only, and one 25 s limit over
+  every address (pins: `test_every_address_is_checked_before_any_is_scanned`,
+  `test_a_dual_stack_host_is_scanned_at_its_next_address_without_resolving_again`,
+  `test_the_addresses_share_one_time_budget`).
 - **The access check refuses never-reachable names too (T3, M5),** before git runs, then runs
   `git ls-remote --heads --tags --end-of-options origin` through `_prepared`, the same
   environment, protocol allow-list, `core.sshCommand` (`StrictHostKeyChecking=yes` against the

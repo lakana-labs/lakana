@@ -47,7 +47,9 @@ Without a picture, a circle with your initials stands beside your name: at the b
 menu on the left, and in **Access** for administrators. To set one:
 
 1. Select your name at the bottom of the menu and choose **Profile picture…**.
-2. **Choose a picture**: a JPEG, PNG or WebP image of up to 5 MB.
+2. **Choose a picture**: a JPEG, PNG or WebP image of up to 5 MB and 40 megapixels (for example
+   7000 by 5000 pixels). A larger picture is refused with the limit; scale it down and choose it
+   again.
 
 The picture shows at once. Lakana keeps a square cut from the centre, 256 by 256 pixels, and
 removes the file's details, such as where a photo was taken or the camera it came from; only the
@@ -56,6 +58,8 @@ pixels are stored. Everyone with access to the instance sees it beside your name
 - Another kind of file (an SVG, a GIF) or a larger one is refused before it is sent, with what
   to choose instead.
 - "The server is busy with other picture uploads": choose **Try again** in a moment.
+- A picture chosen while the previous one is still being sent is not sent; the window says so.
+  Choose it again once the first is saved.
 - **Remove picture** in the same window brings your initials back.
 
 An administrator can remove anyone's picture, for example an unsuitable one: **Access** → the
@@ -89,8 +93,9 @@ The order is the same for everyone; what you may do changes what is inside the b
    workers that are down. Everyone else sees failed checks and late tables among the tables they
    read or opened recently, and their own failed queries. With nothing to report it says
    "Nothing needs your attention."
-5. **Recently opened**: the tables, queries, jobs and runs you opened. The list is kept on the
-   server, so it follows you to another browser.
+5. **Recently opened**: the tables, queries, jobs and runs you opened, kept on the server so the
+   list follows you to another browser. It fills once the Catalog, Queries and Jobs pages arrive
+   in a later release; until then it stays empty.
 6. **Your work**, only if you may deploy: your jobs with their last run, and the repositories
    you connected or deployed with the last deploy in each environment.
 

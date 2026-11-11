@@ -269,7 +269,9 @@ secret goes.
   outside the roots, so never put repositories you did not create under one.
 
 `lakana repo remove NAME --yes` deletes a repository and its deploy history, but only while no
-environment has a current deployment from it: undeploy it there first.
+environment has a current deployment from it: undeploy it there first. Deploy keys Lakana made
+for it stay valid until you remove them at the git host and revoke their secrets
+([Connect a repository](connect-a-repository.md#remove-a-repository)).
 
 ### Test access
 
