@@ -1704,6 +1704,9 @@ def test_0022_adds_workers_the_worker_ids_and_the_status_index_and_downgrades_cl
             "cache_tasks_bytes",
             "cache_complete",
             "cache_measured_at",
+            "memory_used_bytes",
+            "memory_limit_bytes",
+            "memory_measured_at",
         }
         for table in ("query_runs", "deploy_runs"):
             column = {c["name"]: c for c in inspect(engine).get_columns(table)}["worker_id"]
