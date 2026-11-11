@@ -89,6 +89,8 @@ interface RepositoryOut {
   readonly kind: string;
   /** Its URL. */
   readonly url: string;
+  /** The host keys it trusts, as known_hosts lines; null without any. */
+  readonly ssh_known_hosts: string | null;
 }
 
 /**
@@ -170,7 +172,12 @@ export async function getRepository(name: string): Promise<RepositoryOut> {
     "GET",
     `/api/v1/repositories/${encodeURIComponent(name)}`,
   );
-  return { name: repository.name, kind: repository.kind, url: repository.url };
+  return {
+    name: repository.name,
+    kind: repository.kind,
+    url: repository.url,
+    ssh_known_hosts: repository.ssh_known_hosts,
+  };
 }
 
 /**

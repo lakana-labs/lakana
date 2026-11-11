@@ -503,9 +503,38 @@ function TestAccess({ name, environment, host, headingRef }: TestAccessProps): J
 }
 
 /**
- * Registers the repository. When the name is taken by this very repository (the answer of an
- * earlier try was lost), that counts as registered; when another repository has it, the
- * refusal names the next step.
+ * The known_hosts lines of a text as a set: blank lines dropped, spaces collapsed.
+ *
+ * @param text - known_hosts lines, or null.
+ * @returns The lines.
+ */
+function lineSet(text: string | null): ReadonlySet<string> {
+  return new Set(
+    (text ?? "")
+      .split("\n")
+      .map((line) => line.trim().split(/\s+/).join(" "))
+      .filter((line) => line !== ""),
+  );
+}
+
+/**
+ * Whether two texts hold the same known_hosts lines, in any order and spacing.
+ *
+ * @param stored - The lines a repository trusts, or null.
+ * @param ticked - The lines ticked on this page.
+ * @returns True for the same set of lines.
+ */
+function sameLines(stored: string | null, ticked: string): boolean {
+  const a = lineSet(stored);
+  const b = lineSet(ticked);
+  return a.size === b.size && [...a].every((line) => b.has(line));
+}
+
+/**
+ * Registers the repository. When the name is taken by this very repository, with the same
+ * address and exactly the host keys ticked here (the answer of an earlier try was lost), that
+ * counts as registered; with other host keys, or when another repository has the name, the
+ * refusal names the cause and the next step.
  *
  * @param t - The translation function.
  * @param body - The repository.
@@ -525,7 +554,18 @@ async function register(
     }
     const existing = await getRepository(body.name).catch(() => null);
     if (existing?.kind === "ssh" && existing.url === body.url) {
-      return true;
+      if (sameLines(existing.ssh_known_hosts, body.ssh_known_hosts)) {
+        return true;
+      }
+      const name = shellQuote(body.name);
+      throw new ApiError(
+        error.status,
+        error.type,
+        t("settings.connect.create.otherKeys", {
+          show: `lakana repo show ${name}`,
+          update: `lakana repo update ${name} --known-hosts-file known_hosts`,
+        }),
+      );
     }
     throw new ApiError(
       error.status,

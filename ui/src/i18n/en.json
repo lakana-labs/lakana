@@ -487,6 +487,7 @@
         "retry": "Make the keys",
         "done": "Made keys for {{environments}}. Add each one at your Git host, then test access below.",
         "already": "{{name}} was already registered with this URL, so Lakana went on to its keys.",
+        "otherKeys": "A repository with this address is already registered with other host keys. Check them with {{show}}; if the keys ticked here are the right ones, write them to a file and run {{update}}.",
         "taken": "A repository named {{name}} already exists with another URL. Choose another name above.",
         "add": "Add each key as a read-only deploy key at your Git host.",
         "page": "Open {{host}}'s deploy-key page",

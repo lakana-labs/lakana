@@ -489,7 +489,14 @@ describe("ConnectRepository", () => {
         },
         "GET /api/v1/repositories/analytics": {
           status: 200,
-          body: { name: "analytics", kind: "ssh", url: SSH_URL, deploy_keys: [] },
+          body: {
+            name: "analytics",
+            kind: "ssh",
+            url: SSH_URL,
+            // The same line, written down differently: spaces and blank lines do not count.
+            ssh_known_hosts: `\n  ${ED25519.line.replaceAll(" ", "  ")}  \n\n`,
+            deploy_keys: [],
+          },
         },
       }),
     );
@@ -503,6 +510,47 @@ describe("ConnectRepository", () => {
       "/api/v1/repositories",
       "/api/v1/repositories/analytics/deploy-key",
     ]);
+  });
+
+  it.each([
+    ["other host keys", `${ED25519.line}\n${RSA.line}\n`],
+    ["no host keys", null],
+  ])("stays when the same address is registered with %s", async (_, stored) => {
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repositories": {
+          status: 409,
+          body: {
+            type: "AlreadyExistsError",
+            detail: "A repository named 'analytics' already exists.",
+          },
+        },
+        "GET /api/v1/repositories/analytics": {
+          status: 200,
+          body: {
+            name: "analytics",
+            kind: "ssh",
+            url: SSH_URL,
+            ssh_known_hosts: stored,
+            deploy_keys: [],
+          },
+        },
+      }),
+    );
+    await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await shell.user.click(ui.create());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "A repository with this address is already registered with other host keys.",
+    );
+    expect(alert).toHaveTextContent("lakana repo show 'analytics'");
+    expect(alert).toHaveTextContent(
+      "lakana repo update 'analytics' --known-hosts-file known_hosts",
+    );
+    expect(screen.queryByText(/its keys are not made yet/)).not.toBeInTheDocument();
+    expect(ui.create()).toBeEnabled();
+    expect(posts(shell)).not.toContain("/api/v1/repositories/analytics/deploy-key");
   });
 
   it("names the next step when the name is taken by another repository", async () => {

@@ -36,9 +36,11 @@ before it is done.
    earlier*), links the host's deploy-key page, and names the environments it could not write.
    Add each key as a read-only deploy key at your git host (below). If the repository was
    registered but its keys could not be made, the page says so with the cause; **Make the keys**
-   tries only the keys again. If the repository was already registered with the same URL (an
-   earlier try whose answer was lost), the page says so and goes on to the keys; if another
-   repository has the name, choose another name.
+   tries only the keys again. If the repository was already registered with the same URL and
+   exactly the host keys you ticked (an earlier try whose answer was lost), the page says so
+   and goes on to the keys. With other host keys it stops and names `lakana repo show NAME`
+   to check them and `lakana repo update NAME --known-hosts-file known_hosts` to change them;
+   if another repository has the name, choose another name.
 4. **Test access.** **Test access in** *environment* lets a worker read the repository with the
    key of the first environment written. It answers with the outcome and what to do about it;
    on success it shows the command to deploy and, for GitHub and GitLab, the CI how-to.
