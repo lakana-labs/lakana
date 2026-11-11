@@ -6433,7 +6433,7 @@ pins each line.
 ("Test access") are rows of `repository_probes` that a worker runs
 (`lakana_core.projects.probes`, `lakana_worker.repository_probes`); the server only queues and
 answers them. Each line below is pinned by a test in `packages/lakana-core/tests/test_repository_probes.py`,
-`packages/lakana-worker/tests/test_repository_probes.py` or `test_git_access.py`.
+`packages/lakana-worker/tests/test_worker_repository_probes.py` or `test_git_access.py`.
 
 - **No request from the server (T3).** `RepositoryProbeService` writes a row and reads it back; it
   never resolves or connects. A request is refused with `NoWorkerError` (503, naming
