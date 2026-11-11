@@ -211,6 +211,7 @@
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
 "DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
+"DELETE /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7 }
 "DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1 }
@@ -301,6 +302,7 @@
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions":
   { class: ui, part: 7, note: "1b asks it whether a person is an administrator (recovery links)" }
+"GET /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/recent": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
@@ -438,3 +440,4 @@
 "PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
 "PUT /api/v1/environments/{name}/retention": { class: ui, part: 8 }
 "PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
+"PUT /api/v1/principals/{name}/picture": { class: ui, part: 2 }

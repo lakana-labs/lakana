@@ -357,6 +357,17 @@ package downloads when it runs. Before a dependency with compiled code lands:
 4. Record the result in the pull request. An `ALLOWLIST` entry for such a dependency names the
    bundled library and its licence in its comment.
 
+Pillow 13.0.0 (MIT-CMU; `lakana-core`, profile pictures) is the worked example. Its manylinux
+wheel's `pillow.libs/` holds libjpeg-turbo (IJG, BSD-3-Clause), libpng (libpng-2.0), libwebp
+with sharpyuv, demux and mux (BSD-3-Clause), libtiff (libtiff), FreeType (FTL, the option it offers beside
+GPL-2.0), HarfBuzz (MIT), Little CMS (MIT), OpenJPEG (BSD-2-Clause), libavif (BSD-2-Clause, with
+dav1d and aom linked in, both BSD-2-Clause), brotli (MIT), xz (0BSD), zstd (BSD-3-Clause), libxcb
+and libXau (X11); zlib comes from the system (manylinux) or as zlib-ng (Zlib) on macOS. The
+wheel's SBOM (`.dist-info/sboms/`) also names FriBiDi (LGPL-2.1) and libimagequant (GPL-3.0):
+neither is in the wheel. Pillow loads FriBiDi only from the system, for text layout Lakana
+never uses (the server image has none), and its wheels are built without libimagequant
+(`PIL.features.check("libimagequant")` is false). All permissive: no `ALLOWLIST` entry.
+
 ## Paginated list endpoints
 
 A list endpoint that can grow with ordinary traffic returns `{"items": [...],

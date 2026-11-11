@@ -18706,7 +18706,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment: the web interface shows the administration areas, tells a new person to ask for access, and shows the deploy steps of Home from these three.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment: the web interface shows the administration areas, tells a new person to ask for access, and shows the deploy steps of Home from these three. `picture` is the etag of your profile picture, or `null` without one.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -21509,6 +21509,316 @@
         }
       }
     },
+    "/api/v1/principals/{name}/picture": {
+      "put": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Set your profile picture",
+        "description": "Send the image file as the body, with its type as `Content-Type`: `image/jpeg`, `image/png` or `image/webp` (415 for any other, SVG included). At most 5 MB (413). The server keeps a new 256 x 256 picture cut from the centre and turned upright, with none of the file's metadata (location, camera); 422 when the file is not a readable image of the type sent. Only your own (403 for another name, and for a task or CI token). Audited.",
+        "operationId": "set_picture_api_v1_principals__name__picture_put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "Your principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PictureOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The client closed the connection before the request body arrived in full.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "No part of the request body arrived within the read timeout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The request body is of a type the server does not accept; the message names the ones it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Show a person's profile picture",
+        "description": "Your own always; anyone's once you have access (any grant, or the `ADMIN` role); 403 for a person without access yet, and for a task or CI token. 404 when the person has no picture. The answer carries an `ETag` (the `picture` field of the principal and of whoami) and is cached privately for a day; send `If-None-Match` for a 304.",
+        "operationId": "get_picture_api_v1_principals__name__picture_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "The person's principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The picture, a 256 x 256 WebP.",
+            "content": {
+              "image/webp": {}
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The picture is still the one `If-None-Match` names."
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Remove a profile picture",
+        "description": "Your own, or anyone's with `MANAGE_PRINCIPAL` on the instance (an administrator removing an unsuitable picture); 403 otherwise, and for a task or CI token. 404 when no principal has that name; removing a picture that is not there answers 204. Audited.",
+        "operationId": "remove_picture_api_v1_principals__name__picture_delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Name"
+            },
+            "description": "The person's principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/home/get-started": {
       "get": {
         "tags": [
@@ -23082,7 +23392,9 @@
           "SIGN_IN_LINK_USED",
           "PASSKEY_ADDED",
           "PASSKEY_REMOVED",
-          "PASSKEY_DISABLED"
+          "PASSKEY_DISABLED",
+          "PROFILE_PICTURE_SET",
+          "PROFILE_PICTURE_REMOVED"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."
@@ -28162,6 +28474,20 @@
         "title": "PermissionsOut",
         "description": "A principal's effective permissions on one object.\n\nParameters\n----------\nprincipal\n    The principal's name.\nactive\n    Whether it may sign in.\nscope\n    The object asked about.\npermissions\n    One per action the routes ask for on an object of this kind.\nnote\n    Set for a deactivated principal: its tokens no longer work, whatever its grants allow."
       },
+      "PictureOut": {
+        "properties": {
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "etag"
+        ],
+        "title": "PictureOut",
+        "description": "Response body for `PUT /api/v1/principals/{name}/picture`.\n\nParameters\n----------\netag\n    The stored picture's etag: the SHA-256 of the re-encoded WebP, in hex."
+      },
       "PolicyWarningOut": {
         "properties": {
           "kind": {
@@ -28233,6 +28559,17 @@
           "is_active": {
             "type": "boolean",
             "title": "Is Active"
+          },
+          "picture": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picture"
           }
         },
         "type": "object",
@@ -28242,7 +28579,7 @@
           "is_active"
         ],
         "title": "PrincipalOut",
-        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate."
+        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does."
       },
       "ProfileIn": {
         "properties": {
@@ -32360,6 +32697,17 @@
             "type": "boolean",
             "title": "May Deploy",
             "default": false
+          },
+          "picture": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picture"
           }
         },
         "type": "object",
@@ -32369,7 +32717,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\npicture\n    The etag of your profile picture, or `null` without one."
       },
       "WorkEnvironmentOut": {
         "properties": {

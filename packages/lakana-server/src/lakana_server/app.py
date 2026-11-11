@@ -49,6 +49,8 @@ from lakana_server.api.platform.jobs import router as jobs_router
 from lakana_server.api.platform.namespaces import router as namespaces_router
 from lakana_server.api.platform.package_indexes import router as package_indexes_router
 from lakana_server.api.platform.passkeys import router as passkeys_router
+from lakana_server.api.platform.pictures import PICTURE_DECODE_SLOTS
+from lakana_server.api.platform.pictures import router as pictures_router
 from lakana_server.api.platform.principals import router as principals_router
 from lakana_server.api.platform.queries import router as queries_router
 from lakana_server.api.platform.recovery_links import links_router as recovery_links_router
@@ -134,6 +136,7 @@ ROUTERS = (
     info_router,
     status_router,
     interface_state_router,
+    pictures_router,
     home_router,
 )
 """Every router the application includes, in the order they are included."""
@@ -224,6 +227,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.manifest_decode_slots = asyncio.Semaphore(MANIFEST_DECODE_SLOTS)
         app.state.manifest_principals = set()
+        app.state.picture_decode_slots = asyncio.Semaphore(PICTURE_DECODE_SLOTS)
         app.state.download_slots = AppendConcurrencyLimiter(MAX_CONCURRENT_DOWNLOADS)
         readiness = resolved_settings.readiness
         app.state.readiness = ReadinessCheck(

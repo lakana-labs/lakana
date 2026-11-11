@@ -1104,6 +1104,62 @@ dotted table name, a query's id, a link's id or a worker's id, so a row never po
 reader cannot open. Each source reads at most 200 rows, newest first; the merged list is cut at 50
 (`truncated`), Your work at 20 repositories and 20 jobs.
 
+## Profile pictures (M7 part 2)
+
+`PUT/GET/DELETE /api/v1/principals/{name}/picture` (`lakana_core.identity.pictures`,
+`lakana_server.api.platform.pictures`). An upload is untrusted bytes handed to Pillow's native
+decoders, so the decode is fenced in and what is stored is never the upload.
+
+- **Who.** Setting is self only (`require_self`: `403 You can only read and change your own
+  profile picture.` for another name). Removing: one's own, or anyone's with `MANAGE_PRINCIPAL` on
+  the instance (`authorize`, so a refusal is audited as any denial). Reading: one's own always;
+  another person's for a caller with any grant (`GrantService.has_any_grant`) or `ADMIN`; anyone
+  else `403 Pictures are shown to people who have access.` (not audited: the caller asked about
+  nothing they may not know). A missing person and a person without a picture are the same `404`.
+  A task or CI token is `403` on all three (`refuse_tokens`), as on the other per-person routes.
+  No step-up: a picture grants and removes no access (`NO_STEP_UP`). Audited:
+  `PROFILE_PICTURE_SET` (`principal`), `PROFILE_PICTURE_REMOVED` (`principal`, and `by` when an
+  administrator removed another person's; both shown fields); a removal of nothing records nothing.
+  Pins: `test_set_is_self_only`, `test_get_is_for_people_with_access`,
+  `test_admin_may_remove_anothers_picture_and_it_is_audited`, `test_a_task_token_may_not_read_a_picture`.
+- **Before a byte is read.** The route is `async` and `@streams_its_own_body`: it checks the caller
+  and the `Content-Type` first (`check_can_set`; `415 Use a JPEG, PNG or WebP image. SVG and other
+  formats are refused.`), refuses a declared `Content-Length` over 5 MiB, then reads the stream and
+  stops at 5 MiB + 1 byte (`413 The picture is larger than 5 MB. Choose a smaller image or crop it
+  first.`), within the append read timeout. Nothing beyond 5 MiB is ever buffered (pin:
+  `test_over_five_megabytes_is_refused_naming_the_limit`, chunked and declared).
+- **The decode.** In the threadpool (`run_in_threadpool`), at most `PICTURE_DECODE_SLOTS` (2) at once
+  per process (an `asyncio.Semaphore`; a further upload waits, its body already read). The bytes are
+  opened with `Image.open(..., formats=[the one format the media type names])`: the content decides,
+  never a filename, and an SVG, HTML or GIF sent as `image/png` is `422` (pins:
+  `test_an_svg_named_as_a_png_is_refused`, `test_bytes_that_are_not_the_declared_type_are_refused`).
+  The declared width x height is checked against 40 megapixels before any decode (pin:
+  `test_too_many_pixels_are_refused_before_decoding`, `load` never called); Pillow's own
+  `MAX_IMAGE_PIXELS` is set to the same limit and `DecompressionBombWarning` is an error filter, so
+  Pillow refuses on its own above it too (pin: `test_a_decompression_bomb_is_refused`). A JPEG is
+  decoded at a reduced scale (`draft`), a large image reduced by a whole factor before it is turned,
+  so at most one full-size copy is in memory (40 MP RGBA: about 160 MB per slot). Only the first
+  frame of an animation is read. `LOAD_TRUNCATED_IMAGES` stays false: a truncated file is `422`.
+  Every Pillow failure (`OSError`, `ValueError`, `EOFError`, `SyntaxError`, `struct.error`, the bomb
+  error and warning) is one `422` naming the formats and the next step; a fuzz pin flips bytes of a
+  PNG and asserts nothing else escapes (`test_garbage_and_flipped_bytes_never_escape_as_another_error`).
+- **Re-encoding is the metadata strip.** The EXIF orientation is applied (`ImageOps.exif_transpose`),
+  the square cut from the centre (`ImageOps.fit`, 256 x 256), and the pixels copied into a new
+  image (`Image.frombytes`) before saving as WebP quality 85: `convert`, `resize` and `fit` carry the
+  upload's `info` (EXIF with GPS, XMP, ICC profile, comments) along, and the WebP writer would save
+  some of it. No EXIF, XMP, ICC, comment, trailing bytes or second frame survives (pins:
+  `test_exif_orientation_applied_and_metadata_gone`, `test_a_polyglot_keeps_nothing_but_pixels`,
+  `test_only_the_first_frame_of_an_animation_is_kept`). The etag is the SHA-256 of the stored WebP.
+- **Serving.** Only the stored WebP, as `image/webp`, with `ETag`, `Cache-Control: private,
+  max-age=86400`, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src
+  'none'; sandbox` (inert if opened as a document), on the 304 for `If-None-Match` too (pin:
+  `test_picture_response_headers_and_304`). Reads need the caller's credential and, from a browser,
+  the CSRF header, so the interface fetches the picture and shows it as a `blob:` URL.
+- **Residual.** Pillow's decoders (libjpeg-turbo, libpng/zlib, libwebp) are native code: a memory
+  bug in one is reachable by any signed-in person. The format allow-list keeps every other decoder
+  (TIFF, JPEG 2000, AVIF, PSD...) unreachable, and Dependabot keeps Pillow current. Colours of a
+  wide-gamut (Display P3) photo shift slightly, as the ICC profile is dropped, not converted.
+
 ## Jobs: who may start, pause and resume (M5d-b)
 
 A job is a named selection in the manifest; starting one is starting a run, so it has the run's

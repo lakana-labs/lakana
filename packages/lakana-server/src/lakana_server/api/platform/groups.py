@@ -6,11 +6,18 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.identity.groups import GroupService
+from lakana_core.identity.pictures import PictureService
 from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.principals import principals_out
 from lakana_server.api.platform.schemas import GroupCreate, GroupOut, PrincipalOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_group_service, get_managed_write_principal, get_principal
+from lakana_server.deps import (
+    get_group_service,
+    get_managed_write_principal,
+    get_picture_service,
+    get_principal,
+)
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -137,6 +144,7 @@ def list_members(
     name: str,
     principal: PrincipalRef = Depends(get_principal),
     service: GroupService = Depends(get_group_service),
+    pictures: PictureService = Depends(get_picture_service),
 ) -> list[PrincipalOut]:
     """List the members of a group.
 
@@ -150,6 +158,8 @@ def list_members(
         The authenticated caller.
     service
         The group service for this request.
+    pictures
+        The picture service, for each member's picture etag.
 
     Returns
     -------
@@ -161,7 +171,7 @@ def list_members(
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
     """
-    return [PrincipalOut.model_validate(row) for row in service.list_members(principal, name)]
+    return principals_out(service.list_members(principal, name), pictures)
 
 
 @router.put("/{name}/members/{principal_name}", status_code=204, responses=errors(403, 404, 409))

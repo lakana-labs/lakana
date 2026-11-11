@@ -1639,13 +1639,29 @@ class PrincipalOut(BaseModel):
         Whether this is a human user or a service account.
     is_active
         Whether this principal can currently authenticate.
+    picture
+        The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),
+        or `null` without one; it changes whenever the picture does.
     """
 
     name: str
     type: str
     is_active: bool
+    picture: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class PictureOut(BaseModel):
+    """Response body for `PUT /api/v1/principals/{name}/picture`.
+
+    Parameters
+    ----------
+    etag
+        The stored picture's etag: the SHA-256 of the re-encoded WebP, in hex.
+    """
+
+    etag: str
 
 
 class GroupCreate(BaseModel):
@@ -2365,6 +2381,8 @@ class WhoamiOut(BaseModel):
     may_deploy
         Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role
         or a group); the web interface shows the deploy steps and Your work from it.
+    picture
+        The etag of your profile picture, or `null` without one.
     """
 
     name: str
@@ -2375,6 +2393,7 @@ class WhoamiOut(BaseModel):
     admin: bool = False
     has_access: bool = False
     may_deploy: bool = False
+    picture: str | None = None
 
 
 class ProfileIn(BaseModel):

@@ -40,8 +40,8 @@ def test_list_members_returns_principals_sorted_by_name(client: TestClient) -> N
 
     assert response.status_code == 200, response.text
     assert response.json() == [
-        {"name": "alice", "type": "USER", "is_active": True},
-        {"name": "bob", "type": "USER", "is_active": True},
+        {"name": "alice", "type": "USER", "is_active": True, "picture": None},
+        {"name": "bob", "type": "USER", "is_active": True, "picture": None},
     ]
 
 

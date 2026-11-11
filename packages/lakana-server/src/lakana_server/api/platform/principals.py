@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from fastapi import APIRouter, Depends, Query, Response
 
 from lakana_core.auth import PrincipalRef, Securable
 from lakana_core.grants.service import GrantService, scope_filter
+from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
-from lakana_core.models import PrincipalType
+from lakana_core.models import Principal, PrincipalType
 from lakana_server.api.platform.grants import permissions_out
 from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import PermissionsOut, PrincipalCreate, PrincipalOut
@@ -16,6 +19,7 @@ from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import (
     get_grant_service,
     get_managed_write_principal,
+    get_picture_service,
     get_principal,
     get_principal_service,
 )
@@ -26,6 +30,29 @@ router = APIRouter(
     tags=["principals"],
     responses=errors(401),
 )
+
+
+def principals_out(rows: Iterable[Principal], pictures: PictureService) -> list[PrincipalOut]:
+    """Describe principals, each with its picture's etag, read in one statement.
+
+    Parameters
+    ----------
+    rows
+        The principals, already authorized for the caller.
+    pictures
+        The picture service, asked for the etags.
+
+    Returns
+    -------
+    list of PrincipalOut
+        One body per principal, in order.
+    """
+    found = list(rows)
+    etags = pictures.etags_of(row.id for row in found)
+    return [
+        PrincipalOut.model_validate(row).model_copy(update={"picture": etags.get(row.id)})
+        for row in found
+    ]
 
 
 @router.post("", response_model=PrincipalOut, status_code=201, responses=errors(403, 409))
@@ -74,6 +101,7 @@ def get_principal_by_name(
     name: str,
     principal: PrincipalRef = Depends(get_principal),
     service: PrincipalService = Depends(get_principal_service),
+    pictures: PictureService = Depends(get_picture_service),
 ) -> PrincipalOut:
     """Show a principal.
 
@@ -88,6 +116,8 @@ def get_principal_by_name(
         The authenticated caller.
     service
         The principal service for this request.
+    pictures
+        The picture service, for the principal's picture etag.
 
     Returns
     -------
@@ -99,7 +129,7 @@ def get_principal_by_name(
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
     """
-    return PrincipalOut.model_validate(service.get_principal_by_name(principal, name))
+    return principals_out([service.get_principal_by_name(principal, name)], pictures)[0]
 
 
 @router.get("/{name}/permissions", response_model=PermissionsOut, responses=errors(403, 404))
@@ -158,6 +188,7 @@ def list_principals(
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: PrincipalService = Depends(get_principal_service),
+    pictures: PictureService = Depends(get_picture_service),
 ) -> list[PrincipalOut]:
     """List principals.
 
@@ -179,6 +210,8 @@ def list_principals(
         The authenticated caller.
     service
         The principal service for this request.
+    pictures
+        The picture service, for each principal's picture etag.
 
     Returns
     -------
@@ -187,7 +220,7 @@ def list_principals(
     """
     page = service.list_principals(principal, q=q, limit=limit, cursor=cursor)
     set_next_cursor(response, page.next_cursor)
-    return [PrincipalOut.model_validate(row) for row in page.items]
+    return principals_out(page.items, pictures)
 
 
 @router.delete("/{name}", status_code=204, responses=errors(403, 404, 409))

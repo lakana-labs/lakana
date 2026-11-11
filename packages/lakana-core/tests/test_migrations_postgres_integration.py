@@ -3418,3 +3418,22 @@ def test_0072_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0071
         assert not wanted & set(sqlalchemy.inspect(engine).get_table_names())
         engine.dispose()
+
+
+def test_0073_on_postgres() -> None:
+    """0073 creates the profile pictures table, and the downgrade drops it."""
+    revision_0072 = "c109929efd3f"
+    revision_0073 = "d4a7e2b9c613"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0072)
+        engine = sqlalchemy.create_engine(url)
+
+        migrate.upgrade(url, revision_0073)
+        assert _alembic_version(engine) == revision_0073
+        assert "profile_pictures" in sqlalchemy.inspect(engine).get_table_names()
+
+        migrate.downgrade(url, revision_0072)
+        assert _alembic_version(engine) == revision_0072
+        assert "profile_pictures" not in sqlalchemy.inspect(engine).get_table_names()
+        engine.dispose()

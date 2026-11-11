@@ -32,6 +32,7 @@ from lakana_core.errors import (
     SessionEndedError,
     StorageRefusedError,
     StorageUnavailableError,
+    UnsupportedPicture,
     ValidationError,
 )
 
@@ -134,6 +135,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
     ValidationError: 422,
     PermissionDenied: 403,
     PayloadTooLargeError: 413,
+    UnsupportedPicture: 415,
     AppendReadTimeoutError: 408,
     AppendConcurrencyLimitError: 503,
     DownloadConcurrencyLimitError: 503,

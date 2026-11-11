@@ -39,6 +39,7 @@ from lakana_core.identity.links import LinkService
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.passkeys import PasskeyService, needs_passkey
 from lakana_core.identity.pats import PatService
+from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService, utc_now
 from lakana_core.identity.task_tokens import TaskTokenService
@@ -1094,6 +1095,27 @@ def get_interface_state_service(
         The service for the caller's own interface state.
     """
     return InterfaceStateService(session, authz)
+
+
+def get_picture_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> PictureService:
+    """Build a PictureService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    PictureService
+        The service for profile pictures.
+    """
+    return PictureService(session, authz)
 
 
 def get_recent_service(

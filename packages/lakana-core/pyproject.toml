@@ -80,6 +80,14 @@ dependencies = [
     # Brings cbor2 (MIT), pyasn1 (BSD-2-Clause), pyasn1-modules (BSD) and pyOpenSSL
     # (Apache-2.0).
     "webauthn>=3.0.1",
+    # MIT-CMU. Decodes an uploaded profile picture (JPEG, PNG or WebP only) and re-encodes it as
+    # a 256 px WebP without metadata (lakana_core/identity/pictures.py). The wheels' bundled
+    # native libraries were checked for 13.0.0 (docs/agent/conventions.md, "Native code inside a
+    # wheel"): libjpeg-turbo, libpng, libwebp, zlib(-ng), libtiff, FreeType (FTL), HarfBuzz,
+    # raqm, Little CMS, OpenJPEG, libavif with dav1d and aom, brotli, xz, zstd, libxcb, libXau,
+    # all permissive. FriBiDi (LGPL) and libimagequant (GPL) are not in the wheels: Pillow
+    # loads FriBiDi only from the system for text layout, which Lakana never uses.
+    "pillow>=13.0.0",
 ]
 
 [tool.hatch.version]

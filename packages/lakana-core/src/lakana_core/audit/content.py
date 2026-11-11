@@ -86,6 +86,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "asset",
         "asset_scope",
         "attempt",
+        # the administrator who removed another person's profile picture
+        "by",
         # a change made by hand in a scope an access file manages (`MANAGED_SCOPE_OVERRIDDEN`)
         "change",
         "check",

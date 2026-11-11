@@ -27,6 +27,14 @@ class ValidationError(LakanaError):
     """Input was structurally invalid."""
 
 
+class UnsupportedPicture(ValidationError):
+    """A profile picture was sent as a type Lakana does not read (only JPEG, PNG and WebP).
+
+    Raised by `lakana_core.identity.pictures.reencode_picture` for any other media type,
+    SVG among them, before a byte is decoded. Mapped to 415 by the server.
+    """
+
+
 class PermissionDenied(LakanaError):
     """The principal is not permitted to perform this action."""
 

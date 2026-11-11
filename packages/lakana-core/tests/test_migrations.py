@@ -5608,3 +5608,47 @@ def test_0072_adds_the_interface_state_tables_empty(
     assert hidden == (0,)
     command.downgrade(config, _REVISION_0071)
     assert tables() == set()
+
+
+_REVISION_0073 = "d4a7e2b9c613"
+
+
+def test_0073_adds_the_profile_pictures_table_empty(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0073`: profile pictures, one empty table that goes with its principal.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0072)
+    config = Config(str(ALEMBIC_INI))
+
+    def columns() -> set[str]:
+        """Read the table's columns, if it exists.
+
+        Returns
+        -------
+        set of str
+            The column names, empty without the table.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            inspector = inspect(engine)
+            if "profile_pictures" not in inspector.get_table_names():
+                return set()
+            return {c["name"] for c in inspector.get_columns("profile_pictures")}
+        finally:
+            engine.dispose()
+
+    assert columns() == set()
+    command.upgrade(config, _REVISION_0073)
+    assert columns() == {"principal_id", "image", "etag", "updated_at"}
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT count(*) FROM profile_pictures").fetchone() == (0,)
+    command.downgrade(config, _REVISION_0072)
+    assert columns() == set()
