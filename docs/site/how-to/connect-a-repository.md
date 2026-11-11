@@ -11,8 +11,8 @@ environment), a running worker that takes pipeline work, and the repository's SS
 
 ## In the web interface
 
-An administrator opens **Connect a repository** from Home's **Get started** list, or at
-`/settings/repositories/new`. The page has four numbered steps; each appears once the one
+An administrator opens **Connect a repository** from **Settings → Repositories**, from Home's
+**Get started** list, or at `/settings/repositories/new`. The page has four numbered steps; each appears once the one
 before it is done.
 
 1. **The repository.** Paste the **Repository URL**, the one you clone it with. For GitHub,

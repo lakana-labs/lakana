@@ -432,6 +432,11 @@
       "absoluteOutOfBounds": "The longest session is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
       "shorterThanIdle": "The longest session cannot be shorter than the idle timeout ({{idle}} minutes). Make it longer, or the idle timeout shorter."
     },
+    "repositories": {
+      "tab": "Repositories",
+      "intro": "Lakana deploys jobs from Git repositories and only ever reads from them.",
+      "connect": "Connect a repository"
+    },
     "connect": {
       "title": "Connect a repository",
       "intro": "Lakana deploys a project from its Git repository over SSH, with a deploy key it makes for you. Nothing is stored until you confirm the host's keys.",

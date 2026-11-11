@@ -655,7 +655,10 @@ export function ConnectRepository(): JSX.Element {
   return (
     <Page
       title={t("settings.connect.title")}
-      trail={[{ to: "/settings", label: t("areas.settings.name") }]}
+      trail={[
+        { to: "/settings", label: t("areas.settings.name") },
+        { to: "/settings/repositories", label: t("settings.repositories.tab") },
+      ]}
     >
       <p className="page-purpose">{t("settings.connect.intro")}</p>
       <section className="connect-step" aria-labelledby="connect-where">
