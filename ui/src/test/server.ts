@@ -18,6 +18,8 @@ interface SentRequest {
   readonly body: unknown;
   /** A body that is not text (an uploaded file), as sent. */
   readonly raw?: unknown;
+  /** The request's cache mode, when one was set. */
+  readonly cache?: RequestCache;
 }
 
 /** What a route answers: a status and an optional JSON body, or a file. */
@@ -116,6 +118,7 @@ export function fakeServer(routes: Record<string, FakeRoute> = {}): FakeServer {
       headers: headersOf(init),
       body: text === undefined ? undefined : JSON.parse(text),
       ...(init?.body instanceof Blob ? { raw: init.body } : {}),
+      ...(init?.cache === undefined ? {} : { cache: init.cache }),
     };
     sent.push(request);
     const handler = table.get(`${request.method} ${decodeURIComponent(url.pathname)}`);

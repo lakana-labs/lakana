@@ -283,6 +283,20 @@ describe("api.upload and api.blob", () => {
     expect(server.sent[0]?.headers["x-lakana-background"]).toBe("1");
   });
 
+  it("asks the server again before showing a file the browser has cached", async () => {
+    // A replaced picture keeps its URL; only the etag changes, so a cached copy must be checked.
+    const server = fakeServer({
+      "GET /api/v1/principals/admin/picture": {
+        status: 200,
+        blob: new Blob(["webp"], { type: "image/webp" }),
+      },
+    });
+
+    await api.blob("/api/v1/principals/admin/picture");
+
+    expect(server.sent[0]?.cache).toBe("no-cache");
+  });
+
   it("turns a refused upload or read into an ApiError", async () => {
     fakeServer({
       "PUT /api/v1/principals/admin/picture": {

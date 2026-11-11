@@ -227,6 +227,8 @@ interface Exchange {
   readonly body?: BodyInit | undefined;
   /** The body's media type. */
   readonly contentType?: string | undefined;
+  /** The browser cache mode, when the default would show a stale answer. */
+  readonly cache?: RequestCache | undefined;
 }
 
 /**
@@ -263,6 +265,7 @@ async function exchangeWith(
       headers,
       credentials: "same-origin",
       ...(exchange.body === undefined ? {} : { body: exchange.body }),
+      ...(exchange.cache === undefined ? {} : { cache: exchange.cache }),
     });
   } catch {
     throw new ApiError(0, "NetworkError", "The server could not be reached.");
@@ -394,14 +397,21 @@ export const api = {
   /**
    * Reads a file, such as a profile picture. An `<img>` pointing at the API would carry no
    * CSRF token and be refused, so the interface reads the file here and shows it from an object
-   * URL. A background request: showing a picture is not the person acting.
+   * URL. A background request: showing a picture is not the person acting. A replaced file keeps
+   * its path, so the browser asks the server before reusing a cached copy (`no-cache`); an
+   * unchanged one costs a 304.
    *
    * @param path - The path under the server.
    * @returns The file.
    * @throws {ApiError} for a refusal or an unreachable server.
    */
   async blob(path: string): Promise<Blob> {
-    const response = await exchangeWith("GET", path, { accept: "image/*" }, { background: true });
+    const response = await exchangeWith(
+      "GET",
+      path,
+      { accept: "image/*", cache: "no-cache" },
+      { background: true },
+    );
     return response.blob();
   },
 };
