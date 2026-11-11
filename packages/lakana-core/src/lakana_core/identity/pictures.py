@@ -57,6 +57,10 @@ _NOT_READABLE = (
     "This file is not a JPEG, PNG or WebP image Lakana can read. Save it again as JPEG or PNG "
     "and try once more."
 )
+_TOO_MANY_PIXELS = (
+    "This picture has more than 40 megapixels. Scale it down (Lakana keeps 256 by 256 pixels; "
+    "2000 by 2000 is plenty), then upload it again."
+)
 _HIDDEN = "Pictures are shown to people who have access."
 
 _PILLOW_FAILURES: tuple[type[BaseException], ...] = (
@@ -65,8 +69,6 @@ _PILLOW_FAILURES: tuple[type[BaseException], ...] = (
     EOFError,
     SyntaxError,
     struct.error,
-    Image.DecompressionBombError,
-    Image.DecompressionBombWarning,
 )
 """What Pillow raises for a file it cannot or will not read (``struct.error``: a short header)."""
 
@@ -97,14 +99,17 @@ def reencode_picture(data: bytes, media_type: str) -> bytes:
     UnsupportedPicture
         For a media type outside `MEDIA_TYPES` (415).
     ValidationError
-        For bytes that are not a readable image of that type, are truncated, or declare more
-        than `PICTURE_MAX_PIXELS` pixels (422).
+        For bytes that are not a readable image of that type or are truncated, or (with its
+        own message naming the limit) that declare more than `PICTURE_MAX_PIXELS` pixels (422).
     """
     pillow_format = MEDIA_TYPES.get(media_type)
     if pillow_format is None:
         raise UnsupportedPicture(_UNSUPPORTED)
     try:
         return _reencode(data, pillow_format)
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        # Pillow's own pixel guards: the same cause as Lakana's check, so the same answer.
+        raise ValidationError(_TOO_MANY_PIXELS) from exc
     except _PILLOW_FAILURES as exc:
         raise ValidationError(_NOT_READABLE) from exc
 
@@ -171,7 +176,7 @@ def _decode_upright(data: bytes, pillow_format: str) -> tuple[Image.Image, str]:
     with Image.open(io.BytesIO(data), formats=[pillow_format]) as image:
         width, height = image.size
         if width * height > PICTURE_MAX_PIXELS:
-            raise ValidationError(_NOT_READABLE)
+            raise ValidationError(_TOO_MANY_PIXELS)
         if pillow_format == "JPEG":
             image.draft("RGB", (_WORKING_SIDE, _WORKING_SIDE))
         transparent = image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info

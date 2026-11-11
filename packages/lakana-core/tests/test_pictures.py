@@ -29,6 +29,7 @@ from lakana_core.identity.pictures import (
 from lakana_core.models import AuditEvent, AuditEventType, PrincipalType, ProfilePicture
 
 _NOT_READABLE = "is not a JPEG, PNG or WebP image Lakana can read"
+_TOO_MANY_PIXELS = "has more than 40 megapixels. Scale it down"
 _RED = (255, 0, 0)
 _BLUE = (0, 0, 255)
 
@@ -251,12 +252,12 @@ def test_a_huge_declared_size_is_refused_by_lakanas_own_check_without_decoding(
 
     monkeypatch.setattr(ImageFile.ImageFile, "load", lambda self: loads.append(self))
     huge = _grey_png(8000, 8000, zlib.compress(b"\x00" * 8001))
-    with pytest.raises(ValidationError, match=_NOT_READABLE):
+    with pytest.raises(ValidationError, match=_TOO_MANY_PIXELS):
         reencode_picture(huge, "image/png")
     assert loads == []
-    # Over twice the limit Pillow itself refuses at open; still the same answer.
+    # Over twice the limit Pillow itself refuses at open; still the same, true answer.
     larger = _grey_png(20_000, 20_000, zlib.compress(b"\x00" * 20_001))
-    with pytest.raises(ValidationError, match=_NOT_READABLE):
+    with pytest.raises(ValidationError, match=_TOO_MANY_PIXELS):
         reencode_picture(larger, "image/png")
     assert loads == []
 
@@ -265,7 +266,7 @@ def test_just_over_the_pixel_limit_is_refused_and_just_under_is_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(pictures_module, "PICTURE_MAX_PIXELS", 100)
-    with pytest.raises(ValidationError, match=_NOT_READABLE):
+    with pytest.raises(ValidationError, match=_TOO_MANY_PIXELS):
         reencode_picture(_encode(Image.new("L", (101, 1)), "PNG"), "image/png")
     assert _decode(reencode_picture(_encode(Image.new("L", (10, 10)), "PNG"), "image/png"))
 
@@ -278,7 +279,7 @@ def test_a_decompression_bomb_is_refused() -> None:
     idat = b"".join(stream.compress(row) for _ in range(side)) + stream.flush()
     bomb = _grey_png(side, side, idat)
     assert len(bomb) < 200_000 and side * side > PICTURE_MAX_PIXELS
-    with pytest.raises(ValidationError, match=_NOT_READABLE):
+    with pytest.raises(ValidationError, match=_TOO_MANY_PIXELS):
         reencode_picture(bomb, "image/png")
 
 
@@ -300,7 +301,7 @@ def test_pillows_bomb_warning_is_the_same_refusal() -> None:
     png = _grey_png(side, side, zlib.compress(b"\x00" * (side + 1)))
     with warnings.catch_warnings(record=True) as seen:
         warnings.simplefilter("always")
-        with pytest.raises(ValidationError, match=_NOT_READABLE) as refused:
+        with pytest.raises(ValidationError, match=_TOO_MANY_PIXELS) as refused:
             reencode_picture(png, "image/png")
     assert isinstance(refused.value.__cause__, Image.DecompressionBombWarning)
     assert seen == []  # turned into the refusal, not left in the log

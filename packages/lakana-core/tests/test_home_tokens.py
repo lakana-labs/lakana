@@ -16,6 +16,7 @@ from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.home.attention import AttentionService
 from lakana_core.home.get_started import get_started
+from lakana_core.home.recent import RecentService
 from lakana_core.home.work import your_work
 from lakana_core.jobs.service import JobService
 from lakana_core.runs.service import RunService
@@ -150,3 +151,16 @@ def test_a_task_or_ci_token_of_an_administrator_gets_no_status_detail(
     assert runs.instance_status(admin, ()).detail is not None
     for token in _tokens(admin):
         assert runs.instance_status(token, ()).detail is None
+
+
+def test_a_task_or_ci_token_of_an_administrator_can_neither_record_nor_list_recent(
+    session: Session, admin: PrincipalRef
+) -> None:
+    """Recently opened is the person's own: the token is refused before anything is looked up."""
+    recent = RecentService(session, GrantAuthorization(session))
+    assert recent.list(admin, admin.name) == []
+    for token in _tokens(admin):
+        with pytest.raises(PermissionDenied, match="task or CI token"):
+            recent.list(token, admin.name)
+        with pytest.raises(PermissionDenied, match="task or CI token"):
+            recent.record(token, admin.name, kind="table", environment="dev", ref="gold.t")

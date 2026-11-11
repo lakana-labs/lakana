@@ -109,7 +109,10 @@ class DatabaseConfig(BaseModel):
         and error messages. Required.
     echo
         Whether every SQL statement sent to the metadata database is written to the log. Off by
-        default; turn it on only while you look for a problem, because it is very verbose.
+        default; turn it on only while you look for a problem, because it is very verbose. The
+        values a statement carries are never logged, on or off, and are left out of database
+        error messages too (they can be secrets' encrypted values): a log line shows the
+        statement only.
     """
 
     model_config = ConfigDict(hide_input_in_errors=True)

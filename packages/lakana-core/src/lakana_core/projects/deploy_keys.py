@@ -649,7 +649,7 @@ class DeployKeyService:
         where = f"Environment '{shown(env.name)}'"
         other = (
             f"Use another secret name: lakana repo deploy-key {shlex.quote(plain(repo.name))} "
-            "--secret OTHER-NAME (or the page's 'Use another secret name')."
+            "--secret OTHER-NAME."
         )
         if row is None:
             if used_by_its_environment(self._session, env, name):

@@ -353,8 +353,13 @@ def test_key_of_a_deleted_repository_with_the_same_name_is_refused(world: World)
         world.admin, name="analytics", kind=RepositoryKind.SSH, url=_URL, ssh_known_hosts=_HOSTS
     )
 
-    with pytest.raises(ConflictError, match="--secret"):
+    with pytest.raises(ConflictError, match="--secret") as refused:
         world.service().generate(world.admin, "analytics")
+    # The page has no secret-name control, so the next step is only the CLI command.
+    assert "page" not in str(refused.value)
+    assert str(refused.value).endswith(
+        "Use another secret name: lakana repo deploy-key analytics --secret OTHER-NAME."
+    )
 
 
 def test_secret_name_option_writes_that_name(world: World) -> None:

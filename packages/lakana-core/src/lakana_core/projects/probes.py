@@ -542,7 +542,8 @@ class RepositoryProbeService:
             self._session.rollback()
             raise ConflictError(
                 f"You already have {PROBES_OPEN_PER_PERSON} repository checks waiting or running. "
-                "Wait for one to finish (at most two minutes) and try again."
+                "Wait for one to finish (a check ends at most three and a half minutes after it "
+                "was asked) and try again."
             )
         probe = RepositoryProbe(
             id=uuid.uuid4(),

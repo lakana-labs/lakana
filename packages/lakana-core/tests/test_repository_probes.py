@@ -471,9 +471,21 @@ def test_sixth_open_probe_is_refused(world: World) -> None:
     service = world.service()
     for _ in range(PROBES_OPEN_PER_PERSON):
         service.request_host_keys(world.admin, URL)
-    with pytest.raises(ConflictError, match="5"):
+    with pytest.raises(ConflictError, match="5") as refused:
         service.request_host_keys(world.admin, URL)
+    assert "at most three and a half minutes after it was asked" in str(refused.value)
     service.request_host_keys(world.other_admin, URL)
+
+
+def test_a_probe_claimed_at_the_last_moment_ends_three_and_a_half_minutes_on(world: World) -> None:
+    """The bound the 409 states: two minutes to be claimed plus the worker's 90 s lease (M2)."""
+    probe = world.service().request_host_keys(world.admin, URL)
+    last = NOW + PROBE_UNCLAIMED_AFTER - timedelta(seconds=1)
+    assert world.queue().claim("w1", lease_seconds=90, now=last) is not None
+    world.clock.now = last + timedelta(seconds=90)
+    seen = world.service().get(world.admin, str(probe.id))
+    assert seen.state is RepositoryProbeState.DONE
+    assert world.clock.now - NOW <= timedelta(minutes=3, seconds=30)
 
 
 def test_the_cap_is_counted_under_a_lock_on_the_requester(world: World) -> None:

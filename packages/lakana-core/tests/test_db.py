@@ -126,6 +126,25 @@ def test_echo_is_passed_through() -> None:
     engine.dispose()
 
 
+def test_the_echo_and_statement_errors_never_show_parameters(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A bound value (a secret's ciphertext, nonce or wrapped key) is in no log line or error."""
+    engine = create_engine(DatabaseConfig(url="sqlite://", echo=True))
+    with (
+        caplog.at_level(logging.INFO, logger="sqlalchemy.engine.Engine"),
+        engine.connect() as conn,
+    ):
+        conn.execute(text("SELECT :value"), {"value": "SECRET-CIPHERTEXT"})
+        with pytest.raises(OperationalError) as failed:
+            conn.execute(text("SELECT * FROM missing WHERE x = :v"), {"v": "SECRET-NONCE"})
+    engine.dispose()
+    assert "SELECT" in caplog.text
+    assert "SECRET-CIPHERTEXT" not in caplog.text
+    assert "SECRET-NONCE" not in str(failed.value)
+    assert "hidden due to hide_parameters" in str(failed.value)
+
+
 def test_the_listener_leaves_non_sqlite_connections_alone() -> None:
     """The pragma is not issued against a Postgres connection.
 
