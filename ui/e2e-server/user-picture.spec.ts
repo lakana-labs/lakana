@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { localLink, skipTheTour } from "./helpers";
+import { signInLocally, skipTheTour } from "./helpers";
 
 const ORIGIN = "http://localhost:4174";
 
@@ -15,14 +15,9 @@ test("a profile picture: set, shown from a blob: URL under the policy, refused, 
   request,
 }) => {
   const page = await (await browser.newContext({ baseURL: ORIGIN })).newPage();
-  // The welcome is sign-in.spec.ts' subject; here it would only cover the menu.
+  // The welcome is home.spec.ts' subject; here it would only cover the menu.
   await skipTheTour(request);
-  await page.goto(await localLink(request));
-  const landed = page.getByRole("heading", { level: 1, name: /^(Add a passkey|Home)$/ });
-  await expect(landed).toBeVisible();
-  if ((await landed.textContent()) === "Add a passkey") {
-    await page.getByRole("button", { name: "Not now" }).click();
-  }
+  await signInLocally(page, request);
   // A violation of the content security policy is a console error; listened
   // to once signed in (the landing reads the session before the link signs in: a 401).
   const errors: string[] = [];

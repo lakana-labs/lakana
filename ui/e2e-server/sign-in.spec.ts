@@ -1,7 +1,14 @@
 import AxeBuilder from "@axe-core/playwright";
 import { type Browser, expect, type Page, test } from "@playwright/test";
 
-import { addAuthenticator, inviteLink, localLink, setupLink, uniqueName } from "./helpers";
+import {
+  addAuthenticator,
+  interfaceState,
+  inviteLink,
+  localLink,
+  setupLink,
+  uniqueName,
+} from "./helpers";
 
 const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const ORIGIN = "http://localhost:4174";
@@ -68,6 +75,8 @@ test.describe("the first administrator", () => {
     browserName,
   }) => {
     test.skip(browserName !== "chromium", NOT_CHROMIUM);
+    // As at a first sign-in, whatever another file's tests left.
+    await interfaceState(request, { tour_seen: false });
     await page.goto(await setupLink(request));
 
     await expect(page.getByRole("heading", { level: 1, name: "Sign in as admin" })).toBeVisible();

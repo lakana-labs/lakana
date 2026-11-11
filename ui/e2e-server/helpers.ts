@@ -4,10 +4,29 @@
  *
  * @packageDocumentation
  */
-import type { APIRequestContext, BrowserContext, CDPSession, Page } from "@playwright/test";
+import {
+  type APIRequestContext,
+  type APIResponse,
+  type BrowserContext,
+  type CDPSession,
+  expect,
+  type Page,
+} from "@playwright/test";
 
 /** The bootstrap administrator's token, as `playwright.server.config.ts` fixes it. */
 const BOOTSTRAP_TOKEN = "lakana_pat_e2ekey_e2esecret";
+
+/**
+ * Throws with the answer's status and body unless it succeeded.
+ *
+ * @param what - The request, as the error names it.
+ * @param response - The answer.
+ */
+async function ensureOk(what: string, response: APIResponse): Promise<void> {
+  if (!response.ok()) {
+    throw new Error(`${what} answered ${String(response.status())}: ${await response.text()}`);
+  }
+}
 
 /**
  * Asks the API as the bootstrap administrator.
@@ -22,9 +41,7 @@ async function ask(request: APIRequestContext, path: string, body?: object): Pro
     headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
     ...(body === undefined ? {} : { data: body }),
   });
-  if (!response.ok()) {
-    throw new Error(`POST ${path} answered ${String(response.status())}: ${await response.text()}`);
-  }
+  await ensureOk(`POST ${path}`, response);
   return ((await response.json()) as { url: string }).url;
 }
 
@@ -61,6 +78,39 @@ export function inviteLink(request: APIRequestContext, name: string): Promise<st
   return ask(request, "/api/v1/invites", { name });
 }
 
+/** What the web interface remembers for a person, as `/interface-state` answers it. */
+export interface InterfaceState {
+  /** Whether they saw the tour. */
+  readonly tour_seen: boolean;
+  /** Whether they hid Get started. */
+  readonly get_started_hidden: boolean;
+  /** The last update note they saw (a release version), if any. */
+  readonly update_note_seen: string | null;
+}
+
+/**
+ * Reads, and with `change` first changes, the bootstrap administrator's interface state, so
+ * each test starts from the state it needs whatever ran before it. Only the administrator's:
+ * the bootstrap token is theirs, and a person changes only their own.
+ *
+ * @param request - The request context.
+ * @param change - The fields to change; without it, the state is only read.
+ * @returns The state afterwards.
+ */
+export async function interfaceState(
+  request: APIRequestContext,
+  change?: Partial<InterfaceState>,
+): Promise<InterfaceState> {
+  const path = "/api/v1/principals/admin/interface-state";
+  const headers = { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` };
+  const response =
+    change === undefined
+      ? await request.get(path, { headers })
+      : await request.patch(path, { headers, data: change });
+  await ensureOk("interface-state", response);
+  return (await response.json()) as InterfaceState;
+}
+
 /**
  * Records that the bootstrap administrator saw the tour, so the welcome does not open in a test
  * about something else.
@@ -68,13 +118,39 @@ export function inviteLink(request: APIRequestContext, name: string): Promise<st
  * @param request - The request context.
  */
 export async function skipTheTour(request: APIRequestContext): Promise<void> {
-  const response = await request.patch("/api/v1/principals/admin/interface-state", {
+  await interfaceState(request, { tour_seen: true });
+}
+
+/**
+ * Gives an invited person the ADMIN role on the instance, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param name - The person.
+ */
+export async function makeAdministrator(request: APIRequestContext, name: string): Promise<void> {
+  const response = await request.post("/api/v1/grants", {
     headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
-    data: { tour_seen: true },
+    data: { principal: name, role: "ADMIN", kind: "INSTANCE" },
   });
-  if (!response.ok()) {
-    throw new Error(`PATCH interface-state answered ${String(response.status())}`);
+  await ensureOk("POST /api/v1/grants", response);
+}
+
+/**
+ * Signs the bootstrap administrator in with the local link, as `lakana server start --local`
+ * does, and waits for Home. The passkey offer comes only while they have none; it is declined,
+ * as adding one would end the setup link a test of another file needs.
+ *
+ * @param page - A page of a fresh context.
+ * @param request - The request context.
+ */
+export async function signInLocally(page: Page, request: APIRequestContext): Promise<void> {
+  await page.goto(await localLink(request));
+  const landed = page.getByRole("heading", { level: 1, name: /^(Add a passkey|Home)$/ });
+  await expect(landed).toBeVisible();
+  if ((await landed.textContent()) === "Add a passkey") {
+    await page.getByRole("button", { name: "Not now" }).click();
   }
+  await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
 }
 
 /**
