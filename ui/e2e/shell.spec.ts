@@ -243,7 +243,8 @@ for (const theme of ["light", "dark"] as const) {
         "Access",
         "Settings",
         "admin",
-        "Copy command",
+        // Home's first stop: the update note's link.
+        "what's new › (opens in a new tab)",
       ]);
       await expect(page.getByRole("link", { name: "Home" })).toHaveAttribute(
         "aria-current",

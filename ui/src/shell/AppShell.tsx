@@ -9,27 +9,34 @@ import { RouterProvider } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Outlet, useHref, useLocation, useNavigate } from "react-router";
 
+import type { AccessOut } from "../api";
 import { Notices } from "../sign-in/Notices";
 import { type AreaAccess, visibleAreas } from "./areas";
 import { CommandPalette } from "./CommandPalette";
+import { InterfaceStateProvider } from "./InterfaceState";
+import { MeContext } from "./me";
 import { Sidebar } from "./Sidebar";
 
 /** Properties of {@link AppShell}. */
 export interface AppShellProps {
   /** The areas the user may use; the others are hidden. */
   readonly access: AreaAccess;
+  /** What the person may do, for the screens that change with it. */
+  readonly me: AccessOut;
 }
 
 /**
  * Renders the shell. Ctrl+K and ⌘ K open the palette from anywhere, a text field included;
  * after a navigation, focus moves to the new page's heading (not on the first load, so the
- * skip link stays the first stop).
+ * skip link stays the first stop). The person's access and interface state are there for every
+ * screen inside; the interface state is read once, when the shell appears.
  *
- * @param props - The access set.
+ * @param props - The access set and the person.
  * @param props.access - The areas the user may use.
+ * @param props.me - What the person may do.
  * @returns The shell with the current page in its working area.
  */
-export function AppShell({ access }: AppShellProps): JSX.Element {
+export function AppShell({ access, me }: AppShellProps): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -63,35 +70,39 @@ export function AppShell({ access }: AppShellProps): JSX.Element {
   }, []);
 
   return (
-    <RouterProvider
-      navigate={(path) => {
-        void navigate(path);
-      }}
-      useHref={useHref}
-    >
-      <div className="shell">
-        <a
-          className="skip-link"
-          href="#main"
-          onClick={(event) => {
-            event.preventDefault();
-            main.current?.focus();
+    <MeContext value={me}>
+      <InterfaceStateProvider name={me.name}>
+        <RouterProvider
+          navigate={(path) => {
+            void navigate(path);
           }}
+          useHref={useHref}
         >
-          {t("shell.skip")}
-        </a>
-        <Sidebar
-          areas={areas}
-          onSearch={() => {
-            setPaletteOpen(true);
-          }}
-        />
-        <main className="shell-main" id="main" ref={main} tabIndex={-1}>
-          <Notices />
-          <Outlet />
-        </main>
-        <CommandPalette areas={areas} isOpen={paletteOpen} onOpenChange={setPaletteOpen} />
-      </div>
-    </RouterProvider>
+          <div className="shell">
+            <a
+              className="skip-link"
+              href="#main"
+              onClick={(event) => {
+                event.preventDefault();
+                main.current?.focus();
+              }}
+            >
+              {t("shell.skip")}
+            </a>
+            <Sidebar
+              areas={areas}
+              onSearch={() => {
+                setPaletteOpen(true);
+              }}
+            />
+            <main className="shell-main" id="main" ref={main} tabIndex={-1}>
+              <Notices />
+              <Outlet />
+            </main>
+            <CommandPalette areas={areas} isOpen={paletteOpen} onOpenChange={setPaletteOpen} />
+          </div>
+        </RouterProvider>
+      </InterfaceStateProvider>
+    </MeContext>
   );
 }

@@ -7,10 +7,12 @@ import { render } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
+import type { AccessOut } from "../api";
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
 import { ALL_SHIPPED, type AreaAccess } from "../shell/areas";
 import { type AreaPages, appRoutes } from "../shell/routes";
 import { SessionContext, type SessionValue } from "../sign-in/SessionProvider";
+import { homeRoutes } from "./home";
 import { type FakeRoute, type FakeServer, fakeServer } from "./server";
 import { signedIn } from "./session";
 import { MemoryStorage } from "./storage";
@@ -37,6 +39,8 @@ export interface ShellOptions {
   readonly pages?: AreaPages;
   /** Whether Home says the person has no access yet; false by default. */
   readonly noAccessYet?: boolean;
+  /** What the person may do, beyond `noAccessYet`; an administrator named `admin` by default. */
+  readonly me?: Partial<AccessOut>;
   /** The session; a signed-in administrator by default. */
   readonly session?: SessionValue;
   /** Server routes beyond the default (no sign-in notices). */
@@ -47,19 +51,27 @@ export interface ShellOptions {
  * Renders the shell at a path.
  *
  * @param path - The URL path to start at.
- * @param options - The access set, the storage, the session and the server's routes.
+ * @param options - The access set, the storage, the session, what the person may do and the
+ *   server's routes (Home's and the interface state's answer "nothing to report" by default).
  * @returns The router, the storage, a user-event session and the fake server.
  */
 export function renderShell(path = "/", options: ShellOptions = {}): RenderedShell {
   const storage = options.storage ?? new MemoryStorage();
+  const me: AccessOut = {
+    name: "admin",
+    admin: true,
+    mayDeploy: true,
+    noAccessYet: options.noAccessYet ?? false,
+    ...options.me,
+  };
   const server = fakeServer({
     "GET /api/v1/sign-in/notices": { status: 200, body: [] },
+    ...homeRoutes(me.name),
     ...options.routes,
   });
-  const router = createMemoryRouter(
-    appRoutes(options.access ?? ALL_SHIPPED, options.pages, options.noAccessYet),
-    { initialEntries: [path] },
-  );
+  const router = createMemoryRouter(appRoutes(options.access ?? ALL_SHIPPED, options.pages, me), {
+    initialEntries: [path],
+  });
   const user = userEvent.setup();
   render(
     <PreferencesProvider storage={storage}>

@@ -28,10 +28,14 @@ export interface SessionOut {
 
 /** What a person may use, as far as the interface's areas go. */
 export interface AccessOut {
+  /** The person's principal name. */
+  readonly name: string;
   /** True for a holder of the ADMIN role on the instance. */
   readonly admin: boolean;
   /** True when the person has no right anywhere yet. */
   readonly noAccessYet: boolean;
+  /** True when the person may deploy in at least one environment (Home shows Your work). */
+  readonly mayDeploy: boolean;
 }
 
 /** A sign-in notice, as `GET /api/v1/sign-in/notices` answers it. */
@@ -48,10 +52,14 @@ export interface NoticeOut {
 
 /** What `GET /api/v1/whoami` answers about access. */
 interface WhoamiOut {
+  /** The caller's principal name. */
+  readonly name: string;
   /** True for a holder of the ADMIN role on the instance. */
   readonly admin: boolean;
   /** True when the person has any grant at all, at any scope. */
   readonly has_access: boolean;
+  /** True when the person may deploy in at least one environment. */
+  readonly may_deploy: boolean;
 }
 
 /**
@@ -85,14 +93,20 @@ export async function signOutEverywhere(name: string): Promise<void> {
 }
 
 /**
- * Finds out what the signed-in person may use: administrators see Access and Settings, and a
- * person with no grant anywhere is told to ask for one.
+ * Finds out what the signed-in person may use: administrators see Access and Settings, a
+ * person who may deploy sees Your work on Home, and a person with no grant anywhere is told to
+ * ask for one.
  *
  * @returns The access, from `GET /api/v1/whoami`.
  */
 export async function myAccess(): Promise<AccessOut> {
   const me = await api.request<WhoamiOut>("GET", "/api/v1/whoami");
-  return { admin: me.admin, noAccessYet: !me.has_access };
+  return {
+    name: me.name,
+    admin: me.admin,
+    noAccessYet: !me.has_access,
+    mayDeploy: me.may_deploy,
+  };
 }
 
 /**

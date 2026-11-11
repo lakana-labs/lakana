@@ -99,7 +99,121 @@
     "action": "Go to Home"
   },
   "home": {
-    "noAccessYet": "You have no access yet; ask an administrator."
+    "noAccessYet": "You have no access yet; ask an administrator.",
+    "environment": "Environment",
+    "wholeInstance": "Instance",
+    "newTab": "(opens in a new tab)",
+    "update": {
+      "text": "Lakana was updated to {{version}}:",
+      "whatsNew": "what's new",
+      "hide": "Hide the update note"
+    },
+    "getStarted": {
+      "title": "Get started",
+      "hide": "Hide",
+      "done": "Done",
+      "steps": {
+        "connect_repository": {
+          "text": "Connect the Git repository that holds your project, so Lakana can deploy it.",
+          "action": "Connect a repository"
+        },
+        "invite_team": {
+          "text": "Invite your colleagues; each signs in with their own passkey.",
+          "action": "Invite your team"
+        },
+        "add_passkey": {
+          "text": "Add a passkey, so you sign in with your fingerprint, face, PIN or security key.",
+          "action": "Add a passkey"
+        },
+        "deploy_project": {
+          "text": "Deploy your first project: the tutorial walks you through it, or run this in your project’s folder.",
+          "action": "Open the tutorial"
+        },
+        "deploy_project_local": {
+          "text": "Deploy your first project from a folder on this machine: the tutorial walks you through it, and this command starts it in the folder.",
+          "action": "Open the tutorial"
+        },
+        "ci_deploy": {
+          "text": "Let CI deploy for you whenever a change is merged.",
+          "action": "Deploy from GitHub Actions"
+        },
+        "open_table": {
+          "text": "Open a table in the Catalog to see its columns, health and lineage.",
+          "action": "Open the Catalog"
+        },
+        "run_query": {
+          "text": "Run your first query: write SQL and see the result.",
+          "action": "Open Queries"
+        }
+      }
+    },
+    "status": {
+      "title": "Status",
+      "states": {
+        "healthy": "Healthy",
+        "degraded": "Degraded",
+        "down": "Down"
+      },
+      "without": {
+        "healthy": "Everything works.",
+        "degraded": "Lakana works, but slower than usual.",
+        "down": "Lakana cannot get work done right now. Tell an administrator."
+      },
+      "causes": {
+        "database": "The database cannot be reached, so nothing gets done. Check that the database runs, then read the server’s log.",
+        "storage": "The object storage cannot be reached, so tables cannot be read or written. Check that it runs and that the server may reach it.",
+        "no_worker": "No worker is running, so queries and jobs wait until one starts.",
+        "worker_lost_one": "Queries are slower: {{count}} of {{total}} workers is down.",
+        "worker_lost_other": "Queries are slower: {{count}} of {{total}} workers are down.",
+        "memory_high": "The workers are close to their memory limit, so a large query may be stopped."
+      },
+      "compute": "Compute",
+      "slots": "{{busy}} of {{total}} slots busy",
+      "noSlots": "No worker is running.",
+      "memory": "Memory",
+      "memoryOf": "{{used}} of {{limit}}",
+      "memoryNoLimit": "{{used}} in use, limit unknown",
+      "gib": "{{value}} GiB",
+      "workers": "Workers",
+      "workersAlive": "{{alive}} alive",
+      "workersDown": "{{alive}} alive, {{lost}} down",
+      "details": "Details"
+    },
+    "attention": {
+      "title": "Needs your attention",
+      "none": "Nothing needs your attention.",
+      "truncated": "Showing the newest {{count}}.",
+      "kinds": {
+        "run_failed": "Run failed",
+        "table_late": "Late",
+        "check_failed": "Check failed",
+        "query_failed": "Query failed",
+        "recovery_link_open": "Recovery link open",
+        "worker_lost": "Worker down"
+      }
+    },
+    "recent": {
+      "title": "Recently opened",
+      "none": "Nothing opened yet: the tables, queries, jobs and runs you open show here.",
+      "toCatalog": "Find a table in the Catalog",
+      "opened": "Opened",
+      "queryName": "Query {{id}}",
+      "runName": "Run {{id}}",
+      "kinds": {
+        "table": "Table",
+        "query": "Query",
+        "job": "Job",
+        "run": "Run"
+      }
+    },
+    "work": {
+      "title": "Your work",
+      "none": "Nothing yet: the repositories you connect or deploy, and their jobs, show here.",
+      "repositories": "Your repositories",
+      "lastRun": "Last run",
+      "neverRun": "Not run yet",
+      "neverDeployed": "Not deployed yet"
+    }
   },
   "session": {
     "loading": "Loading…",
@@ -300,6 +414,10 @@
   },
   "settings": {
     "tabs": "Settings sections",
+    "status": {
+      "tab": "Status",
+      "intro": "The instance in detail: each worker with its work and memory, and why the instance is degraded or down."
+    },
     "signIn": {
       "tab": "Sign-in",
       "intro": "How long a browser session lasts. API tokens are not affected. Saving asks for a passkey touch when yours is older than 15 minutes.",

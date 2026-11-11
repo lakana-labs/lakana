@@ -27,8 +27,12 @@ export type { InviteOut, RecoveryLinkOut } from "./access";
 export { endSessions, listPasskeys, listSessions, removePasskey } from "./account";
 export type { PasskeyOut } from "./account";
 export { ApiError, onUnauthorized } from "./client";
+export { getAttention, getGetStarted, getWork } from "./home";
+export type { AttentionKind, GetStartedOut, GetStartedStepId, WorkRepositoryOut } from "./home";
 export { describeLink, redeemLink } from "./links";
 export type { LinkDescriptionOut } from "./links";
+export { changeInterfaceState, getInfo, getInterfaceState, listRecent } from "./me";
+export type { InterfaceStateOut, RecentOut } from "./me";
 export { addPasskey, signInWithPasskey } from "./passkeys";
 export {
   dismissNotice,
@@ -41,3 +45,5 @@ export {
 export type { AccessOut, NoticeOut, SessionOut } from "./session";
 export { changeSignInSettings, getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";
+export { getStatus } from "./status";
+export type { InstanceStatusOut, StatusDetailOut } from "./status";

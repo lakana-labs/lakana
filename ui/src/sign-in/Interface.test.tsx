@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Interface, type RouterFactory } from "./Interface";
 
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
+import { homeRoutes } from "../test/home";
 import { ADMIN_SESSION, type FakeRoute, type FakeServer, fakeServer, whoami } from "../test/server";
 import { MemoryStorage } from "../test/storage";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -42,6 +43,8 @@ function renderInterface(
   const server = fakeServer({
     "GET /api/v1/sign-in/notices": { status: 200, body: [] },
     "GET /api/v1/whoami": { status: 200, body: whoami("admin", true) },
+    ...homeRoutes("admin"),
+    ...homeRoutes("kim"),
     ...routes,
   });
   let newest: ReturnType<typeof createMemoryRouter> | null = null;

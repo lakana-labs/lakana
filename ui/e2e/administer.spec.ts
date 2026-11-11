@@ -252,7 +252,7 @@ test.describe("administering sign-in", () => {
     await expect(remove).toBeFocused();
     expect(server.sent.some((request) => request.method() === "DELETE")).toBe(false);
 
-    await page.goto(`${ORIGIN}/settings`);
+    await page.goto(`${ORIGIN}/settings/sign-in`);
     const idle = page.getByRole("textbox", { name: "Idle timeout in minutes" });
     await expect(idle).toHaveValue("720");
     expect(await violations(page), "settings").toEqual([]);

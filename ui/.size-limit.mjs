@@ -12,6 +12,31 @@ const ASSETS = "../packages/lakana-server/src/lakana_server/ui_dist/assets";
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Measured 2.69 kB (the Access screen, 2026-11-09) + 10 %.
 const ON_DEMAND_LIMIT = "2.96 kB";
+// Screens larger than ON_DEMAND_LIMIT, each with a limit of its own; a chunk's file name is the
+// screen's module name, a dash and a hash, so the start of the name finds it in every build.
+const NAMED_LIMITS = [
+  // Measured 3.82 kB (Home: the status box, Needs your attention, Recently opened, Your work,
+  // Get started and the update note, 2026-11-11) + 10 %.
+  { name: "Home", prefix: "HomeScreen-", limit: "4.2 kB" },
+];
+
+/**
+ * The size check of one chunk loaded on demand: its own limit when it is named, else the shared
+ * one.
+ *
+ * @param {string} file - The chunk's file name.
+ * @returns {{name: string, path: string, gzip: boolean, limit: string}} The check.
+ */
+function onDemandCheck(file) {
+  const named = NAMED_LIMITS.find((entry) => file.startsWith(entry.prefix));
+  return {
+    name:
+      named === undefined ? `JavaScript, on demand: ${file}` : `JavaScript, ${named.name}: ${file}`,
+    path: `${ASSETS}/${file}`,
+    gzip: true,
+    limit: named === undefined ? ON_DEMAND_LIMIT : named.limit,
+  };
+}
 
 /**
  * The JavaScript files a first visit loads: those index.html names.
@@ -52,13 +77,8 @@ export default [
     gzip: true,
     limit: "192 kB",
   },
-  ...onDemandChunks(INITIAL).map((name) => ({
-    name: `JavaScript, on demand: ${name}`,
-    path: `${ASSETS}/${name}`,
-    gzip: true,
-    limit: ON_DEMAND_LIMIT,
-  })),
-  // Measured 3.43 kB (the Access and Settings screens, 2026-11-09) + 10 %.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "3.8 kB" },
+  ...onDemandChunks(INITIAL).map(onDemandCheck),
+  // Measured 4.03 kB (with Home's stylesheet, 2026-11-11) + 10 %.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "4.43 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

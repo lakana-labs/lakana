@@ -16,7 +16,7 @@ const SETTINGS = {
 
 describe("SignInSettings", () => {
   it("shows the session lengths with their bounds, edited in place", async () => {
-    renderShell("/settings", {
+    renderShell("/settings/sign-in", {
       routes: { "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS } },
     });
 
@@ -53,7 +53,7 @@ describe("SignInSettings", () => {
   });
 
   it("refuses a longest session shorter than the idle timeout", async () => {
-    const { user } = renderShell("/settings", {
+    const { user } = renderShell("/settings/sign-in", {
       routes: { "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS } },
     });
 
@@ -68,7 +68,7 @@ describe("SignInSettings", () => {
   });
 
   it("saves new lengths and says so", async () => {
-    const { user, server } = renderShell("/settings", {
+    const { user, server } = renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
         "PATCH /api/v1/settings/sign-in": (request) => ({
@@ -91,7 +91,7 @@ describe("SignInSettings", () => {
   });
 
   it("names the server's reason when saving is refused", async () => {
-    const { user } = renderShell("/settings", {
+    const { user } = renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
         "PATCH /api/v1/settings/sign-in": {
@@ -108,7 +108,7 @@ describe("SignInSettings", () => {
   });
 
   it("names the reason when the settings cannot be read", async () => {
-    renderShell("/settings", {
+    renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": {
           status: 403,

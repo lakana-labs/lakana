@@ -6,6 +6,7 @@
 import type { ComponentType } from "react";
 import type { RouteObject } from "react-router";
 
+import type { AccessOut } from "../api";
 import { AppShell } from "./AppShell";
 import { type AreaAccess, type AreaId, SHIPPED_AREAS, type ShippedArea } from "./areas";
 import { AreaPage } from "./AreaPage";
@@ -32,6 +33,7 @@ export type AreaPages = Partial<Record<AreaId, () => Promise<AreaModule>>>;
  * A screen holds the area's places under its path (`/access/invites`), so it owns `<area>/*`.
  */
 const AREA_PAGES: AreaPages = {
+  home: () => import("../home/HomeScreen"),
   access: () => import("../access/AccessScreen"),
   settings: () => import("../settings/SettingsScreen"),
 };
@@ -77,27 +79,28 @@ function areaRoute(
  * state, so a deep link to it says why instead of "not found", and its screen is never loaded.
  *
  * @param access - The areas the user may use.
- * @param pages - The screens loaded on demand; the interface's own by default.
- * @param noAccessYet - Whether Home says that the person has no access yet.
+ * @param pages - The screens loaded on demand; the interface's own when undefined.
+ * @param me - What the person may do; Home and the interface state follow it.
  * @returns The routes for `createBrowserRouter` or `createMemoryRouter`.
  */
 export function appRoutes(
   access: AreaAccess,
-  pages: AreaPages = AREA_PAGES,
-  noAccessYet = false,
+  pages: AreaPages | undefined,
+  me: AccessOut,
 ): RouteObject[] {
+  const screens = pages ?? AREA_PAGES;
   const areas = SHIPPED_AREAS.map((area): RouteObject => {
-    const route = areaRoute(area, access, pages, noAccessYet);
+    const route = areaRoute(area, access, screens, me.noAccessYet);
     if (area.path === "/") {
       return { index: true, ...route };
     }
-    const below = pages[area.id] === undefined ? "" : "/*";
+    const below = screens[area.id] === undefined ? "" : "/*";
     return { path: `${area.path.slice(1)}${below}`, ...route };
   });
   return [
     {
       path: "/",
-      element: <AppShell access={access} />,
+      element: <AppShell access={access} me={me} />,
       children: [
         ...areas,
         {
