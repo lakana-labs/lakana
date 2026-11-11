@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -254,16 +255,29 @@ def test_recent_jobs_and_runs_need_read_environment(
             recent.record(alice, "alice", kind=kind, environment="dev", ref=ref)
 
 
-def test_recent_queries_are_the_submitters_or_need_read_query_text(
+def test_recent_queries_are_the_submitters_only(
     recent: RecentService, alice: PrincipalRef, bob: PrincipalRef, session: Session
 ) -> None:
     own = query_of(session, alice)
     recent.record(alice, "alice", kind="query", environment="dev", ref=str(own.id))
+    assert [v.ref for v in recent.list(alice, "alice")] == [str(own.id)]
+    # As the query's own page: READ_QUERY_TEXT shows text in the audit log, not the query.
+    grant(session, bob, role=Role.ANALYST, environment_name="dev")
+    grant(session, bob, action=Action.READ_QUERY_TEXT)
     with pytest.raises(NotFoundError, match="No query"):
         recent.record(bob, "bob", kind="query", environment="dev", ref=str(own.id))
-    grant(session, bob, action=Action.READ_QUERY_TEXT)
-    recent.record(bob, "bob", kind="query", environment="dev", ref=str(own.id))
-    assert [v.ref for v in recent.list(bob, "bob")] == [str(own.id)]
+    session.add(
+        RecentOpen(
+            id=uuid.uuid4(),
+            principal_id=bob.id,
+            kind="query",
+            environment_id=own.environment_id,
+            ref=str(own.id),
+            opened_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    assert recent.list(bob, "bob") == []
     environment(session, "prod")
     with pytest.raises(NotFoundError):
         recent.record(alice, "alice", kind="query", environment="prod", ref=str(own.id))

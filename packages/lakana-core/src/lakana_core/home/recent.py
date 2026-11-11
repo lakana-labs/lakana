@@ -368,8 +368,9 @@ class RecentService:
     def _query(self, p: PrincipalRef, environment: str, env_id: uuid.UUID, ref: str) -> bool:
         """Say whether the query run exists and the caller may read it.
 
-        Its submitter may while they may still submit queries there (as the query's own page
-        asks); anyone else needs `READ_QUERY_TEXT` on the instance.
+        Only its submitter, while they may still submit queries there: the query's own page
+        (`QueryService.get_query_run`) shows it to nobody else, so Home lists nothing else.
+        `READ_QUERY_TEXT` opens query text in the audit log, not the query.
 
         Parameters
         ----------
@@ -390,18 +391,18 @@ class RecentService:
         query_id = _as_uuid(ref)
         if query_id is None:
             return False
-        submitter = self._session.execute(
-            select(QueryRun.principal_id).where(
-                QueryRun.id == query_id, QueryRun.environment_id == env_id
-            )
-        ).first()
-        if submitter is None:
-            return False
-        if submitter[0] == p.id and self._authz.permits(
+        if not self._authz.permits(
             p, Action.SUBMIT_QUERY, Securable.environment_scope(environment)
         ):
-            return True
-        return self._authz.permits(p, Action.READ_QUERY_TEXT, Securable.instance_scope())
+            return False
+        found = self._session.execute(
+            select(QueryRun.id).where(
+                QueryRun.id == query_id,
+                QueryRun.environment_id == env_id,
+                QueryRun.principal_id == p.id,
+            )
+        ).first()
+        return found is not None
 
     def _job(self, p: PrincipalRef, environment: str, env_id: uuid.UUID, ref: str) -> bool:
         """Say whether a deployed repository declares the job and the caller may read it.

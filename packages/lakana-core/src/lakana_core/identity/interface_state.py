@@ -251,7 +251,7 @@ class InterfaceStateService:
                 # fields of this request go onto that row.
                 pass
             row = _stored(self._session, p.id)
-            if row is None:  # pragma: no cover - the row was just written or found
+            if row is None:  # pragma: no cover -- only if the person is deleted meanwhile
                 raise NotFoundError("Your principal no longer exists.")
         if tour_seen is not None:
             row.tour_seen_at = (row.tour_seen_at or now) if tour_seen else None
