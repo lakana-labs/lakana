@@ -52,7 +52,8 @@ export function PictureDialog({
   // Which of the two buttons started the work that runs; only it shows the pending sign.
   const [pressed, setPressed] = useState<"retry" | "remove" | null>(null);
   // The file field is the dialog's one stable control: Remove picture and Try again hand focus
-  // to it before they act, since they are disabled while busy and gone once they succeeded.
+  // to it before they act, since they cannot be pressed while busy and are gone once they
+  // succeeded.
   const input = useRef<HTMLInputElement>(null);
   const focusField = (): void => {
     input.current?.focus();

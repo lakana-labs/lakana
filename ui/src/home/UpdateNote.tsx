@@ -59,7 +59,8 @@ export function UpdateNote({ onGone }: UpdateNoteProps): JSX.Element | null {
           });
         }}
       >
-        <span aria-hidden="true">×</span>
+        {/* The square button has room for one sign: while it waits, the ring takes the ×'s place. */}
+        {!attempt.busy && <span aria-hidden="true">×</span>}
       </PendingButton>
       {attempt.error !== null && (
         <p className="step-error" role="alert">
