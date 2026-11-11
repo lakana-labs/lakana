@@ -4,7 +4,6 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
-import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, signInWithPasskey } from "../api";
@@ -12,6 +11,7 @@ import { AttemptStatus, useAttempt } from "./Attempt";
 import { problemText } from "./messages";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
+import { PendingButton } from "../shell/PendingButton";
 
 /**
  * Renders the sign-in page. The browser offers the passkeys it holds for this address, so the
@@ -28,9 +28,9 @@ export function SignInPage(): JSX.Element {
       {session.reason !== undefined && <p className="step-notice">{session.reason}</p>}
       <p>{t("signIn.intro")}</p>
       <div className="step-actions">
-        <Button
+        <PendingButton
           className="button button-primary"
-          isDisabled={attempt.busy}
+          pending={attempt.busy}
           onPress={() => {
             attempt.run(
               async () => {
@@ -45,7 +45,7 @@ export function SignInPage(): JSX.Element {
           }}
         >
           {t("signIn.passkey")}
-        </Button>
+        </PendingButton>
       </div>
       <AttemptStatus attempt={attempt} waiting={t("signIn.waiting")} />
       <p className="step-hint">{t("signIn.noPasskey")}</p>

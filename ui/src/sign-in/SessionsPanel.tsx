@@ -4,7 +4,6 @@
  * @packageDocumentation
  */
 import { type JSX, useCallback, useId, useState } from "react";
-import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { endSessions, listSessions } from "../api";
@@ -15,6 +14,7 @@ import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import { useSession } from "./SessionProvider";
+import { PendingButton } from "../shell/PendingButton";
 
 /** Properties of {@link SessionsPanel}. */
 export interface SessionsPanelProps {
@@ -50,9 +50,9 @@ export function SessionsPanel({ name, own }: SessionsPanelProps): JSX.Element {
         <h2 id={heading} ref={headingRef} tabIndex={-1}>
           {t("sessions.title")}
         </h2>
-        <Button
+        <PendingButton
           className="button"
-          isDisabled={attempt.busy}
+          pending={attempt.busy}
           onPress={() => {
             if (own) {
               attempt.run(session.signOutEverywhere);
@@ -62,7 +62,7 @@ export function SessionsPanel({ name, own }: SessionsPanelProps): JSX.Element {
           }}
         >
           {own ? t("shell.signOutEverywhere") : t("sessions.endAll")}
-        </Button>
+        </PendingButton>
       </div>
       <Loaded resource={sessions}>
         {(open) =>

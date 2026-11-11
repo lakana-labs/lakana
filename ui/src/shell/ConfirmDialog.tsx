@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { ActionDialog } from "./ActionDialog";
+import { PendingButton } from "./PendingButton";
 
 /** Properties of {@link ConfirmDialog}. */
 export interface ConfirmDialogProps {
@@ -53,9 +54,9 @@ export function ConfirmDialog({
       <Heading slot="title">{title}</Heading>
       {children}
       <div className="step-actions">
-        <Button
+        <PendingButton
           className="button button-primary"
-          isDisabled={attempt.busy}
+          pending={attempt.busy}
           onPress={() => {
             attempt.run(async () => {
               await onConfirm();
@@ -64,7 +65,7 @@ export function ConfirmDialog({
           }}
         >
           {confirmLabel}
-        </Button>
+        </PendingButton>
         <Button className="button" onPress={onCancel}>
           {t("dialog.cancel")}
         </Button>

@@ -12,6 +12,7 @@ import { addPasskey, type SessionOut } from "../api";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
+import { PendingButton } from "../shell/PendingButton";
 
 /** Properties of {@link AddPasskey}. */
 export interface AddPasskeyProps {
@@ -41,9 +42,9 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
       </p>
       <p>{required ? t("addPasskey.required") : t("addPasskey.offer")}</p>
       <div className="step-actions">
-        <Button
+        <PendingButton
           className="button button-primary"
-          isDisabled={attempt.busy}
+          pending={attempt.busy}
           onPress={() => {
             attempt.run(async () => {
               await addPasskey(account.name);
@@ -52,7 +53,7 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
           }}
         >
           {t("addPasskey.add")}
-        </Button>
+        </PendingButton>
         {required ? (
           <Button
             className="button"

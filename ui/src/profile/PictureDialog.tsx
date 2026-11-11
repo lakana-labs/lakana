@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError, PICTURE_MAX_BYTES, PICTURE_TYPES, removePicture, setPicture } from "../api";
 import { ActionDialog } from "../shell/ActionDialog";
+import { PendingButton } from "../shell/PendingButton";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { Avatar, useCurrentPicture } from "./Avatar";
 
@@ -48,6 +49,8 @@ export function PictureDialog({
   const current = useCurrentPicture(name, etag);
   const [done, setDone] = useState<string | null>(null);
   const [retry, setRetry] = useState<File | null>(null);
+  // Which of the two buttons started the work that runs; only it shows the pending sign.
+  const [pressed, setPressed] = useState<"retry" | "remove" | null>(null);
   // The file field is the dialog's one stable control: Remove picture and Try again hand focus
   // to it before they act, since they are disabled while busy and gone once they succeeded.
   const input = useRef<HTMLInputElement>(null);
@@ -56,22 +59,19 @@ export function PictureDialog({
   };
   const upload = (file: File): void => {
     setDone(null);
-    setRetry(null);
     attempt.run(async () => {
       try {
         await setPicture(name, file);
       } catch (error) {
-        if (error instanceof ApiError && error.status === 503) {
-          setRetry(file);
-        }
+        setRetry(error instanceof ApiError && error.status === 503 ? file : null);
         throw error;
       }
+      setRetry(null);
       setDone(t("profile.saved"));
     });
   };
   const refuse = (key: string): void => {
     setDone(null);
-    setRetry(null);
     attempt.run(
       () => Promise.reject(new Error(key)),
       () => t(key),
@@ -90,6 +90,8 @@ export function PictureDialog({
       setDone(t("profile.stillSending"));
       return;
     }
+    setPressed(null);
+    setRetry(null);
     if (!PICTURE_TYPES.includes(file.type)) {
       refuse("profile.wrongType");
     } else if (file.size > PICTURE_MAX_BYTES) {
@@ -125,23 +127,27 @@ export function PictureDialog({
       </div>
       <div className="step-actions">
         {retry !== null && (
-          <Button
+          <PendingButton
             className="button"
-            isDisabled={attempt.busy}
+            pending={attempt.busy && pressed === "retry"}
+            isDisabled={attempt.busy && pressed !== "retry"}
             onPress={() => {
               focusField();
+              setPressed("retry");
               upload(retry);
             }}
           >
             {t("profile.tryAgain")}
-          </Button>
+          </PendingButton>
         )}
         {current !== null && (
-          <Button
+          <PendingButton
             className="button"
-            isDisabled={attempt.busy}
+            pending={attempt.busy && pressed === "remove"}
+            isDisabled={attempt.busy && pressed !== "remove"}
             onPress={() => {
               focusField();
+              setPressed("remove");
               setDone(null);
               setRetry(null);
               attempt.run(async () => {
@@ -151,7 +157,7 @@ export function PictureDialog({
             }}
           >
             {t("profile.remove")}
-          </Button>
+          </PendingButton>
         )}
         <Button className="button button-primary" onPress={onClose}>
           {t("dialog.done")}

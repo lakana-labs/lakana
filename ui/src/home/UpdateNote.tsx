@@ -4,12 +4,12 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
-import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { useInterfaceState } from "../shell/InterfaceState";
 import { useAttempt } from "../sign-in/Attempt";
 import { releaseNotesUrl } from "./links";
+import { PendingButton } from "../shell/PendingButton";
 
 /** Properties of {@link UpdateNote}. */
 export interface UpdateNoteProps {
@@ -48,10 +48,10 @@ export function UpdateNote({ onGone }: UpdateNoteProps): JSX.Element | null {
           <span className="visually-hidden"> {t("home.newTab")}</span>
         </a>
       </p>
-      <Button
+      <PendingButton
         className="home-update-hide"
         aria-label={t("home.update.hide")}
-        isDisabled={attempt.busy}
+        pending={attempt.busy}
         onPress={() => {
           attempt.run(async () => {
             await change({ update_note_seen: version });
@@ -60,7 +60,7 @@ export function UpdateNote({ onGone }: UpdateNoteProps): JSX.Element | null {
         }}
       >
         <span aria-hidden="true">×</span>
-      </Button>
+      </PendingButton>
       {attempt.error !== null && (
         <p className="step-error" role="alert">
           {attempt.error}

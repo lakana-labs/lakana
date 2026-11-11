@@ -5,7 +5,6 @@
  * @packageDocumentation
  */
 import { type JSX, useId } from "react";
-import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -15,6 +14,7 @@ import { useInterfaceState } from "../shell/InterfaceState";
 import { useAttempt } from "../sign-in/Attempt";
 import { StatusGlyph } from "../status/StatusGlyph";
 import { STEP_WAYS } from "./ways";
+import { PendingButton } from "../shell/PendingButton";
 
 /** Properties of {@link StepWay}. */
 interface StepWayProps {
@@ -82,9 +82,9 @@ export function GetStarted({ list, onGone }: GetStartedProps): JSX.Element | nul
     <section className="home-section" aria-labelledby={heading}>
       <div className="home-section-head">
         <h2 id={heading}>{t("home.getStarted.title")}</h2>
-        <Button
+        <PendingButton
           className="button"
-          isDisabled={attempt.busy}
+          pending={attempt.busy}
           onPress={() => {
             attempt.run(async () => {
               await change({ get_started_hidden: true });
@@ -93,7 +93,7 @@ export function GetStarted({ list, onGone }: GetStartedProps): JSX.Element | nul
           }}
         >
           {t("home.getStarted.hide")}
-        </Button>
+        </PendingButton>
       </div>
       {attempt.error !== null && (
         <p className="step-error" role="alert">

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { AddPasskey } from "./AddPasskey";
 import { SessionContext, type SessionValue } from "./SessionProvider";
 
+import { expectPending, held } from "../test/pending";
 import { ADMIN_SESSION, fakeServer } from "../test/server";
 import { signedIn } from "../test/session";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -70,6 +71,19 @@ describe("AddPasskey", () => {
       "/api/v1/principals/admin/passkeys",
     ]);
     expect(session.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the pending sign on Add a passkey while the server is asked", async () => {
+    fakeWebAuthn();
+    const request = held();
+    fakeServer({ "POST /api/v1/principals/admin/passkeys/options": request.route });
+    const { user } = renderStep(true);
+
+    await user.click(screen.getByRole("button", { name: "Add a passkey" }));
+
+    expectPending(screen.getByRole("button", { name: "Add a passkey" }));
+    request.release({ status: 503, body: { type: "Busy", detail: "Busy." } });
+    await screen.findByRole("alert");
   });
 
   it("names a browser that cannot add a passkey", async () => {

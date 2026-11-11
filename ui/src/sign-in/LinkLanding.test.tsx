@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LinkLanding } from "./LinkLanding";
 import { SessionContext, type SessionValue } from "./SessionProvider";
 
+import { expectPending, held } from "../test/pending";
 import { fakeServer } from "../test/server";
 import { signedIn } from "../test/session";
 
@@ -210,6 +211,24 @@ describe("LinkLanding", () => {
       await screen.findByRole("heading", { level: 1, name: "Sign in as kim" }),
     ).toBeInTheDocument();
     expect(calls).toBe(2);
+  });
+
+  it("shows the pending sign on Continue while the link is used", async () => {
+    const request = held();
+    fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: { kind: "recovery", name: "kim", display_name: null, state: "open" },
+      },
+      "POST /api/v1/sign-in/links/redeem": request.route,
+    });
+    const { user } = renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+
+    expectPending(screen.getByRole("button", { name: "Continue" }));
+    request.release({ status: 503, body: { detail: "Busy.", type: "Busy" } });
+    await screen.findByRole("alert");
   });
 
   it("says that continuing ends the session this browser has", async () => {

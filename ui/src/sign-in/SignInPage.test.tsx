@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { SessionContext, type SessionValue } from "./SessionProvider";
 import { SignInPage } from "./SignInPage";
 
+import { expectPending, held } from "../test/pending";
 import { fakeServer } from "../test/server";
 import { signedIn } from "../test/session";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -85,6 +86,19 @@ describe("SignInPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/^This passkey did not sign you in/);
     expect(session.refresh).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Sign in with a passkey" })).toBeEnabled();
+  });
+
+  it("shows the pending sign on the button while the passkey is asked for", async () => {
+    fakeWebAuthn();
+    const request = held();
+    fakeServer({ "POST /api/v1/sign-in/passkey/options": request.route });
+    const { user } = renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Sign in with a passkey" }));
+
+    expectPending(screen.getByRole("button", { name: "Sign in with a passkey" }));
+    request.release({ status: 503, body: { type: "Busy", detail: "Busy." } });
+    await screen.findByRole("alert");
   });
 
   it("names a cancelled passkey request and shows its wait in words", async () => {

@@ -30,6 +30,7 @@ import { EnvironmentLabel } from "../home/EnvironmentLabel";
 import { CopyLine } from "../shell/CopyLine";
 import { HOW_TO_URL } from "../shell/docs";
 import { Page } from "../shell/Page";
+import { PendingButton } from "../shell/PendingButton";
 import { useFocusAfter } from "../shell/useFocusAfter";
 import { useAttempt } from "../sign-in/Attempt";
 import { problemText } from "../sign-in/messages";
@@ -109,7 +110,8 @@ function useCheck(): Check {
   const { t } = useTranslation();
   const [state, setState] = useState<CheckState>(IDLE);
   const leaving = useRef(new AbortController());
-  // The button stays enabled while a check runs, so it keeps focus; a second press waits.
+  // The button is pending, not disabled, while a check runs, so it keeps focus; React Aria
+  // ignores a press during the wait, and the guard covers one that comes before the sign is drawn.
   const running = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -466,14 +468,15 @@ function TestAccess({ name, environment, host, headingRef }: TestAccessProps): J
         {t("settings.connect.test.heading")}
       </h2>
       <p>{t("settings.connect.test.body", { environment })}</p>
-      <Button
+      <PendingButton
         className="button button-primary"
+        pending={check.busy}
         onPress={() => {
           check.run({ kind: "access", repository: name, environment });
         }}
       >
         {t("settings.connect.test.action", { environment })}
-      </Button>
+      </PendingButton>
       <CheckOutcome
         check={check}
         waiting={t("settings.connect.test.waiting")}
@@ -620,11 +623,9 @@ export function ConnectRepository(): JSX.Element {
       setName(recognised.name.replace(NOT_IN_NAME_RUNS, "-"));
     }
   };
-  // Create stays enabled while it runs, so a failure leaves focus on it; a second press waits.
+  // Create stays pending while it runs, so a failure leaves focus on it; React Aria ignores a
+  // press during the wait.
   const create = (): void => {
-    if (attempt.busy) {
-      return;
-    }
     attempt.run(async () => {
       if (!registered) {
         setAlready(
@@ -729,16 +730,17 @@ export function ConnectRepository(): JSX.Element {
               </a>
             )}
           </p>
-          <Button
+          <PendingButton
             className="button"
             isDisabled={registered || nameError !== null}
+            pending={keys.busy}
             onPress={() => {
               setTicked(new Set());
               keys.run({ kind: "host_keys", url: ssh });
             }}
           >
             {t("settings.connect.keys.fetch")}
-          </Button>
+          </PendingButton>
           <CheckOutcome
             check={keys}
             waiting={t("settings.connect.keys.waiting")}
@@ -780,13 +782,14 @@ export function ConnectRepository(): JSX.Element {
           <p>{t("settings.connect.create.body")}</p>
           {made === null && (
             <>
-              <Button
+              <PendingButton
                 className="button button-primary"
                 isDisabled={ticked.size === 0 || nameError !== null}
+                pending={attempt.busy}
                 onPress={create}
               >
                 {t(registered ? "settings.connect.create.retry" : "settings.connect.create.action")}
-              </Button>
+              </PendingButton>
               {ticked.size === 0 && (
                 <p className="step-hint">{t("settings.connect.create.tick")}</p>
               )}

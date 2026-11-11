@@ -13,6 +13,7 @@ import type { LinkFragment } from "./fragment";
 import { problemText } from "./messages";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
+import { PendingButton } from "../shell/PendingButton";
 
 /** The states of a link the server answers 410 with. */
 const UNUSABLE = new Set(["used", "expired", "withdrawn", "unknown"]);
@@ -167,9 +168,9 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
         <p className="step-notice">{t("link.replaces", { name: session.session?.name })}</p>
       )}
       <div className="step-actions">
-        <Button className="button button-primary" isDisabled={attempt.busy} onPress={use}>
+        <PendingButton className="button button-primary" pending={attempt.busy} onPress={use}>
           {t("link.confirm")}
-        </Button>
+        </PendingButton>
         {attempt.error !== null && attempt.error !== "" && leave}
       </div>
       <AttemptStatus attempt={attempt} waiting={t("link.signingIn")} />

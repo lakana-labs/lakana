@@ -246,6 +246,10 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   step, the accessibility rules and the forbidden list (what makes an interface look generated).
   The reasons are on the contributor page `docs/site/explanation/how-lakana-looks.md`; change
   the skill and the page together.
+- **A button that waits for the server is a `PendingButton`** (`ui/src/shell/PendingButton.tsx`):
+  it shows the pending sign from the first moment and cannot be pressed again; words that say
+  what the person waits for follow within 1 s. Never `isDisabled` for the pressed button, which
+  drops focus; other disabling conditions stay `isDisabled` beside `pending`.
 - **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
   stylesheet and string on (part 1a, Task 3).
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools

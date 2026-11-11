@@ -27,6 +27,7 @@ import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { AccessFrame } from "./AccessFrame";
 import { ShownOnce } from "./ShownOnce";
+import { PendingButton } from "../shell/PendingButton";
 
 /** Properties of {@link InviteDialog}. */
 interface InviteDialogProps {
@@ -74,9 +75,9 @@ function InviteDialog({ onClose }: InviteDialogProps): JSX.Element {
             <Text slot="description">{t("access.invites.displayNameHelp")}</Text>
           </TextField>
           <div className="step-actions">
-            <Button type="submit" className="button button-primary" isDisabled={attempt.busy}>
+            <PendingButton type="submit" className="button button-primary" pending={attempt.busy}>
               {t("access.invites.create")}
-            </Button>
+            </PendingButton>
             <Button className="button" onPress={onClose}>
               {t("dialog.cancel")}
             </Button>
@@ -150,10 +151,10 @@ export function InvitesPage(): JSX.Element {
                     </td>
                     <td>{when(invite.expires_at)}</td>
                     <td>
-                      <Button
+                      <PendingButton
                         className="button"
                         aria-label={t("access.invites.withdrawOf", { name: invite.name })}
-                        isDisabled={withdraw.busy}
+                        pending={withdraw.busy}
                         onPress={() => {
                           withdraw.run(async () => {
                             await withdrawInvite(invite.id);
@@ -163,7 +164,7 @@ export function InvitesPage(): JSX.Element {
                         }}
                       >
                         {t("access.withdraw")}
-                      </Button>
+                      </PendingButton>
                     </td>
                   </tr>
                 ))}

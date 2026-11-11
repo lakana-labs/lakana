@@ -1,7 +1,8 @@
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { STATE } from "../test/home";
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 
 /**
@@ -48,6 +49,28 @@ describe("UpdateNote", () => {
     home("0.23.0", "0.23.0");
     await screen.findByText("Healthy");
     expect(screen.queryByText(/Lakana was updated/)).not.toBeInTheDocument();
+  });
+
+  it("shows the pending sign on the hide button while the choice is saved", async () => {
+    const request = held();
+    const { user } = renderShell("/", {
+      routes: {
+        "GET /api/v1/info": { status: 200, body: { version: "0.23.0" } },
+        "GET /api/v1/principals/admin/interface-state": {
+          status: 200,
+          body: { ...STATE, update_note_seen: "0.22.0" },
+        },
+        "PATCH /api/v1/principals/admin/interface-state": request.route,
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Hide the update note" }));
+
+    expectPending(screen.getByRole("button", { name: "Hide the update note" }));
+    request.release({ status: 200, body: { ...STATE, update_note_seen: "0.23.0" } });
+    await waitFor(() => {
+      expect(screen.queryByText(/Lakana was updated/)).not.toBeInTheDocument();
+    });
   });
 
   it("links the note to the release of that version", async () => {

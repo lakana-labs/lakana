@@ -1,6 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { expectPending } from "../test/pending";
 import { renderShell } from "../test/render";
 import { signedIn } from "../test/session";
 
@@ -40,6 +41,22 @@ describe("SessionsPanel", () => {
     expect(screen.getByText("This browser")).toBeInTheDocument();
     expect(screen.getByText(/Unknown browser/)).toBeInTheDocument();
     expect(screen.getByText(/198\.51\.100\.7/)).toBeInTheDocument();
+  });
+
+  it("shows the pending sign on Sign out everywhere while the sessions end", async () => {
+    const session = signedIn();
+    vi.mocked(session.signOutEverywhere).mockReturnValue(new Promise(() => undefined));
+    const { user } = renderShell("/account", {
+      session,
+      routes: {
+        "GET /api/v1/principals/admin/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/admin/sessions": { status: 200, body: [HERE] },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Sign out everywhere" }));
+
+    expectPending(screen.getByRole("button", { name: "Sign out everywhere" }));
   });
 
   it("signs out everywhere through the session, so this browser signs out too", async () => {

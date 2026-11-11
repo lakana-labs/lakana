@@ -104,6 +104,29 @@
   background: var(--color-sunk);
 }
 
+/*
+ * The pending sign of PendingButton: a ring the size of the text with a gap, so it reads as
+ * waiting even where reduced motion holds it still. Its margins take back most of the flex gap
+ * and a little of the padding, so a button grows by about a ring while it waits.
+ */
+.pending-sign {
+  box-sizing: border-box;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  margin-inline: calc(-1 * var(--space-1));
+  border: 2px solid currentcolor;
+  border-block-start-color: transparent;
+  border-radius: 50%;
+  animation: pending-turn 0.8s linear infinite;
+}
+
+@keyframes pending-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .sidebar-nav {
   display: flex;
   flex: 1;

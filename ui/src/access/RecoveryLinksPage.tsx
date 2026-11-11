@@ -19,6 +19,7 @@ import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { AccessFrame } from "./AccessFrame";
 import { personPath } from "./paths";
 import { RecoveryDialog } from "./RecoveryDialog";
+import { PendingButton } from "../shell/PendingButton";
 
 /**
  * Renders the open recovery links; each row opens its person, and is withdrawn in place.
@@ -67,10 +68,10 @@ export function RecoveryLinksPage(): JSX.Element {
                     </td>
                     <td>{when(link.expires_at)}</td>
                     <td>
-                      <Button
+                      <PendingButton
                         className="button"
                         aria-label={t("access.recovery.withdrawOf", { name: link.name })}
-                        isDisabled={withdraw.busy}
+                        pending={withdraw.busy}
                         onPress={() => {
                           withdraw.run(async () => {
                             await withdrawRecoveryLink(link.id);
@@ -80,7 +81,7 @@ export function RecoveryLinksPage(): JSX.Element {
                         }}
                       >
                         {t("access.withdraw")}
-                      </Button>
+                      </PendingButton>
                     </td>
                     <td>
                       <span className="chevron" aria-hidden="true">

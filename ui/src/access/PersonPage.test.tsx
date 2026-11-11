@@ -1,6 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 import { fakeWebAuthn } from "../test/webauthn";
 
@@ -126,6 +127,59 @@ describe("PersonPage", () => {
       await screen.findByText("https://lakana.example.com/sign-in#l=a&s=b"),
     ).toBeInTheDocument();
     expect(tries).toBe(2);
+  });
+
+  it("shows the pending sign on Continue while the recovery link is made", async () => {
+    const request = held();
+    const { user } = renderShell("/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "POST /api/v1/principals/kim/recovery-link": request.route,
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Issue a recovery link" }));
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    const dialog = screen.getByRole("dialog");
+    expectPending(within(dialog).getByRole("button", { name: "Continue" }));
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).not.toHaveAttribute(
+      "data-pending",
+    );
+    request.release({ status: 403, body: { type: "PermissionDenied", detail: "No." } });
+    await within(dialog).findByRole("alert");
+  });
+
+  it("shows the pending sign on the confirming button while a picture is removed", async () => {
+    const request = held();
+    const { user } = renderShell("/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": {
+          status: 200,
+          body: { name: "kim", type: "USER", is_active: true, picture: "e1" },
+        },
+        "GET /api/v1/principals/kim/picture": {
+          status: 200,
+          blob: new Blob(["webp"], { type: "image/webp" }),
+        },
+        "DELETE /api/v1/principals/kim/picture": request.route,
+        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Remove picture" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove kim's picture?" });
+
+    await user.click(within(dialog).getByRole("button", { name: "Remove picture" }));
+
+    expectPending(within(dialog).getByRole("button", { name: "Remove picture" }));
+    request.release({ status: 204 });
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
   });
 
   it("shows one's own page with the own controls and no recovery link", async () => {

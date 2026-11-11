@@ -1,6 +1,7 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 
 const SETTINGS = {
@@ -88,6 +89,23 @@ describe("SignInSettings", () => {
       idle_timeout_minutes: 60,
       absolute_lifetime_minutes: 10080,
     });
+  });
+
+  it("shows the pending sign on Save while the lengths are saved", async () => {
+    const request = held();
+    const { user } = renderShell("/settings/sign-in", {
+      routes: {
+        "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
+        "PATCH /api/v1/settings/sign-in": request.route,
+      },
+    });
+    await screen.findByRole("textbox", { name: "Idle timeout in minutes" });
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expectPending(screen.getByRole("button", { name: "Save" }));
+    request.release({ status: 200, body: SETTINGS });
+    expect(await screen.findByText("Saved. New sessions use these lengths.")).toBeInTheDocument();
   });
 
   it("names the server's reason when saving is refused", async () => {
