@@ -431,6 +431,77 @@
       "idleOutOfBounds": "The idle timeout is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
       "absoluteOutOfBounds": "The longest session is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
       "shorterThanIdle": "The longest session cannot be shorter than the idle timeout ({{idle}} minutes). Make it longer, or the idle timeout shorter."
+    },
+    "connect": {
+      "title": "Connect a repository",
+      "intro": "Lakana deploys a project from its Git repository over SSH, with a deploy key it makes for you. Nothing is stored until you confirm the host's keys.",
+      "hosts": {
+        "github": "GitHub",
+        "gitlab": "GitLab",
+        "bitbucket": "Bitbucket"
+      },
+      "where": {
+        "heading": "1. The repository",
+        "url": "Repository URL",
+        "urlHelp": "The address you clone it with, such as git@github.com:team/analytics.git or https://github.com/team/analytics.",
+        "name": "Name in Lakana",
+        "nameHelp": "Deploys and the command line use it. No dots, slashes, percent signs or spaces.",
+        "known": "A {{host}} repository. Lakana connects to it over SSH: {{url}}",
+        "other": "Lakana connects to it over SSH: {{url}}",
+        "urlEmpty": "Enter the repository's URL, the one you clone it with.",
+        "urlBad": "This is not a repository URL. Enter it as git@host:team/repo.git, ssh://git@host/team/repo.git or https://host/team/repo.",
+        "httpsOther": "Lakana cannot tell this host's SSH address. Enter the SSH URL (the host's Clone button shows it, such as git@host:team/repo.git), or use a token instead.",
+        "nameEmpty": "Enter a name for the repository.",
+        "nameBad": "A name has no dots, slashes, percent signs or spaces. Try {{suggestion}}."
+      },
+      "token": {
+        "toggle": "Use a token instead",
+        "body": "Register the HTTPS URL with an access token stored as a secret. A token belongs to a person and expires: when they leave or it runs out, deploys stop. A deploy key belongs to the repository.",
+        "command": "lakana repo add {{name}} --kind https --url {{url}} --credential-secret {{name}}",
+        "how": "How to store the token and register the repository"
+      },
+      "keys": {
+        "heading": "2. Confirm the host's keys",
+        "body": "A worker fetches the host's SSH keys. Compare each fingerprint with the ones the host publishes, and tick only the keys that match.",
+        "fetch": "Fetch the host's keys",
+        "waiting": "Asking a worker to fetch the keys…",
+        "published": "{{host}}'s published fingerprints",
+        "compareOther": "Ask the host's administrator for its fingerprints, or find them in the host's documentation.",
+        "matches": "This matches",
+        "matchesFor": "This matches: {{type}}",
+        "showOthers": "Show other key types ({{count}})",
+        "othersNote": "Tick another key type only when you compared its fingerprint too.",
+        "none": "The host offered no SSH key. Check that the URL is the SSH address of your Git host, then fetch again.",
+        "noWorker": "No worker answered within two minutes. Start one (docker compose up -d worker, or lakana server start --local), then try again."
+      },
+      "create": {
+        "heading": "3. Create the repository and its keys",
+        "body": "Lakana registers the repository with the keys you ticked, then makes a key pair for each environment. The private keys stay on the server as secrets; you see only the public keys. This asks for a passkey touch.",
+        "action": "Create the repository and its key",
+        "tick": "Tick each key that matches, above, first.",
+        "working": "Creating the repository and its keys…",
+        "notMade": "The repository is registered; its key is not made yet.",
+        "retry": "Make the key",
+        "add": "Add each key as a read-only deploy key at your Git host.",
+        "page": "Open {{host}}'s deploy-key page",
+        "pageOther": "At your Git host, open the repository's settings and its deploy keys.",
+        "readOnly": "Keep it read-only: leave write access off. Lakana only reads, and a key that may push could change what your production environment deploys.",
+        "earlier": "made earlier",
+        "copy": "Copy key",
+        "skipped": "No key in {{environments}}: you may not manage secrets there. Someone who may runs lakana repo deploy-key {{name}}.",
+        "none": "No environment got a key.",
+        "later": "An environment created later has no key yet: make one with lakana repo deploy-key {{name}} and add it as an additional deploy key at your Git host; the other environments' keys keep working."
+      },
+      "test": {
+        "heading": "4. Test access",
+        "body": "A worker reads the repository with the key of {{environment}}, as a deploy would. Add that key at your Git host first.",
+        "action": "Test access in {{environment}}",
+        "waiting": "Asking a worker to read the repository…",
+        "next": "Next: deploy it, by hand or from CI.",
+        "github": "Deploy from GitHub Actions",
+        "gitlab": "Deploy from GitLab CI",
+        "deploy": "lakana deploy {{name}} --env {{environment}}"
+      }
     }
   },
   "duration": {

@@ -1,0 +1,49 @@
+/* Connect a repository: numbered steps on one column, host keys and deploy keys as rows. */
+.connect-step {
+  max-width: 720px;
+  margin: 0 0 var(--space-6);
+}
+
+.connect-step h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+  line-height: var(--type-section-line);
+}
+
+.connect-keys {
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connect-keys li {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.connect-keys code {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  overflow-wrap: anywhere;
+}
+
+.connect-keys label {
+  display: block;
+  margin-top: var(--space-1);
+}
+
+.connect-keys input {
+  accent-color: var(--color-accent);
+}
+
+/* Links: the accent, underlined on hover, as on Home. */
+.connect-step a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.connect-step a:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}

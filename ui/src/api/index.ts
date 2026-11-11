@@ -53,6 +53,13 @@ export {
   signOutEverywhere,
 } from "./session";
 export type { AccessOut, NoticeOut, SessionOut } from "./session";
+export { createRepository, generateDeployKey, requestProbe, waitForProbe } from "./repositories";
+export type {
+  DeployKeyOut,
+  HostKeyOut,
+  RepositoryProbeIn,
+  RepositoryProbeOut,
+} from "./repositories";
 export { changeSignInSettings, getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";
 export { getStatus } from "./status";

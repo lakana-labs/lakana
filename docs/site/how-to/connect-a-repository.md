@@ -5,12 +5,45 @@ that may read that one repository. Lakana makes the key for you, one key pair pe
 and keeps each private key as that environment's secret. You never see or copy a private key;
 you add the public keys at your git host.
 
-The web interface's **Connect a repository** page walks you through the same steps as the
-commands below: the host's keys, the repository, its keys, and a test.
-
 You need the ADMIN role (or `MANAGE_REPOSITORY` on the instance and `MANAGE_SECRET` in each
 environment), a running worker that takes pipeline work, and the repository's SSH URL
 (`git@host:team/repo.git` or `ssh://git@host/team/repo.git`).
+
+## In the web interface
+
+An administrator opens **Connect a repository** from Home's **Get started** list, or at
+`/settings/repositories/new`. The page has four numbered steps; each appears once the one
+before it is done.
+
+1. **The repository.** Paste the **Repository URL**, the one you clone it with. For GitHub,
+   GitLab and Bitbucket an HTTPS URL works too: the page names the host and shows the SSH
+   address it connects to. **Name in Lakana** is proposed from the URL's last part. For an
+   HTTPS URL of another host the page cannot tell its SSH address: enter the SSH URL (the
+   host's Clone button shows it). **Use a token instead** shows the command that registers the
+   HTTPS URL with a token, for every host; a token belongs to a person and expires, a deploy
+   key belongs to the repository.
+2. **Confirm the host's keys.** **Fetch the host's keys** asks a worker for them. Each key is
+   its own row with its type and fingerprint; for GitHub, GitLab and Bitbucket the page links
+   the host's published fingerprints. Compare each one, and tick **This matches** only for the
+   keys whose fingerprint you compared. The `ssh-ed25519` key is offered first; **Show other
+   key types** shows the others. Nothing is stored yet.
+3. **Create the repository and its keys.** **Create the repository and its key** registers the
+   repository with the keys you ticked, and only those, then makes a key pair for every
+   environment where you may manage secrets. It asks for one passkey touch for both. The page
+   lists each environment's public key with **Copy key** (a key made before is marked *made
+   earlier*), links the host's deploy-key page, and names the environments it could not write.
+   Add each key as a read-only deploy key at your git host (below). If the repository was
+   registered but its key could not be made, the page says so with the cause; **Make the key**
+   tries only the key again.
+4. **Test access.** **Test access in** *environment* lets a worker read the repository with the
+   key of the first environment written. It answers with the outcome and what to do about it;
+   on success it shows the command to deploy and, for GitHub and GitLab, the CI how-to.
+
+While a worker has not answered after a second, the page says what it waits for. If no worker
+takes the check within two minutes, it says so and how to start one.
+
+The sections below take the same steps with the command line, and cover what comes later:
+another environment, replacing a key.
 
 ## Confirm the host keys
 

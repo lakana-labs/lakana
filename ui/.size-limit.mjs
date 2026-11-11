@@ -21,6 +21,10 @@ const NAMED_LIMITS = [
   { name: "Home", prefix: "HomeScreen-", limit: "4.3 kB" },
   // Measured 1.79 kB (the tour: the welcome and its steps, 2026-11-11) + 10 %.
   { name: "the tour", prefix: "Tour-", limit: "1.97 kB" },
+  // Measured 3.96 kB (Connect a repository: the URL and name, the host keys one by one, the
+  // repository with its deploy keys per environment and Test access, 2026-11-11) + 10 %. It loads
+  // only on /settings/repositories/new, so Settings' other places stay within the shared limit.
+  { name: "Connect a repository", prefix: "ConnectRepository-", limit: "4.36 kB" },
 ];
 
 /**
