@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AccessOut, InterfaceStateOut } from "../api";
@@ -273,6 +273,56 @@ describe("the tour", () => {
     await waitFor(() => {
       expect(patches(server)[0]).toEqual({ tour_seen: true });
     });
+  });
+
+  it.each([
+    ["Skip tour", false],
+    ["Escape", false],
+    ["Finish", true],
+  ] as const)(
+    "after a tour begun at the welcome, %s returns focus to the page's heading",
+    async (how, toTheEnd) => {
+      const { user } = firstSignIn();
+      let step = await startTour(user);
+      if (toTheEnd) {
+        for (let index = 0; index < 8; index += 1) {
+          await user.click(within(step).getByRole("button", { name: "Next" }));
+          step = await screen.findByRole("dialog", { name: /./ });
+        }
+      }
+
+      if (how === "Escape") {
+        await user.keyboard("{Escape}");
+      } else {
+        await user.click(within(step).getByRole("button", { name: how }));
+      }
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { level: 1, name: "Home" })).toHaveFocus();
+      });
+    },
+  );
+
+  it("leaves an Escape that something else handled alone", async () => {
+    const { user } = firstSignIn();
+    await startTour(user);
+    // A native field outside React Aria that uses Escape itself (clears its text).
+    const field = document.createElement("input");
+    field.setAttribute("aria-label", "A field that clears on Escape");
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+      }
+    });
+    document.body.append(field);
+    try {
+      // Dispatched on the field, it bubbles to the document as a key pressed there would.
+      expect(fireEvent.keyDown(field, { key: "Escape" })).toBe(false);
+
+      expect(currentStep()).toBe("Home");
+    } finally {
+      field.remove();
+    }
   });
 
   it("records the tour when Escape closes the welcome", async () => {

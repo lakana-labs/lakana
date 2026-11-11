@@ -52,20 +52,20 @@ export interface TourProviderProps {
 
 /**
  * Moves focus back after the tour: to where it was when the tour started while that is still
- * there, else to the page's heading. After the welcome a person never asked for, focus stays
- * where the dialog leaves it.
+ * there, else to the page's heading (a tour begun at the welcome had no such place, and its
+ * steps' buttons are gone). Skipping the welcome itself leaves focus where the dialog returns it.
  *
- * @param target - Where focus was, or null after the welcome.
+ * @param target - Where focus was, or null when the tour began at the welcome.
+ * @param afterSteps - Whether a step was shown before the tour ended.
  */
-function returnFocus(target: HTMLElement | null): void {
-  if (target === null) {
-    return;
-  }
-  if (target.isConnected) {
+function returnFocus(target: HTMLElement | null, afterSteps: boolean): void {
+  if (target?.isConnected === true) {
     target.focus();
     return;
   }
-  document.querySelector<HTMLElement>("main h1")?.focus();
+  if (target !== null || afterSteps) {
+    document.querySelector<HTMLElement>("main h1")?.focus();
+  }
 }
 
 /**
@@ -85,6 +85,7 @@ export function TourProvider({ areas, children }: TourProviderProps): JSX.Elemen
   const [mode, setMode] = useState<"welcome" | "steps" | null>(null);
   const welcomed = useRef(false);
   const opener = useRef<HTMLElement | null>(null);
+  const stepped = useRef(false);
   const [ended, setEnded] = useState(0);
   const [run, setRun] = useState(0);
 
@@ -98,7 +99,7 @@ export function TourProvider({ areas, children }: TourProviderProps): JSX.Elemen
 
   useEffect(() => {
     if (ended > 0) {
-      returnFocus(opener.current);
+      returnFocus(opener.current, stepped.current);
     }
   }, [ended]);
 
@@ -108,7 +109,8 @@ export function TourProvider({ areas, children }: TourProviderProps): JSX.Elemen
     setMode("steps");
     setRun((count) => count + 1);
   }, []);
-  const close = useCallback(() => {
+  const close = useCallback((afterSteps: boolean) => {
+    stepped.current = afterSteps;
     setMode(null);
     setEnded((count) => count + 1);
   }, []);

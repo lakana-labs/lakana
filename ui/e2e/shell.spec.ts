@@ -378,6 +378,8 @@ for (const theme of ["light", "dark"] as const) {
 
         await page.keyboard.press("Escape");
         await expect(page.getByRole("dialog")).toHaveCount(0);
+        // Begun at the welcome, the tour had no place to return to: focus goes to the heading.
+        await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeFocused();
       });
 
       test("Help and the shortcuts have no axe violations", async ({ page }) => {

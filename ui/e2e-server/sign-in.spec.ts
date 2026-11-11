@@ -93,10 +93,14 @@ test.describe("the first administrator", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Sign in to Lakana" })).toBeVisible();
     expect(await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY)).toBeNull();
 
+    // The tour was recorded as seen: the second sign-in reads it so and does not welcome again.
+    const state = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/interface-state") && response.request().method() === "GET",
+    );
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-    // The tour was recorded as seen: the second sign-in does not welcome again.
-    await page.waitForLoadState("networkidle");
+    expect(await (await state).json()).toMatchObject({ tour_seen: true });
     await expect(page.getByRole("dialog")).toHaveCount(0);
     const after = await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY);
     expect(after).toBeTruthy();

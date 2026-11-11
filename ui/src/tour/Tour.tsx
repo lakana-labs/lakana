@@ -212,8 +212,8 @@ export interface TourProps {
   readonly areas: readonly ShippedArea[];
   /** Whether to open with the welcome (the first sign-in) instead of the first step. */
   readonly welcome: boolean;
-  /** Called when the person leaves the tour, in any way. */
-  readonly onClose: () => void;
+  /** Called when the person leaves the tour, in any way; true once a step was shown. */
+  readonly onClose: (afterSteps: boolean) => void;
 }
 
 /**
@@ -251,13 +251,14 @@ export function Tour({ areas, welcome, onClose }: TourProps): JSX.Element {
     };
     // A failed record only means the welcome comes again at the next sign-in.
     record().catch(() => undefined);
-    onClose();
-  }, [state, change, version, onClose]);
+    onClose(index !== null);
+  }, [state, change, version, index, onClose]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      // A menu or dialog open over the tour handles its own Escape and stops it there.
-      if (event.key === "Escape") {
+      // A menu or dialog open over the tour, or a field that used Escape (cleared itself), marks
+      // it handled, and the tour stays.
+      if (event.key === "Escape" && !event.defaultPrevented) {
         end();
       }
     };
