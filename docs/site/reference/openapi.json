@@ -25257,6 +25257,16 @@
         "properties": {
           "id": {
             "type": "string",
+            "enum": [
+              "connect_repository",
+              "invite_team",
+              "add_passkey",
+              "deploy_project",
+              "deploy_project_local",
+              "ci_deploy",
+              "open_table",
+              "run_query"
+            ],
             "title": "Id"
           },
           "done": {
@@ -28507,6 +28517,12 @@
         "properties": {
           "kind": {
             "type": "string",
+            "enum": [
+              "table",
+              "query",
+              "job",
+              "run"
+            ],
             "title": "Kind"
           },
           "environment": {

@@ -2465,7 +2465,7 @@ class RecentOut(BaseModel):
         When you last opened it.
     """
 
-    kind: str
+    kind: Literal["table", "query", "job", "run"]
     environment: str
     ref: str
     opened_at: datetime
@@ -2483,7 +2483,16 @@ class GetStartedStepOut(BaseModel):
         Whether the server's state shows it done.
     """
 
-    id: str
+    id: Literal[
+        "connect_repository",
+        "invite_team",
+        "add_passkey",
+        "deploy_project",
+        "deploy_project_local",
+        "ci_deploy",
+        "open_table",
+        "run_query",
+    ]
     done: bool
 
 

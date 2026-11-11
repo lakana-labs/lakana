@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.models import Environment, Namespace, Table, TableType
+from lakana_core.identity import interface_state as interface_state_module
+from lakana_core.models import Environment, InterfaceState, Namespace, Table, TableType
 from tests.api.platform.test_whoami import _new_person, _task_token_header
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
@@ -136,3 +138,43 @@ def test_recent_refuses_an_unknown_kind_and_a_long_ref(client: TestClient) -> No
         {"kind": "table", "environment": "d" * 256, "ref": "x"},
     ):
         assert client.post(_RECENT, headers=AUTH_HEADER, json=body).status_code == 422
+
+
+def test_two_first_patches_at_once_both_land(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert client.patch(_STATE, headers=AUTH_HEADER, json={"tour_seen": True}).status_code == 200
+    real = interface_state_module._stored
+    calls: list[int] = []
+
+    def stale_once(session: Session, principal_id: uuid.UUID) -> InterfaceState | None:
+        """Miss the stored row the first time, as a request that looked first would.
+
+        Parameters
+        ----------
+        session
+            Database session, passed on.
+        principal_id
+            The person, passed on.
+
+        Returns
+        -------
+        InterfaceState or None
+            `None` once, then the row.
+        """
+        calls.append(1)
+        return None if len(calls) == 1 else real(session, principal_id)
+
+    monkeypatch.setattr(interface_state_module, "_stored", stale_once)
+    second = client.patch(_STATE, headers=AUTH_HEADER, json={"update_note_seen": "0.23.0"})
+    assert second.status_code == 200, second.text
+    assert second.json() == {
+        "tour_seen": True,
+        "get_started_hidden": False,
+        "update_note_seen": "0.23.0",
+    }
+
+
+def test_recent_refuses_a_nul_character_as_422(client: TestClient) -> None:
+    body = {"kind": "table", "environment": "dev\u0000", "ref": "gold.sales"}
+    assert client.post(_RECENT, headers=AUTH_HEADER, json=body).status_code == 422

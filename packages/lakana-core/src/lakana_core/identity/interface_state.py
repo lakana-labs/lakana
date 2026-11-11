@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import enum
 import re
+import uuid
 from dataclasses import dataclass
 
+from sqlalchemy import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AuthorizationService, PrincipalRef
@@ -127,6 +130,24 @@ def _check_version(version: str) -> None:
         )
 
 
+def _stored(session: Session, principal_id: uuid.UUID) -> InterfaceState | None:
+    """Read a person's row as the database has it now.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal_id
+        The person.
+
+    Returns
+    -------
+    InterfaceState or None
+        The row, or `None` before the person's first change.
+    """
+    return session.get(InterfaceState, principal_id, populate_existing=True)
+
+
 class InterfaceStateService:
     """Read and change a person's own interface state.
 
@@ -212,13 +233,26 @@ class InterfaceStateService:
         require_self(p, name, "interface state")
         if isinstance(update_note_seen, str):
             _check_version(update_note_seen)
-        row = self._session.get(InterfaceState, p.id)
         now = utc_now()
+        row = _stored(self._session, p.id)
         if row is None:
             if self._session.get(Principal, p.id) is None:
                 raise NotFoundError("Your principal no longer exists.")
-            row = InterfaceState(principal_id=p.id, get_started_hidden=False, updated_at=now)
-            self._session.add(row)
+            try:
+                with self._session.begin_nested():
+                    self._session.execute(
+                        insert(InterfaceState).values(
+                            principal_id=p.id, get_started_hidden=False, updated_at=now
+                        )
+                    )
+            except IntegrityError:
+                # Another request of the same person wrote the first row since this one
+                # looked (the interface sends the tour and the update note separately); the
+                # fields of this request go onto that row.
+                pass
+            row = _stored(self._session, p.id)
+            if row is None:  # pragma: no cover - the row was just written or found
+                raise NotFoundError("Your principal no longer exists.")
         if tour_seen is not None:
             row.tour_seen_at = (row.tour_seen_at or now) if tour_seen else None
         if get_started_hidden is not None:

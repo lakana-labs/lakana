@@ -11,11 +11,12 @@ makes its entry disappear, never a refusal, and nothing about it is shown. Every
 from __future__ import annotations
 
 import builtins
+import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal, get_args
+from typing import Literal, cast, get_args
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -73,7 +74,7 @@ class RecentView:
         When the person last opened it.
     """
 
-    kind: str
+    kind: RecentKind
     environment: str
     ref: str
     opened_at: datetime
@@ -188,6 +189,11 @@ class RecentService:
             raise ValidationError(
                 f"kind: '{shown(kind)}' is not something Home lists; use table, query, job or run."
             )
+        if any(unicodedata.category(c) == "Cc" for c in environment + ref):
+            raise ValidationError(
+                "environment and ref: a control character is in no name; send the name as the "
+                "page shows it."
+            )
         if len(ref.encode()) > RECENT_REF_BYTES:
             raise ValidationError(f"ref: at most {RECENT_REF_BYTES} bytes.")
         environment_id = self._readable(p, kind, environment, ref)
@@ -262,9 +268,14 @@ class RecentService:
             .limit(RECENT_KEEP)
         ).all()
         return [
-            RecentView(kind=row.kind, environment=env, ref=row.ref, opened_at=row.opened_at)
+            RecentView(
+                kind=cast("RecentKind", row.kind),
+                environment=env,
+                ref=row.ref,
+                opened_at=row.opened_at,
+            )
             for row, env in rows
-            if self._readable(p, row.kind, env, row.ref) is not None
+            if self._found(p, row.kind, env, row.environment_id, row.ref)
         ]
 
     def _readable(self, p: PrincipalRef, kind: str, environment: str, ref: str) -> uuid.UUID | None:
@@ -289,17 +300,40 @@ class RecentService:
         env_id = self._session.execute(
             select(Environment.id).where(Environment.name == environment, LIVE_ENVIRONMENT)
         ).scalar()
-        if env_id is None:
+        if env_id is None or not self._found(p, kind, environment, env_id, ref):
             return None
+        return env_id
+
+    def _found(
+        self, p: PrincipalRef, kind: str, environment: str, env_id: uuid.UUID, ref: str
+    ) -> bool:
+        """Say whether the object exists in a live environment and the caller may read it.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        kind
+            The object's kind.
+        environment
+            Its environment's name.
+        env_id
+            Its environment's id.
+        ref
+            Its reference.
+
+        Returns
+        -------
+        bool
+            Whether it is readable.
+        """
         if kind == "table":
-            found = self._table(p, environment, ref)
-        elif kind == "query":
-            found = self._query(p, environment, env_id, ref)
-        elif kind == "job":
-            found = self._job(p, environment, env_id, ref)
-        else:
-            found = self._run(p, environment, env_id, ref)
-        return env_id if found else None
+            return self._table(p, environment, ref)
+        if kind == "query":
+            return self._query(p, environment, env_id, ref)
+        if kind == "job":
+            return self._job(p, environment, env_id, ref)
+        return self._run(p, environment, env_id, ref)
 
     def _table(self, p: PrincipalRef, environment: str, ref: str) -> bool:
         """Say whether the table exists and the caller may read it.
@@ -423,8 +457,11 @@ class RecentService:
             Whether it is readable.
         """
         run_id = _as_uuid(ref)
-        if run_id is None or not self._authz.permits(
-            p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment)
+        scope = Securable.environment_scope(environment)
+        # As the run's own page: `RUN` or `READ_ENVIRONMENT` (`runs.service.authorize_run_read`).
+        if run_id is None or not (
+            self._authz.permits(p, Action.RUN, scope)
+            or self._authz.permits(p, Action.READ_ENVIRONMENT, scope)
         ):
             return False
         found = self._session.execute(

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from core_test_helpers import ensure_table
 from home_test_helpers import deployed_job, environment, grant, person, query_of, run_of
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, PrincipalRef
@@ -16,7 +16,7 @@ from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.home import recent as recent_module
 from lakana_core.home.recent import RECENT_KEEP, RecentService, RecentView
-from lakana_core.models import Grant, RecentOpen, Table
+from lakana_core.models import Environment, Grant, RecentOpen, Table
 
 
 class _Clock:
@@ -173,9 +173,35 @@ def test_recent_hides_an_object_the_person_can_no_longer_read(
 ) -> None:
     recent.record(alice, "alice", kind="table", environment="dev", ref=table)
     assert len(recent.list(alice, "alice")) == 1
-    session.execute(delete(Grant).where(Grant.principal_id == alice.id))
+    session.execute(
+        update(Grant).where(Grant.principal_id == alice.id).values(revoked_at=datetime.now(UTC))
+    )
     session.commit()
     assert recent.list(alice, "alice") == []
+
+
+def test_recent_hides_the_entries_of_a_deleted_environment(
+    recent: RecentService, alice: PrincipalRef, table: str, session: Session
+) -> None:
+    recent.record(alice, "alice", kind="table", environment="dev", ref=table)
+    session.execute(update(Environment).values(deleted_at=datetime.now(UTC)))
+    session.commit()
+    assert recent.list(alice, "alice") == []
+
+
+def test_recent_refuses_a_nul_character(recent: RecentService, alice: PrincipalRef) -> None:
+    for environment_name, ref in (("dev\x00", "gold.sales"), ("dev", "analytics\x00/nightly")):
+        with pytest.raises(ValidationError, match="control character"):
+            recent.record(alice, "alice", kind="job", environment=environment_name, ref=ref)
+
+
+def test_recent_runs_are_readable_with_run_alone(recent: RecentService, session: Session) -> None:
+    runner = person(session, "runner")
+    grant(session, runner, action=Action.RUN, environment_name="dev")
+    repo, version = deployed_job(session, "dev", "analytics", "nightly")
+    run = run_of(session, repo, version)
+    recent.record(runner, "runner", kind="run", environment="dev", ref=str(run.id))
+    assert [v.ref for v in recent.list(runner, "runner")] == [str(run.id)]
 
 
 def test_recent_hides_a_table_that_was_dropped(

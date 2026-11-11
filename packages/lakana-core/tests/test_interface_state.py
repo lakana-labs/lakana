@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, CiScope, PrincipalRef, TaskScope
 from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
+from lakana_core.identity import interface_state as interface_state_module
 from lakana_core.identity.interface_state import InterfaceStateService, InterfaceStateView
 from lakana_core.models import InterfaceState, Principal, PrincipalType
 
@@ -151,3 +152,39 @@ def test_a_person_whose_principal_is_gone_is_told(session: Session) -> None:
         InterfaceStateService(session, AllowAllAuthorization()).update(
             ghost, "ghost", tour_seen=True
         )
+
+
+def test_two_first_writes_at_once_keep_both_fields(
+    svc: InterfaceStateService,
+    alice: PrincipalRef,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The first request stores the tour; the second looked before that row was written.
+    svc.update(alice, "alice", tour_seen=True)
+    real = interface_state_module._stored
+    calls: list[int] = []
+
+    def stale_once(session: Session, principal_id: uuid.UUID) -> InterfaceState | None:
+        """Miss the stored row the first time, as a request that looked first would.
+
+        Parameters
+        ----------
+        session
+            Database session, passed on.
+        principal_id
+            The person, passed on.
+
+        Returns
+        -------
+        InterfaceState or None
+            `None` once, then the row.
+        """
+        calls.append(1)
+        return None if len(calls) == 1 else real(session, principal_id)
+
+    monkeypatch.setattr(interface_state_module, "_stored", stale_once)
+    assert svc.update(alice, "alice", update_note_seen="0.23.0") == InterfaceStateView(
+        tour_seen=True, get_started_hidden=False, update_note_seen="0.23.0"
+    )
+    assert session.get(InterfaceState, alice.id) is not None

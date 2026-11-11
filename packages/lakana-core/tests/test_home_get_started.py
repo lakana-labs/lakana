@@ -127,6 +127,7 @@ def _setup(session: Session, who: str) -> PrincipalRef:
         ("deployer", False, "deployer", ["deploy_project", "open_table", "run_query"]),
         ("deployer", True, "deployer", ["deploy_project", "open_table", "run_query"]),
         ("reader", False, "reader", ["open_table", "run_query"]),
+        ("reader", True, "reader", ["open_table", "run_query"]),
         ("none", False, "none", []),
     ],
 )
