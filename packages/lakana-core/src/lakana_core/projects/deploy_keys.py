@@ -474,7 +474,7 @@ class DeployKeyService:
         """
         self._require_ssh(repo)
         previous = repo.credential_secret
-        self._require_own_credential(repo, name)
+        self._require_own_credential(repo, name, permitted)
         rows = self._lock_secrets(name)
         steps = [
             (env, rows.get(env.id), self._step(repo, env, name, rows.get(env.id), replace))
@@ -520,7 +520,7 @@ class DeployKeyService:
                 f"update {quoted} --known-hosts-file known_hosts."
             )
 
-    def _require_own_credential(self, repo: Repository, name: str) -> None:
+    def _require_own_credential(self, repo: Repository, name: str, permitted: set[str]) -> None:
         """Refuse when the repository names a secret Lakana did not make.
 
         A repository may switch from one deploy key Lakana made to another name (after the old
@@ -532,11 +532,16 @@ class DeployKeyService:
             The repository, locked.
         name
             The secret name of this call.
+        permitted
+            The environments where the caller may manage secrets; only these are named.
 
         Raises
         ------
         ConflictError
             If `credential_secret` names another secret that is not a key made for it.
+        SecretBindingRefused
+            If such a secret is only in environments the caller may not manage (recorded as a
+            denial by `generate`; the message names no environment).
         """
         previous = repo.credential_secret
         if previous is None or previous == name:
@@ -556,7 +561,18 @@ class DeployKeyService:
         ]
         if own and all(made_for == repo.id for made_for, _ in own):
             return
-        foreign = next((env for made_for, env in own if made_for != repo.id), None)
+        others = [env for made_for, env in own if made_for != repo.id]
+        foreign = next((env for env in others if env in permitted), None)
+        if others and foreign is None:
+            raise SecretBindingRefused(
+                f"Repository '{shown(repo.name)}' already names secret '{shown(previous)}' as its "
+                "credential, and in an environment where you may not manage secrets that is a "
+                "secret Lakana did not make. Ask someone with the ADMIN role in every "
+                "environment to clear it (lakana repo update "
+                f"{shlex.quote(plain(repo.name))} --clear credential_secret) and make the key.",
+                Securable.environment_scope(others[0]),
+                "credential_not_made_by_lakana",
+            )
         cause = (
             f"in environment '{shown(foreign)}' that is a secret Lakana did not make"
             if foreign is not None

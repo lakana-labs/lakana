@@ -790,3 +790,24 @@ def test_a_hand_made_credential_beside_made_keys_is_refused_saying_so(world: Wor
     with pytest.raises(ConflictError, match="Lakana did not make") as refused:
         service.generate(world.admin, "analytics", secret="analytics-2")
     assert "'prod'" in str(refused.value)
+
+
+def test_a_hand_made_credential_where_the_caller_manages_nothing_is_not_named(world: World) -> None:
+    """The person's secret is in prod, where devops may not manage secrets: a recorded denial."""
+    service = world.service()
+    service.generate(world.admin, "analytics", secret="mixed", environments=["dev"])
+    SecretService(world.session, AllowAllAuthorization(), _KEYS).create(
+        world.admin,
+        environment="prod",
+        name="mixed",
+        values={"private_key": "HAND"},
+        use=SecretUse.repository(world.repo),
+    )
+
+    with pytest.raises(PermissionDenied) as refused:
+        service.generate(world.devops, "analytics", secret="analytics-2")
+
+    assert "prod" not in str(refused.value)
+    assert "ADMIN" in str(refused.value)
+    assert world.denials() == ["credential_not_made_by_lakana"]
+    assert world.secrets("analytics-2") == {}
