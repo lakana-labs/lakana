@@ -194,7 +194,7 @@
     },
     "recent": {
       "title": "Recently opened",
-      "none": "Nothing opened yet: the tables, queries, jobs and runs you open show here.",
+      "none": "Nothing opened yet. The tables, queries, jobs and runs you open will show here once the Catalog, Queries and Jobs pages arrive in a later release.",
       "toCatalog": "Find a table in the Catalog",
       "opened": "Opened",
       "queryName": "Query {{id}}",
@@ -607,11 +607,12 @@
   "profile": {
     "menuItem": "Profile picture…",
     "title": "Profile picture",
-    "intro": "A JPEG, PNG or WebP image of up to 5 MB. Lakana keeps a square cut from the centre and removes the file's details, such as where a photo was taken.",
+    "intro": "A JPEG, PNG or WebP image of up to 5 MB and 40 megapixels. Lakana keeps a square cut from the centre and removes the file's details, such as where a photo was taken.",
     "choose": "Choose a picture",
     "wrongType": "Use a JPEG, PNG or WebP image.",
     "tooLarge": "This picture is larger than 5 MB. Choose a smaller JPEG, PNG or WebP image.",
     "saved": "Your picture is saved.",
+    "stillSending": "A picture is still being sent, so this one was not. Choose it again once the first is saved.",
     "removed": "Your picture is removed.",
     "remove": "Remove picture",
     "tryAgain": "Try again",

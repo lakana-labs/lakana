@@ -60,11 +60,13 @@ describe("pictureUrl", () => {
   it("revokes the old object URL once nothing shows it, and keeps the newest", async () => {
     const server = fakeServer({ [PATH]: WEBP });
     const revoke = vi.spyOn(URL, "revokeObjectURL");
-    const old = await pictureUrl("kim.lee", "e1");
-    const fresh = await pictureUrl("kim.lee", "e2");
+    const oldRead = pictureUrl("kim.lee", "e1");
+    const old = await oldRead;
+    const freshRead = pictureUrl("kim.lee", "e2");
+    const fresh = await freshRead;
 
-    releasePicture("kim.lee", "e1");
-    releasePicture("kim.lee", "e2");
+    releasePicture("kim.lee", "e1", oldRead);
+    releasePicture("kim.lee", "e2", freshRead);
 
     await vi.waitFor(() => {
       expect(revoke).toHaveBeenCalledWith(old);
@@ -73,14 +75,15 @@ describe("pictureUrl", () => {
     // The newest stays for the next place that shows the person: no second read.
     await expect(pictureUrl("kim.lee", "e2")).resolves.toBe(fresh);
     expect(server.sent).toHaveLength(2);
-    releasePicture("nobody", "e9");
+    releasePicture("nobody", "e9", freshRead);
   });
 
   it("revokes an older picture nothing shows as soon as a newer one is asked for", async () => {
     fakeServer({ [PATH]: WEBP });
     const revoke = vi.spyOn(URL, "revokeObjectURL");
-    const old = await pictureUrl("kim.lee", "e1");
-    releasePicture("kim.lee", "e1");
+    const oldRead = pictureUrl("kim.lee", "e1");
+    const old = await oldRead;
+    releasePicture("kim.lee", "e1", oldRead);
     expect(revoke).not.toHaveBeenCalled();
 
     await pictureUrl("kim.lee", "e2");
@@ -97,6 +100,22 @@ describe("pictureUrl", () => {
     server.route({ [PATH]: WEBP });
 
     await expect(pictureUrl("kim.lee", "e1")).resolves.toMatch(/^blob:/);
+  });
+
+  it("ignores a late release of a failed read once the picture was read again", async () => {
+    const server = fakeServer({ [PATH]: { status: 503, body: { detail: "Busy." } } });
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const failed = pictureUrl("kim.lee", "e1");
+    await expect(failed).rejects.toMatchObject({ status: 503 });
+    server.route({ [PATH]: WEBP });
+    const url = await pictureUrl("kim.lee", "e1");
+
+    // The place whose read failed lets go only after another place read the picture again.
+    releasePicture("kim.lee", "e1", failed);
+    await pictureUrl("kim.lee", "e2");
+    await Promise.resolve();
+
+    expect(revoke).not.toHaveBeenCalledWith(url);
   });
 
   it("revokes nothing for a read that failed", async () => {
@@ -149,7 +168,8 @@ describe("setPicture and removePicture", () => {
   it("removes a picture and tells every place there is none", async () => {
     fakeServer({ [PATH]: WEBP, "DELETE /api/v1/principals/kim.lee/picture": { status: 204 } });
     const revoke = vi.spyOn(URL, "revokeObjectURL");
-    const url = await pictureUrl("kim.lee", "e1");
+    const read = pictureUrl("kim.lee", "e1");
+    const url = await read;
 
     await removePicture("kim.lee");
 
@@ -157,7 +177,7 @@ describe("setPicture and removePicture", () => {
     expect(changedPicture("someone.else")).toBeUndefined();
     // Still shown until the place that shows it follows the removal.
     expect(revoke).not.toHaveBeenCalled();
-    releasePicture("kim.lee", "e1");
+    releasePicture("kim.lee", "e1", read);
     await vi.waitFor(() => {
       expect(revoke).toHaveBeenCalledWith(url);
     });

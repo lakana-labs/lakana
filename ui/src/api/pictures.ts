@@ -123,10 +123,12 @@ export function pictureUrl(name: string, etag: string): Promise<string> {
  *
  * @param name - The principal name.
  * @param etag - The etag the place held.
+ * @param held - The promise {@link pictureUrl} gave the place: a late release of a read that
+ *   failed, after the picture was read again under the same key, lets go of nothing.
  */
-export function releasePicture(name: string, etag: string): void {
+export function releasePicture(name: string, etag: string, held: Promise<string>): void {
   const entry = cache.get(keyOf(name, etag));
-  if (entry === undefined) {
+  if (entry?.url !== held) {
     return;
   }
   entry.refs -= 1;

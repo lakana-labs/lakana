@@ -40,7 +40,9 @@ describe("PictureDialog", () => {
     open(null);
 
     expect(screen.getByRole("heading", { name: "Profile picture" })).toBeInTheDocument();
-    expect(screen.getByText(/JPEG, PNG or WebP image of up to 5 MB/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/JPEG, PNG or WebP image of up to 5 MB and 40 megapixels/),
+    ).toBeInTheDocument();
     expect(screen.getByText(/such as where a photo was taken/)).toBeInTheDocument();
     expect(screen.getByLabelText("Choose a picture")).toHaveAttribute(
       "accept",
@@ -134,7 +136,7 @@ describe("PictureDialog", () => {
     expect(screen.getByLabelText("Choose a picture")).toHaveFocus();
   });
 
-  it("keeps focus on the file field while a picture uploads, and ignores another choice", async () => {
+  it("keeps focus on the file field while a picture uploads, and says it ignored another choice", async () => {
     let answer: (value: { status: number; body: unknown }) => void = () => undefined;
     const { user, server } = open(null, {
       [`PUT ${PICTURE}`]: () =>
@@ -151,6 +153,11 @@ describe("PictureDialog", () => {
     expect(field).toBeEnabled();
     expect(field).toHaveAttribute("aria-disabled", "true");
     await user.upload(field, png);
+    expect(
+      await screen.findByText(
+        "A picture is still being sent, so this one was not. Choose it again once the first is saved.",
+      ),
+    ).toBeInTheDocument();
     answer({ status: 200, body: { etag: "e2" } });
 
     expect(await screen.findByText("Your picture is saved.")).toBeInTheDocument();

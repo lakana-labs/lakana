@@ -62,7 +62,8 @@ export function Avatar({ name, displayName, etag, size, label }: AvatarProps): J
     }
     // An older read that answers after a newer one must not replace it.
     let live = true;
-    pictureUrl(name, current).then(
+    const held = pictureUrl(name, current);
+    held.then(
       (url) => {
         if (live) {
           setShown({ key: `${name}:${current}`, url });
@@ -73,7 +74,7 @@ export function Avatar({ name, displayName, etag, size, label }: AvatarProps): J
     );
     return () => {
       live = false;
-      releasePicture(name, current);
+      releasePicture(name, current, held);
     };
   }, [name, current]);
   const url = shown !== null && shown.key === key ? shown.url : null;

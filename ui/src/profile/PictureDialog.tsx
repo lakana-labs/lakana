@@ -81,8 +81,13 @@ export function PictureDialog({
     const file = event.target.files?.[0];
     // Cleared, so choosing the same file again is a new choice.
     event.target.value = "";
-    // While a picture is sent the field keeps focus and is only marked as unavailable.
-    if (file === undefined || attempt.busy) {
+    if (file === undefined) {
+      return;
+    }
+    // While a picture is sent the field keeps focus and is only marked as unavailable; a file
+    // chosen meanwhile is not sent, and the status line says so.
+    if (attempt.busy) {
+      setDone(t("profile.stillSending"));
       return;
     }
     if (!PICTURE_TYPES.includes(file.type)) {
