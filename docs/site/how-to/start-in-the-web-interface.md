@@ -2,8 +2,8 @@
 
 Home is the page every sign-in lands on. After this guide you know what the tour on your first
 sign-in shows, what each of Home's boxes tells you, what to do when the instance is not healthy,
-how to work through, or put away, the Get started list, and where Help and the keyboard shortcuts
-are. You need an account in the web interface ([Invite your team](invite-your-team.md) says how
+how to work through, or put away, the Get started list, how to set your profile picture, and
+where Help and the keyboard shortcuts are. You need an account in the web interface ([Invite your team](invite-your-team.md) says how
 a colleague gets one).
 
 ## The tour on your first sign-in
@@ -40,6 +40,26 @@ starts it whenever you like.
 
 The search (**Ctrl K**, or **⌘ K** on a Mac) has **Take the tour again** and **Keyboard
 shortcuts** too: type a few letters of either.
+
+## Your profile picture
+
+Without a picture, a circle with your initials stands beside your name: at the bottom of the
+menu on the left, and in **Access** for administrators. To set one:
+
+1. Select your name at the bottom of the menu and choose **Profile picture…**.
+2. **Choose a picture**: a JPEG, PNG or WebP image of up to 5 MB.
+
+The picture shows at once. Lakana keeps a square cut from the centre, 256 by 256 pixels, and
+removes the file's details, such as where a photo was taken or the camera it came from; only the
+pixels are stored. Everyone with access to the instance sees it beside your name.
+
+- Another kind of file (an SVG, a GIF) or a larger one is refused before it is sent, with what
+  to choose instead.
+- "The server is busy with other picture uploads": choose **Try again** in a moment.
+- **Remove picture** in the same window brings your initials back.
+
+An administrator can remove anyone's picture, for example an unsuitable one: **Access** → the
+person → **Remove picture**. The person can set a new one whenever they like.
 
 ## Keyboard shortcuts
 

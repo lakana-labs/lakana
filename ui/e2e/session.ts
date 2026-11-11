@@ -102,20 +102,25 @@ const HOME: Record<string, unknown> = {
   "/api/v1/info": { version: "0.23.0" },
 };
 
+/** The administrator's profile picture: one pixel, a PNG. */
+const PICTURE =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
 /** The paths the stubs answer; any other request to the API is a test failure. */
 export const STUBBED = [
   "/api/v1/sign-in/session",
   "/api/v1/sign-in/notices",
   "/api/v1/whoami",
   "/api/v1/principals",
+  "/api/v1/principals/admin/picture",
   "/api/v1/settings/sign-in",
   ...Object.keys(HOME),
 ];
 
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
- * worker down, an update note and rows in every box), and the first screens of Access (the
- * people) and Settings (the session lengths).
+ * worker down, an update note and rows in every box), the administrator's profile picture, and
+ * the first screens of Access (the people) and Settings (the session lengths).
  *
  * @param page - The page.
  */
@@ -124,7 +129,11 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route("**/api/v1/sign-in/notices", (route) => route.fulfill({ json: [] }));
   await page.route(
     (url) => url.pathname === "/api/v1/principals",
-    (route) => route.fulfill({ json: [{ name: "admin", type: "USER", is_active: true }] }),
+    (route) =>
+      route.fulfill({ json: [{ name: "admin", type: "USER", is_active: true, picture: "e1" }] }),
+  );
+  await page.route("**/api/v1/principals/admin/picture", (route) =>
+    route.fulfill({ contentType: "image/png", body: Buffer.from(PICTURE, "base64") }),
   );
   await page.route("**/api/v1/settings/sign-in", (route) =>
     route.fulfill({ json: SIGN_IN_SETTINGS }),
@@ -140,7 +149,7 @@ export async function signInAsAdmin(page: Page): Promise<void> {
         admin: true,
         has_access: true,
         may_deploy: true,
-        picture: null,
+        picture: "e1",
       },
     }),
   );

@@ -30,8 +30,8 @@ describe("HelpMenu", () => {
     const banner = screen.getByRole("banner");
     const order = within(banner)
       .getAllByRole("button")
-      .map((button) => button.textContent);
-    expect(order.slice(-2)).toEqual(["Help", "admin"]);
+      .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+    expect(order.slice(-2)).toEqual(["Help", "Signed in as admin"]);
     const settings = within(banner).getByRole("link", { name: "Settings" });
     const help = within(banner).getByRole("button", { name: "Help" });
     expect(settings.compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

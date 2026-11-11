@@ -26,15 +26,22 @@ export const LIBRARY_STYLE_HASHES: readonly string[] = [
  *
  * @remarks
  * Strict on purpose: only the interface's own origin, no inline script or style (except the
- * library style texts hashed above), no `data:` URL, no frames. A later need is added here with its reason. `vite preview` sends it, so the
- * Playwright tests run under it; the build writes it to `csp.txt` (`build/csp-file.ts`), which
- * lakana-server reads and sends.
+ * library style texts hashed above), no `data:` URL, no frames. A later need is added here with
+ * its reason:
+ *
+ * - `img-src 'self' blob:` (profile pictures): the server refuses every cookie request without
+ *   the session's CSRF header, reads too, and an `<img src>` cannot send one. The interface
+ *   reads a picture with `fetch` and shows it from an object URL, which only script of this
+ *   origin can make, from bytes it read itself; a `blob:` image runs nothing.
+ *
+ * `vite preview` sends it, so the Playwright tests run under it; the build writes it to
+ * `csp.txt` (`build/csp-file.ts`), which lakana-server reads and sends.
  */
 export const CONTENT_SECURITY_POLICY: string = [
   "default-src 'self'",
   "script-src 'self'",
   `style-src 'self' ${LIBRARY_STYLE_HASHES.join(" ")}`,
-  "img-src 'self'",
+  "img-src 'self' blob:",
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",

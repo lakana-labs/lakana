@@ -219,6 +219,67 @@ async function refusal(response: Response): Promise<ApiError> {
   });
 }
 
+/** What one exchange with the server sends besides its method and path. */
+interface Exchange {
+  /** The media type the answer should have. */
+  readonly accept: string;
+  /** The body, already encoded, if any. */
+  readonly body?: BodyInit | undefined;
+  /** The body's media type. */
+  readonly contentType?: string | undefined;
+}
+
+/**
+ * Sends one request with the session's CSRF token and reads a refusal into an {@link ApiError}.
+ *
+ * @param method - The HTTP method.
+ * @param path - The path under the server.
+ * @param exchange - The answer's media type and the body.
+ * @param options - Whether the request is a background poll.
+ * @returns The answer, with a status below 400.
+ * @throws {ApiError} for a refusal or an unreachable server.
+ */
+async function exchangeWith(
+  method: string,
+  path: string,
+  exchange: Exchange,
+  options: RequestOptions,
+): Promise<Response> {
+  const headers = new Headers({ Accept: exchange.accept });
+  if (exchange.contentType !== undefined) {
+    headers.set("Content-Type", exchange.contentType);
+  }
+  const token = csrfToken();
+  if (token !== null) {
+    headers.set("X-Lakana-CSRF", token);
+  }
+  if (options.background === true) {
+    headers.set("X-Lakana-Background", "1");
+  }
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers,
+      credentials: "same-origin",
+      ...(exchange.body === undefined ? {} : { body: exchange.body }),
+    });
+  } catch {
+    throw new ApiError(0, "NetworkError", "The server could not be reached.");
+  }
+  if (!response.ok) {
+    const error = await refusal(response);
+    if (error.status === 401) {
+      forgetToken(token);
+      for (const listener of unauthorizedListeners) {
+        listener(error);
+      }
+    }
+    throw error;
+  }
+  return response;
+}
+
 /**
  * Sends one request to the server, without a step-up retry.
  *
@@ -236,38 +297,26 @@ export async function send<T>(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<T> {
-  const headers = new Headers({ Accept: "application/json" });
-  if (body !== undefined) {
-    headers.set("Content-Type", "application/json");
-  }
-  const token = csrfToken();
-  if (token !== null) {
-    headers.set("X-Lakana-CSRF", token);
-  }
-  if (options.background === true) {
-    headers.set("X-Lakana-Background", "1");
-  }
-  let response: Response;
-  try {
-    response = await fetch(path, {
-      method,
-      headers,
-      credentials: "same-origin",
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-  } catch {
-    throw new ApiError(0, "NetworkError", "The server could not be reached.");
-  }
-  if (!response.ok) {
-    const error = await refusal(response);
-    if (error.status === 401) {
-      forgetToken(token);
-      for (const listener of unauthorizedListeners) {
-        listener(error);
-      }
-    }
-    throw error;
-  }
+  const response = await exchangeWith(
+    method,
+    path,
+    body === undefined
+      ? { accept: "application/json" }
+      : { accept: "application/json", body: JSON.stringify(body), contentType: "application/json" },
+    options,
+  );
+  return json<T>(response);
+}
+
+/**
+ * Reads a JSON answer.
+ *
+ * @template T - The JSON the route answers.
+ * @param response - The answer, with a status below 400.
+ * @returns The parsed answer; undefined for 204.
+ * @throws {ApiError} when the answer is not JSON.
+ */
+async function json<T>(response: Response): Promise<T> {
   if (response.status === 204) {
     return undefined as T;
   }
@@ -322,5 +371,37 @@ export const api = {
       await sharedStepUp(stepUpCeremony);
       return send<T>(method, path, body, options);
     }
+  },
+
+  /**
+   * Sends a file as the body, such as a profile picture; no route that takes one asks for a
+   * passkey touch, so there is no step-up retry.
+   *
+   * @template T - The JSON the route answers.
+   * @param method - The HTTP method.
+   * @param path - The path under the server.
+   * @param body - The file.
+   * @param contentType - The file's media type, such as `image/png`.
+   * @returns The parsed answer.
+   * @throws {ApiError} for a refusal or an unreachable server.
+   */
+  async upload<T>(method: string, path: string, body: Blob, contentType: string): Promise<T> {
+    return json<T>(
+      await exchangeWith(method, path, { accept: "application/json", body, contentType }, {}),
+    );
+  },
+
+  /**
+   * Reads a file, such as a profile picture. An `<img>` pointing at the API would carry no
+   * CSRF token and be refused, so the interface reads the file here and shows it from an object
+   * URL. A background request: showing a picture is not the person acting.
+   *
+   * @param path - The path under the server.
+   * @returns The file.
+   * @throws {ApiError} for a refusal or an unreachable server.
+   */
+  async blob(path: string): Promise<Blob> {
+    const response = await exchangeWith("GET", path, { accept: "image/*" }, { background: true });
+    return response.blob();
   },
 };

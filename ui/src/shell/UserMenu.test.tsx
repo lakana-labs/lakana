@@ -155,6 +155,55 @@ describe("UserMenu", () => {
     expect(session.signOutEverywhere).toHaveBeenCalledTimes(1);
   });
 
+  it("shows initials in the menu's button without a picture", async () => {
+    const { server } = renderShell("/");
+    const button = await screen.findByRole("button", { name: "Signed in as admin" });
+
+    expect(button.querySelector(".avatar")).toHaveTextContent("A");
+    expect(button.querySelector("img")).toBeNull();
+    expect(server.sent.some((request) => request.path.endsWith("/picture"))).toBe(false);
+  });
+
+  it("shows the picture in the user menu and on Access", async () => {
+    const { user } = renderShell("/", {
+      me: { picture: "e1" },
+      routes: {
+        "GET /api/v1/principals/admin/picture": {
+          status: 200,
+          blob: new Blob(["webp"], { type: "image/webp" }),
+        },
+        "GET /api/v1/principals": {
+          status: 200,
+          body: [{ name: "admin", type: "USER", is_active: true, picture: "e1" }],
+        },
+      },
+    });
+    const button = await screen.findByRole("button", { name: "Signed in as admin" });
+    await waitFor(() => {
+      expect(button.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
+    });
+
+    await user.click(screen.getByRole("link", { name: "Access" }));
+
+    const row = (await screen.findAllByRole("row"))[1] as HTMLElement;
+    await waitFor(() => {
+      expect(row.querySelector("img")?.getAttribute("src")).toBe(
+        button.querySelector("img")?.getAttribute("src"),
+      );
+    });
+  });
+
+  it("opens the profile picture from the Account section", async () => {
+    const { user } = await openMenu();
+
+    await user.click(screen.getByRole("menuitem", { name: "Profile picture…" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Profile picture" });
+    expect(within(dialog).getByLabelText("Choose a picture")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("says why signing out did not work", async () => {
     const session = signedIn({
       signOut: vi.fn(() =>

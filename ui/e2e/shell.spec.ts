@@ -73,6 +73,9 @@ for (const theme of ["light", "dark"] as const) {
         await page.getByRole("button", { name: "Signed in as admin" }).click();
         await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
         expect(await violations(page), "user menu").toEqual([]);
+        await page.getByRole("menuitem", { name: "Profile picture…" }).click();
+        await expect(page.getByRole("dialog", { name: "Profile picture" })).toBeVisible();
+        expect(await violations(page), "profile picture").toEqual([]);
         await page.keyboard.press("Escape");
         await page.getByRole("button", { name: "Search" }).click();
         await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
@@ -115,6 +118,13 @@ for (const theme of ["light", "dark"] as const) {
           await page.goto(path);
           await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
         }
+        // The picture is read with the CSRF header and shown from a blob: URL, which the policy
+        // allows; a blocked one would not load and would show up as an error.
+        const picture = page.getByRole("button", { name: "Signed in as admin" }).locator("img");
+        await expect(picture).toHaveAttribute("src", /^blob:/);
+        await expect
+          .poll(() => picture.evaluate((image: HTMLImageElement) => image.naturalWidth))
+          .toBeGreaterThan(0);
         // The floating surfaces: React Aria inserts its own styles for them.
         await page.getByRole("button", { name: "Signed in as admin" }).click();
         await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();

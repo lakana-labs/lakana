@@ -80,3 +80,25 @@ describe("the content security policy and the libraries' own styles", () => {
     expect(CONTENT_SECURITY_POLICY).not.toContain("unsafe-");
   });
 });
+
+describe("the content security policy", () => {
+  it("allows blob: images and nothing else new in the policy", () => {
+    const directives = CONTENT_SECURITY_POLICY.split("; ");
+
+    // Profile pictures: read with the CSRF header, shown from an object URL.
+    expect(directives).toContain("img-src 'self' blob:");
+    expect(directives.filter((directive) => directive.includes("blob:"))).toHaveLength(1);
+    expect(CONTENT_SECURITY_POLICY).not.toContain("data:");
+    expect(directives.filter((directive) => !directive.startsWith("style-src "))).toEqual([
+      "default-src 'self'",
+      "script-src 'self'",
+      "img-src 'self' blob:",
+      "font-src 'self'",
+      "connect-src 'self'",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ]);
+  });
+});

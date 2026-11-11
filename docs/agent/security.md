@@ -249,7 +249,13 @@ cookie set for another host.
   `default-src`), refuses the start. The other headers are
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY`.
   The policy allows only the own origin, no inline script, inline style only for the two
-  hashed library texts, no `data:` URL, no frames. Content types come from a fixed table, not
+  hashed library texts, no `data:` URL, no frames; images also from `blob:` (`img-src 'self'
+  blob:`, M7 part 2), for profile pictures: a picture read needs the CSRF header like every
+  cookie request, which an `<img src>` cannot send, so the interface reads it with `fetch` and
+  shows an object URL. Only this origin's script can make one, from bytes it read from its own
+  API, and an image executes nothing; `ui/build/csp.test.ts` pins every directive, and the
+  smoke and server Playwright tests load a picture under the policy with no console error.
+  Content types come from a fixed table, not
   the machine's MIME database; an unknown suffix is `application/octet-stream`. API responses
   get none of these headers. An addition to the policy or a relaxed header needs its reason in
   the pull request that makes it.

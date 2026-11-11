@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { api, setCsrfToken } from "./client";
+import { forgetPictures } from "./pictures";
 
 /** The browser session, as `GET /api/v1/sign-in/session` answers it. */
 export interface SessionOut {
@@ -36,6 +37,8 @@ export interface AccessOut {
   readonly noAccessYet: boolean;
   /** True when the person may deploy in at least one environment (Home shows Your work). */
   readonly mayDeploy: boolean;
+  /** The etag of the person's profile picture, or null without one. */
+  readonly picture: string | null;
 }
 
 /** A sign-in notice, as `GET /api/v1/sign-in/notices` answers it. */
@@ -60,6 +63,8 @@ interface WhoamiOut {
   readonly has_access: boolean;
   /** True when the person may deploy in at least one environment. */
   readonly may_deploy: boolean;
+  /** The etag of the caller's profile picture, or null without one. */
+  readonly picture: string | null;
 }
 
 /**
@@ -73,12 +78,13 @@ export async function getSession(): Promise<SessionOut> {
   return api.request<SessionOut>("GET", "/api/v1/sign-in/session");
 }
 
-/** Ends this browser's session and forgets its CSRF token, even when the server failed. */
+/** Ends this browser's session; forgets its CSRF token and pictures even if the server failed. */
 export async function signOut(): Promise<void> {
   try {
     await api.request("DELETE", "/api/v1/sign-in/session");
   } finally {
     setCsrfToken(null);
+    forgetPictures();
   }
 }
 
@@ -90,6 +96,7 @@ export async function signOut(): Promise<void> {
 export async function signOutEverywhere(name: string): Promise<void> {
   await api.request("DELETE", `/api/v1/principals/${encodeURIComponent(name)}/sessions`);
   setCsrfToken(null);
+  forgetPictures();
 }
 
 /**
@@ -106,6 +113,7 @@ export async function myAccess(): Promise<AccessOut> {
     admin: me.admin,
     noAccessYet: !me.has_access,
     mayDeploy: me.may_deploy,
+    picture: me.picture,
   };
 }
 

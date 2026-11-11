@@ -1,10 +1,10 @@
 /**
- * The menu under the signed-in person's name: theme, density, language, passkeys and sessions,
- * and signing out.
+ * The menu under the signed-in person's name: theme, density, language, the profile picture,
+ * passkeys and sessions, and signing out.
  *
  * @packageDocumentation
  */
-import { type JSX, useId, useState } from "react";
+import { type JSX, lazy, Suspense, useId, useState } from "react";
 import {
   Button,
   Header,
@@ -17,9 +17,16 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { usePreferences } from "../preferences/PreferencesProvider";
+import { Avatar } from "../profile/Avatar";
 import type { Density, Language, Preferences, Theme } from "../preferences/preferences";
 import { problemText } from "../sign-in/messages";
 import { useSession } from "../sign-in/SessionProvider";
+import { useMe } from "./me";
+
+const PictureDialog = lazy(async () => {
+  const { PictureDialog: loaded } = await import("../profile/PictureDialog");
+  return { default: loaded };
+});
 
 const THEMES: readonly Theme[] = ["system", "light", "dark"];
 const DENSITIES: readonly Density[] = ["roomy", "compact"];
@@ -93,9 +100,9 @@ function ChoiceSection<K extends keyof Preferences>({
 }
 
 /**
- * Renders the user menu at the bottom of the sidebar. Its button always shows who is signed in;
- * the menu holds the personal preferences, one's passkeys and sessions, and signing out, here or
- * on every device.
+ * Renders the user menu at the bottom of the sidebar. Its button always shows who is signed in,
+ * with their picture or initials; the menu holds the personal preferences, one's profile picture,
+ * passkeys and sessions, and signing out, here or on every device.
  *
  * @returns The menu, and what went wrong when signing out did not work.
  */
@@ -104,7 +111,10 @@ export function UserMenu(): JSX.Element {
   const session = useSession();
   const title = useId();
   const [error, setError] = useState<string | null>(null);
-  const name = session.session?.display_name ?? session.session?.name;
+  const [picking, setPicking] = useState(false);
+  const me = useMe();
+  const displayName = session.session?.display_name ?? null;
+  const name = displayName ?? session.session?.name;
   const end = (ending: () => Promise<void>): void => {
     setError(null);
     ending().catch((failure: unknown) => {
@@ -116,6 +126,7 @@ export function UserMenu(): JSX.Element {
       <MenuTrigger>
         {/* The name is what shows; the accessible name says what it is (it contains the name). */}
         <Button className="user-menu-button" aria-label={t("shell.signedInAs", { name })}>
+          <Avatar name={me.name} displayName={displayName} etag={me.picture} size={24} />
           {name}
         </Button>
         <Popover className="float" placement="top start">
@@ -144,6 +155,16 @@ export function UserMenu(): JSX.Element {
             />
             <MenuSection className="menu-section">
               <Header className="menu-header">{t("shell.account")}</Header>
+              <MenuItem
+                className="menu-item"
+                id="picture"
+                onAction={() => {
+                  setPicking(true);
+                }}
+              >
+                <span className="menu-check" aria-hidden="true" />
+                {t("profile.menuItem")}
+              </MenuItem>
               <MenuItem className="menu-item" id="account" href="/account">
                 <span className="menu-check" aria-hidden="true" />
                 {t("account.title")}
@@ -172,6 +193,18 @@ export function UserMenu(): JSX.Element {
           </Menu>
         </Popover>
       </MenuTrigger>
+      {picking && (
+        <Suspense fallback={null}>
+          <PictureDialog
+            name={me.name}
+            displayName={displayName}
+            etag={me.picture}
+            onClose={() => {
+              setPicking(false);
+            }}
+          />
+        </Suspense>
+      )}
       {error !== null && (
         <p className="user-menu-error" role="alert">
           {error}

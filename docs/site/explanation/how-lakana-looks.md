@@ -53,7 +53,8 @@ control edges 3:1.
 | Label | 12 / 16 px | 500 | field labels, column heads |
 
 **Spacing.** Eight steps: 4, 8, 12, 16, 24, 32, 48 and 64 px. Corners are 4 px on controls
-and 6 px on panels.
+and 6 px on panels; only a person is round: their picture, or their initials in the accent on
+its pale ground, in a circle beside their name.
 
 **Motion.** Two durations, 120 ms for a hover and 200 ms for a panel or a change of theme,
 with one easing curve, and a slow 2.4 s pulse for a running glyph. All of them become 0 under

@@ -85,7 +85,9 @@ export default [
     limit: "212 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
-  // Measured 4.06 kB (with Home's stylesheet, 2026-11-11) + 10 %.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "4.47 kB" },
+  // Measured 4.61 kB (with the profile pictures' circle and file field, 2026-11-11) + 10 %. Raised from
+  // 4.47 kB: the circle is drawn on the first paint (the user menu's button), so its rules
+  // cannot wait for the dialog that loads on demand.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "5.07 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

@@ -72,10 +72,30 @@ describe("session", () => {
   });
 
   it.each([
-    [true, true, true, { name: "kim", admin: true, noAccessYet: false, mayDeploy: true }],
-    [false, true, true, { name: "kim", admin: false, noAccessYet: false, mayDeploy: true }],
-    [false, true, false, { name: "kim", admin: false, noAccessYet: false, mayDeploy: false }],
-    [false, false, false, { name: "kim", admin: false, noAccessYet: true, mayDeploy: false }],
+    [
+      true,
+      true,
+      true,
+      { name: "kim", admin: true, noAccessYet: false, mayDeploy: true, picture: null },
+    ],
+    [
+      false,
+      true,
+      true,
+      { name: "kim", admin: false, noAccessYet: false, mayDeploy: true, picture: null },
+    ],
+    [
+      false,
+      true,
+      false,
+      { name: "kim", admin: false, noAccessYet: false, mayDeploy: false, picture: null },
+    ],
+    [
+      false,
+      false,
+      false,
+      { name: "kim", admin: false, noAccessYet: true, mayDeploy: false, picture: null },
+    ],
   ])(
     "reads admin %s, access %s and deploy %s from whoami",
     async (admin, has, deploy, expected) => {
@@ -87,6 +107,17 @@ describe("session", () => {
       expect(server.sent.map((request) => request.path)).toEqual(["/api/v1/whoami"]);
     },
   );
+
+  it("reads the etag of the person's picture from whoami", async () => {
+    fakeServer({
+      "GET /api/v1/whoami": {
+        status: 200,
+        body: { ...(whoami("kim", false, true) as object), picture: "e1" },
+      },
+    });
+
+    await expect(myAccess()).resolves.toMatchObject({ picture: "e1" });
+  });
 
   it("lists notices in the background and dismisses one", async () => {
     const notice = {

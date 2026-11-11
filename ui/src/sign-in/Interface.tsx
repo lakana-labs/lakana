@@ -38,7 +38,7 @@ export type RouterFactory = (routes: RouteObject[], at: string | undefined) => D
  * @returns The access.
  */
 function noKnownRights(name: string): AccessOut {
-  return { name, admin: false, noAccessYet: false, mayDeploy: false };
+  return { name, admin: false, noAccessYet: false, mayDeploy: false, picture: null };
 }
 
 /**

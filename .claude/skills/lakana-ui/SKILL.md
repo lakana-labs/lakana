@@ -25,7 +25,8 @@ From `ui/src/styles/tokens.css`, always as `var(--…)`:
   A literal `font-weight` may be 400 or 500, the two weights bundled.
 - **Spacing.** Padding, margin and gaps between elements from `--space-1`…`--space-8`
   (4–64 px). Row height `--row-height` (44 px roomy, 36 px compact).
-- **Radii** `--radius-control` (4 px) and `--radius-panel` (6 px); **shadow** only
+- **Radii** `--radius-control` (4 px), `--radius-panel` (6 px) and `--radius-round` (a person's
+  circle: picture or initials); **shadow** only
   `--shadow-float`, only on floating surfaces (menus, the palette, dialogs).
 - **Motion.** `--motion-fast` (hover), `--motion-panel` (panels, the theme fade), `--ease`,
   `--pulse`. The only literal duration is `0ms` under reduced motion. Nothing moves unless the

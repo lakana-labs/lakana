@@ -227,6 +227,13 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   `ui/build/csp.test.ts` counts the places React Aria, React Aria Components, React Stately and
   React Router insert a `<style>` and hashes their texts, so an upgrade that changes or adds one
   fails there; `e2e/shell.spec.ts` "no console error" opens the menu and the palette too.
+  Images are `img-src 'self' blob:`, and nothing else: profile pictures are read through
+  `api.blob` (the server refuses every cookie request without the CSRF header, reads too, and an
+  `<img src>` to the API cannot send one) and shown from an object URL that `ui/src/api/pictures.ts`
+  keeps per name and etag and revokes when the etag changes, the picture is removed or the
+  session ends. A `blob:` URL can only be made by this origin's script from bytes it holds, and
+  an image runs nothing; never `data:`. `ui/build/csp.test.ts` pins the whole policy, and the
+  smoke test checks that the user menu's picture loads under it.
 - **Every detail page has a breadcrumb** (a person, later a table, a job, a run, a task): pass
   `trail` to `Page` (`ui/src/shell/Page.tsx`), the parts above the page from its area down, e.g.
   Access › People › test1 for `/access/people/test1`. `Page` renders the one shared component,

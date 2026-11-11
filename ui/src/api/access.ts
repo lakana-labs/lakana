@@ -69,6 +69,8 @@ export interface PrincipalOut {
   readonly type: string;
   /** False for a deactivated principal. */
   readonly is_active: boolean;
+  /** The etag of the principal's profile picture, or null without one. */
+  readonly picture: string | null;
 }
 
 /** What the permissions route answers, as far as finding an administrator goes. */

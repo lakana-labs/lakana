@@ -59,6 +59,7 @@ export function renderShell(path = "/", options: ShellOptions = {}): RenderedShe
     name: "admin",
     admin: true,
     mayDeploy: true,
+    picture: null,
     noAccessYet: false,
     ...options.me,
   };

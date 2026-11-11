@@ -35,6 +35,15 @@ export { changeInterfaceState, getInfo, getInterfaceState, listRecent } from "./
 export type { InterfaceStateOut, RecentOut } from "./me";
 export { addPasskey, signInWithPasskey } from "./passkeys";
 export {
+  PICTURE_MAX_BYTES,
+  PICTURE_TYPES,
+  changedPicture,
+  pictureUrl,
+  removePicture,
+  setPicture,
+  watchPictures,
+} from "./pictures";
+export {
   dismissNotice,
   getSession,
   listNotices,
