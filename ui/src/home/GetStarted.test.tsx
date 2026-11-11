@@ -1,7 +1,7 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { DOCS_URL } from "./links";
+import { DOCS_URL } from "../shell/docs";
 
 import { renderShell } from "../test/render";
 

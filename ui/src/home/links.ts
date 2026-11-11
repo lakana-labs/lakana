@@ -1,13 +1,10 @@
 /**
- * Where Home's rows and links go: the interface's places for an object, the documentation site
- * and the release notes.
+ * Where Home's rows and links go: the interface's places for an object and the release
+ * notes.
  *
  * @packageDocumentation
  */
 import type { AttentionKind } from "../api";
-
-/** The public documentation site; opening it is the person's own browsing. */
-export const DOCS_URL = "https://lakana-labs.github.io/lakana/";
 
 /** Where the release notes of each version are. */
 const RELEASES_URL = "https://github.com/lakana-labs/lakana/releases/tag/";

@@ -1,5 +1,6 @@
 /**
- * The command palette (Ctrl/⌘ K): go to any area by typing a few letters of its name.
+ * The command palette (Ctrl/⌘ K): go to any area, take the tour again or see the keyboard
+ * shortcuts, by typing a few letters of the command.
  *
  * @packageDocumentation
  */
@@ -18,6 +19,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
+import { useTour } from "../tour/TourProvider";
 import type { ShippedArea } from "./areas";
 
 /** Properties of {@link CommandPalette}. */
@@ -28,31 +30,62 @@ export interface CommandPaletteProps {
   readonly isOpen: boolean;
   /** Called to open or close it. */
   readonly onOpenChange: (isOpen: boolean) => void;
+  /** Opens the keyboard shortcuts. */
+  readonly onShortcuts: () => void;
+}
+
+/** One command of the palette. */
+interface Command {
+  /** Its id in the menu. */
+  readonly id: string;
+  /** What it says. */
+  readonly label: string;
+  /** What it does, after the palette closed. */
+  readonly run: () => void;
+}
+
+/** Properties of {@link PaletteContent}. */
+interface PaletteContentProps {
+  /** The areas the user sees. */
+  readonly areas: readonly ShippedArea[];
+  /** Closes the palette. */
+  readonly onClose: () => void;
+  /** Opens the keyboard shortcuts. */
+  readonly onShortcuts: () => void;
 }
 
 /**
  * The palette's content, mounted only while it is open, so every opening starts empty.
  *
- * @param props - The areas and the close callback.
+ * @param props - The areas and the callbacks.
  * @param props.areas - The areas the user sees.
  * @param props.onClose - Closes the palette.
+ * @param props.onShortcuts - Opens the keyboard shortcuts.
  * @returns The search field and the commands.
  */
-function PaletteContent({
-  areas,
-  onClose,
-}: {
-  readonly areas: readonly ShippedArea[];
-  readonly onClose: () => void;
-}): JSX.Element {
+function PaletteContent({ areas, onClose, onShortcuts }: PaletteContentProps): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const tour = useTour();
   const { contains } = useFilter({ sensitivity: "base" });
   const [query, setQuery] = useState("");
-  const commands = areas.map((area) => ({
-    area,
-    label: t("palette.goTo", { area: t(`areas.${area.id}.name`) }),
-  }));
+  const commands: readonly Command[] = [
+    ...areas.map((area) => ({
+      id: area.id,
+      label: t("palette.goTo", { area: t(`areas.${area.id}.name`) }),
+      run: () => {
+        void navigate(area.path);
+      },
+    })),
+    {
+      id: "tour",
+      label: t("help.tour"),
+      run: () => {
+        tour.start();
+      },
+    },
+    { id: "shortcuts", label: t("help.shortcuts"), run: onShortcuts },
+  ];
   const matches = commands.filter((command) => contains(command.label, query)).length;
   let status = "";
   if (matches === 0) {
@@ -70,17 +103,17 @@ function PaletteContent({
       </SearchField>
       <Menu
         className="menu palette-menu"
-        aria-label={t("palette.places")}
+        aria-label={t("palette.commands")}
         renderEmptyState={() => <p className="palette-empty">{t("palette.empty", { query })}</p>}
       >
-        {commands.map(({ area, label }) => (
+        {commands.map(({ id, label, run }) => (
           <MenuItem
             className="menu-item"
-            key={area.id}
-            id={area.id}
+            key={id}
+            id={id}
             onAction={() => {
               onClose();
-              void navigate(area.path);
+              run();
             }}
           >
             {label}
@@ -97,15 +130,21 @@ function PaletteContent({
 
 /**
  * Renders the palette as a modal dialog. Escape or a click outside closes it and returns focus
- * to where it was; choosing a command goes there and closes it.
+ * to where it was; choosing a command closes it and does it.
  *
- * @param props - The areas and the open state.
+ * @param props - The areas, the open state and the shortcuts action.
  * @param props.areas - The areas the user sees.
  * @param props.isOpen - Whether the palette is open.
  * @param props.onOpenChange - Called to open or close it.
+ * @param props.onShortcuts - Opens the keyboard shortcuts.
  * @returns The palette.
  */
-export function CommandPalette({ areas, isOpen, onOpenChange }: CommandPaletteProps): JSX.Element {
+export function CommandPalette({
+  areas,
+  isOpen,
+  onOpenChange,
+  onShortcuts,
+}: CommandPaletteProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <ModalOverlay
@@ -121,6 +160,7 @@ export function CommandPalette({ areas, isOpen, onOpenChange }: CommandPalettePr
             onClose={() => {
               onOpenChange(false);
             }}
+            onShortcuts={onShortcuts}
           />
         </Dialog>
       </Modal>

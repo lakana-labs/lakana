@@ -77,6 +77,11 @@ test.describe("the first administrator", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Access" })).toBeVisible();
+    // A first sign-in opens the welcome; Skip records on the server that it was seen.
+    const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
+    await expect(welcome).toBeVisible();
+    await welcome.getByRole("button", { name: "Skip" }).click();
+    await expect(welcome).toBeHidden();
   });
 
   test("passkey sign-in after sign out", async ({ browserName }) => {
@@ -90,6 +95,9 @@ test.describe("the first administrator", () => {
 
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    // The tour was recorded as seen: the second sign-in does not welcome again.
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     const after = await page.evaluate((key) => localStorage.getItem(key), CSRF_KEY);
     expect(after).toBeTruthy();
     expect(after).not.toBe(before);

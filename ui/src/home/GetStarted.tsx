@@ -14,28 +14,7 @@ import { CopyLine } from "../shell/CopyLine";
 import { useInterfaceState } from "../shell/InterfaceState";
 import { useAttempt } from "../sign-in/Attempt";
 import { StatusGlyph } from "../status/StatusGlyph";
-import { DOCS_URL } from "./links";
-
-/** The getting-started tutorial on the documentation site. */
-const TUTORIAL = `${DOCS_URL}tutorials/getting-started/`;
-
-/** Where a step goes: a place in the interface, or a page of the documentation site. */
-type Way = { readonly to: string } | { readonly href: string; readonly command?: string };
-
-/** The way of each step. */
-const WAYS: Record<GetStartedStepId, Way> = {
-  connect_repository: { to: "/settings/repositories/new" },
-  invite_team: { to: "/access/invites" },
-  add_passkey: { to: "/account" },
-  deploy_project: { href: TUTORIAL, command: "lakana deploy --env dev" },
-  deploy_project_local: {
-    href: TUTORIAL,
-    command: 'lakana repo add analytics --kind local --url "$PWD"',
-  },
-  ci_deploy: { href: `${DOCS_URL}how-to/deploy-from-github-actions/` },
-  open_table: { to: "/catalog" },
-  run_query: { to: "/queries" },
-};
+import { STEP_WAYS } from "./ways";
 
 /** Properties of {@link StepWay}. */
 interface StepWayProps {
@@ -53,7 +32,7 @@ interface StepWayProps {
  */
 function StepWay({ id }: StepWayProps): JSX.Element {
   const { t } = useTranslation();
-  const way = WAYS[id];
+  const way = STEP_WAYS[id];
   const label = t(`home.getStarted.steps.${id}.action`);
   if ("to" in way) {
     return <Link to={way.to}>{label}</Link>;

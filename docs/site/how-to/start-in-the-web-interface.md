@@ -1,9 +1,54 @@
 # Start in the web interface
 
-Home is the page every sign-in lands on. After this guide you know what each of its boxes tells
-you, what to do when the instance is not healthy, and how to work through, or put away, the
-Get started list. You need an account in the web interface ([Invite your
-team](invite-your-team.md) says how a colleague gets one).
+Home is the page every sign-in lands on. After this guide you know what the tour on your first
+sign-in shows, what each of Home's boxes tells you, what to do when the instance is not healthy,
+how to work through, or put away, the Get started list, and where Help and the keyboard shortcuts
+are. You need an account in the web interface ([Invite your team](invite-your-team.md) says how
+a colleague gets one).
+
+## The tour on your first sign-in
+
+The first time you sign in with access to the instance, a window says "Welcome to Lakana" and
+offers **Start the tour** or **Skip** (someone with no access yet gets it once an administrator
+has granted them a role). The tour shows the places in the menu on the left one at a time, in the menu's order:
+Home, Catalog, Queries, Jobs, Connections, Access and Settings (the last two only for an
+administrator, as in the menu), then Search and Help. Each step outlines its place and says in a
+sentence or two what you find there.
+
+- Nothing moves on by itself: **Next** and **Back** go through the steps, **Skip tour** or
+  **Esc** leaves it at any step.
+- On a narrow window, where the menu is folded behind the **Menu** button, each step is a window
+  in the middle of the page that names the place, such as "In the menu: Catalog".
+- The last step names your next step from Get started (for an administrator on a new instance,
+  **Connect your first repository**), links to the getting-started tutorial, the how-to guides
+  and the documentation overview, and ends with **Finish**.
+
+However you leave it, the tour does not come back by itself. **Help** → **Take the tour again**
+starts it whenever you like.
+
+## Help
+
+**Help** sits at the bottom of the menu, above your name. It holds:
+
+- **Take the tour again**.
+- **Getting started**, **How-to guides** and **Documentation**: this documentation, in a new tab.
+- **Keyboard shortcuts**: the list below.
+- **Show "Get started" again**, only while you have hidden the list: brings it back and takes
+  you Home.
+- The version of Lakana the instance runs, such as "Lakana 0.23.0", to name when you ask for
+  help.
+
+The search (**Ctrl K**, or **⌘ K** on a Mac) has **Take the tour again** and **Keyboard
+shortcuts** too: type a few letters of either.
+
+## Keyboard shortcuts
+
+| Keys | What they do |
+|---|---|
+| **Ctrl K** (**⌘ K** on a Mac) | Open the search: go to a place or run a command. Works anywhere, a text field included. |
+| **Esc** | Close a menu, a window or the tour. |
+| **Tab**, **Shift Tab** | Move to the next or the previous control. |
+| **Enter** | Open the row that has focus. |
 
 Home shows everything you may see across all environments; each row carries a small label with
 its environment (`dev`, `prod`), or `Instance` for something that belongs to the whole instance,
@@ -78,7 +123,7 @@ deploy your first project from a folder on this machine, open a table and run a 
 that needs a team.
 
 The list disappears when every step is done. **Hide** puts it away before then, on every
-browser you use.
+browser you use; **Help** → **Show "Get started" again** brings it back.
 
 ## The update note
 
@@ -88,5 +133,6 @@ opening it is your browser's own visit, not Lakana sending anything. **×** hide
 that version; the next release shows it again.
 
 You see the note from the second release you use on: someone new to Lakana starts on the
-current release, so there is nothing new to them. A server built from a development checkout
+current release, so there is nothing new to them (finishing or skipping the tour records that
+release as seen). A server built from a development checkout
 (its version is not a release, such as `0.23.1.dev4`) shows no note.

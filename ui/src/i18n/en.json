@@ -82,11 +82,11 @@
   },
   "palette": {
     "placeholder": "Go to a place or run a command",
-    "places": "Places",
     "goTo": "Go to {{area}}",
-    "results_one": "{{count}} place",
-    "results_other": "{{count}} places",
-    "empty": "Nothing matches “{{query}}”."
+    "results_one": "{{count}} result",
+    "results_other": "{{count}} results",
+    "empty": "Nothing matches “{{query}}”.",
+    "commands": "Places and commands"
   },
   "notFound": {
     "title": "This page does not exist",
@@ -440,5 +440,87 @@
     "hours_other": "{{count}} hours",
     "days_one": "{{count}} day",
     "days_other": "{{count}} days"
+  },
+  "help": {
+    "title": "Help",
+    "tour": "Take the tour again",
+    "gettingStarted": "Getting started",
+    "howTo": "How-to guides",
+    "documentation": "Documentation",
+    "shortcuts": "Keyboard shortcuts",
+    "showGetStarted": "Show “Get started” again",
+    "showFailed": "Showing Get started again did not work: {{detail}}",
+    "version": "Lakana {{version}}"
+  },
+  "shortcuts": {
+    "title": "Keyboard shortcuts",
+    "close": "Close",
+    "search": {
+      "text": "Open search: go to a place or run a command."
+    },
+    "escape": {
+      "keys": "Esc",
+      "text": "Close a menu, a dialog or the tour."
+    },
+    "tab": {
+      "keys": "Tab, Shift Tab",
+      "text": "Move to the next or the previous control."
+    },
+    "enter": {
+      "keys": "Enter",
+      "text": "Open the row that has focus."
+    }
+  },
+  "tour": {
+    "welcome": {
+      "title": "Welcome to Lakana",
+      "text": "Lakana keeps your team’s tables in one place, with the jobs that build them, the checks that guard them and who may read them. Every change comes from your project’s Git repository.",
+      "tour": "This short tour shows where things are, one place at a time. You can leave it at any step, and Help brings it back.",
+      "start": "Start the tour",
+      "skip": "Skip"
+    },
+    "progress": "Step {{current}} of {{total}}",
+    "back": "Back",
+    "next": "Next",
+    "skip": "Skip tour",
+    "finish": "Finish",
+    "inMenu": "In the menu: {{place}}",
+    "nextStep": "Your next step:",
+    "connectFirst": "Connect your first repository",
+    "reading": "Read further",
+    "links": {
+      "tutorial": "The getting-started tutorial",
+      "howTo": "How-to guides",
+      "docs": "The documentation overview"
+    },
+    "steps": {
+      "home": {
+        "text": "Where every sign-in lands: whether the instance is well, what needs your attention and what you opened recently."
+      },
+      "catalog": {
+        "text": "Every table you may read, with its columns, its health and where its data comes from."
+      },
+      "queries": {
+        "text": "Write SQL against the tables you may read, and see or download the result."
+      },
+      "jobs": {
+        "text": "The jobs your projects deploy and their runs: what ran, what failed and what runs next."
+      },
+      "connections": {
+        "text": "The databases and services your project loads its data from."
+      },
+      "access": {
+        "text": "Who may sign in, and what each person, group and token may do."
+      },
+      "settings": {
+        "text": "The instance’s status, its environments and how this server is set up."
+      },
+      "search": {
+        "text": "Press {{keys}} anywhere to go to a place or run a command by typing a few letters."
+      },
+      "help": {
+        "text": "Help brings back this tour and Get started, opens the documentation and lists the keyboard shortcuts."
+      }
+    }
   }
 }

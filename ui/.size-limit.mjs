@@ -12,12 +12,15 @@ const ASSETS = "../packages/lakana-server/src/lakana_server/ui_dist/assets";
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Measured 2.69 kB (the Access screen, 2026-11-09) + 10 %.
 const ON_DEMAND_LIMIT = "2.96 kB";
-// Screens larger than ON_DEMAND_LIMIT, each with a limit of its own; a chunk's file name is the
-// screen's module name, a dash and a hash, so the start of the name finds it in every build.
+// Screens larger than ON_DEMAND_LIMIT, and the tour (held to its own, tighter one), each with a
+// limit of its own; a chunk's file name is the module's name, a dash and a hash, so the start of
+// the name finds it in every build.
 const NAMED_LIMITS = [
   // Measured 3.91 kB (Home: the status box, Needs your attention, Recently opened, Your work,
   // Get started and the update note, after review, 2026-11-11) + 10 %.
   { name: "Home", prefix: "HomeScreen-", limit: "4.3 kB" },
+  // Measured 1.79 kB (the tour: the welcome and its steps, 2026-11-11) + 10 %.
+  { name: "the tour", prefix: "Tour-", limit: "1.97 kB" },
 ];
 
 /**
@@ -71,11 +74,15 @@ function onDemandChunks(initial) {
 const INITIAL = firstLoad();
 
 export default [
+  // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
+  // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
+  // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
+  // first paint or is a string of en.json, and moving the tour's strings out alone would not fit.
   {
     name: "JavaScript, first load",
     path: INITIAL.map((name) => `${ASSETS}/${name}`),
     gzip: true,
-    limit: "192 kB",
+    limit: "212 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
   // Measured 4.06 kB (with Home's stylesheet, 2026-11-11) + 10 %.

@@ -1,0 +1,57 @@
+/* The first-sign-in tour: the place a step is about, outlined in the accent like focus, and the
+   step's dialog beside it (or centred, below 640 px, as .dialog in screen.css). Nothing moves. */
+.tour-target {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.tour-step {
+  width: 360px;
+  padding: var(--space-4);
+}
+
+.tour-step h2,
+.tour-modal h2,
+.tour-overlay h2 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.tour-progress,
+.tour-reading-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  color: var(--color-text-muted);
+}
+
+.tour-reading-title {
+  margin: var(--space-4) 0 var(--space-1);
+}
+
+.tour-reading {
+  margin: 0;
+  padding: 0 0 0 var(--space-5);
+}
+
+.tour-reading li {
+  padding: var(--space-1) 0;
+}
+
+/* Links in a step: the accent, and underlined, so they are not told apart by colour alone. */
+.tour-step a,
+.tour-overlay a {
+  color: var(--color-accent);
+}
+
+.tour-step a:hover,
+.tour-overlay a:hover {
+  color: var(--color-accent-hover);
+}
+
+.tour-step .step-actions,
+.tour-overlay .step-actions {
+  margin: var(--space-4) 0 0;
+}
