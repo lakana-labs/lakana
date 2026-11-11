@@ -1,9 +1,11 @@
 """A person's profile picture: upload (re-encoded), read with caching headers, remove.
 
 The upload is read as a stream with a fixed 5 MiB cap, never buffered beyond it, and decoded in
-the threadpool by `lakana_core.identity.pictures`, a few at a time: Pillow's decode of up to 40
-megapixels must not run on the event loop. What is served is the stored re-encoded WebP only,
-with headers that keep a browser from treating it as anything but an image.
+the threadpool by `lakana_core.identity.pictures`: Pillow's decode of up to 40 megapixels must
+not run on the event loop. Two uploads per process at most, one per person, both taken before
+the body is read and refused with 503 rather than queued. What is served is the stored
+re-encoded WebP only, with headers that keep a browser from treating it as anything but an
+image.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from lakana_server.api.platform.schemas import PictureOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.body_limit import streams_its_own_body
+from lakana_server.concurrency import hold_one_per_principal
 from lakana_server.deps import get_picture_service, get_principal
 from lakana_server.errors import AppendReadTimeoutError, PayloadTooLargeError
 
@@ -32,9 +35,15 @@ router = APIRouter(
 )
 
 PICTURE_DECODE_SLOTS = 2
-"""Pictures one server process decodes at once; a further upload waits for a slot."""
+"""Picture uploads one server process reads and decodes at once; a further one is refused with
+503 and `Retry-After: 1`, and each person may have one in progress."""
 
 _NAME = Annotated[str, Path(min_length=1, max_length=255)]
+
+_YOURS_BUSY = (
+    "Another picture upload of yours is still in progress. Wait for it to finish, then try again."
+)
+_ALL_BUSY = "The server is busy with other picture uploads. Try again in a moment."
 
 _TOO_LARGE = "The picture is larger than 5 MB. Choose a smaller image or crop it first."
 
@@ -132,7 +141,7 @@ async def _read_picture(request: Request) -> bytes:
 @router.put(
     "/{name}/picture",
     response_model=PictureOut,
-    responses=errors(400, 404, 408, 413, 415),
+    responses=errors(400, 404, 408, 413, 415, 503),
 )
 @streams_its_own_body
 async def set_picture(
@@ -147,7 +156,8 @@ async def set_picture(
     or `image/webp` (415 for any other, SVG included). At most 5 MB (413). The server keeps a
     new 256 x 256 picture cut from the centre and turned upright, with none of the file's
     metadata (location, camera); 422 when the file is not a readable image of the type sent.
-    Only your own (403 for another name, and for a task or CI token). Audited.
+    Only your own (403 for another name, and for a task or CI token). One upload of yours at a
+    time, and a few in all per server: otherwise 503, try again after `Retry-After`. Audited.
 
     Parameters
     ----------
@@ -169,8 +179,16 @@ async def set_picture(
     # Before a byte is read: a caller who may not set this picture must not make the server
     # read and decode 5 MiB.
     service.check_can_set(principal, name, media_type)
-    data = await _read_picture(request)
-    async with request.app.state.picture_decode_slots:
+    # Taken before the body is read, refused rather than waited for: a request never queues
+    # holding a body and a database connection.
+    async with hold_one_per_principal(
+        request.app.state.picture_decode_slots,
+        request.app.state.picture_principals,
+        principal.id,
+        own_busy=_YOURS_BUSY,
+        all_busy=_ALL_BUSY,
+    ):
+        data = await _read_picture(request)
         etag = await run_in_threadpool(service.set, principal, name, data, media_type)
     return PictureOut(etag=etag)
 

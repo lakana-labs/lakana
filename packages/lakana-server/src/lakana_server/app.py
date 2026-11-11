@@ -228,6 +228,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.manifest_decode_slots = asyncio.Semaphore(MANIFEST_DECODE_SLOTS)
         app.state.manifest_principals = set()
         app.state.picture_decode_slots = asyncio.Semaphore(PICTURE_DECODE_SLOTS)
+        app.state.picture_principals = set()
         app.state.download_slots = AppendConcurrencyLimiter(MAX_CONCURRENT_DOWNLOADS)
         readiness = resolved_settings.readiness
         app.state.readiness = ReadinessCheck(

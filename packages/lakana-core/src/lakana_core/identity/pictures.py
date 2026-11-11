@@ -70,12 +70,6 @@ _PILLOW_FAILURES: tuple[type[BaseException], ...] = (
 )
 """What Pillow raises for a file it cannot or will not read (``struct.error``: a short header)."""
 
-# Pillow's own bomb guard at the pictures' limit: it warns above it and raises above twice it.
-# The warning is an error here, and `_reencode` checks the size itself before any decode, so
-# the refusal does not depend on the process's warning filters.
-Image.MAX_IMAGE_PIXELS = PICTURE_MAX_PIXELS
-warnings.filterwarnings("error", category=Image.DecompressionBombWarning)
-
 
 def reencode_picture(data: bytes, media_type: str) -> bytes:
     """Turn an uploaded image into the stored picture: a 256 x 256 WebP of its pixels only.
@@ -129,6 +123,45 @@ def _reencode(data: bytes, pillow_format: str) -> bytes:
     -------
     bytes
         The WebP file.
+    """
+    # Lakana's own limit is the check below, made on the header before any decode; nothing
+    # process-wide (`Image.MAX_IMAGE_PIXELS`, the warning filters) is changed. Pillow's own guard
+    # stays at its default (about 89 million pixels: it warns above it, raises above twice it),
+    # and this block turns its warning into the same refusal. `catch_warnings` is not isolated
+    # per thread before Python's context-aware warnings, so another decode's block may briefly
+    # see this filter or lose it; either way the explicit check decides.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        upright, mode = _decode_upright(data, pillow_format)
+    fitted = ImageOps.fit(upright, (PICTURE_SIZE, PICTURE_SIZE), method=Image.Resampling.LANCZOS)
+    # A new image from the pixels alone: `fit` and `convert` carry the upload's `info` (EXIF,
+    # XMP, ICC profile, comments) along, and the WebP writer would save some of it.
+    clean = Image.frombytes(mode, fitted.size, fitted.tobytes())
+    out = io.BytesIO()
+    clean.save(out, "WEBP", quality=_QUALITY)
+    return out.getvalue()
+
+
+def _decode_upright(data: bytes, pillow_format: str) -> tuple[Image.Image, str]:
+    """Decode the first frame, at most a little over twice the stored size, and turn it upright.
+
+    The picture is converted to RGB, or RGBA when it has transparency, before it is reduced:
+    `Image.reduce` refuses palette, 1-bit and 16-bit images. The converted copy replaces the
+    decoded one, which is closed, so a 40-megapixel picture holds about 160 MB (RGB) or 320 MB
+    (RGBA, which `reduce` premultiplies in a second full copy) at its peak. A JPEG is decoded
+    at a reduced scale to begin with.
+
+    Parameters
+    ----------
+    data
+        The uploaded file.
+    pillow_format
+        The one Pillow format to open it as.
+
+    Returns
+    -------
+    tuple of (Image.Image, str)
+        The upright image, and its mode: ``RGB`` or ``RGBA``.
 
     Raises
     ------
@@ -141,22 +174,16 @@ def _reencode(data: bytes, pillow_format: str) -> bytes:
             raise ValidationError(_NOT_READABLE)
         if pillow_format == "JPEG":
             image.draft("RGB", (_WORKING_SIDE, _WORKING_SIDE))
-        # `Image.open` stands on the first frame; nothing seeks further. Reducing before the
-        # turn keeps one full-size copy in memory at most; scaling and turning commute.
-        factor = max(1, min(image.size) // _WORKING_SIDE)
-        reduced = image.reduce(factor) if factor > 1 else image.copy()
-        upright = ImageOps.exif_transpose(reduced)
-    transparent = upright.mode in ("RGBA", "LA", "PA") or "transparency" in upright.info
-    mode = "RGBA" if transparent else "RGB"
-    fitted = ImageOps.fit(
-        upright.convert(mode), (PICTURE_SIZE, PICTURE_SIZE), method=Image.Resampling.LANCZOS
-    )
-    # A new image from the pixels alone: `fit` and `convert` carry the upload's `info` (EXIF,
-    # XMP, ICC profile, comments) along, and the WebP writer would save some of it.
-    clean = Image.frombytes(mode, fitted.size, fitted.tobytes())
-    out = io.BytesIO()
-    clean.save(out, "WEBP", quality=_QUALITY)
-    return out.getvalue()
+        transparent = image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info
+        mode = "RGBA" if transparent else "RGB"
+        # `Image.open` stands on the first frame; nothing seeks further.
+        working = image if image.mode == mode else image.convert(mode)
+        if working is not image:
+            image.close()
+        # Reducing before the turn keeps the turn small; scaling and turning commute.
+        factor = max(1, min(working.size) // _WORKING_SIDE)
+        reduced = working.reduce(factor) if factor > 1 else working
+        return ImageOps.exif_transpose(reduced), mode
 
 
 def _stored(session: Session, principal_id: uuid.UUID) -> ProfilePicture | None:

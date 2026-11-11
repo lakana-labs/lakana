@@ -240,8 +240,11 @@ def test_bytes_that_are_not_the_declared_type_are_refused() -> None:
         reencode_picture(gif, "image/png")
 
 
-@pytest.mark.filterwarnings("error::PIL.Image.DecompressionBombWarning")
-def test_too_many_pixels_are_refused_before_decoding(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_huge_declared_size_is_refused_by_lakanas_own_check_without_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """64 megapixels is under Pillow's default bomb limit: only Lakana's own check refuses it."""
+    assert (Image.MAX_IMAGE_PIXELS or 0) > 8000 * 8000
     loads: list[object] = []
     monkeypatch.setattr(Image.Image, "load", lambda self: loads.append(self))
     from PIL import ImageFile
@@ -267,7 +270,6 @@ def test_just_over_the_pixel_limit_is_refused_and_just_under_is_read(
     assert _decode(reencode_picture(_encode(Image.new("L", (10, 10)), "PNG"), "image/png"))
 
 
-@pytest.mark.filterwarnings("error::PIL.Image.DecompressionBombWarning")
 def test_a_decompression_bomb_is_refused() -> None:
     """A PNG of a few kilobytes that would decode to 64 megapixels of zeros."""
     side = 8000
@@ -280,8 +282,44 @@ def test_a_decompression_bomb_is_refused() -> None:
         reencode_picture(bomb, "image/png")
 
 
-def test_pillows_own_limit_is_the_pictures_limit() -> None:
-    assert Image.MAX_IMAGE_PIXELS == PICTURE_MAX_PIXELS
+def test_importing_pictures_changes_no_process_wide_pillow_or_warning_setting() -> None:
+    import importlib
+    import warnings
+
+    filters = list(warnings.filters)
+    importlib.reload(pictures_module)
+    assert Image.MAX_IMAGE_PIXELS == (1024 * 1024 * 1024 // 4 // 3)  # Pillow's default
+    assert list(warnings.filters) == filters
+
+
+def test_pillows_bomb_warning_is_the_same_refusal() -> None:
+    """Between Pillow's default limit and twice it, Pillow only warns; the warning is an error."""
+    import warnings
+
+    side = 10_000  # 100 megapixels: above Pillow's 89 million, below twice that
+    png = _grey_png(side, side, zlib.compress(b"\x00" * (side + 1)))
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        with pytest.raises(ValidationError, match=_NOT_READABLE) as refused:
+            reencode_picture(png, "image/png")
+    assert isinstance(refused.value.__cause__, Image.DecompressionBombWarning)
+    assert seen == []  # turned into the refusal, not left in the log
+
+
+@pytest.mark.parametrize(
+    ("mode", "options"),
+    [("P", {}), ("P", {"transparency": 0}), ("1", {}), ("I;16", {}), ("LA", {}), ("L", {})],
+)
+def test_large_palette_bilevel_and_sixteen_bit_pngs_are_read(
+    mode: str, options: dict[str, object]
+) -> None:
+    """A short side of 1024 or more makes the picture be reduced first, whatever its mode."""
+    image = Image.new(mode, (1200, 1100))
+    data = reencode_picture(_encode(image, "PNG", **options), "image/png")
+    out = _decode(data)
+    assert out.size == (PICTURE_SIZE, PICTURE_SIZE) and out.format == "WEBP"
+    expected = "RGBA" if "transparency" in options or mode == "LA" else "RGB"
+    assert out.mode == expected
 
 
 @pytest.mark.parametrize("fmt", ["JPEG", "PNG", "WEBP"])

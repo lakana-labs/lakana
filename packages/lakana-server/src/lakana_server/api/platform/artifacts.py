@@ -96,7 +96,7 @@ from lakana_server.api.platform.schemas import (
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.body_limit import streams_its_own_body
-from lakana_server.concurrency import AppendConcurrencyLimiter
+from lakana_server.concurrency import AppendConcurrencyLimiter, hold_one_per_principal
 from lakana_server.deps import get_artifact_service, get_principal, get_write_principal
 from lakana_server.errors import (
     AppendConcurrencyLimitError,
@@ -501,18 +501,15 @@ async def _manifest_hold(request: Request, principal_id: uuid.UUID) -> AsyncGene
         If the principal already has a manifest request in progress, or every decode slot is
         taken (503, the same answer for both: nothing tells a caller about other principals).
     """
-    slots: asyncio.Semaphore = request.app.state.manifest_decode_slots
-    holders: set[uuid.UUID] = request.app.state.manifest_principals
-    # `locked()` and the acquire below have no suspension point between them, so no other
-    # request can take the slot this one just saw free.
-    if principal_id in holders or slots.locked():
-        raise AppendConcurrencyLimitError("Too many concurrent uploads; retry shortly.")
-    holders.add(principal_id)
-    try:
-        async with slots:
-            yield
-    finally:
-        holders.discard(principal_id)
+    busy = "Too many concurrent uploads; retry shortly."
+    async with hold_one_per_principal(
+        request.app.state.manifest_decode_slots,
+        request.app.state.manifest_principals,
+        principal_id,
+        own_busy=busy,
+        all_busy=busy,
+    ):
+        yield
 
 
 async def _read_manifest_document(

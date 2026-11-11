@@ -284,3 +284,97 @@ def test_a_picture_that_takes_too_long_in_all_is_a_timeout(
     slow = _put(client, _MINE, AUTH_HEADER, _jpeg(), "image/jpeg")
     assert slow.status_code == 408
     assert "did not finish arriving within 0.2s" in slow.json()["detail"]
+
+
+_YOURS_BUSY = (
+    "Another picture upload of yours is still in progress. Wait for it to finish, then try again."
+)
+_ALL_BUSY = "The server is busy with other picture uploads. Try again in a moment."
+
+
+def _no_read(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record every attempt to read the body.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch.
+
+    Returns
+    -------
+    list of float
+        One entry per read attempt.
+    """
+    reads: list[float] = []
+
+    async def counting(iterator: AsyncIterator[bytes], idle: float) -> bytes | None:
+        """Record the read and end the body.
+
+        Parameters
+        ----------
+        iterator
+            Ignored.
+        idle
+            Recorded.
+
+        Returns
+        -------
+        None
+            The end of the body.
+        """
+        reads.append(idle)
+        await asyncio.sleep(0)
+        return None
+
+    monkeypatch.setattr(routes, "next_chunk", counting)
+    return reads
+
+
+def test_a_second_upload_of_the_same_person_is_503_before_its_body_is_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with Session(client.app.state.engine) as session:
+        from lakana_core.models import Principal
+
+        principal_id = session.execute(
+            select(Principal.id).where(Principal.name == "admin")
+        ).scalar_one()
+    reads = _no_read(monkeypatch)
+    client.app.state.picture_principals.add(principal_id)
+    try:
+        busy = _put(client, _MINE, AUTH_HEADER, _jpeg(), "image/jpeg")
+    finally:
+        client.app.state.picture_principals.discard(principal_id)
+    assert busy.status_code == 503
+    assert busy.headers["Retry-After"] == "1"
+    assert busy.json()["detail"] == _YOURS_BUSY
+    assert reads == []
+
+
+def test_an_upload_when_every_decode_slot_is_taken_is_503_before_its_body_is_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads = _no_read(monkeypatch)
+    slots: asyncio.Semaphore = client.app.state.picture_decode_slots
+    taken = 0
+    while not slots.locked():
+        slots._value -= 1  # take a slot without an event loop; given back below
+        taken += 1
+    try:
+        busy = _put(client, _MINE, AUTH_HEADER, _jpeg(), "image/jpeg")
+    finally:
+        slots._value += taken
+    assert busy.status_code == 503
+    assert busy.json()["detail"] == _ALL_BUSY
+    assert reads == []
+    assert taken == routes.PICTURE_DECODE_SLOTS
+
+
+def test_the_hold_is_given_back_however_the_upload_ends(client: TestClient) -> None:
+    too_big = b"\x00" * (_FIVE_MIB + 1)
+    assert _put(client, _MINE, AUTH_HEADER, too_big, "image/jpeg").status_code == 413
+    assert _put(client, _MINE, AUTH_HEADER, b"junk", "image/png").status_code == 422
+    assert _put(client, _MINE, AUTH_HEADER, _jpeg(), "image/jpeg").status_code == 200
+    assert client.app.state.picture_principals == set()
+    slots: asyncio.Semaphore = client.app.state.picture_decode_slots
+    assert slots._value == routes.PICTURE_DECODE_SLOTS

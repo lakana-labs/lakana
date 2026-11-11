@@ -1128,17 +1128,33 @@ decoders, so the decode is fenced in and what is stored is never the upload.
   stops at 5 MiB + 1 byte (`413 The picture is larger than 5 MB. Choose a smaller image or crop it
   first.`), within the append read timeout. Nothing beyond 5 MiB is ever buffered (pin:
   `test_over_five_megabytes_is_refused_naming_the_limit`, chunked and declared).
-- **The decode.** In the threadpool (`run_in_threadpool`), at most `PICTURE_DECODE_SLOTS` (2) at once
-  per process (an `asyncio.Semaphore`; a further upload waits, its body already read). The bytes are
+- **Two at a time, refused rather than queued.** Before the body is read the route takes one of
+  `PICTURE_DECODE_SLOTS` (2) per process and the caller's place (one upload per person), as the
+  manifest route does (`lakana_server.concurrency.hold_one_per_principal`): a second upload of the
+  same person is `503 Another picture upload of yours is still in progress. Wait for it to finish,
+  then try again.`, and one while both slots are taken `503 The server is busy with other picture
+  uploads. Try again in a moment.`, both with `Retry-After: 1`. So no request waits holding a
+  body and a database connection; two slow uploaders of different people hold the slots for at
+  most the read timeout (pins: `test_a_second_upload_of_the_same_person_is_503_before_its_body_is_read`,
+  `test_an_upload_when_every_decode_slot_is_taken_is_503_before_its_body_is_read`,
+  `test_the_hold_is_given_back_however_the_upload_ends`).
+- **The decode.** In the threadpool (`run_in_threadpool`). The bytes are
   opened with `Image.open(..., formats=[the one format the media type names])`: the content decides,
   never a filename, and an SVG, HTML or GIF sent as `image/png` is `422` (pins:
   `test_an_svg_named_as_a_png_is_refused`, `test_bytes_that_are_not_the_declared_type_are_refused`).
-  The declared width x height is checked against 40 megapixels before any decode (pin:
-  `test_too_many_pixels_are_refused_before_decoding`, `load` never called); Pillow's own
-  `MAX_IMAGE_PIXELS` is set to the same limit and `DecompressionBombWarning` is an error filter, so
-  Pillow refuses on its own above it too (pin: `test_a_decompression_bomb_is_refused`). A JPEG is
-  decoded at a reduced scale (`draft`), a large image reduced by a whole factor before it is turned,
-  so at most one full-size copy is in memory (40 MP RGBA: about 160 MB per slot). Only the first
+  The declared width x height is checked against 40 megapixels on the header, before any decode
+  (pin: `test_a_huge_declared_size_is_refused_by_lakanas_own_check_without_decoding`, `load` never
+  called). Nothing process-wide is changed: Pillow's `MAX_IMAGE_PIXELS` stays at its default
+  (about 89 million pixels), and a local `warnings.catch_warnings()` turns its
+  `DecompressionBombWarning` into the same refusal (pins: `test_a_decompression_bomb_is_refused`,
+  `test_pillows_bomb_warning_is_the_same_refusal`,
+  `test_importing_pictures_changes_no_process_wide_pillow_or_warning_setting`). A JPEG is decoded
+  at a reduced scale (`draft`). The picture is converted to RGB, or RGBA with transparency, before
+  a large one is reduced by a whole factor (`reduce` refuses palette, 1-bit and 16-bit images; pin:
+  `test_large_palette_bilevel_and_sixteen_bit_pngs_are_read`), the decoded original closed, and
+  turned afterwards. Peak memory per slot for 40 megapixels: about 160 MB (RGB, which Pillow keeps
+  at 4 bytes a pixel), about 320 MB with transparency (`reduce` premultiplies RGBA in a second
+  full copy); 640 MB for both slots at worst. Only the first
   frame of an animation is read. `LOAD_TRUNCATED_IMAGES` stays false: a truncated file is `422`.
   Every Pillow failure (`OSError`, `ValueError`, `EOFError`, `SyntaxError`, `struct.error`, the bomb
   error and warning) is one `422` naming the formats and the next step; a fuzz pin flips bytes of a
@@ -6195,6 +6211,9 @@ User documentation: `docs/site/reference/ci-trust-rules.md`. Threat model: "CI O
     `test_deploy_ci_token.py`.
   - `test_ci_token_enforcement.py::test_every_deploy_check_is_covered` lists every function in
     `packages/*/src` that names `DEPLOY` and fails on a new one; add it there with a test.
+    `GrantService.may_deploy_somewhere` (whoami's `may_deploy`) only asks, with `permits` under
+    the token's scope: a CI token answers for its own environment only, and nothing is audited
+    (pin: `test_may_deploy_somewhere_for_a_ci_token_is_its_scope_only_and_records_nothing`).
 - **No foreign key on `deploy_runs.ci_token_id`** (like `QueryRun.task_token_id`): a missing
   token row must not make the run look like one no CI token queued; the worker refuses it.
 - **Tests:** `test_ci_trust_rules.py`, `test_ci_oidc_exchange.py`, `test_ci_token_enforcement.py`

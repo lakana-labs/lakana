@@ -21515,7 +21515,7 @@
           "principals"
         ],
         "summary": "Set your profile picture",
-        "description": "Send the image file as the body, with its type as `Content-Type`: `image/jpeg`, `image/png` or `image/webp` (415 for any other, SVG included). At most 5 MB (413). The server keeps a new 256 x 256 picture cut from the centre and turned upright, with none of the file's metadata (location, camera); 422 when the file is not a readable image of the type sent. Only your own (403 for another name, and for a task or CI token). Audited.",
+        "description": "Send the image file as the body, with its type as `Content-Type`: `image/jpeg`, `image/png` or `image/webp` (415 for any other, SVG included). At most 5 MB (413). The server keeps a new 256 x 256 picture cut from the centre and turned upright, with none of the file's metadata (location, camera); 422 when the file is not a readable image of the type sent. Only your own (403 for another name, and for a task or CI token). One upload of yours at a time, and a few in all per server: otherwise 503, try again after `Retry-After`. Audited.",
         "operationId": "set_picture_api_v1_principals__name__picture_put",
         "parameters": [
           {
@@ -21622,6 +21622,16 @@
           },
           "415": {
             "description": "The request body is of a type the server does not accept; the message names the ones it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
             "content": {
               "application/json": {
                 "schema": {
