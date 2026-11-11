@@ -7,8 +7,9 @@ records what it found while the lease is still this worker's (`RepositoryProbeQu
 worker that lost it records nothing and logs at info level).
 
 - A host-key probe runs `scan_host_keys`: the URL's host is resolved once, any address that
-  `is_never_reachable` refuses the probe, and `ssh-keyscan` reaches the checked address, after
-  ``--``, with a minimal environment and no shell; only well-formed keys of known types are kept
+  `is_never_reachable` refuses the probe before any is tried, and `ssh-keyscan` reaches the
+  checked addresses in turn (never a name resolved again) until one offers a key, after ``--``,
+  with a minimal environment and no shell; only well-formed keys of known types are kept
   (`parse_keyscan`), and the message is a fixed sentence, never the tool's output.
 - An access probe runs `lakana_worker.git.check_access` with the environment's credential
   (`resolve_credential`) and the repository row's own known hosts, with a deadline 15 s inside
@@ -122,9 +123,14 @@ def scan_host_keys(
     *,
     resolve: Callable[..., Sequence[Any]] = socket.getaddrinfo,
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
-    timeout: int = KEYSCAN_TIMEOUT_SECONDS,
+    timeout: float = KEYSCAN_TIMEOUT_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
 ) -> tuple[ProbeOutcome, str, list[HostKey]]:
     """Fetch the SSH host keys a host offers.
+
+    The name is resolved once and every address it gave is checked before any is tried; then
+    the addresses are scanned in turn until one offers a key (a dual-stack host on a worker with
+    no IPv6 route answers at its IPv4 address), all within one `timeout`.
 
     Parameters
     ----------
@@ -137,15 +143,17 @@ def scan_host_keys(
     run
         `subprocess.run` or a stand-in.
     timeout
-        Seconds `ssh-keyscan` may take in all.
+        Seconds `ssh-keyscan` may take in all, over every address.
+    clock
+        `time.monotonic` or a stand-in.
 
     Returns
     -------
     tuple
         The outcome, a fixed sentence and the keys (empty unless ``ok``). ``refused_address``
         when any address `is_never_reachable` (ssh-keyscan never runs); ``unreachable`` for a
-        name that does not resolve or a host that offered no key; ``timeout``; ``failed`` when
-        ssh-keyscan cannot run.
+        name that does not resolve or a host none of whose addresses offered a key;
+        ``timeout`` when the time ran out first; ``failed`` when ssh-keyscan cannot run.
     """
     try:
         answers = resolve(host, port, type=socket.SOCK_STREAM)
@@ -156,28 +164,33 @@ def scan_host_keys(
         return ProbeOutcome.UNREACHABLE, SCAN_MESSAGES[ProbeOutcome.UNREACHABLE], []
     if any(is_never_reachable(address) for address in addresses):
         return ProbeOutcome.REFUSED_ADDRESS, SCAN_MESSAGES[ProbeOutcome.REFUSED_ADDRESS], []
-    argv = ["ssh-keyscan", "-T", "5", "-p", str(port), "-t", "ed25519,ecdsa,rsa"]
-    argv += ["--", str(addresses[0])]
-    try:
-        done = run(  # nosec B603 -- fixed argv, the checked address after `--`, no shell
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"},
-            stdin=subprocess.DEVNULL,
-            check=False,
-            shell=False,
-        )
-    except subprocess.TimeoutExpired:
-        return ProbeOutcome.TIMEOUT, SCAN_MESSAGES[ProbeOutcome.TIMEOUT], []
-    except OSError as exc:
-        logger.warning("ssh-keyscan could not run (%s).", type(exc).__name__)
-        return ProbeOutcome.FAILED, SCAN_MESSAGES[ProbeOutcome.FAILED], []
-    keys = parse_keyscan(done.stdout or "", host=host, port=port)
-    if not keys:
-        return ProbeOutcome.UNREACHABLE, SCAN_MESSAGES[ProbeOutcome.UNREACHABLE], []
-    return ProbeOutcome.OK, _found(len(keys)), keys
+    deadline = clock() + timeout
+    for address in dict.fromkeys(addresses):
+        left = deadline - clock()
+        if left <= 0:
+            return ProbeOutcome.TIMEOUT, SCAN_MESSAGES[ProbeOutcome.TIMEOUT], []
+        argv = ["ssh-keyscan", "-T", "5", "-p", str(port), "-t", "ed25519,ecdsa,rsa"]
+        argv += ["--", str(address)]
+        try:
+            done = run(  # nosec B603 -- fixed argv, a checked address after `--`, no shell
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=left,
+                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"},
+                stdin=subprocess.DEVNULL,
+                check=False,
+                shell=False,
+            )
+        except subprocess.TimeoutExpired:
+            return ProbeOutcome.TIMEOUT, SCAN_MESSAGES[ProbeOutcome.TIMEOUT], []
+        except OSError as exc:
+            logger.warning("ssh-keyscan could not run (%s).", type(exc).__name__)
+            return ProbeOutcome.FAILED, SCAN_MESSAGES[ProbeOutcome.FAILED], []
+        keys = parse_keyscan(done.stdout or "", host=host, port=port)
+        if keys:
+            return ProbeOutcome.OK, _found(len(keys)), keys
+    return ProbeOutcome.UNREACHABLE, SCAN_MESSAGES[ProbeOutcome.UNREACHABLE], []
 
 
 class RepositoryProbeLoop:

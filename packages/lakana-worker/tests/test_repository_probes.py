@@ -140,7 +140,7 @@ def test_scan_connects_to_the_checked_address_with_an_argv_list() -> None:
         "203.0.113.7",
     ]
     assert kwargs.get("shell", False) is False
-    assert kwargs["timeout"] == 25
+    assert 24 < kwargs["timeout"] <= 25
     assert set(kwargs["env"]) <= {"PATH", "LC_ALL"}
     assert keys == [
         HostKey(
@@ -149,6 +149,101 @@ def test_scan_connects_to_the_checked_address_with_an_argv_list() -> None:
             line=f"[git.example.com]:2222 ssh-ed25519 {ED25519_B64}",
         )
     ]
+
+
+class Answers(Runs):
+    """A `Runs` that prints one answer per call, in order.
+
+    Parameters
+    ----------
+    *answers
+        What each call prints; an exception is raised instead.
+    """
+
+    def __init__(self, *answers: str | BaseException) -> None:
+        super().__init__()
+        self._answers = list(answers)
+
+    def __call__(self, argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Record a call and give the next answer.
+
+        Parameters
+        ----------
+        argv
+            The argument list.
+        **kwargs
+            `subprocess.run`'s keywords.
+
+        Returns
+        -------
+        subprocess.CompletedProcess
+            Exit 0 with the next answer.
+
+        Raises
+        ------
+        BaseException
+            The next answer, when it is an exception.
+        """
+        self.calls.append((argv, kwargs))
+        answer = self._answers.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return subprocess.CompletedProcess(argv, 0, answer, "")
+
+
+def test_a_dual_stack_host_is_scanned_at_its_next_address_without_resolving_again() -> None:
+    """An IPv6 address with no route gives nothing; the IPv4 one answers (the name once)."""
+    names: list[str] = []
+    both = resolves_to("2001:db8::7", "203.0.113.7", "2001:db8::7")
+
+    def resolve(host: str, port: object, *args: object, **kwargs: object) -> list[Any]:
+        names.append(host)
+        return both(host, port, *args, **kwargs)
+
+    run = Answers("", f"203.0.113.7 ssh-ed25519 {ED25519_B64}\n")
+    outcome, _message, keys = scan_host_keys("git.example.com", 22, resolve=resolve, run=run)
+    assert outcome is ProbeOutcome.OK and len(keys) == 1
+    assert names == ["git.example.com"]
+    assert [argv[-1] for argv, _ in run.calls] == ["2001:db8::7", "203.0.113.7"]
+
+
+def test_every_address_is_checked_before_any_is_scanned() -> None:
+    """A never-reachable address later in the answer stops the scan before the first one."""
+    run = Answers("", "")
+    outcome, _message, _keys = scan_host_keys(
+        "h", 22, resolve=resolves_to("2001:db8::7", "203.0.113.7", "127.0.0.1"), run=run
+    )
+    assert outcome is ProbeOutcome.REFUSED_ADDRESS
+    assert run.calls == []
+
+
+def test_the_addresses_share_one_time_budget() -> None:
+    """The next address gets only what is left, and a timeout ends the scan."""
+    now = [0.0]
+
+    def clock() -> float:
+        return now[0]
+
+    def slow(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs["timeout"])
+        now[0] += 15
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    calls: list[object] = []
+    outcome, _m, _k = scan_host_keys(
+        "h",
+        22,
+        resolve=resolves_to("2001:db8::7", "203.0.113.7", "203.0.113.8"),
+        run=slow,
+        clock=clock,
+    )
+    assert calls == [25, 10]
+    assert outcome is ProbeOutcome.TIMEOUT
+    run = Answers(subprocess.TimeoutExpired(["ssh-keyscan"], 25), "")
+    outcome, _m, _k = scan_host_keys(
+        "h", 22, resolve=resolves_to("2001:db8::7", "203.0.113.7"), run=run
+    )
+    assert outcome is ProbeOutcome.TIMEOUT and len(run.calls) == 1
 
 
 def test_both_checks_refuse_an_address_in_the_same_words() -> None:
