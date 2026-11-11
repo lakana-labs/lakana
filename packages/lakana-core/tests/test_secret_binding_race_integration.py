@@ -363,9 +363,11 @@ def test_a_key_revoked_while_it_is_replaced_is_not_rotated(engine: Engine) -> No
     deploy reads, and report success.
     """
     tag = uuid.uuid4().hex[:8]
-    env, repo = f"env-{tag}", f"repo-{tag}"
+    env, repo, env_id = f"env-{tag}", f"repo-{tag}", uuid.uuid4()
     with Session(engine) as session:
-        session.add(Environment(id=uuid.uuid4(), name=env, storage_root=f"file:///srv/{tag}"))
+        # The module's engine keeps the environments of the tests before this one: every call
+        # names this test's environment, so nothing is written into theirs.
+        session.add(Environment(id=env_id, name=env, storage_root=f"file:///srv/{tag}"))
         session.commit()
         admin = _principal(session, f"admin-{tag}")
         RepositoryService(session, AllowAllAuthorization()).create(
@@ -378,9 +380,13 @@ def test_a_key_revoked_while_it_is_replaced_is_not_rotated(engine: Engine) -> No
                 "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR\n"
             ),
         )
-        DeployKeyService(session, AllowAllAuthorization(), _KEYS).generate(admin, repo)
+        DeployKeyService(session, AllowAllAuthorization(), _KEYS).generate(
+            admin, repo, environments=[env]
+        )
         secret = session.execute(
-            select(Secret).where(Secret.name == f"{repo}-deploy-key")
+            select(Secret).where(
+                Secret.name == f"{repo}-deploy-key", Secret.environment_id == env_id
+            )
         ).scalar_one()
         secret_id, ciphertext = secret.id, secret.ciphertext
 

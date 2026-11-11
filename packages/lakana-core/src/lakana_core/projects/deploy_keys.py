@@ -541,19 +541,33 @@ class DeployKeyService:
         previous = repo.credential_secret
         if previous is None or previous == name:
             return
-        made_for = set(
-            self._session.execute(
-                select(Secret.generated_for).where(Secret.name == previous)
-            ).scalars()
-        )
-        if made_for == {repo.id}:
+        rows = self._session.execute(
+            select(Secret.generated_for, Secret.use_kind, Secret.use_target_id, Environment.name)
+            .join(Environment, Environment.id == Secret.environment_id)
+            .where(Secret.name == previous)
+            .order_by(Environment.name)
+        ).all()
+        # Only this repository's rows count: a secret of the same name that serves another
+        # repository (a key made for it, or a person's) is not this repository's credential.
+        own = [
+            (made_for, environment)
+            for made_for, use_kind, target, environment in rows
+            if made_for == repo.id or (use_kind is SecretUseKind.REPOSITORY and target == repo.id)
+        ]
+        if own and all(made_for == repo.id for made_for, _ in own):
             return
+        foreign = next((env for made_for, env in own if made_for != repo.id), None)
+        cause = (
+            f"in environment '{shown(foreign)}' that is a secret Lakana did not make"
+            if foreign is not None
+            else "Lakana made no key under that name for it"
+        )
         quoted = shlex.quote(plain(repo.name))
         raise ConflictError(
             f"Repository '{shown(repo.name)}' already names secret '{shown(previous)}' as its "
-            "credential, and Lakana did not make it. A deploy key would replace it: clear it "
-            f"first with lakana repo update {quoted} --clear credential_secret, then make the "
-            f"key with lakana repo deploy-key {quoted}."
+            f"credential, and {cause}. A deploy key would replace it: clear it first with "
+            f"lakana repo update {quoted} --clear credential_secret, then make the key with "
+            f"lakana repo deploy-key {quoted}."
         )
 
     def _lock_secrets(self, name: str) -> dict[uuid.UUID, Secret]:
@@ -707,7 +721,10 @@ class DeployKeyService:
         steps: list[tuple[Environment, Secret | None, _Step]],
         skipped: tuple[str, ...],
     ) -> DeployKeyResult:
-        """Make and replace the keys, name the secret on the repository, audit and commit.
+        """Write the keys; a clash with a concurrent write of the name becomes a fixed 409.
+
+        The clash can surface at any flush, not only at the commit: `insert_secret` queries
+        before it adds, which flushes the previous environment's pending insert.
 
         Parameters
         ----------
@@ -732,7 +749,57 @@ class DeployKeyService:
         Raises
         ------
         ConflictError
-            If the commit collides with a concurrent write.
+            If a write collides with a concurrent one; nothing is changed.
+        """
+        try:
+            return self._write_unguarded(p, repo, name, previous, steps, skipped)
+        except IntegrityError:
+            self._session.rollback()
+            # A fixed message and no chained cause: an IntegrityError's text embeds the
+            # statement and its bound parameters, the ciphertext, nonce and wrapped key among
+            # them, and a logged traceback would print it.
+            raise ConflictError(
+                f"Another request wrote a secret named '{shown(name)}' at the same time; "
+                "nothing was changed. Look at the repository again and try again."
+            ) from None
+
+    def _write_unguarded(
+        self,
+        p: PrincipalRef,
+        repo: Repository,
+        name: str,
+        previous: str | None,
+        steps: list[tuple[Environment, Secret | None, _Step]],
+        skipped: tuple[str, ...],
+    ) -> DeployKeyResult:
+        """Make and replace the keys, name the secret on the repository, audit and commit.
+
+        `_write` turns a clash into a `ConflictError`.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        repo
+            The repository, locked.
+        name
+            The secret name.
+        previous
+            The repository's `credential_secret` before the call.
+        steps
+            Each environment to write, its locked row and its step.
+        skipped
+            The environments left without a key.
+
+        Returns
+        -------
+        DeployKeyResult
+            What was made and kept.
+
+        Raises
+        ------
+        IntegrityError
+            If a flush or the commit collides with a concurrent write of the name.
         """
         keys: list[EnvironmentDeployKey] = []
         made: dict[str, str] = {}
@@ -771,16 +838,7 @@ class DeployKeyService:
                 "previous_credential_secret": previous,
             },
         )
-        try:
-            self._session.commit()
-        except IntegrityError:
-            self._session.rollback()
-            # A fixed message: an IntegrityError's text embeds the statement and its bound
-            # parameters, the ciphertext among them.
-            raise ConflictError(
-                f"Another request wrote a secret named '{shown(name)}' at the same time; "
-                "nothing was changed. Look at the repository again and try again."
-            ) from None
+        self._session.commit()
         return result
 
     def _new_key(

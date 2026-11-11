@@ -727,3 +727,66 @@ def test_the_listing_reads_every_repository_at_once(world: World) -> None:
 
     assert [k.environment for k in shown[world.repo.id]] == ["dev"]
     assert shown[other.id] == ()
+
+
+def test_a_clash_during_the_second_write_is_a_conflict_that_logs_no_ciphertext(
+    world: World, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A same-name insert seen at an autoflush is the fixed 409; nothing quotes the statement."""
+    real = deploy_keys_module.insert_secret
+    calls: list[str] = []
+
+    def _second_clashes(*args: object, **kwargs: object) -> Secret:
+        calls.append("x")
+        if len(calls) == 2:
+            raise IntegrityError(
+                "INSERT INTO secrets (ciphertext, nonce) VALUES (?, ?)",
+                {"ciphertext": b"CIPHERTEXT-BYTES", "nonce": b"NONCE-BYTES"},
+                Exception("duplicate key"),
+            )
+        return real(*args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(deploy_keys_module, "insert_secret", _second_clashes)
+
+    with caplog.at_level("DEBUG"), pytest.raises(ConflictError) as refused:
+        world.service().generate(world.admin, "analytics")
+
+    text = str(refused.value) + caplog.text
+    assert "try again" in str(refused.value)
+    assert refused.value.__cause__ is None and refused.value.__suppress_context__
+    for leaked in ("CIPHERTEXT", "NONCE", "INSERT"):
+        assert leaked not in text
+    assert world.secrets() == {}
+
+
+def test_a_name_another_repository_also_uses_does_not_block_a_switch(world: World) -> None:
+    """Keys of another repository under the same name are not this repository's credential."""
+    other = RepositoryService(world.session, AllowAllAuthorization()).create(
+        world.admin, name="other", kind=RepositoryKind.SSH, url=_URL, ssh_known_hosts=_HOSTS
+    )
+    service = world.service()
+    service.generate(world.admin, "analytics", secret="shared", environments=["dev"])
+    service.generate(world.admin, "other", secret="shared", environments=["prod"])
+
+    result = service.generate(world.admin, "analytics", secret="analytics-2")
+
+    assert result.secret == "analytics-2"
+    world.session.refresh(other)
+    assert other.credential_secret == "shared"
+
+
+def test_a_hand_made_credential_beside_made_keys_is_refused_saying_so(world: World) -> None:
+    """A person's own secret of the name, bound to this repository, is named as the cause."""
+    service = world.service()
+    service.generate(world.admin, "analytics", secret="mixed", environments=["dev"])
+    SecretService(world.session, AllowAllAuthorization(), _KEYS).create(
+        world.admin,
+        environment="prod",
+        name="mixed",
+        values={"private_key": "HAND"},
+        use=SecretUse.repository(world.repo),
+    )
+
+    with pytest.raises(ConflictError, match="Lakana did not make") as refused:
+        service.generate(world.admin, "analytics", secret="analytics-2")
+    assert "'prod'" in str(refused.value)
