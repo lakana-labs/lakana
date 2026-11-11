@@ -172,6 +172,8 @@ Show whether the instance is healthy, degraded or down, and why.
 
 Prints one line: Healthy, Degraded or Down, and a sentence that says why. An administrator (who may manage environments on the instance) also sees the busy task slots, the workers' memory against their limits, and the workers as lakana worker list shows them. Degraded means work gets done, slower or at risk; Down means nothing gets done.
 
+Exit code: 0 for Healthy and for Degraded, 12 for Down (also with --output json), so a script can branch on it. While the catalog database is down the command cannot check who you are and fails with the server's error (exit code 11); the address /readyz still answers then.
+
 ## `lakana search`
 
 Usage: `lakana search [OPTIONS] {TEXT}`
@@ -2197,7 +2199,7 @@ Usage: `lakana worker list [OPTIONS]`
 
 List the registered workers and what each is doing (admin).
 
-A worker is alive while its heartbeat is recent and lost after that; a lost worker's row stays for an hour, and the query or deploy it held is ended by the scheduler. The column takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys, pipeline tasks and table maintenance). The column memory is the memory it last reported against its limit (LAKANA_WORKER__MEMORY_LIMIT). The column caches is the disk its caches take, as it last measured them (hourly).
+A worker is alive while its heartbeat is recent and lost after that; a lost worker's row stays for an hour, and the query or deploy it held is ended by the scheduler; it shows as lost (replaced) once a worker restarted on the same host. The column takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys, pipeline tasks and table maintenance). The column memory is the memory it last reported against its limit (LAKANA_WORKER__MEMORY_LIMIT). The column caches is the disk its caches take, as it last measured them (hourly).
 
 ## `lakana term`
 

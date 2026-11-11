@@ -656,4 +656,5 @@ def worker_out(w: WorkerView) -> WorkerOut:
         memory=None
         if w.memory is None or w.memory_measured_at is None
         else WorkerMemoryOut(**dataclasses.asdict(w.memory), measured_at=w.memory_measured_at),
+        replaced=w.replaced,
     )

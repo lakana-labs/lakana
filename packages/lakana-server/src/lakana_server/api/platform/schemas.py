@@ -4273,8 +4273,8 @@ class WorkerMemoryOut(BaseModel):
     limit_bytes
         Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `null` when it has none.
     measured_at
-        When the worker stored the figures. A worker writes them with a heartbeat once they
-        moved by 1 MiB or more.
+        When the worker last wrote the figures, not when it last measured: it writes them with a
+        heartbeat only once they moved by 1 MiB or more, so steady use keeps an old time.
     """
 
     used_bytes: int
@@ -4313,6 +4313,9 @@ class WorkerOut(BaseModel):
     memory
         The memory it last reported; `null` before its first report and for a worker without
         a memory limit.
+    replaced
+        `true` for a lost worker that a worker restarted on the same host replaced (it started
+        after this one's last heartbeat); such a row does not count as a worker that is down.
     """
 
     id: str
@@ -4327,6 +4330,7 @@ class WorkerOut(BaseModel):
     task_run_id: str | None
     caches: WorkerCachesOut | None = None
     memory: WorkerMemoryOut | None = None
+    replaced: bool = False
 
 
 class StatusDetailOut(BaseModel):
@@ -4368,7 +4372,8 @@ class InstanceStatusOut(BaseModel):
     workers_alive
         The workers whose heartbeat is younger than the lease.
     workers_total
-        Every registered worker, alive and lost.
+        Every registered worker, alive and lost, except lost ones a restart on their host
+        replaced.
     detail
         Compute, memory and the workers; `null` unless the caller may manage environments on
         the instance.

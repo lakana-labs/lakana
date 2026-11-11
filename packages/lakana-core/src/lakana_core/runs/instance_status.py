@@ -61,7 +61,7 @@ class StatusDetail:
         Their limits, added up; `None` when an alive worker reports no limit or no memory yet,
         or when none is alive.
     workers
-        Every registered worker, alive and lost, by id.
+        Every registered worker, alive and lost (replaced ones too, marked `replaced`), by id.
     """
 
     slots_busy: int
@@ -85,7 +85,8 @@ class InstanceStatus:
     workers_alive
         The workers whose heartbeat is younger than the lease.
     workers_total
-        Every registered worker, alive and lost.
+        Every registered worker, alive and lost, except lost ones a restart on their host
+        replaced (`replaced_ids`).
     detail
         Compute, memory and the workers; `None` unless the caller is an administrator.
     """
@@ -95,6 +96,37 @@ class InstanceStatus:
     workers_alive: int
     workers_total: int
     detail: StatusDetail | None
+
+
+def replaced_ids(views: Sequence[WorkerView]) -> frozenset[str]:
+    """Find the lost workers that a restart on their host replaced.
+
+    A worker that exits without a clean stop (its memory watchdog ended it, it crashed, its
+    container was killed) leaves its row, shown as lost for an hour, and comes back with a new id.
+    A lost worker counts as replaced when an alive worker on the same host started after the
+    lost one's last heartbeat: nothing is missing, so the status does not count it as down.
+
+    Parameters
+    ----------
+    views
+        Every registered worker.
+
+    Returns
+    -------
+    frozenset of str
+        The ids of the replaced lost workers.
+    """
+    return frozenset(
+        lost.id
+        for lost in views
+        if lost.status != "alive"
+        and any(
+            other.status == "alive"
+            and other.host == lost.host
+            and other.started_at > lost.heartbeat_at
+            for other in views
+        )
+    )
 
 
 def _causes(failed: Sequence[str], alive: Sequence[WorkerView], lost: int) -> tuple[Cause, ...]:
@@ -108,7 +140,7 @@ def _causes(failed: Sequence[str], alive: Sequence[WorkerView], lost: int) -> tu
     alive
         The alive workers.
     lost
-        How many workers are lost.
+        How many workers are lost and not replaced.
 
     Returns
     -------
@@ -205,8 +237,10 @@ def status_from(
 
     Down for `database`, `storage` or no alive worker; degraded for a lost worker beside an
     alive one or an alive worker at or above `MEMORY_HIGH_SHARE` of its limit; healthy
-    otherwise. A caller who is no administrator gets the state of the causes they may see,
-    except that a failed database or storage keeps it down without naming the cause.
+    otherwise. A lost worker that a restart on its host replaced (`replaced_ids`) is neither
+    counted nor a cause; the administrator's detail still lists it. A caller who is no
+    administrator gets the state of the causes they may see, except that a failed database or
+    storage keeps it down without naming the cause.
 
     Parameters
     ----------
@@ -223,7 +257,8 @@ def status_from(
         The status for this caller.
     """
     alive = [v for v in views if v.status == "alive"]
-    causes = _causes(failed, alive, len(views) - len(alive))
+    counted_total = len(views) - len(replaced_ids(views))
+    causes = _causes(failed, alive, counted_total - len(alive))
     shown = causes if admin else tuple(c for c in causes if c in _EVERYONE)
     counted = causes if admin else tuple(c for c in causes if c != "memory_high")
     state: Literal["healthy", "degraded", "down"] = (
@@ -233,6 +268,6 @@ def status_from(
         state=state,
         causes=shown,
         workers_alive=len(alive),
-        workers_total=len(views),
+        workers_total=counted_total,
         detail=_detail(views, alive) if admin else None,
     )

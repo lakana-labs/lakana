@@ -22,6 +22,7 @@ lakana status
 It prints `Healthy`, `Degraded` or `Down` and one sentence that says why. An administrator also
 sees how busy the workers are, their memory, and the workers themselves
 ([What the status says](#what-the-status-says)). Home in the web interface shows the same status.
+The command exits 0 for `Healthy` and `Degraded` and 12 for `Down`, so a script can check it.
 When it is not `Healthy`, or to look closer, run these in order. The first that looks wrong is
 where to read on.
 
@@ -39,17 +40,23 @@ a dashboard that is slow or a job that did not run is a signal too.
 
 `lakana status` and Home read the same answer. Anyone who is signed in may ask.
 
-- **Healthy.** The catalog database and the storage answer, and every registered worker is alive.
+- **Healthy.** The catalog database and the storage answer, and every registered worker is alive
+  or was replaced by a restart on its host.
 - **Degraded.** Work gets done, but slower or at risk: a worker stopped reporting while another
   is still alive, or an alive worker uses 90 % or more of its memory limit. Near its limit a
   worker ends its largest query or task to stay alive ([Which task needs the most
   memory](#which-task-needs-the-most-memory)), so raise `LAKANA_WORKER__MEMORY_LIMIT` (4 GB by
-  default) or start another worker.
-- **Down.** Nothing gets done: the catalog database or a checked environment's storage does not
-  answer (the same checks as [`/readyz`](#the-health-routes)), or no worker is alive.
+  default) or start another worker. A worker that restarted on the same host (after its memory
+  watchdog stopped it, a crash, or a killed container) replaces the row it left: that row is
+  not counted as a worker that is down, and `lakana worker list` shows it as `lost (replaced)`
+  until it is removed an hour later.
+- **Down.** Nothing gets done: a checked environment's storage does not answer (the same check
+  as [`/readyz`](#the-health-routes)), or no worker is alive. While the catalog database is down,
+  `lakana status` cannot check who you are and fails with the server's error (exit code 11),
+  and Home cannot load; the address `/readyz` still answers and names `database`.
 
-Only an administrator (who may manage environments on the instance) is told about the database,
-the storage and the memory; everyone else sees `Down` without the cause, and only a missing or
+Only an administrator (who may manage environments on the instance) is told which check failed
+and about the memory; everyone else sees `Down` without the cause, and only a missing or
 lost worker by name. An administrator also sees:
 
 - **Compute: busy slots of all slots.** A worker that takes `all` work has two slots, one for
@@ -58,8 +65,8 @@ lost worker by name. An administrator also sees:
   waits.
 - **Memory: in use of the limit.** What the alive workers last reported, added up, against their
   limits added up. A worker reports its memory with its heartbeat once it moved by 1 MiB or
-  more; a worker without a limit reports none, and the line then says that a worker reports no
-  limit.
+  more. When an alive worker has reported nothing yet (it just started, or runs an earlier
+  release) or runs without a limit, the total limit is unknown and the line says so.
 - **The workers,** as `lakana worker list` shows them ([The workers](#the-workers)).
 
 ## The services

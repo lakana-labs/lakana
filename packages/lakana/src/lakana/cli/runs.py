@@ -1140,7 +1140,8 @@ def list_workers(ctx: typer.Context) -> None:
     """List the registered workers and what each is doing (admin).
 
     A worker is alive while its heartbeat is recent and lost after that; a lost worker's row
-    stays for an hour, and the query or deploy it held is ended by the scheduler. The column
+    stays for an hour, and the query or deploy it held is ended by the scheduler; it shows as
+    lost (replaced) once a worker restarted on the same host. The column
     takes is the work the worker takes: all, interactive (ad-hoc queries) or pipeline (deploys,
     pipeline tasks and table maintenance). The column memory is the memory it last reported
     against its limit (LAKANA_WORKER__MEMORY_LIMIT). The column caches is the disk its caches
@@ -1160,6 +1161,22 @@ def list_workers(ctx: typer.Context) -> None:
         )
         return
     emit_workers(state, workers)
+
+
+def _status_cell(worker: WorkerInfo) -> str:
+    """Write a worker's state, saying when a restart on its host replaced a lost one.
+
+    Parameters
+    ----------
+    worker
+        The worker.
+
+    Returns
+    -------
+    str
+        `alive`, `lost`, or `lost (replaced)`.
+    """
+    return f"{worker.status} (replaced)" if worker.replaced else worker.status
 
 
 def memory_cell(worker: WorkerInfo) -> str:
@@ -1200,10 +1217,11 @@ def emit_workers(state: CliState, workers: list[WorkerInfo]) -> None:
         derived={
             "last_seen": _last_seen,
             "doing": _doing,
+            "status": _status_cell,
             "memory": memory_cell,
             "caches": lambda w: cache_size_cell(w, "total_bytes"),
         },
-        whole=["takes", "doing", "memory", "caches"],
+        whole=["status", "takes", "doing", "memory", "caches"],
         footnotes={
             **({"doing": _DOING_NOTE} if any(_doing(w) != "idle" for w in workers) else {}),
             "caches": _CACHES_NOTE,

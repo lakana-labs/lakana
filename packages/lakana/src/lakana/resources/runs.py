@@ -826,6 +826,7 @@ def worker_info(item: dict[str, Any]) -> WorkerInfo:
         task_run_id=item["task_run_id"],
         caches=_caches(item.get("caches")),
         memory=_memory(item.get("memory")),
+        replaced=item.get("replaced") is True,
     )
 
 

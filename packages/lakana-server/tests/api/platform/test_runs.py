@@ -175,6 +175,7 @@ def test_the_worker_list_is_refused_like_the_scheduler_status(client: TestClient
         "task_run_id",
         "caches",
         "memory",
+        "replaced",
     }
     assert row["caches"] is None  # not measured yet
     assert row["memory"] is None  # not reported yet

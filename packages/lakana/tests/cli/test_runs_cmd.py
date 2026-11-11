@@ -775,6 +775,7 @@ def _worker(worker_id: str = "box:41:ab12", **more: object) -> dict[str, object]
         "task_run_id": None,
         "caches": None,
         "memory": None,
+        "replaced": False,
         **more,
     }
 

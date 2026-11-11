@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from lakana_core.runs.instance_status import (
     MEMORY_HIGH_SHARE,
     SLOTS_BY_TAKES,
+    replaced_ids,
     status_from,
 )
 from lakana_core.runs.service import WorkerView
@@ -27,6 +28,9 @@ def alive(
     task: bool = False,
     deploy: bool = False,
     memory: MemoryUse | None = None,
+    host: str = "box",
+    started_at: datetime = _NOW,
+    heartbeat_at: datetime = _NOW,
 ) -> WorkerView:
     """Build the view of a worker, alive unless said otherwise.
 
@@ -48,6 +52,12 @@ def alive(
         Whether it runs a deploy.
     memory
         What it reported of its memory.
+    host
+        Its host.
+    started_at
+        When it registered.
+    heartbeat_at
+        Its last heartbeat.
 
     Returns
     -------
@@ -56,10 +66,10 @@ def alive(
     """
     return WorkerView(
         id=worker_id,
-        host="box",
+        host=host,
         version="1.0",
-        started_at=_NOW,
-        heartbeat_at=_NOW,
+        started_at=started_at,
+        heartbeat_at=heartbeat_at,
         status=status,
         takes=takes,
         query_run_id=uuid.uuid4() if query else None,
@@ -206,3 +216,51 @@ def test_memory_limit_unknown_when_a_worker_reports_none() -> None:
 def test_only_administrators_get_the_detail() -> None:
     assert status_from([], [alive("w1")], admin=False).detail is None
     assert status_from([], [alive("w1")], admin=True).detail is not None
+
+
+_EARLIER = _NOW - timedelta(minutes=5)
+
+
+def test_a_worker_restarted_on_its_host_replaces_the_lost_one() -> None:
+    """The watchdog or Docker restarted the worker: a new id on the same host, started later."""
+    gone = alive("box:1:a", status="lost", heartbeat_at=_EARLIER, started_at=_EARLIER)
+    views = [gone, alive("box:2:b", started_at=_NOW)]
+    assert replaced_ids(views) == frozenset({"box:1:a"})
+    for admin in (False, True):
+        s = status_from([], views, admin=admin)
+        assert (s.state, s.causes, s.workers_alive, s.workers_total) == ("healthy", (), 1, 1)
+    detail = status_from([], views, admin=True).detail
+    assert detail is not None
+    assert [(w.id, w.status) for w in detail.workers] == [("box:1:a", "lost"), ("box:2:b", "alive")]
+
+
+def test_a_lost_worker_without_a_newer_one_on_its_host_is_degraded() -> None:
+    gone = alive("a:1:x", status="lost", host="a", heartbeat_at=_EARLIER)
+    older = alive("a:2:y", host="a", started_at=_EARLIER - timedelta(minutes=1))
+    other_host = alive("b:3:z", host="b", started_at=_NOW)
+    for views in ([gone, older], [gone, other_host]):
+        assert replaced_ids(views) == frozenset()
+        s = status_from([], views, admin=False)
+        assert (s.state, s.causes, s.workers_alive, s.workers_total) == (
+            "degraded",
+            ("worker_lost",),
+            1,
+            2,
+        )
+
+
+def test_two_hosts_one_restarted_and_one_lost() -> None:
+    views = [
+        alive("a:1:x", status="lost", host="a", heartbeat_at=_EARLIER),
+        alive("a:2:y", host="a", started_at=_NOW),
+        alive("b:1:x", status="lost", host="b", heartbeat_at=_EARLIER),
+        alive("c:1:x", host="c"),
+    ]
+    assert replaced_ids(views) == frozenset({"a:1:x"})
+    s = status_from([], views, admin=False)
+    assert (s.state, s.causes, s.workers_alive, s.workers_total) == (
+        "degraded",
+        ("worker_lost",),
+        2,
+        3,
+    )

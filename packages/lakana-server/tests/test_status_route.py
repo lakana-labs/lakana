@@ -25,6 +25,7 @@ def _add_worker(
     age_seconds: int = 0,
     used: int | None = None,
     limit: int | None = None,
+    host: str = "box",
 ) -> None:
     """Insert a worker whose heartbeat is this old, with its memory figures.
 
@@ -40,13 +41,15 @@ def _add_worker(
         The memory it reported using, if any.
     limit
         Its memory limit.
+    host
+        Its host; a lost worker beside a newer alive one on the same host counts as replaced.
     """
     with Session(client.app.state.engine) as session:
         beat = db_now(session) - timedelta(seconds=age_seconds)
         session.add(
             Worker(
                 id=worker_id,
-                host="box",
+                host=host,
                 version="1.0",
                 started_at=beat,
                 heartbeat_at=beat,
@@ -90,7 +93,7 @@ def _readiness(client: TestClient, failed: tuple[str, ...] = ()) -> list[int]:
 def test_status_answers_a_reader_without_detail(client: TestClient) -> None:
     _readiness(client)
     _add_worker(client, "w-1", used=10 * _GIB, limit=10 * _GIB)
-    _add_worker(client, "w-2", age_seconds=120)
+    _add_worker(client, "w-2", age_seconds=120, host="other")
     response = client.get(_STATUS, headers=_token_for(client, "reader"))
     assert response.status_code == 200, response.text
     assert response.json() == {
@@ -146,3 +149,22 @@ def test_worker_list_carries_memory(client: TestClient) -> None:
     assert memory["w-1"] is not None
     assert (memory["w-1"]["used_bytes"], memory["w-1"]["limit_bytes"]) == (_GIB, None)
     assert memory["w-1"]["measured_at"] is not None
+
+
+def test_a_restarted_worker_does_not_count_as_down(client: TestClient) -> None:
+    """The old row of a worker restarted on its host is replaced: healthy, and shown to admins."""
+    _readiness(client)
+    _add_worker(client, "box:1:a", age_seconds=120)
+    with Session(client.app.state.engine) as session:
+        now = db_now(session)
+        session.add(
+            Worker(id="box:2:b", host="box", version="1.0", started_at=now, heartbeat_at=now)
+        )
+        session.commit()
+    reader = client.get(_STATUS, headers=_token_for(client, "reader")).json()
+    assert (reader["state"], reader["workers_alive"], reader["workers_total"]) == ("healthy", 1, 1)
+    workers = client.get(_STATUS, headers=AUTH_HEADER).json()["detail"]["workers"]
+    assert [(w["id"], w["status"], w["replaced"]) for w in workers] == [
+        ("box:1:a", "lost", True),
+        ("box:2:b", "alive", False),
+    ]

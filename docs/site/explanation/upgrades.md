@@ -171,12 +171,13 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 - Migration `0071` adds three empty columns to `workers`: the memory a worker last reported, its
   limit then, and when. Each worker of this release reports its memory with its heartbeat; a
-  worker of an earlier release reports none, and `lakana status` then says that a worker reports
-  no limit until it is upgraded.
+  worker of an earlier release reports none, and `lakana status` then says the memory limit is
+  unknown until it is upgraded.
 - `lakana status` (`GET /api/v1/status`, `client.status()`) is new: `Healthy`, `Degraded` or
   `Down` with the reason, and for an administrator the busy task slots, the workers' memory and
   the workers ([What the status says](../how-to/instance-health.md#what-the-status-says)).
-  `lakana worker list` has a new column `memory`.
+  It exits 12 when the instance is `Down`. `lakana worker list` has a new column `memory`, and
+  shows a lost worker that a restart on its host replaced as `lost (replaced)`.
 
 ### The Compose bundle's web interface settings
 

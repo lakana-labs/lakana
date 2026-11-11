@@ -6,11 +6,16 @@ import typer
 
 from lakana._models import InstanceStatus
 from lakana.cli import _output
-from lakana.cli._state import state_of
+from lakana.cli._state import CliState, state_of
 from lakana.cli.artifacts import human_size
 from lakana.cli.runs import emit_workers
 
 _STATES = {"healthy": "Healthy", "degraded": "Degraded", "down": "Down"}
+
+DOWN_EXIT_CODE = 12
+"""How `lakana status` exits when the instance is down, so a script can tell; 0 otherwise.
+
+It is none of the error codes (1 to 11): the command itself worked."""
 
 _SENTENCES = {
     "database": (
@@ -75,16 +80,41 @@ def status(ctx: typer.Context) -> None:
     memory against their limits, and the workers as lakana worker list shows them. Degraded
     means work gets done, slower or at risk; Down means nothing gets done.
 
+    Exit code: 0 for Healthy and for Degraded, 12 for Down (also with --output json), so a
+    script can branch on it. While the catalog database is down the command cannot check who
+    you are and fails with the server's error (exit code 11); the address /readyz still
+    answers then.
+
     Parameters
     ----------
     ctx
         The Typer context.
+
+    Raises
+    ------
+    typer.Exit
+        With `DOWN_EXIT_CODE` when the instance is down.
     """
     state = state_of(ctx)
     found = state.client().status()
     if state.output == "json":
         _output.emit(state, found)
-        return
+    else:
+        _print(state, found)
+    if found.state == "down":
+        raise typer.Exit(DOWN_EXIT_CODE)
+
+
+def _print(state: CliState, found: InstanceStatus) -> None:
+    """Print the status for people.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    found
+        The status.
+    """
     typer.echo(f"{_STATES.get(found.state, found.state.title())} — {_sentence(found)}")
     detail = found.detail
     if detail is None or not detail.workers:
@@ -94,7 +124,8 @@ def status(ctx: typer.Context) -> None:
         used = human_size(detail.memory_used_bytes)
         limit = detail.memory_limit_bytes
         typer.echo(
-            f"Memory: {used} in use; a worker reports no limit"
+            f"Memory: {used} in use; limit unknown: a worker has not reported its memory yet "
+            "(it just started, or runs an earlier release) or runs without a limit"
             if limit is None
             else f"Memory: {used} of {human_size(limit)}"
         )

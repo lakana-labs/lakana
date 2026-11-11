@@ -3579,6 +3579,9 @@ class WorkerInfo:
     memory
         The memory it last reported; `None` before its first report, for a worker without a
         memory limit, and from a server of an earlier release.
+    replaced
+        `True` for a lost worker that a worker restarted on the same host replaced; such a row
+        does not count as a worker that is down. `False` from a server of an earlier release.
     """
 
     id: str
@@ -3593,6 +3596,7 @@ class WorkerInfo:
     task_run_id: str | None
     caches: WorkerCaches | None = None
     memory: WorkerMemory | None = None
+    replaced: bool = False
 
 
 @dataclass(frozen=True)
@@ -3606,7 +3610,8 @@ class WorkerMemory:
     limit_bytes
         Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `None` when it has none.
     measured_at
-        When the worker stored the figures.
+        When the worker last wrote the figures, not when it last measured: steady use (moving
+        less than 1 MiB) keeps an old time.
     """
 
     used_bytes: int
@@ -3655,7 +3660,8 @@ class InstanceStatus:
     workers_alive
         The workers whose heartbeat is recent.
     workers_total
-        Every registered worker, alive and lost.
+        Every registered worker, alive and lost, except lost ones a restart on their host
+        replaced.
     detail
         Compute, memory and the workers; `None` without `MANAGE_ENVIRONMENT` on the instance.
     """

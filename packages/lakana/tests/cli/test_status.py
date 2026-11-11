@@ -10,6 +10,8 @@ import pytest
 from conftest import FakeApi, invoke, make_state
 from test_runs_cmd import _WNOW, _worker
 
+from lakana.cli.status import DOWN_EXIT_CODE
+
 _STATUS = "/api/v1/status"
 _GIB = 1024**3
 
@@ -124,7 +126,7 @@ def test_each_cause_has_its_sentence(
     tmp_path: Path, state: str, causes: list[str], line: str
 ) -> None:
     code, out = _run(tmp_path, _status(state, causes))
-    assert code == 0
+    assert code == (DOWN_EXIT_CODE if state == "down" else 0)
     assert out.startswith(line)
 
 
@@ -142,7 +144,10 @@ def test_memory_without_a_limit_and_no_alive_worker(tmp_path: Path) -> None:
         "workers": [_worker("a:1:x")],
     }
     out = _run(tmp_path, _status("healthy", [], detail))[1]
-    assert "Memory: 1.0 GiB in use; a worker reports no limit" in out
+    assert (
+        "Memory: 1.0 GiB in use; limit unknown: a worker has not reported its memory yet "
+        "(it just started, or runs an earlier release) or runs without a limit" in out
+    )
     assert re.search(r"a:1:x\s+│.*│ -\s+│", out)
     nobody = {**_status("down", ["no_worker"]), "workers_alive": 0, "workers_total": 0}
     nobody["detail"] = {**detail, "slots_total": 0, "memory_used_bytes": 0, "workers": []}
@@ -159,3 +164,23 @@ def test_status_json_keeps_the_body(tmp_path: Path) -> None:
     body = _status("healthy", [])
     code, out = _run(tmp_path, body, "--output", "json")
     assert (code, json.loads(out)) == (0, body)
+
+
+def test_down_exits_with_its_own_code_also_as_json(tmp_path: Path) -> None:
+    assert DOWN_EXIT_CODE == 12
+    body = _status("down", ["no_worker"])
+    code, out = _run(tmp_path, body, "--output", "json")
+    assert (code, json.loads(out)) == (DOWN_EXIT_CODE, body)
+    assert _run(tmp_path, _status("degraded", ["worker_lost"]))[0] == 0
+
+
+def test_a_replaced_worker_is_shown_as_such(tmp_path: Path) -> None:
+    detail = {
+        "slots_busy": 0,
+        "slots_total": 2,
+        "memory_used_bytes": 0,
+        "memory_limit_bytes": None,
+        "workers": [_worker("a:1:x", status="lost", replaced=True), _worker("a:2:y")],
+    }
+    out = _run(tmp_path, _status("healthy", [], detail))[1]
+    assert re.search(r"a:1:x\s+│.*│ lost \(replaced\)\s+│", out)

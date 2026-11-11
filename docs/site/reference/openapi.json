@@ -25550,7 +25550,7 @@
           "detail"
         ],
         "title": "InstanceStatusOut",
-        "description": "Whether the instance works, as the caller may see it.\n\nParameters\n----------\nstate\n    `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).\ncauses\n    Why, in this order: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`.\n    A caller who may not manage environments on the instance sees only `no_worker` and\n    `worker_lost`; a failed database or storage still makes their state `down`.\nworkers_alive\n    The workers whose heartbeat is younger than the lease.\nworkers_total\n    Every registered worker, alive and lost.\ndetail\n    Compute, memory and the workers; `null` unless the caller may manage environments on\n    the instance."
+        "description": "Whether the instance works, as the caller may see it.\n\nParameters\n----------\nstate\n    `healthy`, `degraded` (work gets done, slower or at risk) or `down` (nothing gets done).\ncauses\n    Why, in this order: `database`, `storage`, `no_worker`, `worker_lost`, `memory_high`.\n    A caller who may not manage environments on the instance sees only `no_worker` and\n    `worker_lost`; a failed database or storage still makes their state `down`.\nworkers_alive\n    The workers whose heartbeat is younger than the lease.\nworkers_total\n    Every registered worker, alive and lost, except lost ones a restart on their host\n    replaced.\ndetail\n    Compute, memory and the workers; `null` unless the caller may manage environments on\n    the instance."
       },
       "InviteIn": {
         "properties": {
@@ -31571,7 +31571,7 @@
           "measured_at"
         ],
         "title": "WorkerMemoryOut",
-        "description": "The memory a worker last reported.\n\nParameters\n----------\nused_bytes\n    The resident memory of the worker and of every process it started.\nlimit_bytes\n    Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `null` when it has none.\nmeasured_at\n    When the worker stored the figures. A worker writes them with a heartbeat once they\n    moved by 1 MiB or more."
+        "description": "The memory a worker last reported.\n\nParameters\n----------\nused_bytes\n    The resident memory of the worker and of every process it started.\nlimit_bytes\n    Its limit (`LAKANA_WORKER__MEMORY_LIMIT`, 4 GB by default); `null` when it has none.\nmeasured_at\n    When the worker last wrote the figures, not when it last measured: it writes them with a\n    heartbeat only once they moved by 1 MiB or more, so steady use keeps an old time."
       },
       "WorkerOut": {
         "properties": {
@@ -31657,6 +31657,11 @@
                 "type": "null"
               }
             ]
+          },
+          "replaced": {
+            "type": "boolean",
+            "title": "Replaced",
+            "default": false
           }
         },
         "type": "object",
@@ -31673,7 +31678,7 @@
           "task_run_id"
         ],
         "title": "WorkerOut",
-        "description": "A registered worker.\n\nParameters\n----------\nid\n    The worker's id.\nhost\n    Its host name.\nversion\n    The Lakana version it runs.\nstarted_at\n    When it registered.\nheartbeat_at\n    Its last heartbeat.\nstatus\n    `alive` (heartbeat younger than the lease) or `lost`.\ntakes\n    The work it takes: `all`, `interactive` (ad-hoc queries) or `pipeline` (deploys, pipeline\n    tasks and table maintenance).\nquery_run_id\n    Its oldest running query, if any.\ndeploy_run_id\n    Its oldest running deploy, if any.\ntask_run_id\n    The running task whose lease it holds, if any.\ncaches\n    The sizes of its caches; `null` before its first measurement.\nmemory\n    The memory it last reported; `null` before its first report and for a worker without\n    a memory limit."
+        "description": "A registered worker.\n\nParameters\n----------\nid\n    The worker's id.\nhost\n    Its host name.\nversion\n    The Lakana version it runs.\nstarted_at\n    When it registered.\nheartbeat_at\n    Its last heartbeat.\nstatus\n    `alive` (heartbeat younger than the lease) or `lost`.\ntakes\n    The work it takes: `all`, `interactive` (ad-hoc queries) or `pipeline` (deploys, pipeline\n    tasks and table maintenance).\nquery_run_id\n    Its oldest running query, if any.\ndeploy_run_id\n    Its oldest running deploy, if any.\ntask_run_id\n    The running task whose lease it holds, if any.\ncaches\n    The sizes of its caches; `null` before its first measurement.\nmemory\n    The memory it last reported; `null` before its first report and for a worker without\n    a memory limit.\nreplaced\n    `true` for a lost worker that a worker restarted on the same host replaced (it started\n    after this one's last heartbeat); such a row does not count as a worker that is down."
       },
       "WriteTargetIn": {
         "properties": {

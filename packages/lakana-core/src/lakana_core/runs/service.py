@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, NamedTuple, cast
 
@@ -94,7 +94,7 @@ from lakana_core.runs.checks import (
 )
 from lakana_core.runs.failures import Failure, attempt_failure, task_failure
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
-from lakana_core.runs.instance_status import InstanceStatus, status_from
+from lakana_core.runs.instance_status import InstanceStatus, replaced_ids, status_from
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.selection import (
     ManifestGraph,
@@ -653,7 +653,12 @@ class WorkerView:
     memory
         The memory use it last reported; `None` before its first report.
     memory_measured_at
-        When it stored it (the database's time); `None` with `memory`.
+        When the worker last wrote `memory` (the database's time); `None` with `memory`. A
+        worker writes it only when its use moved 1 MiB or more, so this is not the time of its
+        last measurement: steady use keeps an old time.
+    replaced
+        Whether this lost worker was replaced by a worker that restarted on its host
+        (`lakana_core.runs.instance_status.replaced_ids`); always `False` for an alive one.
     """
 
     id: str
@@ -671,6 +676,7 @@ class WorkerView:
     query_run_is_adhoc: bool = False
     memory: MemoryUse | None = None
     memory_measured_at: datetime | None = None
+    replaced: bool = False
 
 
 def _entries(manifest: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
@@ -2848,7 +2854,7 @@ class RunService:
                 .order_by(TaskRun.started_at, TaskRun.id)
             )
         )
-        return [
+        views = [
             WorkerView(
                 id=w.id,
                 host=w.host,
@@ -2868,6 +2874,8 @@ class RunService:
             )
             for w in workers
         ]
+        replaced = replaced_ids(views)
+        return [replace(v, replaced=v.id in replaced) for v in views]
 
     @staticmethod
     def _oldest_per_worker(rows: Iterable[tuple[str, uuid.UUID]]) -> dict[str, uuid.UUID]:
