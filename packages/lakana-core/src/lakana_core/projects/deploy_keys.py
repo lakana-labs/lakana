@@ -737,10 +737,11 @@ class DeployKeyService:
         steps: list[tuple[Environment, Secret | None, _Step]],
         skipped: tuple[str, ...],
     ) -> DeployKeyResult:
-        """Write the keys; a clash with a concurrent write of the name becomes a fixed 409.
+        """Make and replace the keys, name the secret on the repository, audit and commit.
 
-        The clash can surface at any flush, not only at the commit: `insert_secret` queries
-        before it adds, which flushes the previous environment's pending insert.
+        A clash with a concurrent write of the name becomes a fixed 409. It can surface at any
+        flush, not only at the commit: `insert_secret` queries before it adds, which flushes
+        the previous environment's pending insert.
 
         Parameters
         ----------
@@ -768,7 +769,31 @@ class DeployKeyService:
             If a write collides with a concurrent one; nothing is changed.
         """
         try:
-            return self._write_unguarded(p, repo, name, previous, steps, skipped)
+            keys, made = self._make_keys(p, repo, name, steps)
+            replaced = tuple(env.name for env, _, step in steps if step is _Step.REPLACE)
+            result = DeployKeyResult(
+                secret=name, keys=tuple(keys), skipped=skipped, replaced=replaced
+            )
+            if not made and previous == name:
+                self._session.rollback()
+                return result
+            repo.credential_secret = name
+            AuditService(self._session).record(
+                p.id,
+                AuditEventType.DEPLOY_KEY_GENERATED,
+                securable=Securable.instance_scope(),
+                detail={
+                    "repository": repo.name,
+                    "secret": name,
+                    "made": made,
+                    "kept": [env.name for env, _, step in steps if step is _Step.KEEP],
+                    "replaced": list(replaced),
+                    "skipped": list(skipped),
+                    "previous_credential_secret": previous,
+                },
+            )
+            self._session.commit()
+            return result
         except IntegrityError:
             self._session.rollback()
             # A fixed message and no chained cause: an IntegrityError's text embeds the
@@ -779,18 +804,14 @@ class DeployKeyService:
                 "nothing was changed. Look at the repository again and try again."
             ) from None
 
-    def _write_unguarded(
+    def _make_keys(
         self,
         p: PrincipalRef,
         repo: Repository,
         name: str,
-        previous: str | None,
         steps: list[tuple[Environment, Secret | None, _Step]],
-        skipped: tuple[str, ...],
-    ) -> DeployKeyResult:
-        """Make and replace the keys, name the secret on the repository, audit and commit.
-
-        `_write` turns a clash into a `ConflictError`.
+    ) -> tuple[list[EnvironmentDeployKey], dict[str, str]]:
+        """Make or keep each environment's key; no commit.
 
         Parameters
         ----------
@@ -800,22 +821,13 @@ class DeployKeyService:
             The repository, locked.
         name
             The secret name.
-        previous
-            The repository's `credential_secret` before the call.
         steps
             Each environment to write, its locked row and its step.
-        skipped
-            The environments left without a key.
 
         Returns
         -------
-        DeployKeyResult
-            What was made and kept.
-
-        Raises
-        ------
-        IntegrityError
-            If a flush or the commit collides with a concurrent write of the name.
+        tuple
+            The keys, by environment, and environment → fingerprint of each key made.
         """
         keys: list[EnvironmentDeployKey] = []
         made: dict[str, str] = {}
@@ -834,28 +846,7 @@ class DeployKeyService:
                     made=step is not _Step.KEEP,
                 )
             )
-        replaced = tuple(env.name for env, _, step in steps if step is _Step.REPLACE)
-        result = DeployKeyResult(secret=name, keys=tuple(keys), skipped=skipped, replaced=replaced)
-        if not made and previous == name:
-            self._session.rollback()
-            return result
-        repo.credential_secret = name
-        AuditService(self._session).record(
-            p.id,
-            AuditEventType.DEPLOY_KEY_GENERATED,
-            securable=Securable.instance_scope(),
-            detail={
-                "repository": repo.name,
-                "secret": name,
-                "made": made,
-                "kept": [env.name for env, _, step in steps if step is _Step.KEEP],
-                "replaced": list(replaced),
-                "skipped": list(skipped),
-                "previous_credential_secret": previous,
-            },
-        )
-        self._session.commit()
-        return result
+        return keys, made
 
     def _new_key(
         self, p: PrincipalRef, repo: Repository, env: Environment, name: str, row: Secret | None
