@@ -53,7 +53,7 @@ ERROR_MEANING: dict[int, str] = {
         "Not signed in: the token or browser session is missing, wrong, expired or revoked; an "
         "ended session says why in `reason`."
     ),
-    403: "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+    403: "Signed in, but not allowed to do this; the message says why and what to do next.",
     404: "What the request names does not exist, or the caller may not know that it does.",
     408: "No part of the request body arrived within the read timeout.",
     409: "The request conflicts with the current state; the message says what to change.",

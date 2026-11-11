@@ -38,6 +38,11 @@ PICTURE_DECODE_SLOTS = 2
 """Picture uploads one server process reads and decodes at once; a further one is refused with
 503 and `Retry-After: 1`, and each person may have one in progress."""
 
+PICTURE_READ_TIMEOUT_SECONDS: float = 120
+"""The longest a picture's body may take to arrive (5 MB at about 42 KB/s), or the append read
+timeout when that is shorter; so two slow uploads hold both decode slots for two minutes at most,
+not the append's 300 seconds."""
+
 _NAME = Annotated[str, Path(min_length=1, max_length=255)]
 
 _YOURS_BUSY = (
@@ -114,14 +119,17 @@ async def _read_picture(request: Request) -> bytes:
     PayloadTooLargeError
         If the declared or the arriving body is larger than 5 MiB (413).
     AppendReadTimeoutError
-        If the body did not arrive in full within the read timeout (408).
+        If the body did not arrive in full within `PICTURE_READ_TIMEOUT_SECONDS`, or the
+        shorter append read timeout (408).
     lakana_server.errors.ClientDisconnectedError
         If the client went away mid-body (400).
     """
     declared = request.headers.get("content-length", "")
     if declared.isascii() and declared.isdigit() and int(declared) > PICTURE_MAX_BYTES:
         raise PayloadTooLargeError(_TOO_LARGE)
-    timeout = request.app.state.settings.append.read_timeout_seconds
+    timeout = min(
+        request.app.state.settings.append.read_timeout_seconds, PICTURE_READ_TIMEOUT_SECONDS
+    )
     iterator = request.stream().__aiter__()
     body = bytearray()
     try:
@@ -153,9 +161,10 @@ async def set_picture(
     """Set your profile picture.
 
     Send the image file as the body, with its type as `Content-Type`: `image/jpeg`, `image/png`
-    or `image/webp` (415 for any other, SVG included). At most 5 MB (413). The server keeps a
-    new 256 x 256 picture cut from the centre and turned upright, with none of the file's
-    metadata (location, camera); 422 when the file is not a readable image of the type sent.
+    or `image/webp` (415 for any other, SVG included). At most 5 MB (413) and 40 megapixels
+    (422). The server keeps a new 256 x 256 picture cut from the centre and turned upright, with
+    none of the file's metadata (location, camera); 422 when the file is not a readable image of
+    the type sent.
     Only your own (403 for another name, and for a task or CI token). One upload of yours at a
     time, and a few in all per server: otherwise 503, try again after `Retry-After`. Audited.
 

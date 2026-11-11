@@ -302,3 +302,9 @@ def test_a_request_with_a_default_parameter_is_served() -> None:
     assert client.get("/x").json() is False
     assert client.get("/x?deleted=true").json() is True
     assert app.openapi() is app.openapi()
+
+
+def test_the_shared_403_meaning_claims_nothing_some_routes_do_not_do() -> None:
+    """Token refusals on Home's routes and picture reads are not audited, so no audit claim."""
+    assert "audit" not in ERROR_MEANING[403]
+    assert ERROR_MEANING[403].startswith("Signed in, but not allowed to do this")

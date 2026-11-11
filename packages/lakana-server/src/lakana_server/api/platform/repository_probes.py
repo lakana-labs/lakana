@@ -73,7 +73,8 @@ def request_repository_probe(
     environment for ``access``). Answers 422 for a body without exactly its kind's fields or an
     unsafe URL, 404 for an unknown repository or environment, 409 while the caller has five
     checks waiting or running, and 503 when no worker that takes pipeline work is running. A
-    check no worker takes within two minutes ends ``no_worker``.
+    check no worker takes within two minutes ends ``no_worker``; one a worker took ends at most
+    90 seconds later, so every check ends within three and a half minutes of its request.
 
     Parameters
     ----------

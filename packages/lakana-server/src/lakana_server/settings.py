@@ -58,8 +58,9 @@ class AppendConfig(BaseModel):
     read_timeout_seconds
         How long the server waits for the body of a request, in seconds (default 300). For a table
         append, the whole body; for an artifact upload, the next piece of a file and the whole
-        manifest request. A request past the limit is refused with 408 and nothing is written. It
-        stops a slow or stalled client from holding a slot.
+        manifest request; for a profile picture, the whole body, but never more than 120 seconds.
+        A request past the limit is refused with 408 and nothing is written. It stops a slow or
+        stalled client from holding a slot.
     max_arrays
         Most columns, summed over all batches, that the data of one append may hold (default
         100,000). Many tiny batches use much memory and processor time even in a small body. A

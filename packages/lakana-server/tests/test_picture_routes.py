@@ -256,31 +256,44 @@ def test_pictures_need_a_credential(client: TestClient) -> None:
     assert client.delete(_MINE).status_code == 401
 
 
+async def _trickle(iterator: AsyncIterator[bytes], idle: float) -> bytes | None:
+    """Hand out one byte every 50 ms, for ever.
+
+    Parameters
+    ----------
+    iterator
+        Ignored.
+    idle
+        Ignored.
+
+    Returns
+    -------
+    bytes
+        One byte.
+    """
+    await asyncio.sleep(0.05)
+    return b" "
+
+
 def test_a_picture_that_takes_too_long_in_all_is_a_timeout(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A byte at a time, each in time, still ends at the total deadline."""
     client.app.state.settings.append.read_timeout_seconds = 0.2
+    monkeypatch.setattr(routes, "next_chunk", _trickle)
+    slow = _put(client, _MINE, AUTH_HEADER, _jpeg(), "image/jpeg")
+    assert slow.status_code == 408
+    assert "did not finish arriving within 0.2s" in slow.json()["detail"]
 
-    async def trickle(iterator: AsyncIterator[bytes], idle: float) -> bytes | None:
-        """Hand out one byte every 50 ms, for ever.
 
-        Parameters
-        ----------
-        iterator
-            Ignored.
-        idle
-            Ignored.
-
-        Returns
-        -------
-        bytes
-            One byte.
-        """
-        await asyncio.sleep(0.05)
-        return b" "
-
-    monkeypatch.setattr(routes, "next_chunk", trickle)
+def test_a_picture_has_its_own_shorter_deadline_than_an_append(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two slow uploads cannot hold both decode slots for the append's 300 s."""
+    assert client.app.state.settings.append.read_timeout_seconds == 300
+    assert routes.PICTURE_READ_TIMEOUT_SECONDS == 120
+    monkeypatch.setattr(routes, "PICTURE_READ_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(routes, "next_chunk", _trickle)
     slow = _put(client, _MINE, AUTH_HEADER, _jpeg(), "image/jpeg")
     assert slow.status_code == 408
     assert "did not finish arriving within 0.2s" in slow.json()["detail"]
