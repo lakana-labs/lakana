@@ -35,6 +35,14 @@ class UnsupportedPicture(ValidationError):
     """
 
 
+class NoWorkerError(LakanaError):
+    """No worker is running that could take the job, so queueing it would only make it wait.
+
+    Raised by `lakana_core.projects.probes.RepositoryProbeService` before a repository check is
+    queued. Mapped to 503 by the server.
+    """
+
+
 class PermissionDenied(LakanaError):
     """The principal is not permitted to perform this action."""
 

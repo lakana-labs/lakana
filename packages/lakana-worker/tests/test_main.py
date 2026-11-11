@@ -291,6 +291,79 @@ def connection_test_loop_stand_in(monkeypatch: pytest.MonkeyPatch) -> mock.Magic
     return loop
 
 
+@pytest.fixture(autouse=True)
+def repository_probe_loop_stand_in(monkeypatch: pytest.MonkeyPatch) -> mock.MagicMock:
+    """Keep `main()` from starting a real repository probe thread on an un-migrated SQLite file.
+
+    Parameters
+    ----------
+    monkeypatch
+        The pytest fixture.
+
+    Returns
+    -------
+    mock.MagicMock
+        The stand-in for the `RepositoryProbeLoop` class.
+    """
+    loop = mock.MagicMock()
+    loop.return_value.start.return_value.is_alive.return_value = False
+    monkeypatch.setattr("lakana_worker.__main__.RepositoryProbeLoop", loop)
+    return loop
+
+
+@pytest.mark.parametrize("takes", ["all", "pipeline"])
+def test_a_worker_that_takes_pipeline_work_runs_the_repository_probe_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repository_probe_loop_stand_in: mock.MagicMock,
+    takes: str,
+) -> None:
+    """The probe loop shares the deploy's git settings and stops with the drain.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the database file.
+    monkeypatch
+        Sets the environment.
+    repository_probe_loop_stand_in
+        The loop's stand-in.
+    takes
+        `LAKANA_WORKER__TAKES`.
+    """
+    monkeypatch.setenv("LAKANA_WORKER__TAKES", takes)
+    monkeypatch.setenv("LAKANA_GIT__NO_PROXY", "git.corp")
+    poll = _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    repository_probe_loop_stand_in.assert_called_once()
+    kwargs = repository_probe_loop_stand_in.call_args.kwargs
+    assert kwargs["stop"] is poll.call_args.kwargs["drain"]
+    assert kwargs["settings"] is poll.call_args.kwargs["deploy"]
+    assert kwargs["settings"].no_proxy == "git.corp"
+    loop = repository_probe_loop_stand_in.return_value
+    loop.start.assert_called_once()
+    loop.stop.assert_called_once()
+    loop.start.return_value.join.assert_called_once()
+
+
+def test_an_interactive_worker_runs_no_repository_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repository_probe_loop_stand_in: mock.MagicMock
+) -> None:
+    """Probes are pipeline work: an interactive worker leaves them to another.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the database file.
+    monkeypatch
+        Sets the environment.
+    repository_probe_loop_stand_in
+        The loop's stand-in.
+    """
+    monkeypatch.setenv("LAKANA_WORKER__TAKES", "interactive")
+    _run_with_loop(tmp_path, monkeypatch, mock.MagicMock())
+    repository_probe_loop_stand_in.assert_not_called()
+
+
 def test_main_runs_the_connection_test_loop_under_the_local_runner_and_stops_it_with_the_drain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

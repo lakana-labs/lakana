@@ -13398,6 +13398,200 @@
         }
       }
     },
+    "/api/v1/repository-probes": {
+      "post": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "Queue a repository check; poll it with `GET /api/v1/repository-probes/{probe_id}`",
+        "description": "``host_keys`` fetches the SSH host keys of `url`'s host and port, for the person to compare with the git host's published fingerprints before trusting any. ``access`` runs `git ls-remote` for registered `repository` with `environment`'s credential and the repository's own known hosts. Needs `MANAGE_REPOSITORY` (and `READ_ENVIRONMENT` on the environment for ``access``). Answers 422 for a body without exactly its kind's fields or an unsafe URL, 404 for an unknown repository or environment, 409 while the caller has five checks waiting or running, and 503 when no worker that takes pipeline work is running. A check no worker takes within two minutes ends ``no_worker``.",
+        "operationId": "request_repository_probe_api_v1_repository_probes_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoryProbeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryProbeOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repository-probes/{probe_id}": {
+      "get": {
+        "tags": [
+          "repositories"
+        ],
+        "summary": "Show one of the caller's repository checks",
+        "description": "Answers 404 for a check of another person, an unknown id, or one older than 24 hours.",
+        "operationId": "get_repository_probe_api_v1_repository_probes__probe_id__get",
+        "parameters": [
+          {
+            "name": "probe_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Probe Id"
+            },
+            "description": "The check's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryProbeOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/package-indexes": {
       "post": {
         "tags": [
@@ -23404,7 +23598,8 @@
           "PASSKEY_REMOVED",
           "PASSKEY_DISABLED",
           "PROFILE_PICTURE_SET",
-          "PROFILE_PICTURE_REMOVED"
+          "PROFILE_PICTURE_REMOVED",
+          "REPOSITORY_PROBE_REQUESTED"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."
@@ -26472,6 +26667,30 @@
         "title": "HistoryOut",
         "description": "What a history write answers: the snapshot and how many versions it opened and closed.\n\nParameters\n----------\nsnapshot_id\n    The committed snapshot; `None` when the rows matched the open versions already.\nversions_opened\n    New versions: a key seen for the first time, or a key with changed values.\nversions_closed\n    Ended versions: a key with changed values, or a key the rows lack (`close_missing`).\nclosed_missing\n    The part of `versions_closed` that ended because the key is gone from the rows.\ncreated\n    `True` when this write created the table (`expected_snapshot_id=none`)."
       },
+      "HostKeyOut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "line": {
+            "type": "string",
+            "title": "Line"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "fingerprint",
+          "line"
+        ],
+        "title": "HostKeyOut",
+        "description": "One SSH host key a check found.\n\nParameters\n----------\ntype\n    The key type, e.g. ``ssh-ed25519``.\nfingerprint\n    ``SHA256:…``, as `ssh-keygen -l` prints it: compare it with the git host's published\n    fingerprints.\nline\n    The known_hosts line for the repository's `ssh_known_hosts`."
+      },
       "ImpactUseOut": {
         "properties": {
           "kind": {
@@ -29411,6 +29630,144 @@
         ],
         "title": "RepositoryOut",
         "description": "Response body for a repository. Carries a secret's name, never a value.\n\nParameters\n----------\nid\n    The repository's id.\nname\n    Its name.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    Its URL.\ncredential_secret\n    The bound secret's name.\ncredential_username\n    HTTPS username, or `None` for ``oauth2``.\nssh_known_hosts\n    Trusted host keys.\ndefault_ref\n    Default ref.\ncreated_by\n    Who registered it.\ncreated_at\n    When.\nupdated_at\n    Last change."
+      },
+      "RepositoryProbeIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "host_keys",
+              "access"
+            ],
+            "title": "Kind"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "RepositoryProbeIn",
+        "description": "Request body that queues a repository check; a worker runs it.\n\nSend exactly the fields of its kind: ``host_keys`` takes `url`; ``access`` takes\n`repository` and `environment`.\n\nParameters\n----------\nkind\n    ``host_keys`` fetches the SSH host keys of the URL's host; ``access`` tests that a\n    worker can read a registered repository with an environment's credential.\nurl\n    The SSH repository URL whose host is scanned (``host_keys`` only).\nrepository\n    The registered repository's name (``access`` only).\nenvironment\n    The environment whose secret of the repository's credential is used (``access`` only)."
+      },
+      "RepositoryProbeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "host_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HostKeyOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Keys"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "outcome",
+          "message",
+          "host_keys",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "RepositoryProbeOut",
+        "description": "Response body for a repository check.\n\nParameters\n----------\nid\n    The check's id.\nkind\n    ``host_keys`` or ``access``.\nstate\n    ``queued``, ``running`` or ``done``.\noutcome\n    What it found once ``done``: ``ok``, ``host_key_changed``, ``host_key_unknown``,\n    ``auth_refused``, ``not_found``, ``unreachable``, ``refused_address``, ``timeout``,\n    ``no_worker`` or ``failed``; `null` before.\nmessage\n    What it found, with the next step; `null` before it is done.\nhost_keys\n    The keys of a ``host_keys`` check that found some; `null` otherwise.\ncreated_at\n    When it was requested.\nfinished_at\n    When it was done; `null` before."
       },
       "RepositoryUpdate": {
         "properties": {

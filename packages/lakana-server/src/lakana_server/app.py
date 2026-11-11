@@ -56,6 +56,7 @@ from lakana_server.api.platform.queries import router as queries_router
 from lakana_server.api.platform.recovery_links import links_router as recovery_links_router
 from lakana_server.api.platform.recovery_links import router as recovery_link_router
 from lakana_server.api.platform.repositories import router as repositories_router
+from lakana_server.api.platform.repository_probes import router as repository_probes_router
 from lakana_server.api.platform.row_filters import router as row_filters_router
 from lakana_server.api.platform.runs import router as runs_router
 from lakana_server.api.platform.runs import scheduler_router
@@ -113,6 +114,7 @@ ROUTERS = (
     connections_router,
     task_connections_router,
     repositories_router,
+    repository_probes_router,
     package_indexes_router,
     deploys_router,
     runs_router,

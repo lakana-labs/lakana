@@ -3316,6 +3316,110 @@ class ConnectionTestOut(BaseModel):
     finished_at: datetime | None
 
 
+class RepositoryProbeIn(BaseModel):
+    """Request body that queues a repository check; a worker runs it.
+
+    Send exactly the fields of its kind: ``host_keys`` takes `url`; ``access`` takes
+    `repository` and `environment`.
+
+    Parameters
+    ----------
+    kind
+        ``host_keys`` fetches the SSH host keys of the URL's host; ``access`` tests that a
+        worker can read a registered repository with an environment's credential.
+    url
+        The SSH repository URL whose host is scanned (``host_keys`` only).
+    repository
+        The registered repository's name (``access`` only).
+    environment
+        The environment whose secret of the repository's credential is used (``access`` only).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["host_keys", "access"]
+    url: str | None = Field(default=None, max_length=2048)
+    repository: str | None = Field(default=None, max_length=255)
+    environment: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def _fields_of_its_kind(self) -> RepositoryProbeIn:
+        """Refuse a body that lacks a field of its kind or sends one of the other kind.
+
+        Returns
+        -------
+        RepositoryProbeIn
+            `self`.
+
+        Raises
+        ------
+        ValueError
+            When the fields do not match the kind.
+        """
+        sent = {name for name in ("url", "repository", "environment") if getattr(self, name)}
+        wanted = {"url"} if self.kind == "host_keys" else {"repository", "environment"}
+        if sent != wanted:
+            raise ValueError(
+                "a host_keys check takes exactly `url`; an access check takes exactly "
+                "`repository` and `environment`"
+            )
+        return self
+
+
+class HostKeyOut(BaseModel):
+    """One SSH host key a check found.
+
+    Parameters
+    ----------
+    type
+        The key type, e.g. ``ssh-ed25519``.
+    fingerprint
+        ``SHA256:…``, as `ssh-keygen -l` prints it: compare it with the git host's published
+        fingerprints.
+    line
+        The known_hosts line for the repository's `ssh_known_hosts`.
+    """
+
+    type: str
+    fingerprint: str
+    line: str
+
+
+class RepositoryProbeOut(BaseModel):
+    """Response body for a repository check.
+
+    Parameters
+    ----------
+    id
+        The check's id.
+    kind
+        ``host_keys`` or ``access``.
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        What it found once ``done``: ``ok``, ``host_key_changed``, ``host_key_unknown``,
+        ``auth_refused``, ``not_found``, ``unreachable``, ``refused_address``, ``timeout``,
+        ``no_worker`` or ``failed``; `null` before.
+    message
+        What it found, with the next step; `null` before it is done.
+    host_keys
+        The keys of a ``host_keys`` check that found some; `null` otherwise.
+    created_at
+        When it was requested.
+    finished_at
+        When it was done; `null` before.
+    """
+
+    id: uuid.UUID
+    kind: str
+    state: str
+    outcome: str | None
+    message: str | None
+    host_keys: list[HostKeyOut] | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
 class EndpointOut(BaseModel):
     """One host and port a connection reaches.
 

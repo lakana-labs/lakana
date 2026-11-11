@@ -50,6 +50,7 @@ from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.projects.deploys import DeployService
 from lakana_core.projects.package_indexes import PackageIndexService
+from lakana_core.projects.probes import RepositoryProbeService
 from lakana_core.projects.repositories import RepositoryService
 from lakana_core.projects.run_policy import RunCaps
 from lakana_core.runs.service import RunService
@@ -1409,6 +1410,32 @@ def get_lineage_service(
         A lineage service using real authorization.
     """
     return LineageService(session, authz)
+
+
+def get_repository_probe_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> RepositoryProbeService:
+    """Build a RepositoryProbeService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, for the worker lease (`LAKANA_RUN__LEASE_SECONDS`).
+    session
+        The current request's database session.
+    authz
+        The real, auditing-wrapped authorization service.
+
+    Returns
+    -------
+    RepositoryProbeService
+        The service.
+    """
+    return RepositoryProbeService(
+        session, authz, lease_seconds=request.app.state.settings.run.lease_seconds
+    )
 
 
 def get_repository_service(

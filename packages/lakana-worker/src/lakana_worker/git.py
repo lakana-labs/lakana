@@ -1,4 +1,7 @@
-"""Fetch one commit of a registered repository with the `git` binary, hardened.
+"""Fetch one commit of a registered repository with the `git` binary, hardened; or check access.
+
+`check_access` lists the remote's branches and tags through the same setup (`_prepared`), for
+"Test access"; it fetches nothing.
 
 Lives in the worker, not in core: git, network egress and temp disk stay out
 of the API server, which imports core. Every rule here is in
@@ -31,25 +34,30 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import ipaddress
+import logging
 import os
 import re
 import selectors
 import shlex
 import shutil
 import signal
+import socket
 import subprocess  # nosec B404 -- git is invoked with fixed argv, no shell
 import tarfile
 import tempfile
 import time
 import unicodedata
 import urllib.parse
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from lakana_core.config import validate_proxy_url
 from lakana_core.errors import ValidationError
-from lakana_core.models import RepositoryKind
+from lakana_core.models import ProbeOutcome, RepositoryKind
+from lakana_core.net.egress import is_never_reachable
 from lakana_core.projects.git_input import (
     is_full_sha,
     resolve_local_path,
@@ -57,6 +65,7 @@ from lakana_core.projects.git_input import (
     validate_repo_url,
 )
 from lakana_core.projects.limits import DeployLimits
+from lakana_core.projects.probes import ssh_endpoint
 
 AUTH_FAILED_MESSAGE = "repository not found or credential rejected"
 DEFAULT_USERNAME = "oauth2"
@@ -964,20 +973,158 @@ def fetch_commit(
     GitError
         For every failure, with a redacted message.
     """
-    secrets = credential.secrets() if credential is not None else []
-    if kind is RepositoryKind.HTTPS:
-        secrets = [*secrets, *proxy_secrets(https_proxy)]
     try:
         if https_proxy is not None:
             validate_proxy_url(https_proxy)
         wanted = validate_ref(ref) if ref is not None else "HEAD"
+    except (ValidationError, ValueError) as exc:
+        raise GitError(str(exc)) from exc
+    with _prepared(
+        kind=kind,
+        url=url,
+        credential=credential,
+        known_hosts=known_hosts,
+        workdir=workdir,
+        repo_roots=repo_roots,
+        ca_bundle=ca_bundle,
+        https_proxy=https_proxy,
+        no_proxy=no_proxy,
+        prefix="fetch-",
+    ) as (run, env, secrets):
+        repo = run / "repo.git"
+        _init(repo, run=run, env=env, limits=limits, deadline=deadline, secrets=secrets)
+        if is_full_sha(wanted):
+            wanted = _verify_reachable(
+                wanted,
+                run=run,
+                env=env,
+                limits=limits,
+                deadline=deadline,
+                secrets=secrets,
+                repository_name=repository_name,
+            )
+        sha = _fetch(wanted, repo=repo, env=env, limits=limits, deadline=deadline, secrets=secrets)
+        archive = run / "code.tar"
+        _archive(
+            sha,
+            cwd=repo,
+            env=env,
+            timeout=_timeout(limits, deadline),
+            target=archive,
+            limit=limits.checkout_bytes,
+            secrets=secrets,
+        )
+        tree = run / "tree"
+        _extract(archive, tree, limit=limits.checkout_bytes, max_members=limits.checkout_members)
+        return FetchedCommit(sha=sha, archive=archive, tree=tree)
+
+
+def _init(
+    repo: Path,
+    *,
+    run: Path,
+    env: Mapping[str, str],
+    limits: DeployLimits,
+    deadline: float,
+    secrets: Sequence[str],
+) -> None:
+    """Create the fresh bare repository git fetches into or lists from.
+
+    Parameters
+    ----------
+    repo
+        Where to create it.
+    run
+        The directory `_prepared` made.
+    env
+        Git environment.
+    limits
+        Limits.
+    deadline
+        Job deadline.
+    secrets
+        Values to redact.
+
+    Raises
+    ------
+    GitError
+        If `git init` fails, or the deadline has passed.
+    """
+    init = _run(
+        ["git", "init", "--quiet", "--bare", str(repo)],
+        cwd=run,
+        env=env,
+        timeout=_timeout(limits, deadline),
+    )
+    if init.returncode != 0:
+        raise GitError(f"git init failed: {redact(init.stderr, secrets)}")
+
+
+@contextlib.contextmanager
+def _prepared(
+    *,
+    kind: RepositoryKind,
+    url: str,
+    credential: GitCredential | None,
+    known_hosts: str | None,
+    workdir: Path,
+    repo_roots: Sequence[str],
+    ca_bundle: Path | None,
+    https_proxy: str | None,
+    no_proxy: str | None,
+    prefix: str,
+) -> Generator[tuple[Path, dict[str, str], list[str]]]:
+    """Validate a repository's settings and build the hardened git environment for it.
+
+    Shared by `fetch_commit` and `check_access`, so a check of a repository runs git exactly as
+    a deploy does: one protocol, the URL as command-scope config, no hooks, helpers or
+    redirects, the operator's HTTPS settings only for ``https``, and the credential in private
+    files that are removed when the block ends.
+
+    Parameters
+    ----------
+    kind
+        Repository kind.
+    url
+        Registered URL (re-validated here).
+    credential
+        Resolved credential, if the repository has one.
+    known_hosts
+        ``known_hosts`` lines for ``ssh``.
+    workdir
+        The caller's private work directory; a new subdirectory is made in it.
+    repo_roots
+        `LAKANA_REPO_ROOTS`, re-checked for ``local``.
+    ca_bundle
+        Extra CA file for HTTPS.
+    https_proxy
+        Proxy URL for HTTPS repositories, already validated.
+    no_proxy
+        Hosts that bypass the proxy.
+    prefix
+        Starts the name of the new subdirectory.
+
+    Yields
+    ------
+    tuple
+        The new directory, git's environment, and every credential form to redact.
+
+    Raises
+    ------
+    GitError
+        If the URL or the local path is refused, with the reason.
+    """
+    secrets = credential.secrets() if credential is not None else []
+    if kind is RepositoryKind.HTTPS:
+        secrets = [*secrets, *proxy_secrets(https_proxy)]
+    try:
         validate_repo_url(kind, url)
         remote = resolve_local_path(url, repo_roots) if kind is RepositoryKind.LOCAL else url
     except (ValidationError, ValueError) as exc:
         raise GitError(str(exc)) from exc
-    run = Path(tempfile.mkdtemp(prefix="fetch-", dir=workdir))
+    run = Path(tempfile.mkdtemp(prefix=prefix, dir=workdir))
     credentials_dir = run / "credentials"
-    home, repo = run / "home", run / "repo.git"
+    home = run / "home"
     home.mkdir(mode=0o700)
     config = [
         *_protocol_config(kind),
@@ -1012,41 +1159,262 @@ def fetch_commit(
             config.append(
                 ("core.sshCommand", _ssh_command(credentials_dir, credential, known_hosts))
             )
-        env = git_environment(home, config, extra, workdir=workdir)
-        init = _run(
-            ["git", "init", "--quiet", "--bare", str(repo)],
-            cwd=run,
-            env=env,
-            timeout=_timeout(limits, deadline),
-        )
-        if init.returncode != 0:
-            raise GitError(f"git init failed: {redact(init.stderr, secrets)}")
-        if is_full_sha(wanted):
-            wanted = _verify_reachable(
-                wanted,
-                run=run,
-                env=env,
-                limits=limits,
-                deadline=deadline,
-                secrets=secrets,
-                repository_name=repository_name,
-            )
-        sha = _fetch(wanted, repo=repo, env=env, limits=limits, deadline=deadline, secrets=secrets)
-        archive = run / "code.tar"
-        _archive(
-            sha,
-            cwd=repo,
-            env=env,
-            timeout=_timeout(limits, deadline),
-            target=archive,
-            limit=limits.checkout_bytes,
-            secrets=secrets,
-        )
-        tree = run / "tree"
-        _extract(archive, tree, limit=limits.checkout_bytes, max_members=limits.checkout_members)
-        return FetchedCommit(sha=sha, archive=archive, tree=tree)
+        yield run, git_environment(home, config, extra, workdir=workdir), secrets
     finally:
         shutil.rmtree(credentials_dir, ignore_errors=True)
+
+
+FAILED_MESSAGE = "The check failed; the worker's log has the details."
+"""The message of an access check whose failure Lakana does not recognise (M3: never git's text)."""
+
+HOST_KEY_CHANGED_MESSAGE = (
+    "The host's key is not the one you confirmed. Check the host's published fingerprints "
+    "before you connect again."
+)
+"""The message of an access check whose host offered a key other than the confirmed one."""
+
+_ACCESS_MESSAGES = {
+    ProbeOutcome.OK: "The worker reached the repository and could read its branches and tags.",
+    ProbeOutcome.HOST_KEY_CHANGED: HOST_KEY_CHANGED_MESSAGE,
+    ProbeOutcome.HOST_KEY_UNKNOWN: (
+        "The host offered no key this repository trusts. Fetch the host's keys again "
+        "(`lakana repo host-keys URL`), compare them with your host's published fingerprints, "
+        "and update the repository's known hosts."
+    ),
+    ProbeOutcome.AUTH_REFUSED: (
+        "Add the public key as a read-only deploy key at your git host, then test again."
+    ),
+    ProbeOutcome.NOT_FOUND: (
+        "The host says there is no such repository, or it hides one the credential may not "
+        "read. Check the URL, and that the deploy key or token is given access to this "
+        "repository at your git host."
+    ),
+    ProbeOutcome.UNREACHABLE: (
+        "The worker could not reach the host. Check the URL's host and port, and that the "
+        "worker's network may connect to it."
+    ),
+    ProbeOutcome.REFUSED_ADDRESS: (
+        "The host's name resolves to an address no Lakana worker may reach (loopback, "
+        "link-local or a cloud metadata address). Use the git host's public name."
+    ),
+    ProbeOutcome.TIMEOUT: (
+        "The host did not answer in time. Check the URL's host and port and the network path "
+        "from the worker to it, then test again."
+    ),
+    ProbeOutcome.FAILED: FAILED_MESSAGE,
+}
+"""The fixed sentence of each outcome of an access check, with its next step."""
+
+_HOST_KEY_CHANGED = re.compile(r"REMOTE HOST IDENTIFICATION HAS CHANGED")
+_NOT_FOUND = re.compile(
+    r"repository not found|repository '.*' not found|returned error: 404|"
+    r"does not appear to be a git repository",
+    re.IGNORECASE,
+)
+_UNREACHABLE = re.compile(
+    r"could not resolve host|could not resolve hostname|name or service not known|"
+    r"connection refused|no route to host|network is unreachable|failed to connect",
+    re.IGNORECASE,
+)
+_TIMED_OUT = re.compile(r"timed out|timeout", re.IGNORECASE)
+
+logger = logging.getLogger(__name__)
+
+
+def access_outcome(stderr: str) -> ProbeOutcome:
+    """Map git's (redacted) stderr of a failed `ls-remote` to an access check's outcome.
+
+    The rules are `classify_failure`'s, split finer: a changed host key only on ssh's "REMOTE
+    HOST IDENTIFICATION HAS CHANGED"; any other host-key failure is an unknown key; a host's
+    "not found" apart from a refused credential.
+
+    Parameters
+    ----------
+    stderr
+        Redacted stderr.
+
+    Returns
+    -------
+    ProbeOutcome
+        The outcome; ``failed`` for anything not recognised.
+    """
+    if _HOST_KEY_CHANGED.search(stderr):
+        return ProbeOutcome.HOST_KEY_CHANGED
+    if _HOST_KEY.search(stderr):
+        return ProbeOutcome.HOST_KEY_UNKNOWN
+    if _NOT_FOUND.search(stderr):
+        return ProbeOutcome.NOT_FOUND
+    if _AUTH_PATTERNS.search(stderr):
+        return ProbeOutcome.AUTH_REFUSED
+    if _TIMED_OUT.search(stderr):
+        return ProbeOutcome.TIMEOUT
+    if _UNREACHABLE.search(stderr):
+        return ProbeOutcome.UNREACHABLE
+    return ProbeOutcome.FAILED
+
+
+def _network_host(kind: RepositoryKind, url: str) -> tuple[str, int] | None:
+    """Read the host and port a remote repository URL connects to.
+
+    Parameters
+    ----------
+    kind
+        The repository's kind.
+    url
+        Its validated URL.
+
+    Returns
+    -------
+    tuple or None
+        The host and port; `None` for ``local``.
+
+    Raises
+    ------
+    ValidationError
+        For an SSH URL `ssh_endpoint` refuses.
+    """
+    if kind is RepositoryKind.SSH:
+        return ssh_endpoint(url)
+    if kind is RepositoryKind.HTTPS:
+        parts = urllib.parse.urlsplit(url)
+        return parts.hostname or "", parts.port or 443
+    return None
+
+
+def refuses_address(
+    host: str, port: int, *, resolve: Callable[..., Sequence[Any]] = socket.getaddrinfo
+) -> bool:
+    """Say whether a host resolves to any address no Lakana worker may reach.
+
+    Parameters
+    ----------
+    host
+        The host.
+    port
+        Its port.
+    resolve
+        `socket.getaddrinfo` or a stand-in.
+
+    Returns
+    -------
+    bool
+        `True` when any address `is_never_reachable`; `False` when none is, or the name does not
+        resolve here (behind a proxy the worker may not resolve names itself, and git then says
+        what happened).
+    """
+    try:
+        answers = resolve(host, port, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return False
+    return any(
+        is_never_reachable(ipaddress.ip_address(str(answer[4][0]).split("%", 1)[0]))
+        for answer in answers
+    )
+
+
+def check_access(
+    *,
+    kind: RepositoryKind,
+    url: str,
+    credential: GitCredential | None,
+    known_hosts: str | None,
+    workdir: Path,
+    limits: DeployLimits,
+    repo_roots: Sequence[str],
+    deadline: float,
+    ca_bundle: Path | None = None,
+    https_proxy: str | None = None,
+    no_proxy: str | None = None,
+    resolve: Callable[..., Sequence[Any]] = socket.getaddrinfo,
+) -> tuple[ProbeOutcome, str]:
+    """Check that a worker can read a repository: `git ls-remote --heads --tags`.
+
+    Runs through the same environment, protocol allow-list, `core.sshCommand` (strict host keys
+    against `known_hosts` only), askpass, limits and redaction as `fetch_commit`, after the URL
+    is validated again and its host is resolved once: any address that `is_never_reachable`
+    refuses the check before git runs (git then resolves the name again, as a deploy does).
+    Nothing is fetched.
+
+    Parameters
+    ----------
+    kind
+        Repository kind.
+    url
+        Registered URL.
+    credential
+        Resolved credential, if the repository has one.
+    known_hosts
+        The repository's ``known_hosts`` lines for ``ssh``.
+    workdir
+        A private (0700) directory the caller removes afterwards.
+    limits
+        Time and size limits.
+    repo_roots
+        `LAKANA_REPO_ROOTS`, re-checked for ``local``.
+    deadline
+        The check's `time.monotonic()` deadline.
+    ca_bundle
+        Extra CA file for HTTPS (`LAKANA_GIT__CA_BUNDLE`).
+    https_proxy
+        Proxy URL for HTTPS repositories (`LAKANA_GIT__HTTPS_PROXY`).
+    no_proxy
+        Hosts that bypass the proxy (`LAKANA_GIT__NO_PROXY`).
+    resolve
+        `socket.getaddrinfo` or a stand-in.
+
+    Returns
+    -------
+    tuple of (ProbeOutcome, str)
+        The outcome and a fixed sentence with the next step; never git's own text, which goes
+        to the worker's log, redacted, for a failure Lakana does not recognise.
+    """
+    try:
+        if https_proxy is not None:
+            validate_proxy_url(https_proxy)
+        validate_repo_url(kind, url)
+        endpoint = _network_host(kind, url)
+    except (ValidationError, ValueError) as exc:
+        return ProbeOutcome.FAILED, f"The repository URL is refused: {exc}"
+    if endpoint is not None and refuses_address(*endpoint, resolve=resolve):
+        return ProbeOutcome.REFUSED_ADDRESS, _ACCESS_MESSAGES[ProbeOutcome.REFUSED_ADDRESS]
+    try:
+        with _prepared(
+            kind=kind,
+            url=url,
+            credential=credential,
+            known_hosts=known_hosts,
+            workdir=workdir,
+            repo_roots=repo_roots,
+            ca_bundle=ca_bundle,
+            https_proxy=https_proxy,
+            no_proxy=no_proxy,
+            prefix="access-",
+        ) as (run, env, secrets):
+            repo = run / "repo.git"
+            _init(repo, run=run, env=env, limits=limits, deadline=deadline, secrets=secrets)
+            listed = _run(
+                ["git", "ls-remote", "--heads", "--tags", "--end-of-options", "origin"],
+                cwd=repo,
+                env=env,
+                timeout=_timeout(limits, deadline),
+                max_bytes=limits.fetch_bytes,
+            )
+            stderr = redact(listed.stderr, secrets)
+    except GitError as exc:
+        text = str(exc)
+        if "timed out" in text or "time limit" in text:
+            return ProbeOutcome.TIMEOUT, (
+                "The check ran out of time before the host answered. Check the URL's host and "
+                "port and the network path from the worker to it, then test again."
+            )
+        logger.warning("A repository access check could not run git: %s", text)
+        return ProbeOutcome.FAILED, FAILED_MESSAGE
+    if listed.returncode == 0:
+        return ProbeOutcome.OK, _ACCESS_MESSAGES[ProbeOutcome.OK]
+    outcome = access_outcome(stderr)
+    if outcome is ProbeOutcome.FAILED:
+        logger.warning("A repository access check failed: %s", stderr.strip())
+    return outcome, _ACCESS_MESSAGES[outcome]
 
 
 def _fetch(

@@ -6227,9 +6227,10 @@ User documentation: `docs/site/reference/ci-trust-rules.md`. Threat model: "CI O
 
 ## Git fetch hardening (M5b)
 
-`lakana_worker.git.fetch_commit` is the only code that runs git. It lives in the worker so git,
-network egress and temp disk never touch the API server. Every change to it keeps this
-checklist true; `packages/lakana-worker/tests/test_git.py` pins each line.
+`lakana_worker.git.fetch_commit` and `check_access` (one shared setup, `_prepared`) are the only
+code that runs git. They live in the worker so git, network egress and temp disk never touch the
+API server. Every change to them keeps this checklist true; `packages/lakana-worker/tests/test_git.py`
+pins each line.
 
 - **Deployers never choose a URL.** Only `MANAGE_REPOSITORY` registers one; a deploy names a
   repository. URL, ref and local path are re-validated in the worker
@@ -6358,6 +6359,69 @@ checklist true; `packages/lakana-worker/tests/test_git.py` pins each line.
   hide it) that `DeploySettings` leaves out of its `repr`. **Residual:** the proxy URL is in the
   git process's command-scope config (its environment), like the repository URL. SSH ignores all
   three settings; `ProxyCommand` is unsupported.
+
+### Repository checks (M7 part 2)
+
+`lakana repo host-keys URL` (fetch a host's SSH keys) and `lakana repo test NAME --env ENV`
+("Test access") are rows of `repository_probes` that a worker runs
+(`lakana_core.projects.probes`, `lakana_worker.repository_probes`); the server only queues and
+answers them. Each line below is pinned by a test in `packages/lakana-core/tests/test_repository_probes.py`,
+`packages/lakana-worker/tests/test_repository_probes.py` or `test_git_access.py`.
+
+- **No request from the server (T3).** `RepositoryProbeService` writes a row and reads it back; it
+  never resolves or connects. A request is refused with `NoWorkerError` (503, naming
+  `docker compose up -d worker` and `lakana server start --local`) while no worker that takes
+  `all` or `pipeline` work is alive, and the loop runs only on such workers.
+- **The host-key scan reaches the address it checked (T3).** `scan_host_keys` resolves the name
+  once; any address that `is_never_reachable` (loopback, link-local and metadata, multicast,
+  reserved, IPv4 inside IPv6) refuses the probe as `refused_address` before `ssh-keyscan` runs.
+  Otherwise `ssh-keyscan -T 5 -p PORT -t ed25519,ecdsa,rsa -- ADDRESS` runs on the first checked
+  address with an argv list, no shell, `stdin` closed, an environment of `PATH` and `LC_ALL`
+  only, and a 25 s limit.
+- **The access check refuses never-reachable names too (T3, M5),** before git runs, then runs
+  `git ls-remote --heads --tags --end-of-options origin` through `_prepared`, the same
+  environment, protocol allow-list, `core.sshCommand` (`StrictHostKeyChecking=yes` against the
+  repository row's own `ssh_known_hosts`, never a probe's), askpass and redaction as
+  `fetch_commit`, with a deadline 15 s inside the 90 s lease. Nothing is fetched. A name the
+  worker cannot resolve itself (only its proxy can) is left to git.
+- **No injection through the URL (T4).** `ssh_endpoint` runs `validate_repo_url` and then requires
+  a port of 1–65535 and an ASCII host of `[a-z0-9.-]` (lower-cased) or a bracketed IPv6 literal:
+  `ssh://a,b/r` (a known_hosts line for two hosts), `ssh://*.x/r` (a pattern) and a non-ASCII
+  name (which Python's resolver IDNA-encodes and ssh does not) are refused before a row exists,
+  and again in the worker. `parse_keyscan` keeps a line only with exactly three fields, a type in
+  `KEY_TYPES`, base64 decoded with `validate=True` and a blob that starts with that same type,
+  and rewrites the host field to the URL's host (`[host]:port` off port 22); at most 10 keys.
+- **Fixed text, never a tool's output (M3, T8).** Every outcome has a fixed sentence with its next
+  step: neither ssh-keyscan's output (a non-SSH service's banner) nor git's stderr reaches a
+  probe. An access failure Lakana does not recognise is "The check failed; the worker's log has
+  the details.", and its stderr, redacted with every form of the credential, goes to the worker's
+  log. `host_key_changed` is answered only on ssh's "REMOTE HOST IDENTIFICATION HAS CHANGED"; any
+  other host-key failure is `host_key_unknown`. A resolved credential's error (missing or unbound
+  secret) is Lakana's own sentence; any other exception is logged by its type only.
+- **Private, short-lived results (T8).** `get` answers only the requester (404 for anyone else,
+  the same as an unknown id); a person has at most 5 probes queued or running; a request, a read
+  and a claim each delete up to 500 probes older than 24 hours. The audit record
+  (`REPOSITORY_PROBE_REQUESTED`, T7) holds kind, host, port, repository, environment and the
+  probe id, never a credential; the `MANAGE_REPOSITORY` denial is audited by `authorize`. An
+  access check also needs `READ_ENVIRONMENT` on its environment (`permits`). No step-up
+  (`NO_STEP_UP`): a probe stores no credential, changes nothing and discloses no secret.
+- **One run per probe (M2).** A probe is claimed once, by an `UPDATE … WHERE state = 'queued'`
+  checked by its row count, and only while it is younger than two minutes; a probe still queued
+  then is answered (and stored) `no_worker` by the same kind of conditional update, so a late
+  worker cannot take it. A probe whose lease ran out is finished `failed` and never taken again
+  (a second run would use the credential again). `finish` records only under the owner's
+  unexpired lease.
+- **Each stored key is one a person compared (T2, I3).** `repo host-keys --save` writes one line,
+  the `ssh-ed25519` key when offered (else the strongest), and prints "Compare this fingerprint
+  with your host's published fingerprints before you use the file."; `--type` picks others,
+  each named with its fingerprint. `ssh-keyscan` opens one connection per key type, so a key
+  nobody compared could be an on-path attacker's.
+
+**Residuals.** Trust on first use: the server cannot prove a person compared a fingerprint; what
+is stored is what the `MANAGE_REPOSITORY` holder sent. The access check, like a deploy, connects
+by name, so DNS may answer differently than for its own check or for the host-key scan
+(rebinding). A `MANAGE_REPOSITORY` holder learns whether a host and port inside the network
+answers SSH (or HTTPS), as a deploy's error already tells them.
 
 ## Local mode (M4c)
 

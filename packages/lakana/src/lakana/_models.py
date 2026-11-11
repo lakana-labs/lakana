@@ -2245,6 +2245,62 @@ class ConnectionTest:
 
 
 @dataclass(frozen=True)
+class HostKey:
+    """One SSH host key a repository check found.
+
+    Parameters
+    ----------
+    type
+        The key type, e.g. ``ssh-ed25519``.
+    fingerprint
+        ``SHA256:…``, as `ssh-keygen -l` prints it: compare it with the git host's published
+        fingerprints before you trust the key.
+    line
+        The known_hosts line for the repository's `ssh_known_hosts`.
+    """
+
+    type: str
+    fingerprint: str
+    line: str
+
+
+@dataclass(frozen=True)
+class RepositoryProbe:
+    """A repository check: queued, taken by a worker, then done with an outcome.
+
+    Parameters
+    ----------
+    id
+        The check's id.
+    kind
+        ``host_keys`` or ``access``.
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        Once done: ``ok``, ``host_key_changed``, ``host_key_unknown``, ``auth_refused``,
+        ``not_found``, ``unreachable``, ``refused_address``, ``timeout``, ``no_worker`` or
+        ``failed``; `None` before.
+    message
+        What it found, with the next step; `None` before it is done.
+    host_keys
+        The keys a ``host_keys`` check found; `None` otherwise.
+    created_at
+        When it was requested.
+    finished_at
+        When it was done; `None` before.
+    """
+
+    id: str
+    kind: str
+    state: str
+    outcome: str | None
+    message: str | None
+    host_keys: list[HostKey] | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
 class ConnectionPage:
     """One page of an environment's connections, newest first.
 

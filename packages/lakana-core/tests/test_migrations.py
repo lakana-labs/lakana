@@ -5652,3 +5652,62 @@ def test_0073_adds_the_profile_pictures_table_empty(
         assert connection.execute("SELECT count(*) FROM profile_pictures").fetchone() == (0,)
     command.downgrade(config, _REVISION_0072)
     assert columns() == set()
+
+
+_REVISION_0074 = "e5b8c1f4a297"
+
+
+def test_0074_adds_the_repository_probes_and_the_public_deploy_key_empty(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0074`: an empty probe table, and a public key every repository starts without.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0073)
+    config = Config(str(ALEMBIC_INI))
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO repositories (id, name, kind, url, created_at, updated_at) VALUES "
+            "('00000000000000000000000000000001', 'analytics', 'SSH', 'git@h:r', "
+            "'2026-11-11 00:00:00', '2026-11-11 00:00:00')"
+        )
+
+    def shape() -> tuple[set[str], set[str]]:
+        """Read the probe table's columns and the repositories' columns.
+
+        Returns
+        -------
+        tuple of set of str
+            The probe table's columns (empty without it) and the repositories' columns.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            inspector = inspect(engine)
+            probes = (
+                {c["name"] for c in inspector.get_columns("repository_probes")}
+                if "repository_probes" in inspector.get_table_names()
+                else set()
+            )
+            return probes, {c["name"] for c in inspector.get_columns("repositories")}
+        finally:
+            engine.dispose()
+
+    probes, repositories = shape()
+    assert probes == set() and "deploy_public_key" not in repositories
+    command.upgrade(config, _REVISION_0074)
+    probes, repositories = shape()
+    assert {"kind", "url", "state", "outcome", "host_keys", "lease_expires_at"} <= probes
+    assert "deploy_public_key" in repositories
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT deploy_public_key FROM repositories").fetchall() == [
+            (None,)
+        ]
+    command.downgrade(config, _REVISION_0073)
+    probes, repositories = shape()
+    assert probes == set() and "deploy_public_key" not in repositories

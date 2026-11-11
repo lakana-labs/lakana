@@ -113,9 +113,11 @@
 "recovery list": { class: ui, part: 1 }
 "recovery withdraw": { class: ui, part: 1 }
 "repo add": { class: ui, part: 8 }
+"repo host-keys": { class: ui, part: 2 }
 "repo list": { class: ui, part: 8 }
 "repo remove": { class: ui, part: 8 }
 "repo show": { class: ui, part: 8 }
+"repo test": { class: ui, part: 2 }
 "repo update": { class: ui, part: 8 }
 "rollback": { class: ui, part: 5 }
 "row-filter create": { class: ui, part: 7 }
@@ -309,6 +311,7 @@
 "GET /api/v1/recovery-links": { class: ui, part: 1 }
 "GET /api/v1/repositories": { class: ui, part: 8 }
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
+"GET /api/v1/repository-probes/{probe_id}": { class: ui, part: 2 }
 "GET /api/v1/row-filters": { class: ui, part: 7 }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
 "GET /api/v1/settings/sign-in":
@@ -413,6 +416,7 @@
 "POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "POST /api/v1/repositories": { class: ui, part: 8 }
+"POST /api/v1/repository-probes": { class: ui, part: 2 }
 "POST /api/v1/row-filters": { class: ui, part: 7 }
 "POST /api/v1/sign-in/links/describe": { class: ui, part: 1 }
 "POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }

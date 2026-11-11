@@ -259,7 +259,8 @@ secret goes.
   `--credential-username` (GitLab deploy tokens have their own).
 - Behind a corporate proxy, or with an internal CA? See [Git network settings](../reference/network-settings.md#git-network-settings).
 - `ssh`: the secret's `private_key` (OpenSSH format) and `--known-hosts-file` are required;
-  unknown host keys are refused.
+  unknown host keys are refused. `lakana repo host-keys` fetches the host's keys for that file
+  (see [SSH host keys](#ssh-host-keys)).
 - `local`: an absolute path under `LAKANA_REPO_ROOTS` (a JSON list, e.g. `'["/srv/repos"]'`; empty
   refuses local repositories). Local mode allows your home directory; the Compose bundle mounts
   `./repos` at `/repos`. Only committed state is deployed. Treat the roots as **trusted content
@@ -268,6 +269,63 @@ secret goes.
 
 `lakana repo remove NAME --yes` deletes a repository and its deploy history, but only while no
 environment has a current deployment from it: undeploy it there first.
+
+### SSH host keys
+
+A worker trusts an SSH host only with the keys you confirmed. Let a worker fetch them; you need
+no `ssh-keyscan` of your own:
+
+<!-- not tested: a worker connects to the reader's own git host -->
+```bash
+lakana repo host-keys git@github.com:acme/analytics.git --save known_hosts
+lakana repo add analytics --kind ssh --url git@github.com:acme/analytics.git \
+    --credential-secret analytics-deploy-key --known-hosts-file known_hosts
+```
+
+The first command prints each key's type and fingerprint and, with `--save`, writes the
+known_hosts line of one key: `ssh-ed25519` when the host offers it, else the strongest one
+offered (`--type ssh-rsa`, repeatable, picks others). **Compare that fingerprint with the
+fingerprints your git host publishes** (GitHub, GitLab and Bitbucket each have a page for
+them) before you register the repository. The keys are fetched over the network, so a
+fingerprint you did not compare proves nothing.
+
+It waits up to 60 seconds for a worker that takes pipeline work. What it may answer:
+
+| Outcome | What to do |
+|---|---|
+| `refused_address` | The name resolves to an address no worker may reach (loopback, link-local, cloud metadata). Use the git host's public name. |
+| `unreachable` | Check the host and port in the URL, and that the worker's network may reach it on SSH. |
+| `timeout` | The host did not answer; check the network path from the worker. |
+| `no_worker` | No worker took the check within two minutes: start one (`docker compose up -d worker`, or `lakana server start --local`). |
+
+A URL's host must be a plain name (letters, digits, dots, hyphens) or an IPv6 address in
+brackets; a URL with a comma, a wildcard or an option-like part is refused.
+
+### Test access
+
+Once a repository is registered and its secret exists, check that a worker can read it with an
+environment's credential, before the first deploy:
+
+<!-- not tested: a worker connects to the reader's own git host -->
+```bash
+lakana repo test analytics --env prod
+```
+
+The worker runs `git ls-remote` exactly as a deploy fetches (the repository's own known hosts,
+the environment's secret) and fetches nothing. It prints `ok: …`, or the outcome and the next
+step, and exits 1 unless it is `ok`:
+
+| Outcome | What to do |
+|---|---|
+| `auth_refused` | Add the public key as a read-only deploy key at your git host (or check the token), then test again. |
+| `not_found` | Check the URL, and that the key or token is given access to this repository. |
+| `host_key_unknown` | The host offered no key the repository trusts: fetch and compare the keys again (`lakana repo host-keys`), then `lakana repo update NAME --known-hosts-file FILE`. |
+| `host_key_changed` | The host's key is not the one you confirmed. Check its published fingerprints before you connect again: this is what an attack looks like. |
+| `unreachable`, `timeout`, `refused_address`, `no_worker` | As for `repo host-keys` above. |
+| `failed` | The worker's log has the details (`docker compose logs worker`). |
+
+Both checks need `MANAGE_REPOSITORY`; `repo test` also needs read access to the environment.
+You can have five checks waiting at once; each is kept for 24 hours and only you can see it.
 
 ## Deploy, dry-run, roll back
 

@@ -1856,6 +1856,33 @@ Delete repository NAME and its deploy history.
 | `NAME` | text | required |  |
 | `--yes` | flag | off | Don't ask for confirmation. |
 
+### `lakana repo host-keys`
+
+Usage: `lakana repo host-keys [OPTIONS] {url}`
+
+Fetch the SSH host keys of URL's host and print their fingerprints.
+
+A worker connects to the host (the server never does); the command waits up to 60 seconds. Compare each fingerprint with your git host's published fingerprints before you trust a key. Exits 1 unless the worker found keys.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `URL` | text | required |  |
+| `--save` | path | none | Write the known_hosts line of the strongest key (ssh-ed25519 when offered) to FILE, for `repo add --known-hosts-file`. |
+| `--type` | text, repeatable | none | With --save: write this key type instead (repeatable), e.g. ssh-rsa. |
+
+### `lakana repo test`
+
+Usage: `lakana repo test [OPTIONS] {name}`
+
+Test that a worker can read repository NAME with ENV's credential.
+
+The worker runs `git ls-remote` with the repository's known hosts and ENV's secret, as a deploy would, and fetches nothing. Prints ``ok: …`` or ``<outcome>: …`` with what to do next; exits 1 unless the outcome is ``ok``. Waits up to 120 seconds.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--env` | text | none | Environment (default: the profile's). |
+
 ## `lakana index`
 
 Usage: `lakana index [OPTIONS] COMMAND [ARGS]...`

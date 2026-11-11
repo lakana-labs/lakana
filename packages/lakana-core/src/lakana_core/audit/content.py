@@ -118,6 +118,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "group",
         "group_id",
         "holder_run_id",
+        # the host and port a repository check reaches (`lakana_core.projects.probes`), never a
+        # credential
+        "host",
         "id",
         "issuer",
         "job",
@@ -142,8 +145,10 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "path",
         # the client's address and browser of a sign-in, as the server saw them
         "peer",
+        "port",
         "principal",
         "principal_id",
+        "probe_id",
         "project_version_id",
         "query_id",
         "ref",

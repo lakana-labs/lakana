@@ -3437,3 +3437,26 @@ def test_0073_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0072
         assert "profile_pictures" not in sqlalchemy.inspect(engine).get_table_names()
         engine.dispose()
+
+
+def test_0074_on_postgres() -> None:
+    """0074 creates the probe table and the public key column, and the downgrade drops both."""
+    revision_0073 = "d4a7e2b9c613"
+    revision_0074 = "e5b8c1f4a297"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0073)
+        engine = sqlalchemy.create_engine(url)
+
+        migrate.upgrade(url, revision_0074)
+        assert _alembic_version(engine) == revision_0074
+        inspector = sqlalchemy.inspect(engine)
+        assert "repository_probes" in inspector.get_table_names()
+        assert "deploy_public_key" in {c["name"] for c in inspector.get_columns("repositories")}
+
+        migrate.downgrade(url, revision_0073)
+        assert _alembic_version(engine) == revision_0073
+        inspector = sqlalchemy.inspect(engine)
+        assert "repository_probes" not in inspector.get_table_names()
+        assert "deploy_public_key" not in {c["name"] for c in inspector.get_columns("repositories")}
+        engine.dispose()

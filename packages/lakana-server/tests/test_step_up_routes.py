@@ -791,6 +791,9 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ),
     ("DELETE", "/api/v1/package-indexes/{name}"): "removing an index removes a source",
     ("DELETE", "/api/v1/repositories/{name}"): "removing a repository removes a source",
+    ("POST", "/api/v1/repository-probes"): (
+        "queues a check of a host or a repository; stores no credential and changes nothing"
+    ),
     ("DELETE", "/api/v1/environments/{name}"): (
         "data operation, undone with restore; joins step-up with its screen in part 8 (spec)"
     ),
