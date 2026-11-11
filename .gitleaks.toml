@@ -33,6 +33,8 @@ regexes = [
   # reads those commits.
   '''eyJhbGciOiJSUzI1NiIsImtpZCI6Ii4uLiJ9.eyJpc3MiOiIuLi4ifQ.c2lnbmF0dXJl''',
   '''lakana_ci_3f2a9c1b7d4e8f60_8m1Zr0qWn5x7sK2bVt9yLcD4gH6jA0pE3uF5iO7wQ1s''',
+  # A made-up public SSH host key (ed25519) in test_deploy_keys.py: a public key is no secret.
+  '''_HOST_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXafUgYR"''',
 ]
 
 [[allowlists]]
