@@ -57,6 +57,31 @@ class InterfaceStateView:
     update_note_seen: str | None
 
 
+def refuse_tokens(p: PrincipalRef, what: str) -> None:
+    """Refuse a caller signed in with a task or CI token: the interface's state is a person's.
+
+    A task or CI token of an administrator would otherwise see an administrator's Home
+    (recovery links, workers, every environment's failures) beyond the token's own scope.
+
+    Parameters
+    ----------
+    p
+        The caller.
+    what
+        What is asked about, for the message: ``interface state``, ``Needs your attention``.
+
+    Raises
+    ------
+    PermissionDenied
+        For a task or CI token.
+    """
+    if p.task_scope is not None or p.ci_scope is not None:
+        raise PermissionDenied(
+            f"A task or CI token cannot read or change a person's {what}; "
+            "sign in to the web interface or use a personal access token."
+        )
+
+
 def require_self(p: PrincipalRef, name: str, what: str) -> None:
     """Refuse a caller asking about another person, or signed in with a task or CI token.
 
@@ -74,11 +99,7 @@ def require_self(p: PrincipalRef, name: str, what: str) -> None:
     PermissionDenied
         For a task or CI token, or a name that is not the caller's.
     """
-    if p.task_scope is not None or p.ci_scope is not None:
-        raise PermissionDenied(
-            f"A task or CI token cannot read or change a person's {what}; "
-            "sign in to the web interface or use a personal access token."
-        )
+    refuse_tokens(p, what)
     if name != p.name:
         raise PermissionDenied(f"You can only read and change your own {what}.")
 

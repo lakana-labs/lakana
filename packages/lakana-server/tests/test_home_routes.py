@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.db import db_now
 from lakana_core.models import Environment, Worker
-from tests.api.platform.test_whoami import _new_person
+from tests.api.platform.test_whoami import _new_person, _task_token_header
 from tests.conftest import AUTH_HEADER
 
 _ATTENTION = "/api/v1/home/attention"
@@ -62,3 +62,13 @@ def test_an_administrator_sees_the_repositories_they_created(client: TestClient)
     assert created.status_code == 201, created.text
     body = client.get(_WORK, headers=AUTH_HEADER).json()
     assert body == {"repositories": [{"name": "shop", "environments": []}], "jobs": []}
+
+
+def test_a_task_token_of_an_administrator_gets_no_home(client: TestClient) -> None:
+    header = _task_token_header(client)
+    for path in (_ATTENTION, _WORK, "/api/v1/home/get-started"):
+        response = client.get(path, headers=header)
+        assert response.status_code == 403, path
+        assert "personal access token" in response.json()["detail"]
+    status = client.get("/api/v1/status", headers=header)
+    assert (status.status_code, status.json()["detail"]) == (200, None)

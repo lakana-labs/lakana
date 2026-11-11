@@ -1,9 +1,9 @@
 """Home in the web interface: the caller's Get started list, Needs your attention and Your work.
 
-Any authenticated caller may ask. Get started is about the caller and the instance's own state
-(a repository exists, a deploy succeeded), so it asks no authorization. Needs your attention and
-Your work show only what the caller may read now, each row asked with `permits`. None of the
-routes records anything.
+Any authenticated person may ask; a task or CI token is refused (403). Get started is about the
+caller and the instance's own state (a repository exists, a deploy succeeded), so it asks no
+authorization. Needs your attention and Your work show only what the caller may read now, each
+row asked with `permits`. None of the routes records anything.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ router = APIRouter(
 )
 
 
-@router.get("/get-started", response_model=GetStartedOut)
+@router.get("/get-started", response_model=GetStartedOut, responses=errors(403))
 def read_get_started(
     request: Request,
     principal: PrincipalRef = Depends(get_principal),
@@ -60,7 +60,8 @@ def read_get_started(
     deploys, opens a table and runs a query; a person who may read opens a table and runs a
     query; a person without access yet gets no steps. In local mode
     (`lakana server start --local`) an administrator gets add a passkey, deploy from a local
-    folder, open a table and run a query. Each step is ticked from the server's state.
+    folder, open a table and run a query. Each step is ticked from the server's state. A task
+    or CI token is refused with 403.
 
     Parameters
     ----------
@@ -91,7 +92,7 @@ def read_get_started(
     )
 
 
-@router.get("/attention", response_model=AttentionOut)
+@router.get("/attention", response_model=AttentionOut, responses=errors(403))
 def read_attention(
     principal: PrincipalRef = Depends(get_principal),
     service: AttentionService = Depends(get_attention_service),
@@ -99,10 +100,12 @@ def read_attention(
     """Show what needs your attention.
 
     An administrator sees the jobs whose newest finished run failed in the last seven days, the
-    late tables, the checks whose newest result failed or errored, the open recovery links and
-    the lost workers. Anyone else sees the late tables and failed checks among the tables they
-    read in the last seven days or opened, and their own queries that failed in that time. A
-    row you may no longer read is left out, never refused. At most 50 rows, newest first.
+    late tables, the checks whose newest result failed or errored, the open recovery links, the
+    lost workers and their own queries that failed in that time. Anyone else sees the late
+    tables and failed checks among the tables they read in the last seven days or opened, and
+    their own queries that failed in that time. A row you may no longer read is left out, never
+    refused. At most 50 rows, newest first. A task or CI token is refused with 403: this is a
+    person's list.
 
     Parameters
     ----------
@@ -132,7 +135,7 @@ def read_attention(
     )
 
 
-@router.get("/work", response_model=WorkOut)
+@router.get("/work", response_model=WorkOut, responses=errors(403))
 def read_work(
     principal: PrincipalRef = Depends(get_principal),
     session: Session = Depends(get_session),
@@ -142,7 +145,8 @@ def read_work(
     """Show your work: the repositories you created or deployed, and their jobs.
 
     Only for a person who may deploy somewhere; anyone else gets two empty lists. Environments
-    and jobs are shown where you may read the environment. At most 20 of each.
+    and jobs are shown where you may read the environment. At most 20 of each. A task or CI
+    token is refused with 403.
 
     Parameters
     ----------

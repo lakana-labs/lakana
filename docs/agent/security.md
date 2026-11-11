@@ -1077,14 +1077,23 @@ names, as `table get` does. Pins: `test_catalog_search.py`, `test_search.py`.
 (`lakana_core.home.work.your_work`) answer any authenticated caller about themself. Every row is asked
 with `permits` when the list is read, never `authorize`: reading a list is no attempt, so it writes no
 audit event, and a refused right leaves a row out instead of answering `403` (pin:
-`test_attention_writes_no_audit_event`). A revoked grant, a dropped table or a deleted environment makes
-the row disappear and nothing about the object is shown (pin:
-`test_attention_drops_a_table_the_person_can_no_longer_read`).
+`test_attention_writes_no_audit_event`). A revoked grant (on the environment or on one table), a dropped
+table or a deleted environment makes the row disappear and nothing about the object is shown (pins:
+`test_attention_drops_a_table_the_person_can_no_longer_read`,
+`test_attention_drops_the_rows_of_one_table_whose_right_was_revoked`); only an administrator still sees
+a dropped table's failed check, whose run still exists. Both lists, and `GET /api/v1/home/get-started`,
+are a person's: a task or CI token is `403` (`A task or CI token cannot read or change a person's …; sign
+in to the web interface or use a personal access token.`, `refuse_tokens`, as the interface-state
+routes; not audited), even one of an administrator, whose grants `holds_instance_admin` reads without
+the token's scope (pins: `test_a_task_or_ci_token_of_an_administrator_is_refused`,
+`test_a_task_token_of_an_administrator_gets_no_home`). `GET /api/v1/status` answers such a token
+without `detail`: it is asked with `permits(MANAGE_ENVIRONMENT)`, which applies the token's scope (pin:
+`test_a_task_or_ci_token_of_an_administrator_gets_no_status_detail`).
 
 | List | Who | Kinds and the right asked per row |
 |---|---|---|
-| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin`) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables with a fired row), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host, as the instance status counts it). The `ADMIN` role holds every right these need, so nothing more is asked. |
-| Needs your attention | anyone else | `table_late` and `check_failed` only among the tables they read within 7 days (`table_reads`) or opened (`recent_opens`), each kept while `READ_TABLE` holds on it now; a check also needs `READ_ENVIRONMENT` (the check list's right) and is left out when it is a generated reference check whose target they may not read (`ReferenceCheckFilter`, as `check list`). `query_failed`: their own failed ad-hoc queries within 7 days (`task_run_id IS NULL`; a pipeline's query is its run's failure), only where they still hold `SUBMIT_QUERY`, as the query's own page shows it only to its submitter. No runs, links or workers. |
+| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin`) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables whose newest freshness row is fired, ranked in one statement, since the sweep records a row only on a change), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host: `replaced_by_restart`, shared with the instance status), `query_failed` (their own, as for anyone else). The `ADMIN` role holds every right these need, so nothing more is asked. |
+| Needs your attention | anyone else | `table_late` and `check_failed` only among the tables they read within 7 days (`table_reads`) or opened (`recent_opens`), each kept while `READ_TABLE` holds on it now (one `permits_each` for all of them: a fixed number of statements per environment, however many tables; pin: `test_a_readers_attention_costs_the_same_for_five_tables_or_forty`); a check also needs `READ_ENVIRONMENT` (the check list's right) and is left out when it is a generated reference check whose target they may not read (`ReferenceCheckFilter`, as `check list`). `query_failed`: their own failed ad-hoc queries within 7 days (`task_run_id IS NULL`; a pipeline's query is its run's failure), only where they still hold `SUBMIT_QUERY`, as the query's own page shows it only to its submitter. No runs, links or workers. |
 | Your work | a caller with `may_deploy_somewhere` | The repositories they created (`created_by`) or deployed (`deploy_runs.principal_id`); environments and jobs (`JobService.list`, asked only after `permits(READ_ENVIRONMENT)`) only where they may read the environment; nothing without a readable environment (the repository listing's right). Anyone else gets two empty lists. |
 
 A row's `title` is a name: a job (the repository for a run of no job), a dotted table name, a check's

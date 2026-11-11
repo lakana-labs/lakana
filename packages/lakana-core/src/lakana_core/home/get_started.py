@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.grants.service import GrantService
+from lakana_core.identity.interface_state import refuse_tokens
 from lakana_core.identity.sessions import utc_now
 from lakana_core.models import (
     CiTrustRule,
@@ -211,7 +212,7 @@ def get_started(
     """Build the caller's Get started list.
 
     About the caller and the instance's own state only, so it needs no authorization and
-    records nothing.
+    records nothing; a person's list, so a task or CI token is refused.
 
     Parameters
     ----------
@@ -229,7 +230,13 @@ def get_started(
     GetStarted
         The audience, the steps with whether each is done, and whether the list is hidden or
         complete.
+
+    Raises
+    ------
+    PermissionDenied
+        For a task or CI token.
     """
+    refuse_tokens(p, "Get started list")
     audience = _audience(grants, p)
     checks = _checks(session, p.id)
     steps = tuple((step, checks[step]()) for step in _STEPS[audience, local])

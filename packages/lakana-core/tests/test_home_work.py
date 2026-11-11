@@ -18,6 +18,8 @@ from lakana_core.models import (
     DeployKind,
     DeployRun,
     DeployStatus,
+    EnvironmentDeployment,
+    JobVersion,
     Repository,
     RepositoryKind,
     RunStatus,
@@ -177,3 +179,33 @@ def test_work_is_empty_without_reading_any_environment(session: Session) -> None
     repo.created_by = only_deploy.id
     session.commit()
     assert _work(session, only_deploy) == ([], [])
+
+
+def test_work_shows_no_environment_or_job_the_caller_may_not_read(
+    session: Session, deployer: PrincipalRef
+) -> None:
+    shop, version = deployed_job(session, "dev", "shop", "nightly")
+    prod = environment(session, "prod")
+    in_prod = JobVersion(
+        id=uuid.uuid4(),
+        repository_id=shop.id,
+        environment_id=prod,
+        commit_sha="b" * 40,
+        manifest_json={"jobs": {"secret_job": {"assets": []}}},
+        code_uri="file:///dev/null",
+        code_sha256="0" * 64,
+    )
+    session.add(in_prod)
+    session.flush()
+    session.add(
+        EnvironmentDeployment(
+            environment_id=prod, repository_id=shop.id, current_job_version_id=in_prod.id
+        )
+    )
+    session.commit()
+    _deploy(session, shop, deployer, "prod", status=DeployStatus.SUCCEEDED, at=_START)
+    _deploy(session, shop, deployer, "dev", status=DeployStatus.SUCCEEDED, at=_START)
+    repositories, jobs = _work(session, deployer)
+    assert [env for env, *_ in repositories[0].environments] == ["dev"]
+    assert [(job.environment, job.job) for job in jobs] == [("dev", "nightly")]
+    assert version.environment_id != prod

@@ -1,12 +1,14 @@
 """Needs your attention: what failed or is late, for Home, filtered by what the person may read now.
 
 An administrator (`holds_instance_admin`) sees the jobs whose newest finished run failed, the late
-tables, the checks whose newest result failed or errored, the open recovery links and the lost
-workers. Anyone else sees the late tables and failed checks among the tables they read
-(`table_reads`) or opened (`recent_opens`), and their own failed ad-hoc queries. Each row is
-checked when the list is read, so a revoked grant or a dropped table makes its row disappear,
-never a refusal. Every check is `permits`, which records nothing: reading a list is not an
-attempt to do anything.
+tables, the checks whose newest result failed or errored, the open recovery links, the lost
+workers and their own failed ad-hoc queries. Anyone else sees the late tables and failed checks
+among the tables they read (`table_reads`) or opened (`recent_opens`), and their own failed
+ad-hoc queries. Each row is checked when the list is read, so a revoked grant or a dropped table
+makes its row disappear (for anyone but an administrator, who still sees a dropped table's
+failed check), never a refusal. Every check is `permits`, which records nothing: reading a
+list is not an attempt to do anything. The list is a person's: a task or CI token is refused,
+so a task run as an administrator cannot read an administrator's list beyond its own scope.
 
 Each source reads at most `CANDIDATE_LIMIT` rows, newest first, in a few indexed statements;
 the rows are then filtered, merged and cut to `ATTENTION_LIMIT`. A row's title is a name (a
@@ -25,14 +27,20 @@ from typing import Literal, cast
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import (
+    Action,
+    AuthorizationService,
+    PrincipalRef,
+    Securable,
+    permits_each,
+)
 from lakana_core.catalog.health_read import newest_freshness
 from lakana_core.catalog.health_record import NOT_SET_BACK
-from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.db import db_now
 from lakana_core.errors import ValidationError
 from lakana_core.grants.admin import holds_instance_admin
 from lakana_core.identifiers import NamespacePath, TableRef
+from lakana_core.identity.interface_state import refuse_tokens
 from lakana_core.identity.links import open_links
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -53,6 +61,7 @@ from lakana_core.models import (
     Worker,
 )
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
+from lakana_core.runs.instance_status import replaced_by_restart
 from lakana_core.runs.workers import alive_ids
 
 ATTENTION_WINDOW = timedelta(days=7)
@@ -152,7 +161,13 @@ class AttentionService:
         -------
         tuple of (list of AttentionItem, bool)
             At most `ATTENTION_LIMIT` rows, newest first, and whether more were cut.
+
+        Raises
+        ------
+        PermissionDenied
+            For a task or CI token.
         """
+        refuse_tokens(p, "Needs your attention")
         self._asked = {}
         now = db_now(self._session)
         since = now - ATTENTION_WINDOW
@@ -163,6 +178,7 @@ class AttentionService:
                 *self._failed_checks(p, since, None),
                 *self._recovery_links(now),
                 *self._lost_workers(now),
+                *self._failed_queries(p, since),
             ]
         else:
             tables = self._readable_tables(p, since)
@@ -197,24 +213,6 @@ class AttentionService:
                 p, action, Securable.environment_scope(environment)
             )
         return self._asked[key]
-
-    def _may_read(self, p: PrincipalRef, table: _Table) -> bool:
-        """Say whether the caller may read a table now.
-
-        Parameters
-        ----------
-        p
-            The caller.
-        table
-            The table.
-
-        Returns
-        -------
-        bool
-            Whether `permits(READ_TABLE)` holds.
-        """
-        scope = Securable.table_scope(table.environment, table.ref.namespace, table.ref.name)
-        return self._authz.permits(p, Action.READ_TABLE, scope)
 
     def _names(self, ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, _Table]:
         """Read the names of tables in live environments.
@@ -269,31 +267,69 @@ class AttentionService:
             .order_by(last.desc())
             .limit(CANDIDATE_LIMIT)
         ).scalars()
-        ids = set(read)
+        ids = set(read) | self._opened_tables(p)
+        tables = list(self._names(ids).items())
+        allowed = permits_each(
+            self._authz,
+            p,
+            [
+                (
+                    Action.READ_TABLE,
+                    Securable.table_scope(table.environment, table.ref.namespace, table.ref.name),
+                )
+                for _, table in tables
+            ],
+        )
+        return {
+            table_id: table for (table_id, table), ok in zip(tables, allowed, strict=True) if ok
+        }
+
+    def _opened_tables(self, p: PrincipalRef) -> set[uuid.UUID]:
+        """Find the tables the caller opened recently that still exist, in one statement.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        set of uuid.UUID
+            Their ids.
+        """
         opened = self._session.execute(
             select(Environment.name, RecentOpen.ref)
             .join(Environment, Environment.id == RecentOpen.environment_id)
             .where(RecentOpen.principal_id == p.id, RecentOpen.kind == "table", LIVE_ENVIRONMENT)
         ).all()
+        wanted: set[tuple[str, str, str]] = set()
         for env, dotted in opened:
             try:
                 ref = TableRef.from_dotted(env, dotted)
             except ValidationError:
                 continue
-            found = resolve_table_id(self._session, env, ref.namespace.joined(), ref.name)
-            if found is not None:
-                ids.add(found)
-        return {
-            table_id: table
-            for table_id, table in self._names(ids).items()
-            if self._may_read(p, table)
-        }
+            wanted.add((env, ref.namespace.joined(), ref.name))
+        if not wanted:
+            return set()
+        rows = self._session.execute(
+            select(Table.id, Environment.name, Namespace.path, Table.name)
+            .join(Namespace, Namespace.id == Table.namespace_id)
+            .join(Environment, Environment.id == Namespace.environment_id)
+            .where(
+                Environment.name.in_({env for env, _, _ in wanted}),
+                Table.name.in_({name for _, _, name in wanted}),
+                LIVE_ENVIRONMENT,
+            )
+        ).all()
+        return {table_id for table_id, *key in rows if tuple(key) in wanted}
 
     def _late_tables(self, tables: dict[uuid.UUID, _Table] | None) -> Iterator[AttentionItem]:
         """List the tables whose newest freshness row fired.
 
-        The candidates are the newest `CANDIDATE_LIMIT` tables with a fired freshness row;
-        `newest_freshness` confirms each is still late.
+        The candidates are the newest `CANDIDATE_LIMIT` tables whose newest freshness row is
+        fired, ranked in one statement: the sweep records a row only when the state changes, so
+        a table late for weeks keeps an old fired row, and tables that fired since and
+        recovered must not push it out. `newest_freshness` confirms each candidate.
 
         Parameters
         ----------
@@ -307,19 +343,29 @@ class AttentionService:
         """
         if tables is not None and not tables:
             return
-        last = func.max(TableHealthSignal.observed_at)
-        query = select(TableHealthSignal.table_id).where(
+        rows = select(
+            TableHealthSignal.table_id,
+            TableHealthSignal.state,
+            TableHealthSignal.observed_at,
+            func.row_number()
+            .over(
+                partition_by=TableHealthSignal.table_id,
+                order_by=(TableHealthSignal.observed_at.desc(), TableHealthSignal.id.desc()),
+            )
+            .label("position"),
+        ).where(
             TableHealthSignal.signal == "freshness",
-            TableHealthSignal.state == "fired",
             TableHealthSignal.sequence_number.is_(None),
             NOT_SET_BACK,
         )
         if tables is not None:
-            query = query.where(TableHealthSignal.table_id.in_(list(tables)))
+            rows = rows.where(TableHealthSignal.table_id.in_(list(tables)))
+        ranked = rows.subquery()
         candidates = list(
             self._session.execute(
-                query.group_by(TableHealthSignal.table_id)
-                .order_by(last.desc())
+                select(ranked.c.table_id)
+                .where(ranked.c.position == 1, ranked.c.state == "fired")
+                .order_by(ranked.c.observed_at.desc())
                 .limit(CANDIDATE_LIMIT)
             ).scalars()
         )
@@ -485,7 +531,7 @@ class AttentionService:
         AttentionItem
             A ``recovery_link_open`` row per link, titled with the person it signs in.
         """
-        links = open_links(self._session, "recovery", now)[-CANDIDATE_LIMIT:]
+        links = open_links(self._session, "recovery", now, newest=CANDIDATE_LIMIT)
         people = {link.principal_id for link in links}
         names = {
             principal_id: name
@@ -503,7 +549,7 @@ class AttentionService:
 
         A worker whose heartbeat is older than the lease is lost. One that a worker started
         on the same host after its last heartbeat replaced is not missing, as the instance
-        status counts it (`lakana_core.runs.instance_status.replaced_ids`).
+        status counts it (`lakana_core.runs.instance_status.replaced_by_restart`).
 
         Parameters
         ----------
@@ -521,14 +567,9 @@ class AttentionService:
                 select(Worker).order_by(Worker.heartbeat_at.desc()).limit(CANDIDATE_LIMIT)
             ).scalars()
         )
+        restarts = [(other.host, other.started_at) for other in rows if other.id in alive]
         for lost in rows:
-            if lost.id in alive:
-                continue
-            replaced = any(
-                other.id in alive
-                and other.host == lost.host
-                and other.started_at > lost.heartbeat_at
-                for other in rows
-            )
-            if not replaced:
+            if lost.id not in alive and not replaced_by_restart(
+                lost.host, lost.heartbeat_at, restarts
+            ):
                 yield AttentionItem("worker_lost", None, lost.host, lost.id, lost.heartbeat_at)

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.grants.service import GrantService
+from lakana_core.identity.interface_state import refuse_tokens
 from lakana_core.jobs.service import JobService
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -29,9 +30,6 @@ from lakana_core.models import (
 
 WORK_LIMIT = 20
 """The most repositories, and the most jobs, Your work lists."""
-
-_CANDIDATES = 200
-"""The most repositories read before they are ordered and cut."""
 
 _NEVER = datetime.min.replace(tzinfo=UTC)
 """Where a job that never ran sorts: after every job that did."""
@@ -181,40 +179,39 @@ def your_work(
         At most `WORK_LIMIT` repositories, the most recently deployed (else created) first,
         and at most `WORK_LIMIT` of their jobs, the most recently run first; both empty for a
         caller who may deploy nowhere or read no environment.
+
+    Raises
+    ------
+    PermissionDenied
+        For a task or CI token.
     """
+    refuse_tokens(p, "Your work")
     if not GrantService(session, authz).may_deploy_somewhere(p):
         return [], []
     readable = _readable_environments(session, authz, p)
     if not readable:
         return [], []
     deployed = select(DeployRun.repository_id).where(DeployRun.principal_id == p.id)
+    moved = (
+        select(
+            DeployRun.repository_id,
+            func.max(func.coalesce(DeployRun.finished_at, DeployRun.created_at)).label("at"),
+        )
+        .where(DeployRun.environment_id.in_(list(readable)))
+        .group_by(DeployRun.repository_id)
+        .subquery()
+    )
+    activity = func.coalesce(moved.c.at, Repository.created_at)
     repos = list(
         session.execute(
             select(Repository)
+            .outerjoin(moved, moved.c.repository_id == Repository.id)
             .where(or_(Repository.created_by == p.id, Repository.id.in_(deployed)))
-            .order_by(Repository.created_at.desc(), Repository.id)
-            .limit(_CANDIDATES)
+            .order_by(activity.desc(), Repository.name.desc())
+            .limit(WORK_LIMIT)
         ).scalars()
     )
     deploys = _last_deploys(session, [repo.id for repo in repos], readable)
-
-    def activity(repo: Repository) -> datetime:
-        """Say when a repository last moved: its newest deploy, else its creation.
-
-        Parameters
-        ----------
-        repo
-            The repository.
-
-        Returns
-        -------
-        datetime
-            The time.
-        """
-        times = [at for _, at in deploys.get(repo.id, {}).values() if at is not None]
-        return max(times, default=repo.created_at)
-
-    repos = sorted(repos, key=lambda repo: (activity(repo), repo.name), reverse=True)[:WORK_LIMIT]
     shown = [
         WorkRepository(
             name=repo.name,

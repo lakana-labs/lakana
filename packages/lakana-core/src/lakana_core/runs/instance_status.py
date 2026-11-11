@@ -12,8 +12,9 @@ change what they can do: that no worker runs, or that one of them is lost.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -98,6 +99,31 @@ class InstanceStatus:
     detail: StatusDetail | None
 
 
+def replaced_by_restart(
+    host: str, heartbeat_at: datetime, alive: Iterable[tuple[str, datetime]]
+) -> bool:
+    """Say whether a lost worker was replaced: an alive worker of its host started after it.
+
+    The one definition the status (`replaced_ids`) and Home's Needs your attention
+    (`lakana_core.home.attention`) share.
+
+    Parameters
+    ----------
+    host
+        The lost worker's host.
+    heartbeat_at
+        Its last heartbeat.
+    alive
+        ``(host, started_at)`` of each alive worker.
+
+    Returns
+    -------
+    bool
+        Whether one of them runs on the same host and started after the last heartbeat.
+    """
+    return any(other == host and started > heartbeat_at for other, started in alive)
+
+
 def replaced_ids(views: Sequence[WorkerView]) -> frozenset[str]:
     """Find the lost workers that a restart on their host replaced.
 
@@ -116,16 +142,11 @@ def replaced_ids(views: Sequence[WorkerView]) -> frozenset[str]:
     frozenset of str
         The ids of the replaced lost workers.
     """
+    alive = [(view.host, view.started_at) for view in views if view.status == "alive"]
     return frozenset(
         lost.id
         for lost in views
-        if lost.status != "alive"
-        and any(
-            other.status == "alive"
-            and other.host == lost.host
-            and other.started_at > lost.heartbeat_at
-            for other in views
-        )
+        if lost.status != "alive" and replaced_by_restart(lost.host, lost.heartbeat_at, alive)
     )
 
 

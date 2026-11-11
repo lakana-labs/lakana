@@ -21515,7 +21515,7 @@
           "home"
         ],
         "summary": "Show your Get started list",
-        "description": "The steps follow what you may do: an administrator connects a repository, invites the team, adds a passkey, deploys the first project and lets CI deploy; a person who may deploy deploys, opens a table and runs a query; a person who may read opens a table and runs a query; a person without access yet gets no steps. In local mode (`lakana server start --local`) an administrator gets add a passkey, deploy from a local folder, open a table and run a query. Each step is ticked from the server's state.",
+        "description": "The steps follow what you may do: an administrator connects a repository, invites the team, adds a passkey, deploys the first project and lets CI deploy; a person who may deploy deploys, opens a table and runs a query; a person who may read opens a table and runs a query; a person without access yet gets no steps. In local mode (`lakana server start --local`) an administrator gets add a passkey, deploy from a local folder, open a table and run a query. Each step is ticked from the server's state. A task or CI token is refused with 403.",
         "operationId": "read_get_started_api_v1_home_get_started_get",
         "parameters": [
           {
@@ -21558,6 +21558,16 @@
               }
             }
           },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -21577,7 +21587,7 @@
           "home"
         ],
         "summary": "Show what needs your attention",
-        "description": "An administrator sees the jobs whose newest finished run failed in the last seven days, the late tables, the checks whose newest result failed or errored, the open recovery links and the lost workers. Anyone else sees the late tables and failed checks among the tables they read in the last seven days or opened, and their own queries that failed in that time. A row you may no longer read is left out, never refused. At most 50 rows, newest first.",
+        "description": "An administrator sees the jobs whose newest finished run failed in the last seven days, the late tables, the checks whose newest result failed or errored, the open recovery links, the lost workers and their own queries that failed in that time. Anyone else sees the late tables and failed checks among the tables they read in the last seven days or opened, and their own queries that failed in that time. A row you may no longer read is left out, never refused. At most 50 rows, newest first. A task or CI token is refused with 403: this is a person's list.",
         "operationId": "read_attention_api_v1_home_attention_get",
         "parameters": [
           {
@@ -21620,6 +21630,16 @@
               }
             }
           },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -21639,7 +21659,7 @@
           "home"
         ],
         "summary": "Show your work: the repositories you created or deployed, and their jobs",
-        "description": "Only for a person who may deploy somewhere; anyone else gets two empty lists. Environments and jobs are shown where you may read the environment. At most 20 of each.",
+        "description": "Only for a person who may deploy somewhere; anyone else gets two empty lists. Environments and jobs are shown where you may read the environment. At most 20 of each. A task or CI token is refused with 403.",
         "operationId": "read_work_api_v1_home_work_get",
         "parameters": [
           {
@@ -21674,6 +21694,16 @@
           },
           "401": {
             "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this. The refusal is recorded in the audit log.",
             "content": {
               "application/json": {
                 "schema": {

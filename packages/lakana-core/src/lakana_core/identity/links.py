@@ -569,7 +569,11 @@ def _state(row: SignInLink, now: datetime) -> LinkState:
 
 
 def open_links(
-    session: Session, kind: Literal["invite", "recovery"], now: datetime
+    session: Session,
+    kind: Literal["invite", "recovery"],
+    now: datetime,
+    *,
+    newest: int | None = None,
 ) -> list[SignInLink]:
     """List the open links of one kind, oldest first, with no authorization.
 
@@ -584,24 +588,24 @@ def open_links(
         ``invite`` or ``recovery``.
     now
         The time a link must expire after.
+    newest
+        Read only this many, the newest; `None` for all.
 
     Returns
     -------
     list of SignInLink
         Links neither used, withdrawn nor expired.
     """
-    return list(
-        session.execute(
-            select(SignInLink)
-            .where(
-                SignInLink.kind == kind,
-                SignInLink.used_at.is_(None),
-                SignInLink.withdrawn_at.is_(None),
-                SignInLink.expires_at > now,
-            )
-            .order_by(SignInLink.created_at, SignInLink.id)
-        ).scalars()
+    query = select(SignInLink).where(
+        SignInLink.kind == kind,
+        SignInLink.used_at.is_(None),
+        SignInLink.withdrawn_at.is_(None),
+        SignInLink.expires_at > now,
     )
+    if newest is not None:
+        query = query.order_by(SignInLink.created_at.desc(), SignInLink.id.desc()).limit(newest)
+        return list(reversed(session.execute(query).scalars().all()))
+    return list(session.execute(query.order_by(SignInLink.created_at, SignInLink.id)).scalars())
 
 
 class LinkService:

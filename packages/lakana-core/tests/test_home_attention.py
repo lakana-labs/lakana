@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 import pytest
 from core_test_helpers import ensure_table
@@ -18,7 +20,7 @@ from home_test_helpers import (
     query_of,
     table_read,
 )
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, event, func, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.authorization import AuditingAuthorization
@@ -27,6 +29,7 @@ from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Secura
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
+from lakana_core.home import attention as attention_module
 from lakana_core.home.attention import (
     ATTENTION_LIMIT,
     AttentionItem,
@@ -561,3 +564,157 @@ def test_attention_is_cut_at_fifty_and_says_so(
         "job00",
         f"job{ATTENTION_LIMIT - 1:02d}",
     )
+
+
+def test_admin_sees_their_own_failed_queries(
+    svc: AttentionService, admin: PrincipalRef, analyst: PrincipalRef, session: Session
+) -> None:
+    own = query_of(session, admin, status=QueryRunStatus.FAILED)
+    query_of(session, analyst, status=QueryRunStatus.FAILED)
+    items, _ = svc.for_caller(admin)
+    assert [(item.kind, item.ref) for item in items] == [("query_failed", str(own.id))]
+
+
+def _table_grants(session: Session, admin: PrincipalRef, name: str, tables: list[str]) -> None:
+    """Let a person read the environment `dev` and only these tables of `gold`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    admin
+        Who grants.
+    name
+        The person's name.
+    tables
+        The tables they may read.
+    """
+    grants = GrantService(session, AllowAllAuthorization())
+    grants.grant(
+        admin,
+        principal=name,
+        action=Action.READ_ENVIRONMENT,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="dev",
+    )
+    for table in tables:
+        grants.grant(
+            admin,
+            principal=name,
+            role=Role.VIEWER,
+            kind=SecurableKind.TABLE,
+            environment="dev",
+            namespace="gold",
+            table=table,
+        )
+
+
+def test_attention_drops_the_rows_of_one_table_whose_right_was_revoked(
+    svc: AttentionService, admin: PrincipalRef, session: Session
+) -> None:
+    reader = person(session, "tess")
+    repo, version = deployed_job(session, "dev", "shop", "nightly")
+    run = finished_run(
+        session, repo, version, job="nightly", status=RunStatus.FAILED, finished_at=_ago(hours=2)
+    )
+    for name in ("sales", "stock"):
+        table_id = _late(session, name)
+        table_read(session, reader, table_id, _ago(hours=5))
+        check_result(
+            session,
+            run,
+            table_id,
+            name=f"gold.{name}/not_null_id",
+            outcome=CheckOutcome.FAILED,
+            finished_at=_ago(hours=2),
+        )
+    _table_grants(session, admin, "tess", ["sales", "stock"])
+    assert len(svc.for_caller(reader)[0]) == 4
+    session.execute(
+        update(Grant)
+        .where(Grant.principal_id == reader.id, Grant.table == "stock")
+        .values(revoked_at=datetime.now(UTC))
+    )
+    session.commit()
+    assert sorted((item.kind, item.title) for item in svc.for_caller(reader)[0]) == [
+        ("check_failed", "gold.sales/not_null_id"),
+        ("table_late", "gold.sales"),
+    ]
+
+
+def _statements(session: Session, ask: Callable[[], object]) -> int:
+    """Count the SQL statements a call issues.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    ask
+        The call.
+
+    Returns
+    -------
+    int
+        The statements that reached the database.
+    """
+    seen: list[object] = []
+
+    def count(*args: object) -> None:
+        """Note one statement.
+
+        Parameters
+        ----------
+        *args
+            What SQLAlchemy passes.
+        """
+        seen.append(args)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        ask()
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    return len(seen)
+
+
+def test_a_readers_attention_costs_the_same_for_five_tables_or_forty(session: Session) -> None:
+    counts = []
+    for many in (5, 40):
+        reader = person(session, f"reader{many}")
+        grant(session, reader, role=Role.ANALYST, environment_name="dev")
+        for number in range(many):
+            _, table_id = ensure_table(session, "dev", "gold", f"t{many}_{number}")
+            table_read(session, reader, table_id, _ago(hours=1))
+        for number in range(3):
+            ensure_table(session, "dev", "gold", f"o{number}")
+            _opened(session, reader, f"gold.o{number}")
+        fresh = AttentionService(session, GrantAuthorization(session), lease_seconds=_LEASE)
+        counts.append(_statements(session, partial(fresh.for_caller, reader)))
+    assert counts[0] == counts[1]
+
+
+def test_a_table_late_for_long_is_not_pushed_out_by_tables_that_recovered(
+    svc: AttentionService, admin: PrincipalRef, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(attention_module, "CANDIDATE_LIMIT", 1)
+    env_id, late = ensure_table(session, "dev", "gold", "sales")
+    fired_freshness(session, env_id, late, observed_at=_ago(days=30))
+    _, recovered = ensure_table(session, "dev", "gold", "stock")
+    fired_freshness(session, env_id, recovered, observed_at=_ago(days=2))
+    fired_freshness(session, env_id, recovered, state="ok", observed_at=_ago(days=1))
+    assert [item.ref for item in svc.for_caller(admin)[0]] == ["gold.sales"]
+
+
+def test_attention_lists_the_newest_open_recovery_links(
+    svc: AttentionService, admin: PrincipalRef, session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(attention_module, "CANDIDATE_LIMIT", 1)
+    carol = person(session, "carol")
+    older = _link(session, carol, expires=_ago(hours=-1))
+    newer = _link(session, carol, expires=_ago(hours=-1))
+    session.execute(
+        update(SignInLink).where(SignInLink.id == older).values(created_at=_ago(hours=3))
+    )
+    session.commit()
+    assert [item.ref for item in svc.for_caller(admin)[0]] == [str(newer)]
