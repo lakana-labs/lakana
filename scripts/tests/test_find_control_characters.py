@@ -49,3 +49,27 @@ def test_the_command_lists_what_a_deploy_refuses(tmp_path: Path) -> None:
         "assets/tail_cr.sql:2: control character U+000D",
     ]
     assert done.stderr == ""
+
+
+def test_a_file_name_is_never_run_or_printed_raw(tmp_path: Path) -> None:
+    """A name ending in a pipe is read as a file, and a control character in a name is escaped."""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "x|").write_bytes(b"-- \x00\n")
+    (assets / "echo PWNED >&2 |").write_bytes(b"SELECT 1\n")
+    (assets / "bad\x1bname.sql").write_bytes(b"-- \x00\n")
+    (assets / "é.sql").write_bytes(b"-- \x00\n")
+    done = subprocess.run(
+        ["bash", "-c", _command()],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    assert done.stderr == ""
+    assert sorted(done.stdout.splitlines()) == [
+        "assets/bad\\x1bname.sql:1: control character U+0000",
+        "assets/x|:1: control character U+0000",
+        "assets/é.sql:1: control character U+0000",
+    ]

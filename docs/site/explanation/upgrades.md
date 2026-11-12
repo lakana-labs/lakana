@@ -144,13 +144,20 @@ before you upgrade:
 
 <!-- source: docs/examples/find-control-characters.sh#find -->
 ```bash
-find assets -type f -exec perl -CSD -ne '
-  printf "%s:%d: control character U+%04X\n", $ARGV, $., ord $& if /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]|\r(?!\n)/;
-  close ARGV if eof' {} +
+find assets -type f -exec perl -CSDA -e '
+  while (<<>>) {
+    if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]|\r(?!\n)/) {
+      my $code = ord $&;
+      (my $name = $ARGV) =~ s/([\x00-\x1f\x7f-\x9f])/sprintf "\\x%02x", ord $1/ge;
+      printf "%s:%d: control character U+%04X\n", $name, $., $code;
+    }
+    close ARGV if eof;
+  }' {} +
 ```
 
 It prints one line for each place a deploy would refuse, and nothing when the folder is clean; it
-needs only `find` and `perl`, which Linux and macOS ship. A dry run (`lakana deploy --dry-run`)
+needs only `find` and `perl` 5.22 or later, which Linux and macOS ship; a file name with a
+control character is printed with `\x..` escapes. A dry run (`lakana deploy --dry-run`)
 shows the same refusal before you upgrade a production deploy.
 
 ### A proxy is trusted for client addresses only when you list it
