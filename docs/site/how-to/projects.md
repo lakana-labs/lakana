@@ -311,7 +311,8 @@ lakana project-version show <id> --env dev
 lakana orphans --env dev                     # produced earlier, by no current deploy
 ```
 
-An asset file may hold tabs and line breaks but no other control characters; a deploy and a dry run refuse it, naming the file and the line.
+An asset file may hold tabs and line breaks but no other control characters; a deploy and a dry
+run refuse it, naming the file and the line.
 
 A deploy prints the resolved SHA and a diff, and when the project has checks, a list of them under
 `Checks:`, and one `warning:` line on stderr for each table that is kept after a failed check and

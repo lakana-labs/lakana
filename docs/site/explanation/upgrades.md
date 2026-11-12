@@ -142,13 +142,16 @@ than tab and line feed, DEL, or a C1 control). The error names the file and the 
 example `assets/silver/a.sql:12: control character U+001B on line 12; remove it`. Find them
 before you upgrade:
 
-<!-- not tested: it searches the reader's own assets/ folder -->
+<!-- source: docs/examples/find-control-characters.sh#find -->
 ```bash
-LC_ALL=C.UTF-8 grep -rnaP '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]|\r(?!$)' assets/
+find assets -type f -exec perl -CSD -ne '
+  printf "%s:%d: control character U+%04X\n", $ARGV, $., ord $& if /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]|\r(?!\n)/;
+  close ARGV if eof' {} +
 ```
 
-On macOS the system `grep` has no `-P`: run `brew install grep` and use `ggrep` instead. A dry
-run (`lakana deploy --dry-run`) shows the same refusal before you upgrade a production deploy.
+It prints one line for each place a deploy would refuse, and nothing when the folder is clean; it
+needs only `find` and `perl`, which Linux and macOS ship. A dry run (`lakana deploy --dry-run`)
+shows the same refusal before you upgrade a production deploy.
 
 ### A proxy is trusted for client addresses only when you list it
 
