@@ -534,3 +534,23 @@ def test_work_is_bounded_with_the_bytes(monkeypatch: pytest.MonkeyPatch) -> None
     body, p = page(t, page_budget=100_000)
     assert len(p["rows"][0]) == 300 and set(map(json.dumps, p["rows"][0])) == {'{"cut": true}'}
     assert p["row_cut"] == [0] and calls["total"] < 1000 and len(body) <= 100_000 + ENVELOPE_MAX
+
+
+def test_a_page_of_long_enum_lists_decodes_only_the_head_of_each_list() -> None:
+    labels = pa.array([f"{i:04d}" + "x" * 596 for i in range(50)])
+    codes = pa.DictionaryArray.from_arrays(
+        pa.array([i % 50 for i in range(200_000)], pa.int8()), labels
+    )
+    lists = pa.ListArray.from_arrays(pa.array(range(0, 200_001, 40_000), pa.int32()), codes)
+    t = pa.table({"e": lists})
+    original = pa.default_memory_pool()
+    pool = pa.proxy_memory_pool(original)
+    pa.set_memory_pool(pool)
+    try:
+        rows = page(t, limit=5)[1]["rows"]
+    finally:
+        pa.set_memory_pool(original)
+    assert (
+        len(rows) == 5 and rows[0][0][100] == {"cut": True} and rows[0][0][1] == "0001" + "x" * 596
+    )
+    assert pool.max_memory() < 20 * 1024 * 1024

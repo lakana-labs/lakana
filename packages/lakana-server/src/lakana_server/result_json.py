@@ -82,12 +82,12 @@ class _CellBuffer:
         Raises
         ------
         _CellOverflow
-            When the piece does not fit the budget.
+            When the piece does not fit the budget; it still counts in `used`,
+            as work attempted.
         """
-        size = _size(text)
-        if self.used + size > self.budget:
+        self.used += _size(text)
+        if self.used > self.budget:
             raise _CellOverflow
-        self.used += size
         self.parts.append(text)
 
 
@@ -107,13 +107,53 @@ def _size(text: str) -> int:
     return len(text) if text.isascii() else len(text.encode())
 
 
-def _cut_array(arr: pa.Array) -> pa.Array:
+def _without_uuid(kind: pa.DataType) -> pa.DataType:
+    """Replace the UUID extension by its 16-byte storage type, at any depth.
+
+    The list kernels cannot build an array of an extension type, so lists,
+    structs and maps are cast to a type without it before they are cut. Unions
+    are left alone: their members are cut one by one.
+
+    Parameters
+    ----------
+    kind : pyarrow.DataType
+        Any type.
+
+    Returns
+    -------
+    pyarrow.DataType
+        The type with every UUID below list, struct and map types replaced.
+    """
+    if isinstance(kind, pa.UuidType):
+        return pa.binary(16)
+    if pa.types.is_list(kind):
+        return pa.list_(_without_uuid(kind.value_type))
+    if pa.types.is_large_list(kind):
+        return pa.large_list(_without_uuid(kind.value_type))
+    if pa.types.is_fixed_size_list(kind):
+        return pa.list_(_without_uuid(kind.value_type), kind.list_size)
+    if pa.types.is_struct(kind):
+        return pa.struct([pa.field(f.name, _without_uuid(f.type), f.nullable) for f in kind])
+    if pa.types.is_map(kind):
+        return pa.map_(_without_uuid(kind.key_type), _without_uuid(kind.item_type))
+    return kind
+
+
+def _cut_array(arr: pa.Array, original: pa.DataType | None = None) -> pa.Array:
     """Shorten the values of an array, recursing through nested types.
+
+    Only the rows of the array are ever cut: a list is sliced to its head
+    before its elements are, so a long list never decodes or copies more than
+    `MAX_LIST_ITEMS` plus one elements per row.
 
     Parameters
     ----------
     arr : pyarrow.Array
         The array, of any type DuckDB can return.
+    original : pyarrow.DataType, optional
+        The type before any cast, which tells a UUID (kept as its bytes) from
+        other 16-byte binary (replaced by its length); the array's own type
+        by default.
 
     Returns
     -------
@@ -121,10 +161,14 @@ def _cut_array(arr: pa.Array) -> pa.Array:
         The same rows with every value cut; its type may differ (binary
         becomes its length, temporal and decimal values become text).
     """
-    if isinstance(arr.type, pa.UuidType):
-        return arr.storage
+    original = arr.type if original is None else original
+    plain = _without_uuid(arr.type)
+    if plain != arr.type:
+        arr = arr.cast(plain)
+    if isinstance(original, pa.UuidType):
+        return arr
     if pa.types.is_dictionary(arr.type):
-        return _cut_array(arr.dictionary_decode())
+        return _cut_array(arr.dictionary_decode(), original.value_type)
     if pa.types.is_string_view(arr.type):
         arr = arr.cast(pa.large_string())
     if pa.types.is_string(arr.type) or pa.types.is_large_string(arr.type):
@@ -145,11 +189,12 @@ def _cut_array(arr: pa.Array) -> pa.Array:
         or pa.types.is_list(arr.type)
         or pa.types.is_large_list(arr.type)
     ):
-        return _cut_list(arr)
+        return _cut_list(arr, original)
     if pa.types.is_struct(arr.type):
-        return _struct_of(arr, [_cut_array(arr.field(i)) for i in range(arr.type.num_fields)])
+        children = [_cut_array(arr.field(i), original[i].type) for i in range(arr.type.num_fields)]
+        return _struct_of(arr, children)
     if pa.types.is_union(arr.type):
-        return _cut_union(arr)
+        return _cut_union(arr, original)
     is_text_form = pa.types.is_temporal(arr.type) and not pa.types.is_interval(arr.type)
     if is_text_form or pa.types.is_decimal(arr.type):
         return pc.cast(arr, pa.string())
@@ -178,13 +223,15 @@ def _struct_of(arr: pa.Array, children: list[pa.Array]) -> pa.Array:
     return pa.StructArray.from_arrays(children, fields=fields, mask=arr.is_null())
 
 
-def _cut_union(arr: pa.Array) -> pa.Array:
+def _cut_union(arr: pa.Array, original: pa.DataType) -> pa.Array:
     """Cut every member of a union array, keeping the member of each row.
 
     Parameters
     ----------
     arr : pyarrow.Array
         A sparse or dense union array.
+    original : pyarrow.DataType
+        Its type before any cast.
 
     Returns
     -------
@@ -192,7 +239,7 @@ def _cut_union(arr: pa.Array) -> pa.Array:
         The union over the cut members, with the same names and type codes.
     """
     kind = arr.type
-    members = [_cut_array(arr.field(i)) for i in range(kind.num_fields)]
+    members = [_cut_array(arr.field(i), original[i].type) for i in range(kind.num_fields)]
     names = [kind[i].name for i in range(kind.num_fields)]
     if kind.mode == "sparse":
         return pa.UnionArray.from_sparse(arr.type_codes, members, names, kind.type_codes)
@@ -221,16 +268,15 @@ def _list_of_view(arr: pa.Array) -> pa.Array:
     return make.from_arrays(offsets, arr.flatten(), mask=arr.is_null())
 
 
-def _cut_list(arr: pa.Array) -> pa.Array:
-    """Cut a list-like array: its elements first, then each list to its head.
-
-    The elements are cut before the lists are sliced, because the list
-    kernels cannot build an array of an extension type such as a UUID.
+def _cut_list(arr: pa.Array, original: pa.DataType) -> pa.Array:
+    """Cut a list-like array to the head of each list, and each element in turn.
 
     Parameters
     ----------
     arr : pyarrow.Array
-        A list, large list, fixed-size list or map array.
+        A list, large list, fixed-size list or map array, without UUIDs.
+    original : pyarrow.DataType
+        Its type before any cast.
 
     Returns
     -------
@@ -239,19 +285,16 @@ def _cut_list(arr: pa.Array) -> pa.Array:
         a map becomes a list of ``{"key", "value"}`` structs.
     """
     if pa.types.is_map(arr.type):
-        entries = pa.StructArray.from_arrays(
-            [_cut_array(arr.keys), _cut_array(arr.items)], ["key", "value"]
+        arr = arr.cast(
+            pa.list_(pa.struct([("key", arr.type.key_type), ("value", arr.type.item_type)]))
         )
-        arr = pa.ListArray.from_arrays(arr.offsets, entries, mask=arr.is_null())
     elif pa.types.is_fixed_size_list(arr.type):
-        size = arr.type.list_size
-        values = _cut_array(arr.values.slice(arr.offset * size, len(arr) * size))
-        arr = pa.FixedSizeListArray.from_arrays(values, size, mask=arr.is_null()).cast(
-            pa.list_(values.type)
-        )
-    else:
-        arr = type(arr).from_arrays(arr.offsets, _cut_array(arr.values), mask=arr.is_null())
-    return pc.list_slice(arr, 0, MAX_LIST_ITEMS + 1)  # ty: ignore[unresolved-attribute]
+        arr = arr.cast(pa.list_(arr.type.value_field))
+    arr = pc.list_slice(arr, 0, MAX_LIST_ITEMS + 1)  # ty: ignore[unresolved-attribute]
+    lengths = pc.fill_null(pc.list_value_length(arr), 0)  # ty: ignore[unresolved-attribute]
+    offsets = pa.concat_arrays([pa.array([0], lengths.type), pc.cumulative_sum(lengths)])  # ty: ignore[unresolved-attribute]
+    values = _cut_array(arr.flatten(), _item_original(original))
+    return type(arr).from_arrays(offsets, values, mask=arr.is_null())
 
 
 def precut(table: pa.Table) -> pa.Table:
@@ -269,7 +312,7 @@ def precut(table: pa.Table) -> pa.Table:
         elements at every level, binary replaced by its length and temporal,
         decimal and map values turned into text or entry lists.
     """
-    arrays = [_cut_array(column.combine_chunks()) for column in table.columns]
+    arrays = [_cut_array(column.combine_chunks(), column.type) for column in table.columns]
     return pa.Table.from_arrays(arrays, names=table.column_names)
 
 
