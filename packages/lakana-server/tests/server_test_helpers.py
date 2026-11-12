@@ -19,7 +19,7 @@ from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 from lakana_core.auth import AllowAllAuthorization
 from lakana_core.identity.sessions import SessionService, utc_now
-from lakana_core.models import BrowserSession, Principal
+from lakana_core.models import BrowserSession, Principal, QueryRun
 from lakana_server.browser_session import CSRF_HEADER, cookie_name
 from tests.conftest import AUTH_HEADER
 
@@ -442,3 +442,60 @@ def session_headers(name: str, value: str, csrf: str | None = None) -> dict[str,
     if csrf is not None:
         headers[CSRF_HEADER] = csrf
     return headers
+
+
+def person(client: TestClient, name: str, role: str, env: str = "dev") -> dict[str, str]:
+    """Create a service account with a role on an environment, and return its header.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    name
+        The principal's name.
+    role
+        The role granted on the environment.
+    env
+        The environment.
+
+    Returns
+    -------
+    dict of str to str
+        The principal's Authorization header.
+    """
+    client.post(
+        "/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "SERVICE_ACCOUNT"}
+    )
+    token = client.post(
+        f"/api/v1/principals/{name}/tokens", headers=AUTH_HEADER, json={"name": name}
+    ).json()["token"]
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": name, "role": role, "kind": "ENVIRONMENT", "environment": env},
+    )
+    assert granted.status_code == 201, granted.text
+    return {"Authorization": f"Bearer {token}"}
+
+
+def query_run_columns(client: TestClient, query_id: str, *names: str) -> dict[str, object]:
+    """Read the named attributes of a query run straight from the app's database.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    query_id
+        The query's id.
+    *names
+        Attributes of `QueryRun`, such as ``"sql_text"`` or ``"preview_table_id"``.
+
+    Returns
+    -------
+    dict of str to object
+        Each name with its value.
+    """
+    with Session(cast(FastAPI, client.app).state.engine) as session:
+        run = session.get(QueryRun, uuid.UUID(query_id))
+        assert run is not None
+        return {name: getattr(run, name) for name in names}

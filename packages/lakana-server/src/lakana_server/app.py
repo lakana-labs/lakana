@@ -82,7 +82,12 @@ from lakana_server.api.routing import describe_openapi
 from lakana_server.auth_rate_limit import AuthAuditLimiter
 from lakana_server.body_limit import BodyLimitMiddleware, streaming_routes
 from lakana_server.browser_guard import BrowserGuard
-from lakana_server.concurrency import AppendConcurrencyLimiter
+from lakana_server.concurrency import (
+    JSON_PAGES_PER_PRINCIPAL,
+    JSON_PAGES_PER_PROCESS,
+    AppendConcurrencyLimiter,
+    ThreadSafeConcurrencyLimiter,
+)
 from lakana_server.deprecation import DeprecationHeaders
 from lakana_server.errors import install_exception_handlers
 from lakana_server.readiness import ReadinessCheck
@@ -234,6 +239,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.picture_decode_slots = asyncio.Semaphore(PICTURE_DECODE_SLOTS)
         app.state.picture_principals = set()
         app.state.download_slots = AppendConcurrencyLimiter(MAX_CONCURRENT_DOWNLOADS)
+        app.state.json_page_limiter = ThreadSafeConcurrencyLimiter(
+            JSON_PAGES_PER_PROCESS, JSON_PAGES_PER_PRINCIPAL
+        )
         readiness = resolved_settings.readiness
         app.state.readiness = ReadinessCheck(
             read=functools.partial(

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
+from typing import Any, Literal
 
+import pyarrow as pa
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
+from lakana_core.catalog.preview import PREVIEW_ROW_LIMIT, previewed_table
 from lakana_core.catalog.query_service import QUERY_LIST_MAX, QueryService, WriteTarget
-from lakana_core.errors import ConflictError
+from lakana_core.errors import ConflictError, ValidationError
 from lakana_core.models import QueryRun, QueryRunStatus, WriteMode
 from lakana_core.runs.waiting import WaitReason
 from lakana_core.secrets.keys import KeyProvider
@@ -20,9 +24,11 @@ from lakana_server.api.platform.schemas import (
     QueryStatusOut,
     QuerySubmit,
     QuerySubmitOut,
+    ResultPageOut,
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
+from lakana_server.concurrency import ThreadSafeConcurrencyLimiter
 from lakana_server.deps import (
     check_statement,
     get_key_provider,
@@ -31,6 +37,8 @@ from lakana_server.deps import (
     get_session,
     with_break_glass,
 )
+from lakana_server.errors import ResultPageLimitError
+from lakana_server.result_json import DEFAULT_PAGE_ROWS, MAX_PAGE_ROWS, json_page
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -331,10 +339,108 @@ _NO_RESULT_CLAUSES: dict[WriteMode | None, str] = {
 }
 
 
-@router.get("/{query_id}/result", responses=errors(403, 404, 409))
+_RESULT_CONTENT: dict[int | str, dict[str, Any]] = {
+    200: {
+        "model": ResultPageOut,
+        "description": (
+            "The whole result as an Arrow IPC file (`format=arrow`, the default), or one page "
+            "of it as JSON (`format=json`)."
+        ),
+        "content": {"application/vnd.apache.arrow.file": {}},
+    }
+}
+"""The two media types of a result, for the OpenAPI document; JSON is `ResultPageOut`."""
+
+ARROW_TAKES_NO_PAGING = "limit and offset apply to format=json; the Arrow result is always whole."
+"""The 422 for `limit` or `offset` with the Arrow result."""
+
+PREVIEW_PAGE_TOO_LONG = (
+    f"A preview shows at most {PREVIEW_ROW_LIMIT} rows; ask with limit={PREVIEW_ROW_LIMIT} or less."
+)
+"""The 422 for a page of a preview with `limit` over the preview's rows."""
+
+_OWN_PAGE_BUSY = "You already have a result page being prepared; wait for it, then try again."
+_ALL_PAGES_BUSY = "The server is preparing other result pages; try again in a moment."
+
+
+def _duration_ms(run: QueryRun) -> int | None:
+    """Say how long a run ran, in whole milliseconds.
+
+    Parameters
+    ----------
+    run
+        The query run.
+
+    Returns
+    -------
+    int or None
+        `finished_at` minus `started_at`, or `None` when either is not recorded.
+    """
+    if run.started_at is None or run.finished_at is None:
+        return None
+    return (run.finished_at - run.started_at) // timedelta(milliseconds=1)
+
+
+def _json_result(
+    content: bytes, run: QueryRun, *, offset: int, limit: int, preview: str | None
+) -> bytes:
+    """Convert one page of a stored Arrow result to bounded JSON.
+
+    Parameters
+    ----------
+    content
+        The stored Arrow IPC file.
+    run
+        The run it belongs to.
+    offset
+        The first row of the page.
+    limit
+        The most rows of the page.
+    preview
+        The previewed table's dotted name, or `None` for any other run.
+
+    Returns
+    -------
+    bytes
+        The page, as `json_page` writes it.
+    """
+    result = pa.ipc.open_file(pa.BufferReader(content)).read_all()
+    return json_page(
+        result,
+        offset=offset,
+        limit=limit,
+        row_cap=None if preview is None else PREVIEW_ROW_LIMIT,
+        duration_ms=_duration_ms(run),
+        masked_columns=run.masked_columns,
+        preview_table=preview,
+    )
+
+
+@router.get("/{query_id}/result", responses={**_RESULT_CONTENT, **errors(403, 404, 409, 503)})
 def get_query_result(
     env: str,
     query_id: uuid.UUID,
+    request: Request,
+    result_format: Literal["arrow", "json"] = Query(
+        "arrow",
+        alias="format",
+        description="`arrow` for the whole result as an Arrow IPC file, `json` for one page.",
+    ),
+    limit: int | None = Query(
+        None,
+        ge=1,
+        le=MAX_PAGE_ROWS,
+        description=(
+            f"Rows of a JSON page, 1 to {MAX_PAGE_ROWS} ({PREVIEW_ROW_LIMIT} at most for a "
+            f"preview); {DEFAULT_PAGE_ROWS} when left out. Only with `format=json`."
+        ),
+    ),
+    offset: int | None = Query(
+        None,
+        ge=0,
+        description="The first row of a JSON page, 0 or more; 0 when left out. Only with "
+        "`format=json`.",
+    ),
     principal: PrincipalRef = Depends(get_principal),
     queries: QueryService = Depends(get_query_service),
     session: Session = Depends(get_session),
@@ -342,10 +448,17 @@ def get_query_result(
 ) -> Response:
     """Fetch a query's result.
 
-    Streams the rows of a finished read as an Arrow IPC stream. Needs `SUBMIT_QUERY` on the
-    environment. Only the submitter can fetch them; for anyone else the answer is 404.
-    Answers 409 unless the query has succeeded, or when it succeeded without being a read
-    (it wrote to a table, created a view or was maintenance): only a read has result rows.
+    Returns the rows of a finished read as an Arrow IPC file, or with `format=json` one page
+    of them as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for
+    a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most
+    64 KiB, with cut values marked; it names the columns masked for you and, for a preview,
+    the table. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the
+    result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or
+    when it succeeded without being a read (it wrote to a table, created a view or was
+    maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with the
+    Arrow result, and for a preview's page longer than 100 rows. Answers 503 with
+    `Retry-After: 1` while you already have a JSON page being prepared, or the server is
+    preparing as many as it allows at once.
 
     Parameters
     ----------
@@ -353,6 +466,14 @@ def get_query_result(
         Environment name.
     query_id
         The query's id.
+    request
+        The request, used to reach the JSON page limiter.
+    result_format
+        ``arrow`` (the default) or ``json``, from the `format` query parameter.
+    limit
+        The rows of a JSON page; `DEFAULT_PAGE_ROWS` when not given.
+    offset
+        The first row of a JSON page; 0 when not given.
     principal
         The authenticated caller.
     queries
@@ -372,7 +493,7 @@ def get_query_result(
     Returns
     -------
     Response
-        The result's raw Arrow IPC bytes.
+        The result's raw Arrow IPC bytes, or one page of it as UTF-8 JSON (`ResultPageOut`).
 
     Raises
     ------
@@ -384,6 +505,13 @@ def get_query_result(
         read (it wrote to a table, created a view or was a maintenance run): only a read has
         result rows, and the message names ``lakana query status ID --env ENV`` to see what
         it did.
+    lakana_core.errors.ValidationError
+        Mapped to 422: `limit` or `offset` with the Arrow result (`ARROW_TAKES_NO_PAGING`), or
+        a preview's page longer than its rows (`PREVIEW_PAGE_TOO_LONG`).
+    lakana_server.errors.ResultPageLimitError
+        Mapped to 503 with `Retry-After: 1`: the caller already has a JSON page being
+        prepared, or every slot of this process is taken. The slot is given back once the
+        page's bytes are built, before they are sent.
     """
     run = queries.get_query_run(principal, env, query_id)
     if run.status != QueryRunStatus.SUCCEEDED:
@@ -396,6 +524,28 @@ def get_query_result(
             "download. "
             f"See what it did with: lakana query status {query_id} --env {env}"
         )
-    resolved = StorageResolver(session, key_provider).for_environment(env)
-    content = resolved.storage.read(run.result_location)
-    return Response(content=content, media_type="application/vnd.apache.arrow.file")
+    if result_format == "arrow":
+        if limit is not None or offset is not None:
+            raise ValidationError(ARROW_TAKES_NO_PAGING)
+        resolved = StorageResolver(session, key_provider).for_environment(env)
+        content = resolved.storage.read(run.result_location)
+        return Response(content=content, media_type="application/vnd.apache.arrow.file")
+    preview = previewed_table(run)
+    if preview is not None and limit is not None and limit > PREVIEW_ROW_LIMIT:
+        raise ValidationError(PREVIEW_PAGE_TOO_LONG)
+    limiter: ThreadSafeConcurrencyLimiter = request.app.state.json_page_limiter
+    busy = limiter.try_acquire(principal.id)
+    if busy is not None:
+        raise ResultPageLimitError(_OWN_PAGE_BUSY if busy == "own" else _ALL_PAGES_BUSY)
+    try:
+        resolved = StorageResolver(session, key_provider).for_environment(env)
+        body = _json_result(
+            resolved.storage.read(run.result_location),
+            run,
+            offset=0 if offset is None else offset,
+            limit=DEFAULT_PAGE_ROWS if limit is None else limit,
+            preview=preview,
+        )
+    finally:
+        limiter.release(principal.id)
+    return Response(content=body, media_type="application/json")

@@ -637,6 +637,113 @@ class QueryStatusOut(BaseModel):
     )
 
 
+class ResultColumnOut(BaseModel):
+    """One column of a JSON result page.
+
+    Documents the page `lakana_server.result_json.json_page` writes; the route returns those
+    bytes as they are and never builds this model.
+
+    Parameters
+    ----------
+    name
+        The column's name.
+    type
+        The column's Arrow type name, cut to 256 characters.
+    type_cut
+        `true` when the type name was cut; absent otherwise.
+    """
+
+    name: str
+    type: str
+    type_cut: bool | None = Field(
+        default=None, description="`true` when the type name was cut; absent otherwise."
+    )
+
+
+class MaskedColumnOut(BaseModel):
+    """A column a mask was applied to for the reader, as the worker recorded it.
+
+    Parameters
+    ----------
+    table
+        The masked table's dotted name.
+    column
+        The column, named as in the read.
+    """
+
+    table: str
+    column: str
+
+
+class PreviewOut(BaseModel):
+    """The table a preview showed, named from the run's own SQL.
+
+    Parameters
+    ----------
+    table
+        The dotted name, cut to 1,024 characters.
+    cut
+        `true` when the name was cut; absent otherwise.
+    """
+
+    table: str
+    cut: bool | None = Field(
+        default=None, description="`true` when the name was cut; absent otherwise."
+    )
+
+
+class ResultPageOut(BaseModel):
+    """One page of a query result as JSON (`GET …/result?format=json`).
+
+    Documents the page `lakana_server.result_json.json_page` writes; the route returns those
+    bytes as they are and never builds this model. The page is at most 4 MiB plus a small
+    envelope, and each cell at most 64 KiB: a cut cell is ``{"cut": true}``, or
+    ``{"cut": true, "text": <prefix>}`` for a string, and a cut list ends with
+    ``{"cut": true}`` after 100 elements.
+
+    Parameters
+    ----------
+    columns
+        The result's columns, in order.
+    columns_cut
+        How many further columns were left out because the header filled the page; then no row
+        is sent.
+    masked_columns
+        The columns masked for the reader, `[]` when none was; `null` when not recorded (a run
+        from before this was recorded).
+    masked_columns_cut
+        How many further masked columns were left out because the page was full.
+    rows
+        The rows of the page, each a list of cells in column order. 64-bit integers and
+        decimals are strings, binary is ``{"binary": <bytes>}``, and NaN and infinities are
+        strings.
+    row_cut
+        The positions on this page of the rows that were cut inside.
+    row_count
+        The rows the result has, at most 100 for a preview.
+    next_offset
+        The offset of the next page, or `null` at the end.
+    duration_ms
+        How long the query ran, or `null` when unknown.
+    preview
+        The previewed table for a preview, `null` for any other query.
+    """
+
+    # jscpd:ignore-start
+    # The keys `json_page` writes; the SDK's `_models.py` mirrors them for `QueryRun.page`.
+    columns: list[ResultColumnOut]
+    columns_cut: int
+    masked_columns: list[MaskedColumnOut] | None
+    masked_columns_cut: int
+    rows: list[list[Any]]
+    row_cut: list[int]
+    row_count: int
+    next_offset: int | None
+    duration_ms: int | None
+    preview: PreviewOut | None
+    # jscpd:ignore-end
+
+
 class ExternalTableCreate(BaseModel):
     """Request body for registering a raw-zone table.
 

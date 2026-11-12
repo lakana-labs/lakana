@@ -398,6 +398,7 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview": { class: read, part: 3 }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop": { class: ui, part: 3 }
 "POST /api/v1/environments/{env}/queries": { class: ui, part: 4 }
 "POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4 }

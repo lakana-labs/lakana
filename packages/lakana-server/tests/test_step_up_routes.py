@@ -894,6 +894,10 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
         "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/maintenance",
     ): "maintenance of existing data",
     (
+        "POST",
+        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview",
+    ): "a read: queues the caller's own query of the table's first rows",
+    (
         "PUT",
         "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention",
     ): "how long dropped data is kept; data operation",

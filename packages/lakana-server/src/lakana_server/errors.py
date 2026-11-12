@@ -67,6 +67,15 @@ class DownloadConcurrencyLimitError(LakanaError):
     """
 
 
+class ResultPageLimitError(LakanaError):
+    """Too many JSON result pages are being prepared in this process, or one already for the caller.
+
+    Server-only, like `DownloadConcurrencyLimitError`: an HTTP-layer cap on conversions that
+    each hold a whole result in memory. Mapped to 503 with a `Retry-After: 1` header; the SDK
+    asks again a few times.
+    """
+
+
 class AppendReadTimeoutError(LakanaError):
     """A governed append's request body took too long to arrive.
 
@@ -140,6 +149,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
     AppendReadTimeoutError: 408,
     AppendConcurrencyLimitError: 503,
     DownloadConcurrencyLimitError: 503,
+    ResultPageLimitError: 503,
     ClientDisconnectedError: 400,
     StorageUnavailableError: 503,
     StorageRefusedError: 502,
@@ -152,6 +162,7 @@ _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
     TooManyAttemptsError: "60",
     AppendConcurrencyLimitError: "1",
     DownloadConcurrencyLimitError: "1",
+    ResultPageLimitError: "1",
     StorageUnavailableError: "5",
     AuditUnavailableError: "5",
     GraphBusyError: "5",
