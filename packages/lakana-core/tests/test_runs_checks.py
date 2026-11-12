@@ -6,6 +6,8 @@ import dataclasses
 import inspect
 import re
 import shlex
+import subprocess
+import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1922,3 +1924,17 @@ def test_a_generated_reference_check_never_reaches_the_stored_key_of_a_result(
     assert _stored(session, table_id).health_item == "healthy"
     found = failing_reference_checks(session, [table_id])
     assert [c.outcome for c in found[table_id]] == ["failed"]
+
+
+@pytest.mark.parametrize("module", ["lakana_core.runs.checks", "lakana_worker.memory"])
+def test_a_module_that_needs_the_check_results_imports_in_a_fresh_interpreter(
+    module: str,
+) -> None:
+    """`runs.checks` and the catalog import each other's names; neither may be first to fail."""
+    done = subprocess.run(  # nosec B603 -- fixed arguments
+        [sys.executable, "-I", "-c", f"import {module}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-400:]

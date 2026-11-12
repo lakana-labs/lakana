@@ -7,9 +7,10 @@ from datetime import UTC, datetime
 
 import pytest
 from home_test_helpers import check_result, deployed_job, environment, run_of
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog import health_summary
 from lakana_core.catalog.health import CheckHealth
 from lakana_core.catalog.health_summary import (
     HEALTH_ITEMS,
@@ -444,3 +445,42 @@ def test_a_key_write_never_moves_updated_at(session: Session) -> None:
     backfill_health_keys(session)
     session.expire_all()
     assert (t.health_item, t.updated_at) == ("healthy", old)
+
+
+def test_backfill_takes_the_lowest_ids_first_and_commits_a_chunk_at_a_time(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(health_summary, "_CHUNK", 2)
+    tables = [_table(session, name) for name in "abcde"]
+    session.commit()
+    commits: list[int] = []
+    engine = session.get_bind()
+
+    def listener(conn: object) -> None:
+        commits.append(1)
+
+    event.listen(engine, "commit", listener)
+    try:
+        assert backfill_health_keys(session, limit=5) == 5
+    finally:
+        event.remove(engine, "commit", listener)
+    assert len(commits) >= 3
+    session.expire_all()
+    assert all(t.health_item == "not_judged" for t in tables)
+    for t in tables:
+        t.health_item = None
+    session.commit()
+    first_two = sorted(t.id for t in tables)[:2]
+    assert backfill_health_keys(session, limit=2) == 2
+    session.expire_all()
+    assert {t.id for t in tables if t.health_item is not None} == set(first_two)
+
+
+def test_a_check_name_with_two_segments_is_not_a_reference_check(session: Session) -> None:
+    t = _table(session, "t")
+    _result(session, t, "silver.t/ref_cust/other", CheckOutcome.FAILED, generated=True, at=_AT)
+    assert failing_reference_checks(session, [t.id]) == {}
+    _result(session, t, "silver.t/sub/ref_cust", CheckOutcome.FAILED, generated=True, at=_AT)
+    assert [c.name for c in failing_reference_checks(session, [t.id])[t.id]] == [
+        "silver.t/sub/ref_cust"
+    ]

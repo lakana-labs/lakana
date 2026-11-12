@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Securable
-from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.db import db_now
 from lakana_core.identifiers import TableRef, shown
 from lakana_core.models import (
@@ -1543,6 +1542,9 @@ def record_result(
             },
         )
     if table_id is not None:
+        # Imported here: the catalog package imports this module's names when it loads.
+        from lakana_core.catalog.health_summary import refresh_health_key
+
         refresh_health_key(session, table_id)
     session.commit()
     return True

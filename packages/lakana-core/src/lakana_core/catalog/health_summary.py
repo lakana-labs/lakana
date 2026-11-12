@@ -88,6 +88,8 @@ HealthState = Literal["failing", "warning", "healthy", "not_judged"]
 _RANK: Mapping[str, int] = {item: rank for rank, item in enumerate(HEALTH_ITEMS)}
 _FAILING_BELOW = 8
 """Ranks under this are failing; the next seven are warnings."""
+_CHUNK = 50
+"""The tables `backfill_health_keys` commits at a time."""
 _HEALTHY = _RANK["healthy"]
 _NOT_JUDGED = _RANK["not_judged"]
 _SIGNAL_ITEM = {
@@ -330,6 +332,9 @@ def _store(
 def backfill_health_keys(session: Session, *, limit: int = 500) -> int:
     """Compute the health word of tables that have none, as housekeeping.
 
+    The tables are taken in id order and committed `_CHUNK` at a time, so a commit to one of them
+    never waits behind the whole batch.
+
     Parameters
     ----------
     session
@@ -342,11 +347,15 @@ def backfill_health_keys(session: Session, *, limit: int = 500) -> int:
     int
         How many tables were taken.
     """
-    ids = session.scalars(select(Table.id).where(Table.health_item.is_(None)).limit(limit)).all()
-    for table_id in ids:
-        summary = _compute(session, table_id)
-        assert summary is not None  # nosec B101 -- the id was just read
-        _store(session, table_id, summary, only_unset=True)
+    ids = session.scalars(
+        select(Table.id).where(Table.health_item.is_(None)).order_by(Table.id).limit(limit)
+    ).all()
+    for start in range(0, len(ids), _CHUNK):
+        for table_id in ids[start : start + _CHUNK]:
+            summary = _compute(session, table_id)
+            assert summary is not None  # nosec B101 -- the id was just read
+            _store(session, table_id, summary, only_unset=True)
+        session.commit()
     session.commit()
     return len(ids)
 
@@ -401,5 +410,8 @@ def failing_reference_checks(
     found: dict[uuid.UUID, list[CheckHealth]] = {}
     for row in rows:
         assert row.table_id is not None  # nosec B101 -- the query selects by table id
-        found.setdefault(row.table_id, []).append(check_health(row))
+        health = check_health(row)
+        # The LIKE above only narrows the scan; `is_reference_check` decides.
+        if is_reference_check(health.name, health.generated):
+            found.setdefault(row.table_id, []).append(health)
     return found
