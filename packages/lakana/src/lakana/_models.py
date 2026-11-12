@@ -4781,3 +4781,74 @@ class ResultPage:
 
 
 # jscpd:ignore-end
+
+
+# jscpd:ignore-start
+# The fields mirror the REST `TableDefinitionOut` and `TableDefinitionFileOut`; the SDK depends on
+# neither.
+@dataclass(frozen=True)
+class TableDefinition:
+    """Where the environment's current deployment defines a table (`client.tables.definition`).
+
+    Every field but `defined` is `None` for a table no current deployment defines: one created
+    or renamed outside a project.
+
+    Parameters
+    ----------
+    defined
+        Whether a current deployment defines the table.
+    repository
+        The repository's name.
+    path
+        The file's path in the repository.
+    line
+        The line the file defines the table on.
+    commit
+        The deployed commit, never the branch head.
+    project_version_id
+        The deployed project version.
+    deployed_at
+        When that version was first deployed to the environment.
+    browse_url
+        An HTTPS link to the line on the repository's git host, or `None` when none can be built
+        (a host other than github.com, gitlab.com, codeberg.org, gitea.com, bitbucket.org and
+        Azure DevOps, such as a server of your own, or a local repository).
+    """
+
+    defined: bool
+    repository: str | None
+    path: str | None
+    line: int | None
+    commit: str | None
+    project_version_id: str | None
+    deployed_at: datetime | None
+    browse_url: str | None
+
+
+@dataclass(frozen=True)
+class TableDefinitionFile(TableDefinition):
+    """A table's definition with the file's text, or why it is not shown.
+
+    Parameters
+    ----------
+    content
+        The file's text (UTF-8, with line-feed line endings), or `None`. It can hold invisible
+        characters such as a bidirectional override, and control characters in a file deployed
+        before deploys refused them: escape them before you print the text to a terminal.
+    bytes
+        The size of the text's UTF-8 encoding, set only with `content`.
+    reason
+        Why `content` is `None`: ``"restricted"`` (you do not pass the rules for reading the
+        file), ``"not_recorded"`` (the deployed version has no record of the file) or
+        ``"too_large"`` (over 1 MiB); `None` with content and for a table no deployment defines.
+    message
+        The sentence for `reason`, with the next step, or `None`.
+    """
+
+    content: str | None
+    bytes: int | None
+    reason: str | None
+    message: str | None
+
+
+# jscpd:ignore-end

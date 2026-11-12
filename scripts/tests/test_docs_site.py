@@ -442,3 +442,17 @@ def test_the_milestone_pattern_matches_the_names_it_is_meant_to_catch() -> None:
         assert MILESTONE.fullmatch(name), name
     for text in ("Mb", "MB", "M5MB", "Memory", "M"):
         assert MILESTONE.search(text) is None, text
+
+
+CREDENTIALS_SENTENCE = (
+    "A password, token or key typed into a project file is shown to everyone who passes these "
+    "rules, so keep credentials in Lakana's secrets and name them in the file."
+)
+"""The known gap of "Defined in" that its page must state, word for word."""
+
+
+def test_the_defined_in_page_states_the_credentials_gap() -> None:
+    """The page says that a credential typed into a file is shown, and where to keep one."""
+    page = (SITE / "how-to" / "see-where-a-table-is-defined.md").read_text(encoding="utf-8")
+    assert CREDENTIALS_SENTENCE in " ".join(page.split())
+    assert "(manage-secrets.md" in page

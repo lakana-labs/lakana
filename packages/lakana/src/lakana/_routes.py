@@ -148,6 +148,12 @@ ROUTES: dict[str, Route] = {
     "tables.preview": Route(
         "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview"
     ),
+    "tables.definition": Route(
+        "GET", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition"
+    ),
+    "tables.definition_file": Route(
+        "GET", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition/file"
+    ),
     "tables.maintain": Route(
         "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/maintenance"
     ),

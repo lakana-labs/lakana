@@ -75,6 +75,7 @@ nav:
       - how-to/clean-up-files-left-by-older-releases.md
       - how-to/find-a-table.md
       - how-to/preview-a-table.md
+      - how-to/see-where-a-table-is-defined.md
       - how-to/find-a-run.md
       - how-to/stop-a-query.md
       - how-to/why-is-it-waiting.md

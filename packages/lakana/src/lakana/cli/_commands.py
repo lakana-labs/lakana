@@ -55,6 +55,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "table references": ("tables.references",),
     "table maintain": ("tables.maintain", "query_run.wait"),
     "table preview": ("tables.preview", "query_run.wait", "query_run.page"),
+    "table definition": ("tables.definition", "tables.definition_file"),
     "artifact upload": ("artifacts.upload",),
     "artifact list": ("artifacts.list",),
     "artifact versions list": ("artifacts.get", "artifacts.versions"),

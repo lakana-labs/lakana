@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,6 +23,8 @@ from lakana._models import (
     Measure,
     ModelReference,
     Table,
+    TableDefinition,
+    TableDefinitionFile,
     TableHealth,
     TableListItem,
 )
@@ -1999,6 +2002,111 @@ def preview(
         lambda: state.client().tables.preview(environment, name),
         timeout=timeout,
     )
+
+
+_LOCATION_LIMIT = 4096
+"""The most characters of one location value printed: a file path's limit on most systems."""
+
+
+def _shown(value: object) -> str:
+    """Put one value a server sent on one line, escaped.
+
+    Parameters
+    ----------
+    value
+        A path, repository name, commit or link.
+
+    Returns
+    -------
+    str
+        The value with control characters and line breaks written as escapes (`inline`).
+    """
+    return _output.inline(str(value), limit=_LOCATION_LIMIT)
+
+
+def _location_lines(found: TableDefinition) -> str:
+    """Write where a table is defined, one fact a line, each value escaped onto its line.
+
+    Parameters
+    ----------
+    found
+        A definition with `defined` true.
+
+    Returns
+    -------
+    str
+        The lines, each ending in a line feed; the `Open` line only when there is a link.
+    """
+    deployed = "" if found.deployed_at is None else f" (deployed {_utc(found.deployed_at)})"
+    lines = [
+        f"Defined in {_shown(found.path)}, line {found.line}",
+        f"Repository  {_shown(found.repository)}",
+        f"Commit      {_shown((found.commit or '')[:7])}{deployed}",
+    ]
+    if found.browse_url is not None:
+        lines.append(f"Open        {_shown(found.browse_url)}")
+    return "".join(_output.safe_text(line) + "\n" for line in lines)
+
+
+@table_app.command("definition")
+def definition(
+    ctx: typer.Context,
+    name: str,
+    show: Annotated[
+        bool,
+        typer.Option(
+            "--show",
+            help="Also print the file, on standard output; the location goes to standard error.",
+        ),
+    ] = False,
+    env: _ENV = None,
+) -> None:
+    """Show the file and line that define table NAME, at the deployed commit.
+
+    The answer comes from the environment's current deployment, never the branch head: the
+    repository, the file and line, the commit, and a link to the line when the repository is on
+    github.com, gitlab.com, codeberg.org, gitea.com, bitbucket.org or Azure DevOps.
+    With `--show`, the file itself goes to standard output, with every control and invisible
+    formatting character written as an escape, and the location to standard error; when the
+    file is not shown to you, a line on standard error says why and what to do.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The qualified table name.
+    show
+        Also print the file.
+    env
+        The environment.
+    """
+    state = state_of(ctx)
+    environment = resolve_environment(state, env)
+    tables = state.client().tables
+    found = (
+        tables.definition_file(environment, name) if show else tables.definition(environment, name)
+    )
+    if state.output == "json":
+        _output.emit(state, found)
+        return
+    out = sys.stderr if show else sys.stdout
+    if not found.defined:
+        out.write(
+            _output.safe_text(
+                f"'{_output.inline(name)}' is not defined by a project deployed to "
+                f"'{_output.inline(environment)}'; it was created or renamed outside a project."
+            )
+            + "\n"
+        )
+        return
+    out.write(_location_lines(found))
+    if not isinstance(found, TableDefinitionFile):
+        return
+    if found.content is not None:
+        sys.stdout.write(_output.safe_source(found.content))
+    else:
+        sys.stderr.write(_output.safe_text(found.message or "") + "\n")
 
 
 def lineage_tree(lineage: Lineage) -> list[str]:

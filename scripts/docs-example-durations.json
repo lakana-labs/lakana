@@ -31,6 +31,7 @@
  "run-a-job": 19,
  "run-after-deploy": 9,
  "see-a-tables-model": 56,
+ "see-where-a-table-is-defined": 14,
  "train-and-predict": 119,
  "translate-a-table": 45,
  "write-modes": 35.7

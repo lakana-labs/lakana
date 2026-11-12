@@ -744,3 +744,31 @@ def test_a_flexible_column_does_not_take_the_room_of_the_columns_next_to_it(
     assert "Not shown" not in flexible
     text = " ".join(" ".join(line.strip("│ ") for line in flexible.splitlines()[3:-1]).split())
     assert text.endswith("without losing a word")
+
+
+def test_safe_source_escapes_ascii_controls_but_keeps_tab_and_line_feed() -> None:
+    text = "".join(chr(c) for c in range(0x20)) + "\x7f"
+    expected = (
+        "".join(chr(c) if c in (0x09, 0x0A) else f"\\x{c:02x}" for c in range(0x20)) + "\\x7f"
+    )
+    assert _output.safe_source(text) == expected
+
+
+def test_safe_source_escapes_c1_and_format_characters_and_separators() -> None:
+    text = "\x80\x9b\x9f\u00ad\u061c\u200b\u200e\u202a\u202e\u2028\u2029\u2066\u2069\ufeff"
+    assert _output.safe_source(text) == (
+        "\\x80\\x9b\\x9f\\xad\\u061c\\u200b\\u200e\\u202a\\u202e\\u2028\\u2029\\u2066\\u2069\\ufeff"
+    )
+
+
+def test_safe_source_escapes_a_lone_surrogate() -> None:
+    assert _output.safe_source("a\ud800b") == "a\\ud800b"
+
+
+def test_safe_source_keeps_printable_text_tabs_and_lines_exactly() -> None:
+    text = "SELECT\t'\u00e9\u20ac\u65e5\u672c \U0001f469 [bold]x[/bold]'\n\n  FROM x  \n"
+    assert _output.safe_source(text) == text
+
+
+def test_safe_source_escapes_a_zero_width_joiner_and_keeps_the_emoji() -> None:
+    assert _output.safe_source("\U0001f469\u200d\U0001f4bb") == "\U0001f469\\u200d\U0001f4bb"
