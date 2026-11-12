@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import shlex
 import sys
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
@@ -545,6 +546,33 @@ def _masked_line(page: ResultPage) -> str | None:
     return f"Masked for you: {', '.join(names)}" if names else None
 
 
+def _rest_hint(page: ResultPage, next_offset: int) -> str:
+    """Say how to read the rows a full page left out.
+
+    Parameters
+    ----------
+    page
+        The cut page of a preview.
+    next_offset
+        The offset of the first row left out.
+
+    Returns
+    -------
+    str
+        A `lakana sql` command that returns exactly the rest, with every name part quoted as an
+        SQL identifier and the whole statement quoted for the shell.
+    """
+    text = "The page is full; the other rows are left out."
+    if page.preview_table is None:
+        return f"{text} Read them with `lakana sql`, or select fewer columns."
+    name = ".".join('"' + part.replace('"', '""') + '"' for part in page.preview_table.split("."))
+    statement = f"SELECT * FROM {name} LIMIT {page.row_count - next_offset} OFFSET {next_offset}"  # nosec B608 - text for the person to run
+    return (
+        f"{text} Read the rest with lakana sql {shlex.quote(statement)}, "
+        "or select fewer columns to see more rows at once."
+    )
+
+
 def show_page(
     state: CliState, environment: str, submit: Callable[[], QueryRun], *, timeout: float | None
 ) -> None:
@@ -592,12 +620,7 @@ def show_page(
         facts = ["Read as you."]
     lines = [" · ".join(facts), _masked_line(page)]
     if page.next_offset is not None:
-        table = page.preview_table or "TABLE"
-        lines.append(
-            f"The page is full; the other rows are left out. Read them with "
-            f"'lakana sql \"SELECT * FROM {table} OFFSET {page.next_offset}\"', "
-            "or select fewer columns to see more rows at once."
-        )
+        lines.append(_rest_hint(page, page.next_offset))
     if page.columns_cut:
         lines.append(f"{page.columns_cut} more columns not shown; use --output json.")
     for line in lines:

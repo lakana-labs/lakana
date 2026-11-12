@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -263,7 +264,6 @@ def test_preview_of_a_cut_page_says_what_was_shown_and_what_to_do(tmp_path: Path
     assert "First 2 of 100 rows" in result.stderr
     assert "First 100 rows" not in result.stderr
     assert "lakana sql" in result.stderr and "fewer columns" in result.stderr
-    assert "gold.orders" in result.stderr
 
 
 def test_preview_of_an_empty_table_prints_no_count_and_says_read_as_you(tmp_path: Path) -> None:
@@ -286,3 +286,60 @@ def test_preview_of_an_empty_table_still_names_the_masked_columns(tmp_path: Path
     )
     assert "No rows." in result.stdout
     assert "Masked for you: email" in result.stderr
+
+
+def _hint(tmp_path: Path, table: str, *, shown: int = 2, total: int = 100) -> str:
+    """Run a preview of a cut page of `table` and return its standard error.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    table
+        The dotted name the page reports as previewed.
+    shown
+        The rows on the page, which is also its `next_offset`.
+    total
+        The rows the result has.
+
+    Returns
+    -------
+    str
+        Standard error.
+    """
+    page = _page(
+        rows=[["1", "***"]] * shown,
+        row_count=total,
+        next_offset=shown,
+        preview={"table": table},
+    )
+    result = invoke(
+        make_state(tmp_path, _api(page)), "table", "preview", "gold.orders", "--env", "dev"
+    )
+    return result.stderr
+
+
+def test_the_hint_for_a_cut_page_returns_exactly_the_rest(tmp_path: Path) -> None:
+    err = _hint(tmp_path, "gold.orders")
+    assert 'lakana sql \'SELECT * FROM "gold"."orders" LIMIT 98 OFFSET 2\'' in err
+
+
+def test_the_hint_quotes_a_hyphen_a_space_and_a_reserved_word(tmp_path: Path) -> None:
+    err = _hint(tmp_path, "my-schema.select.sales orders", shown=5, total=7)
+    expected = 'lakana sql \'SELECT * FROM "my-schema"."select"."sales orders" LIMIT 2 OFFSET 5\''
+    assert expected in err
+
+
+def test_the_hint_survives_a_quote_character_in_a_name(tmp_path: Path) -> None:
+    err = _hint(tmp_path, "gold.o\"d'x")
+    statement = 'SELECT * FROM "gold"."o""d\'x" LIMIT 98 OFFSET 2'
+    assert f"lakana sql {shlex.quote(statement)}" in err
+    assert shlex.split(f"lakana sql {shlex.quote(statement)}")[2] == statement
+
+
+def test_a_cut_page_without_a_table_name_still_points_at_lakana_sql(tmp_path: Path) -> None:
+    page = _page(rows=[["1", "***"]], row_count=100, next_offset=1, preview=None)
+    result = invoke(
+        make_state(tmp_path, _api(page)), "table", "preview", "gold.orders", "--env", "dev"
+    )
+    assert "lakana sql`" in result.stderr and "fewer columns" in result.stderr
