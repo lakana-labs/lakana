@@ -611,6 +611,17 @@ class Table:
     health_never_judged
         The ``block`` column entries of `health` that no commit can judge, with the reason; a
         run warns on them instead of blocking. Empty from an older server.
+    owner
+        Who owns the table; `None` when the owner was deleted, and from an older server.
+    created_at
+        When the table was created; `None` from an older server.
+    last_read_at
+        When a succeeded query last read it; `None` when none did, and from an older server.
+    readers_7d
+        How many principals read it in the last 7 UTC days, today included; never who. ``0``
+        from an older server.
+    health_summary
+        Its health in one word, as you may see it; `None` from an older server.
     """
 
     name: str
@@ -645,6 +656,11 @@ class Table:
     health: dict[str, str] = field(default_factory=dict)
     health_missing: tuple[str, ...] = ()
     health_never_judged: dict[str, str] = field(default_factory=dict)
+    owner: TableOwner | None = None
+    created_at: datetime | None = None
+    last_read_at: datetime | None = None
+    readers_7d: int = 0
+    health_summary: HealthSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -4478,6 +4494,203 @@ class AccessStatus:
 
     scopes: list[ManagedScope]
     overrides: list[AccessOverride]
+
+
+@dataclass(frozen=True)
+class TableOwner:
+    """Who owns a table.
+
+    Parameters
+    ----------
+    name
+        The principal's name.
+    kind
+        ``USER`` or ``SERVICE_ACCOUNT``.
+    """
+
+    name: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class HealthSummary:
+    """A table's health in one word.
+
+    Parameters
+    ----------
+    state
+        ``failing``, ``warning``, ``healthy`` or ``not_judged``.
+    item
+        The word's name.
+    text
+        The word as it is shown.
+    others
+        How many other findings the word leaves out.
+    """
+
+    state: str
+    item: str
+    text: str
+    others: int
+
+
+@dataclass(frozen=True)
+class TableMatch:
+    """What part of a table a search text matched.
+
+    Parameters
+    ----------
+    kind
+        ``table`` for the table's own text, ``column`` for one of its columns'.
+    matched
+        The field: ``name``, ``label``, ``description``, ``grain`` or ``measure``.
+    column
+        For a column match, the column's name.
+    column_type
+        For a column match, its type.
+    snippet
+        For a label, description, grain or measure match, the text around the match.
+    language
+        The language of the matched text; `None` for a name.
+    translated
+        Whether the matched text is a translation.
+    """
+
+    kind: str
+    matched: str
+    column: str | None
+    column_type: str | None
+    snippet: str | None
+    language: str | None
+    translated: bool
+
+
+@dataclass(frozen=True)
+class TableListItem:
+    """One table of the catalog list.
+
+    Parameters
+    ----------
+    environment
+        Its environment.
+    namespace
+        Its namespace, dotted.
+    name
+        Its name.
+    uuid
+        Its id.
+    kind
+        ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    model_kind
+        The ``kind`` its asset header declares, if any.
+    state
+        ``not_published`` or ``kept`` for a managed table so marked; ``published`` otherwise.
+    owner
+        Its owner; `None` when the owner was deleted.
+    created_at
+        When it was created.
+    row_count
+        Its rows, as stored; `None` when not known.
+    size_bytes
+        The size of its data files; `None` when not known.
+    last_write_at
+        When its current snapshot was committed; `None` without one.
+    last_read_at
+        When a succeeded query last read it; `None` when none did.
+    readers_7d
+        How many principals read it in the last 7 UTC days, today included; never who.
+    health_summary
+        Its health in one word, as you may see it.
+    match
+        With a search text, what of the table matched; `None` without one.
+    """
+
+    environment: str
+    namespace: str
+    name: str
+    uuid: str
+    kind: str
+    model_kind: str | None
+    state: str
+    owner: TableOwner | None
+    created_at: datetime
+    row_count: int | None
+    size_bytes: int | None
+    last_write_at: datetime | None
+    last_read_at: datetime | None
+    readers_7d: int
+    health_summary: HealthSummary
+    match: TableMatch | None
+
+
+@dataclass(frozen=True)
+class TableListPage:
+    """One page of the catalog list.
+
+    Parameters
+    ----------
+    items
+        The tables, in the list's order.
+    next_cursor
+        Pass it as ``cursor`` for the next page; `None` on the last.
+    capped
+        Whether a search text matched more readable tables than one search keeps; narrow it.
+    """
+
+    items: list[TableListItem]
+    next_cursor: str | None
+    capped: bool
+
+
+@dataclass(frozen=True)
+class TreeNamespace:
+    """A namespace of the catalog tree.
+
+    Parameters
+    ----------
+    path
+        Its path, dotted.
+    count
+        The readable tables in it and beneath it.
+    """
+
+    path: str
+    count: int
+
+
+@dataclass(frozen=True)
+class TreeEnvironment:
+    """An environment of the catalog tree.
+
+    Parameters
+    ----------
+    name
+        Its name.
+    count
+        The readable tables in it.
+    namespaces
+        Its namespaces you are shown, by path.
+    """
+
+    name: str
+    count: int
+    namespaces: list[TreeNamespace]
+
+
+@dataclass(frozen=True)
+class TableTree:
+    """The counts of readable tables, by environment and namespace.
+
+    Parameters
+    ----------
+    count
+        The readable tables in every environment.
+    environments
+        The environments you are shown, by name.
+    """
+
+    count: int
+    environments: list[TreeEnvironment]
 
 
 # jscpd:ignore-end

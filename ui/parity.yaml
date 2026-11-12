@@ -320,6 +320,8 @@
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }
 "GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/status": { class: read, part: 2 }
+"GET /api/v1/tables": { class: read, part: 3 }
+"GET /api/v1/tables/tree": { class: read, part: 3 }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
 "GET /api/v1/whoami": { class: read, part: 1 }

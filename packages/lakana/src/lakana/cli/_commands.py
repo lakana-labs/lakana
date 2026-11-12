@@ -34,7 +34,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "ns delete": ("namespaces.delete",),
     "table create": ("tables.create", "tables.set_retention"),
     "table create-external": ("tables.create_external",),
-    "table list": ("tables.list", "tables.list_dropped"),
+    "table list": ("tables.list", "tables.list_dropped", "catalog.list", "catalog.iter"),
     "table get": ("tables.get",),
     "table delete": ("tables.delete",),
     "table undrop": ("tables.undrop",),

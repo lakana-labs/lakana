@@ -108,6 +108,11 @@ readers either.
 `null`; that is not an error, and the rest of the health is returned. An empty list means nobody read
 the table in the window.
 
+Who read a table is for the administrator; that it was read is for everyone who may read the table.
+`GET .../tables/{name}` and the catalog list show `last_read_at` (when a succeeded query last
+read it) and `readers_7d` (how many principals read it in the last 7 UTC days, today included) to
+anyone who may read the table, never a name, and seeing them writes no audit event.
+
 ### How long reads are kept
 
 | Setting | Default | Meaning |

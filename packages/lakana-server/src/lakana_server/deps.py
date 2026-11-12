@@ -23,6 +23,7 @@ from lakana_core.catalog.lineage_graph import LineageService
 from lakana_core.catalog.query_service import QueryService
 from lakana_core.catalog.search import CatalogSearch
 from lakana_core.catalog.service import CatalogService
+from lakana_core.catalog.table_listing import TableListing
 from lakana_core.ci_oidc.exchange import TOKEN_PREFIX as CI_TOKEN_PREFIX
 from lakana_core.ci_oidc.exchange import CiTokenService
 from lakana_core.ci_oidc.rules import CiTrustRuleService
@@ -963,6 +964,31 @@ def get_catalog_search(
         A search using real authorization.
     """
     return CatalogSearch(session, authz, main_language=main_language)
+
+
+def get_table_listing(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+    main_language: str = Depends(get_main_language),
+) -> TableListing:
+    """Build a TableListing for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service of this request, so a grant added between
+        two requests is seen by the second.
+    main_language
+        `LAKANA_MAIN_LANGUAGE`, the language of header texts whose project declares none.
+
+    Returns
+    -------
+    TableListing
+        A listing using real authorization.
+    """
+    return TableListing(session, authz, main_language=main_language)
 
 
 def get_glossary_service(

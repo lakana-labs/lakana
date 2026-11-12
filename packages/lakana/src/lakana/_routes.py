@@ -220,6 +220,8 @@ ROUTES: dict[str, Route] = {
     "sign_in_settings.update": Route("PATCH", "/api/v1/settings/sign-in"),
     "task_tokens.mint": Route("POST", "/api/v1/task-tokens"),
     "task_tokens.revoke": Route("DELETE", "/api/v1/task-tokens/{key_id}"),
+    "catalog.list": Route("GET", "/api/v1/tables"),
+    "catalog.tree": Route("GET", "/api/v1/tables/tree"),
     "grants.create": Route("POST", "/api/v1/grants"),
     "grants.list": Route("GET", "/api/v1/grants"),
     "grants.revoke": Route("DELETE", "/api/v1/grants/{grant_id}"),

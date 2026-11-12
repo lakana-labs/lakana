@@ -32,6 +32,7 @@ from lakana_server.api.platform.artifacts import MANIFEST_DECODE_SLOTS, MAX_CONC
 from lakana_server.api.platform.artifacts import environment_router as artifacts_environment_router
 from lakana_server.api.platform.artifacts import router as artifacts_router
 from lakana_server.api.platform.audit_events import router as audit_events_router
+from lakana_server.api.platform.catalog import router as catalog_router
 from lakana_server.api.platform.ci_oidc import router as ci_oidc_router
 from lakana_server.api.platform.ci_trust_rules import router as ci_trust_rules_router
 from lakana_server.api.platform.column_masks import router as column_masks_router
@@ -98,6 +99,7 @@ ROUTERS = (
     dropped_tables_router,
     expiring_tables_router,
     search_router,
+    catalog_router,
     terms_router,
     graph_router,
     artifacts_router,

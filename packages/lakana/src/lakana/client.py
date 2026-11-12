@@ -36,6 +36,7 @@ from lakana.errors import AuthenticationError, ConfigError, InvalidResponse
 from lakana.resources.access import Access
 from lakana.resources.artifacts import Artifacts
 from lakana.resources.audit_events import AuditEvents
+from lakana.resources.catalog import Catalog
 from lakana.resources.checks import Checks
 from lakana.resources.ci_trust_rules import CiTrustRules, exchange_id_token
 from lakana.resources.column_masks import ColumnMasks
@@ -111,6 +112,7 @@ class Client:
         self.environments = Environments(self._transport)
         self.namespaces = Namespaces(self._transport)
         self.tables = Tables(self._transport)
+        self.catalog = Catalog(self._transport)
         self.artifacts = Artifacts(self._transport)
         self.queries = Queries(self._transport)
         self.principals = Principals(self._transport)

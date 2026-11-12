@@ -7,12 +7,14 @@ from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
     SecretStr,
     StrictBool,
+    field_validator,
     model_validator,
 )
 from pydantic_core import PydanticCustomError
@@ -957,6 +959,220 @@ class TableReferenceOut(BaseModel):
     name: str
 
 
+class OwnerOut(BaseModel):
+    """Who owns a table.
+
+    Parameters
+    ----------
+    name
+        The principal's name.
+    kind
+        ``USER`` or ``SERVICE_ACCOUNT``.
+    """
+
+    name: str
+    kind: Literal["USER", "SERVICE_ACCOUNT"]
+
+
+class HealthSummaryOut(BaseModel):
+    """A table's health in one word.
+
+    Parameters
+    ----------
+    state
+        ``failing``, ``warning``, ``healthy`` or ``not_judged``.
+    item
+        The word's name.
+    text
+        The word as it is shown.
+    others
+        How many other findings the word leaves out.
+    """
+
+    state: Literal["failing", "warning", "healthy", "not_judged"]
+    item: str
+    text: str
+    others: int
+
+
+class TableMatchOut(BaseModel):
+    """What part of a table a search text matched.
+
+    Parameters
+    ----------
+    kind
+        ``table`` for the table's own text, ``column`` for one of its columns'.
+    matched
+        The field: ``name``, ``label``, ``description``, ``grain`` or ``measure``.
+    column
+        For a column match, the column's name.
+    column_type
+        For a column match, its type.
+    snippet
+        For a label, description, grain or measure match, the text around the match.
+    language
+        The language of the matched text; `None` for a name.
+    translated
+        Whether the matched text is a translation.
+    """
+
+    # jscpd:ignore-start
+    # The fields of `lakana_core.catalog.table_listing.TableMatch`, which this answer is built
+    # from attribute by attribute (`from_attributes`): the REST contract names each one itself.
+    kind: str
+    matched: str
+    column: str | None
+    column_type: str | None
+    snippet: str | None
+    language: str | None
+    translated: bool
+    # jscpd:ignore-end
+
+
+class TableListItemOut(BaseModel):
+    """One table of the catalog list.
+
+    Parameters
+    ----------
+    environment
+        Its environment.
+    namespace
+        Its namespace, dotted.
+    name
+        Its name.
+    uuid
+        Its id.
+    kind
+        ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    model_kind
+        The ``kind`` its asset header declares, if any.
+    state
+        ``not_published`` or ``kept`` for a managed table so marked; ``published`` otherwise.
+    owner
+        Its owner; `None` when the owner was deleted.
+    created_at
+        When it was created.
+    row_count
+        Its rows, as stored; `None` when not known.
+    size_bytes
+        The size of its data files; `None` when not known, and whenever `last_write_at` is.
+    last_write_at
+        When its current snapshot was committed; `None` without one.
+    last_read_at
+        When a succeeded query last read it; `None` when none did.
+    readers_7d
+        How many principals read it in the last 7 UTC days, today included.
+    health_summary
+        Its health in one word, as the caller may see it.
+    match
+        With a search text, what of the table matched; `None` without one.
+    """
+
+    # jscpd:ignore-start
+    # The fields of `lakana_core.catalog.table_listing.TableListItem`, which this answer is built
+    # from attribute by attribute (`from_attributes`): the REST contract names each one itself.
+    environment: str
+    namespace: str
+    name: str
+    uuid: str = Field(validation_alias=AliasChoices("uuid", "id"))
+    kind: Literal["TABLE", "EXTERNAL", "VIEW", "ARTIFACT"]
+    model_kind: str | None
+    state: Literal["published", "not_published", "kept"]
+    owner: OwnerOut | None
+    created_at: datetime
+    row_count: int | None
+    size_bytes: int | None
+    last_write_at: datetime | None
+    last_read_at: datetime | None
+    readers_7d: int
+    health_summary: HealthSummaryOut
+    match: TableMatchOut | None
+    # jscpd:ignore-end
+
+    @field_validator("uuid", mode="before")
+    @classmethod
+    def _id_as_text(cls, value: object) -> object:
+        """Write an id as text, as `TableOut.uuid` does.
+
+        Parameters
+        ----------
+        value
+            The id, or text.
+
+        Returns
+        -------
+        object
+            The text of a UUID; anything else unchanged.
+        """
+        return str(value) if isinstance(value, uuid.UUID) else value
+
+
+class TableListPageOut(BaseModel):
+    """One page of the catalog list.
+
+    Parameters
+    ----------
+    items
+        The tables, in the list's order.
+    next_cursor
+        Pass it as `cursor` for the next page; `null` on the last.
+    capped
+        Whether a search text matched more readable tables than one search keeps.
+    """
+
+    items: list[TableListItemOut]
+    next_cursor: str | None
+    capped: bool
+
+
+class TreeNamespaceOut(BaseModel):
+    """A namespace of the catalog tree.
+
+    Parameters
+    ----------
+    path
+        Its path, dotted.
+    count
+        The readable tables in it and beneath it.
+    """
+
+    path: str
+    count: int
+
+
+class TreeEnvironmentOut(BaseModel):
+    """An environment of the catalog tree.
+
+    Parameters
+    ----------
+    name
+        Its name.
+    count
+        The readable tables in it.
+    namespaces
+        Its namespaces the caller is shown, by path.
+    """
+
+    name: str
+    count: int
+    namespaces: list[TreeNamespaceOut]
+
+
+class TableTreeOut(BaseModel):
+    """The counts of readable tables, by environment and namespace.
+
+    Parameters
+    ----------
+    count
+        The readable tables in every environment.
+    environments
+        The environments the caller is shown, by name.
+    """
+
+    count: int
+    environments: list[TreeEnvironmentOut]
+
+
 class TableOut(BaseModel):
     """Response body for a table, external table or view, read-only.
 
@@ -1045,6 +1261,17 @@ class TableOut(BaseModel):
         The ``block`` column entries of `health` that no commit can judge, by key, with the
         reason (``a string column has no range``, ``only the first 200 columns are judged``): a
         run warns on such an entry instead of blocking.
+    owner
+        Who owns the table; `None` when the owner was deleted, and for an answer that does not
+        look it up (a create or a commit).
+    created_at
+        When the table was created.
+    last_read_at
+        When a succeeded query last read it; `None` when none did.
+    readers_7d
+        How many principals read it in the last 7 UTC days, today included; never their names.
+    health_summary
+        Its health in one word, as the caller may see it.
     """
 
     name: str
@@ -1079,6 +1306,11 @@ class TableOut(BaseModel):
     health: dict[str, str] = {}
     health_missing: list[str] = []
     health_never_judged: dict[str, str] = {}
+    owner: OwnerOut | None = None
+    created_at: datetime | None = None
+    last_read_at: datetime | None = None
+    readers_7d: int = 0
+    health_summary: HealthSummaryOut | None = None
 
 
 class LastMaintenanceOut(BaseModel):
