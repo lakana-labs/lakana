@@ -30,6 +30,7 @@ lakana --output json table preview silver.orders
   "duration_ms": 119,
   "masked_columns": [],
   "preview_table": "silver.orders",
+  "preview_table_cut": false,
   "row_cut": [],
   "columns_cut": 0,
   "masked_columns_cut": 0
@@ -59,6 +60,7 @@ answers `409` with its own message.
 | `duration_ms` | How long the query ran, or `null` when not known. |
 | `masked_columns` | The columns masked for the reader, each `{"table", "column"}`; `[]` when none; `null` for a run from before this was recorded and for a run without a stored result. |
 | `preview` | `{"table": "gold.orders"}` for a preview, the table as the run's own query names it; `null` for any other query. |
+| `preview_table_cut` | `true` when the table name was cut to fit the page. The SDK and `--output json` show it next to `preview_table`; the REST answer has it as `preview.cut`, present only when `true`. |
 | `row_cut` | The positions on this page of the rows the page budget cut inside. A cell cut at its own 64 KiB limit shows as a `{"cut": true ...}` value in the cell and its row is not listed here. |
 | `columns_cut` | How many columns were left out of the page, in two cases. When the column header filled the page, the columns that did not fit are left out and the page has no rows although `row_count` is above 0. When a row was cut inside the page, the cells of that row that did not fit are left out. Either way the JSON page holds no more of them; select fewer or narrower columns. |
 | `masked_columns_cut` | How many further masked columns were left out because the page was full. |
