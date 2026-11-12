@@ -29,7 +29,7 @@ from lakana_core.errors import AuditUnavailableError, NotFoundError, PermissionD
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
-from lakana_core.identifiers import NAMESPACE_SEPARATOR, TableRef
+from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath, TableRef
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
@@ -55,7 +55,7 @@ from lakana_core.projects.definition import (
     table_definition,
     table_definition_file,
 )
-from lakana_core.projects.source_map import SOURCE_FILE_MAX_BYTES, ProjectFileRecord
+from lakana_core.projects.source_map import SOURCE_FILE_MAX_BYTES, ProjectFileRecord, text_digest
 
 F_REF = TableRef.from_dotted("dev", "gold.f")
 REC = ProjectFileRecord(
@@ -622,6 +622,37 @@ def test_a_row_of_a_version_that_is_not_current_is_never_served(session: Session
     assert (got.definition, got.content, got.reason) == (NOT_DEFINED, None, None)
 
 
+def test_a_row_whose_table_digest_collides_is_not_served_for_another_table(
+    session: Session,
+) -> None:
+    # a forged row of gold.x carrying the digest of gold.f: the name rules the collision out
+    _tables(session, "gold.x")
+    _world(session, _rec("gold.x", "silver.a"))
+    session.execute(update(ProjectFile).values(table_sha256=text_digest("gold.f")))
+    session.commit()
+    got = _file(session, _analyst(session))
+    assert (got.definition, got.content) == (NOT_DEFINED, None)
+
+
+def test_a_dotted_legacy_namespace_does_not_take_another_tables_file(session: Session) -> None:
+    # `["a.b"].c` (a namespace from before dots were refused) and `["a", "b"].c` share the
+    # dotted name a.b.c; the file is deployed for the second one only
+    ensure_table(session, "dev", "a.b", "c")
+    ensure_table(session, "dev", NAMESPACE_SEPARATOR.join(["a", "b"]), "c")
+    deploy_files(session, "dev", "analytics", [_rec("a.b.c")])
+    legacy = TableRef("dev", NamespacePath.from_parts(["a.b"], allow_dots=True), "c")
+    got = table_definition_file(
+        session,
+        GrantAuthorization(session),
+        _analyst(session),
+        legacy,
+        session_factory=sessions_like(session),
+        window_minutes=60,
+    )
+    assert (got.definition, got.content) == (NOT_DEFINED, None)
+    assert _source_viewed(session) == []
+
+
 def test_a_table_in_a_three_level_namespace_is_found(session: Session) -> None:
     ensure_table(session, "dev", NAMESPACE_SEPARATOR.join(["lake", "raw"]), "orders")
     deploy_files(session, "dev", "analytics", [_rec("lake.raw.orders")])
@@ -807,6 +838,17 @@ def test_a_view_assets_own_file_is_hidden_when_a_mask_applies_to_a_base_table(
     _retype(session, "gold.f", TableType.VIEW)
     analyst = _analyst(session)
     _policy(session, "mask", analyst, "silver.a")
+    assert _hidden(_file(session, analyst))
+
+
+def test_a_forged_gate_set_without_the_defined_table_still_checks_its_mask(
+    session: Session,
+) -> None:
+    # a forged row whose gate set leaves out gold.f; the reader has a mask on gold.f
+    forged = dataclasses.replace(REC, gate_tables=("silver.a",))
+    _world(session, forged)
+    analyst = _analyst(session)
+    _policy(session, "mask", analyst, "gold.f")
     assert _hidden(_file(session, analyst))
 
 

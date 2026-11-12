@@ -36,11 +36,9 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import TableRef, shown
 from lakana_core.models import (
-    LIVE_ENVIRONMENT,
     Environment,
     EnvironmentDeployment,
     JobVersion,
-    Namespace,
     ProjectFile,
     ProjectFileText,
     Repository,
@@ -199,23 +197,18 @@ def _live_table(session: Session, ref: TableRef) -> Row[*tuple[Any, ...]] | None
     Row or None
         The table's id, type and environment id, or `None` when it does not exist.
     """
-    # The same live-table lookup as `catalog.preview.submit_preview`, which selects the whole
-    # row. It stays a copy: this module may not import the `lakana_core.catalog` package at
-    # module level (its `__init__` loads the catalog service, the import-cycle rule), and a
-    # helper here would make the preview depend on the "Defined in" module.
-    # jscpd:ignore-start
+    # Imported here because `lakana_core.catalog` loads the catalog service at import time,
+    # which this module may not do at module level (as in `policy.resolver`).
+    from lakana_core.catalog.identity import live_table
+
     return session.execute(
-        select(Table.id, Table.table_type, Environment.id.label("environment_id"))
-        .join(Namespace, Table.namespace_id == Namespace.id)
-        .join(Environment, Namespace.environment_id == Environment.id)
-        .where(
-            Environment.name == ref.environment,
-            LIVE_ENVIRONMENT,
-            Namespace.path == ref.namespace.joined(),
-            Table.name == ref.name,
+        live_table(
+            select(Table.id, Table.table_type, Environment.id.label("environment_id")),
+            ref.environment,
+            ref.namespace.joined(),
+            ref.name,
         )
     ).one_or_none()
-    # jscpd:ignore-end
 
 
 def _definition(
@@ -322,6 +315,10 @@ def _locate(
     if table is None:
         raise NotFoundError(f"Table '{shown(ref.name)}' not found in {shown(str(ref.namespace))}.")
     dotted = f"{ref.namespace}.{ref.name}"
+    # A namespace part from before dots were refused would share its dotted name with another
+    # table (`["a.b"].c` and `["a", "b"].c`); a deploy only ever names the second.
+    if TableRef.from_dotted(ref.environment, dotted) != ref:
+        return NOT_DEFINED, None
     row = session.execute(
         select(
             ProjectFile.path,

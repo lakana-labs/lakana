@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from lakana_core.errors import ValidationError
@@ -76,8 +77,37 @@ def resolve_table_id(
         matches that combination.
     """
     return session.execute(
-        select(Table.id)
-        .join(Namespace, Table.namespace_id == Namespace.id)
+        live_table(select(Table.id), environment, namespace_joined, table)
+    ).scalar_one_or_none()
+
+
+def live_table(
+    statement: Select[*tuple[Any, ...]], environment: str, namespace_joined: str, table: str
+) -> Select[*tuple[Any, ...]]:
+    """Narrow a select of a table's columns to one table of a live environment, by its names.
+
+    The one lookup of a table by name that `resolve_table_id`, the preview and "Defined in"
+    share: a deleted environment has no tables.
+
+    Parameters
+    ----------
+    statement
+        A select of columns or entities of `Table`, `Namespace` and `Environment`, with no
+        join yet.
+    environment
+        The environment's name.
+    namespace_joined
+        The table's namespace, in the unit-separator-joined storage form (`Namespace.path`).
+    table
+        The table's name.
+
+    Returns
+    -------
+    Select
+        The statement, joined and filtered; at most one row matches.
+    """
+    return (
+        statement.join(Namespace, Table.namespace_id == Namespace.id)
         .join(Environment, Namespace.environment_id == Environment.id)
         .where(
             Environment.name == environment,
@@ -85,7 +115,7 @@ def resolve_table_id(
             Namespace.path == namespace_joined,
             Table.name == table,
         )
-    ).scalar_one_or_none()
+    )
 
 
 def environment_ids_in(session: Session, names: Iterable[str]) -> dict[str, uuid.UUID]:
