@@ -25,9 +25,9 @@ from lakana_core.auth import (
 from lakana_core.catalog.preview import (
     PREVIEW_NOT_FOR_A_TASK,
     PREVIEW_ROW_LIMIT,
-    PREVIEW_TABLE_CHANGED,
     preview_needs_submit_query_message,
     preview_of_a_dotted_name_message,
+    preview_of_a_dotted_table_name_message,
     preview_of_an_artifact_message,
     preview_parts,
     preview_sql,
@@ -52,7 +52,6 @@ from lakana_core.runs.store import query_completed_detail
 
 _ORDERS = TableRef("dev", NamespacePath.from_parts(["gold"]), "orders")
 _MODEL = TableRef("dev", NamespacePath.from_parts(["gold"]), "model")
-_DOTTED = TableRef("dev", NamespacePath.from_parts(["legacy.ns"], allow_dots=True), "t")
 
 
 def _person(session: Session, name: str, role: Role | None = None) -> PrincipalRef:
@@ -223,15 +222,10 @@ def test_an_artifact_has_no_preview(session: Session, principal: PrincipalRef) -
     assert _queued(session) == 0
 
 
-@pytest.mark.parametrize(
-    ("namespace", "name", "dotted"),
-    [("legacy.ns", "t", "legacy.ns.t"), ("gold", "a.b", "gold.a.b")],
-    ids=["namespace", "table"],
-)
-def test_a_table_in_a_namespace_with_a_dot_is_refused_with_the_cause(
-    session: Session, principal: PrincipalRef, namespace: str, name: str, dotted: str
-) -> None:
-    """No query can name such a table yet, so no run is queued that would read another one.
+def _refusal_of_a_dotted_name(
+    session: Session, principal: PrincipalRef, namespace: str, name: str
+) -> str:
+    """Ask for the preview of a legacy name with a dot, and return the refusal.
 
     Parameters
     ----------
@@ -240,24 +234,47 @@ def test_a_table_in_a_namespace_with_a_dot_is_refused_with_the_cause(
     principal
         The caller.
     namespace
-        The namespace's stored path.
+        The namespace's stored path, one part.
     name
         The table's name.
-    dotted
-        The name the refusal shows.
+
+    Returns
+    -------
+    str
+        The `ConflictError`'s message; no run was queued.
     """
     ensure_table(session, "dev", namespace, name)
     ref = TableRef("dev", NamespacePath.from_parts([namespace], allow_dots=True), name)
-
     with pytest.raises(ConflictError) as caught:
         submit_preview(session, AllowAllAuthorization(), principal, ref)
-
-    assert str(caught.value) == preview_of_a_dotted_name_message(dotted)
-    assert str(caught.value) == (
-        f"{dotted} is in a namespace whose name contains a dot, which a query cannot name yet; "
-        "rename the namespace to preview it."
-    )
     assert _queued(session) == 0
+    return str(caught.value)
+
+
+def test_a_table_in_a_namespace_with_a_dot_is_refused_with_the_cause(
+    session: Session, principal: PrincipalRef
+) -> None:
+    """No query can name such a table yet; the next step is renaming the namespace."""
+    refusal = _refusal_of_a_dotted_name(session, principal, "legacy.ns", "t")
+
+    assert refusal == preview_of_a_dotted_name_message("legacy.ns.t")
+    assert refusal == (
+        "legacy.ns.t is in a namespace whose name contains a dot, which a query cannot name "
+        "yet; rename the namespace to preview it."
+    )
+
+
+def test_a_table_whose_own_name_has_a_dot_is_told_to_rename_the_table(
+    session: Session, principal: PrincipalRef
+) -> None:
+    """The dot is in the table's name, so renaming the namespace would not help."""
+    refusal = _refusal_of_a_dotted_name(session, principal, "gold", "a.b")
+
+    assert refusal == preview_of_a_dotted_table_name_message("gold.a.b")
+    assert refusal == (
+        "gold.a.b has a table name that contains a dot, which a query cannot name yet; "
+        "rename the table to preview it."
+    )
 
 
 def test_a_preview_run_is_bound_and_carries_the_server_sql(
@@ -308,9 +325,10 @@ def test_the_preview_sql_quotes_every_part(parts: tuple[str, ...], name: str) ->
     assert PREVIEW_ROW_LIMIT == 100
 
 
-def test_the_worker_message_names_the_next_step() -> None:
-    """The mismatch the worker raises says what to do."""
-    assert PREVIEW_TABLE_CHANGED == "The table changed since the preview was asked for; refresh."
+def test_sql_that_names_no_table_is_refused_when_read_back() -> None:
+    """Reading the parts back never answers for SQL that is not a preview's."""
+    with pytest.raises(ValueError, match="names no table"):
+        preview_parts("SELECT 1")
 
 
 def test_query_completed_detail_marks_a_preview() -> None:

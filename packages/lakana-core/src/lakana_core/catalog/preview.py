@@ -105,6 +105,25 @@ def preview_of_a_dotted_name_message(dotted: str) -> str:
     )
 
 
+def preview_of_a_dotted_table_name_message(dotted: str) -> str:
+    """Say that a table whose own name has a dot in it cannot be previewed yet.
+
+    Parameters
+    ----------
+    dotted
+        The table's dotted name.
+
+    Returns
+    -------
+    str
+        The message, naming the next step: renaming the table.
+    """
+    return (
+        f"{shown(dotted)} has a table name that contains a dot, which a query cannot name yet; "
+        "rename the table to preview it."
+    )
+
+
 def preview_sql(namespace: NamespacePath, name: str) -> str:
     """Write the SQL of a preview, every part of the name quoted.
 
@@ -139,9 +158,15 @@ def preview_parts(sql: str) -> tuple[str, ...]:
     -------
     tuple of str
         The namespace's parts and the table's name, unquoted, outermost first.
+
+    Raises
+    ------
+    ValueError
+        If the SQL names no table, so it is not a preview's.
     """
     table = sqlglot.parse_one(sql, read="duckdb").find(exp.Table)
-    assert table is not None  # nosec B101 -- preview_sql always names one table
+    if table is None:
+        raise ValueError("The SQL names no table, so it is not a preview's.")
     return tuple(part.name for part in table.parts)
 
 
@@ -205,7 +230,7 @@ def submit_preview(
     ConflictError
         For an artifact, which has no rows (`preview_of_an_artifact_message`), and for a
         namespace or table name that contains a dot, which no query can name yet
-        (`preview_of_a_dotted_name_message`).
+        (`preview_of_a_dotted_name_message`, `preview_of_a_dotted_table_name_message`).
     """
     authorization.authorize(
         p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
@@ -239,9 +264,12 @@ def submit_preview(
     if table.table_type == TableType.ARTIFACT:
         raise ConflictError(preview_of_an_artifact_message(dotted, ref.environment))
     # The query path names tables by dotted strings, so a dot inside a part would make the
-    # worker look for another object; no run is queued that it could not check.
-    if any("." in part for part in (*namespace.parts, table.name)):
+    # worker look for another object; no run is queued that it could not check. The refusal
+    # names what to rename: the namespace first, should both hold a dot.
+    if any("." in part for part in namespace.parts):
         raise ConflictError(preview_of_a_dotted_name_message(dotted))
+    if "." in table.name:
+        raise ConflictError(preview_of_a_dotted_table_name_message(dotted))
     run = QueryRun(
         id=uuid.uuid4(),
         environment_id=environment_id,

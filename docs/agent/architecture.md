@@ -627,9 +627,9 @@ queueing (M5c3) and cron (M5d) plug into the tick.
   `load_table_at_check`. The run's `QUERY_COMPLETED` event carries `check_result_id`, which no
   other query's event has. A preview of a table is bound the same way, by `preview_table_id`
   (migration `0076`, no foreign key), set only by `lakana_core.catalog.preview.submit_preview`
-  from server-built SQL; its `QUERY_COMPLETED` event carries `preview: true`. The user documentation is `docs/site/how-to/check-your-data.md`,
-  "Look at the rows that failed"; what a reviewer must know is in `docs/agent/security.md`, "The
-  query that shows the rows of a check".
+  from server-built SQL; its `QUERY_COMPLETED` event carries `preview: true`. The user
+  documentation is `docs/site/how-to/check-your-data.md`, "Look at the rows that failed"; what a
+  reviewer must know is in `docs/agent/security.md`, "The query that shows the rows of a check".
 - **The tag's removal.** `CatalogService.maintain` asks `catalog.maintenance.old_failed_tags` for
   the tags with the failed-check prefix whose snapshot is more than seven days old (a tag has no
   creation time; the snapshot's timestamp is the age, and the comparison is strict), removes each
