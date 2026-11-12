@@ -2072,8 +2072,9 @@ class Tables:
             If the table does not exist.
         lakana.errors.PermissionDenied
             Without the right to run queries in the environment, or to read the table.
-        lakana.errors.ValidationError
-            If the name is an artifact's, which holds files, not rows.
+        lakana.errors.Conflict
+            If the name is an artifact's, which holds files, not rows, or its namespace or table
+            name contains a dot, which a query cannot name yet; the message names the next step.
         """
         namespace, name = _split_namespace_table(qualified_name)
         response = self._transport.request(

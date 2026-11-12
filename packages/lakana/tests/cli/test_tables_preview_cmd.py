@@ -252,3 +252,37 @@ def test_preview_leaves_out_the_time_when_the_server_does_not_know_it(tmp_path: 
     assert result.exit_code == 0, result.stderr
     assert "First 3 rows · read as you" in result.stderr
     assert " s\n" not in result.stderr.replace("\r", "").split("Masked")[0]
+
+
+def test_preview_of_a_cut_page_says_what_was_shown_and_what_to_do(tmp_path: Path) -> None:
+    page = _page(rows=[["1", "***"], ["2", "***"]], row_count=100, next_offset=2)
+    result = invoke(
+        make_state(tmp_path, _api(page)), "table", "preview", "gold.orders", "--env", "dev"
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "First 2 of 100 rows" in result.stderr
+    assert "First 100 rows" not in result.stderr
+    assert "lakana sql" in result.stderr and "fewer columns" in result.stderr
+    assert "gold.orders" in result.stderr
+
+
+def test_preview_of_an_empty_table_prints_no_count_and_says_read_as_you(tmp_path: Path) -> None:
+    page = _page(rows=[], row_count=0, masked_columns=[])
+    result = invoke(
+        make_state(tmp_path, _api(page)), "table", "preview", "gold.orders", "--env", "dev"
+    )
+    assert "First 0 rows" not in result.stderr
+    assert "Read as you." in result.stderr
+
+
+def test_preview_of_an_empty_table_still_names_the_masked_columns(tmp_path: Path) -> None:
+    result = invoke(
+        make_state(tmp_path, _api(_page(rows=[], row_count=0))),
+        "table",
+        "preview",
+        "gold.orders",
+        "--env",
+        "dev",
+    )
+    assert "No rows." in result.stdout
+    assert "Masked for you: email" in result.stderr

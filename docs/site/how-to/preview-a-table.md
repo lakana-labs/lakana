@@ -32,7 +32,9 @@ that you read them as yourself:
 First 3 rows · read as you · 0.6 s
 ```
 
-A table with no rows prints `No rows.`. A preview never shows more than 100 rows; to see further
+A table with no rows prints `No rows.`, and `Read as you.` on standard error. When the rows are
+so wide that the page is full before row 100, the line says `First 12 of 100 rows` and how to read
+the rest. A preview never shows more than 100 rows; to see further
 rows, run a query with `lakana sql`. A cell that is very long is shown cut, with an ellipsis after
 it, and binary data as its size, `<12 bytes>`. Press Ctrl-C to cancel a preview that is waiting.
 
@@ -55,7 +57,8 @@ When a preview needs to name more masked columns than fit in a page, the line en
 
 ## Get the rows as JSON
 
-`--output json` prints the page as the server answers it, for a script:
+`--output json` prints the page for a script. Its keys are the SDK's: the previewed table is
+`preview_table`, where the REST answer has `preview`:
 
 <!-- source: docs/examples/preview-a-table/run.sh#json -->
 ```bash
@@ -72,8 +75,8 @@ The fields of the page are described in [The result page](../reference/query-res
 - **The name is an artifact.** An artifact holds files, not rows. Download it with
   `lakana artifact download` instead; the message names the command.
 - **The table changed while the preview waited.** The run fails with a message to try again.
-- **The namespace's name contains a dot.** A query cannot name such a table yet; rename the
-  namespace to preview it.
+- **The namespace's name or the table's name contains a dot.** A query cannot name such a table
+  yet; the message says which, and the next step is to rename the namespace or the table.
 
 A namespace may be nested, as in `gold.finance.sales`: the table is the last part of the name.
 

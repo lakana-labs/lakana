@@ -578,12 +578,26 @@ def show_page(
             [c.name for c in page.columns],
             [[page_cell(cell) for cell in row] for row in page.rows],
         )
+        shown = len(page.rows)
+        facts = [
+            f"First {shown} rows"
+            if page.next_offset is None
+            else f"First {shown} of {page.row_count} rows",
+            "read as you",
+        ]
+        if page.duration_ms is not None:
+            facts.append(f"{page.duration_ms / 1000:.1f} s")
     else:
         sys.stdout.write("No rows.\n")
-    facts = [f"First {page.row_count} rows", "read as you"]
-    if page.duration_ms is not None:
-        facts.append(f"{page.duration_ms / 1000:.1f} s")
+        facts = ["Read as you."]
     lines = [" · ".join(facts), _masked_line(page)]
+    if page.next_offset is not None:
+        table = page.preview_table or "TABLE"
+        lines.append(
+            f"The page is full; the other rows are left out. Read them with "
+            f"'lakana sql \"SELECT * FROM {table} OFFSET {page.next_offset}\"', "
+            "or select fewer columns to see more rows at once."
+        )
     if page.columns_cut:
         lines.append(f"{page.columns_cut} more columns not shown; use --output json.")
     for line in lines:

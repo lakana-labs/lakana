@@ -12,7 +12,7 @@ from lakana import _http
 from lakana._config import ResolvedConfig
 from lakana._http import BUSY_ATTEMPTS, HttpTransport
 from lakana._models import MaskedColumn, ResultColumn
-from lakana.errors import LakanaError
+from lakana.errors import Conflict, InvalidResponse, LakanaError
 from lakana.resources.queries import QueryRun
 from lakana.resources.tables import Tables
 
@@ -201,3 +201,51 @@ def test_wait_really_sleeps(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_http.time, "sleep", slept.append)
     _http.wait(1.5)
     assert slept == [1.5]
+
+
+def test_preview_of_an_artifact_is_a_conflict_the_sdk_raises() -> None:
+    message = "An artifact holds files, not rows; download it with `lakana artifact download a.b`."
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"detail": message, "type": "ConflictError"})
+
+    with pytest.raises(Conflict, match="holds files, not rows"):
+        Tables(_transport(handler)).preview("dev", "a.b")
+
+
+def test_page_of_a_body_that_is_not_json_names_the_cause() -> None:
+    with pytest.raises(InvalidResponse, match="not what a Lakana server sends"):
+        _run(lambda _r: httpx.Response(200, content=b"<html>proxy</html>")).page()
+
+
+def test_page_of_a_json_body_that_is_not_a_page_names_the_cause() -> None:
+    with pytest.raises(InvalidResponse, match="not what a Lakana server sends"):
+        _run(lambda _r: httpx.Response(200, json=["not", "a", "page"])).page()
+
+
+def test_page_reads_next_offset() -> None:
+    page = _run(answer({**PAGE_BODY, "next_offset": 3})).page()
+    assert page.next_offset == 3
+
+
+def test_page_waits_as_long_as_the_retry_after_says(monkeypatch: pytest.MonkeyPatch) -> None:
+    waits: list[float] = []
+    monkeypatch.setattr(_http, "wait", waits.append)
+    answers = iter([busy("3"), ok(PAGE_BODY)])
+    _run(lambda _r: next(answers)).page()
+    assert waits == [3.0]
+
+
+def test_page_raises_at_once_on_the_busy_type_with_another_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    waits: list[float] = []
+    monkeypatch.setattr(_http, "wait", waits.append)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, json={"detail": "no", "type": "ResultPageLimitError"})
+
+    with pytest.raises(LakanaError) as caught:
+        _run(handler).page()
+    assert caught.value.status == 502
+    assert waits == []

@@ -29,7 +29,7 @@ from lakana._models import (
     WaitingFor,
 )
 from lakana._routes import ROUTES
-from lakana.errors import QueryFailed, ServerError, ValidationError
+from lakana.errors import InvalidResponse, QueryFailed, ServerError, ValidationError
 
 _EntryList = list[QueryListEntry]
 
@@ -422,6 +422,8 @@ class QueryRun:
             If the query has not succeeded yet, or is not a read.
         lakana.errors.ValidationError
             If `limit` or `offset` is out of range.
+        lakana.errors.InvalidResponse
+            If the answer is not a result page (a proxy's page, or a wrong URL).
         lakana.errors.ServerError
             If the server is still busy after the attempts (status 503).
         """
@@ -433,7 +435,13 @@ class QueryRun:
                 params={"format": "json", "limit": limit, "offset": offset},
             )
             _usage.add_bytes_read(len(response.content))
-            return _page_from_json(response.json())
+            try:
+                return _page_from_json(response.json())
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:
+                raise InvalidResponse(
+                    "The server's answer to a result page was not what a Lakana server sends. "
+                    "Check the URL."
+                ) from exc
 
         for _ in range(BUSY_ATTEMPTS - 1):
             try:
