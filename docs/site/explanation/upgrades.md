@@ -160,6 +160,12 @@ needs only `find` and `perl` 5.22 or later, which Linux and macOS ship; a file n
 control character is printed with `\x..` escapes. A dry run (`lakana deploy --dry-run`)
 shows the same refusal before you upgrade a production deploy.
 
+### Project files are recorded at deploy
+
+Migration `0077` adds two tables, which hold the files of each deployed project version; it runs
+with the other migrations, and nothing else has to be done. A table's "Defined in" answers
+`not_recorded` for a project until its next deploy.
+
 ### A proxy is trusted for client addresses only when you list it
 
 - A proxy on the same host is no longer trusted for `X-Forwarded-For` by default: set

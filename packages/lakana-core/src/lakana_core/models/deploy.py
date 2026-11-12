@@ -6,7 +6,18 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -61,6 +72,55 @@ class JobVersion(Base):
         ForeignKey("principals.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class ProjectFileText(Base):
+    """The text of a deployed project file, stored once per content digest.
+
+    Written by `lakana_core.projects.source_map.write_source_map` inside `record_deploy`, and
+    deleted by `sweep_project_file_texts` once no `ProjectFile` names it.
+    """
+
+    __tablename__ = "project_file_texts"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    """The hex SHA-256 of the text's UTF-8 bytes."""
+    text: Mapped[str] = mapped_column(Text)
+
+
+class ProjectFile(Base):
+    """One asset file of a project version: its path, the table it defines and its gate set.
+
+    The gate set (`gate_tables`, `gate_raw`) decides who may read the file's text; it was worked
+    out by the deploy's own parser under `gate_version`. Paths and table names are unbounded, so
+    the key and the index hold their digests, never the names themselves.
+    """
+
+    __tablename__ = "project_files"
+    __table_args__ = (Index("ix_project_files_version_table", "job_version_id", "table_sha256"),)
+
+    job_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_versions.id", ondelete="CASCADE"), primary_key=True
+    )
+    path_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    """The hex SHA-256 of `path`'s UTF-8 bytes."""
+    path: Mapped[str] = mapped_column(Text)
+    table_sha256: Mapped[str] = mapped_column(String(64))
+    """The hex SHA-256 of `table_name`'s UTF-8 bytes."""
+    table_name: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(
+        String(64), ForeignKey("project_file_texts.sha256", ondelete="RESTRICT")
+    )
+    """The text's digest; a text a version names can never be deleted."""
+    line: Mapped[int] = mapped_column(Integer)
+    bytes: Mapped[int] = mapped_column(Integer)
+    """The size of the text's UTF-8 encoding."""
+    gate_tables: Mapped[list] = mapped_column(JSON)
+    """Every table name the file uses, the one it defines included, sorted."""
+    gate_raw: Mapped[bool] = mapped_column(Boolean)
+    """Whether the file reads a file path or uses a connection."""
+    gate_version: Mapped[int] = mapped_column(Integer)
+    """The extraction that worked out the gate set (`source_map.GATE_VERSION`)."""
 
 
 class DeployRun(Base):

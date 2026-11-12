@@ -49,6 +49,8 @@ from lakana_core.models.deploy import (
     DeployStatus,
     EnvironmentDeployment,
     JobVersion,
+    ProjectFile,
+    ProjectFileText,
 )
 from lakana_core.models.ci_oidc import CiOidcJti, CiToken, CiTrustRule
 from lakana_core.models.check_result import CheckOutcome, CheckResult, RollbackOutcome
@@ -139,6 +141,8 @@ __all__ = [
     "PrincipalType",
     "ProbeOutcome",
     "ProfilePicture",
+    "ProjectFile",
+    "ProjectFileText",
     "QueryErrorCause",
     "QueryRun",
     "QueryRunStatus",

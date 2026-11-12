@@ -127,6 +127,7 @@ from lakana_core.projects.manifest import (
 )
 from lakana_core.projects.model import TargetInfo, resolve_references
 from lakana_core.projects.parse import ParsedAsset, file_references, sql_file_references
+from lakana_core.projects.source_map import ProjectFileRecord, write_source_map
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.pools import PIPELINE
 from lakana_core.runs.waiting import (
@@ -3858,6 +3859,7 @@ class DeployService:
         worker_id: str | None,
         checks: Mapping[str, object] | None = None,
         code_bytes: int | None = None,
+        files: Sequence[ProjectFileRecord] = (),
     ) -> JobVersion:
         """Record a successful deploy in one transaction.
 
@@ -3894,6 +3896,9 @@ class DeployService:
         code_bytes
             The size of the code archive (`lakana env usage` adds it up); `None` when the deploy
             reuses an existing project version, whose row keeps its own.
+        files
+            The source map's records (`source_map_records`), written for the new or the reused
+            version after every `tables` lock (`write_source_map`); empty records none.
 
         Returns
         -------
@@ -3996,6 +4001,7 @@ class DeployService:
             manifest,
         )
         write_glossary(self._session, environment_id, repository_id, manifest)
+        write_source_map(self._session, version, files)
         run.job_version_id = version.id
         run.diff_json = diff.to_json()
         run.checks_json = dict(checks) if checks else None
