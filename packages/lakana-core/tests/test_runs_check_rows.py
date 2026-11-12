@@ -923,7 +923,9 @@ def _constructions(
         its fields could not be read.
     """
     found: dict[str, list[bool]] = {}
-    for path, (_, tree) in sources.items():
+    for path, (text, tree) in sources.items():
+        if name not in text:
+            continue
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
                 continue
@@ -1048,7 +1050,9 @@ def _other_mentions(
         are left out.
     """
     found: dict[str, set[str]] = {}
-    for path, (_, tree) in sources.items():
+    for path, (text, tree) in sources.items():
+        if field not in text:
+            continue
         mentions = _mentions_in(tree, path, field)
         if mentions:
             found[path] = mentions
