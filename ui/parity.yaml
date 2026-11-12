@@ -262,6 +262,8 @@
 "GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition/file": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals":
   { class: read, part: 3 }

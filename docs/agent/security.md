@@ -47,6 +47,9 @@ query path sit relative to `lakana-core`/`lakana-server`, see `docs/agent/archit
   `PrincipalService`, or `CiTrustRuleService` without an accompanying `AuditService.record` call
   is a gap, not a style choice — see "Audit log" below for the event types and detail shapes already in
   use.
+- **A route that shows a deployed file takes an object reference, never a path, commit or version,
+  and shows content only to a reader of the environment and of every table the file uses, with no
+  policy applying to them.**
 
 ## Syntax errors name only the reader's own SQL
 
@@ -5623,6 +5626,10 @@ exit criterion is being re-run after the M3f fixes above — see
 | `POST …/tables/{name}/preview` | `READ_TABLE` first, then `SUBMIT_QUERY`; no run context or task-kind token | The server builds `SELECT * … LIMIT 100`. The run is bound by `preview_table_id`, which only `submit_preview` sets. The worker compares the id of the object the `FROM` names, before `expand_views`. Status and result: the submitter only; cancel: the existing rule. |
 | `masked_columns` on a query result | the submitter only | **Loosening:** names the columns masked for the reader (`{table, column}`), recorded by the worker from what it applied; never the expression, id or subject. The same reasoning as health's `values_hidden`. Row filters are not named. On the JSON page the list is written through the page budget; entries that do not fit are left out and counted in `masked_columns_cut`, never cut inside. |
 | `GET …/queries/{id}/result?format=json` | the submitter only | At most 1,000 rows (100 for a preview). A bounded writer stops inside a cell at 64 KiB and inside a row at 4 MiB a page, the first row included (`{"cut": true}`, `row_cut`). Strings are pre-cut in pyarrow, and the page is UTF-8. Binary is never sent. 4 concurrent conversions per process and 1 per principal; `503` beyond. |
+| `GET …/tables/{name}/definition` | `READ_TABLE` | Path, line, commit and link of the current version; no path, commit or version parameter. **Loosening:** a reader of the table sees the repository's name and HTTPS browse URL without `READ_ENVIRONMENT`. A `local` path is never shown. |
+| `GET …/tables/{name}/definition/file` | `READ_TABLE`; for `content` also `READ_ENVIRONMENT`, read on every table of `gate_tables`, no view among them at read time other than the file's own table, `gate_raw` false, and no applicable row filter or column mask on any of them | Served from `project_files`, never from the tarball. One `restricted` reason for every failed condition. `SOURCE_VIEWED` once per window, fail-closed. The CLI escapes C0, C1, `Cf`, U+2028 and U+2029. |
+| Source map at deploy | written by the worker in `record_deploy`, both branches | `git archive` runs with `* -export-subst` in `$GIT_DIR/info/attributes` (`export-ignore` unchanged). A reused version writes a row only for a missing or stale `gate_version`, and only when the text matches the manifest (`normalized_sql` or the Python source digest). A foreign key to the texts (`ON DELETE RESTRICT`); the text insert locks the row and the sweep skips locked rows. C0 and C1 controls in asset files are refused at deploy (breaking, see the release note). Unreferenced texts are swept. |
+| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `job_version`. (b) `job_version` shows `sql` to `READ_ENVIRONMENT` holders without the policy condition and without `SOURCE_VIEWED` (issue after 3a). (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
 
 The preview route asks for no step-up: it is a read under the caller's own rights, like `POST …/queries` (`NO_STEP_UP` in `test_step_up_routes.py`). The conversion slot (`ThreadSafeConcurrencyLimiter`, one `threading.Lock` over the total and the count per principal, because the route runs in the thread pool) is given back once the page's bytes are built, before they are sent, and also when the conversion fails.
 

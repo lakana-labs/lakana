@@ -4,7 +4,7 @@ import hashlib
 import json
 import tempfile
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -12,14 +12,24 @@ from typing import Any, cast
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from minio import Minio
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 from lakana_core.auth import AllowAllAuthorization
 from lakana_core.identity.sessions import SessionService, utc_now
-from lakana_core.models import BrowserSession, Principal, QueryRun
+from lakana_core.models import (
+    BrowserSession,
+    Environment,
+    EnvironmentDeployment,
+    JobVersion,
+    Principal,
+    QueryRun,
+    Repository,
+    RepositoryKind,
+)
+from lakana_core.projects.source_map import ProjectFileRecord, write_source_map
 from lakana_server.browser_session import CSRF_HEADER, cookie_name
 from tests.conftest import AUTH_HEADER
 
@@ -499,3 +509,103 @@ def query_run_columns(client: TestClient, query_id: str, *names: str) -> dict[st
         run = session.get(QueryRun, uuid.UUID(query_id))
         assert run is not None
         return {name: getattr(run, name) for name in names}
+
+
+DEPLOYED_REPOSITORY = "analytics"
+"""The repository `deploy_file` registers, on GitHub so the location has a link."""
+
+
+def deploy_file(
+    session: Session,
+    environment: str,
+    table: str,
+    text: str,
+    *,
+    gate_tables: Sequence[str] = (),
+    gate_raw: bool = False,
+) -> None:
+    """Make a project version whose one SQL asset defines `table` the current one, with its file.
+
+    Registers the repository `DEPLOYED_REPOSITORY` on first use and stores a version whose
+    manifest has the asset `assets/<namespace path>/<name>.sql`, at the commit ``"a" * 40`` for
+    the repository's first version in the environment and a new commit for each later one. Then
+    it points the environment's deployment at that version and writes the source map with
+    `write_source_map`, as a deploy does (the `_deploy` pattern of
+    `tests/api/platform/test_graph.py`).
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    environment
+        The environment's name; it must exist.
+    table
+        The dotted table name the file defines.
+    text
+        The file's text.
+    gate_tables
+        Every table the file uses; stored sorted and without duplicates.
+    gate_raw
+        Whether the file reads a file path or uses a connection.
+    """
+    namespace, _, name = table.rpartition(".")
+    record = ProjectFileRecord(
+        path=f"assets/{namespace.replace('.', '/')}/{name}.sql",
+        table=table,
+        text=text,
+        normalized_sql=text,
+        gate_tables=tuple(sorted(set(gate_tables))),
+        gate_raw=gate_raw,
+    )
+    env_id = session.execute(
+        select(Environment.id).where(Environment.name == environment)
+    ).scalar_one()
+    repo = session.execute(
+        select(Repository).where(Repository.name == DEPLOYED_REPOSITORY)
+    ).scalar_one_or_none()
+    if repo is None:
+        repo = Repository(
+            id=uuid.uuid4(),
+            name=DEPLOYED_REPOSITORY,
+            kind=RepositoryKind.HTTPS,
+            url=f"https://github.com/acme/{DEPLOYED_REPOSITORY}.git",
+        )
+        session.add(repo)
+        session.flush()
+    earlier = session.scalar(
+        select(func.count())
+        .select_from(JobVersion)
+        .where(JobVersion.repository_id == repo.id, JobVersion.environment_id == env_id)
+    )
+    version = JobVersion(
+        id=uuid.uuid4(),
+        repository_id=repo.id,
+        environment_id=env_id,
+        commit_sha=f"{earlier:040x}" if earlier else "a" * 40,
+        manifest_json={
+            "assets": [
+                {
+                    "table": record.table,
+                    "path": record.path,
+                    "normalized_sql": record.normalized_sql,
+                    "kind": "sql",
+                }
+            ]
+        },
+        code_uri="u",
+        code_sha256="0" * 64,
+    )
+    session.add(version)
+    session.flush()
+    pointer = session.get(EnvironmentDeployment, (env_id, repo.id))
+    if pointer is None:
+        session.add(
+            EnvironmentDeployment(
+                environment_id=env_id, repository_id=repo.id, current_job_version_id=version.id
+            )
+        )
+    else:
+        pointer.current_job_version_id = version.id
+    session.flush()
+    write_source_map(session, version, [record])
+    session.commit()

@@ -745,6 +745,74 @@ class ResultPageOut(BaseModel):
     # jscpd:ignore-end
 
 
+class TableDefinitionOut(BaseModel):
+    """Where the environment's current deployment defines a table.
+
+    Every field but `defined` is `null` for a table no current deployment defines.
+
+    Parameters
+    ----------
+    defined
+        Whether a current deployment defines the table.
+    repository
+        The repository's name.
+    path
+        The file's path in the repository.
+    commit
+        The deployed commit, never the branch head.
+    line
+        The line the file defines the table on.
+    project_version_id
+        The deployed project version.
+    deployed_at
+        When that version was first recorded in the environment.
+    browse_url
+        An HTTPS link to the line on the repository's git host, or `null` when none can be
+        built (a host other than the five public ones, or a local repository).
+    """
+
+    # jscpd:ignore-start
+    # The SDK's `_models.py` mirrors these fields for `TableDefinition`.
+    defined: bool
+    repository: str | None
+    path: str | None
+    commit: str | None
+    line: int | None
+    project_version_id: str | None
+    deployed_at: datetime | None
+    browse_url: str | None
+    # jscpd:ignore-end
+
+
+class TableDefinitionFileOut(TableDefinitionOut):
+    """A table's definition with the file's text, or the reason the text is not returned.
+
+    Flat: the location's fields, then the file's. Core's `TableDefinitionFile` nests the
+    location; `lakana_server.api.platform.tables._definition_file_out` flattens it.
+
+    Parameters
+    ----------
+    content
+        The file's text (UTF-8, with line-feed line endings), or `null`.
+    bytes
+        The size of the text's UTF-8 encoding, set only with `content`.
+    reason
+        Why `content` is `null`: `restricted` (the reader does not pass the content rule),
+        `not_recorded` (the deployed version has no record of the file) or `too_large` (over
+        1 MiB); `null` with content and for a table no deployment defines.
+    message
+        The sentence for `reason`, naming no table, or `null`.
+    """
+
+    # jscpd:ignore-start
+    # The SDK's `_models.py` mirrors these fields for `TableDefinitionFile`.
+    content: str | None
+    bytes: int | None
+    reason: Literal["restricted", "not_recorded", "too_large"] | None
+    message: str | None
+    # jscpd:ignore-end
+
+
 class ExternalTableCreate(BaseModel):
     """Request body for registering a raw-zone table.
 

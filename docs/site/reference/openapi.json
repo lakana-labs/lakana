@@ -3886,6 +3886,240 @@
         }
       }
     },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition": {
+      "get": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Tell where the environment's current deployment defines a table",
+        "description": "Answers the repository, the file's path and line, the deployed commit and project version, and an HTTPS link to the line on the git host when the repository is on one of the five public hosts. The commit is always the one deployed, never the branch head. The request takes no parameter beyond the table's name: the server finds the file from the current deployment, so no path, commit or version is ever read from the caller. Needs `READ_TABLE` on the table; a reader of the table sees the repository's name and link without any right on the environment. A table no current deployment defines answers 200 with `defined: false` and every other field `null`. Answers 403 alike for a table you may not read and one that does not exist, and 404 when the environment does not exist or for a table you may read that is gone.",
+        "operationId": "get_table_definition_api_v1_environments__env__namespaces__path__tables__name__definition_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table or view name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDefinitionOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition/file": {
+      "get": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Give the file that defines a table, when you may see its text",
+        "description": "Answers the location as `…/definition` does, with the file's text read from what Lakana recorded at deploy, never from the repository or the git host. The text is shown only to someone who may read the environment (`READ_ENVIRONMENT`) and every table the file uses, the table itself included, with no row filter or column mask applying to them on any of those tables, when no other table the file uses is a view, and when the file reads no file path and uses no connection. Anyone else gets `content: null` with `reason: restricted` and one sentence that names no table and no failed condition. `not_recorded` means the deployed version has no record of the file (deploy a new commit), and `too_large` a file over 1 MiB. Each read of a text is recorded in the audit log as `SOURCE_VIEWED`, once per reader, table and commit within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`, before the text is returned. Needs `READ_TABLE` on the table. Answers 403 alike for a table you may not read and one that does not exist, 404 when the environment does not exist or for a table you may read that is gone, and 503 with `Retry-After` when the audit row could not be written; no text is returned then.",
+        "operationId": "get_table_definition_file_api_v1_environments__env__namespaces__path__tables__name__definition_file_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table or view name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDefinitionFileOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop": {
       "post": {
         "tags": [
@@ -32135,6 +32369,257 @@
         ],
         "title": "TableCreate",
         "description": "Request body for creating a managed table from a JSON schema.\n\n`extra=\"forbid\"` refuses an unrecognised field outright (422) rather\nthan silently ignoring it — in particular, a caller-sent `\"location\"`\nis refused the same way the Iceberg router already refuses one, instead\nof being accepted and quietly dropped, which would misleadingly suggest\nit had any effect.\n\nThe wire field is still named `\"schema\"` (`Field(alias=\"schema\")`); the\nPython attribute is `columns`, not `schema`, because `BaseModel` itself\ndefines a (deprecated, v1-compat) `schema()` method, and pydantic warns\nat class-definition time that a field named `schema` shadows it — `ExternalTableOut` has the\nsame shape (`table_schema`\naliased to `schema`), fixed the same way.\n\nParameters\n----------\nname\n    Table name.\ncolumns\n    The table's columns, in order. Field ids are assigned `1..n` in\n    this order. Bounded to 1000 columns.\nbreak_glass_reason\n    Write to a protected environment outside a run; needs `MANAGE_ENVIRONMENT`,\n    audited."
+      },
+      "TableDefinitionFileOut": {
+        "properties": {
+          "defined": {
+            "type": "boolean",
+            "title": "Defined"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "project_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Version Id"
+          },
+          "deployed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed At"
+          },
+          "browse_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browse Url"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "restricted",
+                  "not_recorded",
+                  "too_large"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "defined",
+          "repository",
+          "path",
+          "commit",
+          "line",
+          "project_version_id",
+          "deployed_at",
+          "browse_url",
+          "content",
+          "bytes",
+          "reason",
+          "message"
+        ],
+        "title": "TableDefinitionFileOut",
+        "description": "A table's definition with the file's text, or the reason the text is not returned.\n\nFlat: the location's fields, then the file's. Core's `TableDefinitionFile` nests the\nlocation; `lakana_server.api.platform.tables._definition_file_out` flattens it.\n\nParameters\n----------\ncontent\n    The file's text (UTF-8, with line-feed line endings), or `null`.\nbytes\n    The size of the text's UTF-8 encoding, set only with `content`.\nreason\n    Why `content` is `null`: `restricted` (the reader does not pass the content rule),\n    `not_recorded` (the deployed version has no record of the file) or `too_large` (over\n    1 MiB); `null` with content and for a table no deployment defines.\nmessage\n    The sentence for `reason`, naming no table, or `null`."
+      },
+      "TableDefinitionOut": {
+        "properties": {
+          "defined": {
+            "type": "boolean",
+            "title": "Defined"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "project_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Version Id"
+          },
+          "deployed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed At"
+          },
+          "browse_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browse Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "defined",
+          "repository",
+          "path",
+          "commit",
+          "line",
+          "project_version_id",
+          "deployed_at",
+          "browse_url"
+        ],
+        "title": "TableDefinitionOut",
+        "description": "Where the environment's current deployment defines a table.\n\nEvery field but `defined` is `null` for a table no current deployment defines.\n\nParameters\n----------\ndefined\n    Whether a current deployment defines the table.\nrepository\n    The repository's name.\npath\n    The file's path in the repository.\ncommit\n    The deployed commit, never the branch head.\nline\n    The line the file defines the table on.\nproject_version_id\n    The deployed project version.\ndeployed_at\n    When that version was first recorded in the environment.\nbrowse_url\n    An HTTPS link to the line on the repository's git host, or `null` when none can be\n    built (a host other than the five public ones, or a local repository)."
       },
       "TableHealthOut": {
         "properties": {
