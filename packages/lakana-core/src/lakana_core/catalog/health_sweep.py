@@ -52,6 +52,7 @@ from lakana_core.catalog.health_signals import (
     freshness_signal,
     schedule_threshold,
 )
+from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.db import rowcount
 from lakana_core.identifiers import NamespacePath, shown
 from lakana_core.models import JobSchedule, Namespace, Table, TableHealthSignal
@@ -392,6 +393,9 @@ def _check_freshness(
         and (observation.state != "off" or previous.observed == observation.observed)
     ):
         return False
+    # The table's row first, as every write that changes its stored word takes it: a commit and a
+    # check result lock it before they add rows that refer to it.
+    session.execute(select(Table.id).where(Table.id == table_id).with_for_update())
     rows = signal_rows(
         [(observation, effect)],
         environment_id=environment_id,
@@ -402,6 +406,7 @@ def _check_freshness(
     )
     session.add_all(rows)
     session.flush()
+    refresh_health_key(session, table_id)
     session.add_all(
         queue_health_notifications(
             session,

@@ -46,6 +46,7 @@ __all__ = [
     "SnapshotStats",
     "StoredStats",
     "TableHealth",
+    "check_health",
     "last_maintenance",
     "latest_checks",
     "readers",
@@ -359,24 +360,37 @@ def latest_checks(session: Session, table_id: uuid.UUID) -> list[CheckHealth]:
         .execution_options(populate_existing=True)
     )
     newest = {row.check_name: row for row in rows}
-    return [
-        CheckHealth(
-            name=row.check_name,
-            check=row.check_name.rpartition("/")[2],
-            run_id=row.run_id,
-            outcome=row.outcome.value,
-            on_failure=row.on_failure,
-            failing_rows=row.failing_rows,
-            error=row.error,
-            rollback_outcome=None if row.rollback_outcome is None else row.rollback_outcome.value,
-            kept=row.on_failure == "keep"
-            and row.outcome in {CheckOutcome.FAILED, CheckOutcome.ERRORED},
-            not_published=row.rollback_outcome is RollbackOutcome.UNPUBLISHED,
-            finished_at=row.finished_at,
-            generated=row.generated,
-        )
-        for _, row in sorted(newest.items())
-    ]
+    return [check_health(row) for _, row in sorted(newest.items())]
+
+
+def check_health(row: CheckResult) -> CheckHealth:
+    """Describe one stored check result.
+
+    Parameters
+    ----------
+    row
+        The result.
+
+    Returns
+    -------
+    CheckHealth
+        The result as the API shows it.
+    """
+    return CheckHealth(
+        name=row.check_name,
+        check=row.check_name.rpartition("/")[2],
+        run_id=row.run_id,
+        outcome=row.outcome.value,
+        on_failure=row.on_failure,
+        failing_rows=row.failing_rows,
+        error=row.error,
+        rollback_outcome=None if row.rollback_outcome is None else row.rollback_outcome.value,
+        kept=row.on_failure == "keep"
+        and row.outcome in {CheckOutcome.FAILED, CheckOutcome.ERRORED},
+        not_published=row.rollback_outcome is RollbackOutcome.UNPUBLISHED,
+        finished_at=row.finished_at,
+        generated=row.generated,
+    )
 
 
 @dataclass(frozen=True)

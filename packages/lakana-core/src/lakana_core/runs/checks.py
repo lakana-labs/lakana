@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Securable
+from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.db import db_now
 from lakana_core.identifiers import TableRef, shown
 from lakana_core.models import (
@@ -32,6 +33,7 @@ from lakana_core.models import (
     Environment,
     RollbackOutcome,
     Run,
+    Table,
     TaskRun,
     TaskStatus,
 )
@@ -1436,10 +1438,11 @@ def record_result(
 ) -> bool:
     """Record one check's result for the claim that ran it.
 
-    The task run is read ``FOR SHARE``, the lock a write takes, so a reclaim of the task waits
-    for this transaction or is seen by it. A failed or errored `block` or `keep` check is audited as
-    ``CHECK_FAILED`` by the run's principal. A second call for the same check replaces the
-    result.
+    The checked table's row is locked first (``FOR UPDATE``) and the task run is then read
+    ``FOR SHARE``, the lock a write takes, so a reclaim of the task waits for this transaction or
+    is seen by it. The table's stored health word is refreshed in the same transaction. A failed
+    or errored `block` or `keep` check is audited as ``CHECK_FAILED`` by the run's principal. A
+    second call for the same check replaces the result.
 
     Parameters
     ----------
@@ -1475,6 +1478,10 @@ def record_result(
     bool
         `False` when the claim is not held: nothing is recorded.
     """
+    if table_id is not None:
+        # A write's lock order, `tables` before `task_runs` (the order `commit_table` takes),
+        # because the result changes the table's stored word below.
+        session.execute(select(Table.id).where(Table.id == table_id).with_for_update())
     held = session.execute(
         select(TaskRun.run_id, Run.environment_id, Run.run_as_principal_id, Environment.name)
         .join(Run, Run.id == TaskRun.run_id)
@@ -1535,6 +1542,8 @@ def record_result(
                 "rows": failing_rows,
             },
         )
+    if table_id is not None:
+        refresh_health_key(session, table_id)
     session.commit()
     return True
 

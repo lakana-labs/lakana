@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session, class_mapper
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import PrincipalRef, Securable
+from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.catalog.locations import lock_location
 from lakana_core.catalog.translations import translation_rows
 from lakana_core.grants.revocation import POLICY_MODELS, RevokedPolicy, revoke_attached
@@ -610,6 +611,8 @@ def restore_table(
 ) -> Table:
     """Insert a dropped table's row, descriptions, columns, model and translations, uncommitted.
 
+    The row's health word is computed again from what remains (its check results).
+
     A principal deleted since the drop (the owner, the author of a description or a translation,
     who set its retention) is left out, as the row's foreign key would have done had the row stayed.
 
@@ -704,6 +707,9 @@ def restore_table(
             )
         )
     session.flush()
+    # The signal rows went with the dropped row, and the stored word may be missing or older than
+    # the check results that remain, so it is computed again.
+    refresh_health_key(session, row.id)
     return row
 
 

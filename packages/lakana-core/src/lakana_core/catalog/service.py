@@ -140,6 +140,7 @@ from lakana_core.catalog.health_record import (
     signal_rows,
 )
 from lakana_core.catalog.health_signals import SIGNALS, HealthEffects, never_judged
+from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.catalog.history import (
     EARLIEST_START,
     HISTORY_KEY_PROPERTY,
@@ -2912,6 +2913,7 @@ class CatalogService:
         try:
             self._session.flush()  # a name collision raises here, and SQLite's write lock is held
             self._add_health(health, messages)  # after the table row, for their foreign key
+            refresh_health_key(self._session, prepared.table_id)
             if files_read is not None and metadata.current_snapshot_id is not None:
                 record_files_read(
                     self._session, prepared.table_id, metadata.current_snapshot_id, files_read
@@ -5221,6 +5223,8 @@ class CatalogService:
         sync_table_columns(self._session, table_id, from_iceberg_schema(updated.schema()))
         if after_swap is not None:
             after_swap()
+        # After `after_swap`, so one call covers the commit's own rows and a set-back's marks.
+        refresh_health_key(self._session, table_id)
         # A maintenance commit never passed the guard's `check`, so whatever
         # is pending belongs to an earlier, unfinished write and must not land.
         if not maintenance:

@@ -902,6 +902,7 @@ def _run_main(
         mock.patch("lakana_worker.__main__.backfill_table_columns"),
         mock.patch("lakana_worker.__main__.bind_legacy_policies"),
         mock.patch("lakana_worker.__main__.measure_table_sizes"),
+        mock.patch("lakana_worker.__main__.backfill_health_keys"),
         mock.patch("lakana_worker.__main__.signal.signal"),
     ):
         scheduler_mock.return_value.start.return_value.is_alive.return_value = False
@@ -955,6 +956,7 @@ def _housekeeping(
     sizes: mock.MagicMock | None = None,
     health: mock.MagicMock | None = None,
     policies: mock.MagicMock | None = None,
+    health_keys: mock.MagicMock | None = None,
 ) -> None:
     """Run `main`, then the housekeeping callable it gave the scheduler, once.
 
@@ -982,6 +984,8 @@ def _housekeeping(
         Stands in for `sweep_health`; a mock that succeeds when `None`.
     policies
         Stands in for `bind_legacy_policies`; a mock that succeeds when `None`.
+    health_keys
+        Stands in for `backfill_health_keys`; a mock that succeeds when `None`.
     """
     monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
@@ -997,6 +1001,7 @@ def _housekeeping(
         mock.patch("lakana_worker.__main__.measure_table_sizes", sizes or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.sweep_health", health or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.bind_legacy_policies", policies or mock.MagicMock()),
+        mock.patch("lakana_worker.__main__.backfill_health_keys", health_keys or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.signal.signal"),
     ):
         scheduler_mock.return_value.start.return_value.is_alive.return_value = False
@@ -2238,6 +2243,37 @@ def test_a_failing_table_size_measurement_is_logged_and_the_others_still_run(
     assert "The table size measurement failed (OSError)" in caplog.text
     assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
     assert columns.call_count == 1
+
+
+def test_housekeeping_also_computes_the_health_words_of_tables_that_have_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.orm import Session
+
+    health_keys = mock.MagicMock()
+    _housekeeping(
+        tmp_path, monkeypatch, mock.MagicMock(), mock.MagicMock(), health_keys=health_keys
+    )
+    assert health_keys.call_count == 1
+    assert isinstance(health_keys.call_args.args[0], Session)
+
+
+def test_a_failing_health_backfill_is_logged_and_the_others_still_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    policies = mock.MagicMock()
+    with caplog.at_level(logging.WARNING):
+        _housekeeping(
+            tmp_path,
+            monkeypatch,
+            mock.MagicMock(),
+            mock.MagicMock(),
+            policies=policies,
+            health_keys=mock.MagicMock(side_effect=OSError),
+        )
+    assert "The table health backfill failed (OSError)" in caplog.text
+    assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
+    assert policies.call_count == 1
 
 
 def _runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **environment: str) -> PythonRuntime:

@@ -21,6 +21,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from core_test_helpers import ActionAllowList, FakeColumnCatalog
+from home_test_helpers import check_result, deployed_job, run_of
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField
 from sqlalchemy import delete as sa_delete
@@ -36,6 +37,7 @@ from lakana_core.auth import (
     Securable,
     SecurableKind,
 )
+from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.catalog.model_metadata import (
     incoming_references,
     read_table_model,
@@ -62,9 +64,11 @@ from lakana_core.models import (
     AuditEvent,
     AuditEventType,
     Base,
+    CheckOutcome,
     ColumnDescription,
     ColumnMask,
     DeclaredMeasure,
+    Environment,
     Grant,
     Namespace,
     Principal,
@@ -72,6 +76,7 @@ from lakana_core.models import (
     RowFilter,
     Table,
     TableColumn,
+    TableHealthSignal,
     TableLocation,
     TableLocationState,
     TableType,
@@ -605,20 +610,50 @@ def test_a_drop_of_a_table_sharing_a_dropped_location_never_shortens_it(
 # --- undrop -----------------------------------------------------------------------------------
 
 
-def test_undrop_of_a_tombstone_written_before_the_sort_keys_is_measured_by_the_next_sweep(
+def _checked(session: Session, table_id: uuid.UUID, outcome: CheckOutcome, day: int) -> None:
+    """Record a result of the check ``gold.orders/not_null`` of a table.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    table_id
+        The table.
+    outcome
+        How the check ended.
+    day
+        The day of November 2026 it ended.
+    """
+    repo, version = deployed_job(session, "dev", f"repo-{uuid.uuid4().hex[:8]}", "daily")
+    check_result(
+        session,
+        run_of(session, repo, version),
+        table_id,
+        name="gold.orders/not_null",
+        outcome=outcome,
+        finished_at=datetime(2026, 11, day, tzinfo=UTC),
+    )
+
+
+def test_undrop_of_a_tombstone_without_the_keys_takes_the_defaults_then_the_sweeps_fill_them(
     session: Session, catalog: CatalogService, principal: PrincipalRef
 ) -> None:
-    """A pre-0075 tombstone has no `row_count`: the restored row must not look measured."""
+    """A pre-0075 tombstone has none of the keys: the restored row must not look measured."""
     table_id = _orders_table(catalog, principal)
+    _checked(session, table_id, CheckOutcome.PASSED, 1)
     ref = _ref("gold.orders")
     catalog.drop_table(principal, ref)
     record = _record(session, table_id)
     assert record.dropped_table is not None
-    stored = {
-        key: value
-        for key, value in record.dropped_table["row"].items()
-        if key not in {"row_count", "last_write_at", "last_read_at", "health_rank"}
+    keys = {
+        "row_count",
+        "last_write_at",
+        "last_read_at",
+        "health_rank",
+        "health_item",
+        "health_others",
     }
+    stored = {key: value for key, value in record.dropped_table["row"].items() if key not in keys}
     assert stored["size_metadata_location"] == stored["metadata_location"]
     session.execute(
         update(TableLocation)
@@ -630,10 +665,45 @@ def test_undrop_of_a_tombstone_written_before_the_sort_keys_is_measured_by_the_n
     catalog.undrop_table(principal, ref)
 
     row = _fresh(session, Table, table_id)
-    assert (row.row_count, row.last_write_at, row.size_metadata_location) == (None, None, None)
+    assert (row.health_item, row.health_rank, row.row_count) == ("healthy", 15, None)
+    assert (row.last_write_at, row.size_metadata_location) == (None, None)
     assert measure_table_sizes(session, StorageResolver(session)) == 1
     row = _fresh(session, Table, table_id)
     assert row.row_count == 3 and row.last_write_at is not None
+
+
+def test_undrop_recomputes_the_word_its_deleted_signal_rows_no_longer_support(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    table_id = _orders_table(catalog, principal)
+    environment_id = session.scalars(select(Environment.id)).one()
+    session.add(
+        TableHealthSignal(
+            id=uuid.uuid4(),
+            environment_id=environment_id,
+            table_id=table_id,
+            signal="volume",
+            snapshot_id=99,
+            sequence_number=99,
+            observed={"added": 1, "total": 4},
+            band={"low": 10.0, "high": 20.0, "median": 15.0},
+            state="fired",
+            effect="warn",
+            observed_at=datetime(2026, 11, 1, tzinfo=UTC),
+        )
+    )
+    session.commit()
+    _checked(session, table_id, CheckOutcome.FAILED, 1)
+    _checked(session, table_id, CheckOutcome.PASSED, 2)
+    refresh_health_key(session, table_id)
+    session.commit()
+    assert _fresh(session, Table, table_id).health_item == "rows_dropped"
+    ref = _ref("gold.orders")
+
+    catalog.drop_table(principal, ref)
+    catalog.undrop_table(principal, ref)
+
+    assert _fresh(session, Table, table_id).health_item == "healthy"
 
 
 def test_undrop_of_a_tombstone_with_the_sort_keys_keeps_them_measured(
@@ -683,8 +753,17 @@ def test_undrop_restores_the_same_table_and_exactly_the_policies_its_drop_revoke
     row = _fresh(session, Table, table_id)
     restored_columns = {column.key: getattr(row, column.key) for column in Table.__table__.columns}
     # The restore is the table's last activity (its retention counts from it), so only
-    # `updated_at` moves on.
+    # `updated_at` moves on. The health word is computed again: the signal rows it came from
+    # went with the dropped row.
     assert restored_columns.pop("updated_at") >= snapshot_before.pop("updated_at")
+    assert (snapshot_before.pop("health_item"), snapshot_before.pop("health_rank")) == (
+        "healthy",
+        15,
+    )
+    assert (restored_columns.pop("health_item"), restored_columns.pop("health_rank")) == (
+        "not_judged",
+        16,
+    )
     assert restored_columns == snapshot_before
     assert (
         sorted(

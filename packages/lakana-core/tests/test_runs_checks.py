@@ -11,12 +11,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from core_test_helpers import _prepared_catalog, python_task_run
-from sqlalchemy import select
+from core_test_helpers import _prepared_catalog, ensure_table, python_task_run
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 import lakana_core.runs.checks as checks_module
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind
+from lakana_core.catalog.health_summary import failing_reference_checks
 from lakana_core.catalog.service import (
     CHANGED_BY_ANOTHER_REASON,
     ROLLBACK_NOT_KNOWN_REASON,
@@ -31,6 +32,7 @@ from lakana_core.models import (
     CheckResult,
     RollbackOutcome,
     Run,
+    Table,
     TaskRun,
     TaskStatus,
 )
@@ -1820,3 +1822,103 @@ def test_the_message_of_a_fired_health_check_gives_its_text_and_no_rows_command(
         f"({_HEALTH})."
     )
     assert several.count("Look at the rows") == 1
+
+
+def _stored(session: Session, table_id: uuid.UUID) -> Table:
+    """Reload a table row.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+
+    Returns
+    -------
+    Table
+        The row, as stored.
+    """
+    session.expire_all()
+    row = session.get(Table, table_id)
+    assert row is not None
+    return row
+
+
+def test_a_check_result_stores_the_word_and_a_later_pass_clears_it(
+    session: Session, task: TaskRun
+) -> None:
+    _, table_id = ensure_table(session, "dev", "silver", "station_temperatures")
+    before = _stored(session, table_id).updated_at
+    assert _record(session, task, _spec(), CheckOutcome.FAILED, table_id=table_id)
+    row = _stored(session, table_id)
+    assert (row.health_item, row.health_rank) == ("check_failed", 6)
+    assert _record(session, task, _spec(), CheckOutcome.PASSED, table_id=table_id)
+    row = _stored(session, table_id)
+    assert (row.health_item, row.health_rank) == ("healthy", 15)
+    assert row.updated_at == before
+
+
+def test_record_result_reads_the_table_row_before_the_task_run(
+    session: Session, task: TaskRun
+) -> None:
+    """The first read of ``tables`` precedes the first read of ``task_runs``.
+
+    SQLite renders no ``FOR UPDATE``, so this pins the order; the lock itself is
+    ``.with_for_update()`` on that first select, rendered on Postgres.
+    """
+    _, table_id = ensure_table(session, "dev", "silver", "station_temperatures")
+    session.refresh(task)  # its attributes are read here, not inside the recorded call
+    statements: list[str] = []
+
+    def _keep(conn: object, cursor: object, statement: str, *args: object) -> None:
+        statements.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", _keep)
+    try:
+        assert _record(session, task, _spec(), CheckOutcome.PASSED, table_id=table_id)
+    finally:
+        event.remove(engine, "before_cursor_execute", _keep)
+    first_tables = next(
+        i
+        for i, s in enumerate(statements)
+        if s.lstrip().startswith("SELECT") and "FROM tables" in s
+    )
+    first_task_runs = next(i for i, s in enumerate(statements) if "task_runs" in s)
+    assert first_tables < first_task_runs
+
+
+def test_a_result_without_a_table_locks_and_stores_nothing(session: Session, task: TaskRun) -> None:
+    statements: list[str] = []
+
+    def _keep(conn: object, cursor: object, statement: str, *args: object) -> None:
+        statements.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", _keep)
+    try:
+        assert _record(session, task, _spec(), CheckOutcome.PASSED, table_id=None)
+    finally:
+        event.remove(engine, "before_cursor_execute", _keep)
+    assert not any("FROM tables" in s for s in statements)
+
+
+def test_a_refused_claim_stores_nothing(session: Session, task: TaskRun) -> None:
+    _, table_id = ensure_table(session, "dev", "silver", "station_temperatures")
+    assert not _record(
+        session, task, _spec(), CheckOutcome.FAILED, table_id=table_id, worker="other"
+    )
+    assert _stored(session, table_id).health_item is None
+
+
+def test_a_generated_reference_check_never_reaches_the_stored_key_of_a_result(
+    session: Session, task: TaskRun
+) -> None:
+    _, table_id = ensure_table(session, "dev", "silver", "station_temperatures")
+    ref = dataclasses.replace(_spec("ref_station"), generated=GeneratedFrom("references", ("id",)))
+    assert _record(session, task, _spec(), CheckOutcome.PASSED, table_id=table_id)
+    assert _record(session, task, ref, CheckOutcome.FAILED, table_id=table_id)
+    assert _stored(session, table_id).health_item == "healthy"
+    found = failing_reference_checks(session, [table_id])
+    assert [c.outcome for c in found[table_id]] == ["failed"]

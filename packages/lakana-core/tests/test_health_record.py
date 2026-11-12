@@ -891,3 +891,51 @@ def test_garbled_stored_effects_read_as_warn_and_are_logged(
         "silver.orders: its stored health effects are not all understood; "
         "the ones that are not read as warn"
     ]
+
+
+def test_a_commit_that_fires_a_signal_stores_its_word(
+    catalog: CatalogService, session: Session, principal: PrincipalRef
+) -> None:
+    """A volume firing below the band stores "rows dropped" on the table row.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    """
+    # Sequence numbers up to 0, so the commit below (sequence 1) is the newest.
+    _seed(session, "volume", {"added": 1_000, "total": 1_000}, first_day=-8)
+    catalog.append(principal, _ORDERS, _rows([1, 2, 3]))
+    session.expire_all()
+    row = session.get(Table, _table_id(session))
+    assert row is not None
+    assert (row.health_item, row.health_rank, row.health_others) == ("rows_dropped", 9, 0)
+
+
+def test_a_table_created_with_rows_stores_its_word(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A create-mode write stores a word from the table's first snapshot.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Storage root.
+    principal
+        The writer.
+    """
+    built = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    data = _rows([1, 2])
+    built.write_batches(
+        principal, _ORDERS, mode=WriteMode.CREATE, schema=data.schema, batches=data.to_batches()
+    )
+    session.expire_all()
+    row = session.get(Table, _table_id(session))
+    assert row is not None
+    assert (row.health_item, row.health_rank) == ("healthy", 15)

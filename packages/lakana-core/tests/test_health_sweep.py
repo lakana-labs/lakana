@@ -21,7 +21,7 @@ from health_test_helpers import (
     _table_id,
     health_catalog,
 )
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -747,3 +747,50 @@ def test_freshness_reads_at_most_its_cap_of_volume_rows(
     _sweep(session, datetime(2026, 10, 8, 2, tzinfo=UTC))
     (row,) = _freshness(session)
     assert row.state == "no_history"
+
+
+def test_the_freshness_sweep_stores_late(catalog: CatalogService, session: Session) -> None:
+    _deployed(session, _MANIFEST_WITHOUT_SCHEDULE)
+    _seed(session, "volume", _ADDED)
+    session.expire_all()
+    before = session.get(Table, _table_id(session))
+    assert before is not None
+    unchanged = before.updated_at
+    _sweep(session)
+    session.expire_all()
+    row = session.get(Table, _table_id(session))
+    assert row is not None
+    assert (row.health_item, row.health_rank, row.updated_at) == ("late", 8, unchanged)
+    _seed(session, "volume", _ADDED, count=1, first_day=19)  # a commit at `_NOW`
+    _sweep(session, _NOW + timedelta(hours=1), rotation=1)
+    session.expire_all()
+    assert row.health_item == "healthy"
+
+
+def test_the_freshness_sweep_locks_the_table_row_before_it_adds_signal_rows(
+    catalog: CatalogService, session: Session
+) -> None:
+    _deployed(session, _MANIFEST_WITHOUT_SCHEDULE)
+    _seed(session, "volume", _ADDED)
+    statements: list[str] = []
+
+    def _keep(conn: object, cursor: object, statement: str, *args: object) -> None:
+        statements.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", _keep)
+    try:
+        _sweep(session)
+    finally:
+        event.remove(engine, "before_cursor_execute", _keep)
+    lock = next(
+        (
+            i
+            for i, s in enumerate(statements)
+            if " ".join(s.split()).startswith("SELECT tables.id FROM tables WHERE tables.id")
+        ),
+        None,
+    )
+    insert = next(i for i, s in enumerate(statements) if "INSERT INTO table_health_signals" in s)
+    assert lock is not None
+    assert lock < insert
