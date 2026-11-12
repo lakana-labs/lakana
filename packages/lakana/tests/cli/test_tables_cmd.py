@@ -2811,3 +2811,211 @@ def test_table_get_without_effects_prints_no_health_line(tmp_path: Path) -> None
         The CLI's home.
     """
     assert "Health (not the default warn)" not in _get_with_health(tmp_path, {}, [])
+
+
+def _listed_item(**changes: object) -> dict[str, object]:
+    """Build one item of `GET /api/v1/tables` as the server sends it.
+
+    Parameters
+    ----------
+    **changes
+        Fields to replace.
+
+    Returns
+    -------
+    dict
+        The item: a table whose health word is "Check failed" with two more findings.
+    """
+    item: dict[str, object] = {
+        "environment": "dev",
+        "namespace": "silver",
+        "name": "orders",
+        "uuid": "u-orders",
+        "kind": "TABLE",
+        "model_kind": "fact",
+        "state": "published",
+        "owner": {"name": "ada", "kind": "USER"},
+        "created_at": "2026-11-01T08:00:00Z",
+        "row_count": 1200,
+        "size_bytes": 2048,
+        "last_write_at": "2026-11-10T08:00:00Z",
+        "last_read_at": "2026-11-11T09:30:00Z",
+        "readers_7d": 3,
+        "health_summary": {
+            "state": "failing",
+            "item": "check_failed",
+            "text": "Check failed",
+            "others": 2,
+        },
+        "match": {
+            "kind": "column",
+            "matched": "description",
+            "column": "store_id",
+            "column_type": "long",
+            "snippet": "joins dim_store",
+            "language": "en",
+            "translated": False,
+        },
+    }
+    return {**item, **changes}
+
+
+def _catalog_api(*items: dict[str, object], next_cursor: str | None = None) -> FakeApi:
+    """Build a fake API that answers `GET /api/v1/tables` with a page.
+
+    Parameters
+    ----------
+    *items
+        The page's items.
+    next_cursor
+        The page's cursor.
+
+    Returns
+    -------
+    FakeApi
+        The fake API.
+    """
+    api = FakeApi()
+    api.on(
+        "GET", "/api/v1/tables", json={"items": items, "next_cursor": next_cursor, "capped": False}
+    )
+    return api
+
+
+def test_table_list_without_namespace_lists_across_namespaces_with_health(tmp_path: Path) -> None:
+    api = _catalog_api(_listed_item())
+    result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev", "--sort", "rows")
+    assert result.exit_code == 0, result.output
+    assert dict(api.requests[-1].url.params) == {"environment": "dev", "sort": "rows"}
+    text = _plain(result.stdout)
+    assert "Check failed (+2)" in text and "orders" in text and "ada" in text
+    assert "2.0 KiB" in text and "1200" in text
+
+
+def test_table_list_all_environments_sends_no_environment(tmp_path: Path) -> None:
+    api = _catalog_api(_listed_item(match=None))
+    result = invoke(make_state(tmp_path, api), "table", "list", "--all-environments")
+    assert result.exit_code == 0, result.output
+    assert "environment" not in api.requests[-1].url.params
+    assert "match" not in _plain(result.stdout)
+
+
+def test_search_shows_the_matching_part(tmp_path: Path) -> None:
+    api = _catalog_api(_listed_item())
+    result = invoke(
+        make_state(tmp_path, api),
+        "table", "list", "--env", "dev", "--search", "store", "--under", "silver",
+    )  # fmt: skip
+    assert result.exit_code == 0, result.output
+    assert dict(api.requests[-1].url.params) == {
+        "environment": "dev",
+        "q": "store",
+        "namespace": "silver",
+        "sort": "name",
+    }
+    assert "column store_id: joins dim_store" in _plain(result.stdout)
+
+
+def test_search_shows_the_field_of_a_table_match(tmp_path: Path) -> None:
+    table_match = {
+        "kind": "table",
+        "matched": "name",
+        "column": None,
+        "column_type": None,
+        "snippet": None,
+        "language": None,
+        "translated": False,
+    }
+    api = _catalog_api(_listed_item(match=table_match))
+    result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev", "--search", "ord")
+    assert "name" in _plain(result.stdout).split("match")[-1]
+
+
+def test_a_column_match_without_text_shows_only_the_column(tmp_path: Path) -> None:
+    column_match = {
+        "kind": "column",
+        "matched": "name",
+        "column": "store_id",
+        "column_type": "long",
+        "snippet": None,
+        "language": None,
+        "translated": False,
+    }
+    api = _catalog_api(_listed_item(match=column_match))
+    result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev", "--search", "store")
+    assert "column store_id" in _plain(result.stdout)
+    assert "joins" not in result.stdout
+
+
+def test_unknown_values_are_shown_as_nothing(tmp_path: Path) -> None:
+    unknown = _listed_item(
+        owner=None,
+        row_count=None,
+        size_bytes=None,
+        last_write_at=None,
+        last_read_at=None,
+        health_summary={"state": "healthy", "item": "healthy", "text": "Healthy", "others": 0},
+        match=None,
+    )
+    api = _catalog_api(unknown)
+    result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev")
+    assert result.exit_code == 0, result.output
+    assert "Healthy" in result.stdout and "(+" not in result.stdout
+
+
+def test_table_list_json_is_the_items_and_the_next_page_goes_to_stderr(tmp_path: Path) -> None:
+    api = _catalog_api(_listed_item(), next_cursor="abc")
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output", "json", "table", "list", "--env", "dev", "--limit", "1",
+        "--order", "desc", "--cursor", "c0",
+    )  # fmt: skip
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)[0]["name"] == "orders"
+    assert dict(api.requests[-1].url.params) == {
+        "environment": "dev",
+        "sort": "name",
+        "order": "desc",
+        "limit": "1",
+        "cursor": "c0",
+    }
+    assert "More results: lakana table list --env dev --order desc --limit 1" in result.stderr
+    assert "--cursor abc" in result.stderr
+
+
+def test_table_list_without_tables_says_so(tmp_path: Path) -> None:
+    result = invoke(make_state(tmp_path, _catalog_api()), "table", "list", "--env", "dev")
+    assert result.exit_code == 0, result.output
+    assert "(none)" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "args,needle",
+    [
+        (["silver", "--search", "x"], "--under NAMESPACE"),
+        (["silver", "--under", "x"], "--under NAMESPACE"),
+        (["silver", "--all-environments"], "--under NAMESPACE"),
+        (["silver", "--sort", "rows"], "--under NAMESPACE"),
+        (["silver", "--order", "desc"], "--under NAMESPACE"),
+        (["silver", "--cursor", "c"], "--under NAMESPACE"),
+        (["--model-kind", "fact"], "give NAMESPACE"),
+        (["--lang", "de"], "give NAMESPACE"),
+        (["--dropped"], "give NAMESPACE"),
+        (["--all-environments", "--env", "dev"], "cannot be combined"),
+    ],
+)
+def test_conflicting_options_are_refused_with_the_fix(
+    tmp_path: Path, args: list[str], needle: str
+) -> None:
+    api = FakeApi()
+    result = invoke(make_state(tmp_path, api), "table", "list", *args)
+    assert result.exit_code == 2
+    assert needle in _plain(result.stderr)
+    assert api.requests == []
+
+
+def test_a_search_result_without_a_match_shows_an_empty_match_cell(tmp_path: Path) -> None:
+    api = _catalog_api(_listed_item(match=None))
+    result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev", "--search", "ord")
+    assert result.exit_code == 0, result.output
+    assert "match" in _plain(result.stdout)

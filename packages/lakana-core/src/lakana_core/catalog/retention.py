@@ -6,10 +6,12 @@ else its environment's (`Environment.retention_days`). Nothing has one unless so
 **The clock.** A table's *last activity* is the later of its last change in the catalog (the
 row's `updated_at`: every commit of a write or of maintenance moves it, and so does a change to
 its description or its retention), its creation, and the last read the worker recorded in
-`table_reads`. Reads only ever move it later. The snapshot's own timestamp is not used: the
-committing client writes it, so it is not trusted to decide a deletion; the catalog's time of the
-commit is never earlier. Reads through the Iceberg REST catalog are not recorded, and reads older
-than ``LAKANA_TABLE_READS__KEEP_DAYS`` are swept away, so neither keeps a table.
+`table_reads`. Reads only ever move it later. `tables.last_read_at` is a display key for the
+catalog list and its sorts; retention never reads it, only `table_reads`. The snapshot's own
+timestamp is not used: the committing client writes it, so it is not trusted to decide a deletion;
+the catalog's time of the commit is never earlier. Reads through the Iceberg REST catalog are not
+recorded, and reads older than ``LAKANA_TABLE_READS__KEEP_DAYS`` are swept away, so neither keeps a
+table.
 
 - ``days``: the table expires `days` after its last activity, and never earlier than `days` after
   the retention was set (for an environment's retention, after it was set there), so turning a

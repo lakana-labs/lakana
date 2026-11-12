@@ -291,7 +291,7 @@ A deploy turns `key:` into the checks `key_unique` and `key_not_null`, and each 
 
 ### See a table's model in the catalog
 
-`lakana table get` shows the model a table's header declares, `lakana table list` and
+`lakana table get` shows the model a table's header declares, `lakana table list NAMESPACE` and
 `lakana search` take `--model-kind`, search finds a table by its grain, and
 `lakana table references` shows the references in both directions. See
 [Declare a table's model](../how-to/declare-a-tables-model.md).

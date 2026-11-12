@@ -119,7 +119,7 @@ the refusal. `lakana.ingest` calls them inside the task; a person reads connecti
 
 _UI_ONLY = frozenset({"catalog.tree"})
 """SDK methods that only feed a screen: the counts of the catalog tree (M7 part 3a) have no use in
-a terminal, where `lakana table list` and `lakana env list` answer the same questions."""
+a terminal, where `lakana table list` lists the same tables with `--under`."""
 
 _ASSET_ONLY = frozenset({"tables.history"})
 """SDK methods a Python asset's harness calls and no person runs by hand: a history version

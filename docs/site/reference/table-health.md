@@ -128,6 +128,41 @@ with a message that names the setting if the default window is above the kept pe
 the message gives the range and names `LAKANA_TABLE_READS__KEEP_DAYS`. Lowering the kept period
 deletes the older counts at the next sweep; raising it does not bring back counts already deleted.
 
+## The health in one word
+
+The table list and `GET .../tables/{name}` show a table's health as one word, `health_summary`: the
+worst thing that is wrong with it, and `others`, how many other findings it leaves out (the list
+shows `Check failed (+2)`). `state` is `failing` (red), `warning` (amber), `healthy` or
+`not_judged`. These are all the words, worst first:
+
+| # | `item` | Text | `state` |
+|---|---|---|---|
+| 1 | `blocked_late` | Blocked: late | `failing` |
+| 2 | `blocked_rows_dropped` | Blocked: rows dropped | `failing` |
+| 3 | `blocked_rows_rose` | Blocked: rows rose | `failing` |
+| 4 | `blocked_nulls_changed` | Blocked: nulls changed | `failing` |
+| 5 | `blocked_out_of_range` | Blocked: out of range | `failing` |
+| 6 | `blocked_schema_changed` | Blocked: schema changed | `failing` |
+| 7 | `check_failed` | Check failed | `failing` |
+| 8 | `check_errored` | Check could not run | `failing` |
+| 9 | `late` | Late | `warning` |
+| 10 | `rows_dropped` | Rows dropped | `warning` |
+| 11 | `rows_rose` | Rows rose | `warning` |
+| 12 | `nulls_changed` | Nulls changed | `warning` |
+| 13 | `out_of_range` | Out of range | `warning` |
+| 14 | `schema_changed` | Schema changed | `warning` |
+| 15 | `check_warned` | Check warned | `warning` |
+| 16 | `healthy` | Healthy | `healthy` |
+| 17 | `not_judged` | Not judged | `not_judged` |
+
+A signal that fired with the effect `block` gives its `Blocked:` word, one with `warn` the plain
+word. A table is `Healthy` only with evidence: a check that passed or a signal that is within its
+band. A table with neither, and every view, external table and artifact, is `Not judged`. Sorting
+the list by `health` puts the table with the worst word first.
+
+A check that a model table generates for a reference to another table is counted only for a reader
+who may read that other table; to anyone else it does not exist.
+
 ## Signals
 
 Every snapshot Lakana commits (a run, an append, a merge, a history write, a REST write) records
@@ -440,7 +475,7 @@ history and what happens to a message still waiting is in [The history](#the-his
 | `lakana table health NAME --signals` | Lists the history of the health signals, newest first; a signal whose snapshot a failed check set back has `(set back)` after its state. Narrow it with `--signal S`, `--column C` and `--days N`; page with `--limit N` and `--cursor X`. |
 | `lakana table health NAME --output json` | Every field of the answer as JSON. |
 | `lakana table get NAME` | Lists the effects of `health:` that are not the default `warn`, and marks one that names a column the table does not have. |
-| `lakana table get NAME --output json` | Includes `last_write_at`, `row_count`, `size_bytes`, `file_count`, `health` (the effects that are not `warn`, by `signal` or `signal.column`), `health_missing` (the keys of `health` that name a column the table does not have) and `health_never_judged` (the `block` column entries no commit can judge, with the reason). |
+| `lakana table get NAME --output json` | Includes `last_write_at`, `row_count`, `size_bytes`, `file_count`, `health` (the effects that are not `warn`, by `signal` or `signal.column`), `health_missing` (the keys of `health` that name a column the table does not have) and `health_never_judged` (the `block` column entries no commit can judge, with the reason), `owner` (`name` and `kind`, or `null`), `created_at`, `last_read_at`, `readers_7d` and `health_summary` (the [one word](#the-health-in-one-word)). |
 
 Without a right to see the grants the command says that the readers are not shown, and why.
 
@@ -454,6 +489,7 @@ server that is older than table health. `Table.health` holds the effects that ar
 every signal warns, and from an older server), `Table.health_missing` the keys of it that name a
 column the table does not have, and `Table.health_never_judged` the `block` column entries that no
 commit can judge, with the reason (empty from an older server).
+`Table.owner` (a `TableOwner` or `None`), `Table.created_at`, `Table.last_read_at`, `Table.readers_7d` and `Table.health_summary` (a `HealthSummary`, or `None` from an older server) hold the owner, the creation time, the last read, the readers of the last 7 days and the one word. [Table list](table-list.md) lists them for every table.
 
 `client.tables.health(...).signals` is a list of `HealthSignal`, or `None` from a server older
 than signals. `client.tables.health_signals(environment, "namespace.table", days=None, signal=None,

@@ -36,6 +36,20 @@ lakana --output json search status --kind column
 out=$(lakana --output json search status --kind column)
 test "$(names "$out")" = "column silver.orders.status"
 
+# docs:start table-list
+lakana table list --all-environments --sort last_write
+# docs:end table-list
+
+out=$(lakana --output json table list --all-environments --sort last_write)
+test "$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])[0]["name"])' "$out")" = "orders"
+
+# docs:start table-list-search
+lakana table list --search order --under silver
+# docs:end table-list-search
+
+out=$(lakana --output json table list --search order --under silver)
+test "$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])[0]["match"]["kind"])' "$out")" = "table"
+
 # docs:start model-kind
 lakana search store --model-kind dimension
 # docs:end model-kind

@@ -408,7 +408,7 @@ Usage: `lakana env usage [OPTIONS] [name]`
 
 Show how much storage environments use, and the size of the workers' caches.
 
-For each environment: its managed tables (the files of their current version), the dropped tables that can still be restored, its artifacts and its code archives. The figures come from the catalog database; every write stores its table's size, and the worker measures the tables that have none in its hourly sweep, so such a table counts as unmeasured until then. Not counted: the files of older table versions that maintenance has not removed yet, external tables, and files nothing names. Needs MANAGE_ENVIRONMENT on each environment; the workers' caches need it on the instance.
+For each environment: its managed tables (the files of their current version), the dropped tables that can still be restored, its artifacts and its code archives. The figures come from the catalog database; every write stores its table's size, and the worker reads the size of a table written before that in its hourly sweep. A table whose write did not state its size stays unmeasured until a write states it. Not counted: the files of older table versions that maintenance has not removed yet, external tables, and files nothing names. Needs MANAGE_ENVIRONMENT on each environment; the workers' caches need it on the instance.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -510,17 +510,26 @@ Register external table NAME over files under raw/.
 
 ### `lakana table list`
 
-Usage: `lakana table list [OPTIONS] {namespace}`
+Usage: `lakana table list [OPTIONS] [namespace]`
 
-List the tables in NAMESPACE, or with --dropped the tables dropped from it.
+List the tables in NAMESPACE, or with no NAMESPACE every table you may read.
 
-A dropped table keeps its files until `purge_after` (the server's undo period, 7 days by default); until then `lakana table undrop` restores it. A table that its retention lets expire within the server's warning window (7 days by default) shows when, in `expires`. With --model-kind, only the tables whose asset header says `kind: <that kind>`.
+With NAMESPACE: the tables in it, or with --dropped the tables dropped from it. A dropped table keeps its files until `purge_after` (the server's undo period, 7 days by default); until then `lakana table undrop` restores it. A table that its retention lets expire within the server's warning window (7 days by default) shows when, in `expires`. With --model-kind, only the tables whose asset header says `kind: <that kind>`.
+
+Without NAMESPACE: one page of the tables you may read in the environment (or in every environment with --all-environments), each with its owner, health in one word, rows, size, and when it was last written and read. Narrow it with --search and --under, order it with --sort and --order, and page on with --cursor.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `NAMESPACE` | text | required |  |
-| `--dropped` | flag | off | List the dropped tables that can still be restored, and until when. |
+| `NAMESPACE` | text | none | List this namespace's tables; leave out to list across namespaces. |
+| `--dropped` | flag | off | With NAMESPACE: list the dropped tables that can still be restored, and until when. |
 | `--model-kind` | text | none | Only tables whose asset header declares this kind: fact, dimension, wide or staging. |
+| `--search` | text | none | Only tables whose name, label, description or grain, or a column's name, label, description or measure, contains this text (1 to 200 characters). |
+| `--under` | text | none | Only this namespace and the ones beneath it, dotted (no NAMESPACE). |
+| `--all-environments` | flag | off | List the tables of every environment you may read. |
+| `--sort` | text | `name` | What to sort by: name, owner, health, rows, size, last_write, last_read or created. A table with no value comes last. |
+| `--order` | text | none | asc or desc (default: asc for name, owner and health, desc for the rest). |
+| `--limit` | whole number, 1 to 200 | none | Most rows to list (default 50, at most 200). |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
 | `--lang` | text | none | Show the texts in this language, such as de or fr-CH. |
 | `--env` | text | none | Environment (default: the profile's). |
 

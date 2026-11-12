@@ -95,6 +95,7 @@ nav:
       - reference/load.md
       - reference/table-health.md
       - reference/search.md
+      - reference/table-list.md
       - reference/lists.md
       - reference/access.md
       - reference/access-file.md

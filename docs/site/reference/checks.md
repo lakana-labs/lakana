@@ -384,7 +384,7 @@ checked` under it. A check generated from the asset's header reads `key_unique (
   warns and `(keep)` after one that keeps. When
   `lakana.yaml` sets the default of some checks, a line follows: ``2 checks take `on_failure:
   warn` from lakana.yaml.`` (`1 check takes` for one).
-- `lakana table get` and `lakana table list` show a `state` of `published`, `not published` or
+- `lakana table get` and `lakana table list NAMESPACE` show a `state` of `published`, `not published` or
   `kept`, and `table get` says why for the last two.
 - `lakana runs cancel` ends a run whose checks cannot finish at once; without it, such a task
   ends `failed` with the code `checks_unfinished` after 5 more tries of its checks, and its table
