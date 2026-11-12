@@ -1086,7 +1086,9 @@ def test_only_submit_preview_sets_preview_table_id(
 
     A run bound by `preview_table_id` is a preview: its SQL is the server's, and the worker
     compares the object it reads with the id. A new place that constructs a query run fails here
-    until it is listed, and one that sets the field must be argued for.
+    until it is listed, and one that sets the field must be argued for. One file names it
+    outside a construction, and only reads it: the worker's query path hands the id on to the
+    check of the previewed object (`pipeline.py`, a keyword argument).
 
     Parameters
     ----------
@@ -1100,7 +1102,9 @@ def test_only_submit_preview_sets_preview_table_id(
         "lakana-worker/src/lakana_worker/checks.py": [False],
         "lakana-worker/src/lakana_worker/tasks.py": [False],
     }
-    assert _other_mentions(parsed_sources, "preview_table_id") == {}
+    assert _other_mentions(parsed_sources, "preview_table_id") == {
+        "lakana-worker/src/lakana_worker/pipeline.py": {"keyword"},
+    }
 
 
 @pytest.mark.slow

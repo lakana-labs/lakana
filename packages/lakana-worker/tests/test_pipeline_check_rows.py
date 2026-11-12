@@ -5,6 +5,8 @@ query child: the worker reads the one table the result names at the checked snap
 every other table as it is now.
 """
 
+# ruff: file-ignore[redefined-while-unused]  (each test that takes the imported `admin` fixture)
+
 from __future__ import annotations
 
 import uuid
@@ -14,6 +16,20 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.ipc
 import pytest
+from policy_read_helpers import (
+    ORDERS,
+    admin,  # ruff: ignore[unused-import]
+    catalog,
+    filter,
+    filter_eu,
+    grant_read,
+    mask,
+    mask_as,
+    orders,
+    reader,
+    run,
+    write,
+)
 from pyiceberg.schema import Schema
 from pyiceberg.table.update import (
     AddSchemaUpdate,
@@ -34,7 +50,7 @@ from lakana_core.auth import (
 from lakana_core.catalog.identity import resolve_environment_id, resolve_table_id
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.query_service import QueryService, WriteTarget
-from lakana_core.catalog.service import CatalogService, failed_snapshot_tag
+from lakana_core.catalog.service import failed_snapshot_tag
 from lakana_core.catalog.writes import SnapshotPin
 from lakana_core.config import StorageConfig
 from lakana_core.errors import (
@@ -56,7 +72,6 @@ from lakana_core.models import (
     Environment,
     JobVersion,
     Principal,
-    PrincipalType,
     QueryErrorCause,
     QueryRun,
     QueryRunStatus,
@@ -95,128 +110,15 @@ from lakana_worker.pipeline import (
     run_one,
 )
 
-_ORDERS = TableRef.from_dotted("dev", "gold.orders")
 _NEGATIVE = "SELECT * FROM gold.orders WHERE id < 0"
 """A check that finds orders with a negative id."""
 
 
-@pytest.fixture
-def admin(session: Session, tmp_path: Path) -> PrincipalRef:
-    """Provide the principal that sets the world up and runs the pipeline, and `dev`.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    tmp_path
-        The environment's storage root.
-
-    Returns
-    -------
-    PrincipalRef
-        The administrator.
-    """
-    principal_id = uuid.uuid4()
-    session.add(Principal(id=principal_id, type=PrincipalType.USER, name="admin"))
-    session.commit()
-    ref = PrincipalRef(id=principal_id, name="admin", type=PrincipalType.USER)
-    _catalog(session).create_environment(
-        ref, name="dev", storage=StorageConfig(scheme="file", root=f"file://{tmp_path}", options={})
-    )
-    return ref
-
-
-def _catalog(session: Session) -> CatalogService:
-    """Return a catalog that allows everything, for setting the world up.
-
-    Parameters
-    ----------
-    session
-        Database session.
-
-    Returns
-    -------
-    CatalogService
-        The catalog.
-    """
-    return CatalogService(session, StorageResolver(session), AllowAllAuthorization())
-
-
-def _orders(ids: list[int], regions: list[str], **more: list[str]) -> pa.Table:
-    """Build rows of orders.
-
-    Parameters
-    ----------
-    ids
-        The `id` values.
-    regions
-        The `region` values.
-    **more
-        Further string columns by name.
-
-    Returns
-    -------
-    pa.Table
-        The rows, with an `email` column derived from the id.
-    """
-    return pa.table(
-        {
-            "id": pa.array(ids, pa.int64()),
-            "region": pa.array(regions, pa.string()),
-            "email": pa.array([f"o{i}@example.org" for i in ids], pa.string()),
-        }
-        | {name: pa.array(values, pa.string()) for name, values in more.items()}
-    )
-
-
-_GOOD = _orders([1], ["eu"])
+_GOOD = orders([1], ["eu"])
 """What the table holds before and after the failed run: one good row."""
 
-_BAD = _orders([2, -1, -2], ["eu", "eu", "us"])
+_BAD = orders([2, -1, -2], ["eu", "eu", "us"])
 """What the failed run wrote: three rows, two of which the check finds."""
-
-
-def _write(
-    session: Session,
-    admin: PrincipalRef,
-    rows: pa.Table,
-    mode: WriteMode,
-    *,
-    ref: TableRef = _ORDERS,
-    evolve_schema: bool = False,
-) -> int:
-    """Write rows into a table and return the snapshot the write made.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    admin
-        The writer.
-    rows
-        The rows.
-    mode
-        The write mode.
-    ref
-        The target.
-    evolve_schema
-        Let the table adopt the rows' schema.
-
-    Returns
-    -------
-    int
-        The id of the new snapshot.
-    """
-    written = _catalog(session).write_batches(
-        admin,
-        ref,
-        mode=mode,
-        schema=rows.schema,
-        batches=rows.to_batches(),
-        evolve_schema=evolve_schema,
-    )
-    assert written.snapshot_id is not None
-    return written.snapshot_id
 
 
 def _table_id(session: Session, name: str = "orders") -> uuid.UUID:
@@ -386,8 +288,8 @@ def _failed_run(
     CheckResult
         The failed result, whose checked snapshot is the one the run wrote.
     """
-    before = None if first_build else _write(session, admin, _GOOD, WriteMode.CREATE)
-    after = _write(
+    before = None if first_build else write(session, admin, _GOOD, WriteMode.CREATE)
+    after = write(
         session,
         admin,
         bad,
@@ -395,9 +297,9 @@ def _failed_run(
         evolve_schema=not first_build,
     )
     result = _checked(session, admin, snapshot_id=after, sql=sql)
-    rolled = _catalog(session).roll_back(
+    rolled = catalog(session).roll_back(
         admin,
-        _ORDERS,
+        ORDERS,
         run_id=result.run_id,
         task_run_id=result.task_run_id,
         written=Written(_table_id(session), before, after, publishes=first_build),
@@ -407,58 +309,6 @@ def _failed_run(
         RollbackOutcome.UNPUBLISHED if first_build else RollbackOutcome.ROLLED_BACK
     )
     return session.scalars(select(CheckResult).where(CheckResult.id == result.id)).one()
-
-
-def _reader(session: Session, admin: PrincipalRef, name: str, *tables: str) -> PrincipalRef:
-    """Create a person who may read the named tables of `gold` and nothing else.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    admin
-        The granting principal.
-    name
-        The person's name.
-    *tables
-        The tables of `gold` to grant `READ_TABLE` on.
-
-    Returns
-    -------
-    PrincipalRef
-        The person.
-    """
-    principal_id = uuid.uuid4()
-    session.add(Principal(id=principal_id, type=PrincipalType.USER, name=name))
-    session.commit()
-    for table in tables:
-        _grant_read(session, admin, name, table)
-    return PrincipalRef(id=principal_id, name=name, type=PrincipalType.USER)
-
-
-def _grant_read(session: Session, admin: PrincipalRef, name: str, table: str) -> None:
-    """Grant a principal `READ_TABLE` on one table of `gold`.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    admin
-        The granting principal.
-    name
-        The grantee's name.
-    table
-        The table, in `gold`.
-    """
-    GrantService(session, AllowAllAuthorization()).grant(
-        admin,
-        principal=name,
-        action=Action.READ_TABLE,
-        kind=SecurableKind.TABLE,
-        environment="dev",
-        namespace="gold",
-        table=table,
-    )
 
 
 def _submit(session: Session, reader: PrincipalRef, result: CheckResult) -> uuid.UUID:
@@ -488,39 +338,6 @@ def _submit(session: Session, reader: PrincipalRef, result: CheckResult) -> uuid
     ).id
 
 
-def _run(
-    session: Session, tmp_path: Path, query_run_id: uuid.UUID
-) -> tuple[QueryRun, list[dict[str, object]]]:
-    """Run a queued query under the real grants and return it with its rows.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    tmp_path
-        The storage root, where results land.
-    query_run_id
-        The queued query run.
-
-    Returns
-    -------
-    tuple
-        The finished run and its rows, ordered by `id` (empty when it failed).
-    """
-    run_one(session, query_run_id, GrantAuthorization(session))
-    session.rollback()
-    run = session.execute(
-        select(QueryRun)
-        .where(QueryRun.id == query_run_id)
-        .execution_options(populate_existing=True)
-    ).scalar_one()
-    if run.result_location is None:
-        return run, []
-    with pyarrow.ipc.open_file(tmp_path / run.result_location) as reader:
-        rows = reader.read_all().to_pylist()
-    return run, sorted(rows, key=lambda row: row["id"])
-
-
 def _rows(
     session: Session, tmp_path: Path, reader: PrincipalRef, result: CheckResult
 ) -> list[dict[str, object]]:
@@ -542,8 +359,8 @@ def _rows(
     list of dict
         The rows, ordered by `id`.
     """
-    run, rows = _run(session, tmp_path, _submit(session, reader, result))
-    assert (run.status, run.error_message) == (QueryRunStatus.SUCCEEDED, None)
+    finished, rows = run(session, tmp_path, _submit(session, reader, result))
+    assert (finished.status, finished.error_message) == (QueryRunStatus.SUCCEEDED, None)
     return rows
 
 
@@ -568,9 +385,9 @@ def _failure(
     tuple
         The failed run's message and cause.
     """
-    run, rows = _run(session, tmp_path, _submit(session, reader, result))
-    assert (run.status, rows, run.result_location) == (QueryRunStatus.FAILED, [], None)
-    return run.error_message, run.error_cause
+    finished, rows = run(session, tmp_path, _submit(session, reader, result))
+    assert (finished.status, rows, finished.result_location) == (QueryRunStatus.FAILED, [], None)
+    return finished.error_message, finished.error_cause
 
 
 def _gone(run_id: uuid.UUID) -> str:
@@ -602,7 +419,7 @@ def test_the_rows_are_those_of_the_checked_snapshot(
 ) -> None:
     """The failed run's rows are shown although the table was set back to one good row."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
 
     rows = _rows(session, tmp_path, ana, result)
 
@@ -612,8 +429,8 @@ def test_the_rows_are_those_of_the_checked_snapshot(
     ]
     # The same SQL as an ordinary query reads the table as it is now: no such row.
     ordinary = QueryService(session, AllowAllAuthorization()).submit_query(ana, "dev", _NEGATIVE)
-    run, today = _run(session, tmp_path, ordinary.id)
-    assert (run.status, today) == (QueryRunStatus.SUCCEEDED, [])
+    finished, today = run(session, tmp_path, ordinary.id)
+    assert (finished.status, today) == (QueryRunStatus.SUCCEEDED, [])
 
 
 def test_only_the_checked_table_is_read_at_the_snapshot(
@@ -622,16 +439,16 @@ def test_only_the_checked_table_is_read_at_the_snapshot(
     """A second table the check joins changed since: its rows are today's."""
     limits = TableRef.from_dotted("dev", "gold.limits")
     floor = pa.table({"floor": pa.array([0], pa.int64())})
-    then = _write(session, admin, floor, WriteMode.CREATE, ref=limits)
+    then = write(session, admin, floor, WriteMode.CREATE, ref=limits)
     result = _failed_run(
         session,
         admin,
         sql="SELECT o.id, l.floor FROM gold.orders o JOIN gold.limits l ON o.id < l.floor",
     )
     lower = pa.table({"floor": pa.array([-1], pa.int64())})
-    now = _write(session, admin, lower, WriteMode.REPLACE, ref=limits)
+    now = write(session, admin, lower, WriteMode.REPLACE, ref=limits)
     assert now != then
-    ana = _reader(session, admin, "ana", "orders", "limits")
+    ana = reader(session, admin, "ana", "orders", "limits")
 
     rows = _rows(session, tmp_path, ana, result)
 
@@ -644,7 +461,7 @@ def test_the_snapshot_that_was_read_is_what_the_query_records(
 ) -> None:
     """The snapshot recorded per table is the checked one for the checked table, else today's."""
     limits = TableRef.from_dotted("dev", "gold.limits")
-    current = _write(
+    current = write(
         session, admin, pa.table({"floor": pa.array([0], pa.int64())}), WriteMode.CREATE, ref=limits
     )
     result = _failed_run(
@@ -652,7 +469,7 @@ def test_the_snapshot_that_was_read_is_what_the_query_records(
         admin,
         sql="SELECT o.id, l.floor FROM gold.orders o JOIN gold.limits l ON o.id < l.floor",
     )
-    ana = _reader(session, admin, "ana", "orders", "limits")
+    ana = reader(session, admin, "ana", "orders", "limits")
     seen: list[ReadOutcome] = []
 
     failure = run_one(
@@ -759,30 +576,6 @@ def _policy_needs(column: str, run_id: uuid.UUID) -> str:
     )
 
 
-def _filter(session: Session, admin: PrincipalRef, name: str, expression: str) -> None:
-    """Give a reader a row filter on `gold.orders`.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    admin
-        The principal that sets the filter.
-    name
-        The reader's name.
-    expression
-        The predicate.
-    """
-    RowFilterService(session, AllowAllAuthorization(), _catalog(session)).create(
-        admin,
-        principal=name,
-        environment="dev",
-        namespace="gold",
-        table="orders",
-        expression=expression,
-    )
-
-
 def _stored_filter(session: Session, admin: PrincipalRef, name: str, expression: str) -> None:
     """Store a row filter on `gold.orders` the way an older release accepted it.
 
@@ -817,97 +610,12 @@ def _stored_filter(session: Session, admin: PrincipalRef, name: str, expression:
             environment_id=environment_id,
             table_id=table_id,
             expression=expression,
-            schema_id=_catalog(session).load_table(admin, _ORDERS).metadata.current_schema_id,
+            schema_id=catalog(session).load_table(admin, ORDERS).metadata.current_schema_id,
             created_by=admin.id,
             created_at=datetime.now(UTC),
         )
     )
     session.commit()
-
-
-def _mask_as(
-    session: Session, admin: PrincipalRef, name: str, column: str, expression: str
-) -> None:
-    """Give a reader a column mask on `gold.orders` with an expression of its own.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    admin
-        The principal that sets the mask.
-    name
-        The reader's name.
-    column
-        The masked column.
-    expression
-        What is shown in its place.
-    """
-    ColumnMaskService(session, AllowAllAuthorization(), _catalog(session)).create(
-        admin,
-        principal=name,
-        environment="dev",
-        namespace="gold",
-        table="orders",
-        column=column,
-        expression=expression,
-    )
-
-
-def _filter_eu(session: Session, admin: PrincipalRef, name: str) -> None:
-    """Give a reader the row filter ``region = 'eu'`` on `gold.orders`.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    admin
-        The principal that sets the filter.
-    name
-        The reader's name.
-    """
-    RowFilterService(session, AllowAllAuthorization(), _catalog(session)).create(
-        admin,
-        principal=name,
-        environment="dev",
-        namespace="gold",
-        table="orders",
-        expression="region = 'eu'",
-    )
-
-
-def _mask(session: Session, admin: PrincipalRef, name: str, column: str) -> uuid.UUID:
-    """Give a reader a column mask on `gold.orders` that shows ``***``.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    admin
-        The principal that sets the mask.
-    name
-        The reader's name.
-    column
-        The masked column; the table must have it now.
-
-    Returns
-    -------
-    uuid.UUID
-        The mask's id.
-    """
-    return (
-        ColumnMaskService(session, AllowAllAuthorization(), _catalog(session))
-        .create(
-            admin,
-            principal=name,
-            environment="dev",
-            namespace="gold",
-            table="orders",
-            column=column,
-            expression="'***'",
-        )
-        .id
-    )
 
 
 def _current_columns(session: Session) -> dict[str, str]:
@@ -951,7 +659,7 @@ def _warned_run(session: Session, admin: PrincipalRef, rows: pa.Table, sql: str)
     CheckResult
         The result; its checked snapshot stays in the table's history.
     """
-    snapshot = _write(session, admin, rows, WriteMode.CREATE)
+    snapshot = write(session, admin, rows, WriteMode.CREATE)
     return _checked(session, admin, snapshot_id=snapshot, sql=sql)
 
 
@@ -985,17 +693,17 @@ def test_lakanas_own_writes_keep_the_field_ids_of_unchanged_columns(
     The read at a check compares field ids; if a write gave unchanged columns new ids, every
     column would be withheld after any rebuild.
     """
-    _write(session, admin, _GOOD, WriteMode.CREATE)
+    write(session, admin, _GOOD, WriteMode.CREATE)
     created = _field_ids(session)
 
-    _write(session, admin, _BAD, WriteMode.REPLACE)
+    write(session, admin, _BAD, WriteMode.REPLACE)
     rebuilt = _field_ids(session)
-    _write(session, admin, _orders([3], ["eu"], note=["n"]), WriteMode.REPLACE, evolve_schema=True)
+    write(session, admin, orders([3], ["eu"], note=["n"]), WriteMode.REPLACE, evolve_schema=True)
     widened = _field_ids(session)
-    _write(
+    write(
         session,
         admin,
-        _orders([4], ["eu"], note=["n"], tier=["t"]),
+        orders([4], ["eu"], note=["n"], tier=["t"]),
         WriteMode.APPEND,
         evolve_schema=True,
     )
@@ -1015,15 +723,15 @@ def test_a_column_only_the_failed_snapshot_has_is_shown_to_nobody(
     No mask can be put on a column the table does not have now, so the column is withheld
     from every reader alike: one with a mask, one with a row filter only, one with neither.
     """
-    bad = _orders([2, -1, -2], ["eu", "eu", "us"], note=["n2", "n-1", "n-2"])
+    bad = orders([2, -1, -2], ["eu", "eu", "us"], note=["n2", "n-1", "n-2"])
     result = _failed_run(session, admin, bad=bad)
     assert list(_current_columns(session)) == ["id", "region", "email"]
-    ana = _reader(session, admin, "ana", "orders")
-    ben = _reader(session, admin, "ben", "orders")
-    cy = _reader(session, admin, "cy", "orders")
-    _filter_eu(session, admin, "ana")
-    _filter_eu(session, admin, "ben")
-    _mask(session, admin, "ana", "email")
+    ana = reader(session, admin, "ana", "orders")
+    ben = reader(session, admin, "ben", "orders")
+    cy = reader(session, admin, "cy", "orders")
+    filter_eu(session, admin, "ana")
+    filter_eu(session, admin, "ben")
+    mask(session, admin, "ana", "email")
 
     masked = _rows(session, tmp_path, ana, result)
     filtered = _rows(session, tmp_path, ben, result)
@@ -1054,13 +762,13 @@ def test_a_check_that_names_a_column_that_is_not_shown_fails_with_the_reason(
     masked
         Whether the reader has a column mask on the table.
     """
-    bad = _orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
+    bad = orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
     result = _failed_run(
         session, admin, bad=bad, sql="SELECT id FROM gold.orders WHERE note = 'n-1'"
     )
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     if masked:
-        _mask(session, admin, "ana", "email")
+        mask(session, admin, "ana", "email")
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -1084,9 +792,9 @@ def test_a_withheld_column_named_in_another_case_or_through_an_alias_gets_the_re
     session: Session, admin: PrincipalRef, tmp_path: Path, sql: str
 ) -> None:
     """The database words the failure differently, but the cause is the same withheld column."""
-    bad = _orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
+    bad = orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
     result = _failed_run(session, admin, bad=bad, sql=sql)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -1103,7 +811,7 @@ def test_a_column_dropped_since_is_not_shown_from_an_older_snapshot(
     its field is gone and every read of the table under it is refused; once it is revoked the
     column is still not shown: neither with ``*`` nor by name.
     """
-    bad = _orders([2, -1], ["eu", "eu"], ssn=["s2", "s-1"])
+    bad = orders([2, -1], ["eu", "eu"], ssn=["s2", "s-1"])
     result = _warned_run(session, admin, bad, _NEGATIVE)
     by_name = _checked(
         session,
@@ -1111,13 +819,13 @@ def test_a_column_dropped_since_is_not_shown_from_an_older_snapshot(
         snapshot_id=result.checked_snapshot_id or 0,
         sql="SELECT ssn FROM gold.orders WHERE id < 0",
     )
-    ana = _reader(session, admin, "ana", "orders")
-    mask_id = _mask(session, admin, "ana", "ssn")
-    _write(session, admin, _orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
+    mask_id = mask(session, admin, "ana", "ssn")
+    write(session, admin, orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
     assert list(_current_columns(session)) == ["id", "region", "email"]
 
     with_stale_mask, _ = _failure(session, tmp_path, ana, result)
-    ColumnMaskService(session, AllowAllAuthorization(), _catalog(session)).revoke(admin, mask_id)
+    ColumnMaskService(session, AllowAllAuthorization(), catalog(session)).revoke(admin, mask_id)
     rows = _rows(session, tmp_path, ana, result)
     message, _ = _failure(session, tmp_path, ana, by_name)
 
@@ -1133,9 +841,9 @@ def test_a_column_whose_type_was_widened_since_is_not_shown(
     narrow = pa.table({"id": pa.array([2, -1], pa.int64()), "qty": pa.array([5, 6], pa.int32())})
     result = _warned_run(session, admin, narrow, "SELECT * FROM gold.orders WHERE id < 0")
     wide = pa.table({"id": pa.array([3], pa.int64()), "qty": pa.array([7], pa.int64())})
-    _write(session, admin, wide, WriteMode.REPLACE, evolve_schema=True)
+    write(session, admin, wide, WriteMode.REPLACE, evolve_schema=True)
     assert _current_columns(session) == {"id": "long", "qty": "long"}
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
 
     assert _rows(session, tmp_path, ana, result) == [{"id": -1}]
 
@@ -1197,9 +905,9 @@ def test_a_rebuild_with_the_same_columns_keeps_every_column_shown(
 ) -> None:
     """Later runs replaced the table and added a column: the old snapshot's columns are shown."""
     result = _warned_run(session, admin, _BAD, _NEGATIVE)
-    _write(session, admin, _GOOD, WriteMode.REPLACE)
-    _write(session, admin, _orders([5], ["eu"], tier=["t"]), WriteMode.REPLACE, evolve_schema=True)
-    ana = _reader(session, admin, "ana", "orders")
+    write(session, admin, _GOOD, WriteMode.REPLACE)
+    write(session, admin, orders([5], ["eu"], tier=["t"]), WriteMode.REPLACE, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
 
     assert _rows(session, tmp_path, ana, result) == [
         {"id": -2, "region": "us", "email": "o-2@example.org"},
@@ -1218,14 +926,12 @@ def test_a_row_filter_on_a_column_added_since_refuses_the_read_with_its_own_reas
     `note` is withheld in the same read; the reason given is the filter's, which is the
     cause, and not that of a column the check's SQL never names.
     """
-    bad = _orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
+    bad = orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
     result = _failed_run(session, admin, bad=bad)
-    _write(
-        session, admin, _orders([6], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True
-    )
+    write(session, admin, orders([6], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True)
     assert list(_current_columns(session)) == ["id", "region", "email", "tier"]
-    ana = _reader(session, admin, "ana", "orders")
-    RowFilterService(session, AllowAllAuthorization(), _catalog(session)).create(
+    ana = reader(session, admin, "ana", "orders")
+    RowFilterService(session, AllowAllAuthorization(), catalog(session)).create(
         admin,
         principal="ana",
         environment="dev",
@@ -1248,11 +954,11 @@ def test_a_row_filter_on_a_column_dropped_since_refuses_the_read(
 
     That refuses every read of the table under the filter, the read at the check included.
     """
-    bad = _orders([2, -1, -2], ["eu", "eu", "us"], ssn=["s2", "s-1", "s-2"])
+    bad = orders([2, -1, -2], ["eu", "eu", "us"], ssn=["s2", "s-1", "s-2"])
     result = _warned_run(session, admin, bad, _NEGATIVE)
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "SSN = 's-1'")
-    _write(session, admin, _orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "SSN = 's-1'")
+    write(session, admin, orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -1279,7 +985,7 @@ def _dropped_and_added_again(session: Session, admin: PrincipalRef) -> CheckResu
     result = _warned_run(session, admin, _BAD, _NEGATIVE)
     before = _field_ids(session)
     without = pa.table({"id": pa.array([7], pa.int64()), "email": pa.array(["x"], pa.string())})
-    _write(session, admin, without, WriteMode.REPLACE, evolve_schema=True)
+    write(session, admin, without, WriteMode.REPLACE, evolve_schema=True)
     again = pa.table(
         {
             "id": pa.array([-8, 9], pa.int64()),
@@ -1287,7 +993,7 @@ def _dropped_and_added_again(session: Session, admin: PrincipalRef) -> CheckResu
             "region": pa.array(["eu", "us"], pa.string()),
         }
     )
-    _write(session, admin, again, WriteMode.REPLACE, evolve_schema=True)
+    write(session, admin, again, WriteMode.REPLACE, evolve_schema=True)
     after = _field_ids(session)
     assert (after["id"], after["email"]) == (before["id"], before["email"])
     assert after["region"] != before["region"]
@@ -1302,16 +1008,16 @@ def test_a_filter_on_a_column_dropped_and_added_again_refuses_the_read(
     The reader's ordinary query of the table is untouched by all of this.
     """
     result = _dropped_and_added_again(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "region = 'eu'")
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "region = 'eu'")
 
     message, cause = _failure(session, tmp_path, ana, result)
     ordinary = QueryService(session, AllowAllAuthorization()).submit_query(ana, "dev", _NEGATIVE)
-    run, today = _run(session, tmp_path, ordinary.id)
+    finished, today = run(session, tmp_path, ordinary.id)
 
     assert message == _policy_needs("region", result.run_id)
     assert cause == QueryErrorCause.INVALID_QUERY.value
-    assert (run.status, today) == (
+    assert (finished.status, today) == (
         QueryRunStatus.SUCCEEDED,
         [{"id": -8, "email": "o-8@example.org", "region": "eu"}],
     )
@@ -1326,8 +1032,8 @@ def test_a_filter_written_before_the_column_was_dropped_and_added_again_refuses_
     cover another column in every read of the table.
     """
     result = _dropped_and_added_again(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "region = 'eu'")
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "region = 'eu'")
     for stored in session.execute(select(RowFilter)).scalars().all():
         _unbind(session, stored.id, PENDING)
         stored.schema_id = None
@@ -1344,8 +1050,8 @@ def test_a_mask_whose_expression_reads_a_column_that_is_another_now_refuses_the_
 ) -> None:
     """The mask on `email` is built from `region`, which is not the column it was."""
     result = _dropped_and_added_again(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _mask_as(session, admin, "ana", "email", "substr(region, 1, 1) || '***'")
+    ana = reader(session, admin, "ana", "orders")
+    mask_as(session, admin, "ana", "email", "substr(region, 1, 1) || '***'")
 
     message, _ = _failure(session, tmp_path, ana, result)
 
@@ -1357,7 +1063,7 @@ def test_the_first_column_by_name_is_the_one_named(
 ) -> None:
     """Several columns of the reader's policies changed: the text names one, always the same."""
     result = _dropped_and_added_again(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     _stored_filter(session, admin, "ana", "zone = 'a' OR region = 'eu' OR area = 'b'")
 
     message, _ = _failure(session, tmp_path, ana, result)
@@ -1370,9 +1076,9 @@ def test_a_mask_whose_expression_reads_unchanged_columns_is_applied(
 ) -> None:
     """A mask built from another column works on the snapshot as on the table."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _filter_eu(session, admin, "ana")
-    _mask_as(session, admin, "ana", "email", "substr(region, 1, 1) || '***'")
+    ana = reader(session, admin, "ana", "orders")
+    filter_eu(session, admin, "ana")
+    mask_as(session, admin, "ana", "email", "substr(region, 1, 1) || '***'")
 
     assert _rows(session, tmp_path, ana, result) == [{"id": -1, "region": "eu", "email": "e***"}]
 
@@ -1391,18 +1097,18 @@ def test_a_filter_on_one_of_two_columns_renamed_into_each_other_refuses_the_read
         NestedField(ids["id"], "id", LongType(), required=False),
         NestedField(ids["email"], "region", StringType(), required=False),
         NestedField(ids["region"], "email", StringType(), required=False),
-        schema_id=_catalog(session).load_table(admin, _ORDERS).metadata.current_schema_id + 1,
+        schema_id=catalog(session).load_table(admin, ORDERS).metadata.current_schema_id + 1,
     )
-    _catalog(session).commit_table(
+    catalog(session).commit_table(
         admin,
-        _ORDERS,
+        ORDERS,
         requirements=[],
         updates=[AddSchemaUpdate(schema_=swapped), SetCurrentSchemaUpdate(schema_id=-1)],
     )
     assert _field_ids(session) == {"id": ids["id"], "region": ids["email"], "email": ids["region"]}
-    ana = _reader(session, admin, "ana", "orders")
-    cy = _reader(session, admin, "cy", "orders")
-    _filter(session, admin, "ana", "region = 'eu'")
+    ana = reader(session, admin, "ana", "orders")
+    cy = reader(session, admin, "cy", "orders")
+    filter(session, admin, "ana", "region = 'eu'")
 
     message, _ = _failure(session, tmp_path, ana, result)
     plain = _rows(session, tmp_path, cy, result)
@@ -1420,18 +1126,18 @@ def test_a_check_read_before_a_swap_never_shows_the_masked_field(
     no row shows an unmasked value of the masked field under any name.
     """
     result = _warned_run(session, admin, _BAD, _NEGATIVE)
-    ana = _reader(session, admin, "ana", "orders")
-    _mask(session, admin, "ana", "email")
+    ana = reader(session, admin, "ana", "orders")
+    mask(session, admin, "ana", "email")
     ids = _field_ids(session)
     swapped = Schema(
         NestedField(ids["id"], "id", LongType(), required=False),
         NestedField(ids["email"], "region", StringType(), required=False),
         NestedField(ids["region"], "email", StringType(), required=False),
-        schema_id=_catalog(session).load_table(admin, _ORDERS).metadata.current_schema_id + 1,
+        schema_id=catalog(session).load_table(admin, ORDERS).metadata.current_schema_id + 1,
     )
-    _catalog(session).commit_table(
+    catalog(session).commit_table(
         admin,
-        _ORDERS,
+        ORDERS,
         requirements=[],
         updates=[AddSchemaUpdate(schema_=swapped), SetCurrentSchemaUpdate(schema_id=-1)],
     )
@@ -1452,8 +1158,8 @@ def test_a_filter_on_a_field_of_a_column_is_judged_by_the_column(
     has no fields); what matters here is that it is not refused for a column `country`.
     """
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    ben = _reader(session, admin, "ben", "orders")
+    ana = reader(session, admin, "ana", "orders")
+    ben = reader(session, admin, "ben", "orders")
     _stored_filter(session, admin, "ana", "region.country = 'DE'")
     _stored_filter(session, admin, "ben", "address.country = 'DE'")
 
@@ -1474,12 +1180,10 @@ def test_a_mask_on_a_column_added_since_does_not_block_the_read(
     expression reads.
     """
     result = _warned_run(session, admin, _BAD, _NEGATIVE)
-    _write(
-        session, admin, _orders([6], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True
-    )
-    ana = _reader(session, admin, "ana", "orders")
-    _mask_as(session, admin, "ana", "tier", "substr(tier, 1, 1)")
-    _mask(session, admin, "ana", "email")
+    write(session, admin, orders([6], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
+    mask_as(session, admin, "ana", "tier", "substr(tier, 1, 1)")
+    mask(session, admin, "ana", "email")
 
     assert _rows(session, tmp_path, ana, result) == [
         {"id": -2, "region": "us", "email": "***"},
@@ -1492,8 +1196,8 @@ def test_a_filter_that_spells_an_unchanged_column_in_another_case_is_applied(
 ) -> None:
     """The database matches a column name without regard to case, and so does the check here."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "Region = 'eu'")
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "Region = 'eu'")
 
     assert _rows(session, tmp_path, ana, result) == [
         {"id": -1, "region": "eu", "email": "o-1@example.org"}
@@ -1507,9 +1211,9 @@ def test_a_mask_on_a_column_widened_since_does_not_block_the_read(
     narrow = pa.table({"id": pa.array([2, -1], pa.int64()), "qty": pa.array([5, 6], pa.int32())})
     result = _warned_run(session, admin, narrow, _NEGATIVE)
     wide = pa.table({"id": pa.array([3], pa.int64()), "qty": pa.array([7], pa.int64())})
-    _write(session, admin, wide, WriteMode.REPLACE, evolve_schema=True)
-    ana = _reader(session, admin, "ana", "orders")
-    ColumnMaskService(session, AllowAllAuthorization(), _catalog(session)).create(
+    write(session, admin, wide, WriteMode.REPLACE, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
+    ColumnMaskService(session, AllowAllAuthorization(), catalog(session)).create(
         admin,
         principal="ana",
         environment="dev",
@@ -1529,18 +1233,18 @@ def test_an_ordinary_query_with_a_mask_on_an_unknown_column_is_refused_as_before
 
     The mask is one of an earlier release: a bound mask cannot name an unknown column.
     """
-    _write(session, admin, _orders([1], ["eu"], ssn=["s1"]), WriteMode.CREATE)
-    ana = _reader(session, admin, "ana", "orders")
-    _unbind(session, _mask(session, admin, "ana", "ssn"), UNBOUND)
-    _write(session, admin, _orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
+    write(session, admin, orders([1], ["eu"], ssn=["s1"]), WriteMode.CREATE)
+    ana = reader(session, admin, "ana", "orders")
+    _unbind(session, mask(session, admin, "ana", "ssn"), UNBOUND)
+    write(session, admin, orders([3], ["eu"]), WriteMode.REPLACE, evolve_schema=True)
 
     ordinary = QueryService(session, AllowAllAuthorization()).submit_query(
         ana, "dev", "SELECT * FROM gold.orders"
     )
-    run, rows = _run(session, tmp_path, ordinary.id)
+    finished, rows = run(session, tmp_path, ordinary.id)
 
-    assert (run.status, rows) == (QueryRunStatus.FAILED, [])
-    assert run.error_message == (
+    assert (finished.status, rows) == (QueryRunStatus.FAILED, [])
+    assert finished.error_message == (
         "Column mask references unknown column 'ssn'; known columns: ['email', 'id', 'region']"
     )
 
@@ -1554,8 +1258,8 @@ def test_a_mask_that_differs_from_a_shown_column_only_in_case_is_not_skipped(
     release, not bound to field ids, can be spelled other than its column.
     """
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    mask_id = _mask(session, admin, "ana", "email")
+    ana = reader(session, admin, "ana", "orders")
+    mask_id = mask(session, admin, "ana", "email")
     _unbind(session, mask_id, UNBOUND)
     session.execute(update(ColumnMask).where(ColumnMask.id == mask_id).values(column="EMAIL"))
     session.commit()
@@ -1600,9 +1304,9 @@ def test_an_unchanged_schema_shows_every_column_under_the_readers_filter_and_mas
 ) -> None:
     """The ordinary case: the rows of the checked snapshot, filtered and masked as today's."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _filter_eu(session, admin, "ana")
-    _mask(session, admin, "ana", "email")
+    ana = reader(session, admin, "ana", "orders")
+    filter_eu(session, admin, "ana")
+    mask(session, admin, "ana", "email")
 
     assert _rows(session, tmp_path, ana, result) == [{"id": -1, "region": "eu", "email": "***"}]
 
@@ -1613,8 +1317,8 @@ def test_no_column_left_to_show_fails_with_a_text_of_its_own(
     """The table was rebuilt with other columns altogether: nothing of the snapshot is listed."""
     result = _warned_run(session, admin, _BAD, _NEGATIVE)
     other = pa.table({"key": pa.array(["a"], pa.string())})
-    _write(session, admin, other, WriteMode.REPLACE, evolve_schema=True)
-    ana = _reader(session, admin, "ana", "orders")
+    write(session, admin, other, WriteMode.REPLACE, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -1630,11 +1334,11 @@ def test_another_error_keeps_its_own_message(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """Only a query that names a withheld column gets that reason; other failures stay."""
-    bad = _orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
+    bad = orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
     result = _failed_run(
         session, admin, bad=bad, sql="SELECT CAST(region AS INTEGER) AS id FROM gold.orders"
     )
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -1648,9 +1352,9 @@ def test_a_column_the_query_names_that_nobody_has_keeps_the_databases_message(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """A query that names a column no snapshot has is not blamed on the withheld one."""
-    bad = _orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
+    bad = orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
     result = _failed_run(session, admin, bad=bad, sql="SELECT nowhere FROM gold.orders")
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -1668,18 +1372,18 @@ def test_a_column_that_another_table_of_the_query_has_is_not_explained_as_withhe
     `gold.notes` has a column `note` of its own. A "column not found" for `note` may then be
     about either table, and the database's own message stands.
     """
-    bad = _orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
+    bad = orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
     sql = "SELECT id FROM gold.orders WHERE note = 'x' AND EXISTS (SELECT 1 FROM gold.notes)"
     result = _failed_run(session, admin, bad=bad, sql=sql)
     notes = TableRef.from_dotted("dev", "gold.notes")
-    _write(
+    write(
         session,
         admin,
         pa.table({"NOTE": pa.array(["a"], pa.string())}),
         WriteMode.CREATE,
         ref=notes,
     )
-    ana = _reader(session, admin, "ana", "orders", "notes")
+    ana = reader(session, admin, "ana", "orders", "notes")
     authz = GrantAuthorization(session)
     alone: dict[str, str] = {}
     beside: dict[str, str] = {}
@@ -1714,12 +1418,12 @@ def test_the_source_of_the_checked_table_lists_its_columns_and_another_table_doe
     The explicit list is what keeps a withheld column out of the read; a reader without any
     policy would otherwise read the snapshot's files with ``*``.
     """
-    bad = _orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
+    bad = orders([2, -1], ["eu", "eu"], note=["n2", "n-1"])
     result = _failed_run(session, admin, bad=bad)
     limits = TableRef.from_dotted("dev", "gold.limits")
     floor = pa.table({"floor": pa.array([0], pa.int64())})
-    _write(session, admin, floor, WriteMode.CREATE, ref=limits)
-    ben = _reader(session, admin, "ben", "orders", "limits")
+    write(session, admin, floor, WriteMode.CREATE, ref=limits)
+    ben = reader(session, admin, "ben", "orders", "limits")
     authz = GrantAuthorization(session)
     names = ["gold.orders", "gold.limits"]
 
@@ -1778,7 +1482,7 @@ def test_the_event_of_a_query_that_shows_the_rows_of_a_check_names_the_result(
 ) -> None:
     """The trail tells a read of a checked snapshot from an ordinary query of the table."""
     result = _failed_run(session, admin, first_build=True)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     before = len(_completed(session))
 
     _rows(session, tmp_path, ana, result)
@@ -1800,15 +1504,15 @@ def test_the_event_of_a_failed_or_refused_query_of_the_rows_names_the_result_too
     """Failed in the query or refused before it: the event says which result was asked for."""
     result = _failed_run(session, admin)
     result_id = str(result.id)
-    stranger = _reader(session, admin, "stranger")
-    ana = _reader(session, admin, "ana", "orders")
+    stranger = reader(session, admin, "stranger")
+    ana = reader(session, admin, "ana", "orders")
     before = len(_completed(session))
 
     _failure(session, tmp_path, stranger, result)
     refused = _submit(session, ana, result)
     session.execute(update(Principal).where(Principal.id == ana.id).values(is_active=False))
     session.commit()
-    _run(session, tmp_path, refused)
+    run(session, tmp_path, refused)
 
     assert _completed(session)[before:] == [
         {
@@ -1832,18 +1536,18 @@ def test_the_event_of_an_ordinary_query_has_the_keys_it_always_had(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """A query that is not bound to a check result gains no key, completed or refused."""
-    _write(session, admin, _GOOD, WriteMode.CREATE)
-    ana = _reader(session, admin, "ana", "orders")
+    write(session, admin, _GOOD, WriteMode.CREATE)
+    ana = reader(session, admin, "ana", "orders")
     queries = QueryService(session, AllowAllAuthorization())
     before = len(_completed(session))
 
-    done, _ = _run(
+    done, _ = run(
         session, tmp_path, queries.submit_query(ana, "dev", "SELECT id FROM gold.orders").id
     )
     refused = queries.submit_query(ana, "dev", "SELECT id FROM gold.orders").id
     session.execute(update(Principal).where(Principal.id == ana.id).values(is_active=False))
     session.commit()
-    _run(session, tmp_path, refused)
+    run(session, tmp_path, refused)
 
     assert done.status is QueryRunStatus.SUCCEEDED
     details = _completed(session)[before:]
@@ -1864,7 +1568,7 @@ def test_the_checked_table_is_read_at_the_snapshot_through_a_view(
         admin, "dev", _NEGATIVE, WriteTarget(table="gold.negative", mode=WriteMode.VIEW)
     )
     assert run_one(session, view.id, AllowAllAuthorization()) is None
-    ana = _reader(session, admin, "ana", "orders", "negative")
+    ana = reader(session, admin, "ana", "orders", "negative")
 
     rows = _rows(session, tmp_path, ana, result)
 
@@ -1879,7 +1583,7 @@ def test_a_query_through_a_view_that_fails_keeps_its_own_error(
     That diagnosis reads every table as it is now. Here the table is not published, so it
     would blame the view for that and point back at the command that is running.
     """
-    after = _write(session, admin, _BAD, WriteMode.CREATE)
+    after = write(session, admin, _BAD, WriteMode.CREATE)
     view = QueryService(session, AllowAllAuthorization()).submit_write(
         admin, "dev", _NEGATIVE, WriteTarget(table="gold.negative", mode=WriteMode.VIEW)
     )
@@ -1890,16 +1594,16 @@ def test_a_query_through_a_view_that_fails_keeps_its_own_error(
         snapshot_id=after,
         sql="SELECT CAST(region AS INTEGER) AS id FROM gold.negative",
     )
-    rolled = _catalog(session).roll_back(
+    rolled = catalog(session).roll_back(
         admin,
-        _ORDERS,
+        ORDERS,
         run_id=result.run_id,
         task_run_id=result.task_run_id,
         written=Written(_table_id(session), None, after, publishes=True),
         failed_checks=[result.check_name],
     )
     assert rolled.outcome is RollbackOutcome.UNPUBLISHED
-    ana = _reader(session, admin, "ana", "orders", "negative")
+    ana = reader(session, admin, "ana", "orders", "negative")
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -1923,7 +1627,7 @@ def test_both_references_of_a_self_join_are_read_at_the_snapshot(
             "WHERE a.id < 0"
         ),
     )
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
 
     rows = _rows(session, tmp_path, ana, result)
 
@@ -1940,10 +1644,10 @@ def test_a_second_table_that_is_not_published_is_refused_as_in_any_query(
         admin,
         sql="SELECT o.id, l.floor FROM gold.orders o JOIN gold.limits l ON o.id < l.floor",
     )
-    first = _write(
+    first = write(
         session, admin, pa.table({"floor": pa.array([0], pa.int64())}), WriteMode.CREATE, ref=limits
     )
-    rolled = _catalog(session).roll_back(
+    rolled = catalog(session).roll_back(
         admin,
         limits,
         run_id=result.run_id,
@@ -1952,7 +1656,7 @@ def test_a_second_table_that_is_not_published_is_refused_as_in_any_query(
         failed_checks=["gold.limits/any"],
     )
     assert rolled.outcome is RollbackOutcome.UNPUBLISHED
-    ana = _reader(session, admin, "ana", "orders", "limits")
+    ana = reader(session, admin, "ana", "orders", "limits")
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -1969,7 +1673,7 @@ def test_a_reader_without_the_grant_learns_nothing(
 ) -> None:
     """The read grant on the checked table is asked for like in any query."""
     result = _failed_run(session, admin)
-    eve = _reader(session, admin, "eve")
+    eve = reader(session, admin, "eve")
 
     message, cause = _failure(session, tmp_path, eve, result)
 
@@ -1982,15 +1686,15 @@ def test_a_table_built_again_under_the_name_is_not_read_at_the_old_snapshot(
 ) -> None:
     """The result is bound to the table's id; a new table of the name has no such snapshot."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _catalog(session).drop_table(admin, _ORDERS)
-    _write(session, admin, _orders([-7], ["eu"]), WriteMode.CREATE)
+    ana = reader(session, admin, "ana", "orders")
+    catalog(session).drop_table(admin, ORDERS)
+    write(session, admin, orders([-7], ["eu"]), WriteMode.CREATE)
 
     # The grant went with the old table: without one on the new table nothing is said.
     message, cause = _failure(session, tmp_path, ana, result)
     assert message == "Resolving the tables this query reads failed (PermissionDenied)."
 
-    _grant_read(session, admin, "ana", "orders")
+    grant_read(session, admin, "ana", "orders")
     message, cause = _failure(session, tmp_path, ana, result)
 
     assert message == _gone(result.run_id)
@@ -2007,8 +1711,8 @@ def test_a_renamed_table_gives_the_snapshot_gone_text_to_who_may_read_the_name(
     in the namespace passes the grant, and gets the text instead of a bare "not found".
     """
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    nia = _reader(session, admin, "nia")
+    ana = reader(session, admin, "ana", "orders")
+    nia = reader(session, admin, "nia")
     GrantService(session, AllowAllAuthorization()).grant(
         admin,
         principal="nia",
@@ -2017,12 +1721,12 @@ def test_a_renamed_table_gives_the_snapshot_gone_text_to_who_may_read_the_name(
         environment="dev",
         namespace="gold",
     )
-    _catalog(session).rename_table(admin, _ORDERS, TableRef.from_dotted("dev", "gold.orders_old"))
+    catalog(session).rename_table(admin, ORDERS, TableRef.from_dotted("dev", "gold.orders_old"))
 
     by_table, _ = _failure(session, tmp_path, ana, result)
     by_namespace, cause = _failure(session, tmp_path, nia, result)
     ordinary = QueryService(session, AllowAllAuthorization()).submit_query(nia, "dev", _NEGATIVE)
-    unbound, _ = _run(session, tmp_path, ordinary.id)
+    unbound, _ = run(session, tmp_path, ordinary.id)
 
     assert by_table == "Resolving the tables this query reads failed (PermissionDenied)."
     assert by_namespace == _gone(result.run_id)
@@ -2035,7 +1739,7 @@ def test_another_table_of_the_check_that_is_gone_keeps_the_opaque_text(
 ) -> None:
     """Only the checked table's own name gets the snapshot-gone text."""
     limits = TableRef.from_dotted("dev", "gold.limits")
-    _write(
+    write(
         session, admin, pa.table({"floor": pa.array([0], pa.int64())}), WriteMode.CREATE, ref=limits
     )
     result = _failed_run(
@@ -2043,8 +1747,8 @@ def test_another_table_of_the_check_that_is_gone_keeps_the_opaque_text(
         admin,
         sql="SELECT o.id FROM gold.orders o JOIN gold.limits l ON o.id < l.floor",
     )
-    _catalog(session).drop_table(admin, limits)
-    ana = _reader(session, admin, "ana", "orders")
+    catalog(session).drop_table(admin, limits)
+    ana = reader(session, admin, "ana", "orders")
     GrantService(session, AllowAllAuthorization()).grant(
         admin,
         principal="ana",
@@ -2064,17 +1768,17 @@ def test_an_ordinary_query_still_cannot_read_a_table_that_is_not_published(
 ) -> None:
     """A failed first build: only the query bound to the check result reads its rows."""
     result = _failed_run(session, admin, first_build=True)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     # The rollback of a first build removes the snapshot and leaves the schema the build
     # made, so every column of the failed snapshot is one the table has.
     assert _current_columns(session) == {"id": "long", "region": "string", "email": "string"}
 
     ordinary = QueryService(session, AllowAllAuthorization()).submit_query(ana, "dev", _NEGATIVE)
-    run, rows = _run(session, tmp_path, ordinary.id)
+    finished, rows = run(session, tmp_path, ordinary.id)
 
-    assert (run.status, rows) == (QueryRunStatus.FAILED, [])
-    assert run.error_message is not None
-    assert run.error_message.startswith("`gold.orders` has not been published: ")
+    assert (finished.status, rows) == (QueryRunStatus.FAILED, [])
+    assert finished.error_message is not None
+    assert finished.error_message.startswith("`gold.orders` has not been published: ")
     assert ordinary.check_result_id is None
     assert _rows(session, tmp_path, ana, result) == [
         {"id": -2, "region": "us", "email": "o-2@example.org"},
@@ -2087,7 +1791,7 @@ def test_a_result_that_is_gone_fails_the_query_with_its_message(
 ) -> None:
     """The result went with its run after the query was queued: nothing is read as it is now."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     query_run_id = _submit(session, ana, result)
     result_id = result.id
     session.execute(delete(Run).where(Run.id == result.run_id))
@@ -2095,15 +1799,15 @@ def test_a_result_that_is_gone_fails_the_query_with_its_message(
     session.expire_all()
     assert session.get(CheckResult, result_id) is None
 
-    run, rows = _run(session, tmp_path, query_run_id)
+    finished, rows = run(session, tmp_path, query_run_id)
 
-    assert (run.status, rows) == (QueryRunStatus.FAILED, [])
-    assert run.error_message == (
+    assert (finished.status, rows) == (QueryRunStatus.FAILED, [])
+    assert finished.error_message == (
         "The check result this query reads is no longer there: it was recorded again by a new "
         "attempt of its task, or removed with its run. Run `lakana check rows` again."
     )
-    assert run.error_cause == QueryErrorCause.NOT_FOUND.value
-    assert run.check_result_id == result_id
+    assert finished.error_cause == QueryErrorCause.NOT_FOUND.value
+    assert finished.check_result_id == result_id
 
 
 def test_a_result_recorded_again_by_a_new_attempt_fails_the_query_with_what_to_do(
@@ -2111,7 +1815,7 @@ def test_a_result_recorded_again_by_a_new_attempt_fails_the_query_with_what_to_d
 ) -> None:
     """A result recorded again has a new id: the query waiting for the old one says so."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     query_run_id = _submit(session, ana, result)
     old_id, snapshot_id, task_run_id = result.id, result.checked_snapshot_id, result.task_run_id
     assert record_result(
@@ -2141,14 +1845,14 @@ def test_a_result_recorded_again_by_a_new_attempt_fails_the_query_with_what_to_d
     again = session.scalars(select(CheckResult).where(CheckResult.task_run_id == task_run_id)).one()
     assert again.id != old_id
 
-    run, rows = _run(session, tmp_path, query_run_id)
+    finished, rows = run(session, tmp_path, query_run_id)
 
-    assert (run.status, rows) == (QueryRunStatus.FAILED, [])
-    assert run.error_message == (
+    assert (finished.status, rows) == (QueryRunStatus.FAILED, [])
+    assert finished.error_message == (
         "The check result this query reads is no longer there: it was recorded again by a new "
         "attempt of its task, or removed with its run. Run `lakana check rows` again."
     )
-    assert run.error_cause == QueryErrorCause.NOT_FOUND.value
+    assert finished.error_cause == QueryErrorCause.NOT_FOUND.value
 
 
 def test_a_result_of_another_environment_is_no_result_for_the_query(
@@ -2156,9 +1860,9 @@ def test_a_result_of_another_environment_is_no_result_for_the_query(
 ) -> None:
     """The worker looks the result up in the query run's own environment."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     query_run_id = _submit(session, ana, result)
-    other = _catalog(session).create_environment(
+    other = catalog(session).create_environment(
         admin,
         name="prod",
         storage=StorageConfig(scheme="file", root=f"file://{tmp_path}/prod", options={}),
@@ -2168,10 +1872,10 @@ def test_a_result_of_another_environment_is_no_result_for_the_query(
     )
     session.commit()
 
-    run, rows = _run(session, tmp_path, query_run_id)
+    finished, rows = run(session, tmp_path, query_run_id)
 
-    assert (run.status, rows) == (QueryRunStatus.FAILED, [])
-    assert run.error_message == (
+    assert (finished.status, rows) == (QueryRunStatus.FAILED, [])
+    assert finished.error_message == (
         "The check result this query reads is no longer there: it was recorded again by a new "
         "attempt of its task, or removed with its run. Run `lakana check rows` again."
     )
@@ -2182,20 +1886,20 @@ def test_the_snapshot_removed_by_maintenance_gives_r1(
 ) -> None:
     """Once maintenance removed the failed snapshot the query says so and where the count is."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    catalog = _catalog(session)
+    ana = reader(session, admin, "ana", "orders")
+    service = catalog(session)
     # Maintenance keeps every snapshot a tag names and the newest one, so the tag is removed
     # here and the table is built again first, as it would be after a failure.
-    _write(session, admin, _orders([3], ["eu"]), WriteMode.APPEND)
-    catalog.commit_table(
+    write(session, admin, orders([3], ["eu"]), WriteMode.APPEND)
+    service.commit_table(
         admin,
-        _ORDERS,
+        ORDERS,
         requirements=[],
         updates=[RemoveSnapshotRefUpdate(ref_name=failed_snapshot_tag(result.run_id))],
         action=Action.MAINTAIN_TABLE,
     )
-    report = catalog.maintain(
-        admin, _ORDERS, keep_days=0, keep_last=1, now=datetime.now(UTC) + timedelta(days=8)
+    report = service.maintain(
+        admin, ORDERS, keep_days=0, keep_last=1, now=datetime.now(UTC) + timedelta(days=8)
     )
     assert result.checked_snapshot_id in report.snapshots_expired
     session.rollback()
@@ -2218,17 +1922,17 @@ def _expire_the_failed_snapshot(session: Session, admin: PrincipalRef, result: C
     result
         The failed check result whose snapshot goes.
     """
-    catalog = _catalog(session)
-    _write(session, admin, _orders([3], ["eu"]), WriteMode.APPEND)
-    catalog.commit_table(
+    service = catalog(session)
+    write(session, admin, orders([3], ["eu"]), WriteMode.APPEND)
+    service.commit_table(
         admin,
-        _ORDERS,
+        ORDERS,
         requirements=[],
         updates=[RemoveSnapshotRefUpdate(ref_name=failed_snapshot_tag(result.run_id))],
         action=Action.MAINTAIN_TABLE,
     )
-    report = catalog.maintain(
-        admin, _ORDERS, keep_days=0, keep_last=1, now=datetime.now(UTC) + timedelta(days=8)
+    report = service.maintain(
+        admin, ORDERS, keep_days=0, keep_last=1, now=datetime.now(UTC) + timedelta(days=8)
     )
     assert result.checked_snapshot_id in report.snapshots_expired
     session.rollback()
@@ -2267,7 +1971,7 @@ def test_maintenance_during_the_read_gives_the_snapshot_gone_text(
         Which step fails: the read or the resolution.
     """
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     real_resolve = pipeline._resolve_sources
     calls: list[int] = []
 
@@ -2373,7 +2077,7 @@ def test_a_storage_failure_with_the_snapshot_still_there_keeps_its_own_text(
 ) -> None:
     """The catalog still holds the snapshot, so the failure is not blamed on maintenance."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
 
     def broken_read(*args: object, **kwargs: object) -> pa.Table:
         """Fail as the storage does.
@@ -2407,8 +2111,8 @@ def test_an_ordinary_query_is_never_told_a_snapshot_is_gone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only a query bound to a check result asks: another one keeps its failure."""
-    _write(session, admin, _GOOD, WriteMode.CREATE)
-    ana = _reader(session, admin, "ana", "orders")
+    write(session, admin, _GOOD, WriteMode.CREATE)
+    ana = reader(session, admin, "ana", "orders")
 
     def broken_read(*args: object, **kwargs: object) -> pa.Table:
         """Fail as the storage does.
@@ -2434,17 +2138,17 @@ def test_an_ordinary_query_is_never_told_a_snapshot_is_gone(
         .id
     )
 
-    run, _ = _run(session, tmp_path, run_id)
+    finished, _ = run(session, tmp_path, run_id)
 
-    assert run.error_message == _RAW_STORAGE_FAILURE
+    assert finished.error_message == _RAW_STORAGE_FAILURE
 
 
 def test_a_kept_table_is_read_by_this_query(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """A kept table holds the failing rows for people to look at; this query has no task."""
-    _write(session, admin, _GOOD, WriteMode.CREATE)
-    kept = _write(session, admin, _BAD, WriteMode.REPLACE)
+    write(session, admin, _GOOD, WriteMode.CREATE)
+    kept = write(session, admin, _BAD, WriteMode.REPLACE)
     result = _checked(session, admin, snapshot_id=kept)
     session.execute(
         update(Table)
@@ -2456,7 +2160,7 @@ def test_a_kept_table_is_read_by_this_query(
         )
     )
     session.commit()
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
 
     rows = _rows(session, tmp_path, ana, result)
 
@@ -2467,10 +2171,10 @@ def test_a_passed_check_shows_no_rows(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """A check that passed is read at its snapshot like any other and returns nothing."""
-    passed = _write(session, admin, _GOOD, WriteMode.CREATE)
+    passed = write(session, admin, _GOOD, WriteMode.CREATE)
     result = _checked(session, admin, snapshot_id=passed, outcome=CheckOutcome.PASSED)
-    _write(session, admin, _BAD, WriteMode.REPLACE)
-    ana = _reader(session, admin, "ana", "orders")
+    write(session, admin, _BAD, WriteMode.REPLACE)
+    ana = reader(session, admin, "ana", "orders")
 
     assert _rows(session, tmp_path, ana, result) == []
 
@@ -2630,18 +2334,18 @@ def test_a_row_filter_on_a_column_an_older_file_lacks_reads_it_as_null(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """The checked snapshot has a file without `tier`; the filter reads NULL there and applies."""
-    _write(session, admin, _GOOD, WriteMode.CREATE)
-    snapshot = _write(
-        session, admin, _orders([-1], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True
+    write(session, admin, _GOOD, WriteMode.CREATE)
+    snapshot = write(
+        session, admin, orders([-1], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True
     )
     result = _checked(
         session, admin, snapshot_id=snapshot, sql="SELECT id FROM gold.orders WHERE id < 0"
     )
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "tier = 'gold'")
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "tier = 'gold'")
 
     assert _rows(session, tmp_path, ana, result) == [{"id": -1}]
-    plain = _reader(session, admin, "cy", "orders")
+    plain = reader(session, admin, "cy", "orders")
     assert _rows(session, tmp_path, plain, result) == [{"id": -1}]
 
 
@@ -2649,21 +2353,19 @@ def test_an_ordinary_read_under_a_filter_on_a_column_an_older_file_lacks_shows_w
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """The row written before `tier` existed reads NULL and fails the filter; nothing else does."""
-    _write(session, admin, _GOOD, WriteMode.CREATE)
-    _write(
-        session, admin, _orders([6], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True
-    )
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "tier = 'gold'")
+    write(session, admin, _GOOD, WriteMode.CREATE)
+    write(session, admin, orders([6], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "tier = 'gold'")
     run_id = (
         QueryService(session, AllowAllAuthorization())
         .submit_query(ana, "dev", "SELECT id FROM gold.orders")
         .id
     )
 
-    run, rows = _run(session, tmp_path, run_id)
+    finished, rows = run(session, tmp_path, run_id)
 
-    assert (run.status, rows) == (QueryRunStatus.SUCCEEDED, [{"id": 6}])
+    assert (finished.status, rows) == (QueryRunStatus.SUCCEEDED, [{"id": 6}])
 
 
 @pytest.mark.parametrize("policy", ["filter", "mask"])
@@ -2691,12 +2393,12 @@ def test_a_policy_on_a_column_widened_since_is_named_as_the_policys_need(
     narrow = pa.table({"id": pa.array([2, -1], pa.int64()), "qty": pa.array([5, 6], pa.int32())})
     result = _warned_run(session, admin, narrow, "SELECT * FROM gold.orders WHERE id < 0")
     wide = pa.table({"id": pa.array([3], pa.int64()), "qty": pa.array([7], pa.int64())})
-    _write(session, admin, wide, WriteMode.REPLACE, evolve_schema=True)
-    ana = _reader(session, admin, "ana", "orders")
+    write(session, admin, wide, WriteMode.REPLACE, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
     if policy == "filter":
-        _filter(session, admin, "ana", "qty > 6")
+        filter(session, admin, "ana", "qty > 6")
     else:
-        _mask_as(session, admin, "ana", "id", "qty")
+        mask_as(session, admin, "ana", "id", "qty")
 
     message, cause = _failure(session, tmp_path, ana, result)
 
@@ -2720,11 +2422,11 @@ def _add_a_column_without_writing(session: Session, admin: PrincipalRef) -> None
         NestedField(ids["region"], "region", StringType(), required=False),
         NestedField(ids["email"], "email", StringType(), required=False),
         NestedField(99, "tier", StringType(), required=False),
-        schema_id=_catalog(session).load_table(admin, _ORDERS).metadata.current_schema_id + 1,
+        schema_id=catalog(session).load_table(admin, ORDERS).metadata.current_schema_id + 1,
     )
-    _catalog(session).commit_table(
+    catalog(session).commit_table(
         admin,
-        _ORDERS,
+        ORDERS,
         requirements=[],
         updates=[AddSchemaUpdate(schema_=schema), SetCurrentSchemaUpdate(schema_id=-1)],
     )
@@ -2753,22 +2455,22 @@ def test_a_column_added_without_a_write_reads_as_null_under_a_policy(
     expected
         The rows the reader sees.
     """
-    _write(session, admin, _GOOD, WriteMode.CREATE)
+    write(session, admin, _GOOD, WriteMode.CREATE)
     _add_a_column_without_writing(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     if policy == "mask":
-        _mask_as(session, admin, "ana", "email", "tier")
+        mask_as(session, admin, "ana", "email", "tier")
     else:
-        _filter(session, admin, "ana", "tier = 'x'")
+        filter(session, admin, "ana", "tier = 'x'")
     run_id = (
         QueryService(session, AllowAllAuthorization())
         .submit_query(ana, "dev", "SELECT id FROM gold.orders")
         .id
     )
 
-    run, rows = _run(session, tmp_path, run_id)
+    finished, rows = run(session, tmp_path, run_id)
 
-    assert (run.status, rows) == (QueryRunStatus.SUCCEEDED, expected)
+    assert (finished.status, rows) == (QueryRunStatus.SUCCEEDED, expected)
 
 
 def test_a_reader_who_wrote_a_missing_column_gets_the_fixed_message_and_no_hint(
@@ -2778,43 +2480,43 @@ def test_a_reader_who_wrote_a_missing_column_gets_the_fixed_message_and_no_hint(
 
     Errors on reads under a row filter or column mask always show the fixed message.
     """
-    _write(session, admin, _GOOD, WriteMode.CREATE)
+    write(session, admin, _GOOD, WriteMode.CREATE)
     _add_a_column_without_writing(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "region = 'eu'")
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "region = 'eu'")
     sql = "SELECT tier FROM (SELECT id FROM gold.orders) AS sub"
     run_id = QueryService(session, AllowAllAuthorization()).submit_query(ana, "dev", sql).id
 
-    run, rows = _run(session, tmp_path, run_id)
+    finished, rows = run(session, tmp_path, run_id)
 
-    assert (run.status, rows) == (QueryRunStatus.FAILED, [])
-    assert run.error_message == policy_read_failure("gold.orders")
-    assert "older data files" not in run.error_message
+    assert (finished.status, rows) == (QueryRunStatus.FAILED, [])
+    assert finished.error_message == policy_read_failure("gold.orders")
+    assert "older data files" not in finished.error_message
 
 
 def test_a_view_that_leaves_the_column_out_is_not_blamed_on_the_files(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """The view's own SELECT does not expose `tier`; the expanded SQL names it, so it is theirs."""
-    _write(session, admin, _GOOD, WriteMode.CREATE)
+    write(session, admin, _GOOD, WriteMode.CREATE)
     _add_a_column_without_writing(session, admin)
     view = QueryService(session, AllowAllAuthorization()).submit_write(
         admin, "dev", "SELECT id FROM gold.orders", WriteTarget(table="gold.v", mode=WriteMode.VIEW)
     )
     run_one(session, view.id, AllowAllAuthorization())
-    ana = _reader(session, admin, "ana", "orders", "v")
-    _filter(session, admin, "ana", "region = 'eu'")
+    ana = reader(session, admin, "ana", "orders", "v")
+    filter(session, admin, "ana", "region = 'eu'")
     run_id = (
         QueryService(session, AllowAllAuthorization())
         .submit_query(ana, "dev", "SELECT tier FROM gold.v")
         .id
     )
 
-    run, rows = _run(session, tmp_path, run_id)
+    finished, rows = run(session, tmp_path, run_id)
 
-    assert (run.status, rows) == (QueryRunStatus.FAILED, [])
-    assert run.error_message is not None
-    assert "older data files" not in run.error_message
+    assert (finished.status, rows) == (QueryRunStatus.FAILED, [])
+    assert finished.error_message is not None
+    assert "older data files" not in finished.error_message
 
 
 @pytest.mark.parametrize(
@@ -2848,36 +2550,34 @@ def test_a_reader_who_names_a_column_no_file_has_yet_reads_it_as_null(
     expected
         The rows the reader sees.
     """
-    _write(session, admin, _GOOD, WriteMode.CREATE)
+    write(session, admin, _GOOD, WriteMode.CREATE)
     _add_a_column_without_writing(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "region = 'eu'")
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "region = 'eu'")
     run_id = QueryService(session, AllowAllAuthorization()).submit_query(ana, "dev", sql).id
 
-    run, rows = _run(session, tmp_path, run_id)
+    finished, rows = run(session, tmp_path, run_id)
 
-    assert (run.status, rows) == (QueryRunStatus.SUCCEEDED, expected)
+    assert (finished.status, rows) == (QueryRunStatus.SUCCEEDED, expected)
 
 
 def test_a_reader_reads_a_new_column_of_a_table_with_mixed_files(
     session: Session, admin: PrincipalRef, tmp_path: Path
 ) -> None:
     """An older file and a newer one that has `tier` read NULL and the value respectively."""
-    _write(session, admin, _GOOD, WriteMode.CREATE)
-    _write(
-        session, admin, _orders([6], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True
-    )
-    ana = _reader(session, admin, "ana", "orders")
-    _filter(session, admin, "ana", "region = 'eu'")
+    write(session, admin, _GOOD, WriteMode.CREATE)
+    write(session, admin, orders([6], ["eu"], tier=["gold"]), WriteMode.APPEND, evolve_schema=True)
+    ana = reader(session, admin, "ana", "orders")
+    filter(session, admin, "ana", "region = 'eu'")
     run_id = (
         QueryService(session, AllowAllAuthorization())
         .submit_query(ana, "dev", "SELECT id, tier FROM gold.orders")
         .id
     )
 
-    run, rows = _run(session, tmp_path, run_id)
+    finished, rows = run(session, tmp_path, run_id)
 
-    assert (run.status, rows) == (
+    assert (finished.status, rows) == (
         QueryRunStatus.SUCCEEDED,
         [{"id": 1, "tier": None}, {"id": 6, "tier": "gold"}],
     )
@@ -2888,8 +2588,8 @@ def test_a_reader_without_the_grant_keeps_the_original_failure_at_the_second_loo
 ) -> None:
     """The second resolution asks for READ_TABLE first: no grant, no text about the snapshot."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
-    nobody = _reader(session, admin, "nobody")
+    ana = reader(session, admin, "ana", "orders")
+    nobody = reader(session, admin, "nobody")
     query = session.get(QueryRun, _submit(session, ana, result))
     assert query is not None
     _expire_the_failed_snapshot(session, admin, result)
@@ -2924,7 +2624,7 @@ def test_a_stopping_worker_does_not_look_again(
 ) -> None:
     """While the worker stops the run's outcome is rolled back: the second look is skipped."""
     result = _failed_run(session, admin)
-    ana = _reader(session, admin, "ana", "orders")
+    ana = reader(session, admin, "ana", "orders")
     query = session.get(QueryRun, _submit(session, ana, result))
     assert query is not None
     _expire_the_failed_snapshot(session, admin, result)

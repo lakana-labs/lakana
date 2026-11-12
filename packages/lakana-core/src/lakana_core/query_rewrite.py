@@ -902,7 +902,7 @@ def _from_item_function_name(node: exp.Table | exp.Lateral) -> str | None:
 
 
 def _dotted_table_name(table: exp.Table) -> str:
-    """Build a dotted table name from a sqlglot Table node's catalog/db/name parts.
+    """Build a dotted table name from every part of a sqlglot Table node.
 
     Parameters
     ----------
@@ -912,11 +912,12 @@ def _dotted_table_name(table: exp.Table) -> str:
     Returns
     -------
     str
-        The dotted name (e.g. "gold.sales.monthly"), joining whichever of
-        `catalog`, `db`, and the table's own name are present.
+        The dotted name (e.g. "gold.sales.monthly"), joining every part of the name. A name
+        of four or more parts keeps them all: sqlglot holds the parts after `catalog` and
+        `db` in a `Dot` as the table's own name, so `a.b.c.d` names the table `d` of the
+        namespace `a.b.c`, never `a.b.d`.
     """
-    name_parts = (table.args.get("catalog"), table.args.get("db"), table.this)
-    return ".".join(part.name for part in name_parts if part)
+    return ".".join(part.name for part in table.parts)
 
 
 logger = logging.getLogger(__name__)
@@ -2470,8 +2471,9 @@ def rewrite_query(
             # The caller refers to the table by its own name, so that name is the alias
             # (`orders.id` resolves). Only when nothing else in the statement is called so:
             # otherwise the read keeps its generated name, as it always did, and a clash
-            # fails in the database instead of binding to the wrong table.
-            replacement.set("alias", exp.TableAlias(this=table.this.copy()))
+            # fails in the database instead of binding to the wrong table. The name is the
+            # last part: in `a.b.c.d` sqlglot holds `c.d` as the table's own name.
+            replacement.set("alias", exp.TableAlias(this=table.parts[-1].copy()))
             named.append((_qualifier_key(table), table))
         _carry_table_clauses(table, replacement, dotted)
         table.replace(replacement)
