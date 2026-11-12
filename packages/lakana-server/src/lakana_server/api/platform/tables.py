@@ -31,13 +31,14 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
 
-from lakana_core.auth import PrincipalRef
+from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.catalog.descriptions import KEEP, Keep
 from lakana_core.catalog.files_read import FilesReadReport, parse_files_read, split_files_read
 from lakana_core.catalog.history import HistoryResult
 from lakana_core.catalog.json_schema import ColumnSpec, from_iceberg_schema, to_iceberg_schema
 from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
 from lakana_core.catalog.loads import require_bronze
+from lakana_core.catalog.preview import submit_preview
 from lakana_core.catalog.query_service import QueryService
 from lakana_core.catalog.retention import TableRetention
 from lakana_core.catalog.service import CatalogService, LoadedTable, TableDescription
@@ -90,6 +91,7 @@ from lakana_server.body_limit import streams_its_own_body
 from lakana_server.concurrency import AppendConcurrencyLimiter
 from lakana_server.deps import (
     get_catalog,
+    get_grant_authorization,
     get_lineage_service,
     get_main_language,
     get_principal,
@@ -1768,6 +1770,68 @@ def maintain_table(
         dry_run=body.dry_run,
         older_than_hours=body.older_than_hours,
     )
+    return QuerySubmitOut(query_id=str(run.id))
+
+
+@router.post(
+    "/{name}/preview",
+    response_model=QuerySubmitOut,
+    status_code=202,
+    responses=errors(403, 404, 409),
+)
+def preview_table(
+    env: str,
+    path: str,
+    name: str,
+    principal: PrincipalRef = Depends(get_principal),
+    session: Session = Depends(get_session),
+    authorization: AuthorizationService = Depends(get_grant_authorization),
+) -> QuerySubmitOut:
+    """Queue a preview of a table or view: its first 100 rows, read as you.
+
+    Queues your own query of `SELECT * … LIMIT 100`, written by the server, and answers 202
+    like the query submit route; poll its status, then fetch the rows with
+    `…/queries/{query_id}/result?format=json`. The request takes no body and no parameter: the
+    server builds the SQL and the limit. The query reads with your own row filters and column
+    masks, and the result names the masked columns. Needs `READ_TABLE` on the table, then
+    `SUBMIT_QUERY` on the environment (a Viewer is refused and told to ask for the Analyst
+    role); a task cannot preview. Answers 403 alike for a table you may not read and one that
+    does not exist, 404 when the environment does not exist or for a table you may read that is
+    gone, and 409 for an artifact (download it instead) and for a namespace or table name with
+    a dot, which a query cannot name yet.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table or view name.
+    principal
+        The authenticated caller.
+    session
+        The request's database session.
+    authorization
+        The authorization service.
+
+    Returns
+    -------
+    QuerySubmitOut
+        The preview query's id; poll it and fetch its result with the query routes.
+
+    Raises
+    ------
+    lakana_core.errors.PermissionDenied
+        Mapped to 403: without `READ_TABLE` on the table (also when it does not exist), without
+        `SUBMIT_QUERY` on the environment, or for a task.
+    lakana_core.errors.NotFoundError
+        Mapped to 404: the environment does not exist, or the table is gone.
+    lakana_core.errors.ConflictError
+        Mapped to 409: an artifact, which has no rows, or a name with a dot.
+    """
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    run = submit_preview(session, authorization, principal, ref)
     return QuerySubmitOut(query_id=str(run.id))
 
 

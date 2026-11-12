@@ -2052,7 +2052,7 @@
           "queries"
         ],
         "summary": "Fetch a query's result",
-        "description": "Streams the rows of a finished read as an Arrow IPC stream. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch them; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it succeeded without being a read (it wrote to a table, created a view or was maintenance): only a read has result rows.",
+        "description": "Returns the rows of a finished read as an Arrow IPC file, or with `format=json` one page of them as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked; it names the columns masked for you and, for a preview, the table. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it succeeded without being a read (it wrote to a table, created a view or was maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with the Arrow result, and for a preview's page longer than 100 rows. Answers 503 with `Retry-After: 1` while you already have a JSON page being prepared, or the server is preparing as many as it allows at once.",
         "operationId": "get_query_result_api_v1_environments__env__queries__query_id__result_get",
         "parameters": [
           {
@@ -2077,6 +2077,61 @@
             "description": "The query's id."
           },
           {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "arrow",
+                "json"
+              ],
+              "type": "string",
+              "description": "`arrow` for the whole result as an Arrow IPC file, `json` for one page.",
+              "default": "arrow",
+              "title": "Format"
+            },
+            "description": "`arrow` for the whole result as an Arrow IPC file, `json` for one page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Rows of a JSON page, 1 to 1000 (100 at most for a preview); 100 when left out. Only with `format=json`.",
+              "title": "Limit"
+            },
+            "description": "Rows of a JSON page, 1 to 1000 (100 at most for a preview); 100 when left out. Only with `format=json`."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The first row of a JSON page, 0 or more; 0 when left out. Only with `format=json`.",
+              "title": "Offset"
+            },
+            "description": "The first row of a JSON page, 0 or more; 0 when left out. Only with `format=json`."
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
@@ -2097,11 +2152,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The whole result as an Arrow IPC file (`format=arrow`, the default), or one page of it as JSON (`format=json`).",
             "content": {
               "application/json": {
-                "schema": {}
-              }
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageOut"
+                }
+              },
+              "application/vnd.apache.arrow.file": {}
             }
           },
           "401": {
@@ -2136,6 +2194,16 @@
           },
           "409": {
             "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3675,6 +3743,128 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview": {
+      "post": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Queue a preview of a table or view: its first 100 rows, read as you",
+        "description": "Queues your own query of `SELECT * … LIMIT 100`, written by the server, and answers 202 like the query submit route; poll its status, then fetch the rows with `…/queries/{query_id}/result?format=json`. The request takes no body and no parameter: the server builds the SQL and the limit. The query reads with your own row filters and column masks, and the result names the masked columns. Needs `READ_TABLE` on the table, then `SUBMIT_QUERY` on the environment (a Viewer is refused and told to ask for the Analyst role); a task cannot preview. Answers 403 alike for a table you may not read and one that does not exist, 404 when the environment does not exist or for a table you may read that is gone, and 409 for an artifact (download it instead) and for a namespace or table name with a dot, which a query cannot name yet.",
+        "operationId": "preview_table_api_v1_environments__env__namespaces__path__tables__name__preview_post",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table or view name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuerySubmitOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -28352,6 +28542,25 @@
         "title": "ManagedScopeOut",
         "description": "A scope an access file manages, and its last apply.\n\nParameters\n----------\nscope\n    ``instance`` or an environment's name.\nfile_name\n    The name of the file that last applied it.\nfile_sha256\n    That file's hash.\nsource_commit\n    The commit the file came from, when given.\napplied_by\n    Who applied it; `null` once that principal is deleted.\napplied_at\n    When."
       },
+      "MaskedColumnOut": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "column": {
+            "type": "string",
+            "title": "Column"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table",
+          "column"
+        ],
+        "title": "MaskedColumnOut",
+        "description": "A column a mask was applied to for the reader, as the worker recorded it.\n\nParameters\n----------\ntable\n    The masked table's dotted name.\ncolumn\n    The column, named as in the read."
+      },
       "MeasureOut": {
         "properties": {
           "id": {
@@ -29328,6 +29537,32 @@
         ],
         "title": "PolicyWarningOut",
         "description": "A row filter or column mask a task's write left out of date; shown to administrators only.\n\nParameters\n----------\nkind\n    ``row_filter`` or ``column_mask``.\ncolumn\n    The column the policy uses, as the policy spells it.\nchange\n    ``removed`` (the write removed the column) or ``replaced`` (its type changed in a way\n    that does not widen, so it is a new column under the same name).\npolicy_id\n    The policy's id.\nmessage\n    What happened and the next step, in one paragraph."
+      },
+      "PreviewOut": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "cut": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cut",
+            "description": "`true` when the name was cut; absent otherwise."
+          }
+        },
+        "type": "object",
+        "required": [
+          "table"
+        ],
+        "title": "PreviewOut",
+        "description": "The table a preview showed, named from the run's own SQL.\n\nParameters\n----------\ntable\n    The dotted name, cut to 1,024 characters.\ncut\n    `true` when the name was cut; absent otherwise."
       },
       "PrincipalCreate": {
         "properties": {
@@ -30440,6 +30675,136 @@
         "type": "object",
         "title": "RepositoryUpdate",
         "description": "Request body for changing a repository; omitted fields stay, `null` clears.\n\nParameters\n----------\nurl\n    New URL.\ncredential_secret\n    New secret name.\ncredential_username\n    New HTTPS username.\nssh_known_hosts\n    New ``known_hosts`` lines.\ndefault_ref\n    New default ref."
+      },
+      "ResultColumnOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "type_cut": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Cut",
+            "description": "`true` when the type name was cut; absent otherwise."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "ResultColumnOut",
+        "description": "One column of a JSON result page.\n\nDocuments the page `lakana_server.result_json.json_page` writes; the route returns those\nbytes as they are and never builds this model.\n\nParameters\n----------\nname\n    The column's name.\ntype\n    The column's Arrow type name, cut to 256 characters.\ntype_cut\n    `true` when the type name was cut; absent otherwise."
+      },
+      "ResultPageOut": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ResultColumnOut"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "columns_cut": {
+            "type": "integer",
+            "title": "Columns Cut"
+          },
+          "masked_columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MaskedColumnOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked Columns"
+          },
+          "masked_columns_cut": {
+            "type": "integer",
+            "title": "Masked Columns Cut"
+          },
+          "rows": {
+            "items": {
+              "items": {},
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "row_cut": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Row Cut"
+          },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns",
+          "columns_cut",
+          "masked_columns",
+          "masked_columns_cut",
+          "rows",
+          "row_cut",
+          "row_count",
+          "next_offset",
+          "duration_ms",
+          "preview"
+        ],
+        "title": "ResultPageOut",
+        "description": "One page of a query result as JSON (`GET …/result?format=json`).\n\nDocuments the page `lakana_server.result_json.json_page` writes; the route returns those\nbytes as they are and never builds this model. The page is at most 4 MiB plus a small\nenvelope, and each cell at most 64 KiB: a cut cell is ``{\"cut\": true}``, or\n``{\"cut\": true, \"text\": <prefix>}`` for a string, and a cut list ends with\n``{\"cut\": true}`` after 100 elements.\n\nParameters\n----------\ncolumns\n    The result's columns, in order.\ncolumns_cut\n    How many columns were left out: when the header filled the page, the columns that did not\n    fit and no row is sent; when the page budget cut a row inside, the cells of that row that\n    did not fit.\nmasked_columns\n    The columns masked for the reader, `[]` when none was; `null` when not recorded (a run\n    from before this was recorded).\nmasked_columns_cut\n    How many further masked columns were left out because the page was full.\nrows\n    The rows of the page, each a list of cells in column order. 64-bit integers and\n    decimals are strings, binary is ``{\"binary\": <bytes>}``, and NaN and infinities are\n    strings.\nrow_cut\n    The positions on this page of the rows that were cut inside.\nrow_count\n    The rows the result has, at most 100 for a preview.\nnext_offset\n    The offset of the next page, or `null` at the end.\nduration_ms\n    How long the query ran, or `null` when unknown.\npreview\n    The previewed table for a preview, `null` for any other query."
       },
       "Role": {
         "type": "string",

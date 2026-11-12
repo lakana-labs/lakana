@@ -51,6 +51,22 @@ def test_extract_table_refs_finds_every_qualified_table() -> None:
     assert set(refs) == {"bronze.a", "gold.b"}
 
 
+def test_a_table_in_a_three_level_namespace_keeps_every_part() -> None:
+    """`a.b.c.d` names the table `d` of the namespace `a.b.c`, never `a.b.d`."""
+    assert extract_table_refs('SELECT * FROM "a"."b"."c"."d"') == ["a.b.c.d"]
+    assert extract_table_refs("SELECT * FROM gold.orders") == ["gold.orders"]
+
+
+def test_a_table_in_a_three_level_namespace_is_read_under_its_own_name() -> None:
+    """The read takes the table's last part as its alias, so `orders.id` still resolves."""
+    rewritten = rewrite_query(
+        "SELECT orders.id FROM gold.sales.eu.orders",
+        sources={"gold.sales.eu.orders": _parquet("a.parquet")},
+    )
+
+    assert re.search(r" FROM __lakana_gold_sales_eu_orders_\w+ AS orders$", rewritten.sql)
+
+
 def test_extract_table_refs_ignores_a_name_the_query_defines_itself() -> None:
     """A `WITH` name is not a catalog table and must not be reported as one.
 

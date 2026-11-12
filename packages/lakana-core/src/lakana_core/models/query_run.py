@@ -182,3 +182,20 @@ class QueryRun(Base, TimestampMixin):
     message; an ``ON DELETE SET NULL`` would silently turn it into a query of the table as it
     is now.
     """
+    preview_table_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    """The table or view this query previews; `None` for every other run.
+
+    Set only by `lakana_core.catalog.preview.submit_preview`, never from a request field: the
+    run's SQL is then the server's own, and the worker compares the id of the object that SQL
+    names with this one before it reads. Both the marker of a preview and its binding.
+    Deliberately has no foreign key and no index: as with `check_result_id`, a dropped table
+    must leave the id here, so that the worker fails the run instead of reading another
+    object of that name.
+    """
+    masked_columns: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
+    """The column masks the worker applied for the reader, as ``[{"table", "column"}]``.
+
+    Written by the worker together with `result_location`, so `None` means not recorded (a
+    run from before the column, or one without a stored result) and ``[]`` means no mask
+    applied. Never the expression, the policy or its subject.
+    """

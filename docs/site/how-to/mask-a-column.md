@@ -97,6 +97,10 @@ masked: Alice still sees `name`. Mask every column that identifies a person.
 When two or more masks apply to the same column of the same person (one made for her, one for a group
 she is in), Lakana does not guess which should win. The column reads `NULL` for her.
 
+A preview (`lakana table preview`, see [Preview a table](preview-a-table.md)) shows the masked
+values like any query and names the masked columns on standard error (`Masked for you: ssn`). It
+names the column, never the rule, the replacement or who set it up.
+
 ## List and remove masks
 
 <!-- not tested: needs a running instance and an administrator's profile; packages/lakana-server/tests/cli/test_column_masks_howto.py runs these commands against the real server and checks what they print -->

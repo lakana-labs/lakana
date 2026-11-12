@@ -10,11 +10,26 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.ipc
 
-from lakana import _usage
-from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param, query_params
-from lakana._models import QueryListEntry, QueryListPage, QueryStatus, WaitingFor
+from lakana import _http, _usage
+from lakana._http import (
+    BUSY_ATTEMPTS,
+    NEXT_CURSOR_HEADER,
+    HttpTransport,
+    csv_param,
+    query_params,
+    retry_wait,
+)
+from lakana._models import (
+    MaskedColumn,
+    QueryListEntry,
+    QueryListPage,
+    QueryStatus,
+    ResultColumn,
+    ResultPage,
+    WaitingFor,
+)
 from lakana._routes import ROUTES
-from lakana.errors import QueryFailed, ValidationError
+from lakana.errors import InvalidResponse, QueryFailed, ServerError, ValidationError
 
 _EntryList = list[QueryListEntry]
 
@@ -191,6 +206,45 @@ def _write_target(
     }
 
 
+_PAGE_BUSY_TYPE = "ResultPageLimitError"
+"""The `type` of the server's busy answer for a result page (503 with `Retry-After`)."""
+
+
+def _page_from_json(data: dict[str, Any]) -> ResultPage:
+    """Build a `ResultPage` from the JSON page the server answers.
+
+    Parameters
+    ----------
+    data
+        The decoded page.
+
+    Returns
+    -------
+    ResultPage
+        The page; `masked_columns` and `preview_table` are `None` when the server sent `null`.
+    """
+    masked = data.get("masked_columns")
+    preview = data.get("preview")
+    return ResultPage(
+        columns=tuple(
+            ResultColumn(c["name"], c["type"], bool(c.get("type_cut", False)))
+            for c in data["columns"]
+        ),
+        rows=tuple(tuple(row) for row in data["rows"]),
+        row_count=data["row_count"],
+        next_offset=data.get("next_offset"),
+        duration_ms=data.get("duration_ms"),
+        masked_columns=None
+        if masked is None
+        else tuple(MaskedColumn(m["table"], m["column"]) for m in masked),
+        preview_table=None if preview is None else preview["table"],
+        row_cut=tuple(data.get("row_cut", ())),
+        columns_cut=data.get("columns_cut", 0),
+        masked_columns_cut=data.get("masked_columns_cut", 0),
+        preview_table_cut=False if preview is None else bool(preview.get("cut", False)),
+    )
+
+
 class QueryRun:
     """A handle to a submitted query, for polling status and fetching results.
 
@@ -341,6 +395,63 @@ class QueryRun:
         _usage.add_bytes_read(len(response.content))
         with pyarrow.ipc.open_file(pa.BufferReader(response.content)) as reader:
             return reader.read_all()
+
+    def page(self, *, limit: int = 100, offset: int = 0) -> ResultPage:
+        """Fetch one page of this query's result as JSON, cells bounded in size.
+
+        This is the page the web UI shows. When the server is busy converting other pages it
+        answers 503 with `Retry-After`; this method waits that long and asks again, up to five
+        attempts in all, then raises the last 503.
+
+        Parameters
+        ----------
+        limit
+            Rows on the page, 1 to 1,000 (at most 100 for a preview).
+        offset
+            Rows to skip, at least 0. Use the page's `next_offset` for the next page.
+
+        Returns
+        -------
+        ResultPage
+            The page.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the query does not exist, or was submitted by another principal.
+        lakana.errors.Conflict
+            If the query has not succeeded yet, or is not a read.
+        lakana.errors.ValidationError
+            If `limit` or `offset` is out of range.
+        lakana.errors.InvalidResponse
+            If the answer is not a result page (a proxy's page, or a wrong URL).
+        lakana.errors.ServerError
+            If the server is still busy after the attempts (status 503).
+        """
+
+        def fetch() -> ResultPage:
+            response = self._transport.request(
+                ROUTES["queries.result"],
+                path_params={"env": self.environment, "query_id": self.id},
+                params={"format": "json", "limit": limit, "offset": offset},
+            )
+            _usage.add_bytes_read(len(response.content))
+            try:
+                return _page_from_json(response.json())
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:
+                raise InvalidResponse(
+                    "The server's answer to a result page was not what a Lakana server sends. "
+                    "Check the URL."
+                ) from exc
+
+        for _ in range(BUSY_ATTEMPTS - 1):
+            try:
+                return fetch()
+            except ServerError as exc:
+                if exc.status != 503 or exc.error_type != _PAGE_BUSY_TYPE:
+                    raise
+                _http.wait(retry_wait(exc))
+        return fetch()
 
 
 class Queries:

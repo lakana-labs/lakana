@@ -84,6 +84,7 @@ from lakana_core.catalog.datafiles import list_data_files
 from lakana_core.catalog.external_location import check_claim_free, parse_external_location
 from lakana_core.catalog.field_ids import read_fields, refuse_changed_nested_fields
 from lakana_core.catalog.health import record_table_reads
+from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.maintenance import (
     DEFAULT_KEEP_DAYS,
     DEFAULT_KEEP_LAST,
@@ -91,6 +92,7 @@ from lakana_core.catalog.maintenance import (
     MaintenanceStopped,
 )
 from lakana_core.catalog.merge import SQL_ADVICE
+from lakana_core.catalog.preview import PREVIEW_TABLE_CHANGED, preview_parts
 from lakana_core.catalog.schema_compat import SchemaDiff, arrow_to_iceberg_schema, view_columns
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.watermark import check_incremental_key, wrap_incremental
@@ -1320,6 +1322,10 @@ class _Prepared:
     read_prefixes
         The read prefix of every table the query reads, sorted and without duplicates: the
         locations the query process may open (`execute_query`'s `read_prefixes`).
+    masked
+        The column masks of the reader that applied, as pairs of the dotted base table and the
+        column as the read names it, sorted: what a stored result records as
+        `QueryRun.masked_columns`. A view is never named; the base table behind it is.
     """
 
     rewritten: RewrittenQuery
@@ -1331,6 +1337,7 @@ class _Prepared:
     projected: frozenset[str] = frozenset()
     named: frozenset[str] = frozenset()
     read_prefixes: tuple[str, ...] = ()
+    masked: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1466,11 +1473,14 @@ def _resolve_and_rewrite(
     *,
     root: str | None = None,
     check_result_id: uuid.UUID | None = None,
+    preview_table_id: uuid.UUID | None = None,
 ) -> _Prepared:
     """Expand views, then authorize and resolve every base table, and rewrite.
 
     Views are expanded first, so resolution and the policy
-    rewrite only ever see base tables and a view can't widen access.
+    rewrite only ever see base tables and a view can't widen access. A preview first makes
+    sure that the object its SQL names is still the one it was asked for
+    (`_require_the_previewed_object`), before any view is expanded or table read.
 
     Parameters
     ----------
@@ -1494,6 +1504,9 @@ def _resolve_and_rewrite(
     check_result_id
         The check result whose rows the query shows (`QueryRun.check_result_id`); `None` for
         every other query. See `_resolve_sources`.
+    preview_table_id
+        The table or view a preview shows (`QueryRun.preview_table_id`); `None` for every
+        other query.
 
     Returns
     -------
@@ -1502,6 +1515,9 @@ def _resolve_and_rewrite(
 
     Raises
     ------
+    NotFoundError
+        For a preview whose SQL names an object other than the one it was asked for
+        (`PREVIEW_TABLE_CHANGED`).
     _ResolutionFailed
         As `_expand_views_opaquely` and `_resolve_sources_opaquely` raise it.
     UnsupportedTableError
@@ -1515,6 +1531,8 @@ def _resolve_and_rewrite(
     ValidationError
         If expansion or rewriting fails.
     """
+    if preview_table_id is not None:
+        _require_the_previewed_object(session, environment_name, sql, preview_table_id)
     catalog = CatalogService(session, StorageResolver(session, key_provider), authz)
     expanded = _expand_views_opaquely(catalog, principal, environment_name, sql, root)
     try:
@@ -1564,7 +1582,48 @@ def _resolve_and_rewrite(
         ),
         named=named_columns(expanded.sql),
         read_prefixes=tuple(sorted(set(prefixes))),
+        masked=tuple(
+            sorted(
+                (name, column) for name, source in sources.items() for column in source.column_masks
+            )
+        ),
     )
+
+
+def _require_the_previewed_object(
+    session: Session, environment_name: str, sql: str, preview_table_id: uuid.UUID
+) -> None:
+    """Refuse a preview whose SQL no longer names the table or view it was asked for.
+
+    The server wrote the SQL from the catalog row and bound the run to that row's id. Between
+    the request and this run the object may have been dropped, created again under the name,
+    or replaced by a view (or a view by a table). The name is read back part by part from the
+    server's own SQL and resolved to an id, which must be the bound one. This runs before any
+    view is expanded, because the rest of the read never sees a view.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_name
+        The environment the query runs against.
+    sql
+        The preview's SQL, as the server wrote it.
+    preview_table_id
+        The id of the table or view the preview was asked for.
+
+    Raises
+    ------
+    NotFoundError
+        `PREVIEW_TABLE_CHANGED` when the name resolves to another object or to none. It names
+        neither object, as opaque as a table that is not published.
+    """
+    parts = preview_parts(sql)
+    found = resolve_table_id(
+        session, environment_name, NamespacePath.from_parts(parts[:-1]).joined(), parts[-1]
+    )
+    if found != preview_table_id:
+        raise NotFoundError(PREVIEW_TABLE_CHANGED)
 
 
 _REFERENCED_COLUMN = re.compile(
@@ -2724,9 +2783,9 @@ def _run_one(
        `None` tells nobody.
     on_result
         For a read run only: called with the result, the snapshots read and the tables
-        a policy applied to, instead of storing a result file; `result_location` stays unset.
-        Only `lakana_worker.checks.count_check` passes it, for the count of a check; a write
-        or maintenance run never calls it.
+        a policy applied to, instead of storing a result file; `result_location` and
+        `masked_columns` stay unset. Only `lakana_worker.checks.count_check` passes it, for the
+        count of a check; a write or maintenance run never calls it.
 
     Returns
     -------
@@ -2874,6 +2933,7 @@ def _run_one(
                 locations,
                 root=run.target_name if run.write_mode == WriteMode.VIEW else None,
                 check_result_id=run.check_result_id,
+                preview_table_id=run.preview_table_id,
             )
             if run.write_mode is None:
                 result = execute_query(
@@ -2896,6 +2956,9 @@ def _run_one(
                     result_path = f"_artifacts/queries/{run.id}/result.arrow"
                     _store_result(resolved_storage.storage, result_path, result)
                     run.result_location = result_path
+                    run.masked_columns = [
+                        {"table": table, "column": column} for table, column in prepared.masked
+                    ]
                 row_count = result.num_rows
             elif run.write_mode == WriteMode.VIEW:
                 _create_view(

@@ -523,6 +523,25 @@ def emit_arrow(state: CliState, table: pa.Table, max_rows: int) -> None:
     console.print(f"{table.num_rows} rows")
 
 
+def emit_text_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> None:
+    """Print rows of text as a table; no control character reaches the terminal.
+
+    Parameters
+    ----------
+    headers
+        The column names.
+    rows
+        The rows, each one string per column. Text is printed literally: Rich markup is never
+        read, and every control character is written as an escape (`safe_text`).
+    """
+    rendered = Table()
+    for header in headers:
+        rendered.add_column(Text(safe_text(header)))
+    for row in rows:
+        rendered.add_row(*(Text(safe_text(cell)) for cell in row))
+    _console().print(rendered)
+
+
 def done(state: CliState, message: str, value: Any = None) -> None:  # ruff: ignore[any-type]
     """Report a completed mutation.
 

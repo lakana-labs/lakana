@@ -1,12 +1,28 @@
 """Tests for the query submission API."""
 
+import json
+import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pyarrow as pa
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
-from lakana_core.models import WriteMode
+from lakana_core.errors import LakanaError
+from lakana_core.models import QueryRun, QueryRunStatus, WriteMode
+from lakana_core.storage.resolver import StorageResolver
+from lakana_server.api.platform import queries as queries_module
+from lakana_server.api.platform.schemas import (
+    MaskedColumnOut,
+    PreviewOut,
+    ResultColumnOut,
+    ResultPageOut,
+)
+from lakana_server.result_json import json_page
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import person, query_run_columns
 
 
 def test_submit_then_get_returns_queued(client: TestClient) -> None:
@@ -300,40 +316,6 @@ def _environment(client: TestClient, name: str = "dev") -> None:
     assert created.status_code == 201, created.text
 
 
-def _person(client: TestClient, name: str, role: str, env: str = "dev") -> dict[str, str]:
-    """Create a service account with a role on an environment, and return its header.
-
-    Parameters
-    ----------
-    client
-        Test client for the API.
-    name
-        The principal's name.
-    role
-        The role granted on the environment.
-    env
-        The environment.
-
-    Returns
-    -------
-    dict of str to str
-        The principal's Authorization header.
-    """
-    client.post(
-        "/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "SERVICE_ACCOUNT"}
-    )
-    token = client.post(
-        f"/api/v1/principals/{name}/tokens", headers=AUTH_HEADER, json={"name": name}
-    ).json()["token"]
-    granted = client.post(
-        "/api/v1/grants",
-        headers=AUTH_HEADER,
-        json={"principal": name, "role": role, "kind": "ENVIRONMENT", "environment": env},
-    )
-    assert granted.status_code == 201, granted.text
-    return {"Authorization": f"Bearer {token}"}
-
-
 def _submit(client: TestClient, headers: dict[str, str] = AUTH_HEADER, env: str = "dev") -> str:
     """Submit a query and return its id.
 
@@ -511,7 +493,7 @@ def test_cancel_a_query_that_has_ended_answers_its_status(client: TestClient) ->
 def test_cancel_by_another_principal_is_the_404_of_a_status_read(client: TestClient) -> None:
     """Bob learns nothing from a cancel that a status read would not tell him."""
     _environment(client)
-    bob = _person(client, "bob", "ANALYST")
+    bob = person(client, "bob", "ANALYST")
     query_id = _submit(client)
     before = _row(client, query_id)
     unknown = "00000000-0000-0000-0000-000000000000"
@@ -533,8 +515,8 @@ def test_cancel_by_another_principal_is_the_404_of_a_status_read(client: TestCli
 def test_a_holder_of_manage_environment_cancels_anyones_query(client: TestClient) -> None:
     """An environment admin cancels bob's query; the audit event names the admin."""
     _environment(client)
-    bob = _person(client, "bob", "ANALYST")
-    carol = _person(client, "carol", "ADMIN")
+    bob = person(client, "bob", "ANALYST")
+    carol = person(client, "carol", "ADMIN")
     query_id = _submit(client, bob)
 
     cancelled = client.post(_cancel_url(query_id), headers=carol)
@@ -806,8 +788,8 @@ def test_a_stranger_gets_the_same_404_for_a_capped_query(client: TestClient) -> 
 
     _environment(client)
     _alive_worker(client)
-    bob = _person(client, "bob", "ANALYST")
-    carol = _person(client, "carol", "ANALYST")
+    bob = person(client, "bob", "ANALYST")
+    carol = person(client, "carol", "ANALYST")
     running = _submit(client, bob)
     _put_status(client, running, "RUNNING")
     capped = _submit(client, bob)
@@ -825,7 +807,7 @@ def test_a_managers_cancel_of_another_principals_capped_query_answers_no_reason(
     """The cancel answers with the run `CANCELLED`, which has no reason: no count leaks."""
     _environment(client)
     _alive_worker(client)
-    bob = _person(client, "bob", "ANALYST")
+    bob = person(client, "bob", "ANALYST")
     _put_status(client, _submit(client, bob), "RUNNING")
     capped = _submit(client, bob)
     before = client.get(f"/api/v1/environments/dev/queries/{capped}", headers=bob).json()
@@ -841,8 +823,8 @@ def test_a_managers_listing_never_shows_how_many_another_principal_runs(
 ) -> None:
     _environment(client)
     _alive_worker(client)
-    bob = _person(client, "bob", "ANALYST")
-    carol = _person(client, "carol", "ADMIN")
+    bob = person(client, "bob", "ANALYST")
+    carol = person(client, "carol", "ADMIN")
     for _ in range(3):  # three running, a limit of 1: above it, so the count is not the limit
         _put_status(client, _submit(client, bob), "RUNNING")
     queued = _submit(client, bob)
@@ -869,7 +851,7 @@ def test_a_queued_query_of_a_stranger_is_still_not_found_and_says_nothing(
     """The reason travels inside the status read: whoever may not read the run gets a 404."""
     _environment(client)
     query_id = _submit(client)
-    reader = _person(client, "reader", "ANALYST")
+    reader = person(client, "reader", "ANALYST")
     response = client.get(f"/api/v1/environments/dev/queries/{query_id}", headers=reader)
     assert response.status_code == 404
     assert "waiting_for" not in response.text
@@ -967,9 +949,9 @@ def test_the_list_shows_a_manager_another_users_row_and_the_status_read_still_re
 ) -> None:
     """A manager sees bob's row in the list, without SQL, and gets a 404 on bob's status."""
     _environment(client)
-    bob = _person(client, "bob", "ANALYST")
-    carol = _person(client, "carol", "ADMIN")
-    dave = _person(client, "dave", "ANALYST")
+    bob = person(client, "bob", "ANALYST")
+    carol = person(client, "carol", "ADMIN")
+    dave = person(client, "dave", "ANALYST")
     _environment(client, "other")
     query_id = _submit(client, bob)
     orphan = _submit(client, bob)
@@ -996,7 +978,7 @@ def test_the_list_of_another_environments_manager_is_the_status_reads_403(
     _environment(client)
     _environment(client, "other")
     query_id = _submit(client)
-    outsider = _person(client, "outsider", "ADMIN", env="other")
+    outsider = person(client, "outsider", "ADMIN", env="other")
     listed = client.get(_list_url(), headers=outsider)
     read = client.get(f"{_list_url()}/{query_id}", headers=outsider)
     assert listed.status_code == read.status_code == 403
@@ -1194,3 +1176,312 @@ def test_the_status_of_a_query_carries_its_resources(client: TestClient) -> None
         3.1,
         1288490188,
     )
+
+
+# --- The JSON page of a result ----------------------------------------------------------
+
+T0 = datetime(2026, 11, 12, 9, 0, tzinfo=UTC)
+"""A fixed start time for a run whose duration a test reads back."""
+
+
+def result_url(qid: str, query: str = "") -> str:
+    """Build the result route of a query in `dev`.
+
+    Parameters
+    ----------
+    qid
+        The query's id.
+    query
+        The query string without its ``?``, or empty.
+
+    Returns
+    -------
+    str
+        The URL.
+    """
+    url = f"/api/v1/environments/dev/queries/{qid}/result"
+    return f"{url}?{query}" if query else url
+
+
+def stored_result(client: TestClient, env: str, table: pa.Table, **run_fields: object) -> str:
+    """Submit a query as the administrator and finish it with `table` as its stored result.
+
+    The worker is bypassed as in `test_get_result_of_succeeded_query_returns_arrow_bytes`: the
+    run is set to `SUCCEEDED` and the result written as an Arrow IPC file through the
+    environment's storage.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    env
+        An existing environment.
+    table
+        The result.
+    **run_fields
+        Further attributes of the run, such as `preview_table_id` or `masked_columns`.
+
+    Returns
+    -------
+    str
+        The query's id.
+    """
+    submitted = client.post(
+        f"/api/v1/environments/{env}/queries", json={"sql": "SELECT 1"}, headers=AUTH_HEADER
+    )
+    assert submitted.status_code == 202, submitted.text
+    qid = submitted.json()["query_id"]
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_file(sink, table.schema) as writer:
+        writer.write_table(table)
+    path = f"_artifacts/queries/{qid}/result.arrow"
+    with Session(client.app.state.engine) as session:
+        StorageResolver(session).for_environment(env).storage.write(
+            path, sink.getvalue().to_pybytes()
+        )
+        run = session.get(QueryRun, uuid.UUID(qid))
+        assert run is not None
+        run.status = QueryRunStatus.SUCCEEDED
+        run.result_location = path
+        run.lineage_json = {}
+        for name, value in run_fields.items():
+            setattr(run, name, value)
+        session.commit()
+    return qid
+
+
+def set_status(client: TestClient, qid: str, status: str) -> str:
+    """Set a run's status as the worker would, and hand its id back.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    qid
+        The query's id.
+    status
+        A `QueryRunStatus` value.
+
+    Returns
+    -------
+    str
+        `qid`, so a call can sit inside a URL.
+    """
+    _put_status(client, qid, status)
+    return qid
+
+
+def raising(*args: object, **kwargs: object) -> bytes:
+    """Stand in for `json_page` and fail as a conversion would.
+
+    Parameters
+    ----------
+    *args
+        Ignored.
+    **kwargs
+        Ignored.
+
+    Raises
+    ------
+    LakanaError
+        Always; the server maps an unmapped `LakanaError` to 500.
+    """
+    raise LakanaError("conversion failed")
+
+
+def test_the_json_page_carries_masked_columns_and_duration(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(
+        client,
+        "dev",
+        pa.table({"i": [1]}),
+        masked_columns=[{"table": "gold.orders", "column": "email"}],
+        started_at=T0,
+        finished_at=T0 + timedelta(milliseconds=1500),
+    )
+    response = client.get(result_url(qid, "format=json"), headers=AUTH_HEADER)
+    assert response.headers["content-type"] == "application/json"
+    page = response.json()
+    assert (page["masked_columns"], page["duration_ms"]) == (
+        [{"table": "gold.orders", "column": "email"}],
+        1500,
+    )
+    assert (page["columns"], page["rows"], page["next_offset"]) == (
+        [{"name": "i", "type": "int64"}],
+        [["1"]],
+        None,
+    )
+
+
+def test_a_json_page_of_an_unfinished_run_is_409(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}))
+    for status in ("QUEUED", "RUNNING", "CANCELLED", "FAILED"):
+        response = client.get(
+            result_url(set_status(client, qid, status), "format=json"), headers=AUTH_HEADER
+        )
+        assert response.status_code == 409, status
+        assert f"status: {status}" in response.json()["detail"]
+
+
+def test_a_json_page_of_a_write_is_the_409_of_the_arrow_result(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}), result_location=None)
+    arrow = client.get(result_url(qid), headers=AUTH_HEADER)
+    page = client.get(result_url(qid, "format=json"), headers=AUTH_HEADER)
+    assert (page.status_code, page.json()) == (409, arrow.json())
+
+
+def test_a_run_from_before_this_release_has_masked_columns_null(client: TestClient) -> None:
+    _environment(client)
+    page = client.get(
+        result_url(stored_result(client, "dev", pa.table({"i": [1]})), "format=json"),
+        headers=AUTH_HEADER,
+    ).json()
+    assert (page["masked_columns"], page["preview"], page["duration_ms"]) == (None, None, None)
+
+
+def test_a_json_page_follows_limit_and_offset(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": pa.array(range(250), pa.int32())}))
+    first = client.get(result_url(qid, "format=json"), headers=AUTH_HEADER).json()
+    assert (len(first["rows"]), first["rows"][0], first["next_offset"]) == (100, [0], 100)
+    last = client.get(result_url(qid, "format=json&offset=240&limit=20"), headers=AUTH_HEADER)
+    assert (last.json()["rows"], last.json()["next_offset"]) == (
+        [[i] for i in range(240, 250)],
+        None,
+    )
+    assert last.json()["row_count"] == 250
+
+
+@pytest.mark.parametrize(
+    ("query", "name", "bound"),
+    [
+        ("format=json&limit=0", "limit", "greater than or equal to 1"),
+        ("format=json&limit=1001", "limit", "less than or equal to 1000"),
+        ("format=json&offset=-1", "offset", "greater than or equal to 0"),
+    ],
+)
+def test_a_limit_or_offset_out_of_range_is_422_naming_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, query: str, name: str, bound: str
+) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}))
+    monkeypatch.setattr(queries_module, "json_page", raising)
+    response = client.get(result_url(qid, query), headers=AUTH_HEADER)
+    assert response.status_code == 422
+    (problem,) = response.json()["detail"]
+    assert (problem["loc"], bound in problem["msg"]) == (["query", name], True)
+
+
+def test_limit_or_offset_with_arrow_is_422(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}))
+    for query in ("limit=5", "offset=0", "format=arrow&limit=5"):
+        response = client.get(result_url(qid, query), headers=AUTH_HEADER)
+        assert response.status_code == 422, query
+        assert response.json()["detail"] == (
+            "limit and offset apply to format=json; the Arrow result is always whole."
+        )
+
+
+def test_an_unknown_format_is_422(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}))
+    response = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["query", "format"]
+
+
+def test_arrow_stays_the_default(client: TestClient) -> None:
+    _environment(client)
+    table = pa.table({"i": [1, 2]})
+    qid = stored_result(client, "dev", table)
+    response = client.get(result_url(qid), headers=AUTH_HEADER)
+    assert response.headers["content-type"] == "application/vnd.apache.arrow.file"
+    assert pa.ipc.open_file(pa.BufferReader(response.content)).read_all().equals(table)
+
+
+def test_a_full_json_limiter_answers_503_with_retry_after(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}))
+    lim = client.app.state.json_page_limiter
+    for _ in range(4):
+        assert lim.try_acquire(uuid.uuid4()) is None
+    response = client.get(result_url(qid, "format=json"), headers=AUTH_HEADER)
+    assert (response.status_code, response.headers["Retry-After"], response.json()) == (
+        503,
+        "1",
+        {
+            "detail": "The server is preparing other result pages; try again in a moment.",
+            "type": "ResultPageLimitError",
+        },
+    )
+
+
+def test_a_principal_with_a_page_in_progress_is_told_to_wait_for_it(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}))
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert client.app.state.json_page_limiter.try_acquire(admin) is None
+    response = client.get(result_url(qid, "format=json"), headers=AUTH_HEADER)
+    assert (response.status_code, response.headers["Retry-After"]) == (503, "1")
+    assert response.json()["detail"] == (
+        "You already have a result page being prepared; wait for it, then try again."
+    )
+
+
+def test_the_arrow_result_takes_no_json_slot(client: TestClient) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}))
+    lim = client.app.state.json_page_limiter
+    for _ in range(4):
+        lim.try_acquire(uuid.uuid4())
+    assert client.get(result_url(qid), headers=AUTH_HEADER).status_code == 200
+
+
+def test_the_slot_is_released_after_a_page_and_after_a_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", pa.table({"i": [1]}))
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert client.get(result_url(qid, "format=json"), headers=AUTH_HEADER).status_code == 200
+    monkeypatch.setattr(queries_module, "json_page", raising)
+    assert client.get(result_url(qid, "format=json"), headers=AUTH_HEADER).status_code == 500
+    assert client.app.state.json_page_limiter.try_acquire(admin) is None
+
+
+def test_the_result_route_documents_arrow_and_the_json_page(client: TestClient) -> None:
+    spec = client.app.openapi()
+    op = spec["paths"]["/api/v1/environments/{env}/queries/{query_id}/result"]["get"]
+    content = op["responses"]["200"]["content"]
+    assert set(content) == {"application/vnd.apache.arrow.file", "application/json"}
+    assert content["application/json"]["schema"] == {"$ref": "#/components/schemas/ResultPageOut"}
+    assert {code for code in op["responses"]} == {"200", "401", "403", "404", "409", "422", "503"}
+    limit = next(p for p in op["parameters"] if p["name"] == "limit")
+    assert (limit["schema"]["anyOf"][0]["minimum"], limit["schema"]["anyOf"][0]["maximum"]) == (
+        1,
+        1000,
+    )
+
+
+def test_the_page_schema_declares_every_key_the_writer_emits() -> None:
+    wide = pa.struct([(f"field_{i}", pa.int8()) for i in range(40)])
+    body = json_page(
+        pa.table({"s": pa.array([None], wide)}),
+        offset=0,
+        limit=1,
+        row_cap=None,
+        duration_ms=1,
+        masked_columns=[{"table": "gold.orders", "column": "email"}],
+        preview_table="x" * 2000,
+    )
+    page = json.loads(body)
+    assert page["columns"][0]["type_cut"] is True
+    assert page["preview"]["cut"] is True
+    assert set(page) == set(ResultPageOut.model_fields)
+    assert set(page["columns"][0]) == set(ResultColumnOut.model_fields)
+    assert set(page["masked_columns"][0]) == set(MaskedColumnOut.model_fields)
+    assert set(page["preview"]) == set(PreviewOut.model_fields)
+    ResultPageOut.model_validate(page)

@@ -16,8 +16,9 @@ from lakana_core.models import AuditEvent, AuditEventType, Principal, Table, Tab
 from lakana_server.api.platform.listing import NEXT_CURSOR_HEADER
 from lakana_server.app import create_app
 from lakana_server.settings import Settings
-from tests.api.platform.test_queries import _environment, _person, _submit
+from tests.api.platform.test_queries import _environment, _submit
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import person
 
 _QUERIES = "/api/v1/environments/dev/queries"
 _TABLES = "/api/v1/environments/dev/namespaces/gold/tables"
@@ -89,7 +90,7 @@ def _list(client: TestClient, headers: dict[str, str] = AUTH_HEADER, **params: o
 
 def test_a_managers_list_of_someone_elses_query_is_recorded_once(client: TestClient) -> None:
     _environment(client)
-    bob = _person(client, "bob", "ANALYST")
+    bob = person(client, "bob", "ANALYST")
     _submit(client)
     _submit(client, bob)
     _submit(client, bob)
@@ -117,7 +118,7 @@ def test_a_managers_list_of_someone_elses_query_is_recorded_once(client: TestCli
 @pytest.mark.slow
 def test_a_list_that_cannot_be_audited_is_a_503_without_rows(client: TestClient) -> None:
     _environment(client)
-    query_id = _submit(client, _person(client, "bob", "ANALYST"))
+    query_id = _submit(client, person(client, "bob", "ANALYST"))
     _refuse_view_rows(client)
     response = client.get(_QUERIES, headers=AUTH_HEADER)
     assert response.status_code == 503
@@ -149,7 +150,7 @@ def quiet_client(settings: Settings) -> Iterator[TestClient]:
 
 def test_the_setting_turns_the_view_audit_off(quiet_client: TestClient) -> None:
     _environment(quiet_client)
-    _submit(quiet_client, _person(quiet_client, "bob", "ANALYST"))
+    _submit(quiet_client, person(quiet_client, "bob", "ANALYST"))
     assert len(_list(quiet_client)) == 1
     _table_with_a_reader(quiet_client)
     assert quiet_client.get(f"{_TABLES}/t/health", headers=AUTH_HEADER).status_code == 200
@@ -189,7 +190,7 @@ def _table_with_a_reader(client: TestClient) -> None:
 
 def test_the_readers_of_a_table_are_recorded_once(client: TestClient) -> None:
     _environment(client)
-    _person(client, "bob", "ANALYST")
+    person(client, "bob", "ANALYST")
     _table_with_a_reader(client)
     for days in (30, 30, 7):
         response = client.get(f"{_TABLES}/t/health", headers=AUTH_HEADER, params={"days": days})
@@ -203,7 +204,7 @@ def test_the_readers_of_a_table_are_recorded_once(client: TestClient) -> None:
 
 def test_readers_that_cannot_be_audited_are_a_503(client: TestClient) -> None:
     _environment(client)
-    _person(client, "bob", "ANALYST")
+    person(client, "bob", "ANALYST")
     _table_with_a_reader(client)
     _refuse_view_rows(client)
     response = client.get(f"{_TABLES}/t/health", headers=AUTH_HEADER)

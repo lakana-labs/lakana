@@ -20,6 +20,7 @@ import httpx
 import pytest
 from scripts.pytest_memory_limit import open_descriptors
 
+from lakana import _http
 from lakana._artifact_manifest import (
     ManifestError,
     ScanLimits,
@@ -478,7 +479,7 @@ def test_a_file_upload_waits_the_whole_seconds_the_server_asked_up_to_ten(
 def test_a_retry_after_of_five_thousand_digits_is_the_cap_and_does_not_raise() -> None:
     """Python refuses `int()` of a string past 4,300 digits; the wait never gets that far."""
     exc = LakanaError("busy", status=503, retry_after="9" * 5000)
-    assert module._retry_wait(exc) == pytest.approx(10.0)
+    assert _http.retry_wait(exc) == pytest.approx(10.0)
 
 
 @pytest.mark.parametrize(
@@ -1128,7 +1129,7 @@ _REAL_WAIT = module._wait
 
 def test_the_wait_between_attempts_really_waits(monkeypatch: pytest.MonkeyPatch) -> None:
     slept: list[float] = []
-    monkeypatch.setattr(module.time, "sleep", slept.append)
+    monkeypatch.setattr(_http.time, "sleep", slept.append)
     _REAL_WAIT(2.5)
     assert slept == [2.5]
 

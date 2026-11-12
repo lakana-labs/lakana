@@ -5810,3 +5810,67 @@ def test_0075_adds_the_sort_keys_and_backfills_the_last_read(
     assert rows("SELECT updated_at FROM tables ORDER BY name") == updated_before
     command.downgrade(config, _REVISION_0074)
     assert not _SORT_KEY_COLUMNS & columns()
+
+
+_REVISION_0076 = "a7d3e9c1b406"
+
+
+def test_0076_adds_the_preview_binding_and_the_masked_columns(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0076`: two nullable query run columns, no foreign key; an older run has neither.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0075)
+    config = Config(str(ALEMBIC_INI))
+    added = {"preview_table_id", "masked_columns"}
+
+    def columns() -> dict[str, bool]:
+        """Read the query runs' added columns.
+
+        Returns
+        -------
+        dict
+            Each added column present to whether it is nullable.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            found = inspect(engine).get_columns("query_runs")
+            return {c["name"]: c["nullable"] for c in found if c["name"] in added}
+        finally:
+            engine.dispose()
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute(
+            "INSERT INTO query_runs (id, environment_id, sql_text, status, created_at, updated_at) "
+            f"VALUES ('{uuid.uuid4().hex}', '{uuid.uuid4().hex}', 'SELECT 1', 'SUCCEEDED', "
+            f"'{_utc_text()}', '{_utc_text()}')"
+        )
+    assert columns() == {}
+    command.upgrade(config, _REVISION_0076)
+    assert columns() == {"preview_table_id": True, "masked_columns": True}
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        constrained = {
+            c
+            for f in inspect(engine).get_foreign_keys("query_runs")
+            for c in f["constrained_columns"]
+        }
+        assert "preview_table_id" not in constrained
+    finally:
+        engine.dispose()
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT preview_table_id, masked_columns FROM query_runs"
+        ).fetchall() == [(None, None)]
+    command.downgrade(config, _REVISION_0075)
+    assert columns() == {}
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT count(*) FROM query_runs").fetchone() == (1,)

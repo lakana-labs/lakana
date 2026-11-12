@@ -44,8 +44,6 @@ import contextlib
 import dataclasses
 import hashlib
 import os
-import re
-import time
 import uuid
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -53,6 +51,7 @@ from typing import Any
 
 import httpx
 
+from lakana import _http
 from lakana._artifact_manifest import (
     CHANGED,
     READ_BYTES,
@@ -67,7 +66,13 @@ from lakana._artifact_manifest import (
     shown,
 )
 from lakana._artifact_tree import TreeWriter, check_manifest
-from lakana._http import HttpTransport, query_params
+from lakana._http import (
+    BUSY_ATTEMPTS,
+    BUSY_BACKOFF_SECONDS,
+    HttpTransport,
+    query_params,
+    retry_wait,
+)
 from lakana._models import (
     Artifact,
     ArtifactDownload,
@@ -129,18 +134,6 @@ applies it to each connect and read, not to the whole file)."""
 
 _UPLOAD_ROUNDS = 3
 """Times an upload is started from the manifest when the server lost it."""
-
-_BUSY_ATTEMPTS = 5
-"""Times one file is sent, or an upload is begun, when the server answers 503 (for a file: any
-503; to begin an upload: its own busy 503, every upload or manifest slot taken)."""
-
-_BUSY_BACKOFF_SECONDS = 1.0
-"""Seconds waited after a 503 before sending the file again when the answer has no usable
-`Retry-After`."""
-
-_RETRY_AFTER_CAP_SECONDS = 10.0
-"""Longest wait a `Retry-After` can make before a file is sent again (the server's
-storage-unavailable answer says 5)."""
 
 _DOWNLOAD_ATTEMPTS = 6
 """Times one file is asked for when the server answers 503 (every download slot is taken, or
@@ -259,29 +252,7 @@ def _wait(seconds: float) -> None:
     seconds
         How long.
     """
-    time.sleep(seconds)
-
-
-def _retry_wait(exc: LakanaError) -> float:
-    """Say how long to wait before sending a file again after a 503.
-
-    Parameters
-    ----------
-    exc
-        The 503 the server (or a proxy) answered.
-
-    Returns
-    -------
-    float
-        The answer's `Retry-After` when it is whole seconds (at most `_RETRY_AFTER_CAP_SECONDS`),
-        else `_BUSY_BACKOFF_SECONDS`: the header is absent, not a number, negative, fractional or
-        an HTTP date.
-    """
-    text = (exc.retry_after or "").strip()
-    if not re.fullmatch(r"[0-9]+", text):
-        return _BUSY_BACKOFF_SECONDS
-    seconds = float(int(text)) if len(text) <= 9 else _RETRY_AFTER_CAP_SECONDS
-    return min(seconds, _RETRY_AFTER_CAP_SECONDS)
+    _http.wait(seconds)
 
 
 def _object(response: Any, what: str) -> dict[str, Any]:  # ruff: ignore[any-type]
@@ -989,13 +960,13 @@ class Artifacts:
                 json=document,
             )
 
-        for _ in range(_BUSY_ATTEMPTS - 1):
+        for _ in range(BUSY_ATTEMPTS - 1):
             try:
                 return begin()
             except ServerError as exc:
                 if exc.status != 503 or exc.error_type != _UPLOAD_BUSY_TYPE:
                     raise
-                _wait(_BUSY_BACKOFF_SECONDS)
+                _wait(BUSY_BACKOFF_SECONDS)
         return begin()
 
     def _withdraw(self, upload_params: Mapping[str, str]) -> None:
@@ -1177,13 +1148,13 @@ class Artifacts:
                 timeout=_BLOB_TIMEOUT_SECONDS,
             )
 
-        for _ in range(_BUSY_ATTEMPTS - 1):
+        for _ in range(BUSY_ATTEMPTS - 1):
             try:
                 return put()
             except ServerError as exc:
                 if exc.status != 503:
                     raise
-                _wait(_retry_wait(exc))
+                _wait(retry_wait(exc))
         put()
 
     def abort_upload(self, environment: str, qualified_name: str, upload_id: str) -> None:

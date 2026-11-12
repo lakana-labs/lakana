@@ -1,4 +1,4 @@
-"""A non-blocking concurrency limiter for the governed append route.
+"""Non-blocking concurrency limiters: governed appends, and JSON result pages.
 
 `asyncio.Semaphore.acquire()` *waits* for a slot to free up rather than
 refusing outright, which is the wrong behaviour for an HTTP request that
@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Literal
 
 from lakana_server.errors import AppendConcurrencyLimitError
 
@@ -111,3 +113,74 @@ async def hold_one_per_principal(
             yield
     finally:
         holders.discard(principal_id)
+
+
+JSON_PAGES_PER_PROCESS = 4
+"""The most JSON result pages one server process converts at once."""
+
+JSON_PAGES_PER_PRINCIPAL = 1
+"""The most JSON result pages one principal has converted at once, in one process."""
+
+
+class ThreadSafeConcurrencyLimiter:
+    """A non-blocking limiter with a cap in total and a cap per key, safe across threads.
+
+    The twin of `AppendConcurrencyLimiter` for synchronous routes, which FastAPI runs in its
+    thread pool: two requests can check and take a slot at the same moment, so one lock guards
+    the total count and the count per key, and every check and change happens under it.
+
+    Parameters
+    ----------
+    max_concurrent
+        The most slots taken at once, across all keys.
+    per_key
+        The most slots one key holds at once.
+    """
+
+    def __init__(self, max_concurrent: int, per_key: int) -> None:
+        self._max_concurrent = max_concurrent
+        self._max_per_key = per_key
+        self._lock: contextlib.AbstractContextManager[object] = threading.Lock()
+        self._taken = 0
+        self._per_key: dict[uuid.UUID, int] = {}
+
+    def try_acquire(self, key: uuid.UUID) -> Literal["own", "all"] | None:
+        """Take one slot for `key`, without waiting for one to free up.
+
+        Parameters
+        ----------
+        key
+            Whose slot it is, such as the caller's principal id.
+
+        Returns
+        -------
+        Literal["own", "all"] or None
+            `None` when a slot was taken: the caller must call `release` with the same key
+            exactly once. ``"own"`` when `key` already holds its share, and ``"all"`` when
+            every slot is taken; then nothing changed.
+        """
+        with self._lock:
+            held = self._per_key.get(key, 0)
+            if held >= self._max_per_key:
+                return "own"
+            if self._taken >= self._max_concurrent:
+                return "all"
+            self._taken += 1
+            self._per_key[key] = held + 1
+            return None
+
+    def release(self, key: uuid.UUID) -> None:
+        """Give back a slot that `try_acquire` took for `key`.
+
+        Parameters
+        ----------
+        key
+            The key the slot was taken for.
+        """
+        with self._lock:
+            self._taken -= 1
+            left = self._per_key[key] - 1
+            if left:
+                self._per_key[key] = left
+            else:
+                del self._per_key[key]

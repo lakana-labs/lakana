@@ -13,8 +13,9 @@ from lakana_core.models import DeployRun, QueryRun, QueryRunStatus, Run, RunStat
 from lakana_server.api.platform.listing import NEXT_CURSOR_HEADER
 from tests.api.platform.test_deployments_run_as import _deploy
 from tests.api.platform.test_deploys import _setup as _deploys_setup
-from tests.api.platform.test_queries import _environment, _person, _submit
+from tests.api.platform.test_queries import _environment, _submit
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import person
 
 _RUNS = "/api/v1/environments/dev/runs"
 _QUERIES = "/api/v1/environments/dev/queries"
@@ -185,7 +186,7 @@ def test_a_cursor_of_another_list_is_refused_on_every_list(client: TestClient) -
 
 def test_queries_filter_by_status_and_submitter_and_page(client: TestClient) -> None:
     _environment(client)
-    bob = _person(client, "bob", "ANALYST")
+    bob = person(client, "bob", "ANALYST")
     mine = _submit(client)
     theirs = _submit(client, bob)
     done = _submit(client)

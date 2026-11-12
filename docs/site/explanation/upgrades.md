@@ -240,6 +240,15 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   ([Disk use](../how-to/instance-health.md#disk-use)). The sweeps fill the
   figures in by themselves: nothing has to be done.
 
+### Query runs record a table preview and the masks they applied
+
+- Migration `0076` adds two columns to `query_runs`: the table a preview was asked for, and the
+  column masks the worker applied when it ran the query. Both start empty. Nothing has to be
+  done: the upgrade runs with the others.
+- Runs from before the upgrade show masks as "not recorded" (`masked_columns` is `null` in the
+  result page), which is different from "no column was masked" (an empty list). Only runs after
+  the upgrade record the masks ([Preview a table](../how-to/preview-a-table.md)).
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header
