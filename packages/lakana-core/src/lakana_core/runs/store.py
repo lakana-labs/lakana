@@ -1304,13 +1304,14 @@ def query_completed_detail(
     One builder for everyone who ends a query run (its worker, the sweep, a cancel), so that
     the event reads the same whoever wrote it. A query that shows the rows of a check reads a
     snapshot that an ordinary query of the table cannot reach (a table that is not published,
-    or a state that was set back), so its event names the check result. The key is left out
-    for every other query, whose event is then exactly what it always was.
+    or a state that was set back), so its event names the check result. A preview of a table
+    (a run bound by `preview_table_id`) is marked as one. Each key is left out for every other
+    query, whose event is then exactly what it always was.
 
     Parameters
     ----------
     run
-        The query run (its `sql_text` and `check_result_id` are read).
+        The query run (its `sql_text`, `check_result_id` and `preview_table_id` are read).
     tables_touched
         The dotted names the query's own text reads; empty when they were never extracted.
     row_count
@@ -1323,8 +1324,8 @@ def query_completed_detail(
     dict
         The detail: `sql_text` (as `LAKANA_AUDIT__QUERY_TEXT` says: the text, its SHA-256 and
         length, or `None`; `lakana_core.audit.content.stored_query_text`), `tables_touched`,
-        `row_count`, `status`, and `check_result_id`
-        (the id as text) only for a run bound to a check result.
+        `row_count`, `status`, `check_result_id` (the id as text) only for a run bound to a
+        check result, and `preview` (`True`) only for a preview.
     """
     detail: dict[str, object] = {
         "sql_text": stored_query_text(run.sql_text),
@@ -1334,6 +1335,8 @@ def query_completed_detail(
     }
     if run.check_result_id is not None:
         detail["check_result_id"] = str(run.check_result_id)
+    if run.preview_table_id is not None:
+        detail["preview"] = True
     return detail
 
 
@@ -1351,8 +1354,8 @@ def record_query_completed(
     session
         Database session; the caller commits.
     run
-        The run (its `principal_id`, `environment_id`, `sql_text` and `check_result_id` are
-        read).
+        The run (its `principal_id`, `environment_id`, `sql_text`, `check_result_id` and
+        `preview_table_id` are read).
     status
         The final status.
     row_count

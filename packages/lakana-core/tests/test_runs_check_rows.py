@@ -881,46 +881,73 @@ def test_a_run_with_a_target_is_no_count_even_without_a_write_mode(session: Sess
 # --- nothing else binds a query run to a check result ---
 
 
-def _constructions(name: str) -> dict[str, list[bool]]:
+@pytest.fixture(scope="module")
+def parsed_sources() -> dict[str, tuple[str, ast.Module]]:
+    """Read and parse every source file of core, server and worker once for the module.
+
+    Returns
+    -------
+    dict
+        Path relative to the packages to the file's text and its tree. Migrations are left
+        out: they add the columns the walks look for.
+    """
+    found: dict[str, tuple[str, ast.Module]] = {}
+    for package in ("lakana-core", "lakana-server", "lakana-worker"):
+        for path in sorted((_SOURCES / package / "src").rglob("*.py")):
+            if "migrations" in path.parts:
+                continue
+            text = path.read_text()
+            found[str(path.relative_to(_SOURCES))] = (text, ast.parse(text))
+    return found
+
+
+def _constructions(
+    sources: dict[str, tuple[str, ast.Module]], name: str, field: str = "check_result_id"
+) -> dict[str, list[bool]]:
     """Find every place in core, server and worker that constructs a class of this name.
 
     Parameters
     ----------
+    sources
+        The parsed sources (`parsed_sources`).
     name
         The class's name.
+    field
+        The keyword looked for.
 
     Returns
     -------
     dict
         Source file (relative to the packages) to, for each construction in it, whether
-        `check_result_id` is among its keywords. A construction with ``**`` keywords fails
-        the test: its fields could not be read.
+        `field` is among its keywords. A construction with ``**`` keywords fails the test:
+        its fields could not be read.
     """
     found: dict[str, list[bool]] = {}
-    for package in ("lakana-core", "lakana-server", "lakana-worker"):
-        for path in sorted((_SOURCES / package / "src").rglob("*.py")):
-            for node in ast.walk(ast.parse(path.read_text())):
-                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
-                    continue
-                if node.func.id != name:
-                    continue
-                assert all(keyword.arg is not None for keyword in node.keywords), path
-                found.setdefault(str(path.relative_to(_SOURCES)), []).append(
-                    any(keyword.arg == "check_result_id" for keyword in node.keywords)
-                )
+    for path, (_, tree) in sources.items():
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            if node.func.id != name:
+                continue
+            assert all(keyword.arg is not None for keyword in node.keywords), path
+            found.setdefault(path, []).append(
+                any(keyword.arg == field for keyword in node.keywords)
+            )
     return found
 
 
-def _mentions(source: str, path: str = "") -> set[str]:
-    """Find the ways a piece of source code names `check_result_id` outside a construction.
+def _mentions(source: str, path: str = "", field: str = "check_result_id") -> set[str]:
+    """Find the ways a piece of source code names a field of a query run outside a construction.
 
     Parameters
     ----------
     source
         Python source.
     path
-        The file's path relative to the packages; the audit key is exempt only in the run
-        store.
+        The file's path relative to the packages; the audit key ``check_result_id`` is exempt
+        only in the run store.
+    field
+        The field looked for.
 
     Returns
     -------
@@ -930,19 +957,41 @@ def _mentions(source: str, path: str = "") -> set[str]:
         included); ``key`` for a dictionary keyed by an attribute of that name
         (``.values({QueryRun.check_result_id: ...})``); ``text`` for a string that contains
         the name and is not a docstring (raw SQL, `setattr`, a request's field alias);
-        the key of the audit detail (``detail["check_result_id"] = ...``) is left out.
+        the key of the audit detail (``detail["check_result_id"] = ...``) is left out, for
+        `check_result_id` only.
     """
-    tree = ast.parse(source)
+    return _mentions_in(ast.parse(source), path, field)
+
+
+def _mentions_in(tree: ast.Module, path: str, field: str) -> set[str]:
+    """Find the ways a parsed module names a field of a query run outside a construction.
+
+    Parameters
+    ----------
+    tree
+        The parsed module.
+    path
+        The file's path relative to the packages.
+    field
+        The field looked for.
+
+    Returns
+    -------
+    set of str
+        What `_mentions` describes.
+    """
     docstrings = {
         id(node.value)
         for node in ast.walk(tree)
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
     }
-    # The one allowed string: the key under which an audit event's detail names the field.
+    # The one allowed string: the key under which an audit event's detail names the check
+    # result.
     audit_keys = {
         id(node.slice)
         for node in ast.walk(tree)
-        if path == _STORE
+        if field == "check_result_id"
+        and path == _STORE
         and isinstance(node, ast.Subscript)
         and isinstance(node.value, ast.Name)
         and node.value.id == "detail"
@@ -954,24 +1003,24 @@ def _mentions(source: str, path: str = "") -> set[str]:
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Attribute)
-            and node.attr == "check_result_id"
+            and node.attr == field
             and isinstance(node.ctx, ast.Store)
         ):
             found.add("store")
         if (
             isinstance(node, ast.Call)
             and not (isinstance(node.func, ast.Name) and node.func.id == "QueryRun")
-            and any(keyword.arg == "check_result_id" for keyword in node.keywords)
+            and any(keyword.arg == field for keyword in node.keywords)
         ):
             found.add("keyword")
         if isinstance(node, ast.Dict) and any(
-            isinstance(key, ast.Attribute) and key.attr == "check_result_id" for key in node.keys
+            isinstance(key, ast.Attribute) and key.attr == field for key in node.keys
         ):
             found.add("key")
         if (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
-            and "check_result_id" in node.value
+            and field in node.value
             and id(node) not in docstrings
             and id(node) not in audit_keys
         ):
@@ -979,35 +1028,50 @@ def _mentions(source: str, path: str = "") -> set[str]:
     return found
 
 
-def _other_mentions() -> dict[str, set[str]]:
-    """Find the files of core, server and worker that name `check_result_id` in a statement.
+def _other_mentions(
+    sources: dict[str, tuple[str, ast.Module]], field: str = "check_result_id"
+) -> dict[str, set[str]]:
+    """Find the files of core, server and worker that name a field of a query run in a statement.
+
+    Parameters
+    ----------
+    sources
+        The parsed sources (`parsed_sources`); migrations are not among them, as one adds the
+        column.
+    field
+        The field looked for.
 
     Returns
     -------
     dict
         File (relative to the packages) to what `_mentions` found in it; files with nothing
-        are left out. Migrations are not read: one adds the column.
+        are left out.
     """
     found: dict[str, set[str]] = {}
-    for package in ("lakana-core", "lakana-server", "lakana-worker"):
-        for path in sorted((_SOURCES / package / "src").rglob("*.py")):
-            if "migrations" in path.parts:
-                continue
-            mentions = _mentions(path.read_text(), str(path.relative_to(_SOURCES)))
-            if mentions:
-                found[str(path.relative_to(_SOURCES))] = mentions
+    for path, (_, tree) in sources.items():
+        mentions = _mentions_in(tree, path, field)
+        if mentions:
+            found[path] = mentions
     return found
 
 
 @pytest.mark.slow
-def test_only_the_rows_of_a_check_bind_a_query_run_to_a_check_result() -> None:
+def test_only_the_rows_of_a_check_bind_a_query_run_to_a_check_result(
+    parsed_sources: dict[str, tuple[str, ast.Module]],
+) -> None:
     """Every construction of a query run is listed, and one of them sets the binding.
 
     A query run that names a check result reads a table as it was, also when the table is
     not published. A new place that constructs a query run fails here until it is listed,
     and one that sets the field must be argued for.
+
+    Parameters
+    ----------
+    parsed_sources
+        The sources of core, server and worker.
     """
-    assert _constructions("QueryRun") == {
+    assert _constructions(parsed_sources, "QueryRun") == {
+        "lakana-core/src/lakana_core/catalog/preview.py": [False],
         "lakana-core/src/lakana_core/catalog/query_service.py": [False, False, False],
         "lakana-core/src/lakana_core/runs/check_rows.py": [True],
         "lakana-worker/src/lakana_worker/checks.py": [False],
@@ -1015,8 +1079,34 @@ def test_only_the_rows_of_a_check_bind_a_query_run_to_a_check_result() -> None:
     }
 
 
+def test_only_submit_preview_sets_preview_table_id(
+    parsed_sources: dict[str, tuple[str, ast.Module]],
+) -> None:
+    """Only the server's own preview binds a query run to a table, and nothing sets it later.
+
+    A run bound by `preview_table_id` is a preview: its SQL is the server's, and the worker
+    compares the object it reads with the id. A new place that constructs a query run fails here
+    until it is listed, and one that sets the field must be argued for.
+
+    Parameters
+    ----------
+    parsed_sources
+        The sources of core, server and worker.
+    """
+    assert _constructions(parsed_sources, "QueryRun", "preview_table_id") == {
+        "lakana-core/src/lakana_core/catalog/preview.py": [True],
+        "lakana-core/src/lakana_core/catalog/query_service.py": [False, False, False],
+        "lakana-core/src/lakana_core/runs/check_rows.py": [False],
+        "lakana-worker/src/lakana_worker/checks.py": [False],
+        "lakana-worker/src/lakana_worker/tasks.py": [False],
+    }
+    assert _other_mentions(parsed_sources, "preview_table_id") == {}
+
+
 @pytest.mark.slow
-def test_nothing_sets_the_binding_on_a_query_run_that_exists() -> None:
+def test_nothing_sets_the_binding_on_a_query_run_that_exists(
+    parsed_sources: dict[str, tuple[str, ast.Module]],
+) -> None:
     """No assignment, update, raw SQL or field of a request names the binding.
 
     One file is listed, and it only reads the field: the worker's query path hands the id of
@@ -1026,8 +1116,13 @@ def test_nothing_sets_the_binding_on_a_query_run_that_exists() -> None:
     one subscript of ``detail`` and nothing else, so any other string in that file is found. The
     audit log's list of field names (`lakana_core.audit.content.SHOWN_FIELDS`) names the key as a
     string too; it sets nothing.
+
+    Parameters
+    ----------
+    parsed_sources
+        The sources of core, server and worker.
     """
-    assert _other_mentions() == {
+    assert _other_mentions(parsed_sources) == {
         "lakana-core/src/lakana_core/audit/content.py": {"text"},
         "lakana-worker/src/lakana_worker/pipeline.py": {"keyword"},
     }
@@ -1087,6 +1182,14 @@ def test_the_audit_key_is_exempt_in_the_run_store_only() -> None:
     assert _mentions(_AUDIT_KEY, _STORE) == set()
     assert _mentions(_AUDIT_KEY, "lakana-worker/src/lakana_worker/pipeline.py") == {"text"}
     assert _mentions(_AUDIT_KEY) == {"text"}
+
+
+def test_the_walk_finds_the_preview_binding_and_exempts_no_key_of_it() -> None:
+    """The field is a parameter: each write of `preview_table_id` is found, even in the store."""
+    field = "preview_table_id"
+    assert _mentions("run.preview_table_id = table.id\n", field=field) == {"store"}
+    assert _mentions("run.check_result_id = result.id\n", field=field) == set()
+    assert _mentions('detail["preview_table_id"] = str(run.id)\n', _STORE, field) == {"text"}
 
 
 def test_an_ordinary_query_cannot_name_a_check_result(

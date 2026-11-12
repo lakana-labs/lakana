@@ -261,6 +261,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "on",
         "others_shown",
         "presented_count",
+        "preview",
         "previous",
         "previous_credential_secret",
         "previous_days",

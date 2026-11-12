@@ -3543,3 +3543,53 @@ def test_0075_on_postgres() -> None:
         columns = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("tables")}
         assert not {"row_count", "last_write_at", "last_read_at", "health_rank"} & columns
         engine.dispose()
+
+
+def test_0076_on_postgres() -> None:
+    """0076 adds a query run's preview binding and masked columns; an older run has neither."""
+    revision_0075 = "f6c9d2a5b318"
+    revision_0076 = "a7d3e9c1b406"
+    added = {"preview_table_id", "masked_columns"}
+    query_id = uuid.uuid4()
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0075)
+        engine = sqlalchemy.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO query_runs (id, environment_id, sql_text, status, "
+                    "cancel_requested, created_at, updated_at) VALUES (:id, :env, 'SELECT 1', "
+                    "'SUCCEEDED', false, :now, :now)"
+                ),
+                {"id": query_id, "env": uuid.uuid4(), "now": datetime.now(UTC)},
+            )
+
+        migrate.upgrade(url, revision_0076)
+        assert _alembic_version(engine) == revision_0076
+        inspector = sqlalchemy.inspect(engine)
+        found = {
+            c["name"]: (type(c["type"]).__name__, c["nullable"])
+            for c in inspector.get_columns("query_runs")
+            if c["name"] in added
+        }
+        assert found == {"preview_table_id": ("UUID", True), "masked_columns": ("JSON", True)}
+        assert "preview_table_id" not in {
+            f["constrained_columns"][0] for f in inspector.get_foreign_keys("query_runs")
+        }
+        with engine.connect() as conn:
+            row = conn.execute(
+                sqlalchemy.text(
+                    "SELECT preview_table_id, masked_columns FROM query_runs WHERE id = :id"
+                ),
+                {"id": query_id},
+            ).one()
+        assert tuple(row) == (None, None)
+
+        migrate.downgrade(url, revision_0075)
+        assert _alembic_version(engine) == revision_0075
+        assert not added & {c["name"] for c in sqlalchemy.inspect(engine).get_columns("query_runs")}
+        with engine.connect() as conn:
+            assert conn.execute(sqlalchemy.text("SELECT count(*) FROM query_runs")).scalar() == 1
+        engine.dispose()

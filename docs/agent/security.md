@@ -3501,7 +3501,9 @@ found through a query run of their own that is bound to the check result
   with `check_result_id` it has one more key, **`check_result_id`** (the id as text): the
   read reached a table that is not published, or a state that was set back, which an ordinary
   query naming the same table cannot. The key is absent, not `null`, for every other run, so
-  their events are unchanged. One builder, `lakana_core.runs.store.query_completed_detail`,
+  their events are unchanged. A preview of a table (a run with `preview_table_id`, set only by
+  `lakana_core.catalog.preview.submit_preview`) has the key **`preview`** (`true`) instead,
+  absent for every other run in the same way. One builder, `lakana_core.runs.store.query_completed_detail`,
   serves the three writers of the event (the worker's `_run_one`, its `_refuse`, and
   `record_query_completed` for the sweep and a cancel of a lost run). The run and the check
   are found from the id in `check_results` while the result exists.
