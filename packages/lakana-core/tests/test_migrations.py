@@ -5919,7 +5919,8 @@ def test_0077_creates_the_source_map_tables(migrated_db: MigratedDb) -> None:
             "path_sha256",
         ]
         assert {i["name"]: i["column_names"] for i in inspector.get_indexes("project_files")} == {
-            "ix_project_files_version_table": ["job_version_id", "table_sha256"]
+            "ix_project_files_version_table": ["job_version_id", "table_sha256"],
+            "ix_project_files_sha256": ["sha256"],
         }
         assert {
             (f["constrained_columns"][0], f["referred_table"], f["options"].get("ondelete"))

@@ -6,20 +6,19 @@ import dataclasses
 import hashlib
 import logging
 import uuid
-from pathlib import Path
+from collections.abc import Callable
+from typing import cast
 
 import pytest
-from core_test_helpers import _prepared_catalog
+import test_projects_deploys
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from test_projects_dag import make_asset
-from test_projects_deploys import _BRONZE, _SILVER, _claimed, _manifest, _python, _repo
+from test_projects_deploys import _deployed, _python, _repo
 
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef
-from lakana_core.identifiers import TableRef
+import lakana_core.projects.source_map as source_map
+from lakana_core.auth import PrincipalRef
 from lakana_core.models import (
-    DeployKind,
-    DeployRun,
     JobVersion,
     ProjectFile,
     ProjectFileText,
@@ -27,9 +26,9 @@ from lakana_core.models import (
 )
 from lakana_core.projects.asset_model import ResolvedReference
 from lakana_core.projects.deploys import DeployService
-from lakana_core.projects.diff import DeployDiff
 from lakana_core.projects.discovery import DiscoveredAsset
 from lakana_core.projects.parse import ParsedAsset
+from lakana_core.projects.python_assets import PYTHON_SOURCE_PREFIX
 from lakana_core.projects.source_map import (
     GATE_VERSION,
     SOURCE_FILE_MAX_BYTES,
@@ -53,6 +52,9 @@ REC_F = ProjectFileRecord(
     gate_raw=False,
 )
 """`ASSET_F`'s record, as the deploy works it out."""
+
+env = test_projects_deploys.env
+"""`dev` with `bronze.events` and an empty `silver` namespace, the deploy tests' own fixture."""
 
 
 def discovered_for(*parsed: ParsedAsset) -> tuple[DiscoveredAsset, ...]:
@@ -99,26 +101,6 @@ def _rows(session: Session, version_id: uuid.UUID) -> list[str]:
     )
 
 
-@pytest.fixture
-def env(session: Session, tmp_path: Path) -> None:
-    """Create `dev` with `bronze.events` and an empty `silver` namespace.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    tmp_path
-        Storage root.
-    """
-    _prepared_catalog(
-        session,
-        tmp_path,
-        AllowAllAuthorization(),
-        namespaces=[_BRONZE, _SILVER],
-        tables=[TableRef("dev", _BRONZE, "events")],
-    )
-
-
 def _record(
     session: Session,
     p: PrincipalRef,
@@ -128,7 +110,7 @@ def _record(
     *assets: ParsedAsset,
     monkeypatch: pytest.MonkeyPatch | None = None,
 ) -> JobVersion:
-    """Submit and record a deploy of `assets` at `sha`, with the source map `files`.
+    """Deploy as `_deployed` does, with the source map `files`.
 
     Parameters
     ----------
@@ -146,44 +128,33 @@ def _record(
         The manifest's assets.
     monkeypatch
         When given, the first lookup of an existing version misses, so the insert meets the
-        version already recorded and takes the `IntegrityError` branch.
+        version already recorded and takes the `IntegrityError` branch; undone before return.
 
     Returns
     -------
     JobVersion
         The recorded version.
     """
-    service = DeployService(session, AllowAllAuthorization())
-    view = service.submit(p, "dev", repository=repo.name, kind=DeployKind.DEPLOY, ref="main")
-    run = _claimed(session, session.get(DeployRun, view.id))
-    run.resolved_sha = sha
-    current = service.current_job_version(run.environment_id, repo.id)
-    if monkeypatch is not None:
-        real = service._existing_job_version
-        seen: list[str] = []
+    real_record = cast("Callable[..., JobVersion]", DeployService.record_deploy)
+    real_existing = cast("Callable[..., JobVersion | None]", DeployService._existing_job_version)
+    seen: list[str] = []
 
-        def blind_first(
-            environment_id: uuid.UUID, repository_id: uuid.UUID, sha: str
-        ) -> JobVersion | None:
-            seen.append(sha)
-            return None if len(seen) == 1 else real(environment_id, repository_id, sha)
+    def with_files(service: DeployService, *args: object, **kwargs: object) -> JobVersion:
+        return real_record(service, *args, **kwargs, files=files)
 
-        monkeypatch.setattr(service, "_existing_job_version", blind_first)
-    try:
-        return service.record_deploy(
-            p,
-            run,
-            manifest=_manifest(*assets),
-            code_uri=f"file:///dev/_artifacts/code/{repo.name}/{sha}.tar.gz",
-            code_sha256="0" * 64,
-            diff=DeployDiff(added=tuple(a.table for a in assets)),
-            expected_job_version_id=current.id if current else None,
-            worker_id="w1",
-            files=files,
-        )
-    finally:
+    def blind_first(service: DeployService, *args: object) -> JobVersion | None:
+        seen.append("lookup")
+        return None if len(seen) == 1 else real_existing(service, *args)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(DeployService, "record_deploy", with_files)
         if monkeypatch is not None:
-            monkeypatch.undo()
+            monkeypatch.setattr(DeployService, "_existing_job_version", blind_first)
+        try:
+            return _deployed(session, p, repo, sha, *assets)
+        finally:
+            if monkeypatch is not None:
+                monkeypatch.undo()
 
 
 def test_the_fixed_values_are_the_notes() -> None:
@@ -395,3 +366,62 @@ def test_the_sweep_stops_when_asked(session: Session) -> None:
     session.add_all([ProjectFileText(sha256=f"{i:064x}", text="x") for i in range(3)])
     session.commit()
     assert sweep_project_file_texts(session, batch=1, should_stop=lambda: True) == 1
+
+
+def test_a_text_referenced_meanwhile_is_kept_and_the_sweep_goes_on(
+    session: Session, env: None, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A delete the foreign key refuses (a race) keeps that text; the other texts still go."""
+    _record(session, principal, _repo(session), "a" * 40, [REC_F], ASSET_F)
+    session.add_all([ProjectFileText(sha256=c * 64, text="orphan") for c in "ef"])
+    session.commit()
+    real = source_map._unreferenced
+    calls: list[int] = []
+
+    def seen_before_the_reference(session: Session, batch: int, refused: set[str]) -> list[str]:
+        calls.append(batch)
+        return [REC_F.sha256, "e" * 64] if len(calls) == 1 else real(session, batch, refused)
+
+    monkeypatch.setattr(source_map, "_unreferenced", seen_before_the_reference)
+    assert sweep_project_file_texts(session, batch=2) == 2
+    assert session.scalars(select(ProjectFileText.sha256)).all() == [REC_F.sha256]
+
+
+PY_TEXT = "def p(df):\n    return df\n"
+"""A Python asset's source."""
+
+ASSET_P = dataclasses.replace(
+    _python("gold.p", {"df": "bronze.events"}),
+    normalized_sql=PYTHON_SOURCE_PREFIX + text_digest(PY_TEXT),
+)
+"""A Python asset whose manifest entry holds the digest of `PY_TEXT`."""
+
+REC_P = ProjectFileRecord(
+    path=ASSET_P.path,
+    table="gold.p",
+    text=PY_TEXT,
+    normalized_sql=ASSET_P.normalized_sql,
+    gate_tables=("bronze.events", "gold.p"),
+    gate_raw=False,
+)
+"""`ASSET_P`'s record."""
+
+
+def test_a_python_file_is_recorded_when_its_text_is_the_manifests(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """The text's digest is the one in the manifest entry, so the file is recorded."""
+    version = _record(session, principal, _repo(session), "a" * 40, [REC_P], ASSET_P)
+    assert _rows(session, version.id) == ["assets/gold/p.py"]
+
+
+def test_a_python_record_whose_text_is_not_the_manifests_is_skipped(
+    session: Session, env: None, principal: PrincipalRef, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A Python record's `normalized_sql` matches, but its text is another: skipped, logged."""
+    other = dataclasses.replace(REC_P, text="def p(df):\n    return None\n")
+    with caplog.at_level(logging.WARNING, logger="lakana_core.projects.source_map"):
+        version = _record(session, principal, _repo(session), "a" * 40, [other], ASSET_P)
+    assert _rows(session, version.id) == []
+    assert session.get(ProjectFileText, other.sha256) is None
+    assert "assets/gold/p.py" in caplog.text

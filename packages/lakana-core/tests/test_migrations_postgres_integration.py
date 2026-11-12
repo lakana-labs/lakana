@@ -22,6 +22,7 @@ backfilled values from the still-present source rows on real Postgres.
 from __future__ import annotations
 
 import json
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -3603,7 +3604,9 @@ def test_0077_on_postgres() -> None:
     revision_0076 = "a7d3e9c1b406"
     revision_0077 = "b9f4e2a7c058"
     version_id = uuid.uuid4()
-    long_path, long_table = "assets/" + "p" * 4096 + ".sql", "gold." + "t" * 4096
+    # random hex does not compress, so a name in a btree key would exceed its size limit
+    long_path = "assets/" + secrets.token_hex(2048) + ".sql"
+    long_table = "gold." + secrets.token_hex(2048)
     insert_file = sqlalchemy.text(
         "INSERT INTO project_files (job_version_id, path_sha256, path, table_sha256, table_name, "
         "sha256, line, bytes, gate_tables, gate_raw, gate_version) VALUES (:v, :ps, :p, :ts, :t, "
@@ -3620,7 +3623,8 @@ def test_0077_on_postgres() -> None:
             "path_sha256",
         ]
         assert {i["name"]: i["column_names"] for i in inspector.get_indexes("project_files")} == {
-            "ix_project_files_version_table": ["job_version_id", "table_sha256"]
+            "ix_project_files_version_table": ["job_version_id", "table_sha256"],
+            "ix_project_files_sha256": ["sha256"],
         }
         assert {
             (f["constrained_columns"][0], f["referred_table"], f["options"].get("ondelete"))

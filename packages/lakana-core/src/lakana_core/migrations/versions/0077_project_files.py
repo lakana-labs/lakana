@@ -28,7 +28,8 @@ def upgrade() -> None:
     - `project_files`, one row per asset file of a version, keyed by the path's digest and
       indexed by the table name's digest, since neither name has a length limit and a btree
       entry has one. A text a file names cannot be deleted (`RESTRICT`); the files go with
-      their version (`CASCADE`).
+      their version (`CASCADE`). `sha256` is indexed, so the foreign key's check on a text
+      delete and the sweep's `NOT EXISTS` never scan the table.
     """
     op.create_table(
         "project_file_texts",
@@ -69,6 +70,7 @@ def upgrade() -> None:
         ["job_version_id", "table_sha256"],
         unique=False,
     )
+    op.create_index("ix_project_files_sha256", "project_files", ["sha256"], unique=False)
 
 
 def downgrade() -> None:
@@ -76,6 +78,7 @@ def downgrade() -> None:
 
     Drops the source map; the next deploy of each commit after upgrading again records it.
     """
+    op.drop_index("ix_project_files_sha256", table_name="project_files")
     op.drop_index("ix_project_files_version_table", table_name="project_files")
     op.drop_table("project_files")
     op.drop_table("project_file_texts")

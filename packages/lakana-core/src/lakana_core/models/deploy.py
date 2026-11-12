@@ -97,7 +97,11 @@ class ProjectFile(Base):
     """
 
     __tablename__ = "project_files"
-    __table_args__ = (Index("ix_project_files_version_table", "job_version_id", "table_sha256"),)
+    __table_args__ = (
+        Index("ix_project_files_version_table", "job_version_id", "table_sha256"),
+        # The foreign key's check on a text delete and the sweep both look a text up here.
+        Index("ix_project_files_sha256", "sha256"),
+    )
 
     job_version_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("job_versions.id", ondelete="CASCADE"), primary_key=True

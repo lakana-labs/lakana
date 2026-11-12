@@ -26,6 +26,7 @@ from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.identifiers import shown
@@ -33,6 +34,7 @@ from lakana_core.models import JobVersion, ProjectFile, ProjectFileText
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference
 from lakana_core.projects.discovery import DiscoveredAsset
 from lakana_core.projects.parse import file_references
+from lakana_core.projects.python_assets import PYTHON_SOURCE_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -230,14 +232,37 @@ def _chunks(rows: list[dict[str, Any]]) -> Iterator[list[dict[str, Any]]]:
         yield rows[start : start + _ROWS_PER_STATEMENT]
 
 
+def _matches(record: ProjectFileRecord, entries: set[tuple[str, str, str]]) -> bool:
+    """Tell whether a record is the code of one of the manifest's entries.
+
+    Parameters
+    ----------
+    record
+        The deploy's record.
+    entries
+        The manifest's `(table, path, normalized_sql)` entries.
+
+    Returns
+    -------
+    bool
+        True when the entry exists and, for a Python asset (whose `normalized_sql` is the
+        digest of its source), the record's text has that digest.
+    """
+    if (record.table, record.path, record.normalized_sql) not in entries:
+        return False
+    python = record.normalized_sql.startswith(PYTHON_SOURCE_PREFIX)
+    return not python or record.normalized_sql == PYTHON_SOURCE_PREFIX + record.sha256
+
+
 def write_source_map(
     session: Session, version: JobVersion, files: Sequence[ProjectFileRecord]
 ) -> int:
     """Write a version's source map, in the deploy's transaction; nothing is committed here.
 
     A record is written only when its table, path and `normalized_sql` equal an entry of the
-    version's manifest, so a reused version never takes a text that differs from the code it
-    runs; any other record is skipped and its path logged. The texts are upserted in digest
+    version's manifest and, for a Python asset, its text is the one that entry's digest names,
+    so a reused version never takes a text that differs from the code it runs; any other record
+    is skipped and its path logged. The texts are upserted in digest
     order, each conflict updating the row to itself, which locks it until the commit. A file row
     that exists is replaced only when its `gate_version` is older than `GATE_VERSION`.
 
@@ -258,7 +283,7 @@ def write_source_map(
     entries = _manifest_entries(version.manifest_json)
     kept: dict[str, ProjectFileRecord] = {}
     for record in files:
-        if (record.table, record.path, record.normalized_sql) in entries:
+        if _matches(record, entries):
             kept[text_digest(record.path)] = record
         else:
             logger.warning(
@@ -311,14 +336,46 @@ def write_source_map(
     return written
 
 
+def _unreferenced(session: Session, batch: int, refused: set[str]) -> list[str]:
+    """Select and lock the next batch of texts no project file references.
+
+    Parameters
+    ----------
+    session
+        The sweep's session.
+    batch
+        The most texts to take.
+    refused
+        Texts whose delete the foreign key refused in this sweep; never taken again.
+
+    Returns
+    -------
+    list of str
+        The digests, in order, each row locked (``FOR UPDATE SKIP LOCKED`` on Postgres).
+    """
+    query = select(ProjectFileText.sha256).where(
+        ~exists().where(ProjectFile.sha256 == ProjectFileText.sha256)
+    )
+    if refused:
+        query = query.where(ProjectFileText.sha256.not_in(refused))
+    return list(
+        session.scalars(
+            query.order_by(ProjectFileText.sha256)
+            .limit(batch)
+            .with_for_update(skip_locked=True, of=ProjectFileText)
+        )
+    )
+
+
 def sweep_project_file_texts(
     session: Session, *, batch: int = 500, should_stop: Callable[[], bool] = lambda: False
 ) -> int:
     """Delete the texts no project file references, in batches, each committed.
 
     Each batch takes its rows with ``FOR UPDATE SKIP LOCKED``, so a text a running deploy has
-    upserted (and so locked) is skipped; the ``RESTRICT`` foreign key refuses any delete that
-    would still leave a file without its text.
+    upserted (and so locked) is skipped. The ``RESTRICT`` foreign key refuses any delete that
+    would still leave a file without its text; each text is deleted in a savepoint of its own,
+    so such a refusal keeps that text and the sweep goes on with the others.
 
     Parameters
     ----------
@@ -335,21 +392,21 @@ def sweep_project_file_texts(
         The number of texts deleted.
     """
     deleted = 0
+    refused: set[str] = set()
     while True:
-        shas = list(
-            session.scalars(
-                select(ProjectFileText.sha256)
-                .where(~exists().where(ProjectFile.sha256 == ProjectFileText.sha256))
-                .order_by(ProjectFileText.sha256)
-                .limit(batch)
-                .with_for_update(skip_locked=True, of=ProjectFileText)
-            )
-        )
+        shas = _unreferenced(session, batch, refused)
         if not shas:
             session.commit()
             return deleted
-        session.execute(delete(ProjectFileText).where(ProjectFileText.sha256.in_(shas)))
+        for sha in shas:
+            try:
+                with session.begin_nested():
+                    session.execute(delete(ProjectFileText).where(ProjectFileText.sha256 == sha))
+            except IntegrityError:
+                # A file came to name the text after the select read it; the text stays.
+                refused.add(sha)
+            else:
+                deleted += 1
         session.commit()
-        deleted += len(shas)
         if should_stop():
             return deleted
