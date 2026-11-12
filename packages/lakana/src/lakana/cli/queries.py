@@ -616,13 +616,22 @@ def show_page(
         if page.duration_ms is not None:
             facts.append(f"{page.duration_ms / 1000:.1f} s")
     else:
-        sys.stdout.write("No rows.\n")
+        if page.row_count == 0:
+            sys.stdout.write("No rows.\n")
         facts = ["Read as you."]
     lines = [" · ".join(facts), _masked_line(page)]
     if page.next_offset is not None:
         lines.append(_rest_hint(page, page.next_offset))
+    if not page.rows and page.row_count > 0:
+        lines.append(
+            f"The {page.row_count} rows did not fit in the page: its columns filled it. "
+            "Select fewer or narrower columns with lakana sql."
+        )
     if page.columns_cut:
-        lines.append(f"{page.columns_cut} more columns not shown; use --output json.")
+        lines.append(
+            f"{page.columns_cut} more columns not shown: the page budget cut them. "
+            "Select fewer or narrower columns with lakana sql."
+        )
     for line in lines:
         if line:
             typer.echo(_output.safe_text(line), err=True)

@@ -67,6 +67,10 @@ lakana --output json table preview silver.orders
 
 The fields of the page are described in [The result page](../reference/query-result-page.md).
 
+In the audit log, the `QUERY_COMPLETED` event of a preview has `detail.preview: true`; the event of
+every other query does not have the field. An administrator can so tell a preview from a query
+that reads the same table.
+
 ## When a preview is refused
 
 - **Your role cannot run queries in the environment.** A viewer can read tables in the catalogue but
@@ -75,8 +79,12 @@ The fields of the page are described in [The result page](../reference/query-res
 - **The name is an artifact.** An artifact holds files, not rows. Download it with
   `lakana artifact download` instead; the message names the command.
 - **The table changed while the preview waited.** The run fails with a message to try again.
-- **The namespace's name or the table's name contains a dot.** A query cannot name such a table
-  yet; the message says which, and the next step is to rename the namespace or the table.
+- **A table's name contains a dot.** A query cannot name such a table yet. Only a raw REST call
+  can reach this refusal, as a 409 that names the table; the SDK and the CLI split a name on its
+  last dot, so there a dotted table name reads as a namespace and a table and you see the
+  ordinary refusal for a table that does not exist or that you may not read. A namespace name with a dot cannot be reached at all: the REST path splits on
+  every dot, so you see that same ordinary refusal. In both cases the next step is to rename the
+  namespace or the table.
 
 A namespace may be nested, as in `gold.finance.sales`: the table is the last part of the name.
 

@@ -7,7 +7,10 @@ import uuid
 import pyarrow as pa
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from lakana_core.models import Principal
 from tests.api.platform.test_queries import result_url, stored_result
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import (
@@ -198,3 +201,32 @@ def test_another_principal_gets_404_for_a_preview_result(previews: TestClient) -
     response = previews.get(result_url(qid, "format=json"), headers=bob)
     assert response.status_code == 404
     assert "email" not in response.text
+
+
+def test_a_full_limiter_does_not_make_another_principals_run_a_503(previews: TestClient) -> None:
+    """The lookup comes before the limiter, so a full limiter is no existence oracle.
+
+    Both caps are full: the process's slots and bob's own. If `try_acquire` ran before
+    `get_query_run`, bob would get 503 for the run that exists and 404 for one that does
+    not, which tells him which ids exist.
+    """
+    qid = stored_result(
+        previews,
+        "dev",
+        pa.table({"i": [1]}),
+        preview_table_id=uuid.uuid4(),
+        sql_text='SELECT * FROM "gold"."orders" LIMIT 100',
+    )
+    bob = person(previews, "bob", "ADMIN")
+    with Session(previews.app.state.engine) as session:
+        bob_id = session.scalars(select(Principal.id).where(Principal.name == "bob")).one()
+    limiter = previews.app.state.json_page_limiter
+    assert limiter.try_acquire(bob_id) is None
+    while limiter.try_acquire(uuid.uuid4()) is None:
+        pass
+    assert limiter.try_acquire(bob_id) is not None
+    assert limiter.try_acquire(uuid.uuid4()) == "all"
+    others = previews.get(result_url(qid, "format=json"), headers=bob)
+    missing = previews.get(result_url(str(uuid.uuid4()), "format=json"), headers=bob)
+    assert (others.status_code, missing.status_code) == (404, 404)
+    assert others.json()["type"] == missing.json()["type"]

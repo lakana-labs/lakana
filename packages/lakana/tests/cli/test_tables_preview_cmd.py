@@ -116,16 +116,37 @@ def test_preview_without_a_mask_prints_no_masked_line(tmp_path: Path) -> None:
         assert "Masked" not in result.stderr
 
 
-def test_preview_says_when_columns_were_left_out(tmp_path: Path) -> None:
+def test_preview_says_when_the_columns_filled_the_page(tmp_path: Path) -> None:
+    """The page the server sends when the header fills it: no rows, `columns_cut` above 0."""
     result = invoke(
-        make_state(tmp_path, _api(_page(columns_cut=7))),
+        make_state(tmp_path, _api(_page(rows=[], row_count=3, columns_cut=7))),
         "table",
         "preview",
         "gold.orders",
         "--env",
         "dev",
     )
-    assert "7 more columns not shown" in result.stderr
+    assert result.exit_code == 0, result.stderr
+    assert "No rows." not in result.stdout
+    assert "--output json" not in result.stderr
+    assert "7 more columns" in result.stderr
+    assert "rows did not fit" in result.stderr
+    assert "fewer or narrower columns" in result.stderr
+
+
+def test_preview_says_when_a_row_lost_columns_inside_the_page(tmp_path: Path) -> None:
+    result = invoke(
+        make_state(tmp_path, _api(_page(columns_cut=2))),
+        "table",
+        "preview",
+        "gold.orders",
+        "--env",
+        "dev",
+    )
+    assert "No rows." not in result.stdout
+    assert "--output json" not in result.stderr
+    assert "2 more columns not shown" in result.stderr
+    assert "fewer or narrower columns" in result.stderr
 
 
 def test_preview_marks_cut_and_binary_cells(tmp_path: Path) -> None:

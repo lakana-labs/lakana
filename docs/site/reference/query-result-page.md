@@ -60,7 +60,7 @@ answers `409` with its own message.
 | `masked_columns` | The columns masked for the reader, each `{"table", "column"}`; `[]` when none; `null` for a run from before this was recorded and for a run without a stored result. |
 | `preview` | `{"table": "gold.orders"}` for a preview, the table as the run's own query names it; `null` for any other query. |
 | `row_cut` | The positions on this page of the rows that have a cut cell. |
-| `columns_cut` | How many further columns were left out because the header filled the page; then the page has no rows. |
+| `columns_cut` | How many columns were left out of the page, in two cases. When the column header filled the page, the columns that did not fit are left out and the page has no rows although `row_count` is above 0. When a row was cut inside the page, the cells of that row that did not fit are left out. Either way the JSON page holds no more of them; select fewer or narrower columns. |
 | `masked_columns_cut` | How many further masked columns were left out because the page was full. |
 
 `row_cut`, `columns_cut` and `masked_columns_cut` are always present, empty or `0` when nothing was
