@@ -302,6 +302,19 @@ def _stored(session: Session) -> Table:
     return session.execute(select(Table).where(Table.name == "sales")).scalar_one()
 
 
+def test_a_created_table_stores_no_rows_zero_bytes_and_the_file_they_describe(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    catalog = _prepared_catalog(
+        session, tmp_path, AllowAllAuthorization(), namespaces=[_REF.namespace]
+    )
+    catalog.create_table(principal, _REF, schema=_SCHEMA)
+
+    row = _stored(session)
+    assert (row.row_count, row.size_bytes, row.last_write_at) == (None, 0, None)
+    assert row.size_metadata_location == row.metadata_location is not None
+
+
 def test_a_commit_stores_the_stats_of_its_snapshot(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:

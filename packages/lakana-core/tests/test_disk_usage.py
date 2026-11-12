@@ -255,14 +255,14 @@ def test_a_table_that_changed_while_it_was_read_keeps_no_figure(
     assert _row(session, "full").size_bytes is None
 
 
-def test_a_snapshot_without_a_size_is_stored_as_zero_bytes(
+def test_a_snapshot_without_a_size_is_counted_as_unmeasured(
     dev: CatalogService, session: Session
 ) -> None:
     with mock.patch.object(health, "snapshot_stats") as stats:
         stats.return_value = health.SnapshotStats(None, None, None, None)
         measure_table_sizes(session, StorageResolver(session))
     found = environment_usage(session, _environment(session))
-    assert found.tables == UsagePart(count=2, bytes=0, unmeasured=0)
+    assert found.tables == UsagePart(count=2, bytes=0, unmeasured=1)
 
 
 def test_the_tables_of_a_deleted_environment_are_not_measured(

@@ -100,9 +100,11 @@ class Table(Base, TimestampMixin):
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True, default=None)
     """The size of a managed table's current files (``total-files-size`` of its snapshot).
 
-    Measured by the worker's housekeeping (`lakana_core.catalog.usage`), never at request time;
-    `None` before the first measurement and when the snapshot's summary does not say. A tombstone
-    keeps it, so a dropped table's size is known for its undo period.
+    Stored by the write that commits the snapshot (``0`` for a table without one), and measured by
+    the worker's housekeeping (`lakana_core.catalog.usage`) for tables that have none; never read
+    from storage at request time. `None` before the first of the two and when the snapshot's
+    summary does not say. A tombstone keeps it, so a dropped table's size is known for its undo
+    period.
     """
     size_metadata_location: Mapped[str | None] = mapped_column(
         String(1024), nullable=True, default=None

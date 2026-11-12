@@ -52,6 +52,7 @@ from lakana_core.catalog.tombstones import (
     PURGE_STARTED_MESSAGE,
 )
 from lakana_core.catalog.translations import edit_translation, write_translations
+from lakana_core.catalog.usage import measure_table_sizes
 from lakana_core.config import DatabaseConfig, StorageConfig
 from lakana_core.db import create_engine
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, PermissionDenied
@@ -602,6 +603,50 @@ def test_a_drop_of_a_table_sharing_a_dropped_location_never_shortens_it(
 
 
 # --- undrop -----------------------------------------------------------------------------------
+
+
+def test_undrop_of_a_tombstone_written_before_the_sort_keys_is_measured_by_the_next_sweep(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """A pre-0075 tombstone has no `row_count`: the restored row must not look measured."""
+    table_id = _orders_table(catalog, principal)
+    ref = _ref("gold.orders")
+    catalog.drop_table(principal, ref)
+    record = _record(session, table_id)
+    assert record.dropped_table is not None
+    stored = {
+        key: value
+        for key, value in record.dropped_table["row"].items()
+        if key not in {"row_count", "last_write_at", "last_read_at", "health_rank"}
+    }
+    assert stored["size_metadata_location"] == stored["metadata_location"]
+    session.execute(
+        update(TableLocation)
+        .where(TableLocation.id == record.id)
+        .values(dropped_table={**record.dropped_table, "row": stored})
+    )
+    session.commit()
+
+    catalog.undrop_table(principal, ref)
+
+    row = _fresh(session, Table, table_id)
+    assert (row.row_count, row.last_write_at, row.size_metadata_location) == (None, None, None)
+    assert measure_table_sizes(session, StorageResolver(session)) == 1
+    row = _fresh(session, Table, table_id)
+    assert row.row_count == 3 and row.last_write_at is not None
+
+
+def test_undrop_of_a_tombstone_with_the_sort_keys_keeps_them_measured(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    table_id = _orders_table(catalog, principal)
+    ref = _ref("gold.orders")
+    catalog.drop_table(principal, ref)
+    catalog.undrop_table(principal, ref)
+
+    row = _fresh(session, Table, table_id)
+    assert row.row_count == 3 and row.size_metadata_location == row.metadata_location
+    assert measure_table_sizes(session, StorageResolver(session)) == 0
 
 
 def test_undrop_restores_the_same_table_and_exactly_the_policies_its_drop_revoked(

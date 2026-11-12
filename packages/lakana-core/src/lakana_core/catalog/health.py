@@ -143,13 +143,14 @@ class StoredStats:
     row_count
         The rows of the table; `None` without a snapshot or when the summary does not say.
     size_bytes
-        The size of its data files; ``0`` without a snapshot or when the summary does not say.
+        The size of its data files; ``0`` without a snapshot, `None` when the summary does not
+        say (a value the summary does not state is null, never guessed).
     last_write_at
         When the snapshot was committed; `None` without a snapshot.
     """
 
     row_count: int | None
-    size_bytes: int
+    size_bytes: int | None
     last_write_at: datetime | None
 
 
@@ -167,12 +168,12 @@ def stored_stats(metadata: TableMetadata) -> StoredStats:
     -------
     StoredStats
         ``(None, 0, None)`` for a table without a snapshot; otherwise the numbers of
-        `snapshot_stats`, a missing size as ``0``.
+        `snapshot_stats`, a size the summary does not state as `None`.
     """
     if metadata.current_snapshot_id is None:
         return StoredStats(None, 0, None)
     found = snapshot_stats(metadata)
-    return StoredStats(found.row_count, found.size_bytes or 0, found.last_write_at)
+    return StoredStats(found.row_count, found.size_bytes, found.last_write_at)
 
 
 @dataclass(frozen=True)
@@ -472,10 +473,13 @@ def record_table_reads(
     no table of the environment counts nothing.
 
     The same call moves `Table.last_read_at` of each table forward (never back), keeping
-    `updated_at`. On Postgres that update takes the table rows in id order after the
-    ``table_reads`` upserts. A concurrent commit holds its table row only for the swap's
-    transaction and takes no lock the completion holds, so the completion waits briefly and
-    cannot deadlock.
+    `updated_at`. Lock order on Postgres, per table in id order: the table row, then its
+    ``table_reads`` row; the completion holds its `query_runs` row before. That is the order of a
+    delete of a table (its row, then the counts that cascade), and of a commit (the table row,
+    then the write's `query_runs` fence, which a completion that reaches this call no longer
+    contends for: it returns before it when another worker holds the run). Taking the counts
+    first would deadlock with a delete of the table. A concurrent commit holds its table row
+    only for the swap's transaction, so the completion waits briefly.
 
     Parameters
     ----------
@@ -507,6 +511,17 @@ def record_table_reads(
         return
     insert = postgresql_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
     for table_id in sorted(table_ids):
+        # A sort key only: `updated_at` is kept, it is retention's clock and retention reads
+        # `table_reads`. The table row comes first, then its counts: the order in which a
+        # delete of the table takes them (its row, then the counts that cascade).
+        session.execute(
+            update(Table)
+            .where(
+                Table.id == table_id, or_(Table.last_read_at.is_(None), Table.last_read_at < now)
+            )
+            .values(last_read_at=now, updated_at=Table.updated_at)
+            .execution_options(synchronize_session=False)
+        )
         statement = insert(TableRead).values(
             id=uuid.uuid4(),
             table_id=table_id,
@@ -524,18 +539,6 @@ def record_table_reads(
                 },
             )
         )
-    # A sort key only: `updated_at` is kept, it is retention's clock and retention reads
-    # `table_reads`. The ids are sorted, like the upserts, so two completions take the rows
-    # in one order.
-    session.execute(
-        update(Table)
-        .where(
-            Table.id.in_(sorted(table_ids)),
-            or_(Table.last_read_at.is_(None), Table.last_read_at < now),
-        )
-        .values(last_read_at=now, updated_at=Table.updated_at)
-        .execution_options(synchronize_session=False)
-    )
 
 
 def sweep_table_reads(session: Session, *, keep_days: int, now: datetime) -> int:

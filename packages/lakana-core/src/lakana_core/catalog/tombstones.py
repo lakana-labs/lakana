@@ -644,6 +644,10 @@ def restore_table(
     )
     owner = stored.get("owner_id")
     setter = stored.get("retention_set_by")
+    # A tombstone written before the sort keys were kept has no `row_count`: its size was
+    # measured, its rows and last write were not, so the row must not look measured and the
+    # next size sweep fills them in.
+    unmeasured = {} if "row_count" in stored else {"size_metadata_location": None}
     row = _row_from_json(
         Table,
         stored,
@@ -651,6 +655,7 @@ def restore_table(
         name=name,
         owner_id=uuid.UUID(owner) if owner in known else None,
         retention_set_by=uuid.UUID(setter) if setter in known else None,
+        **unmeasured,
     )
     session.add(row)
     session.flush()

@@ -408,7 +408,7 @@ Usage: `lakana env usage [OPTIONS] [name]`
 
 Show how much storage environments use, and the size of the workers' caches.
 
-For each environment: its managed tables (the files of their current version), the dropped tables that can still be restored, its artifacts and its code archives. The figures come from the catalog database; the worker measures the tables in its hourly sweep, so a table written since counts as unmeasured until then. Not counted: the files of older table versions that maintenance has not removed yet, external tables, and files nothing names. Needs MANAGE_ENVIRONMENT on each environment; the workers' caches need it on the instance.
+For each environment: its managed tables (the files of their current version), the dropped tables that can still be restored, its artifacts and its code archives. The figures come from the catalog database; every write stores its table's size, and the worker measures the tables that have none in its hourly sweep, so such a table counts as unmeasured until then. Not counted: the files of older table versions that maintenance has not removed yet, external tables, and files nothing names. Needs MANAGE_ENVIRONMENT on each environment; the workers' caches need it on the instance.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
