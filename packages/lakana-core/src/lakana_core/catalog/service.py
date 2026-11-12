@@ -118,6 +118,7 @@ from lakana_core.catalog.health import (
     latest_checks,
     readers,
     snapshot_stats,
+    stored_stats,
 )
 from lakana_core.catalog.health_jobs import (
     judged_by_run,
@@ -2873,6 +2874,7 @@ class CatalogService:
         # learn about them first.
         target = prepared.resolved.confine_to_root(target)
         written = write_metadata(prepared.resolved.file_io, metadata, target)
+        stats = stored_stats(metadata)
         row = Table(
             id=prepared.table_id,
             namespace_id=prepared.namespace_id,
@@ -2881,6 +2883,10 @@ class CatalogService:
             metadata_location=written,
             previous_metadata_location=None,
             owner_id=owner_id,
+            row_count=stats.row_count,
+            size_bytes=stats.size_bytes,
+            size_metadata_location=written,
+            last_write_at=stats.last_write_at,
         )
         self._session.add(row)
         sync_created_table(self._session, prepared.environment_id, row, ref.dotted())
@@ -5209,6 +5215,7 @@ class CatalogService:
             expected_location=expected,
             new_location=written,
             publish=not maintenance and updated.current_snapshot_id is not None,
+            stats=stored_stats(updated),
         )
         self._add_health(health, messages)
         sync_table_columns(self._session, table_id, from_iceberg_schema(updated.schema()))

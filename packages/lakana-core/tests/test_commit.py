@@ -1,14 +1,27 @@
 """Tests for the compare-and-swap metadata pointer commit."""
 
 import uuid
+from dataclasses import astuple
+from datetime import UTC, datetime
+from pathlib import Path
 
+import pyarrow as pa
 import pytest
-from sqlalchemy import select
+from core_test_helpers import _prepared_catalog
+from pyiceberg.schema import Schema
+from pyiceberg.types import LongType, NestedField
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog.commit import commit_metadata_pointer
+from lakana_core.catalog.health import StoredStats, stored_stats
+from lakana_core.catalog.service import CatalogService
+from lakana_core.catalog.usage import measure_table_sizes
 from lakana_core.errors import ConflictError
+from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import Environment, Namespace, Table, TableType
+from lakana_core.storage.resolver import StorageResolver
 
 
 def _table(session: Session, *, metadata_location: str | None) -> Table:
@@ -205,6 +218,118 @@ def test_the_pointer_swap_clears_the_marker_only_when_asked(session: Session) ->
     session.commit()
     session.refresh(tbl)
     assert (tbl.metadata_location, tbl.unpublished_run_id) == ("loc2", None)
+
+
+def test_a_swap_with_stats_stores_them_and_the_file_they_were_read_from(session: Session) -> None:
+    tbl = _table(session, metadata_location="loc0")
+    written = datetime(2026, 11, 12, 8, 0, tzinfo=UTC)
+
+    commit_metadata_pointer(
+        session,
+        tbl.id,
+        expected_location="loc0",
+        new_location="loc1",
+        stats=StoredStats(row_count=7, size_bytes=900, last_write_at=written),
+    )
+    session.commit()
+    session.expire_all()
+    stored = session.get(Table, tbl.id)
+    assert stored is not None
+    assert (stored.row_count, stored.size_bytes, stored.last_write_at) == (7, 900, written)
+    assert stored.size_metadata_location == "loc1"
+
+
+def test_a_swap_without_stats_leaves_the_stored_ones(session: Session) -> None:
+    tbl = _table(session, metadata_location="loc0")
+    tbl.row_count = 5
+    session.commit()
+
+    commit_metadata_pointer(session, tbl.id, expected_location="loc0", new_location="loc1")
+    session.commit()
+    session.expire_all()
+    stored = session.get(Table, tbl.id)
+    assert stored is not None
+    assert (stored.row_count, stored.size_metadata_location) == (5, None)
+
+
+_SCHEMA = Schema(NestedField(1, "id", LongType(), required=True))
+_ROWS = pa.table(
+    {"id": pa.array([1, 2, 3], pa.int64())},
+    schema=pa.schema([pa.field("id", pa.int64(), nullable=False)]),
+)
+_REF = TableRef("dev", NamespacePath.from_parts(["gold"]), "sales")
+
+
+def _appended(session: Session, tmp_path: Path, principal: PrincipalRef) -> CatalogService:
+    """Build a catalog whose `gold.sales` has had three rows appended.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        The storage root.
+    principal
+        The acting principal.
+
+    Returns
+    -------
+    CatalogService
+        The catalog.
+    """
+    catalog = _prepared_catalog(
+        session, tmp_path, AllowAllAuthorization(), namespaces=[_REF.namespace]
+    )
+    catalog.create_table(principal, _REF, schema=_SCHEMA)
+    catalog.append(principal, _REF, _ROWS)
+    return catalog
+
+
+def _stored(session: Session) -> Table:
+    """Read `gold.sales` afresh.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    Table
+        The row.
+    """
+    session.expire_all()
+    return session.execute(select(Table).where(Table.name == "sales")).scalar_one()
+
+
+def test_a_commit_stores_the_stats_of_its_snapshot(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    catalog = _appended(session, tmp_path, principal)
+    stats = stored_stats(catalog.load_table(principal, _REF).metadata)
+
+    row = _stored(session)
+    assert (row.row_count, row.size_bytes, row.last_write_at) == astuple(stats)
+    assert row.row_count == 3
+    assert row.size_metadata_location == row.metadata_location
+
+
+def test_commit_and_sweep_store_the_same_values_for_the_same_metadata(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    _appended(session, tmp_path, principal)
+    row = _stored(session)
+    after_commit = (row.row_count, row.size_bytes, row.last_write_at)
+    session.execute(
+        update(Table).values(
+            row_count=None, size_bytes=None, last_write_at=None, size_metadata_location=None
+        )
+    )
+    session.commit()
+
+    assert measure_table_sizes(session, StorageResolver(session)) == 1
+    row = _stored(session)
+    assert (row.row_count, row.size_bytes, row.last_write_at) == after_commit
 
 
 def test_a_publishing_swap_that_lost_the_race_keeps_the_marker(session: Session) -> None:

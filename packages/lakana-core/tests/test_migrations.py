@@ -5716,3 +5716,97 @@ def test_0074_adds_the_repository_probes_and_the_deploy_key_columns_empty(
     assert probes == set() and not added & secrets
     with sqlite3.connect(db_path) as connection:
         assert connection.execute("SELECT name FROM secrets").fetchall() == [("k",)]
+
+
+_REVISION_0075 = "f6c9d2a5b318"
+_SORT_KEY_COLUMNS = {
+    "row_count",
+    "last_write_at",
+    "last_read_at",
+    "health_rank",
+    "health_item",
+    "health_others",
+}
+
+
+def test_0075_adds_the_sort_keys_and_backfills_the_last_read(
+    tmp_path: Path, migrated_db: MigratedDb
+) -> None:
+    """Revision `0075`: sort keys with neutral values, the last read taken from the read counts.
+
+    Parameters
+    ----------
+    tmp_path
+        Holds the throwaway SQLite file.
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0074)
+    config = Config(str(ALEMBIC_INI))
+    iceberg, view = "00000000000000000000000000000011", "00000000000000000000000000000012"
+    with sqlite3.connect(db_path) as connection:
+        for table_id, name, kind in ((iceberg, "a", "ICEBERG"), (view, "b", "VIEW")):
+            connection.execute(
+                "INSERT INTO tables (id, namespace_id, name, table_type, size_bytes, "
+                "size_metadata_location, created_at, updated_at) VALUES "
+                f"('{table_id}', '00000000000000000000000000000021', '{name}', '{kind}', 123, "
+                "'s3://x/m.json', '2026-11-01 00:00:00', '2026-11-02 00:00:00')"
+            )
+        for read_id, day, at in (
+            ("01", "2026-11-01", "2026-11-01 10:00:00.000000"),
+            ("02", "2026-11-03", "2026-11-03 09:00:00.000000"),
+        ):
+            connection.execute(
+                "INSERT INTO table_reads (id, table_id, principal_id, day, read_count, "
+                f"last_read_at) VALUES ('000000000000000000000000000000{read_id}', '{iceberg}', "
+                f"'00000000000000000000000000000031', '{day}', 1, '{at}')"
+            )
+
+    def rows(sql: str) -> list[tuple]:
+        """Run a query on the file.
+
+        Parameters
+        ----------
+        sql
+            The statement.
+
+        Returns
+        -------
+        list of tuple
+            Its rows.
+        """
+        with sqlite3.connect(db_path) as connection:
+            return connection.execute(sql).fetchall()
+
+    def columns() -> set[str]:
+        """Read the table's columns.
+
+        Returns
+        -------
+        set of str
+            Their names.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            return {c["name"] for c in inspect(engine).get_columns("tables")}
+        finally:
+            engine.dispose()
+
+    updated_before = rows("SELECT updated_at FROM tables ORDER BY name")
+    assert not _SORT_KEY_COLUMNS & columns()
+    command.upgrade(config, _REVISION_0075)
+    assert rows("SELECT last_read_at FROM tables WHERE table_type = 'ICEBERG'") == [
+        ("2026-11-03 09:00:00.000000",)
+    ]
+    assert rows("SELECT last_read_at FROM tables WHERE table_type = 'VIEW'") == [(None,)]
+    assert rows(
+        "SELECT size_bytes, size_metadata_location, row_count FROM tables "
+        "WHERE table_type = 'ICEBERG'"
+    ) == [(123, None, None)]
+    assert rows("SELECT size_metadata_location FROM tables WHERE table_type = 'VIEW'") == [
+        ("s3://x/m.json",)
+    ]
+    assert rows("SELECT health_rank, health_item, health_others FROM tables") == [(16, None, 0)] * 2
+    assert rows("SELECT updated_at FROM tables ORDER BY name") == updated_before
+    command.downgrade(config, _REVISION_0074)
+    assert not _SORT_KEY_COLUMNS & columns()

@@ -15,6 +15,7 @@ from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from lakana_core.catalog.health import StoredStats
 from lakana_core.errors import ConflictError
 from lakana_core.models import Table
 
@@ -26,6 +27,7 @@ def commit_metadata_pointer(
     expected_location: str | None,
     new_location: str,
     publish: bool = False,
+    stats: StoredStats | None = None,
 ) -> None:
     """Atomically move a table's metadata pointer.
 
@@ -42,6 +44,10 @@ def commit_metadata_pointer(
     (`Table.unpublished_run_id`): the commit that gives a table its current snapshot
     and the end of its being unpublished are one statement, so neither can land without the
     other. A swap that loses the race changes nothing, the marker included.
+
+    With `stats` the same `UPDATE` also stores the numbers of the new snapshot that the table
+    list sorts on (rows, size, last write) and the file they were read from, so the size
+    sweep finds the table measured.
 
     This does not commit the transaction. The caller owns the unit of work, so
     that the pointer move and any accompanying row changes land together
@@ -68,6 +74,8 @@ def commit_metadata_pointer(
     publish
         Also set `unpublished_run_id` to `NULL`. Pass it only for a commit that leaves the
         table with a current snapshot.
+    stats
+        The stored numbers of the new metadata; `None` leaves the stored ones as they are.
 
     Raises
     ------
@@ -86,6 +94,13 @@ def commit_metadata_pointer(
     }
     if publish:
         values["unpublished_run_id"] = None
+    if stats is not None:
+        values.update(
+            row_count=stats.row_count,
+            size_bytes=stats.size_bytes,
+            size_metadata_location=new_location,
+            last_write_at=stats.last_write_at,
+        )
     # No .returning() on this statement: that would make the ORM return a
     # ChunkedIteratorResult instead, and this cast would then lie.
     result = cast(

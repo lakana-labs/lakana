@@ -5,11 +5,12 @@ statements over the catalog database, so no environment, however large its bucke
 server walk it. The figures come from three places:
 
 - **managed tables**: `Table.size_bytes`, the ``total-files-size`` of the table's current
-  snapshot. The worker that holds the scheduler role reads it from the table's metadata file in
-  its housekeeping (`measure_table_sizes`, at most `MEASURE_BATCH` tables and
-  `MEASURE_MAX_SECONDS` per sweep) and records which metadata file it read
-  (`Table.size_metadata_location`), so a table that changed since is known to be measured on an
-  earlier version, and measured again by the next sweep;
+  snapshot. A commit stores it with the table's rows and last write
+  (`Table.row_count`, `Table.last_write_at`) and the metadata file it read
+  (`Table.size_metadata_location`). The worker that holds the scheduler role does the same
+  for the tables that have none (`measure_table_sizes`, at most `MEASURE_BATCH` tables and
+  `MEASURE_MAX_SECONDS` per sweep), so a table committed before these columns existed, or
+  changed since by a writer that stores none, is measured again by the next sweep;
 - **dropped tables in their undo period**: the tombstone keeps every column of the table's row
   (`lakana_core.catalog.tombstones`), the measured size included;
 - **artifacts and code archives**: the sizes recorded when they were stored
@@ -31,7 +32,7 @@ from decimal import Decimal
 from sqlalchemy import BigInteger, case, cast, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from lakana_core.catalog.health import snapshot_stats
+from lakana_core.catalog.health import stored_stats
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.db import rowcount
 from lakana_core.identifiers import shown
@@ -243,7 +244,11 @@ def environment_usage(session: Session, environment: Environment) -> Environment
 def _measure_one(
     session: Session, storage: StorageResolver, table_id: uuid.UUID, location: str, env: str
 ) -> bool:
-    """Read one table's size from its metadata file and record it, if the table is unchanged.
+    """Read one table's size, rows and last write from its metadata file and record them.
+
+    Recorded only if the table is unchanged. A commit stores the same values
+    (`lakana_core.catalog.health.stored_stats`), so this fills in the tables that were
+    committed before the columns existed.
 
     Parameters
     ----------
@@ -265,7 +270,7 @@ def _measure_one(
         (the next sweep measures its new version).
     """
     metadata = read_metadata(storage.for_environment(env).file_io, location)
-    size = 0 if metadata.current_snapshot_id is None else snapshot_stats(metadata).size_bytes
+    stats = stored_stats(metadata)
     # `updated_at` is kept: retention counts a table's activity from it, and a measurement is
     # none. Written only while the table still names the file that was read: a commit that came
     # in between is neither overwritten nor described by an older figure. One short transaction
@@ -273,7 +278,13 @@ def _measure_one(
     result = session.execute(
         update(Table)
         .where(Table.id == table_id, Table.metadata_location == location)
-        .values(size_bytes=size, size_metadata_location=location, updated_at=Table.updated_at)
+        .values(
+            row_count=stats.row_count,
+            size_bytes=stats.size_bytes,
+            size_metadata_location=location,
+            last_write_at=stats.last_write_at,
+            updated_at=Table.updated_at,
+        )
         .execution_options(synchronize_session=False)
     )
     session.commit()
