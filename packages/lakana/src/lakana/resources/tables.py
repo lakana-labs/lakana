@@ -2047,6 +2047,41 @@ class Tables:
         )
         return QueryRun(self._transport, id=response.json()["query_id"], environment=environment)
 
+    def preview(self, environment: str, qualified_name: str) -> QueryRun:
+        """Queue a preview of a table's first 100 rows, read as you.
+
+        A worker runs it as a query of yours, so your row filters and column masks apply. Poll
+        the returned handle, then read the rows with `QueryRun.page()`, whose `masked_columns`
+        names the columns that were masked for you.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+
+        Returns
+        -------
+        QueryRun
+            A handle to the preview run.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the table does not exist.
+        lakana.errors.PermissionDenied
+            Without the right to run queries in the environment, or to read the table.
+        lakana.errors.ValidationError
+            If the name is an artifact's, which holds files, not rows.
+        """
+        namespace, name = _split_namespace_table(qualified_name)
+        response = self._transport.request(
+            ROUTES["tables.preview"],
+            path_params={"env": environment, "path": namespace, "name": name},
+        )
+        return QueryRun(self._transport, id=response.json()["query_id"], environment=environment)
+
     def _send_arrow(
         self,
         route: str,

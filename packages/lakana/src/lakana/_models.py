@@ -4695,3 +4695,86 @@ class TableTree:
 
 
 # jscpd:ignore-end
+
+
+# jscpd:ignore-start
+# The fields mirror the REST `ResultPageOut` and its parts; the SDK depends on neither.
+@dataclass(frozen=True)
+class ResultColumn:
+    """One column of a result page.
+
+    Parameters
+    ----------
+    name
+        The column's name.
+    type
+        The column's Arrow type name, cut to 256 characters.
+    type_cut
+        `True` when the type name was cut.
+    """
+
+    name: str
+    type: str
+    type_cut: bool = False
+
+
+@dataclass(frozen=True)
+class MaskedColumn:
+    """A column a mask was applied to for the reader.
+
+    Parameters
+    ----------
+    table
+        The masked table's dotted name.
+    column
+        The column, named as in the read.
+    """
+
+    table: str
+    column: str
+
+
+@dataclass(frozen=True)
+class ResultPage:
+    """One page of a query result as JSON (`QueryRun.page`, `client.tables.preview`).
+
+    Parameters
+    ----------
+    columns
+        The result's columns, in order.
+    rows
+        The rows of the page, each a tuple of cells in column order. 64-bit integers and decimals
+        are strings, binary is ``{"binary": <bytes>}``, and a cut cell is ``{"cut": true}`` or
+        ``{"cut": true, "text": <prefix>}``.
+    row_count
+        The rows the result has, at most 100 for a preview.
+    next_offset
+        The offset of the next page, or `None` at the end.
+    duration_ms
+        How long the query ran, or `None` when unknown.
+    masked_columns
+        The columns masked for you, `()` when none was; `None` when not recorded (a run from
+        before this was recorded).
+    preview_table
+        The previewed table's dotted name for a preview, `None` for any other query.
+    row_cut
+        The positions on this page of the rows that were cut inside.
+    columns_cut
+        How many further columns were left out because the header filled the page.
+    masked_columns_cut
+        How many further masked columns were left out because the page was full.
+    """
+
+    columns: tuple[ResultColumn, ...]
+    rows: tuple[tuple[object, ...], ...]
+    row_count: int
+    next_offset: int | None
+    duration_ms: int | None
+    masked_columns: tuple[MaskedColumn, ...] | None
+    preview_table: str | None
+    row_cut: tuple[int, ...] = ()
+    columns_cut: int = 0
+    masked_columns_cut: int = 0
+
+
+# jscpd:ignore-end

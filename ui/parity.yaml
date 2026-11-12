@@ -172,6 +172,7 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
+"table preview": { class: read, part: 3 }
 "table references": { class: ui, part: 3 }
 "table replace":
   {

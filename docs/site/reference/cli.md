@@ -691,6 +691,20 @@ A snapshot kept under the tag of a failed check is removed with that tag once it
 | `--older-than-hours` | whole number, 1 to 87600 | `72` | Orphaned files younger than this many hours are never deleted (1 to 87600). |
 | `--timeout` | number | none | Seconds to wait before giving up. |
 
+### `lakana table preview`
+
+Usage: `lakana table preview [OPTIONS] {name}`
+
+Show the first 100 rows of table NAME, read as you.
+
+Your row filters and column masks apply: the rows are the ones you may see. On standard error, `Masked for you` names the columns that were masked for you (never the rule), and a line says how many rows were read. To export a result, use `lakana sql`.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--timeout` | number | none | Seconds to wait before giving up. |
+
 ### `lakana table lineage`
 
 Usage: `lakana table lineage [OPTIONS] {name}`

@@ -10,6 +10,7 @@ given.
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from typing import Any, Protocol, TypeVar, cast
@@ -22,12 +23,57 @@ from lakana._routes import Route
 from lakana.errors import (
     InvalidResponse,
     LakanaConnectionError,
+    LakanaError,
     ValidationError,
     raise_for_response,
 )
 
 _RETRY_BACKOFFS_SECONDS: tuple[float, ...] = (0.0, 0.2, 0.4)
 _FORBIDDEN_PATH_PARAM_VALUES = frozenset({"", ".", "..", "/"})
+
+BUSY_ATTEMPTS = 5
+"""Times a request is sent when the server answers 503 with its busy answer (a file upload: any
+503; beginning an upload: its own busy 503; a result page: its `ResultPageLimitError`)."""
+
+BUSY_BACKOFF_SECONDS = 1.0
+"""Seconds waited after a 503 before sending again when the answer has no usable `Retry-After`."""
+
+RETRY_AFTER_CAP_SECONDS = 10.0
+"""Longest wait a `Retry-After` can make before a request is sent again (the server's
+storage-unavailable answer says 5)."""
+
+
+def wait(seconds: float) -> None:
+    """Wait before asking again; the one place the SDK sleeps between attempts.
+
+    Parameters
+    ----------
+    seconds
+        How long.
+    """
+    time.sleep(seconds)
+
+
+def retry_wait(exc: LakanaError) -> float:
+    """Say how long to wait before sending a request again after a 503.
+
+    Parameters
+    ----------
+    exc
+        The 503 the server (or a proxy) answered.
+
+    Returns
+    -------
+    float
+        The answer's `Retry-After` when it is whole seconds (at most `RETRY_AFTER_CAP_SECONDS`),
+        else `BUSY_BACKOFF_SECONDS`: the header is absent, not a number, negative, fractional or
+        an HTTP date.
+    """
+    text = (exc.retry_after or "").strip()
+    if not re.fullmatch(r"[0-9]+", text):
+        return BUSY_BACKOFF_SECONDS
+    seconds = float(int(text)) if len(text) <= 9 else RETRY_AFTER_CAP_SECONDS
+    return min(seconds, RETRY_AFTER_CAP_SECONDS)
 
 
 def _undecodable(url: str, exc: httpx.DecodingError) -> InvalidResponse:

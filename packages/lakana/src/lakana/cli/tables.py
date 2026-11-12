@@ -31,6 +31,7 @@ from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
 from lakana.cli.checks import check_shown, withheld_line
+from lakana.cli.queries import show_page
 from lakana.errors import LakanaError, ValidationError
 
 if TYPE_CHECKING:
@@ -1962,6 +1963,42 @@ def maintain(
             kind="MaintenanceNotApplied",
         )
     _output.done(state, _maintained(environment, name, report), status)
+
+
+@table_app.command("preview")
+def preview(
+    ctx: typer.Context,
+    name: str,
+    env: _ENV = None,
+    timeout: Annotated[
+        float | None, typer.Option("--timeout", help="Seconds to wait before giving up.")
+    ] = None,
+) -> None:
+    """Show the first 100 rows of table NAME, read as you.
+
+    Your row filters and column masks apply: the rows are the ones you may see. On standard
+    error, `Masked for you` names the columns that were masked for you (never the rule), and
+    a line says how many rows were read. To export a result, use `lakana sql`.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The qualified table name.
+    env
+        The environment.
+    timeout
+        Seconds to wait for the run.
+    """
+    state = state_of(ctx)
+    environment = resolve_environment(state, env)
+    show_page(
+        state,
+        environment,
+        lambda: state.client().tables.preview(environment, name),
+        timeout=timeout,
+    )
 
 
 def lineage_tree(lineage: Lineage) -> list[str]:

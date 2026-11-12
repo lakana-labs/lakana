@@ -100,7 +100,7 @@ def _public_sdk_methods() -> set[str]:
     client = lakana.Client(url="http://x", token="lakana_pat_k_s")
     try:
         keys = {"client.sql", "client.whoami"}
-        keys |= {f"query_run.{m}" for m in ("status", "wait", "result", "cancel")}
+        keys |= {f"query_run.{m}" for m in ("status", "wait", "result", "cancel", "page")}
         for attr, resource in vars(client).items():
             if attr.startswith("_"):
                 continue

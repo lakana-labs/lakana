@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import sys
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from typing import Annotated
 import pyarrow as pa
 import typer
 
-from lakana._models import QueryListEntry, QueryStatus, WaitingFor
+from lakana._models import QueryListEntry, QueryStatus, ResultPage, WaitingFor
 from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._paging import more_results
@@ -491,6 +492,103 @@ def show_result(
     with _fetching(run, environment):
         table = run.result()
     _render(state, table, out, fmt, max_rows)
+
+
+def page_cell(value: object) -> str:
+    """Write one cell of a JSON result page as the text a table shows.
+
+    Parameters
+    ----------
+    value
+        The cell as the server wrote it: a scalar, a list, an object, or one of the markers
+        ``{"cut": true, "text": ...}``, ``{"cut": true}`` and ``{"binary": n}``.
+
+    Returns
+    -------
+    str
+        A cut string is its prefix and an ellipsis, a cut value alone an ellipsis, binary
+        ``<n bytes>``, a list or object compact JSON, and `None` nothing.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        if value.get("cut") is True:
+            text = value.get("text")
+            return f"{text}…" if isinstance(text, str) else "…"
+        if set(value) == {"binary"}:
+            return f"<{value['binary']} bytes>"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value)
+
+
+def _masked_line(page: ResultPage) -> str | None:
+    """Name the columns a preview masked for the reader, never the rule.
+
+    Parameters
+    ----------
+    page
+        The page.
+
+    Returns
+    -------
+    str or None
+        `Masked for you: ...`, a column of the previewed table by its name and one behind a view
+        as `table.column`; `None` when no column was masked or it is not known.
+    """
+    names = [
+        m.column if m.table == page.preview_table else f"{m.table}.{m.column}"
+        for m in page.masked_columns or ()
+    ]
+    if page.masked_columns_cut:
+        names.append(f"and {page.masked_columns_cut} more")
+    return f"Masked for you: {', '.join(names)}" if names else None
+
+
+def show_page(
+    state: CliState, environment: str, submit: Callable[[], QueryRun], *, timeout: float | None
+) -> None:
+    """Submit a preview, wait for it, and print its first page, with what was masked on stderr.
+
+    Ctrl-C cancels the run as in `lakana sql`; a failed run's message is the error. In JSON
+    mode the page is printed as it is.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    environment
+        The environment the run belongs to.
+    submit
+        Queues the preview and returns its handle; called inside the guard that turns a Ctrl-C
+        before the server confirmed it into exit 130.
+    timeout
+        Seconds to wait for the run.
+    """
+    with _unsubmitted(environment):
+        run = submit()
+    _wait(run, environment, timeout, state)
+    with _fetching(run, environment):
+        page = run.page()
+    if state.output == "json":
+        _output.print_json(page)
+        return
+    if page.rows:
+        _output.emit_text_table(
+            [c.name for c in page.columns],
+            [[page_cell(cell) for cell in row] for row in page.rows],
+        )
+    else:
+        sys.stdout.write("No rows.\n")
+    facts = [f"First {page.row_count} rows", "read as you"]
+    if page.duration_ms is not None:
+        facts.append(f"{page.duration_ms / 1000:.1f} s")
+    lines = [" · ".join(facts), _masked_line(page)]
+    if page.columns_cut:
+        lines.append(f"{page.columns_cut} more columns not shown; use --output json.")
+    for line in lines:
+        if line:
+            typer.echo(_output.safe_text(line), err=True)
 
 
 def sql(
