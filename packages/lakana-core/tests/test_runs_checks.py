@@ -1926,7 +1926,10 @@ def test_a_generated_reference_check_never_reaches_the_stored_key_of_a_result(
     assert [c.outcome for c in found[table_id]] == ["failed"]
 
 
-@pytest.mark.parametrize("module", ["lakana_core.runs.checks", "lakana_worker.memory"])
+@pytest.mark.parametrize(
+    "module",
+    ["lakana_core.runs.checks", "lakana_worker.memory", "lakana_core.catalog.table_listing"],
+)
 def test_a_module_that_needs_the_check_results_imports_in_a_fresh_interpreter(
     module: str,
 ) -> None:

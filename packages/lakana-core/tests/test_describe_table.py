@@ -11,9 +11,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from core_test_helpers import _prepared_catalog, python_task_run
+from home_test_helpers import person, table_read
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField
-from sqlalchemy import event, select, update
+from sqlalchemy import delete, event, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import (
@@ -28,6 +29,7 @@ from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.model_metadata import write_model_entry
 from lakana_core.catalog.service import CatalogService
+from lakana_core.catalog.table_listing import TableOwner
 from lakana_core.config import StorageConfig
 from lakana_core.errors import PermissionDenied
 from lakana_core.grants.authorization import GrantAuthorization
@@ -894,3 +896,61 @@ def test_measures_and_columns_show_in_the_readers_language_with_their_coverage(s
     assert [(c.language, c.translated, c.total) for c in described.translations] == [("fr", 2, 4)]
     assert (described.label, described.label_language) == (None, None)
     assert described.language == "fr-CH"
+
+
+_T_LAST = datetime(2026, 11, 1, 9, 30, tzinfo=UTC)
+
+
+def test_describe_table_carries_owner_created_last_read_readers_and_health(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    catalog = _catalog_with_orders(session, principal, tmp_path)
+    alice, bob, carl = (person(session, n) for n in ("alice", "bob", "carl"))
+    row = session.scalars(select(Table).where(Table.name == "orders")).one()
+    row.owner_id, row.last_read_at = alice.id, _T_LAST
+    row.health_item, row.health_rank, row.health_others = "late", 8, 0
+    session.commit()
+    now = datetime.now(UTC)
+    table_read(session, bob, row.id, now)
+    table_read(session, carl, row.id, now - timedelta(days=1))
+
+    d = catalog.describe_table(principal, TableRef.from_dotted("dev", "bronze.orders"))
+
+    assert d.owner == TableOwner("alice", "USER")
+    assert d.created_at == row.created_at
+    assert (d.readers_7d, d.last_read_at) == (2, _T_LAST)
+    assert d.health_summary is not None and d.health_summary.text == "Late"
+
+
+def test_a_view_is_described_with_owner_and_not_judged(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    catalog = _catalog_with_orders(session, principal, tmp_path)
+    view_ref = TableRef.from_dotted("dev", "gold.v")
+    catalog.create_or_replace_view(
+        principal,
+        view_ref,
+        sql="SELECT id FROM bronze.orders",
+        references=catalog.resolve_lineage_sources(principal, "dev", ["bronze.orders"]),
+        columns=[ColumnSpec(name="id", type="long", nullable=True)],
+    )
+
+    d = catalog.describe_table(principal, view_ref)
+
+    assert d.health_summary is not None and d.health_summary.item == "not_judged"
+    assert d.owner == TableOwner(principal.name, principal.type.value)
+    assert d.size_bytes is None
+
+
+def test_a_deleted_owner_is_none(session: Session, principal: PrincipalRef, tmp_path: Path) -> None:
+    catalog = _catalog_with_orders(session, principal, tmp_path)
+    gone = person(session, "gone")
+    session.execute(update(Table).where(Table.name == "orders").values(owner_id=gone.id))
+    session.commit()
+    session.execute(delete(Principal).where(Principal.id == gone.id))
+    session.commit()
+
+    assert (
+        catalog.describe_table(principal, TableRef.from_dotted("dev", "bronze.orders")).owner
+        is None
+    )

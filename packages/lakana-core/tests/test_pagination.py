@@ -13,15 +13,21 @@ from lakana_core.errors import ValidationError
 from lakana_core.pagination import (
     _BAD_CURSOR,
     _OTHER_LIST,
+    CursorValue,
     Position,
+    SortedPosition,
     decode_cursor,
     decode_key_cursor,
+    decode_sorted_cursor,
     encode_cursor,
     encode_key_cursor,
+    encode_sorted_cursor,
     parse_choices,
 )
 
 _AT = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
+ID = uuid.UUID("00000000-0000-0000-0000-000000000042")
+_KeyType = type[str] | type[int] | type[datetime]
 
 
 def _raw(payload: bytes) -> str:
@@ -157,3 +163,91 @@ def test_a_key_with_a_lone_surrogate_encodes_and_is_refused_on_the_way_back() ->
     cursor = encode_key_cursor("terms", "a\ud800")
     with pytest.raises(ValidationError):
         decode_key_cursor("terms", cursor)
+
+
+@pytest.mark.parametrize(
+    ("values", "types"),
+    [
+        (("orders", "silver", "dev"), (str, str, str)),
+        ((42,), (int,)),
+        ((None,), (int,)),
+        ((datetime(2026, 11, 12, tzinfo=UTC),), (datetime,)),
+    ],
+)
+def test_a_sorted_cursor_round_trips_typed_values(
+    values: tuple[CursorValue, ...], types: tuple[_KeyType, ...]
+) -> None:
+    c = encode_sorted_cursor("tables", "rows:desc", values, ID)
+    assert decode_sorted_cursor("tables", "rows:desc", c, types) == SortedPosition(values, ID)
+
+
+def test_a_cursor_of_another_sort_is_refused_naming_both() -> None:
+    c = encode_sorted_cursor("tables", "rows:desc", (1,), ID)
+    with pytest.raises(ValidationError, match=r"sorted by `size:desc`.*sorted by `rows:desc`"):
+        decode_sorted_cursor("tables", "size:desc", c, (int,))
+
+
+def test_a_value_of_the_wrong_type_is_refused() -> None:
+    c = encode_sorted_cursor("tables", "rows:desc", ("x",), ID)
+    with pytest.raises(ValidationError, match="cursor is not valid"):
+        decode_sorted_cursor("tables", "rows:desc", c, (int,))
+
+
+def test_a_sorted_cursor_of_another_list_is_refused_naming_both() -> None:
+    c = encode_cursor("runs", _AT, ID)
+    with pytest.raises(ValidationError, match=r"`tables` list: it came from the `runs` list"):
+        decode_sorted_cursor("tables", "rows:desc", c, (int,))
+
+
+def test_a_sorted_cursor_keeps_the_time_in_utc() -> None:
+    local = datetime(2026, 11, 12, 14, tzinfo=timezone(timedelta(hours=2)))
+    c = encode_sorted_cursor("tables", "created:desc", (local,), ID)
+    at = decode_sorted_cursor("tables", "created:desc", c, (datetime,)).values[0]
+    assert at == local
+    assert isinstance(at, datetime) and at.utcoffset() == timedelta(0)
+
+
+_GOOD_ID = '"' + str(ID) + '"'
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"!",
+        b'"a string"',
+        b'{"k": "tables", "s": 1, "v": [], "i": ' + _GOOD_ID.encode() + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": {}, "i": ' + _GOOD_ID.encode() + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": [["i", 1]], "i": 7}',
+        b'{"k": "tables", "s": "rows:desc", "v": [["i", 1]], "i": "not an id"}',
+        b'{"k": "tables", "s": "rows:desc", "v": [], "i": ' + _GOOD_ID.encode() + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": [["i", 1], ["i", 2]], "i": '
+        + _GOOD_ID.encode()
+        + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": [["i"]], "i": ' + _GOOD_ID.encode() + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": ["i"], "i": ' + _GOOD_ID.encode() + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": [["i", true]], "i": ' + _GOOD_ID.encode() + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": [["n", 1]], "i": ' + _GOOD_ID.encode() + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": [["x", 1]], "i": ' + _GOOD_ID.encode() + b"}",
+        b'{"k": "tables", "s": "rows:desc", "v": [["t", 1]], "i": ' + _GOOD_ID.encode() + b"}",
+    ],
+)
+def test_a_sorted_cursor_that_was_not_issued_is_refused(body: bytes) -> None:
+    with pytest.raises(ValidationError, match="Start the listing again"):
+        decode_sorted_cursor("tables", "rows:desc", _raw(body), (int,))
+
+
+@pytest.mark.parametrize(
+    ("value", "type_"),
+    [
+        ('["t", "2026-11-12T00:00:00"]', datetime),
+        ('["t", "not a time"]', datetime),
+        ('["s", "a\\u0000b"]', str),
+        ('["s", "a\\ud800"]', str),
+        ('["s", 1]', str),
+        ('["i", "2026-11-12T00:00:00+00:00"]', int),
+    ],
+)
+def test_a_sorted_cursor_value_that_was_not_issued_is_refused(value: str, type_: _KeyType) -> None:
+    body = '{"k": "tables", "s": "name:asc", "v": [' + value + '], "i": ' + _GOOD_ID + "}"
+    with pytest.raises(ValidationError, match="cursor is not valid"):
+        decode_sorted_cursor("tables", "name:asc", _raw(body.encode()), (type_,))
