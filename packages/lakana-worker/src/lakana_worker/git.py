@@ -1021,11 +1021,13 @@ def fetch_commit(
 
 
 def _neutralise_export_subst(repo: Path) -> None:
-    """Make `git archive` give each file exactly as committed.
+    """Make `git archive` leave every `$Format:…$` placeholder unexpanded.
 
     `$GIT_DIR/info/attributes` takes precedence over the commit's own `.gitattributes`, so
-    `* -export-subst` leaves every `$Format:…$` placeholder unexpanded: one commit always gives
-    the same text, for what runs and for the source map. `export-ignore` stays in force.
+    `* -export-subst` turns the expansion off: one commit always gives the same text, for what
+    runs and for the source map. `export-ignore` stays in force, and so do the attributes that
+    convert a file's text on checkout (`ident`, `eol`, `working-tree-encoding`), which depend
+    only on the commit.
 
     Parameters
     ----------
