@@ -646,7 +646,7 @@ def test_remeasure_runs_the_tests_under_coverage_apart_from_the_run(tmp_path: Pa
     assert "--cov" in command
     assert "-n" not in command
     assert "-o" in command and "junit_family=xunit1" in command
-    assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage.remeasured.0")
+    assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage.remeasured.0-0")
 
 
 def test_remeasure_runs_each_package_in_its_own_process(tmp_path: Path) -> None:
@@ -711,6 +711,76 @@ def test_remeasure_hands_the_warm_up_plugin_its_candidates_and_the_shard_times(
     }
 
 
+def _timed(durations: list[float], calls: list[int]) -> Callable[..., None]:
+    """Stand in for the re-run: each run reports the next of `durations` for every candidate.
+
+    Parameters
+    ----------
+    durations
+        The seconds of the first run, the second run and so on.
+    calls
+        Gets one entry per run.
+
+    Returns
+    -------
+    callable
+        A replacement for `subprocess.run`.
+    """
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
+        seconds = durations[len(calls)]
+        calls.append(1)
+        plan = json.loads(Path(env[WARM_UP_ENV]).read_text())
+        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
+        report.write_text(_junit(*[_case(*i.split("::"), seconds) for i in plan["candidates"]]))
+
+    return run
+
+
+def test_remeasure_answers_the_fastest_of_its_runs(tmp_path: Path) -> None:
+    """A slow runner only adds time, so the fastest run is the test's own cost."""
+    calls: list[int] = []
+    tests = [TestTime("a.py", "t", 5.6, slow=False, skipped=False)]
+    run = _timed([2.6, 1.4, 2.2], calls)
+    assert remeasure(tests, tmp_path, run=run, runs=3) == {"a.py::t": 1.4}
+    assert len(calls) == 3
+
+
+def test_remeasure_stops_once_every_test_was_fast_enough(tmp_path: Path) -> None:
+    """A test below `stop_below` is not run again, so a quiet runner pays for one run."""
+    calls: list[int] = []
+    tests = [TestTime("a.py", "t", 5.6, slow=False, skipped=False)]
+    run = _timed([2.0, 2.0, 2.0], calls)
+    assert remeasure(tests, tmp_path, run=run, runs=3, stop_below=2.5) == {"a.py::t": 2.0}
+    assert len(calls) == 1
+
+
+def test_remeasure_keeps_running_a_test_that_stays_slow(tmp_path: Path) -> None:
+    """A really slow test is measured every time, and the fastest of them is still slow."""
+    calls: list[int] = []
+    tests = [TestTime("a.py", "t", 5.6, slow=False, skipped=False)]
+    run = _timed([3.1, 2.9, 3.4], calls)
+    assert remeasure(tests, tmp_path, run=run, runs=3, stop_below=2.5) == {"a.py::t": 2.9}
+    assert len(calls) == 3
+
+
+def test_main_re_runs_three_times_and_stops_below_the_confirm_line(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The command hands the re-run its run count and the confirm line."""
+    (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 2.5)))
+    seen: dict[str, object] = {}
+
+    def fake(tests: object, workdir: object, **kwargs: object) -> dict[str, float]:
+        seen.update(kwargs)
+        return {"a.py::t": 0.5}
+
+    monkeypatch.setattr("scripts.time_budgets.remeasure", fake)
+    assert main(["slow-tests", "--confirm", "one.xml"]) == 0
+    assert seen["runs"] == 3
+    assert seen["stop_below"] == read_budgets(Path("scripts/time-budgets.toml")).confirm_seconds
+
+
 def test_remeasure_without_a_report_answers_nothing(tmp_path: Path) -> None:
     """A re-run that crashed leaves the first measurement standing."""
     tests = [TestTime("a.py", "t", 2.5, slow=False, skipped=False)]
@@ -723,7 +793,7 @@ def test_main_confirms_before_failing(
     """``--confirm`` runs the candidates again; without it the first time decides."""
     (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 2.5)))
     monkeypatch.setattr(
-        "scripts.time_budgets.remeasure", lambda tests, workdir, warm_from=(): {"a.py::t": 0.5}
+        "scripts.time_budgets.remeasure", lambda tests, workdir, **kwargs: {"a.py::t": 0.5}
     )
     assert main(["slow-tests", "--confirm", "one.xml"]) == 0
     assert "counted as noise" in capsys.readouterr().out
