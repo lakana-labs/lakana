@@ -289,7 +289,8 @@
     "add": "Add a passkey",
     "notNow": "Not now",
     "signOut": "Sign out",
-    "waiting": "Waiting for your passkey…"
+    "waiting": "Waiting for your passkey…",
+    "signingOut": "Signing you out…"
   },
   "notices": {
     "label": "Sign-in notices",
@@ -431,6 +432,11 @@
       "idleOutOfBounds": "The idle timeout is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
       "absoluteOutOfBounds": "The longest session is between {{min}} and {{max}} minutes. Enter a whole number in that range.",
       "shorterThanIdle": "The longest session cannot be shorter than the idle timeout ({{idle}} minutes). Make it longer, or the idle timeout shorter."
+    },
+    "repositories": {
+      "tab": "Repositories",
+      "intro": "Lakana deploys jobs from Git repositories and only ever reads from them.",
+      "connect": "Connect a repository"
     },
     "connect": {
       "title": "Connect a repository",

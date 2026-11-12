@@ -2,6 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { areasFor } from "../shell/areas";
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 import type { FakeRoute } from "../test/server";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -90,8 +91,8 @@ function flow(more: Record<string, FakeRoute> = {}): Record<string, FakeRoute> {
 const ui = {
   url: () => screen.getByRole("textbox", { name: "Repository URL" }),
   name: () => screen.getByRole("textbox", { name: "Name in Lakana" }),
-  fetch: () => screen.getByRole("button", { name: "Fetch the host's keys" }),
-  create: () => screen.getByRole("button", { name: "Create the repository and its keys" }),
+  fetch: () => screen.getByRole("button", { name: /^Fetch the host's keys/ }),
+  create: () => screen.getByRole("button", { name: /^Create the repository and its keys/ }),
 };
 
 /**
@@ -641,6 +642,7 @@ describe("ConnectRepository", () => {
     );
     await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
     await shell.user.click(ui.create());
+    expectPending(ui.create());
     await shell.user.click(ui.create());
     expect(ui.create()).toHaveFocus();
 
@@ -774,6 +776,8 @@ describe("ConnectRepository", () => {
     );
     await user.click(ui.fetch());
     expect(screen.queryByText("Asking a worker to fetch the keys…")).not.toBeInTheDocument();
+    // The sign shows at once, a second before the words.
+    expectPending(ui.fetch());
     // The button keeps focus while the worker runs the check; a second press asks nothing more.
     await user.click(ui.fetch());
     expect(ui.fetch()).toHaveFocus();
@@ -869,6 +873,43 @@ describe("ConnectRepository", () => {
         "https://lakana-labs.github.io/lakana/how-to/deploy-from-gitlab-ci/",
       );
     }
+  });
+
+  it("shows the pending sign on Test access at once and keeps focus there", async () => {
+    const request = held();
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repository-probes": (sent) =>
+          (sent.body as { kind: string }).kind === "access"
+            ? request.route()
+            : { status: 202, body: PROBE },
+      }),
+    );
+    await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await shell.user.click(ui.create());
+    const test = await screen.findByRole("button", { name: "Test access in dev" });
+
+    await shell.user.click(test);
+
+    expectPending(test);
+    expect(test).toHaveFocus();
+    request.release({ status: 202, body: ACCESS_OK });
+    expect(await screen.findByText(ACCESS_OK.message)).toBeInTheDocument();
+  });
+
+  it("asks for the keys once when the button is pressed twice in the same instant", async () => {
+    const shell = await enter(
+      GITHUB_HTTPS,
+      flow({ "POST /api/v1/repository-probes": held().route }),
+    );
+
+    act(() => {
+      ui.fetch().click();
+      ui.fetch().click();
+    });
+
+    expectPending(ui.fetch());
+    expect(posts(shell)).toEqual(["/api/v1/repository-probes"]);
   });
 
   it("names the cause and next step of a failed access test", async () => {

@@ -15,6 +15,7 @@ import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "./Attempt";
+import { PendingButton } from "../shell/PendingButton";
 
 /** Properties of {@link PasskeysPanel}. */
 export interface PasskeysPanelProps {
@@ -62,9 +63,9 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
           {t("passkeys.title")}
         </h2>
         {own && (
-          <Button
+          <PendingButton
             className="button button-primary"
-            isDisabled={attempt.busy}
+            pending={attempt.busy}
             onPress={() => {
               attempt.run(async () => {
                 await addPasskey(name);
@@ -73,7 +74,7 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
             }}
           >
             {t("addPasskey.add")}
-          </Button>
+          </PendingButton>
         )}
       </div>
       <Loaded resource={passkeys}>

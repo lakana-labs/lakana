@@ -14,6 +14,7 @@ import { CopyLine } from "../shell/CopyLine";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { ShownOnce } from "./ShownOnce";
+import { PendingButton } from "../shell/PendingButton";
 
 /** Properties of {@link RecoveryDialog}. */
 export interface RecoveryDialogProps {
@@ -82,9 +83,9 @@ export function RecoveryDialog({ name: known, onClose }: RecoveryDialogProps): J
           )}
           <p className="page-notice">{t("access.recovery.confirmFirst")}</p>
           <div className="step-actions">
-            <Button type="submit" className="button button-primary" isDisabled={attempt.busy}>
+            <PendingButton type="submit" className="button button-primary" pending={attempt.busy}>
               {t("access.recovery.continue")}
-            </Button>
+            </PendingButton>
             <Button className="button" onPress={onClose}>
               {t("dialog.cancel")}
             </Button>

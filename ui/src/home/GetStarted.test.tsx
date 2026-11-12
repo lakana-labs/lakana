@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { DOCS_URL } from "../shell/docs";
 
+import { STATE } from "../test/home";
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 
 const STEPS = [
@@ -99,6 +101,34 @@ describe("GetStarted", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noreferrer");
     expect(link).toHaveTextContent("(opens in a new tab)");
+  });
+
+  it("shows the pending sign on Hide while the choice is saved", async () => {
+    const request = held();
+    const { user } = renderShell("/", {
+      routes: {
+        "GET /api/v1/home/get-started": {
+          status: 200,
+          body: {
+            audience: "admin",
+            local: false,
+            steps: [{ id: "invite_team", done: false }],
+            hidden: false,
+            complete: false,
+          },
+        },
+        "PATCH /api/v1/principals/admin/interface-state": request.route,
+      },
+    });
+    const region = await screen.findByRole("region", { name: "Get started" });
+
+    await user.click(within(region).getByRole("button", { name: "Hide" }));
+
+    expectPending(within(region).getByRole("button", { name: /^Hide/ }));
+    request.release({ status: 200, body: { ...STATE, get_started_hidden: true } });
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Get started" })).not.toBeInTheDocument();
+    });
   });
 
   it("marks a done step with the succeeded glyph and the word Done", async () => {

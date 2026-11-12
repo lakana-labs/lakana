@@ -1,10 +1,11 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { Notices } from "./Notices";
 import { SessionContext } from "./SessionProvider";
 
+import { expectPending, held } from "../test/pending";
 import { fakeServer } from "../test/server";
 import { signedIn } from "../test/session";
 
@@ -81,6 +82,33 @@ describe("Notices", () => {
     expect(server.sent.map((request) => `${request.method} ${request.path}`)).toContain(
       "DELETE /api/v1/sign-in/notices/2",
     );
+  });
+
+  it("shows the pending sign on the Dismiss that was pressed, and only there", async () => {
+    const request = held();
+    fakeServer({
+      "GET /api/v1/sign-in/notices": {
+        status: 200,
+        body: [
+          { id: "1", kind: "passkey_added", subject: "admin", created_at: AT },
+          { id: "2", kind: "recovery_used", subject: "kim", created_at: AT },
+        ],
+      },
+      "DELETE /api/v1/sign-in/notices/1": request.route,
+    });
+    const user = renderNotices();
+    await screen.findByRole("region", { name: "Sign-in notices" });
+
+    await user.click(screen.getAllByRole("button", { name: "Dismiss" })[0] as HTMLElement);
+
+    const buttons = screen.getAllByRole("button", { name: /^Dismiss/ });
+    expectPending(buttons[0] as HTMLElement);
+    expect((buttons[1] as HTMLElement).querySelector(".pending-sign")).toBeNull();
+    expect(buttons[1]).toBeDisabled();
+    request.release({ status: 204 });
+    await waitFor(() => {
+      expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    });
   });
 
   it("says why a notice could not be dismissed", async () => {

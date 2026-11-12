@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { expectPending, held } from "../test/pending";
 import { fakeServer, type FakeRoute } from "../test/server";
 import { PictureDialog } from "./PictureDialog";
 
@@ -198,6 +199,44 @@ describe("PictureDialog", () => {
     expect(screen.getByLabelText("Choose a picture")).toHaveFocus();
   });
 
+  it("shows the pending sign on Try again while the picture is sent again, and nowhere else", async () => {
+    let calls = 0;
+    const second = held();
+    const { user } = open("e1", {
+      [`PUT ${PICTURE}`]: () => {
+        calls += 1;
+        return calls === 1
+          ? { status: 503, body: { detail: "The server is busy. Try again." } }
+          : second.route();
+      },
+    });
+    await user.upload(
+      screen.getByLabelText("Choose a picture"),
+      new File(["jpg"], "kim.jpg", { type: "image/jpeg" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expectPending(screen.getByRole("button", { name: /^Try again/ }));
+    const remove = screen.getByRole("button", { name: "Remove picture" });
+    expect(remove).toBeDisabled();
+    expect(remove.querySelector(".pending-sign")).toBeNull();
+    second.release({ status: 200, body: { etag: "e2" } });
+    expect(await screen.findByText("Your picture is saved.")).toBeInTheDocument();
+  });
+
+  it("shows no sign on Remove picture while a chosen file is sent", async () => {
+    const { user } = open("e1", { [`PUT ${PICTURE}`]: held().route });
+
+    await user.upload(
+      screen.getByLabelText("Choose a picture"),
+      new File(["png"], "kim.png", { type: "image/png" }),
+    );
+
+    const remove = screen.getByRole("button", { name: "Remove picture" });
+    expect(remove).toBeDisabled();
+    expect(remove.querySelector(".pending-sign")).toBeNull();
+  });
+
   it("hands focus to the file field while Remove picture works, before the button is disabled", async () => {
     let answer: (value: { status: number }) => void = () => undefined;
     const { user } = open("e1", {
@@ -212,7 +251,7 @@ describe("PictureDialog", () => {
     await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Working…")).toBeInTheDocument();
-    expect(remove).toBeDisabled();
+    expectPending(remove);
     expect(screen.getByLabelText("Choose a picture")).toHaveFocus();
     answer({ status: 204 });
     expect(await screen.findByText("Your picture is removed.")).toBeInTheDocument();

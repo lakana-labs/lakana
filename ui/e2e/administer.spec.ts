@@ -20,6 +20,11 @@ function challenge(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
 }
 
+// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
+// names it by the ids of the button's parts, which may be gone by then; it is the library's
+// transient node, not the page.
+const LIVE_ANNOUNCER = "[data-live-announcer]";
+
 /**
  * Runs axe over the page with the WCAG 2.2 AA tags.
  *
@@ -27,7 +32,7 @@ function challenge(): string {
  * @returns The violations' ids and targets.
  */
 async function violations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG).analyze();
+  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
   return results.violations.map(
     (violation) =>
       `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`,

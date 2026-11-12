@@ -5,7 +5,7 @@
  */
 import type { TFunction } from "i18next";
 import { type JSX, useState } from "react";
-import { Button, Form, Input, Label, Text, TextField } from "react-aria-components";
+import { Form, Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { changeSignInSettings, getSignInSettings, type SignInSettingsOut } from "../api";
@@ -13,6 +13,7 @@ import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
 import { useAttempt } from "../sign-in/Attempt";
 import { SettingsFrame } from "./SettingsFrame";
+import { PendingButton } from "../shell/PendingButton";
 
 const HOUR = 60;
 const DAY = 24 * HOUR;
@@ -144,9 +145,9 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
       </TextField>
       <p>{t("settings.signIn.appliesLater")}</p>
       <div className="step-actions">
-        <Button type="submit" className="button button-primary" isDisabled={attempt.busy}>
+        <PendingButton type="submit" className="button button-primary" pending={attempt.busy}>
           {t("settings.signIn.save")}
-        </Button>
+        </PendingButton>
       </div>
       <p className="step-status" role="status">
         {saved ? t("settings.signIn.saved") : ""}

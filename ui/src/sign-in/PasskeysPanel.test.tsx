@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 import { fakeWebAuthn } from "../test/webauthn";
 
@@ -43,6 +44,25 @@ describe("PasskeysPanel", () => {
     expect(within(key).getByText(/Never used/)).toBeInTheDocument();
     expect(within(key).getByText(/Disabled: a copy of it was detected/)).toBeInTheDocument();
     expect(within(key).getByText(/Not usable at this address/)).toBeInTheDocument();
+  });
+
+  it("shows the pending sign on Add a passkey while the server is asked", async () => {
+    fakeWebAuthn();
+    const request = held();
+    const { user } = renderShell("/account", {
+      routes: {
+        "GET /api/v1/principals/admin/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/admin/sessions": { status: 200, body: [] },
+        "POST /api/v1/principals/admin/passkeys/options": request.route,
+      },
+    });
+    await screen.findByText(/You have no passkey yet/);
+
+    await user.click(screen.getByRole("button", { name: "Add a passkey" }));
+
+    expectPending(screen.getByRole("button", { name: /^Add a passkey/ }));
+    request.release({ status: 503, body: { type: "Busy", detail: "Busy." } });
+    await screen.findByRole("alert");
   });
 
   it("adds a passkey and lists it", async () => {

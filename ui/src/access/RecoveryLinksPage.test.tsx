@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 
 const OPEN = {
@@ -133,6 +134,50 @@ describe("RecoveryLinksPage", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No principal named 'nobody'.");
+  });
+
+  it("shows the pending sign on Withdraw while the link is withdrawn", async () => {
+    const request = held();
+    const { user } = renderShell("/access/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": { status: 200, body: [OPEN] },
+        "DELETE /api/v1/recovery-links/r-1": request.route,
+      },
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Withdraw the recovery link of kim" }),
+    );
+
+    const button = screen.getByRole("button", { name: /^Withdraw the recovery link of kim/ });
+    expectPending(button);
+    request.release({ status: 204 });
+    await waitFor(() => {
+      expect(button.querySelector(".pending-sign")).toBeNull();
+    });
+  });
+
+  it("shows the pending sign only on the Withdraw that was pressed", async () => {
+    const request = held();
+    const { user } = renderShell("/access/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": {
+          status: 200,
+          body: [OPEN, { ...OPEN, id: "r-3", name: "sam" }],
+        },
+        "DELETE /api/v1/recovery-links/r-1": request.route,
+      },
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Withdraw the recovery link of kim" }),
+    );
+
+    expectPending(screen.getByRole("button", { name: /^Withdraw the recovery link of kim/ }));
+    const other = screen.getByRole("button", { name: "Withdraw the recovery link of sam" });
+    expect(other.querySelector(".pending-sign")).toBeNull();
+    expect(other).toBeDisabled();
+    request.release({ status: 204 });
   });
 
   it("withdraws a link in place", async () => {
