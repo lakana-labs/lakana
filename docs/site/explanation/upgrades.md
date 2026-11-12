@@ -160,6 +160,15 @@ needs only `find` and `perl` 5.22 or later, which Linux and macOS ship; a file n
 control character is printed with `\x..` escapes. A dry run (`lakana deploy --dry-run`)
 shows the same refusal before you upgrade a production deploy.
 
+### $Format placeholders are no longer expanded (breaking)
+
+A deploy now stores and runs each file exactly as committed. An `export-subst` attribute in
+`.gitattributes` no longer expands `$Format:…$` placeholders, so a file that used one to write
+the commit into its own text now deploys the placeholder itself. Read the deployed commit from
+Lakana instead: `lakana deployments` lists it for each repository, and `lakana table definition`
+shows the commit that defines a table. To find such placeholders, run `git grep -n '\$Format:'`
+in the repository. `export-ignore` still leaves a file out of a deploy, as before.
+
 ### Project files are recorded at deploy
 
 Migration `0077` adds two tables, which hold the files of each deployed project version; it runs
