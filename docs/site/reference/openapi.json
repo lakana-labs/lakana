@@ -5785,7 +5785,7 @@
           "catalog"
         ],
         "summary": "List the tables you may read, across environments and namespaces",
-        "description": "Filtered by environment, namespace, model kind and a search text, sorted and paged by a cursor. What you may not read is left out, not refused: each table needs `READ_TABLE` on it, a list writes no `AUTHORIZATION_DENIED`, and no count of hidden tables is given. Every table shows its owner's name and kind, when it was last read and by how many principals in the last 7 UTC days (never who), and its health in one word. A table with no known value for the sort key comes last. A search text matches the same texts as the environment search, only in tables you may read; `capped` says it matched more of them than one search keeps, so narrow it. Answers 404 when `environment` does not exist (to someone who may read environments; anyone else gets an empty page, as for one that exists), and 422 for a `sort`, `order`, `limit`, `q`, `model_kind`, `lang` or `cursor` that is not valid.",
+        "description": "Filtered by environment, namespace, model kind and a search text, sorted and paged by a cursor. What you may not read is left out, not refused: each table needs `READ_TABLE` on it, a list writes no `AUTHORIZATION_DENIED`, and no count of hidden tables is given. Every table shows its owner's name and kind, when it was last read and by how many principals in the last 7 UTC days (never who), and its health in one word. A table with no known value for the sort key comes last. A search text matches the same texts as the environment search, only in tables you may read; `capped` says it stopped early, at 5,000 readable candidates, so narrow it. Answers 404 when `environment` does not exist (to someone who may read environments; anyone else gets an empty page, as for one that exists), and 422 for a `sort`, `order`, `limit`, `q`, `model_kind`, `lang` or `cursor` that is not valid.",
         "operationId": "list_tables_api_v1_tables_get",
         "parameters": [
           {
@@ -32012,7 +32012,7 @@
           "capped"
         ],
         "title": "TableListPageOut",
-        "description": "One page of the catalog list.\n\nParameters\n----------\nitems\n    The tables, in the list's order.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last.\ncapped\n    Whether a search text matched more readable tables than one search keeps."
+        "description": "One page of the catalog list.\n\nParameters\n----------\nitems\n    The tables, in the list's order.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last.\ncapped\n    Whether a search text stopped early, with more readable candidates than one search reads."
       },
       "TableMatchOut": {
         "properties": {

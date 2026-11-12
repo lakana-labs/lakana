@@ -12,8 +12,9 @@ table or column a term links is found by that term's name and synonyms, in the l
 shows them in.
 
 The table list's search text (`CatalogSearch.table_matches`) walks the same ranked union, of the
-table and column arms only, over several environments, and keeps only the tables its caller may
-read; an unreadable candidate is never counted.
+table and column arms only, over several environments, restricted in the SQL to the tables its
+caller may read, and stops after `MAX_SCANNED` candidates too; an unreadable candidate is never
+read or counted.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from sqlalchemy import (
     String,
     Text,
     and_,
+    bindparam,
     case,
     cast,
     exists,
@@ -684,7 +686,9 @@ class CatalogSearch:
         Returns
         -------
         TableMatches
-            At most `MAX_SCANNED` tables, each with its best hit, and whether more matched.
+            The tables found in the first `MAX_SCANNED` readable candidates (a table and each
+            of its matching columns are candidates), each with its best hit, and whether the
+            walk stopped there with more left.
 
         Raises
         ------
@@ -702,9 +706,13 @@ class CatalogSearch:
         if chain:
             selects.append(_table_translations(match, environment_ids, None, chain, main))
             selects.append(_column_translations(match, environment_ids, chain, main))
-        limit = MAX_SCANNED
+        # Every arm joins `tables`: keeping only the readable ids there means an unreadable row
+        # is never sorted, read or counted against `MAX_SCANNED`, so `capped` speaks of readable
+        # tables only. The ids are written into the SQL, which has no limit on bound parameters.
+        only = bindparam("readable", list(readable), expanding=True, literal_execute=True)
+        selects = [arm.where(Table.id.in_(only)) for arm in selects]
         hits: dict[uuid.UUID, SearchHit] = {}
-        capped = False
+        cut: list[bool] = []
 
         def may_see(row: _Candidate) -> bool:
             """Say whether a candidate names a readable table.
@@ -721,16 +729,19 @@ class CatalogSearch:
             """
             return uuid.UUID(row.sort_id) in readable
 
-        with closing(_walk(self._session, selects, may_see, max_scanned=None)) as walk:
+        walk = _walk(
+            self._session,
+            selects,
+            may_see,
+            max_scanned=MAX_SCANNED,
+            on_cut=lambda: cut.append(True),
+        )
+        with closing(walk):
             for row in walk:
                 table_id = uuid.UUID(row.sort_id)
-                if table_id in hits:
-                    continue
-                if len(hits) == limit:
-                    capped = True
-                    break
-                hits[table_id] = _hit(row, needle)
-        return TableMatches(hits, capped)
+                if table_id not in hits:
+                    hits[table_id] = _hit(row, needle)
+        return TableMatches(hits, bool(cut))
 
     def _may_see(
         self,
@@ -777,6 +788,7 @@ def _walk(
     may_see: Callable[[_Candidate], bool],
     *,
     max_scanned: int | None,
+    on_cut: Callable[[], None] | None = None,
 ) -> Generator[_Candidate]:
     """Walk the ranked candidates, best first, and yield the ones the caller may see.
 
@@ -793,6 +805,8 @@ def _walk(
         Whether the caller may read what a row names.
     max_scanned
         Stop after examining this many candidates; `None` walks them all.
+    on_cut
+        Called once when the walk stops at `max_scanned` with candidates left.
 
     Yields
     ------
@@ -825,6 +839,8 @@ def _walk(
     try:
         for row in result:
             if max_scanned is not None and scanned >= max_scanned:
+                if on_cut is not None:
+                    on_cut()
                 return
             scanned += 1
             if row.kind_order in (0, 1, 4):

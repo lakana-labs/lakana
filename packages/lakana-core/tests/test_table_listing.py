@@ -684,6 +684,64 @@ def test_capped_counts_only_readable_matches(
     assert (_names(page), page.capped) == (["dev:silver.orders"], False)
 
 
+def _wide_world(session: Session) -> tuple[PrincipalRef, PrincipalRef]:
+    """Build `dev.silver` with `wide`, five columns starting with ``c``, and `zc`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    tuple of PrincipalRef
+        An administrator, and a reader of `zc` alone.
+    """
+    admin, reader = person(session, "admin"), person(session, "reader")
+    grants = GrantService(session, AllowAllAuthorization())
+    grants.grant(admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    silver = _namespace(session, environment(session, "dev"), "silver")
+    wide = _table(session, silver, "wide")
+    _table(session, silver, "zc")
+    for m in range(5):
+        session.add(
+            TableColumn(id=uuid.uuid4(), table_id=wide.id, name=f"c{m}", type="int", position=m)
+        )
+    session.commit()
+    grants.grant(
+        admin,
+        principal="reader",
+        role=Role.VIEWER,
+        kind=SecurableKind.TABLE,
+        environment="dev",
+        namespace="silver",
+        table="zc",
+    )
+    return admin, reader
+
+
+def test_a_search_stops_after_max_scanned_candidates_and_says_so(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # two tables, but six candidates: `wide`'s five columns (prefix) before `zc`'s name
+    # (substring); the walk stops after three, so `zc` is never reached
+    admin, _ = _wide_world(session)
+    monkeypatch.setattr(search, "MAX_SCANNED", 3)
+    page = TableListing(session, GrantAuthorization(session)).list(admin, q="c")
+    assert (_names(page), page.capped) == (["dev:silver.wide"], True)
+
+
+def test_unreadable_candidates_never_use_up_the_scan(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `wide`'s five matching columns come before `zc` in the ranked union; the reader may
+    # not read `wide`, so they must neither fill the scan nor set `capped`
+    _, reader = _wide_world(session)
+    monkeypatch.setattr(search, "MAX_SCANNED", 1)
+    page = TableListing(session, GrantAuthorization(session)).list(reader, q="c")
+    assert (_names(page), page.capped) == (["dev:silver.zc"], False)
+
+
 def test_a_missing_environment_is_404_only_for_a_reader_of_environments(
     world: ListingWorld,
 ) -> None:

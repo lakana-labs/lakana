@@ -2860,7 +2860,9 @@ def _listed_item(**changes: object) -> dict[str, object]:
     return {**item, **changes}
 
 
-def _catalog_api(*items: dict[str, object], next_cursor: str | None = None) -> FakeApi:
+def _catalog_api(
+    *items: dict[str, object], next_cursor: str | None = None, capped: bool = False
+) -> FakeApi:
     """Build a fake API that answers `GET /api/v1/tables` with a page.
 
     Parameters
@@ -2869,6 +2871,8 @@ def _catalog_api(*items: dict[str, object], next_cursor: str | None = None) -> F
         The page's items.
     next_cursor
         The page's cursor.
+    capped
+        Whether the search stopped early.
 
     Returns
     -------
@@ -2877,9 +2881,75 @@ def _catalog_api(*items: dict[str, object], next_cursor: str | None = None) -> F
     """
     api = FakeApi()
     api.on(
-        "GET", "/api/v1/tables", json={"items": items, "next_cursor": next_cursor, "capped": False}
+        "GET", "/api/v1/tables", json={"items": items, "next_cursor": next_cursor, "capped": capped}
     )
     return api
+
+
+@pytest.mark.parametrize("output", [[], ["--output", "json"]])
+def test_a_capped_search_says_so_on_stderr(tmp_path: Path, output: list[str]) -> None:
+    api = _catalog_api(_listed_item(), capped=True)
+    result = invoke(
+        make_state(tmp_path, api), *output, "table", "list", "--env", "dev", "--search", "o"
+    )
+    assert result.exit_code == 0, result.output
+    plain = _plain(result.stderr)
+    assert "stopped early" in plain and "--under" in plain and "longer --search" in plain
+    assert "stopped early" not in result.stdout
+
+
+def test_an_uncapped_search_prints_no_notice(tmp_path: Path) -> None:
+    api = _catalog_api(_listed_item())
+    result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev", "--search", "o")
+    assert result.exit_code == 0, result.output
+    assert "stopped early" not in _plain(result.stderr)
+
+
+def test_model_kind_and_lang_are_passed_across_namespaces(tmp_path: Path) -> None:
+    api = _catalog_api(_listed_item(match=None))
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "list",
+        "--env",
+        "dev",
+        "--model-kind",
+        "fact",
+        "--lang",
+        "de",
+    )
+    assert result.exit_code == 0, result.output
+    assert dict(api.requests[-1].url.params) == {
+        "environment": "dev",
+        "model_kind": "fact",
+        "sort": "name",
+        "lang": "de",
+    }
+
+
+def test_a_refused_kind_across_namespaces_names_the_option(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/tables",
+        status=422,
+        json={"detail": "model_kind must be one of fact, dimension, wide, staging; got 'cube'"},
+    )
+    result = invoke(
+        make_state(tmp_path, api), "table", "list", "--model-kind", "cube", "--env", "dev"
+    )
+    assert result.exit_code == 8
+    assert "--model-kind must be one of fact" in _plain(result.stderr)
+
+
+def test_another_refusal_across_namespaces_is_shown_unchanged(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", "/api/v1/tables", status=422, json={"detail": "The cursor is not valid."})
+    result = invoke(
+        make_state(tmp_path, api), "table", "list", "--model-kind", "fact", "--env", "dev"
+    )
+    assert result.exit_code == 8
+    assert "The cursor is not valid." in _plain(result.stderr)
 
 
 def test_table_list_without_namespace_lists_across_namespaces_with_health(tmp_path: Path) -> None:
@@ -3002,8 +3072,6 @@ def test_table_list_without_tables_says_so(tmp_path: Path) -> None:
         (["silver", "--limit", "5"], "--limit"),
         (["silver", "--dropped", "--limit", "5"], "--limit"),
         (["silver", "--cursor", "c"], "--under NAMESPACE"),
-        (["--model-kind", "fact"], "give NAMESPACE"),
-        (["--lang", "de"], "give NAMESPACE"),
         (["--dropped"], "give NAMESPACE"),
         (["--all-environments", "--env", "dev"], "cannot be combined"),
     ],

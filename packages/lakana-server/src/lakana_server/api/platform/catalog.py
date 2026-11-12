@@ -129,7 +129,7 @@ def list_tables(
     table shows its owner's name and kind, when it was last read and by how many principals in
     the last 7 UTC days (never who), and its health in one word. A table with no known value for
     the sort key comes last. A search text matches the same texts as the environment search,
-    only in tables you may read; `capped` says it matched more of them than one search keeps, so
+    only in tables you may read; `capped` says it stopped early, at 5,000 readable candidates, so
     narrow it. Answers 404 when `environment` does not exist (to someone who may read
     environments; anyone else gets an empty page, as for one that exists), and 422 for a `sort`,
     `order`, `limit`, `q`, `model_kind`, `lang` or `cursor` that is not valid.

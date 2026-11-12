@@ -158,7 +158,9 @@ shows `Check failed (+2)`). `state` is `failing` (red), `warning` (amber), `heal
 A signal that fired with the effect `block` gives its `Blocked:` word, one with `warn` the plain
 word. A table is `Healthy` only with evidence: a check that passed or a signal that is within its
 band. A table with neither, and every view, external table and artifact, is `Not judged`. Sorting
-the list by `health` puts the table with the worst word first.
+the [table list](table-list.md#the-sorts) by `health` puts the table with the worst stored word
+first. The stored word leaves out the reference checks below, so a table whose word you see is
+worse because of one can sit among better words; the word shown is always yours.
 
 A check that a model table generates for a reference to another table is counted only for a reader
 who may read that other table; to anyone else it does not exist.

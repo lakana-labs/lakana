@@ -265,7 +265,7 @@ class TableListPage:
     next_cursor
         The cursor of the next page; `None` on the last.
     capped
-        Whether a search text matched more readable tables than one search keeps.
+        Whether a search text stopped early, with more readable candidates than one search reads.
     """
 
     items: list[TableListItem]

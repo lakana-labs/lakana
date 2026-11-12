@@ -346,8 +346,9 @@ def list_tables(
 
     Without NAMESPACE: one page of the tables you may read in the environment (or in every
     environment with --all-environments), each with its owner, health in one word, rows, size,
-    and when it was last written and read. Narrow it with --search and --under, order it with
-    --sort and --order, and page on with --cursor.
+    and when it was last written and read. Narrow it with --search, --under and --model-kind,
+    order it with --sort and --order, and page on with --cursor; --lang is the language in which
+    --search matches translated texts. A line on stderr says when a search stopped early.
 
     Parameters
     ----------
@@ -374,7 +375,7 @@ def list_tables(
     cursor
         The cursor of the previous page (across namespaces).
     lang
-        The language of the texts.
+        The language of the texts; across namespaces, the language a search matches in.
     env
         The environment.
 
@@ -386,8 +387,8 @@ def list_tables(
     """
     state = state_of(ctx)
     if namespace is None:
-        if model_kind is not None or lang is not None or dropped:
-            raise CliError("--model-kind, --lang and --dropped list one namespace: give NAMESPACE.")
+        if dropped:
+            raise CliError("--dropped lists one namespace: give NAMESPACE.")
         if all_environments and env:
             raise CliError(
                 "--env and --all-environments cannot be combined: leave out --env to list every "
@@ -398,10 +399,12 @@ def list_tables(
             None if all_environments else resolve_environment(state, env),
             search=search,
             under=under,
+            model_kind=model_kind,
             sort=sort or "name",
             order=order,
             limit=limit,
             cursor=cursor,
+            lang=lang,
             env=env,
         )
         return
@@ -506,10 +509,12 @@ def _list_across(
     *,
     search: str | None,
     under: str | None,
+    model_kind: str | None,
     sort: str,
     order: str | None,
     limit: int | None,
     cursor: str | None,
+    lang: str | None,
     env: str | None,
 ) -> None:
     """Print one page of the tables across namespaces, and how to get the next.
@@ -524,6 +529,8 @@ def _list_across(
         The search text, if any.
     under
         The namespace to stay under, if any.
+    model_kind
+        The kind to keep, if any.
     sort
         The sort key.
     order
@@ -532,18 +539,31 @@ def _list_across(
         Rows per page, if given.
     cursor
         The previous page's cursor, if any.
+    lang
+        The language to match translated texts in, if given.
     env
         The `--env` the reader typed, repeated in the next-page line.
+
+    Raises
+    ------
+    ValidationError
+        A refusal of the server other than of the kind, unchanged.
     """
-    page = state.client().catalog.list(
-        environment=environment,
-        namespace=under,
-        q=search,
-        sort=sort,
-        order=order,
-        limit=limit,
-        cursor=cursor,
-    )
+    try:
+        page = state.client().catalog.list(
+            environment=environment,
+            namespace=under,
+            q=search,
+            model_kind=model_kind,
+            sort=sort,
+            order=order,
+            limit=limit,
+            cursor=cursor,
+            lang=lang,
+        )
+    except ValidationError as exc:
+        _refuse_kind(exc, model_kind)
+        raise
     columns = [
         "name", "namespace", "environment", "kind", "owner", "health", "rows", "size",
         "last_write", "last_read",
@@ -566,12 +586,23 @@ def _list_across(
             "--all-environments": environment is None,
             "--search": search,
             "--under": under,
+            "--model-kind": model_kind,
             "--sort": sort if sort != "name" else None,
             "--order": order,
             "--limit": limit,
+            "--lang": lang,
         },
         page.next_cursor,
     )
+    if page.capped:
+        typer.echo(_CAPPED, err=True)
+
+
+_CAPPED = (
+    "The search stopped early: more tables matched than one search reads, so some are not "
+    "listed. Narrow it with --under NAMESPACE or a longer --search text."
+)
+"""The line a search that stopped early prints, on stderr."""
 
 
 _MODEL_KIND_PARAMETER = "model_kind must be one of "
@@ -612,8 +643,27 @@ def _listed(
     try:
         return state.client().tables.list(environment, namespace, model_kind=model_kind, lang=lang)
     except ValidationError as exc:
-        if model_kind is None or not str(exc).startswith(_MODEL_KIND_PARAMETER):
-            raise
+        _refuse_kind(exc, model_kind)
+        raise
+
+
+def _refuse_kind(exc: ValidationError, model_kind: str | None) -> None:
+    """Restate the server's refusal of a kind with the option the reader typed.
+
+    Parameters
+    ----------
+    exc
+        The server's refusal.
+    model_kind
+        The kind sent, if any.
+
+    Raises
+    ------
+    CliError
+        Exit 8, when `exc` refuses the kind: its text, with ``--model-kind`` in place of the
+        query parameter it names. Any other refusal returns, for the caller to raise.
+    """
+    if model_kind is not None and str(exc).startswith(_MODEL_KIND_PARAMETER):
         raise CliError(
             "--model-kind" + str(exc).removeprefix("model_kind"), 8, kind=type(exc).__name__
         ) from exc

@@ -62,15 +62,19 @@ instance that has just been upgraded, the worker fills them in within its next s
 |---|---|---|
 | `name` | name, then namespace, then environment | `asc` |
 | `owner` | the owner's name | `asc` |
-| `health` | the health word, the worst first | `asc` |
+| `health` | the stored health word, the worst first (see below) | `asc` |
 | `rows` | `row_count` | `desc` |
 | `size` | `size_bytes` | `desc` |
 | `last_write` | `last_write_at` | `desc` |
 | `last_read` | `last_read_at` | `desc` |
 | `created` | `created_at` | `desc` |
 
-A table with no value for the key comes last, in either order. Ties are broken in a
-fixed order, so a page never repeats or skips a table.
+A table with no value for the key comes last, in either order. Ties are broken in a fixed order.
+
+The `health` sort uses the word stored with each table, which leaves out the checks a model
+table generates for its references to other tables. The word shown in `health_summary` is always
+yours: it adds the failing reference checks you may see. So a table whose shown word is worse
+because of such a check can sit among tables with a better word.
 
 ## Paging
 
@@ -79,8 +83,15 @@ as `cursor` with the same filters and sort to get the next page. It is `null` on
 cursor that is not valid for the request is a `422`: start again without
 it.
 
-`capped` is `true` when the search text matched more of the tables you may read than one search
-keeps (5,000). Narrow the text, or add `namespace` or `environment`.
+While the list does not change, the pages neither repeat nor skip a table. A table whose sort key
+changes while you page can move: sorted by `last_read`, a table read in the meantime moves to the
+front, and you miss it on the later pages; sorted by `rows`, `size` or `health`, a write or a
+check can move a table back onto a page you will read again. To see the list as it is now, start
+again without `cursor`.
+
+`capped` is `true` when the search text stopped early: it reads at most 5,000 candidates (a
+table, and each of its columns that matches, is one candidate), counting only tables you may
+read, and more were left. Narrow the text, or add `namespace` or `environment`.
 
 ## The tree
 
@@ -184,15 +195,20 @@ lakana table list --search order --under silver
 | `--search TEXT` | The `q` parameter. A `match` column says what matched. |
 | `--under NAMESPACE` | The `namespace` parameter: this namespace and the ones beneath it. |
 | `--all-environments` | Every environment you may read; cannot be combined with `--env`. |
+| `--model-kind KIND` | The `model_kind` parameter. |
 | `--sort KEY`, `--order asc\|desc` | The `sort` and `order` parameters. |
 | `--limit N` | Tables per page, 1 to 200; 50 by default. |
 | `--cursor TEXT` | The cursor of the previous page. The command prints the full command for the next page. |
+| `--lang LANG` | The `lang` parameter: the language in which `--search` matches translated texts. |
 
 The columns are `name`, `namespace`, `environment`, `kind`, `owner`, `health` (the word, and
 `(+N)` for N other findings), `rows`, `size`, `last_write` and `last_read` (UTC), and `match` with
 `--search`. A value that is not known is shown as nothing. On a narrow terminal the least useful
 columns are left out, and a line says how to see them; `--output json` has every field of the
-table above.
+table above. When the search stopped early (`capped`), a line on standard error says so and how to
+narrow it, with `--under` or a longer `--search` text.
 
-With a namespace, `lakana table list NAMESPACE` keeps its own columns, `--model-kind`, `--lang`
-and `--dropped`; the options of the two modes do not mix, and the command says which to leave out.
+With a namespace, `lakana table list NAMESPACE` keeps its own columns and `--dropped`, and takes
+`--model-kind` and `--lang` too; `--search`, `--under`, `--all-environments`, `--sort`, `--order`,
+`--limit` and `--cursor` belong to the list across namespaces, and the command refuses them with
+a namespace and says which to leave out.
