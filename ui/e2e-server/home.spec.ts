@@ -25,6 +25,11 @@ async function freshPage(browser: Browser): Promise<Page> {
   return context.newPage();
 }
 
+// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
+// names it by the ids of the button's parts, which may be gone by then; it is the library's
+// transient node, not the page.
+const LIVE_ANNOUNCER = "[data-live-announcer]";
+
 /**
  * Runs axe over the page with the WCAG 2.2 AA tags.
  *
@@ -32,7 +37,7 @@ async function freshPage(browser: Browser): Promise<Page> {
  * @returns The violations, each with the elements it found.
  */
 async function violations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG).analyze();
+  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
   return results.violations.map(
     (violation) =>
       `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`,
