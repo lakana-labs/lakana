@@ -19,6 +19,8 @@ node_modules/
 .idea/
 .vscode/
 .superpowers/
+# Agent settings and skills stay on the machine.
+.claude/
 docs/superpowers/
 .worktrees/
 site-build/
