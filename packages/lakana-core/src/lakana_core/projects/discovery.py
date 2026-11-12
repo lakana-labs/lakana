@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import stat
 import unicodedata
 from dataclasses import dataclass
@@ -44,6 +45,8 @@ _INIT_MESSAGE = (
     "every .py file under assets/ is an asset; put helper code outside assets/ "
     "(the repository root and src/ are importable)"
 )
+REFUSED_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+"""Control characters an asset file may not hold; tab and line feed pass."""
 _LINK_MESSAGE = "symlinks are not allowed in a repository with Python assets"
 
 
@@ -215,6 +218,46 @@ def _decode(data: bytes, relative: str, issues: list[ProjectIssue]) -> str | Non
     except UnicodeDecodeError:
         issues.append(ProjectIssue(relative, None, f"{relative} is not valid UTF-8"))
         return None
+
+
+def control_character_message(code: int, line: int) -> str:
+    """Word the refusal of one control character.
+
+    Parameters
+    ----------
+    code
+        The character's code point.
+    line
+        The 1-based line it is on.
+
+    Returns
+    -------
+    str
+        The message, naming the character and the line.
+    """
+    return f"control character U+{code:04X} on line {line}; remove it"
+
+
+def control_character_issue(relative: str, text: str) -> ProjectIssue | None:
+    """Find the first control character in a normalised file.
+
+    Parameters
+    ----------
+    relative
+        The file's repository-relative path.
+    text
+        The file's text after `normalize_source`, so a CRLF is already an LF.
+
+    Returns
+    -------
+    ProjectIssue or None
+        An issue for the first refused character, or `None` when there is none.
+    """
+    match = REFUSED_CONTROL.search(text)
+    if match is None:
+        return None
+    line = text.count("\n", 0, match.start()) + 1
+    return ProjectIssue(relative, line, control_character_message(ord(match.group()), line))
 
 
 def _fold(table: str) -> str:
@@ -509,6 +552,9 @@ def discover(root: Path, *, limits: DeployLimits | None = None) -> Checkout:
                 table = _table_name(parts, relative, issues)
                 data = _read(path, relative, limits.sql_file_bytes, issues)
                 text = _decode(data, relative, issues) if data is not None else None
+                if text is not None and (refused := control_character_issue(relative, text)):
+                    issues.append(refused)
+                    continue
                 if table is None or text is None:
                     continue
                 earlier = produced.get(_fold(table))

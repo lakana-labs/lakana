@@ -135,6 +135,21 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### Control characters in asset files are refused (breaking)
+
+A deploy now refuses an asset file that contains a control character (NUL, a C0 control other
+than tab and line feed, DEL, or a C1 control). The error names the file and the line, for
+example `assets/silver/a.sql:12: control character U+001B on line 12; remove it`. Find them
+before you upgrade:
+
+<!-- not tested: it searches the reader's own assets/ folder -->
+```bash
+LC_ALL=C.UTF-8 grep -rnaP '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]|\r(?!$)' assets/
+```
+
+On macOS the system `grep` has no `-P`: run `brew install grep` and use `ggrep` instead. A dry
+run (`lakana deploy --dry-run`) shows the same refusal before you upgrade a production deploy.
+
 ### A proxy is trusted for client addresses only when you list it
 
 - A proxy on the same host is no longer trusted for `X-Forwarded-For` by default: set

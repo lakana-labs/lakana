@@ -343,6 +343,7 @@ there is one, the line, as `path:line: message`. Fix the cause and deploy again.
 | `assets/a.sql and assets/a.py both produce table 'a'` | A SQL file and a Python file for one table. | Keep one. |
 | `every .py file under assets/ is an asset; put helper code outside assets/ …` | `__init__.py` or a helper module under `assets/`. | Move helper code to the repository root or `src/`. |
 | `symlinks are not allowed in a repository with Python assets` | A symlink anywhere in the repository. | Replace it with a copy of the file. |
+| `assets/silver/a.sql:12: control character U+001B on line 12; remove it` | A NUL, a C0 control other than tab and line feed, DEL or a C1 control in an asset file. | Remove it, commit and deploy. |
 | `a project with Python assets needs a pyproject.toml at the repository root` | No `pyproject.toml`. | Add one (see the [first example](../how-to/projects.md#a-first-example)). |
 | `a project with Python assets needs a committed uv.lock; run `uv lock`` | No lock file. | Run `uv lock`, then commit it. |
 | `does not contain lakana; add lakana[assets] …`, `does not contain polars; depend on lakana[assets] …` | The lock lacks the SDK or polars. | Depend on `lakana[assets]` and run `uv lock`. |
