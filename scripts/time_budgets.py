@@ -39,6 +39,7 @@ from pathlib import Path
 BUDGETS = Path("scripts/time-budgets.toml")
 BASELINE = Path("scripts/slow-tests-baseline.json")
 DOCS = "docs/agent/testing.md, 'Time budgets'"
+CONFIRM_RUNS = 3  # solo re-runs of a flagged test; the fastest counts
 UPDATE_COMMAND = "uv run python scripts/time_budgets.py slow-tests --update REPORT.xml ..."
 WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"  # read by scripts/remeasure_warm_up.py
 
@@ -403,8 +404,9 @@ def check_slow_tests(
 
     One measurement in a busy shard is noisy (a test of 0.6 s once took 2.4 s), so with
     `remeasure` an unmarked test over the threshold fails only when it takes that long again,
-    run on its own, and only from `confirm_threshold` (a margin above the threshold: a test that
-    sits at the threshold would otherwise pass and fail on the same code).
+    run on its own (the fastest of several runs), and only from `confirm_threshold` (a margin
+    above the threshold: a test that sits at the threshold would otherwise pass and fail on the
+    same code).
 
     Parameters
     ----------
@@ -563,8 +565,60 @@ def remeasure(
     workdir: Path,
     run: Callable[..., object] = subprocess.run,
     warm_from: Sequence[TestTime] = (),
+    *,
+    runs: int = 1,
+    stop_below: float | None = None,
 ) -> dict[str, float]:
-    """Run tests again, on their own and serially, under coverage as in the shards.
+    """Run tests again, up to `runs` times, and answer each one's fastest time.
+
+    A solo run on a slow runner can land above the line (2.5 s twice on one day for tests
+    that are fast elsewhere), and runner variance only ever adds time, so the fastest of a few
+    runs is the best estimate of what the test itself costs. A test that took less than
+    `stop_below` once is not run again.
+
+    Parameters
+    ----------
+    tests
+        The tests to measure again.
+    workdir
+        A directory for the junit reports and the coverage data.
+    run
+        Runs the command; `subprocess.run` unless a test replaces it.
+    warm_from
+        Every test the reports hold, from which the warm-up tests are picked.
+    runs
+        The most runs of each test.
+    stop_below
+        A test whose fastest time is below this many seconds is not run again; None runs
+        every test `runs` times.
+
+    Returns
+    -------
+    dict
+        The fastest seconds by node id, for the tests some run measured.
+    """
+    fastest: dict[str, float] = {}
+    pending = list(tests)
+    for attempt in range(runs):
+        if not pending:
+            break
+        for nodeid, seconds in _remeasure_once(
+            pending, workdir, run, warm_from, f"{attempt}-"
+        ).items():
+            fastest[nodeid] = min(seconds, fastest.get(nodeid, seconds))
+        if stop_below is not None:
+            pending = [t for t in pending if fastest.get(t.nodeid, stop_below) >= stop_below]
+    return fastest
+
+
+def _remeasure_once(
+    tests: Sequence[TestTime],
+    workdir: Path,
+    run: Callable[..., object],
+    warm_from: Sequence[TestTime],
+    tag: str,
+) -> dict[str, float]:
+    """Run tests again once, on their own and serially, under coverage as in the shards.
 
     Each package's tests run in a pytest process of their own: every package has a module
     named `conftest`, and in one process the first one imported would shadow the others. Each
@@ -581,10 +635,12 @@ def remeasure(
         A directory for the junit reports and the coverage data, so neither touches the
         combined report of the run.
     run
-        Runs the command; `subprocess.run` unless a test replaces it.
+        Runs the command.
     warm_from
         Every test the reports hold, from which the warm-up tests are picked; empty runs each
         candidate alone.
+    tag
+        Prefix of the file names, so a later run does not overwrite an earlier one.
 
     Returns
     -------
@@ -598,8 +654,8 @@ def remeasure(
     wanted = {test.nodeid for test in tests}
     seconds: dict[str, float] = {}
     for index, group in enumerate(groups.values()):
-        report = workdir / f"remeasured-{index}.xml"
-        plan = workdir / f"warm-up-{index}.json"
+        report = workdir / f"remeasured-{tag}{index}.xml"
+        plan = workdir / f"warm-up-{tag}{index}.json"
         plan.write_text(json.dumps(_warm_up_plan(group, warm_from)))
         command = [
             sys.executable,
@@ -619,7 +675,7 @@ def remeasure(
         ]
         env = {
             **os.environ,
-            "COVERAGE_FILE": str(workdir / f".coverage.remeasured.{index}"),
+            "COVERAGE_FILE": str(workdir / f".coverage.remeasured.{tag}{index}"),
             WARM_UP_ENV: str(plan),
         }
         run(command, env=env, check=False)
@@ -723,7 +779,15 @@ def _run_slow_tests(args: argparse.Namespace) -> int:
             baseline=baseline,
             confirm_threshold=budgets.confirm_seconds,
             remeasure=(
-                (lambda over: remeasure(over, Path(workdir), warm_from=tests))
+                (
+                    lambda over: remeasure(
+                        over,
+                        Path(workdir),
+                        warm_from=tests,
+                        runs=CONFIRM_RUNS,
+                        stop_below=budgets.confirm_seconds,
+                    )
+                )
                 if args.confirm
                 else None
             ),
