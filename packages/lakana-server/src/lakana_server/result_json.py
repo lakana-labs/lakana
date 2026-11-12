@@ -32,12 +32,12 @@ PAGE_BUDGET = 4 * 1024 * 1024
 MAX_STRING_CHARS = 10_922
 MAX_LIST_ITEMS = 100
 MAX_TYPE_CHARS = 256
+MAX_PREVIEW_CHARS = 1_024
 MAX_PAGE_ROWS = 1_000
 DEFAULT_PAGE_ROWS = 100
 
 _CUT = '{"cut":true}'
 _MARKER_OVERHEAD = len(json.dumps({"cut": True, "text": ""}).encode())
-_SAFE_INTEGER = 2**53
 
 
 class _CellOverflow(Exception):
@@ -137,43 +137,121 @@ def _cut_array(arr: pa.Array) -> pa.Array:
         or pa.types.is_fixed_size_binary(arr.type)
     ):
         return pc.binary_length(arr)  # ty: ignore[unresolved-attribute]
-    if pa.types.is_map(arr.type):
-        entry = pa.struct([("key", arr.type.key_type), ("value", arr.type.item_type)])
-        arr = arr.cast(pa.list_(entry))
-    if pa.types.is_fixed_size_list(arr.type):
-        arr = arr.cast(pa.list_(arr.type.value_field))
-    if pa.types.is_list(arr.type) or pa.types.is_large_list(arr.type):
+    if pa.types.is_list_view(arr.type) or pa.types.is_large_list_view(arr.type):
+        arr = _list_of_view(arr)
+    if (
+        pa.types.is_map(arr.type)
+        or pa.types.is_fixed_size_list(arr.type)
+        or pa.types.is_list(arr.type)
+        or pa.types.is_large_list(arr.type)
+    ):
         return _cut_list(arr)
     if pa.types.is_struct(arr.type):
-        children = [_cut_array(arr.field(i)) for i in range(arr.type.num_fields)]
-        fields = [
-            pa.field(arr.type[i].name, child.type, arr.type[i].nullable)
-            for i, child in enumerate(children)
-        ]
-        return pa.StructArray.from_arrays(children, fields=fields, mask=arr.is_null())
+        return _struct_of(arr, [_cut_array(arr.field(i)) for i in range(arr.type.num_fields)])
+    if pa.types.is_union(arr.type):
+        return _cut_union(arr)
     is_text_form = pa.types.is_temporal(arr.type) and not pa.types.is_interval(arr.type)
     if is_text_form or pa.types.is_decimal(arr.type):
         return pc.cast(arr, pa.string())
     return arr
 
 
-def _cut_list(arr: pa.Array) -> pa.Array:
-    """Cut a list array to its first elements, and each element in turn.
+def _struct_of(arr: pa.Array, children: list[pa.Array]) -> pa.Array:
+    """Rebuild a struct array over new children, keeping names and nulls.
 
     Parameters
     ----------
     arr : pyarrow.Array
-        A list or large list array.
+        The struct array.
+    children : list of pyarrow.Array
+        One replacement array per field, as long as `arr`.
 
     Returns
     -------
     pyarrow.Array
-        The same lists with at most `MAX_LIST_ITEMS` plus one elements each.
+        The struct array over the children.
     """
-    arr = pc.list_slice(arr, 0, MAX_LIST_ITEMS + 1)  # ty: ignore[unresolved-attribute]
+    fields = [
+        pa.field(arr.type[i].name, child.type, arr.type[i].nullable)
+        for i, child in enumerate(children)
+    ]
+    return pa.StructArray.from_arrays(children, fields=fields, mask=arr.is_null())
+
+
+def _cut_union(arr: pa.Array) -> pa.Array:
+    """Cut every member of a union array, keeping the member of each row.
+
+    Parameters
+    ----------
+    arr : pyarrow.Array
+        A sparse or dense union array.
+
+    Returns
+    -------
+    pyarrow.Array
+        The union over the cut members, with the same names and type codes.
+    """
+    kind = arr.type
+    members = [_cut_array(arr.field(i)) for i in range(kind.num_fields)]
+    names = [kind[i].name for i in range(kind.num_fields)]
+    if kind.mode == "sparse":
+        return pa.UnionArray.from_sparse(arr.type_codes, members, names, kind.type_codes)
+    return pa.UnionArray.from_dense(arr.type_codes, arr.offsets, members, names, kind.type_codes)
+
+
+def _list_of_view(arr: pa.Array) -> pa.Array:
+    """Turn a list view into a list of the same rows.
+
+    pyarrow's own cast from a list view to a list builds an invalid offsets
+    buffer, so the lists are rebuilt from their lengths.
+
+    Parameters
+    ----------
+    arr : pyarrow.Array
+        A list view or large list view array.
+
+    Returns
+    -------
+    pyarrow.Array
+        A list or large list array over the flattened elements.
+    """
     lengths = pc.fill_null(pc.list_value_length(arr), 0)  # ty: ignore[unresolved-attribute]
     offsets = pa.concat_arrays([pa.array([0], lengths.type), pc.cumulative_sum(lengths)])  # ty: ignore[unresolved-attribute]
-    return type(arr).from_arrays(offsets, _cut_array(arr.flatten()), mask=arr.is_null())
+    make = pa.LargeListArray if pa.types.is_large_list_view(arr.type) else pa.ListArray
+    return make.from_arrays(offsets, arr.flatten(), mask=arr.is_null())
+
+
+def _cut_list(arr: pa.Array) -> pa.Array:
+    """Cut a list-like array: its elements first, then each list to its head.
+
+    The elements are cut before the lists are sliced, because the list
+    kernels cannot build an array of an extension type such as a UUID.
+
+    Parameters
+    ----------
+    arr : pyarrow.Array
+        A list, large list, fixed-size list or map array.
+
+    Returns
+    -------
+    pyarrow.Array
+        A list array with at most `MAX_LIST_ITEMS` plus one cut elements each;
+        a map becomes a list of ``{"key", "value"}`` structs.
+    """
+    if pa.types.is_map(arr.type):
+        entries = pa.StructArray.from_arrays(
+            [_cut_array(arr.keys), _cut_array(arr.items)], ["key", "value"]
+        )
+        arr = pa.ListArray.from_arrays(arr.offsets, entries, mask=arr.is_null())
+    elif pa.types.is_fixed_size_list(arr.type):
+        size = arr.type.list_size
+        values = _cut_array(arr.values.slice(arr.offset * size, len(arr) * size))
+        arr = pa.FixedSizeListArray.from_arrays(values, size, mask=arr.is_null()).cast(
+            pa.list_(values.type)
+        )
+    else:
+        arr = type(arr).from_arrays(arr.offsets, _cut_array(arr.values), mask=arr.is_null())
+    return pc.list_slice(arr, 0, MAX_LIST_ITEMS + 1)  # ty: ignore[unresolved-attribute]
 
 
 def precut(table: pa.Table) -> pa.Table:
@@ -210,8 +288,8 @@ def _leaf(scalar: pa.Scalar, original: pa.DataType) -> object:
     -------
     object
         A JSON-serialisable value: a number, a string, a bool, or a small dict
-        for binary and intervals. Integers beyond 2**53 and non-finite floats
-        are strings, so no client rounds them.
+        for binary and intervals. 64-bit integers (always, by type) and
+        non-finite floats are strings, so no client rounds them.
     """
     if isinstance(original, pa.UuidType):
         return str(uuid.UUID(bytes=scalar.as_py()))
@@ -234,7 +312,7 @@ def _leaf(scalar: pa.Scalar, original: pa.DataType) -> object:
         return value
     if pa.types.is_integer(original):
         value = scalar.as_py()
-        return value if abs(value) < _SAFE_INTEGER else str(value)
+        return value if original.bit_width < 64 else str(value)
     if pa.types.is_boolean(original) or pa.types.is_string(scalar.type):
         return scalar.as_py()
     return str(scalar)
@@ -329,9 +407,9 @@ def _emit(scalar: pa.Scalar, original: pa.DataType, buf: _CellBuffer, *, top: bo
         When the cell outgrows its budget.
     """
     original = _plain(original)
-    if isinstance(scalar, pa.UnionScalar):
+    if isinstance(scalar, pa.UnionScalar) and scalar.is_valid:
+        original = original[original.type_codes.index(scalar.type_code)].type
         scalar = scalar.value
-        original = original if scalar is None else scalar.type
     if scalar is None or not scalar.is_valid:
         buf.add("null")
     elif pa.types.is_struct(scalar.type):
@@ -362,7 +440,7 @@ def _emit(scalar: pa.Scalar, original: pa.DataType, buf: _CellBuffer, *, top: bo
         buf.add(text)
 
 
-def _cell(scalar: pa.Scalar, original: pa.DataType, cell_budget: int) -> str:
+def _cell(scalar: pa.Scalar, original: pa.DataType, cell_budget: int) -> tuple[str, int]:
     """Write one cell of a row, or its cut marker when it outgrows the budget.
 
     Parameters
@@ -376,15 +454,16 @@ def _cell(scalar: pa.Scalar, original: pa.DataType, cell_budget: int) -> str:
 
     Returns
     -------
-    str
-        The JSON text of the cell, at most `cell_budget` bytes.
+    tuple
+        The JSON text of the cell, at most `cell_budget` bytes, and how many
+        bytes were written to get it (a cut cell still cost its work).
     """
     buf = _CellBuffer(cell_budget)
     try:
         _emit(scalar, original, buf, top=True)
     except _CellOverflow:
-        return _CUT
-    return "".join(buf.parts)
+        return _CUT, buf.used
+    return "".join(buf.parts), buf.used
 
 
 def _placeholders(
@@ -427,8 +506,13 @@ def _write_row(
     used: int,
     page_budget: int,
     cell_budget: int,
+    work: list[int],
 ) -> tuple[list[str], int, int, bool] | None:
     """Write row k of a pre-cut page against the page budget.
+
+    Besides the bytes kept, the page counts the bytes it attempted, so cells
+    that are written and then dropped cannot keep the server busy: once the
+    attempts reach twice the page budget, the rest of the row is placeholders.
 
     Parameters
     ----------
@@ -444,6 +528,8 @@ def _write_row(
         The page budget.
     cell_budget : int
         The cell budget.
+    work : list of int
+        One element: the bytes attempted on this page so far, updated here.
 
     Returns
     -------
@@ -457,9 +543,13 @@ def _write_row(
         return None
     cells: list[str] = []
     for j, (column, original) in enumerate(zip(columns, originals, strict=True)):
-        text = _cell(column[k], original, cell_budget)
-        cost = _size(text) + (1 if cells else 0)
-        if used + cost > page_budget:
+        fits = work[0] < 2 * page_budget
+        if fits:
+            text, attempted = _cell(column[k], original, cell_budget)
+            work[0] += attempted
+            cost = _size(text) + (1 if cells else 0)
+            fits = used + cost <= page_budget
+        if not fits:
             if j == 0 and k:
                 return None
             return _placeholders(cells, used, len(columns) - j, page_budget)
@@ -523,8 +613,9 @@ def _write_rows(
     table = precut(result.slice(offset, count))
     originals = [field.type for field in result.schema]
     rows: list[str] = []
+    work = [0]
     for k in range(count):
-        written = _write_row(table.columns, originals, k, used, page_budget, cell_budget)
+        written = _write_row(table.columns, originals, k, used, page_budget, cell_budget, work)
         if written is None:
             return rows, [], 0, offset + k if k else None
         cells, used, left_out, cut = written
@@ -586,6 +677,39 @@ def _column_entry(field: pa.Field) -> str:
     return json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
 
 
+def _preview_json(name: str, room: int) -> str:
+    """Write the previewed table's name, cut to a prefix that fits `room`.
+
+    Parameters
+    ----------
+    name : str
+        The dotted table name.
+    room : int
+        The page bytes still free.
+
+    Returns
+    -------
+    str
+        ``{"table": name}``; the name is cut to `MAX_PREVIEW_CHARS` and to what
+        fits, and ``"cut": true`` is added when it was cut.
+    """
+
+    def render(length: int) -> str:
+        entry: dict[str, object] = {"table": name[:length]}
+        if length < len(name):
+            entry["cut"] = True
+        return json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+
+    low, high = 0, min(len(name), MAX_PREVIEW_CHARS)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if _size(render(middle)) <= room:
+            low = middle
+        else:
+            high = middle - 1
+    return render(low)
+
+
 def json_page(
     result: pa.Table,
     *,
@@ -600,9 +724,10 @@ def json_page(
 ) -> bytes:
     """Write one page of a query result as bounded UTF-8 JSON.
 
-    The `columns` header, the `masked_columns` list and the rows are counted
-    against `page_budget` in that order, so the answer is never larger than the
-    budget plus a small fixed envelope, whatever the data.
+    The preview name (cut to 1,024 characters), the `columns` header, the
+    `masked_columns` list and the rows are counted against `page_budget` in that
+    order, so the answer is never larger than the budget plus a small fixed
+    envelope, whatever the data.
 
     Parameters
     ----------
@@ -634,6 +759,8 @@ def json_page(
     """
     total = result.num_rows if row_cap is None else min(result.num_rows, row_cap)
     used = 2 + (4 if masked_columns is None else 2) + 2
+    preview = "null" if preview_table is None else _preview_json(preview_table, page_budget - used)
+    used += _size(preview)
     columns, columns_cut, used = _fit(
         (_column_entry(field) for field in result.schema), len(result.schema), used, page_budget
     )
@@ -649,11 +776,6 @@ def json_page(
         rows, row_cut, columns_cut, next_offset = _write_rows(
             result, offset, count, total, used, page_budget, cell_budget
         )
-    preview = (
-        "null"
-        if preview_table is None
-        else json.dumps({"table": preview_table}, ensure_ascii=False)
-    )
     body = (
         f'{{"columns":[{",".join(columns)}],"columns_cut":{columns_cut},'
         f'"masked_columns":{"null" if masks is None else "[" + ",".join(masks) + "]"},'
