@@ -2173,8 +2173,8 @@ def test_the_macos_job_runs_the_unit_suite_and_the_getting_started_example() -> 
     macOS (#153) a failure fails the run like any other job's.
     """
     job = _jobs("ci.yml")[MACOS_JOB]
-    assert job["name"] == "unit (macos, ${{ matrix.shard }}/3)"
-    assert job["strategy"]["matrix"]["shard"] == [1, 2, 3]
+    assert job["name"] == "unit (macos, ${{ matrix.shard }}/4)"
+    assert job["strategy"]["matrix"]["shard"] == [1, 2, 3, 4]
     assert "continue-on-error" not in job
     assert job["runs-on"] == "macos-latest"
     assert "CI_RUNNER" not in str(job)
@@ -2189,7 +2189,9 @@ def test_the_macos_job_runs_the_unit_suite_and_the_getting_started_example() -> 
     assert setup["with"]["python-version"] == "3.14"
     assert any("run_docs_examples.sh getting-started" in c for c in commands)
     example = next(s for s in job["steps"] if "getting-started" in s.get("run", ""))
-    assert example["if"].endswith("&& matrix.shard == 3")
+    assert example["if"].endswith("&& matrix.shard == 4")
+    tests = next(s for s in job["steps"] if s.get("name") == "Unit tests")
+    assert tests["env"] == {"LAKANA_TEST_SHARD": "${{ matrix.shard }}/4"}
     assert (
         (ROOT / "docs/examples/getting-started/run.sh")
         .read_text()
@@ -2223,7 +2225,7 @@ def test_the_macos_job_runs_for_a_pull_request_only_when_packages_change() -> No
         assert step["if"].startswith("steps.scope.outputs.run == 'true'"), step
 
 
-def test_the_macos_check_collects_all_three_shards() -> None:
+def test_the_macos_check_collects_all_four_shards() -> None:
     """``test (macos)`` is the check the maintainer will make required (#148)."""
     job = _jobs("ci.yml")["test-macos"]
     assert job["name"] == "test (macos)"

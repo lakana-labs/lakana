@@ -77,7 +77,7 @@ files, spread over the shards by the seconds in `scripts/test-durations.json`, t
 each to the shard with the least time so far; a file without an entry counts one second. Every
 shard and every xdist worker computes the same split from the same collection, so the shards
 together run every test once. When the shards drift apart (a budget failure shows it), refresh the
-file from the junit artifacts of a green run (`junit-unit-*`, `junit-integration-*`):
+file from the junit artifacts of a green run (`junit-unit-*`, `junit-integration-*`); a test checks that at most a tenth of the test files lack an entry, because a file without one counts one second and a stale file skews the shards (in November 2026 a quarter had none, and the three shards summed to 1082, 1429 and 1396 s of measured test time; with a fresh file they sum to 1302 s each). The macOS run uses four shards: three shards of balanced files still took 13 to 14 minutes each, too close to the 15-minute budget.
 
 ```bash
 gh run download RUN_ID -p 'junit-*' -D ~/.cache/lakana-junit
@@ -313,12 +313,12 @@ every missing output of it means "run everything".
   the duplicated lines or the clones rise (see "The duplication ratchet" below).
 - **`ui`** runs every gate of the web interface (see "The `ui/` gates" below).
 - **`test (macos)`** (job `test-macos`) is the macOS check: Lakana's local mode supports macOS
-  (Python 3.13 and later), and the three shards it collects, `unit (macos, 1/3)` to `(macos, 3/3)`
+  (Python 3.13 and later), and the four shards it collects, `unit (macos, 1/4)` to `(macos, 4/4)`
   (job `unit-macos`), run what a macOS user runs, on GitHub's `macos-latest`
   (Apple Silicon, 3 cores, 7 GB) with Python 3.14. They run the `packages/` unit suite (not
   `scripts/`, which is Linux tooling whose tests need GNU tools) with
   `pytest packages -m "not integration" -n 2`, without coverage (the ratchet stays on the Linux 3.14 job), and
-  the third shard runs `scripts/run_docs_examples.sh getting-started`, which ends with `lakana server reset --local`.
+  the fourth shard runs `scripts/run_docs_examples.sh getting-started`, which ends with `lakana server reset --local`.
   Docker-based tests (`integration`, `five-minute`, `compose-smoke`) do not run: macOS runners
   have no Docker. `scripts/pytest_memory_limit.py` needs `/proc`, so on macOS it does nothing and
   the limit's 6 GB default (below the runner's 7 GB) is not enforced; two workers fit. The example
@@ -707,7 +707,7 @@ maintainer who wants to run CI on a runner of their own.
 - **What moves:** every job of `ci.yml`, `security.yml`, `conventional.yml`, `mutation.yml` and
   `security-deep.yml`, and the `release-please` job of `release.yml`, which only opens and merges
   the release pull request.
-- **What never moves:** the macOS shards `unit (macos, N/3)` (macOS runs only on GitHub's own runners) and every job
+- **What never moves:** the macOS shards `unit (macos, N/4)` (macOS runs only on GitHub's own runners) and every job
   that builds or publishes a release. What users install is
   built on GitHub's runners, not on someone's machine.
 - **A pull request from a fork always uses GitHub's runner.** The `runs-on` expression honours
