@@ -27,6 +27,7 @@ in the `AuditEventType` of `lakana_core.models`; in groups:
 | Queries | `QUERY_COMPLETED` (also for a query that failed: `detail.status` says), `QUERY_CANCELLED` |
 | Artifacts | `ARTIFACT_*` |
 | Reading the log and other people's activity | `ACTIVITY_VIEWED` |
+| Reading the file that defines a table | `SOURCE_VIEWED` (repository, path and commit; once per person, table and commit per hour) |
 
 What the log does **not** record:
 
@@ -45,6 +46,7 @@ What the log does **not** record:
   many were left out. The first refusal of each action is always written.
 - **Reading other people's events, when switched off.** `LAKANA_VIEW_AUDIT__ENABLED=false` stops
   the `ACTIVITY_VIEWED` events (`true` by default); the window is `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`.
+  It never stops `SOURCE_VIEWED`: a read of a deployed file is always recorded, with the same window.
 - **Each successful sign-in.** One per token every 15 minutes (`LAKANA_AUDIT__SIGN_IN_WINDOW_MINUTES`;
   `0` records every request), with the number of those left out in `detail.suppressed`.
 - **Query text, unless you keep it.** `LAKANA_AUDIT__QUERY_TEXT` is `full` by default; `hash` stores

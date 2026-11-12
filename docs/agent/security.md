@@ -5476,6 +5476,14 @@ already allows.
   `{"principal_id": id}` for a filter on someone else. Same dedup, exemptions (a filter on the
   reader's own id; a page of only the reader's rows), fail-closed 503 and no `ADMIN` exemption as the
   other views. A `PermissionDenied` comes before anything is read or recorded.
+- **Reads of a deployed file are audited (M7 part 3a).** `table_definition_file`
+  (`lakana_core.projects.definition`) writes `SOURCE_VIEWED` (the table as scope; `repository`,
+  `path`, `commit`) through `record_source_view` before it returns a file's text, once per reader,
+  table and commit within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. `record_view` and
+  `record_source_view` share `_record_once` (lookup, write, fail closed). `LAKANA_VIEW_AUDIT__ENABLED`
+  never turns it off. A location answer, `restricted`, `not_recorded` and `too_large` write nothing
+  beyond the usual `AUTHORIZATION_DENIED` of the first `READ_TABLE` check; the gate's own checks use
+  `permits`. If the row cannot be written, `AuditUnavailableError` and no text.
 - **Denial rows are bounded per principal.** `DenialAuditLimiter`
   (`lakana_core.audit.denial_limiter`) allows `LAKANA_DENIAL_AUDIT__PER_PRINCIPAL_PER_MINUTE`
   (30) rows per principal per minute, a token bucket modelled on the server's `AuthAuditLimiter`;

@@ -16,6 +16,10 @@ caller returns none of the activity.
 A view that shows nobody else's activity, and names nobody else, writes nothing. The detail
 holds the filters and counts, and the targeting key the viewer typed, never the names of the
 people seen, row ids or SQL.
+
+`record_source_view` writes `SOURCE_VIEWED` for a read of the file that defines a table
+(`lakana_core.projects.definition`), the same way: once per reader, table and commit within the
+same window, failing closed. Both share `_record_once`.
 """
 
 from __future__ import annotations
@@ -86,54 +90,86 @@ def sessions_like(session: Session) -> Callable[[], Session]:
     return lambda: Session(bind)
 
 
-def _already_recorded(
-    session: Session,
+def _record_once(
+    session_factory: Callable[[], Session],
     principal: PrincipalRef,
-    view: View,
+    event_type: AuditEventType,
     scope: Securable,
-    targeting_key: dict[str, str] | None,
-    since: datetime,
+    detail: Mapping[str, object],
+    *,
+    window_minutes: int,
+    same: Callable[[object], bool],
+    refused: str,
 ) -> bool:
-    """Say whether the same view already has a row within the window.
+    """Write an audit row of a read unless the same one exists within the window; fail closed.
+
+    The lookup and the row use a session of their own, committed here, apart from the caller's
+    transaction.
 
     Parameters
     ----------
-    session
-        The audit session.
+    session_factory
+        Opens the session the lookup and the row use (`sessions_like`).
     principal
-        The viewer.
-    view
-        What was viewed.
+        The reader.
+    event_type
+        The event written.
     scope
-        Where.
-    targeting_key
-        The targeting key, or `None`.
-    since
-        The start of the window.
+        The object read.
+    detail
+        The row's detail.
+    window_minutes
+        The window: a row of the same reader, event type and scope at most this old counts.
+    same
+        Whether a stored row's detail is the same read.
+    refused
+        What a failure refuses, for the log line and the error (``a read of …``).
 
     Returns
     -------
     bool
-        `True` if a row of the same viewer, view, scope and key occurred at or after `since`.
+        Whether a row was written.
+
+    Raises
+    ------
+    AuditUnavailableError
+        If the lookup or the write failed; the caller must not return what was read.
     """
     namespace = scope.namespace.joined() if scope.namespace is not None else None
-    details = session.scalars(
-        select(AuditEvent.detail).where(
-            AuditEvent.event_type == AuditEventType.ACTIVITY_VIEWED,
-            AuditEvent.principal_id == principal.id,
-            AuditEvent.occurred_at >= since,
-            AuditEvent.securable_kind == scope.kind,
-            AuditEvent.securable_environment == scope.environment,
-            AuditEvent.securable_namespace == namespace,
-            AuditEvent.securable_table == scope.table,
+    try:
+        with session_factory() as session:
+            since = datetime.now(UTC) - timedelta(minutes=window_minutes)
+            details = session.scalars(
+                select(AuditEvent.detail).where(
+                    AuditEvent.event_type == event_type,
+                    AuditEvent.principal_id == principal.id,
+                    AuditEvent.occurred_at >= since,
+                    AuditEvent.securable_kind == scope.kind,
+                    AuditEvent.securable_environment == scope.environment,
+                    AuditEvent.securable_namespace == namespace,
+                    AuditEvent.securable_table == scope.table,
+                )
+            ).all()
+            if any(same(stored) for stored in details):
+                return False
+            AuditService(session).record(
+                principal.id, event_type, securable=scope, detail=dict(detail), commit=True
+            )
+    except Exception as exc:
+        cause = type(exc).__name__
+        logger.warning(
+            "%s was refused: its %s audit row could not be written (%s).",
+            refused[:1].upper() + refused[1:],
+            event_type.value,
+            cause,
         )
-    ).all()
-    return any(
-        isinstance(detail, dict)
-        and detail.get("view") == view.value
-        and detail.get("targeting_key") == targeting_key
-        for detail in details
-    )
+        raise AuditUnavailableError(
+            f"This read was refused because it could not be recorded in the audit log ({cause}): "
+            f"{refused} is always recorded. Try again in a moment; if it "
+            "keeps failing, ask the operator to check the server's database (the server log "
+            "names the error)."
+        ) from exc
+    return True
 
 
 def record_view(
@@ -189,37 +225,79 @@ def record_view(
     key = dict(targeting_key) if targeting_key is not None else None
     if detail.others_shown == 0 and key is None:
         return False
-    try:
-        with session_factory() as session:
-            since = datetime.now(UTC) - timedelta(minutes=config.window_minutes)
-            if _already_recorded(session, principal, view, scope, key, since):
-                return False
-            AuditService(session).record(
-                principal.id,
-                AuditEventType.ACTIVITY_VIEWED,
-                securable=scope,
-                detail={
-                    "view": view.value,
-                    "filters": dict(detail.filters),
-                    "rows_shown": detail.rows_shown,
-                    "others_shown": detail.others_shown,
-                    "distinct_others": detail.distinct_others,
-                    "targeting_key": key,
-                },
-                commit=True,
-            )
-    except Exception as exc:
-        cause = type(exc).__name__
-        logger.warning(
-            "A read of other people's activity (%s) was refused: its ACTIVITY_VIEWED audit row "
-            "could not be written (%s).",
-            view.value,
-            cause,
-        )
-        raise AuditUnavailableError(
-            f"This read was refused because it could not be recorded in the audit log ({cause}): "
-            "a read of other people's activity is always recorded. Try again in a moment; if it "
-            "keeps failing, ask the operator to check the server's database (the server log "
-            "names the error)."
-        ) from exc
-    return True
+    return _record_once(
+        session_factory,
+        principal,
+        AuditEventType.ACTIVITY_VIEWED,
+        scope,
+        {
+            "view": view.value,
+            "filters": dict(detail.filters),
+            "rows_shown": detail.rows_shown,
+            "others_shown": detail.others_shown,
+            "distinct_others": detail.distinct_others,
+            "targeting_key": key,
+        },
+        window_minutes=config.window_minutes,
+        same=lambda stored: (
+            isinstance(stored, dict)
+            and stored.get("view") == view.value
+            and stored.get("targeting_key") == key
+        ),
+        refused="a read of other people's activity",
+    )
+
+
+def record_source_view(
+    session_factory: Callable[[], Session],
+    principal: PrincipalRef,
+    scope: Securable,
+    *,
+    repository: str,
+    path: str,
+    commit: str,
+    window_minutes: int,
+) -> bool:
+    """Record that `principal` read the file that defines a table, once per window.
+
+    The row is `SOURCE_VIEWED`, written whatever `LAKANA_VIEW_AUDIT__ENABLED` says: that switch
+    governs `ACTIVITY_VIEWED` only. A row of the same reader, table and commit within the window
+    counts as this one.
+
+    Parameters
+    ----------
+    session_factory
+        Opens the session the lookup and the row use (`sessions_like`).
+    principal
+        The reader.
+    scope
+        The table the file defines.
+    repository
+        The repository's name.
+    path
+        The file's path in the repository.
+    commit
+        The deployed commit.
+    window_minutes
+        `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`.
+
+    Returns
+    -------
+    bool
+        Whether a row was written.
+
+    Raises
+    ------
+    AuditUnavailableError
+        If the lookup or the write failed; the caller must not return the file.
+    """
+    return _record_once(
+        session_factory,
+        principal,
+        AuditEventType.SOURCE_VIEWED,
+        scope,
+        {"repository": repository, "path": path, "commit": commit},
+        window_minutes=window_minutes,
+        same=lambda stored: isinstance(stored, dict) and stored.get("commit") == commit,
+        refused="a read of a project file",
+    )

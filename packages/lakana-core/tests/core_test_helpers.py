@@ -48,6 +48,7 @@ from lakana_core.models import (
     EnvironmentDeployment,
     JobVersion,
     Namespace,
+    ProjectFile,
     Repository,
     RepositoryKind,
     Run,
@@ -58,6 +59,7 @@ from lakana_core.models import (
     TaskRun,
     TaskStatus,
 )
+from lakana_core.projects.source_map import ProjectFileRecord, write_source_map
 from lakana_core.secrets.crypto import EncryptedSecret
 from lakana_core.storage.resolver import StorageResolver
 
@@ -1222,6 +1224,99 @@ def deploy_manifest(
         )
     else:
         pointer.current_job_version_id = version.id
+    session.commit()
+    return version
+
+
+def deploy_files(
+    session: Session,
+    environment: str,
+    repository: str,
+    files: Sequence[ProjectFileRecord],
+    *,
+    kind: RepositoryKind = RepositoryKind.HTTPS,
+    url: str = "https://github.com/acme/analytics.git",
+    sha: str = "a" * 40,
+    gate_version: int | None = None,
+) -> JobVersion:
+    """Make a project version with these asset files the current one, with its source map.
+
+    Stores a `JobVersion` whose manifest has one entry per record, points the environment's
+    deployment of the repository at it and writes the source map with `write_source_map`, as
+    a deploy does. The repository is registered on first use.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    environment
+        The environment's name; it must exist.
+    repository
+        The repository's name.
+    files
+        The asset files of the version.
+    kind
+        The repository's kind, on first use.
+    url
+        The repository's URL, on first use.
+    sha
+        The version's commit.
+    gate_version
+        Given, the version's file rows are then set to this `gate_version`.
+
+    Returns
+    -------
+    JobVersion
+        The new current version.
+    """
+    env_id = session.execute(
+        select(Environment.id).where(Environment.name == environment)
+    ).scalar_one()
+    repo = session.execute(
+        select(Repository).where(Repository.name == repository)
+    ).scalar_one_or_none()
+    if repo is None:
+        repo = Repository(id=uuid.uuid4(), name=repository, kind=kind, url=url)
+        session.add(repo)
+        session.flush()
+    version = JobVersion(
+        id=uuid.uuid4(),
+        repository_id=repo.id,
+        environment_id=env_id,
+        commit_sha=sha,
+        manifest_json={
+            "assets": [
+                {
+                    "table": record.table,
+                    "path": record.path,
+                    "normalized_sql": record.normalized_sql,
+                    "kind": "sql",
+                }
+                for record in files
+            ]
+        },
+        code_uri="file:///code.tar.gz",
+        code_sha256="0" * 64,
+    )
+    session.add(version)
+    session.flush()
+    pointer = session.get(EnvironmentDeployment, (env_id, repo.id))
+    if pointer is None:
+        session.add(
+            EnvironmentDeployment(
+                environment_id=env_id, repository_id=repo.id, current_job_version_id=version.id
+            )
+        )
+    else:
+        pointer.current_job_version_id = version.id
+    session.flush()
+    write_source_map(session, version, files)
+    if gate_version is not None:
+        session.execute(
+            sa.update(ProjectFile)
+            .where(ProjectFile.job_version_id == version.id)
+            .values(gate_version=gate_version)
+        )
     session.commit()
     return version
 
