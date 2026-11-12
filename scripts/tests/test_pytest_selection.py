@@ -311,3 +311,26 @@ def test_a_test_file_outside_the_root_is_named_by_its_full_path(
     item.path = Path("/elsewhere/a.py")
     selected, _ = _run([item])
     assert selected == [item]
+
+
+def test_the_durations_file_knows_most_test_files() -> None:
+    """A file without an entry counts one second, so a stale file skews the shards (#546).
+
+    Measured: with 151 of 660 files unknown the macOS shards ran 1082, 1429 and 1396 seconds on
+    the same code; with every file known they differ by a few seconds.
+    """
+    root = Path(__file__).resolve().parents[2]
+    known = set(json.loads((root / "scripts" / "test-durations.json").read_text()))
+    files = {
+        path.relative_to(root).as_posix()
+        for pattern in ("packages/*/tests/**/test_*.py", "scripts/tests/**/test_*.py")
+        for path in root.glob(pattern)
+    }
+    unknown = sorted(files - known)
+    assert len(unknown) <= len(files) // 10, (
+        f"{len(unknown)} of {len(files)} test files have no entry in scripts/test-durations.json "
+        "(a shard counts each as one second). Refresh it from a green run's junit artifacts: "
+        "gh run download RUN_ID -p 'junit-*' -D ~/.cache/lakana-junit, then uv run python "
+        "scripts/time_budgets.py durations --output scripts/test-durations.json "
+        "~/.cache/lakana-junit/*/*.xml"
+    )
