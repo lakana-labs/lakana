@@ -408,7 +408,7 @@ jobs:
   # Linux; every push to `main` runs them, and the push that merges a release pull request is the
   # release's check. `test (macos)` collects the shards; it is not a required check yet.
   unit-macos:
-    name: unit (macos, ${{ matrix.shard }}/3)
+    name: unit (macos, ${{ matrix.shard }}/4)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.draft != 'true' }}
     runs-on: macos-latest
@@ -416,7 +416,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -443,12 +443,12 @@ jobs:
       - name: Unit tests
         if: steps.scope.outputs.run == 'true'
         env:
-          LAKANA_TEST_SHARD: ${{ matrix.shard }}/3
+          LAKANA_TEST_SHARD: ${{ matrix.shard }}/4
         run: uv run pytest packages -m "not integration" -n 2 --dist loadfile -p no:cacheprovider
       # scripts/run_docs_examples.sh uses GNU `timeout` and `setsid` and bash 4: Homebrew has the
       # first and the last, and a few lines of Python stand in for `setsid`, which macOS lacks.
       - name: Tools the example runner needs
-        if: steps.scope.outputs.run == 'true' && matrix.shard == 3
+        if: steps.scope.outputs.run == 'true' && matrix.shard == 4
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"       # a slow `brew update` must not eat the time budget
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
@@ -468,7 +468,7 @@ jobs:
           echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
       - name: Getting-started example (init, start, deploy, run, query, reset)
-        if: steps.scope.outputs.run == 'true' && matrix.shard == 3
+        if: steps.scope.outputs.run == 'true' && matrix.shard == 4
         env:
           LAKANA_DOCS_EXAMPLE_BUDGET: "240"
         run: uv run bash scripts/run_docs_examples.sh getting-started
@@ -485,7 +485,7 @@ jobs:
           RESULT: ${{ needs.unit-macos.result }}
         run: |
           if [ "$RESULT" != "success" ]; then
-            echo "::error::A macOS shard ended with '$RESULT': the failing job of this run is named 'unit (macos, N/3)'."
+            echo "::error::A macOS shard ended with '$RESULT': the failing job of this run is named 'unit (macos, N/4)'."
             exit 1
           fi
 
