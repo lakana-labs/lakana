@@ -104,6 +104,7 @@ def test_a_lookalike_host_gets_no_link(url: str) -> None:
         "https://github.com/./r",
         "https://github.com/a/%2e%2e",
         "https://github.com/a/..git",
+        "https://github.com/a/.git.git",
         "https://gitlab.com/a//r",
         "https://dev.azure.com/org/my project/_git/r",
         "https://github.com/a/b/c",
@@ -204,13 +205,20 @@ def test_browse_url_normalises_case_trailing_slash_and_port() -> None:
 
 
 def test_every_path_segment_is_percent_encoded() -> None:
-    """Dot segments, spaces, ``%``, ``#`` and ``?`` in the file path cannot move the link."""
-    assert link("https://github.com/a/b", path="assets/../x y/%2e.sql") == (
-        f"https://github.com/a/b/blob/{SHA}/assets/%2E%2E/x%20y/%252e.sql#L1"
+    """Spaces, ``%``, ``#``, ``?``, ``&`` and ``=`` in the file path cannot move the link."""
+    assert link("https://github.com/a/b", path="assets/x y/%2e.sql") == (
+        f"https://github.com/a/b/blob/{SHA}/assets/x%20y/%252e.sql#L1"
     )
-    assert link("https://github.com/a/b", path="./a#b?.sql") == (
-        f"https://github.com/a/b/blob/{SHA}/%2E/a%23b%3F.sql#L1"
+    assert link("https://github.com/a/b", path="a#b?.sql") == (
+        f"https://github.com/a/b/blob/{SHA}/a%23b%3F.sql#L1"
     )
     assert (link("https://dev.azure.com/o/p/_git/r", path="a&line=9.sql") or "").startswith(
         f"https://dev.azure.com/o/p/_git/r?path=/a%26line%3D9.sql&version=GC{SHA}&"
     )
+
+
+@pytest.mark.parametrize("path", ["../../../../evil", "a/./b", "a//b", "", "assets/..", "./a"])
+def test_a_dot_or_empty_segment_in_the_file_path_gets_no_link(path: str) -> None:
+    """A browser resolves ``..`` even when encoded, so such a path gets no link at all."""
+    assert link("https://github.com/a/b", path=path) is None
+    assert link("git@gitlab.com:g/r.git", RepositoryKind.SSH, path=path) is None

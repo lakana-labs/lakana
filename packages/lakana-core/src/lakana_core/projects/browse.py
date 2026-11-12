@@ -15,10 +15,13 @@ The stored URL may be older than today's validation, so nothing in it is trusted
 - userinfo is dropped, SSH becomes HTTPS (its port is dropped), and an HTTPS port other than
   443 gives no link;
 - every host test is a `re.fullmatch`, and every repository segment fits
-  ``[A-Za-z0-9._-]+``, is neither ``.`` nor ``..`` and does not start with ``-``.
+  ``[A-Za-z0-9._-]+``, is neither ``.`` nor ``..`` and does not start with ``-``, and the
+  repository is never named ``.git``.
 
-The file path is percent-encoded segment by segment, with ``.`` and ``..`` written as ``%2E``
-and ``%2E%2E``, so a forged path cannot steer a browser to another page of the host.
+A file path with an empty, ``.`` or ``..`` segment, or an empty file path, gets no link: a
+browser resolves ``..`` even when it is written ``%2E%2E``, so a forged path could otherwise
+steer the link out of the repository to another page of the host. Every other segment is
+percent-encoded on its own, so ``#``, ``?``, ``&`` and ``%`` cannot change the link.
 
 This module imports nothing from `lakana_core.runs` or `lakana_core.catalog.service`.
 """
@@ -80,7 +83,10 @@ def browse_url(kind: RepositoryKind, url: str, *, commit: str, path: str, line: 
     repository = _repository_path(kind, host, segments)
     if repository is None:
         return None
-    file_path = "/".join(_segment(s) for s in path.split("/"))
+    file_segments = path.split("/")
+    if any(s in ("", ".", "..") for s in file_segments):
+        return None
+    file_path = "/".join(quote(s, safe="") for s in file_segments)
     pattern = _PATTERNS.get(host, _AZURE)
     return pattern.format(base=f"https://{host}/{repository}", sha=commit, path=file_path, n=line)
 
@@ -146,7 +152,9 @@ def _locate(kind: RepositoryKind, url: str) -> tuple[str, list[str]] | None:
         return None
     segments = repository.removeprefix("/").removesuffix("/").split("/")
     segments[-1] = segments[-1].removesuffix(".git")
-    if not all(_SEGMENT.fullmatch(s) and s not in (".", "..") and s[0] != "-" for s in segments):
+    if segments[-1] == ".git" or not all(
+        _SEGMENT.fullmatch(s) and s not in (".", "..") and s[0] != "-" for s in segments
+    ):
         return None
     return host, segments
 
@@ -185,22 +193,3 @@ def _repository_path(kind: RepositoryKind, host: str, segments: list[str]) -> st
     else:
         fits = count == 2
     return "/".join(segments) if fits else None
-
-
-def _segment(segment: str) -> str:
-    """Percent-encode one segment of a file path.
-
-    Parameters
-    ----------
-    segment
-        One ``/``-separated part of the stored path.
-
-    Returns
-    -------
-    str
-        ``%2E`` for ``.``, ``%2E%2E`` for ``..``, else the segment with every reserved
-        character encoded.
-    """
-    if segment in (".", ".."):
-        return "%2E" * len(segment)
-    return quote(segment, safe="")
