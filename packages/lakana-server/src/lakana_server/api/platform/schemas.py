@@ -706,8 +706,9 @@ class ResultPageOut(BaseModel):
     columns
         The result's columns, in order.
     columns_cut
-        How many further columns were left out because the header filled the page; then no row
-        is sent.
+        How many columns were left out: when the header filled the page, the columns that did not
+        fit and no row is sent; when the page budget cut a row inside, the cells of that row that
+        did not fit.
     masked_columns
         The columns masked for the reader, `[]` when none was; `null` when not recorded (a run
         from before this was recorded).

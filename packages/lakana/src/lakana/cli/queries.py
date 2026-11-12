@@ -559,17 +559,26 @@ def _rest_hint(page: ResultPage, next_offset: int) -> str:
     Returns
     -------
     str
-        A `lakana sql` command that returns exactly the rest, with every name part quoted as an
-        SQL identifier and the whole statement quoted for the shell.
+        A `lakana sql` command that returns the remaining rows, with every name part quoted as
+        an SQL identifier and the whole statement quoted for the shell. `LIMIT` and `OFFSET`
+        without `ORDER BY` follow the table's own order, which may differ between runs, so the
+        hint says so. When the server cut the table's name, no command is built from it: the
+        hint names the cause and says to use the full table name.
     """
     text = "The page is full; the other rows are left out."
+    if page.preview_table_cut:
+        return (
+            f"{text} The table name is too long for the page, so no command is shown. "
+            "Read the rest with lakana sql and the full table name."
+        )
     if page.preview_table is None:
         return f"{text} Read them with `lakana sql`, or select fewer columns."
     name = ".".join('"' + part.replace('"', '""') + '"' for part in page.preview_table.split("."))
     statement = f"SELECT * FROM {name} LIMIT {page.row_count - next_offset} OFFSET {next_offset}"  # nosec B608 - text for the person to run
     return (
-        f"{text} Read the rest with lakana sql {shlex.quote(statement)}, "
-        "or select fewer columns to see more rows at once."
+        f"{text} Read the remaining rows with lakana sql {shlex.quote(statement)}; without "
+        "ORDER BY the order of the table's rows may differ between runs. "
+        "Or select fewer columns to see more rows at once."
     )
 
 

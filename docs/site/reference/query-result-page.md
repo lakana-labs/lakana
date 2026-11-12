@@ -59,7 +59,7 @@ answers `409` with its own message.
 | `duration_ms` | How long the query ran, or `null` when not known. |
 | `masked_columns` | The columns masked for the reader, each `{"table", "column"}`; `[]` when none; `null` for a run from before this was recorded and for a run without a stored result. |
 | `preview` | `{"table": "gold.orders"}` for a preview, the table as the run's own query names it; `null` for any other query. |
-| `row_cut` | The positions on this page of the rows that have a cut cell. |
+| `row_cut` | The positions on this page of the rows the page budget cut inside. A cell cut at its own 64 KiB limit shows as a `{"cut": true ...}` value in the cell and its row is not listed here. |
 | `columns_cut` | How many columns were left out of the page, in two cases. When the column header filled the page, the columns that did not fit are left out and the page has no rows although `row_count` is above 0. When a row was cut inside the page, the cells of that row that did not fit are left out. Either way the JSON page holds no more of them; select fewer or narrower columns. |
 | `masked_columns_cut` | How many further masked columns were left out because the page was full. |
 
@@ -95,8 +95,9 @@ A page is built to a budget, so no result can fill a browser or a terminal:
 - **A list** shows its first 100 elements, followed by one `{"cut": true}`. The limit applies at
   every level of nesting.
 - **The page** is at most 4 MiB. When the rows do not fit, the page holds the rows that do, and
-  `next_offset` points at the first row left. A single row of the page may have cut cells (listed in
-  `row_cut`).
+  `next_offset` points at the first row left. A single row of the page may be cut inside by the
+  page budget: it is listed in `row_cut`, and `columns_cut` counts its cells left out. A cell cut at
+  its own 64 KiB limit is not listed in `row_cut`; its value is `{"cut": true ...}`.
 
 ## When the server is busy
 

@@ -4757,6 +4757,8 @@ class ResultPage:
         before this was recorded).
     preview_table
         The previewed table's dotted name for a preview, `None` for any other query.
+    preview_table_cut
+        `True` when the server cut `preview_table` because it was too long for the page.
     row_cut
         The positions on this page of the rows that were cut inside.
     columns_cut
@@ -4775,6 +4777,7 @@ class ResultPage:
     row_cut: tuple[int, ...] = ()
     columns_cut: int = 0
     masked_columns_cut: int = 0
+    preview_table_cut: bool = False
 
 
 # jscpd:ignore-end

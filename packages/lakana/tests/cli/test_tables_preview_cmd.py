@@ -211,7 +211,7 @@ def test_preview_json_output_is_the_page(tmp_path: Path) -> None:
 
 
 def test_preview_prints_the_failure_of_the_run(tmp_path: Path) -> None:
-    message = "The table changed since the preview was asked for; refresh."
+    message = "The table changed since the preview was asked for; run the preview again."
     result = invoke(
         make_state(tmp_path, _api(status="FAILED", error=message)),
         "table",
@@ -340,9 +340,26 @@ def _hint(tmp_path: Path, table: str, *, shown: int = 2, total: int = 100) -> st
     return result.stderr
 
 
-def test_the_hint_for_a_cut_page_returns_exactly_the_rest(tmp_path: Path) -> None:
+def test_the_hint_for_a_cut_page_names_the_rest_and_the_order_caveat(tmp_path: Path) -> None:
     err = _hint(tmp_path, "gold.orders")
     assert 'lakana sql \'SELECT * FROM "gold"."orders" LIMIT 98 OFFSET 2\'' in err
+    assert "exactly" not in err
+    assert "without ORDER BY" in err and "may differ" in err
+
+
+def test_a_cut_table_name_gets_no_command_with_the_cut_name(tmp_path: Path) -> None:
+    page = _page(
+        rows=[["1", "***"]],
+        row_count=100,
+        next_offset=1,
+        preview={"table": "gold.zz", "cut": True},
+    )
+    result = invoke(
+        make_state(tmp_path, _api(page)), "table", "preview", "gold.orders", "--env", "dev"
+    )
+    assert "gold.zz" not in result.stderr
+    assert "name is too long" in result.stderr
+    assert "full table name" in result.stderr
 
 
 def test_the_hint_quotes_a_hyphen_a_space_and_a_reserved_word(tmp_path: Path) -> None:

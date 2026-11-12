@@ -241,6 +241,7 @@ def _page_from_json(data: dict[str, Any]) -> ResultPage:
         row_cut=tuple(data.get("row_cut", ())),
         columns_cut=data.get("columns_cut", 0),
         masked_columns_cut=data.get("masked_columns_cut", 0),
+        preview_table_cut=False if preview is None else bool(preview.get("cut", False)),
     )
 
 

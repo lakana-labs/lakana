@@ -36,7 +36,9 @@ from lakana_core.models import (
 PREVIEW_ROW_LIMIT: int = 100
 """The most rows a preview shows: a constant in the server-built SQL, never from the client."""
 
-PREVIEW_TABLE_CHANGED: str = "The table changed since the preview was asked for; refresh."
+PREVIEW_TABLE_CHANGED: str = (
+    "The table changed since the preview was asked for; run the preview again."
+)
 """The worker's failure when the object the SQL names is no longer the one previewed."""
 
 PREVIEW_NOT_FOR_A_TASK: str = (
