@@ -7,6 +7,7 @@ import threading
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -253,8 +254,9 @@ def _record_refusing_source_viewed(
 _OPENED: list[tuple[str, object]] | None = None
 """The file-system events the audit hook collects while a test arms it; `None` when unarmed."""
 
-_WATCHDOG = "pytest-memory-watchdog"
-"""The thread of `scripts/pytest_memory_limit.py`, which reads `/proc` on its own schedule."""
+_WATCHDOG: threading.Thread | None = None
+"""The thread of `scripts/pytest_memory_limit.py`, which reads `/proc` on its own schedule; set
+while armed, `None` when this process runs no watchdog (an xdist worker, or the limit off)."""
 
 _FILE_EVENTS = frozenset({"open", "os.listdir", "os.scandir", "glob.glob", "shutil.copyfile"})
 """The audit events that read or list the file system."""
@@ -263,8 +265,8 @@ _FILE_EVENTS = frozenset({"open", "os.listdir", "os.scandir", "glob.glob", "shut
 def _hook(name: str, args: tuple[object, ...]) -> None:
     """Collect file-system events while armed; an audit hook cannot be removed, so it idles.
 
-    The test suite's memory watchdog thread is left out: it measures the process from outside
-    any request.
+    The test suite's memory watchdog thread is left out, by identity rather than by name (any
+    thread can take its name): it measures the process from outside any request.
 
     Parameters
     ----------
@@ -273,11 +275,7 @@ def _hook(name: str, args: tuple[object, ...]) -> None:
     args
         Its arguments.
     """
-    if (
-        _OPENED is not None
-        and name in _FILE_EVENTS
-        and threading.current_thread().name != _WATCHDOG
-    ):
+    if _OPENED is not None and name in _FILE_EVENTS and threading.current_thread() is not _WATCHDOG:
         _OPENED.append((name, args[0] if args else None))
 
 
@@ -285,21 +283,41 @@ sys.addaudithook(_hook)
 
 
 @pytest.fixture
-def opened() -> Iterator[list[tuple[str, object]]]:
+def opened(pytestconfig: pytest.Config) -> Iterator[list[tuple[str, object]]]:
     """Arm the audit hook for the test's body.
+
+    Parameters
+    ----------
+    pytestconfig
+        The pytest configuration, where the memory watchdog is registered as a plugin.
 
     Yields
     ------
     list of tuple
         Every file-system event while armed.
     """
-    global _OPENED
+    global _OPENED, _WATCHDOG
+    watchdog = pytestconfig.pluginmanager.get_plugin("lakana-memory-watchdog")
+    _WATCHDOG = getattr(watchdog, "thread", None)
     events: list[tuple[str, object]] = []
     _OPENED = events
     try:
         yield events
     finally:
         _OPENED = None
+        _WATCHDOG = None
+
+
+def test_the_audit_hook_leaves_out_only_the_watchdog_itself(
+    opened: list[tuple[str, object]],
+) -> None:
+    def read_proc() -> None:
+        Path("/proc/self/status").read_bytes()
+
+    impostor = threading.Thread(target=read_proc, name="pytest-memory-watchdog")
+    impostor.start()
+    impostor.join()
+    assert ("open", "/proc/self/status") in [(e, str(a)) for e, a in opened]
 
 
 def test_definition_has_no_path_commit_or_version_parameter(defs: TestClient) -> None:
@@ -468,7 +486,15 @@ def test_a_failed_audit_write_is_503_with_no_content(
     response = defs.get(url("gold.f") + "/file", headers=ann)
     assert response.status_code == 503
     assert "SELECT" not in response.text
+    assert "content" not in response.json()
     assert "Retry-After" in response.headers
+    with _session(defs) as session:
+        viewed = session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.event_type == AuditEventType.SOURCE_VIEWED)
+        )
+    assert viewed == 0
 
 
 @pytest.mark.parametrize("forged", ["../x", "/etc/passwd", "%2e%2e/%2e%2e/etc/passwd"])
