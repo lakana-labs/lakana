@@ -1240,9 +1240,12 @@ the test, the budget, and the next step.
   candidate's clock. Moving that setup off the candidate is deliberate: in a shard it falls on
   whichever test of the module runs first, and the rule targets tests that are slow in
   themselves; the candidate's own function-scoped setup, call and teardown are measured in
-  full. The candidate fails only if it takes `confirm_seconds` (2.5 s, in `scripts/time-budgets.toml` beside the
-  threshold) or more there: a margin, because a test that sits at the 2 s threshold passed and
-  failed on the same code. The in-shard threshold stays 2 s for flagging; the log names each one
+  full. The candidate is run up to three times (`CONFIRM_RUNS`; it stops after the first run below
+  the line) and fails only if its **fastest** run takes `confirm_seconds` (2.5 s, in
+  `scripts/time-budgets.toml` beside the threshold) or more: a margin, because a test that sits at
+  the 2 s threshold passed and failed on the same code, and the fastest of several runs, because
+  runner noise only adds time (on 2026-11-12 two tests that are fast elsewhere took 2.5 s solo
+  on a slow runner; #550). A really slow test is slow in every run and still fails. The in-shard threshold stays 2 s for flagging; the log names each one
   counted as noise. A new test over
   the threshold fails with its name and both times: make it faster (a smaller fixture, no real sleep, a shared app;
   see "The CLI tests share one app" for what that once saved), or mark it slow and make another
