@@ -231,6 +231,15 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   `http://localhost:<port>`: a value in your shell (for example from a bundle's `.env`) is ignored
   with one line saying so.
 
+### Table sizes are measured again after the upgrade
+
+- Migration `0075` adds each table's rows, last write, last read and health in one word to
+  `tables`, for the new table list, and marks the size of every managed table as not yet
+  measured. Until the worker's hourly sweep has measured a table again (up to 200 per sweep),
+  `lakana env usage` counts it as `unmeasured` and its total ends with `+`
+  ([Disk use](../how-to/instance-health.md#disk-use)). The sweeps fill the
+  figures in by themselves: nothing has to be done.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header
@@ -291,7 +300,7 @@ A deploy turns `key:` into the checks `key_unique` and `key_not_null`, and each 
 
 ### See a table's model in the catalog
 
-`lakana table get` shows the model a table's header declares, `lakana table list` and
+`lakana table get` shows the model a table's header declares, `lakana table list NAMESPACE` and
 `lakana search` take `--model-kind`, search finds a table by its grain, and
 `lakana table references` shows the references in both directions. See
 [Declare a table's model](../how-to/declare-a-tables-model.md).

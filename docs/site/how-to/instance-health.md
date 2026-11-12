@@ -282,10 +282,12 @@ Leave out `dev` to see every environment you manage. The first table has one row
 | `total` | The four together. |
 
 The figures come from the catalog database, never from a walk over the storage, so the command is
-quick however large the bucket is. The sizes of tables are measured by the worker's hourly sweep:
-a table written since then is counted with its earlier size, and one never measured not at all;
-the cell then says how many are `unmeasured`, and the total ends with `+`, a floor. After an
-upgrade the first sweeps measure the tables that existed before, up to 200 per sweep. Code archives
+quick however large the bucket is. The size of a table is stored with every write to it. A table
+that was written before this figure was kept is read by the worker's hourly sweep, and until then
+not counted: the cell says how many are `unmeasured`, and the total ends with `+`, a floor. After
+an upgrade the first sweeps measure the tables that existed before, up to 200 per sweep. A table
+whose write did not state its size stays `unmeasured` until a write states it; the sweep does not
+guess it. Code archives
 of deploys made before this release have no recorded size and stay `unmeasured`. Not counted: the
 files of older table versions that [maintenance](../reference/table-health.md) has not removed yet,
 the tables' metadata files, external tables (their files are yours, not Lakana's) and files

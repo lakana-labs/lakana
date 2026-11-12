@@ -33,7 +33,8 @@ name, so searching the `fr` name finds nothing by name; ask in `fr` alone to fin
 [Glossary](glossary.md).
 
 A table is a managed table, an external table, a view or an artifact, as in the table listing
-(`table_kind` is `TABLE`, `EXTERNAL`, `VIEW` or `ARTIFACT`). An artifact has no columns and no
+(`table_kind` is `TABLE`, `EXTERNAL`, `VIEW` or `ARTIFACT`). To search only tables, sorted and
+paged, use the `q` parameter of the [table list](table-list.md). An artifact has no columns and no
 description. The *shown* description is the edit if there is one, else the project's text
 ([Descriptions](descriptions.md)); a column's text is searched only while the column is in the
 table's schema.

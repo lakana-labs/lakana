@@ -3461,3 +3461,85 @@ def test_0074_on_postgres() -> None:
         assert "repository_probes" not in inspector.get_table_names()
         assert not added & {c["name"] for c in inspector.get_columns("secrets")}
         engine.dispose()
+
+
+def test_0075_on_postgres() -> None:
+    """0075 adds the sort keys, backfills the last read, resets the size's file; downgrade drops."""
+    revision_0074 = "e5b8c1f4a297"
+    revision_0075 = "f6c9d2a5b318"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0074)
+        engine = sqlalchemy.create_engine(url)
+        now = datetime(2026, 11, 3, 9, 0, tzinfo=UTC)
+        principal_id, environment_id, namespace_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        table_id = uuid.uuid4()
+        with engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO principals (id, type, name, is_active, created_at, updated_at) "
+                    "VALUES (:id, 'USER', 'admin', true, :now, :now)"
+                ),
+                {"id": principal_id, "now": now},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO environments (id, name, storage_root, storage_options, "
+                    "is_protected, properties, created_at, updated_at) "
+                    "VALUES (:id, 'dev', 's3://bucket/dev', :options, false, :props, :now, :now)"
+                ),
+                {
+                    "id": environment_id,
+                    "options": json.dumps({}),
+                    "props": json.dumps({}),
+                    "now": now,
+                },
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO namespaces (id, environment_id, path, properties, owner_id) "
+                    "VALUES (:id, :environment_id, 'gold', :props, NULL)"
+                ),
+                {"id": namespace_id, "environment_id": environment_id, "props": json.dumps({})},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO tables (id, namespace_id, name, table_type, size_bytes, "
+                    "size_metadata_location, created_at, updated_at) VALUES (:id, :namespace_id, "
+                    "'orders', 'ICEBERG', 123, 's3://bucket/m.json', :now, :now)"
+                ),
+                {"id": table_id, "namespace_id": namespace_id, "now": now},
+            )
+            for day, at in ((1, now - timedelta(days=2)), (3, now)):
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO table_reads (id, table_id, principal_id, day, read_count, "
+                        "last_read_at) VALUES (:id, :table_id, :principal_id, :day, 1, :at)"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "table_id": table_id,
+                        "principal_id": principal_id,
+                        "day": f"2026-11-0{day}",
+                        "at": at,
+                    },
+                )
+
+        migrate.upgrade(url, revision_0075)
+        assert _alembic_version(engine) == revision_0075
+        with engine.connect() as conn:
+            row = conn.execute(
+                sqlalchemy.text(
+                    "SELECT last_read_at, size_bytes, size_metadata_location, health_rank, "
+                    "updated_at FROM tables"
+                )
+            ).one()
+        assert row.last_read_at == now
+        assert (row.size_bytes, row.size_metadata_location, row.health_rank) == (123, None, 16)
+        assert row.updated_at == now
+
+        migrate.downgrade(url, revision_0074)
+        assert _alembic_version(engine) == revision_0074
+        columns = {c["name"] for c in sqlalchemy.inspect(engine).get_columns("tables")}
+        assert not {"row_count", "last_write_at", "last_read_at", "health_rank"} & columns
+        engine.dispose()

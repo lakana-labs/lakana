@@ -118,6 +118,7 @@ from lakana_core.catalog.health import (
     latest_checks,
     readers,
     snapshot_stats,
+    stored_stats,
 )
 from lakana_core.catalog.health_jobs import (
     judged_by_run,
@@ -139,6 +140,7 @@ from lakana_core.catalog.health_record import (
     signal_rows,
 )
 from lakana_core.catalog.health_signals import SIGNALS, HealthEffects, never_judged
+from lakana_core.catalog.health_summary import HealthSummary, refresh_health_key
 from lakana_core.catalog.history import (
     EARLIEST_START,
     HISTORY_KEY_PROPERTY,
@@ -238,6 +240,7 @@ from lakana_core.catalog.retention import (
 )
 from lakana_core.catalog.schema_compat import SchemaDiff, arrow_to_iceberg_schema, plan_schema
 from lakana_core.catalog.schema_inference import infer_schema
+from lakana_core.catalog.table_listing import TableOwner, table_facts
 from lakana_core.catalog.texts import LanguageCoverage, TextChooser, column_texts
 from lakana_core.catalog.tombstones import (
     DEFAULT_UNDO_DAYS,
@@ -732,7 +735,8 @@ class TableDescription:
     row_count
         The rows in the current snapshot's summary (``total-records``); `None` when missing.
     size_bytes
-        The size of its data files (``total-files-size``); `None` when missing.
+        The size of its data files (``total-files-size``); `None` when missing, and whenever
+        `last_write_at` is.
     file_count
         Its data files (``total-data-files``); `None` when missing.
     expires_at
@@ -774,6 +778,16 @@ class TableDescription:
         The ``block`` column entries of `health` that no commit can judge, with the reason
         (`health_signals.never_judged`): ``range`` on a type without one, a column past the
         200th. A run warns on them instead of blocking.
+    owner
+        Who owns the table, with the principal's kind; `None` when the owner was deleted.
+    created_at
+        When the table was created.
+    last_read_at
+        When a succeeded query last read it, as stored; `None` when none did.
+    readers_7d
+        How many distinct principals read it in the last 7 UTC days, today included; never who.
+    health_summary
+        Its health in one word, with the failing reference checks the reader may see.
     """
 
     ref: TableRef
@@ -813,6 +827,11 @@ class TableDescription:
     health: dict[str, str] = dataclass_field(default_factory=dict)
     health_missing: tuple[str, ...] = ()
     health_never_judged: Mapping[str, str] = dataclass_field(default_factory=dict)
+    owner: TableOwner | None = None
+    created_at: datetime | None = None
+    last_read_at: datetime | None = None
+    readers_7d: int = 0
+    health_summary: HealthSummary | None = None
 
 
 def _stored_effects(row: Table, dotted: str) -> HealthEffects:
@@ -2873,6 +2892,7 @@ class CatalogService:
         # learn about them first.
         target = prepared.resolved.confine_to_root(target)
         written = write_metadata(prepared.resolved.file_io, metadata, target)
+        stats = stored_stats(metadata)
         row = Table(
             id=prepared.table_id,
             namespace_id=prepared.namespace_id,
@@ -2881,6 +2901,10 @@ class CatalogService:
             metadata_location=written,
             previous_metadata_location=None,
             owner_id=owner_id,
+            row_count=stats.row_count,
+            size_bytes=stats.size_bytes,
+            size_metadata_location=written,
+            last_write_at=stats.last_write_at,
         )
         self._session.add(row)
         sync_created_table(self._session, prepared.environment_id, row, ref.dotted())
@@ -2906,6 +2930,7 @@ class CatalogService:
         try:
             self._session.flush()  # a name collision raises here, and SQLite's write lock is held
             self._add_health(health, messages)  # after the table row, for their foreign key
+            refresh_health_key(self._session, prepared.table_id)
             if files_read is not None and metadata.current_snapshot_id is not None:
                 record_files_read(
                     self._session, prepared.table_id, metadata.current_snapshot_id, files_read
@@ -3658,10 +3683,11 @@ class CatalogService:
         keys += list(model.measure_keys) if model is not None else []
         expires_at = None
         expires_soon = False
+        now = db_now(self._session)
         if row.table_type is TableType.ICEBERG:
             env = self._find_environment(ref.environment)
             expires_at = describe_retention(self._session, env, row, ref).expires_at
-            warning = db_now(self._session) + timedelta(days=self._expiry_warning_days)
+            warning = now + timedelta(days=self._expiry_warning_days)
             # 0 turns the warning off, also for a table already due.
             expires_soon = (
                 self._expiry_warning_days > 0 and expires_at is not None and expires_at <= warning
@@ -3674,8 +3700,18 @@ class CatalogService:
             terms = table_terms(
                 self._session, namespace.environment_id, dotted, languages, self._main_language
             )
+        facts = table_facts(self._session, self._authz, p, [(ref.environment, row)], now=now)[
+            row.id
+        ]
         return replace(
             described,
+            owner=facts.owner,
+            created_at=row.created_at,
+            last_read_at=facts.last_read_at,
+            readers_7d=facts.readers_7d,
+            health_summary=facts.health_summary,
+            # The API shows no size without a write, as the list does.
+            size_bytes=None if described.last_write_at is None else described.size_bytes,
             terms=terms.table,
             column_terms=dict(terms.columns),
             description=None if description is None else description.text,
@@ -5209,11 +5245,14 @@ class CatalogService:
             expected_location=expected,
             new_location=written,
             publish=not maintenance and updated.current_snapshot_id is not None,
+            stats=stored_stats(updated),
         )
         self._add_health(health, messages)
         sync_table_columns(self._session, table_id, from_iceberg_schema(updated.schema()))
         if after_swap is not None:
             after_swap()
+        # After `after_swap`, so one call covers the commit's own rows and a set-back's marks.
+        refresh_health_key(self._session, table_id)
         # A maintenance commit never passed the guard's `check`, so whatever
         # is pending belongs to an earlier, unfinished write and must not land.
         if not maintenance:

@@ -124,7 +124,7 @@ change is not audited: it is a display preference that changes nothing anyone el
 | `lakana table describe NAME [--column COLUMN] --reset` | Removes the edits of the description and the label. |
 | `lakana table describe NAME … --lang LANGUAGE` | Does the same in that language; without `--lang`, in the table's main language. |
 | `lakana table get NAME [--lang LANGUAGE]` | Shows the label, the description, the columns' labels and descriptions, and the coverage. |
-| `lakana table list NAMESPACE [--lang LANGUAGE]` | Lists the tables; with `--output json`, their texts in that language. |
+| `lakana table list NAMESPACE [--lang LANGUAGE]` | Lists the tables of the namespace; with `--output json`, their texts in that language. |
 | `lakana me set --language TAG` | Sets your own language; `--reset` removes it. |
 
 `--text`, `--label` or both set texts; `--reset` alone removes both edits. Anything else is

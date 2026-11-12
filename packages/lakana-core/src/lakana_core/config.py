@@ -1155,9 +1155,9 @@ class TableUndoConfig(BaseModel):
         tables they drop because their retention has passed, which keep at least one day; set
         the same value for the server and every worker.
     expiry_warning_days
-        Days ahead `lakana table list` and `lakana table get` warn that a table expires because
-        of its retention, and the default window of `lakana table expiring` (default 7; 0 to
-        3,650). 0 turns the warning off.
+        Days ahead `lakana table list NAMESPACE` and `lakana table get` warn that a table expires
+        because of its retention, and the default window of `lakana table expiring` (default 7; 0
+        to 3,650). 0 turns the warning off.
     """
 
     undo_days: int = Field(default=7, ge=0, le=365)

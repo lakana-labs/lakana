@@ -264,7 +264,7 @@ lakana search "calendar" --model-kind fact --env dev
 └───────┴────────────────────────┴─────────┴───────┴──────────────────────────────────────────────┘
 ```
 
-`lakana table list` takes `--model-kind` too. The search rules are in
+`lakana table list NAMESPACE` takes `--model-kind` too. The search rules are in
 [Search](../reference/search.md).
 
 ## Declare the measures

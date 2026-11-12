@@ -24,6 +24,7 @@ import lakana
 from lakana.errors import AuthenticationError, Conflict, NotFound
 from lakana.errors import PermissionDenied as SdkPermissionDenied
 from lakana_core.catalog import service as catalog_service
+from lakana_core.catalog.health import StoredStats
 from lakana_core.db import create_engine, db_now
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.models import (
@@ -427,6 +428,7 @@ def test_an_ending_between_the_check_and_the_commit_of_a_bound_upload_lands_no_w
         expected_location: str | None,
         new_location: str,
         publish: bool = False,
+        stats: StoredStats | None = None,
     ) -> None:
         if not ended:
             ended.append(_ENDINGS[ending](stack.db, attempt))
@@ -436,6 +438,7 @@ def test_an_ending_between_the_check_and_the_commit_of_a_bound_upload_lands_no_w
             expected_location=expected_location,
             new_location=new_location,
             publish=publish,
+            stats=stats,
         )
 
     monkeypatch.setattr(catalog_service, "commit_metadata_pointer", end_first)

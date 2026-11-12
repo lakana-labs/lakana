@@ -23,6 +23,7 @@ from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.auth import AuthorizationService
 from lakana_core.catalog.columns import backfill_table_columns
 from lakana_core.catalog.health import sweep_table_reads
+from lakana_core.catalog.health_summary import backfill_health_keys
 from lakana_core.catalog.health_sweep import HEALTH_SWEEP_MAX_SECONDS, sweep_health
 from lakana_core.catalog.location_sweep import (
     DEFAULT_MAX_SECONDS as LOCATION_SWEEP_MAX_SECONDS,
@@ -739,6 +740,16 @@ def main() -> None:
             )
         try:
             with session_factory() as session:
+                backfill_health_keys(session)
+        except Exception as exc:
+            logger.warning(
+                "The table health backfill failed (%s).",
+                type(exc).__name__,
+                exc_info=True,
+                extra=log_event(LogEvent.SWEEP_FAILED),
+            )
+        try:
+            with session_factory() as session:
                 backfill_table_columns(session, StorageResolver(session, key_provider))
         except Exception as exc:
             logger.warning(
@@ -770,7 +781,8 @@ def main() -> None:
             "stored "
             "for it, the row filters and column masks of earlier releases are not bound to "
             "field ids (they keep refusing reads after a rename), the sizes of tables and of the "
-            "worker's caches are not measured, and uv's package cache is not trimmed. Set it to a "
+            "worker's caches are not measured, the health words of tables that have none are not "
+            "computed, and uv's package cache is not trimmed. Set it to a "
             "number of seconds (3600 is the default) to turn them on."
         )
     scheduler = SchedulerLoop(

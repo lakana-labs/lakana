@@ -324,7 +324,7 @@ Error: `silver.station_temperatures` has not been published: its first build fai
 silver.station_temperatures/no_missing_station --env dev`. It is published by the next run in which its checks pass.
 ```
 
-`lakana table get` and `lakana table list` show the state in a column named `state`. (The
+`lakana table get` and `lakana table list NAMESPACE` show the state in a column named `state`. (The
 `metadata_location` row of `table get` is left out below; it holds a path of your machine.)
 
 <!-- source: docs/examples/check-your-data/run.sh#table-get -->

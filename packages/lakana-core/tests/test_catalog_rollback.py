@@ -35,6 +35,7 @@ from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunCon
 from lakana_core.catalog import service as service_module
 from lakana_core.catalog.files_read import FileRead, FilesReadReport, record_files_read
 from lakana_core.catalog.health_record import own_chain
+from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService, Rollback, failed_snapshot_tag
 from lakana_core.catalog.writes import WriteResult
@@ -500,6 +501,72 @@ def test_a_set_back_marks_the_health_signals_of_the_snapshots_it_sets_back(
     assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.ROLLED_BACK
     assert _health_snapshots(session) == {before}
     assert _health_snapshots(session, set_back=True) == {middle, after}
+
+
+def test_a_set_back_clears_the_word_of_the_rows_it_marks(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A blocking signal row of the failed snapshot names the word until the set-back marks it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The writer.
+    tmp_path
+        Storage root.
+    """
+    catalog = _catalog(session, principal, tmp_path)
+    before = _write(catalog, principal, _orders([1], ["eu"]), WriteMode.CREATE).snapshot_id
+    after = _write(catalog, principal, _orders([2], ["us"]), WriteMode.APPEND).snapshot_id
+    task = _task(session, principal)
+    run = session.get(Run, task.run_id)
+    assert run is not None
+    table = _row(session)
+    now = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
+    session.add_all(
+        [
+            TableHealthSignal(
+                id=uuid.uuid4(),
+                environment_id=run.environment_id,
+                table_id=table.id,
+                signal="schema",
+                snapshot_id=after,
+                sequence_number=99,
+                observed={"changes": []},
+                band=None,
+                state="fired",
+                effect="block",
+                observed_at=now,
+            ),
+            CheckResult(
+                id=uuid.uuid4(),
+                run_id=task.run_id,
+                task_run_id=task.id,
+                environment_id=run.environment_id,
+                check_name=_FAILED,
+                check_path="checks/gold/orders/unique_id.sql",
+                table_name=_TABLE,
+                table_id=table.id,
+                on_failure="block",
+                outcome=CheckOutcome.FAILED,
+                started_at=now,
+                finished_at=now,
+            ),
+        ]
+    )
+    session.commit()
+    refresh_health_key(session, table.id)
+    session.commit()
+    session.expire_all()
+    assert _row(session).health_item == "blocked_schema_changed"
+    written = Written(table.id, before, after, publishes=False)
+    _stamp(session, task, written)
+
+    assert _roll_back(catalog, principal, task, written).outcome is RollbackOutcome.ROLLED_BACK
+    session.expire_all()
+    assert _row(session).health_item == "check_failed"
 
 
 def test_the_own_chain_walks_from_the_tip_to_the_snapshot_before(

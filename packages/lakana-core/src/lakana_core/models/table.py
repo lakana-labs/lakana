@@ -11,7 +11,9 @@ from sqlalchemy import (
     Date,
     Enum,
     ForeignKey,
+    Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -77,7 +79,17 @@ class Table(Base, TimestampMixin):
     """
 
     __tablename__ = "tables"
-    __table_args__ = (UniqueConstraint("namespace_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("namespace_id", "name"),
+        # Each sort key of the table list with `id`, so a keyset page reads in index order.
+        Index("ix_tables_row_count_id", "row_count", "id"),
+        Index("ix_tables_size_bytes_id", "size_bytes", "id"),
+        Index("ix_tables_last_write_at_id", "last_write_at", "id"),
+        Index("ix_tables_last_read_at_id", "last_read_at", "id"),
+        Index("ix_tables_health_rank_id", "health_rank", "id"),
+        Index("ix_tables_created_at_id", "created_at", "id"),
+        Index("ix_tables_name_id", "name", "id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     namespace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("namespaces.id", ondelete="CASCADE"))
@@ -88,15 +100,32 @@ class Table(Base, TimestampMixin):
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True, default=None)
     """The size of a managed table's current files (``total-files-size`` of its snapshot).
 
-    Measured by the worker's housekeeping (`lakana_core.catalog.usage`), never at request time;
-    `None` before the first measurement and when the snapshot's summary does not say. A tombstone
-    keeps it, so a dropped table's size is known for its undo period.
+    Stored by the write that commits the snapshot (``0`` for a table without one), and measured by
+    the worker's housekeeping (`lakana_core.catalog.usage`) for tables that have none; never read
+    from storage at request time. `None` before the first of the two and when the snapshot's
+    summary does not say. A tombstone keeps it, so a dropped table's size is known for its undo
+    period.
     """
     size_metadata_location: Mapped[str | None] = mapped_column(
         String(1024), nullable=True, default=None
     )
     """The metadata file `size_bytes` was read from; differs from `metadata_location` once the
     table changed after it was measured."""
+    row_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True, default=None)
+    """The rows of a managed table (``total-records`` of its snapshot); `None` until stored."""
+    last_write_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, default=None)
+    """When the current snapshot was committed; `None` without a snapshot or until stored."""
+    last_read_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, default=None)
+    """When a succeeded query last named the table; `None` if none did.
+
+    A sort key only. Retention reads `table_reads`, never this column.
+    """
+    health_rank: Mapped[int] = mapped_column(SmallInteger, default=16, server_default="16")
+    """The rank of the table's one-word health; 16 is "not judged"."""
+    health_item: Mapped[str | None] = mapped_column(String(32), nullable=True, default=None)
+    """What the one-word health is about; `None` until it is computed."""
+    health_others: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    """How many other findings the health word leaves out."""
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("principals.id", ondelete="SET NULL"), nullable=True
     )

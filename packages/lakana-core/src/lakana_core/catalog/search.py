@@ -10,6 +10,11 @@ match; translated texts match only in the reader's languages, and a table or col
 several texts is one hit. A glossary term is found by its name, synonyms and definition, and a
 table or column a term links is found by that term's name and synonyms, in the languages the term
 shows them in.
+
+The table list's search text (`CatalogSearch.table_matches`) walks the same ranked union, of the
+table and column arms only, over several environments, restricted in the SQL to the tables its
+caller may read, and stops after `MAX_SCANNED` candidates too; an unreadable candidate is never
+read or counted.
 """
 
 from __future__ import annotations
@@ -17,8 +22,11 @@ from __future__ import annotations
 import enum
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Collection, Generator, Sequence
+from contextlib import closing
 from dataclasses import dataclass
+from functools import partial
+from itertools import islice
 from typing import Any, Protocol
 from typing import cast as type_cast
 
@@ -28,6 +36,7 @@ from sqlalchemy import (
     String,
     Text,
     and_,
+    bindparam,
     case,
     cast,
     exists,
@@ -79,7 +88,7 @@ SNIPPET_LENGTH = 160
 """The most characters of a description a hit shows."""
 
 CHUNK = 200
-"""How many ranked candidates are fetched, and then checked against the caller's rights, at once."""
+"""How many ranked candidates are fetched at once, from the one ranked statement a search runs."""
 
 MAX_SCANNED = 5000
 """The most candidates one search examines. A caller who may read few of many matches gets what
@@ -102,6 +111,8 @@ class _Candidate(Protocol):
     """A row of the ranked union, as the checks and `_hit` read it."""
 
     kind_order: int
+    sort_id: str
+    """The table's id for a table or column row, the row's own id otherwise."""
     sort_source: int
     """0 for a row of a main arm, more for a translation."""
     matched: str
@@ -238,6 +249,22 @@ class SearchPage:
     limit: int
     offset: int
     has_more: bool
+
+
+@dataclass(frozen=True)
+class TableMatches:
+    """The readable tables a text matches.
+
+    Parameters
+    ----------
+    hits
+        Table id → its best ranked hit, at most `MAX_SCANNED`.
+    capped
+        Whether a further readable table matched.
+    """
+
+    hits: dict[uuid.UUID, SearchHit]
+    capped: bool
 
 
 def _snippet(text: str, needle: str) -> str:
@@ -573,13 +600,15 @@ class CatalogSearch:
         main = self._main_language
         selects: list[_Candidates] = []
         if SearchKind.TABLE in wanted:
-            selects.append(_tables(match, environment_id, model_kind, main))
+            selects.append(_tables(match, [environment_id], model_kind, main))
             if chain:
-                selects.append(_table_translations(match, environment_id, model_kind, chain, main))
+                selects.append(
+                    _table_translations(match, [environment_id], model_kind, chain, main)
+                )
         if SearchKind.COLUMN in wanted:
-            selects.append(_columns(match, environment_id, main))
+            selects.append(_columns(match, [environment_id], main))
             if chain:
-                selects.append(_column_translations(match, environment_id, chain, main))
+                selects.append(_column_translations(match, [environment_id], chain, main))
         if SearchKind.RUN in wanted and may_read_environment:
             selects.append(_runs(match, needle, environment_id))
         if may_read_environment:
@@ -624,57 +653,95 @@ class CatalogSearch:
         list of SearchHit
             The permitted candidates after the first `offset`, best first.
         """
-        union = union_all(*selects).subquery("hits")
-        ranked = select(union).order_by(
-            union.c.rank,
-            union.c.kind_order,
-            union.c.sort_name,
-            union.c.sort_id,
-            # An item's own text, translated or not, comes before a term's at the same rank;
-            # then its main-language row before a translation; then, for rows still tied, the
-            # smallest term key and the matched text (f3 of a term, f4 of a table or column;
-            # f3 of those is fixed per item), so `_hit` shows the same row every time.
-            union.c.by_term,
-            union.c.sort_source,
-            union.c.f7,
-            union.c.f3,
-            union.c.f4,
-        )
         readable: dict[tuple[str, str], bool] = {}
-        seen: set[tuple[object, ...]] = set()
-        counted = scanned = position = 0
-        hits: list[SearchHit] = []
-        done = False
-        while not done:
-            rows = self._session.execute(ranked.limit(CHUNK).offset(position)).all()
-            if not rows:
-                break
-            position += len(rows)
-            for row in rows:
-                if scanned >= MAX_SCANNED:
-                    done = True
-                    break
-                scanned += 1
-                if row.kind_order in (0, 1, 4):
-                    # A table, column or term found by a second text: the first, better ranked
-                    # row stands for it. Skipped before `_may_see`, as a hidden one would be.
-                    identity = (
-                        (row.kind_order, row.f1)
-                        if row.kind_order == _KIND_ORDER[SearchKind.TERM]
-                        else (row.kind_order, row.f1, row.f2, row.f3)
-                    )
-                    if identity in seen:
-                        continue
-                    seen.add(identity)
-                if not self._may_see(p, environment, row, readable):
-                    continue
-                counted += 1
-                if counted > offset:
-                    hits.append(_hit(row, needle))
-                if counted >= wanted:
-                    done = True
-                    break
-        return hits
+        may_see = partial(self._may_see, p, environment, readable=readable)
+        with closing(_walk(self._session, selects, may_see, max_scanned=MAX_SCANNED)) as walk:
+            return [_hit(row, needle) for row in islice(walk, offset, wanted)]
+
+    def table_matches(
+        self,
+        environment_ids: Sequence[uuid.UUID],
+        q: str,
+        *,
+        readable: Collection[uuid.UUID],
+        languages: Sequence[str],
+    ) -> TableMatches:
+        """Find the readable tables a text matches, by their own texts or their columns'.
+
+        The table and column arms are searched, their translations in the reader's languages
+        included, never the glossary's. A table is kept once, by its best ranked row. Only
+        readable tables are kept and counted, so the answer says nothing of another table.
+
+        Parameters
+        ----------
+        environment_ids
+            The environments to search.
+        q
+            The text; trimmed, 1 to 200 characters.
+        readable
+            The ids of the tables the caller may read, other filters applied.
+        languages
+            The reader's canonical languages, most wanted first.
+
+        Returns
+        -------
+        TableMatches
+            The tables found in the first `MAX_SCANNED` readable candidates (a table and each
+            of its matching columns are candidates), each with its best hit, and whether the
+            walk stopped there with more left.
+
+        Raises
+        ------
+        ValidationError
+            If the text is empty after trimming or too long.
+        """
+        needle = _normalized_query(q)
+        match = _Match(needle)
+        chain = lookup_chain(languages)
+        main = self._main_language
+        selects = [
+            _tables(match, environment_ids, None, main),
+            _columns(match, environment_ids, main),
+        ]
+        if chain:
+            selects.append(_table_translations(match, environment_ids, None, chain, main))
+            selects.append(_column_translations(match, environment_ids, chain, main))
+        # Every arm joins `tables`: keeping only the readable ids there means an unreadable row
+        # is never sorted, read or counted against `MAX_SCANNED`, so `capped` speaks of readable
+        # tables only. The ids are written into the SQL, which has no limit on bound parameters.
+        only = bindparam("readable", list(readable), expanding=True, literal_execute=True)
+        selects = [arm.where(Table.id.in_(only)) for arm in selects]
+        hits: dict[uuid.UUID, SearchHit] = {}
+        cut: list[bool] = []
+
+        def may_see(row: _Candidate) -> bool:
+            """Say whether a candidate names a readable table.
+
+            Parameters
+            ----------
+            row
+                A row of the ranked union.
+
+            Returns
+            -------
+            bool
+                Whether its table is in `readable`.
+            """
+            return uuid.UUID(row.sort_id) in readable
+
+        walk = _walk(
+            self._session,
+            selects,
+            may_see,
+            max_scanned=MAX_SCANNED,
+            on_cut=lambda: cut.append(True),
+        )
+        with closing(walk):
+            for row in walk:
+                table_id = uuid.UUID(row.sort_id)
+                if table_id not in hits:
+                    hits[table_id] = _hit(row, needle)
+        return TableMatches(hits, bool(cut))
 
     def _may_see(
         self,
@@ -715,6 +782,84 @@ class CatalogSearch:
         return readable[key]
 
 
+def _walk(
+    session: Session,
+    selects: Sequence[_Candidates],
+    may_see: Callable[[_Candidate], bool],
+    *,
+    max_scanned: int | None,
+    on_cut: Callable[[], None] | None = None,
+) -> Generator[_Candidate]:
+    """Walk the ranked candidates, best first, and yield the ones the caller may see.
+
+    The ranked select runs once and is read `CHUNK` rows at a time, so a walk costs one sort of
+    the union however far it goes. Close the generator when done with it: that closes the select.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    selects
+        The candidate selects, in the shape of the union.
+    may_see
+        Whether the caller may read what a row names.
+    max_scanned
+        Stop after examining this many candidates; `None` walks them all.
+    on_cut
+        Called once when the walk stops at `max_scanned` with candidates left.
+
+    Yields
+    ------
+    _Candidate
+        Each candidate the caller may see. A table, column or term found by a second text is
+        yielded once, by its first, best ranked row, and the repeat is skipped before
+        `may_see`, as a hidden one would be.
+    """
+    union = union_all(*selects).subquery("hits")
+    ranked = select(union).order_by(
+        union.c.rank,
+        union.c.kind_order,
+        union.c.sort_name,
+        union.c.sort_id,
+        # An item's own text, translated or not, comes before a term's at the same rank;
+        # then its main-language row before a translation; then, for rows still tied, the
+        # smallest term key and the matched text (f3 of a term, f4 of a table or column;
+        # f3 of those is fixed per item), so `_hit` shows the same row every time.
+        union.c.by_term,
+        union.c.sort_source,
+        union.c.f7,
+        union.c.f3,
+        union.c.f4,
+    )
+    seen: set[tuple[object, ...]] = set()
+    scanned = 0
+    # One statement, read `CHUNK` rows at a time: re-running it per chunk with an offset would
+    # sort the whole union again for each chunk.
+    result = session.execute(ranked.execution_options(yield_per=CHUNK))
+    try:
+        for row in result:
+            if max_scanned is not None and scanned >= max_scanned:
+                if on_cut is not None:
+                    on_cut()
+                return
+            scanned += 1
+            if row.kind_order in (0, 1, 4):
+                # A table or column by its table's id (two environments may hold the same
+                # dotted name) and its column; a term by its key.
+                identity = (
+                    (row.kind_order, row.f1)
+                    if row.kind_order == _KIND_ORDER[SearchKind.TERM]
+                    else (row.kind_order, row.sort_id, row.f3)
+                )
+                if identity in seen:
+                    continue
+                seen.add(identity)
+            if may_see(row):
+                yield row
+    finally:
+        result.close()
+
+
 def _header_language(main_language: str) -> ColumnElement[str]:
     """Say which language a table's header texts are in.
 
@@ -732,7 +877,10 @@ def _header_language(main_language: str) -> ColumnElement[str]:
 
 
 def _tables(
-    match: _Match, environment_id: uuid.UUID, model_kind: str | None, main_language: str
+    match: _Match,
+    environment_ids: Sequence[uuid.UUID],
+    model_kind: str | None,
+    main_language: str,
 ) -> _Candidates:
     """Select the tables, views, external tables and artifacts whose main-language texts match.
 
@@ -740,8 +888,8 @@ def _tables(
     ----------
     match
         The comparisons.
-    environment_id
-        The environment.
+    environment_ids
+        The environments.
     model_kind
         Keep only tables that declare this kind, or `None` for every table.
     main_language
@@ -789,7 +937,7 @@ def _tables(
         )
         .join(Namespace, Namespace.id == Table.namespace_id)
         .where(
-            Namespace.environment_id == environment_id,
+            Namespace.environment_id.in_(environment_ids),
             or_(by_name, in_label, in_description, in_grain),
         )
     )
@@ -876,7 +1024,7 @@ def _not_main_language(main_language: str) -> ColumnElement[bool]:
 
 def _table_translations(
     match: _Match,
-    environment_id: uuid.UUID,
+    environment_ids: Sequence[uuid.UUID],
     model_kind: str | None,
     languages: Sequence[str],
     main_language: str,
@@ -887,8 +1035,8 @@ def _table_translations(
     ----------
     match
         The comparisons.
-    environment_id
-        The environment.
+    environment_ids
+        The environments.
     model_kind
         Keep only tables that declare this kind, or `None`.
     languages
@@ -927,7 +1075,7 @@ def _table_translations(
         .join(Table, Table.id == TextTranslation.table_id)
         .join(Namespace, Namespace.id == Table.namespace_id)
         .where(
-            Namespace.environment_id == environment_id,
+            Namespace.environment_id.in_(environment_ids),
             TextTranslation.subject == "table",
             TextTranslation.language.in_(languages),
             _not_main_language(main_language),
@@ -937,15 +1085,17 @@ def _table_translations(
     return query.where(Table.model_kind == model_kind) if model_kind is not None else query
 
 
-def _columns(match: _Match, environment_id: uuid.UUID, main_language: str) -> _Candidates:
+def _columns(
+    match: _Match, environment_ids: Sequence[uuid.UUID], main_language: str
+) -> _Candidates:
     """Select the columns whose name, label, description or measure label or description matches.
 
     Parameters
     ----------
     match
         The comparisons.
-    environment_id
-        The environment.
+    environment_ids
+        The environments.
     main_language
         The instance's main language, for a table whose project declares none.
 
@@ -1012,14 +1162,17 @@ def _columns(match: _Match, environment_id: uuid.UUID, main_language: str) -> _C
             ),
         )
         .where(
-            Namespace.environment_id == environment_id,
+            Namespace.environment_id.in_(environment_ids),
             or_(named, in_column_label, in_description, in_measure),
         )
     )
 
 
 def _column_translations(
-    match: _Match, environment_id: uuid.UUID, languages: Sequence[str], main_language: str
+    match: _Match,
+    environment_ids: Sequence[uuid.UUID],
+    languages: Sequence[str],
+    main_language: str,
 ) -> _Candidates:
     """Select the columns whose translated label or description, or measure text, matches.
 
@@ -1027,8 +1180,8 @@ def _column_translations(
     ----------
     match
         The comparisons.
-    environment_id
-        The environment.
+    environment_ids
+        The environments.
     languages
         The reader's languages, truncation included.
     main_language
@@ -1073,7 +1226,7 @@ def _column_translations(
         .join(Table, Table.id == TableColumn.table_id)
         .join(Namespace, Namespace.id == Table.namespace_id)
         .where(
-            Namespace.environment_id == environment_id,
+            Namespace.environment_id.in_(environment_ids),
             TextTranslation.subject.in_(("column", "measure")),
             TextTranslation.language.in_(languages),
             _not_main_language(main_language),

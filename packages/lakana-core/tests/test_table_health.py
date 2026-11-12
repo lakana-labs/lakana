@@ -18,11 +18,13 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.catalog import health
 from lakana_core.catalog.health import (
+    StoredStats,
     last_maintenance,
     latest_checks,
     readers,
     record_table_reads,
     snapshot_stats,
+    stored_stats,
     sweep_table_reads,
 )
 from lakana_core.catalog.service import CatalogService
@@ -651,6 +653,114 @@ def test_no_reads_to_record_runs_no_statement(
         session, environment="dev", principal_id=principal.id, dotted_refs=[], now=_NOW
     )
     assert _reads(session) == []
+
+
+def test_a_read_takes_the_table_row_before_its_counts_in_id_order(
+    session: Session, principal: PrincipalRef, catalog_with_orders: CatalogService
+) -> None:
+    """A delete of a table takes its row and then the counts that cascade; so does a read."""
+    catalog_with_orders.create_table(principal, TableRef("dev", _SILVER, "items"), schema=_SCHEMA)
+    ids = {name: table_id for name, table_id in session.execute(select(Table.name, Table.id))}
+    seen: list[tuple[str, uuid.UUID]] = []
+
+    def note(conn, cursor, statement, parameters, context, executemany) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Note each statement that writes a table row or a count.
+
+        Parameters
+        ----------
+        conn
+            Unused.
+        cursor
+            Unused.
+        statement
+            The SQL.
+        parameters
+            Its parameters.
+        context
+            Unused.
+        executemany
+            Unused.
+        """
+        kind = (
+            "tables"
+            if statement.startswith("UPDATE tables")
+            else "table_reads"
+            if statement.startswith("INSERT INTO table_reads")
+            else None
+        )
+        if kind is not None:
+            named = {i for i in ids.values() if i.hex in map(str, parameters)}
+            seen.extend((kind, i) for i in named)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", note)
+    try:
+        record_table_reads(
+            session,
+            environment="dev",
+            principal_id=principal.id,
+            dotted_refs=["silver.orders", "silver.items"],
+            now=_NOW,
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", note)
+    first, second = sorted(ids.values())
+    assert seen == [
+        ("tables", first),
+        ("table_reads", first),
+        ("tables", second),
+        ("table_reads", second),
+    ]
+
+
+def test_a_read_moves_last_read_at_forward_only_and_keeps_updated_at(
+    session: Session, principal: PrincipalRef, catalog_with_orders: CatalogService
+) -> None:
+    table_id = _orders_id(session)
+    session.expire_all()
+    before = session.get(Table, table_id)
+    assert before is not None and before.last_read_at is None
+    updated_before = before.updated_at
+    later = _NOW + timedelta(hours=1)
+    for at in (later, _NOW):
+        record_table_reads(
+            session,
+            environment="dev",
+            principal_id=principal.id,
+            dotted_refs=["silver.orders"],
+            now=at,
+        )
+        session.commit()
+    session.expire_all()
+    row = session.get(Table, table_id)
+    assert row is not None
+    assert row.last_read_at == later
+    assert row.updated_at == updated_before
+
+
+def test_the_stored_stats_of_a_table_without_a_snapshot_are_no_rows_and_zero_bytes(
+    principal: PrincipalRef, catalog_with_orders: CatalogService
+) -> None:
+    empty = catalog_with_orders.load_table(principal, _ORDERS)
+    assert stored_stats(empty.metadata) == StoredStats(None, 0, None)
+
+
+def test_the_stored_stats_of_a_table_with_a_snapshot_are_those_of_the_snapshot(
+    principal: PrincipalRef, catalog_with_orders: CatalogService
+) -> None:
+    catalog_with_orders.append(principal, _ORDERS, _data([1, 2, 3]))
+    metadata = catalog_with_orders.load_table(principal, _ORDERS).metadata
+    found = snapshot_stats(metadata)
+    assert found.size_bytes is not None
+    assert stored_stats(metadata) == StoredStats(3, found.size_bytes, found.last_write_at)
+
+
+def test_the_stored_size_of_a_snapshot_that_does_not_say_is_null_not_zero() -> None:
+    snapshot = SimpleNamespace(summary=None, timestamp_ms=1_700_000_000_000)
+    metadata = SimpleNamespace(snapshot_by_id=lambda _: snapshot, current_snapshot_id=7)
+    assert stored_stats(metadata) == StoredStats(  # ty: ignore[invalid-argument-type]
+        None, None, datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
+    )
 
 
 def test_the_sweep_deletes_the_days_before_the_kept_period(

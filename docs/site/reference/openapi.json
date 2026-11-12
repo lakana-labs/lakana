@@ -5779,6 +5779,290 @@
         }
       }
     },
+    "/api/v1/tables": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List the tables you may read, across environments and namespaces",
+        "description": "Filtered by environment, namespace, model kind and a search text, sorted and paged by a cursor. What you may not read is left out, not refused: each table needs `READ_TABLE` on it, a list writes no `AUTHORIZATION_DENIED`, and no count of hidden tables is given. Every table shows its owner's name and kind, when it was last read and by how many principals in the last 7 UTC days (never who), and its health in one word. A table with no known value for the sort key comes last. A search text matches the same texts as the environment search, only in tables you may read; `capped` says it stopped early, at 5,000 readable candidates, so narrow it. Answers 404 when `environment` does not exist (to someone who may read environments; anyone else gets an empty page, as for one that exists), and 422 for a `sort`, `order`, `limit`, `q`, `model_kind`, `lang` or `cursor` that is not valid.",
+        "operationId": "list_tables_api_v1_tables_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this environment.",
+              "title": "Environment"
+            },
+            "description": "Only this environment."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this namespace and the ones beneath it, dotted.",
+              "title": "Namespace"
+            },
+            "description": "Only this namespace and the ones beneath it, dotted."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables whose name, label, description, grain, or a column's name, label, description or measure contains this text; 1 to 200 characters.",
+              "title": "Q"
+            },
+            "description": "Only tables whose name, label, description, grain, or a column's name, label, description or measure contains this text; 1 to 200 characters."
+          },
+          {
+            "name": "model_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging.",
+              "title": "Model Kind"
+            },
+            "description": "Only tables whose asset header declares this kind: fact, dimension, wide or staging."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "What the list is sorted by: name, owner, health, rows, size, last_write, last_read, created. A table with no value sorts last, in either order.",
+              "default": "name",
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: name, owner, health, rows, size, last_write, last_read, created. A table with no value sorts last, in either order."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "asc or desc; by default asc for name, owner and health, desc for the rest.",
+              "title": "Order"
+            },
+            "description": "asc or desc; by default asc for name, owner and health, desc for the rest."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Tables per page, 1 to 200.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Tables per page, 1 to 200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next_cursor` of the previous page, sent with the same filters and sort.",
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page, sent with the same filters and sort."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language.",
+              "title": "Lang"
+            },
+            "description": "The language of the texts, such as de or fr-CH; without it, your profile's language, then Accept-Language, then the instance's main language."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableListPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tables/tree": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Count the tables you may read, by environment and namespace",
+        "description": "A node's count is what the list answers for it without a search text: only tables you may read are counted, an environment is shown with `READ_ENVIRONMENT` or a readable table in it, a namespace with `READ_NAMESPACE` on its environment or a readable table in it or beneath it. Writes no audit event.",
+        "operationId": "table_tree_api_v1_tables_tree_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableTreeOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/terms": {
       "get": {
         "tags": [
@@ -26861,6 +27145,41 @@
         "title": "HealthSignalPageOut",
         "description": "One page of the history of a table's health signals, newest first.\n\nParameters\n----------\nitems\n    The observations.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last."
       },
+      "HealthSummaryOut": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "failing",
+              "warning",
+              "healthy",
+              "not_judged"
+            ],
+            "title": "State"
+          },
+          "item": {
+            "type": "string",
+            "title": "Item"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "others": {
+            "type": "integer",
+            "title": "Others"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "item",
+          "text",
+          "others"
+        ],
+        "title": "HealthSummaryOut",
+        "description": "A table's health in one word.\n\nParameters\n----------\nstate\n    ``failing``, ``warning``, ``healthy`` or ``not_judged``.\nitem\n    The word's name.\ntext\n    The word as it is shown.\nothers\n    How many other findings the word leaves out."
+      },
       "HistoryOut": {
         "properties": {
           "snapshot_id": {
@@ -28595,6 +28914,29 @@
         ],
         "title": "OrphansOut",
         "description": "Orphans visible to the caller.\n\nParameters\n----------\norphans\n    Readable orphans.\nhidden\n    Orphans the caller may not read."
+      },
+      "OwnerOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "SERVICE_ACCOUNT"
+            ],
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "OwnerOut",
+        "description": "Who owns a table.\n\nParameters\n----------\nname\n    The principal's name.\nkind\n    ``USER`` or ``SERVICE_ACCOUNT``."
       },
       "PackageIndexCreate": {
         "properties": {
@@ -31489,6 +31831,261 @@
         "title": "TableHealthOut",
         "description": "A table's health at a glance.\n\nParameters\n----------\ndays\n    The window `readers` covers.\nlast_maintenance\n    The last maintenance that changed the table; `None` if there is none.\nchecks\n    The newest result of each check of the table.\nreaders\n    Who read the table in the window, most reads first; `None` for a caller who may not see\n    the table's grants.\nhidden_checks\n    How many results were left out of `checks`: generated reference checks whose target the\n    caller may not read.\nsignals\n    The current state of each health signal, values hidden where a column mask or row filter\n    applies to the caller."
       },
+      "TableListItemOut": {
+        "properties": {
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "uuid": {
+            "type": "string",
+            "title": "Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "TABLE",
+              "EXTERNAL",
+              "VIEW",
+              "ARTIFACT"
+            ],
+            "title": "Kind"
+          },
+          "model_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Kind"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "published",
+              "not_published",
+              "kept"
+            ],
+            "title": "State"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Count"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "last_write_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Write At"
+          },
+          "last_read_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read At"
+          },
+          "readers_7d": {
+            "type": "integer",
+            "title": "Readers 7D"
+          },
+          "health_summary": {
+            "$ref": "#/components/schemas/HealthSummaryOut"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TableMatchOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "environment",
+          "namespace",
+          "name",
+          "uuid",
+          "kind",
+          "model_kind",
+          "state",
+          "owner",
+          "created_at",
+          "row_count",
+          "size_bytes",
+          "last_write_at",
+          "last_read_at",
+          "readers_7d",
+          "health_summary",
+          "match"
+        ],
+        "title": "TableListItemOut",
+        "description": "One table of the catalog list.\n\nParameters\n----------\nenvironment\n    Its environment.\nnamespace\n    Its namespace, dotted.\nname\n    Its name.\nuuid\n    Its id.\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    The ``kind`` its asset header declares, if any.\nstate\n    ``not_published`` or ``kept`` for a managed table so marked; ``published`` otherwise.\nowner\n    Its owner; `None` when the owner was deleted.\ncreated_at\n    When it was created.\nrow_count\n    Its rows, as stored; `None` when not known.\nsize_bytes\n    The size of its data files; `None` when not known, and whenever `last_write_at` is.\nlast_write_at\n    When its current snapshot was committed; `None` without one.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included.\nhealth_summary\n    Its health in one word, as the caller may see it.\nmatch\n    With a search text, what of the table matched; `None` without one."
+      },
+      "TableListPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TableListItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "capped": {
+            "type": "boolean",
+            "title": "Capped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "capped"
+        ],
+        "title": "TableListPageOut",
+        "description": "One page of the catalog list.\n\nParameters\n----------\nitems\n    The tables, in the list's order.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last.\ncapped\n    Whether a search text stopped early, with more readable candidates than one search reads."
+      },
+      "TableMatchOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "matched": {
+            "type": "string",
+            "title": "Matched"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "column_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Type"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "translated": {
+            "type": "boolean",
+            "title": "Translated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "matched",
+          "column",
+          "column_type",
+          "snippet",
+          "language",
+          "translated"
+        ],
+        "title": "TableMatchOut",
+        "description": "What part of a table a search text matched.\n\nParameters\n----------\nkind\n    ``table`` for the table's own text, ``column`` for one of its columns'.\nmatched\n    The field: ``name``, ``label``, ``description``, ``grain`` or ``measure``.\ncolumn\n    For a column match, the column's name.\ncolumn_type\n    For a column match, its type.\nsnippet\n    For a label, description, grain or measure match, the text around the match.\nlanguage\n    The language of the matched text; `None` for a name.\ntranslated\n    Whether the matched text is a translation."
+      },
       "TableModelOut": {
         "properties": {
           "kind": {
@@ -31874,6 +32471,55 @@
             "type": "object",
             "title": "Health Never Judged",
             "default": {}
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "last_read_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read At"
+          },
+          "readers_7d": {
+            "type": "integer",
+            "title": "Readers 7D",
+            "default": 0
+          },
+          "health_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -31885,7 +32531,7 @@
           "schema"
         ],
         "title": "TableOut",
-        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has.\nterms\n    The glossary terms that link the table itself, in the reader's language; empty without\n    ``READ_ENVIRONMENT`` on the environment.\nhealth\n    The effects of the asset's `health:` that differ from `warn`, by ``signal`` or\n    ``signal.column`` (``range.price``), sorted by key; empty when every signal warns, and\n    for every kind but a managed table.\nhealth_missing\n    The keys of `health` whose column the table does not have: the deploy cannot check the\n    columns of a ``SELECT *`` or Python asset. Such an entry has no effect.\nhealth_never_judged\n    The ``block`` column entries of `health` that no commit can judge, by key, with the\n    reason (``a string column has no range``, ``only the first 200 columns are judged``): a\n    run warns on such an entry instead of blocking."
+        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference\n    .\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has.\nterms\n    The glossary terms that link the table itself, in the reader's language; empty without\n    ``READ_ENVIRONMENT`` on the environment.\nhealth\n    The effects of the asset's `health:` that differ from `warn`, by ``signal`` or\n    ``signal.column`` (``range.price``), sorted by key; empty when every signal warns, and\n    for every kind but a managed table.\nhealth_missing\n    The keys of `health` whose column the table does not have: the deploy cannot check the\n    columns of a ``SELECT *`` or Python asset. Such an entry has no effect.\nhealth_never_judged\n    The ``block`` column entries of `health` that no commit can judge, by key, with the\n    reason (``a string column has no range``, ``only the first 200 columns are judged``): a\n    run warns on such an entry instead of blocking.\nowner\n    Who owns the table; `None` when the owner was deleted, and for an answer that does not\n    look it up (a create or a commit).\ncreated_at\n    When the table was created.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included; never their names.\nhealth_summary\n    Its health in one word, as the caller may see it."
       },
       "TableReferenceOut": {
         "properties": {
@@ -32111,6 +32757,28 @@
         ],
         "title": "TableRetentionOut",
         "description": "A managed table's retention, and when it expires.\n\nParameters\n----------\nname\n    The table's name.\nnamespace\n    Dot-joined namespace path.\nuuid\n    The table's id.\nsource\n    ``table`` when the table sets its own, ``environment`` when its environment's applies;\n    `null` when it has none.\ndays\n    The days after its last activity it expires.\non\n    The day it expires on.\nnever\n    Whether the table says it never expires.\nset_by\n    Who set the retention that applies; `null` when nobody did or that principal is gone.\nset_at\n    When it was set.\nlast_activity_at\n    The later of the table's last change and its last recorded read.\nexpires_at\n    When it expires; `null` when it never does.\nkept\n    Why a table that has a retention never expires: ``protected`` (a protected environment)\n    or ``project_asset`` (a deployed project declares it); `null` otherwise."
+      },
+      "TableTreeOut": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "environments": {
+            "items": {
+              "$ref": "#/components/schemas/TreeEnvironmentOut"
+            },
+            "type": "array",
+            "title": "Environments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "environments"
+        ],
+        "title": "TableTreeOut",
+        "description": "The counts of readable tables, by environment and namespace.\n\nParameters\n----------\ncount\n    The readable tables in every environment.\nenvironments\n    The environments the caller is shown, by name."
       },
       "TaskAttemptOut": {
         "properties": {
@@ -33052,6 +33720,52 @@
         ],
         "title": "TranslationCoverageOut",
         "description": "How many of a table's main-language texts one language has.\n\nParameters\n----------\nlanguage\n    The language.\ntranslated\n    Texts it has.\ntotal\n    Texts the table shows in its main language."
+      },
+      "TreeEnvironmentOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "namespaces": {
+            "items": {
+              "$ref": "#/components/schemas/TreeNamespaceOut"
+            },
+            "type": "array",
+            "title": "Namespaces"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "count",
+          "namespaces"
+        ],
+        "title": "TreeEnvironmentOut",
+        "description": "An environment of the catalog tree.\n\nParameters\n----------\nname\n    Its name.\ncount\n    The readable tables in it.\nnamespaces\n    Its namespaces the caller is shown, by path."
+      },
+      "TreeNamespaceOut": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "count"
+        ],
+        "title": "TreeNamespaceOut",
+        "description": "A namespace of the catalog tree.\n\nParameters\n----------\npath\n    Its path, dotted.\ncount\n    The readable tables in it and beneath it."
       },
       "UndropIn": {
         "properties": {

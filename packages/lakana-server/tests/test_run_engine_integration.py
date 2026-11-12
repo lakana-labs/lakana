@@ -33,6 +33,7 @@ from lakana.errors import Conflict, NotFound, QueryFailed
 from lakana.errors import PermissionDenied as SdkPermissionDenied
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, RunContext
 from lakana_core.catalog import service as catalog_service
+from lakana_core.catalog.health import StoredStats
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.service import CatalogService, Rollback, failed_snapshot_tag
 from lakana_core.config import DatabaseConfig
@@ -1454,6 +1455,7 @@ def test_a_reclaim_between_the_guard_check_and_the_commit_lands_no_write(
         expected_location: str | None,
         new_location: str,
         publish: bool = False,
+        stats: StoredStats | None = None,
     ) -> None:
         reclaimed.append(_reclaim_now(db, claimed))
         original(
@@ -1462,6 +1464,7 @@ def test_a_reclaim_between_the_guard_check_and_the_commit_lands_no_write(
             expected_location=expected_location,
             new_location=new_location,
             publish=publish,
+            stats=stats,
         )
 
     monkeypatch.setattr(catalog_service, "commit_metadata_pointer", reclaim_first)

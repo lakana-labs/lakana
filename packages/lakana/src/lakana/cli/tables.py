@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ from lakana._models import (
     ModelReference,
     Table,
     TableHealth,
+    TableListItem,
 )
 from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
@@ -269,12 +271,16 @@ def _restorable_cell(dropped: DroppedTable) -> str:
 @table_app.command("list")
 def list_tables(
     ctx: typer.Context,
-    namespace: str,
+    namespace: Annotated[
+        str | None,
+        typer.Argument(help="List this namespace's tables; leave out to list across namespaces."),
+    ] = None,
     dropped: Annotated[
         bool,
         typer.Option(
             "--dropped",
-            help="List the dropped tables that can still be restored, and until when.",
+            help="With NAMESPACE: list the dropped tables that can still be restored, and "
+            "until when.",
         ),
     ] = False,
     model_kind: Annotated[
@@ -285,32 +291,129 @@ def list_tables(
             "staging.",
         ),
     ] = None,
+    search: Annotated[
+        str | None,
+        typer.Option(
+            "--search",
+            help="Only tables whose name, label, description or grain, or a column's name, "
+            "label, description or measure, contains this text (1 to 200 characters).",
+        ),
+    ] = None,
+    under: Annotated[
+        str | None,
+        typer.Option(
+            "--under", help="Only this namespace and the ones beneath it, dotted (no NAMESPACE)."
+        ),
+    ] = None,
+    all_environments: Annotated[
+        bool,
+        typer.Option(
+            "--all-environments", help="List the tables of every environment you may read."
+        ),
+    ] = False,
+    sort: Annotated[
+        str | None,
+        typer.Option(
+            "--sort",
+            help="What to sort by: name (the default), owner, health, rows, size, last_write, "
+            "last_read or created. A table with no value comes last.",
+        ),
+    ] = None,
+    order: Annotated[
+        str | None,
+        typer.Option(
+            "--order",
+            help="asc or desc (default: asc for name, owner and health, desc for the rest).",
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            "--limit", min=1, max=200, help="Most rows to list (default 50, at most 200)."
+        ),
+    ] = None,
+    cursor: CURSOR = None,
     lang: _LANG = None,
     env: _ENV = None,
 ) -> None:
-    """List the tables in NAMESPACE, or with --dropped the tables dropped from it.
+    """List the tables in NAMESPACE, or with no NAMESPACE every table you may read.
 
-    A dropped table keeps its files until `purge_after` (the server's undo period, 7 days by
-    default); until then `lakana table undrop` restores it. A table that its retention lets
-    expire within the server's warning window (7 days by default) shows when, in `expires`.
-    With --model-kind, only the tables whose asset header says `kind: <that kind>`.
+    With NAMESPACE: the tables in it, or with --dropped the tables dropped from it. A dropped
+    table keeps its files until `purge_after` (the server's undo period, 7 days by default);
+    until then `lakana table undrop` restores it. A table that its retention lets expire within
+    the server's warning window (7 days by default) shows when, in `expires`. With
+    --model-kind, only the tables whose asset header says `kind: <that kind>`.
+
+    Without NAMESPACE: one page of the tables you may read in the environment (or in every
+    environment with --all-environments), each with its owner, health in one word, rows, size,
+    and when it was last written and read. Narrow it with --search, --under and --model-kind,
+    order it with --sort and --order, and page on with --cursor; --lang is the language in which
+    --search matches translated texts. A line on stderr says when a search stopped early.
 
     Parameters
     ----------
     ctx
         The Typer context.
     namespace
-        The dotted namespace.
+        The dotted namespace; without it the list spans namespaces.
     dropped
         List the dropped tables instead.
     model_kind
         Only tables whose header declares this kind.
+    search
+        Only tables matching this text (across namespaces).
+    under
+        Only this namespace and the ones beneath it (across namespaces).
+    all_environments
+        List every environment (across namespaces).
+    sort
+        The sort key (across namespaces).
+    order
+        ``asc`` or ``desc`` (across namespaces).
+    limit
+        Rows per page (across namespaces).
+    cursor
+        The cursor of the previous page (across namespaces).
     lang
-        The language of the texts.
+        The language of the texts; across namespaces, the language a search matches in.
     env
         The environment.
+
+    Raises
+    ------
+    CliError
+        Exit 2, when the options of one mode meet the other mode, or `--env` meets
+        `--all-environments`; the message says what to leave out.
     """
     state = state_of(ctx)
+    if namespace is None:
+        if dropped:
+            raise CliError("--dropped lists one namespace: give NAMESPACE.")
+        if all_environments and env:
+            raise CliError(
+                "--env and --all-environments cannot be combined: leave out --env to list every "
+                "environment, or --all-environments to list one."
+            )
+        _list_across(
+            state,
+            None if all_environments else resolve_environment(state, env),
+            search=search,
+            under=under,
+            model_kind=model_kind,
+            sort=sort or "name",
+            order=order,
+            limit=limit,
+            cursor=cursor,
+            lang=lang,
+            env=env,
+        )
+        return
+    across = (search, under, sort, order, limit, cursor)
+    if all_environments or any(option is not None for option in across):
+        raise CliError(
+            "--search, --under, --all-environments, --sort, --order, --limit and --cursor list "
+            "across namespaces: leave out NAMESPACE and pass --under NAMESPACE instead."
+        )
     environment = resolve_environment(state, env)
     if dropped:
         _output.emit(
@@ -332,6 +435,174 @@ def list_tables(
         droppable=["kind", "uuid"],
         derived={"state": _state_cell, "expires": _expires_cell},
     )
+
+
+def _health_cell(item: TableListItem) -> str:
+    """Write a table's health word, with how many other findings it leaves out.
+
+    Parameters
+    ----------
+    item
+        A table of the list.
+
+    Returns
+    -------
+    str
+        ``Check failed`` or ``Check failed (+2)``.
+    """
+    summary = item.health_summary
+    return f"{summary.text} (+{summary.others})" if summary.others else summary.text
+
+
+def _match_cell(item: TableListItem) -> str:
+    """Say what part of a table the search text matched.
+
+    Parameters
+    ----------
+    item
+        A table of the list.
+
+    Returns
+    -------
+    str
+        ``column store_id: joins dim_store`` for a column, the field's name for the table.
+    """
+    match = item.match
+    if match is None:
+        return ""
+    if match.kind != "column":
+        return match.matched
+    return f"column {match.column}: {match.snippet}" if match.snippet else f"column {match.column}"
+
+
+def _moment_cell(when: datetime | None) -> str:
+    """Write a time for the list, in UTC.
+
+    Parameters
+    ----------
+    when
+        The time, if known.
+
+    Returns
+    -------
+    str
+        For example ``2026-11-10 08:00``; empty when not known.
+    """
+    return "" if when is None else when.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
+
+
+_ACROSS_DERIVED: dict[str, Callable[[TableListItem], str]] = {
+    "owner": lambda item: "" if item.owner is None else item.owner.name,
+    "health": _health_cell,
+    "rows": lambda item: "" if item.row_count is None else str(item.row_count),
+    "size": lambda item: "" if item.size_bytes is None else human_size(item.size_bytes),
+    "last_write": lambda item: _moment_cell(item.last_write_at),
+    "last_read": lambda item: _moment_cell(item.last_read_at),
+    "match": _match_cell,
+}
+"""The columns of the cross-namespace list that are not a field of the item."""
+
+
+def _list_across(
+    state: CliState,
+    environment: str | None,
+    *,
+    search: str | None,
+    under: str | None,
+    model_kind: str | None,
+    sort: str,
+    order: str | None,
+    limit: int | None,
+    cursor: str | None,
+    lang: str | None,
+    env: str | None,
+) -> None:
+    """Print one page of the tables across namespaces, and how to get the next.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    environment
+        The environment, or `None` for every one.
+    search
+        The search text, if any.
+    under
+        The namespace to stay under, if any.
+    model_kind
+        The kind to keep, if any.
+    sort
+        The sort key.
+    order
+        The sort order, if given.
+    limit
+        Rows per page, if given.
+    cursor
+        The previous page's cursor, if any.
+    lang
+        The language to match translated texts in, if given.
+    env
+        The `--env` the reader typed, repeated in the next-page line.
+
+    Raises
+    ------
+    ValidationError
+        A refusal of the server other than of the kind, unchanged.
+    """
+    try:
+        page = state.client().catalog.list(
+            environment=environment,
+            namespace=under,
+            q=search,
+            model_kind=model_kind,
+            sort=sort,
+            order=order,
+            limit=limit,
+            cursor=cursor,
+            lang=lang,
+        )
+    except ValidationError as exc:
+        _refuse_kind(exc, model_kind)
+        raise
+    columns = [
+        "name", "namespace", "environment", "kind", "owner", "health", "rows", "size",
+        "last_write", "last_read",
+    ]  # fmt: skip
+    if search is not None:
+        columns.append("match")
+    _output.emit(
+        state,
+        page.items,
+        columns=columns,
+        droppable=["last_read", "kind", "environment", "size", "last_write"],
+        derived=_ACROSS_DERIVED,
+        flexible=["match"],
+    )
+    more_results(
+        state,
+        ["lakana", "table", "list"],
+        {
+            "--env": env,
+            "--all-environments": environment is None,
+            "--search": search,
+            "--under": under,
+            "--model-kind": model_kind,
+            "--sort": sort if sort != "name" else None,
+            "--order": order,
+            "--limit": limit,
+            "--lang": lang,
+        },
+        page.next_cursor,
+    )
+    if page.capped:
+        typer.echo(_CAPPED, err=True)
+
+
+_CAPPED = (
+    "The search stopped early: more tables matched than one search reads, so some are not "
+    "listed. Narrow it with --under NAMESPACE or a longer --search text."
+)
+"""The line a search that stopped early prints, on stderr."""
 
 
 _MODEL_KIND_PARAMETER = "model_kind must be one of "
@@ -372,8 +643,27 @@ def _listed(
     try:
         return state.client().tables.list(environment, namespace, model_kind=model_kind, lang=lang)
     except ValidationError as exc:
-        if model_kind is None or not str(exc).startswith(_MODEL_KIND_PARAMETER):
-            raise
+        _refuse_kind(exc, model_kind)
+        raise
+
+
+def _refuse_kind(exc: ValidationError, model_kind: str | None) -> None:
+    """Restate the server's refusal of a kind with the option the reader typed.
+
+    Parameters
+    ----------
+    exc
+        The server's refusal.
+    model_kind
+        The kind sent, if any.
+
+    Raises
+    ------
+    CliError
+        Exit 8, when `exc` refuses the kind: its text, with ``--model-kind`` in place of the
+        query parameter it names. Any other refusal returns, for the caller to raise.
+    """
+    if model_kind is not None and str(exc).startswith(_MODEL_KIND_PARAMETER):
         raise CliError(
             "--model-kind" + str(exc).removeprefix("model_kind"), 8, kind=type(exc).__name__
         ) from exc

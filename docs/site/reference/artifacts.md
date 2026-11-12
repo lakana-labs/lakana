@@ -514,7 +514,7 @@ it already stored stay until Lakana's periodic clean-up finds that nothing needs
 
 - `lakana table get NAME` shows the artifact's name, namespace, kind `ARTIFACT` and id, and
   points to `artifact versions list`.
-- `lakana table list NAMESPACE` includes the artifacts of the namespace.
+- `lakana table list NAMESPACE` and `lakana table list` (all namespaces) include the artifacts you may read.
 - `lakana table lineage NAME` shows an artifact as `<name> [artifact]`.
 - `lakana table delete NAME` refuses an artifact and says to use `lakana artifact drop`. `table
   append`, `table replace`, `table maintain` and a rename refuse it too. Row filters and column

@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from pyiceberg.table.metadata import TableMetadata
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -31,6 +31,7 @@ from lakana_core.models import (
     QueryRun,
     QueryRunStatus,
     RollbackOutcome,
+    Table,
     TableRead,
     WriteMode,
 )
@@ -43,12 +44,15 @@ __all__ = [
     "LastMaintenance",
     "Reader",
     "SnapshotStats",
+    "StoredStats",
     "TableHealth",
+    "check_health",
     "last_maintenance",
     "latest_checks",
     "readers",
     "record_table_reads",
     "snapshot_stats",
+    "stored_stats",
     "sweep_table_reads",
 ]
 
@@ -129,6 +133,48 @@ def snapshot_stats(metadata: TableMetadata) -> SnapshotStats:
         size_bytes=_whole_number(summary.get("total-files-size")),
         file_count=_whole_number(summary.get("total-data-files")),
     )
+
+
+@dataclass(frozen=True)
+class StoredStats:
+    """The three numbers kept on a table's row for sorting, read from its current snapshot.
+
+    Parameters
+    ----------
+    row_count
+        The rows of the table; `None` without a snapshot or when the summary does not say.
+    size_bytes
+        The size of its data files; ``0`` without a snapshot, `None` when the summary does not
+        say (a value the summary does not state is null, never guessed).
+    last_write_at
+        When the snapshot was committed; `None` without a snapshot.
+    """
+
+    row_count: int | None
+    size_bytes: int | None
+    last_write_at: datetime | None
+
+
+def stored_stats(metadata: TableMetadata) -> StoredStats:
+    """Read what a commit and the size sweep store on the table's row.
+
+    One function for both, so they store the same values for the same metadata.
+
+    Parameters
+    ----------
+    metadata
+        The table's current metadata.
+
+    Returns
+    -------
+    StoredStats
+        ``(None, 0, None)`` for a table without a snapshot; otherwise the numbers of
+        `snapshot_stats`, a size the summary does not state as `None`.
+    """
+    if metadata.current_snapshot_id is None:
+        return StoredStats(None, 0, None)
+    found = snapshot_stats(metadata)
+    return StoredStats(found.row_count, found.size_bytes, found.last_write_at)
 
 
 @dataclass(frozen=True)
@@ -314,24 +360,37 @@ def latest_checks(session: Session, table_id: uuid.UUID) -> list[CheckHealth]:
         .execution_options(populate_existing=True)
     )
     newest = {row.check_name: row for row in rows}
-    return [
-        CheckHealth(
-            name=row.check_name,
-            check=row.check_name.rpartition("/")[2],
-            run_id=row.run_id,
-            outcome=row.outcome.value,
-            on_failure=row.on_failure,
-            failing_rows=row.failing_rows,
-            error=row.error,
-            rollback_outcome=None if row.rollback_outcome is None else row.rollback_outcome.value,
-            kept=row.on_failure == "keep"
-            and row.outcome in {CheckOutcome.FAILED, CheckOutcome.ERRORED},
-            not_published=row.rollback_outcome is RollbackOutcome.UNPUBLISHED,
-            finished_at=row.finished_at,
-            generated=row.generated,
-        )
-        for _, row in sorted(newest.items())
-    ]
+    return [check_health(row) for _, row in sorted(newest.items())]
+
+
+def check_health(row: CheckResult) -> CheckHealth:
+    """Describe one stored check result.
+
+    Parameters
+    ----------
+    row
+        The result.
+
+    Returns
+    -------
+    CheckHealth
+        The result as the API shows it.
+    """
+    return CheckHealth(
+        name=row.check_name,
+        check=row.check_name.rpartition("/")[2],
+        run_id=row.run_id,
+        outcome=row.outcome.value,
+        on_failure=row.on_failure,
+        failing_rows=row.failing_rows,
+        error=row.error,
+        rollback_outcome=None if row.rollback_outcome is None else row.rollback_outcome.value,
+        kept=row.on_failure == "keep"
+        and row.outcome in {CheckOutcome.FAILED, CheckOutcome.ERRORED},
+        not_published=row.rollback_outcome is RollbackOutcome.UNPUBLISHED,
+        finished_at=row.finished_at,
+        generated=row.generated,
+    )
 
 
 @dataclass(frozen=True)
@@ -427,6 +486,15 @@ def record_table_reads(
     query however often the query names it. A name that is not ``namespace.table`` or matches
     no table of the environment counts nothing.
 
+    The same call moves `Table.last_read_at` of each table forward (never back), keeping
+    `updated_at`. Lock order on Postgres, per table in id order: the table row, then its
+    ``table_reads`` row; the completion holds its `query_runs` row before. That is the order of a
+    delete of a table (its row, then the counts that cascade), and of a commit (the table row,
+    then the write's `query_runs` fence, which a completion that reaches this call no longer
+    contends for: it returns before it when another worker holds the run). Taking the counts
+    first would deadlock with a delete of the table. A concurrent commit holds its table row
+    only for the swap's transaction, so the completion waits briefly.
+
     Parameters
     ----------
     session
@@ -457,6 +525,17 @@ def record_table_reads(
         return
     insert = postgresql_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
     for table_id in sorted(table_ids):
+        # A sort key only: `updated_at` is kept, it is retention's clock and retention reads
+        # `table_reads`. The table row comes first, then its counts: the order in which a
+        # delete of the table takes them (its row, then the counts that cascade).
+        session.execute(
+            update(Table)
+            .where(
+                Table.id == table_id, or_(Table.last_read_at.is_(None), Table.last_read_at < now)
+            )
+            .values(last_read_at=now, updated_at=Table.updated_at)
+            .execution_options(synchronize_session=False)
+        )
         statement = insert(TableRead).values(
             id=uuid.uuid4(),
             table_id=table_id,

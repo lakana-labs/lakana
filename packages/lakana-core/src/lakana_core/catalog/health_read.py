@@ -466,10 +466,8 @@ def _commit_rows(
     )
 
 
-def current_signals(
-    session: Session, table_id: uuid.UUID, table: str, visibility: Visibility
-) -> list[SignalView]:
-    """Show the current state of each signal of a table, with the last time each fired.
+def current_rows(session: Session, table_id: uuid.UUID) -> list[TableHealthSignal]:
+    """Read the rows that show a table's current state of each signal.
 
     Schema and volume are each the row of the newest commit to record them, freshness its newest
     row by time (`newest_freshness`: the hourly sweep writes it). Null rate and range are the rows
@@ -479,7 +477,7 @@ def current_signals(
     data files (a delete) writes none, so the commit before it is shown. "Newest" is
     `NEWEST_COMMIT`: by the snapshot's sequence number, then time, so two commits that share a
     time never mix. Each is found with one ordered seek, so the work does not grow with the
-    table's history. A row a set-back marked takes no part, nor in the last firings.
+    table's history. A row a set-back marked takes no part.
 
     Parameters
     ----------
@@ -487,14 +485,10 @@ def current_signals(
         Database session.
     table_id
         The table.
-    table
-        Its dotted name, for the alerts.
-    visibility
-        What the reader may not see.
 
     Returns
     -------
-    list of SignalView
+    list of TableHealthSignal
         In the order of `SIGNALS`, then by column.
     """
 
@@ -519,6 +513,33 @@ def current_signals(
     rows += [] if freshness is None else [freshness]
     rows += _commit_rows(session, table_id, newest(COLUMN_SIGNALS))
     rows.sort(key=lambda row: (SIGNALS.index(row.signal), row.column_name or ""))
+    return rows
+
+
+def current_signals(
+    session: Session, table_id: uuid.UUID, table: str, visibility: Visibility
+) -> list[SignalView]:
+    """Show the current state of each signal of a table, with the last time each fired.
+
+    The rows are `current_rows`. A row a set-back marked takes no part, nor in the last firings.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_id
+        The table.
+    table
+        Its dotted name, for the alerts.
+    visibility
+        What the reader may not see.
+
+    Returns
+    -------
+    list of SignalView
+        In the order of `SIGNALS`, then by column.
+    """
+    rows = current_rows(session, table_id)
     fired = _last_fired(session, table_id)
     return [
         _view(

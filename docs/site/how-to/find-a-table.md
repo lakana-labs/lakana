@@ -67,6 +67,34 @@ lakana search store --model-kind dimension
 A table that declares no kind is never kept by this filter. See
 [Asset front-matter](../reference/asset-front-matter.md) for what the header declares.
 
+## Browse every table you may read
+
+`lakana search` finds things of every kind; `lakana table list` without a namespace lists tables
+only, one page at a time, each with its owner, its health in one word, its rows and size, and when
+it was last written and last read. It lists the tables you may read in your environment, or in
+every environment with `--all-environments`, and sorts them by what you want to know first:
+
+<!-- source: docs/examples/find-a-table/run.sh#table-list -->
+```bash
+lakana table list --all-environments --sort last_write
+```
+
+`--sort` takes `name`, `owner`, `health`, `rows`, `size`, `last_write`, `last_read` and `created`;
+a table with no value for it comes last. Add `--search TEXT` to keep the tables whose name, label,
+description or grain, or a column's name, label, description or measure, contains the text, and
+`--under NAMESPACE` to stay in one namespace and the ones beneath it. A `match` column then says
+what matched, such as `column store_id: joins dim_store`:
+
+<!-- source: docs/examples/find-a-table/run.sh#table-list-search -->
+```bash
+lakana table list --search order --under silver
+```
+
+The command prints at most 50 tables (`--limit`, at most 200). When there are more, the last line
+is the exact command for the next page. The list shows only what you may read and leaves the rest
+out without saying that anything is missing. Every column, the sorts, the REST routes and the SDK
+calls are in [Table list](../reference/table-list.md).
+
 ## Use the answer in a script
 
 <!-- source: docs/examples/find-a-table/run.sh#json -->

@@ -37,6 +37,7 @@ from lakana_core.models import (
 from lakana_server.api.platform.schemas import TableOut
 from lakana_server.api.platform.tables import _to_out
 from lakana_server.settings import Settings
+from tests.api.platform.test_tables_health import _table
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment, create_table
 
@@ -189,6 +190,23 @@ def test_get_table_reports_its_schema(client: TestClient) -> None:
         {"name": "amount", "type": "decimal(10,2)", "nullable": True},
     ]
     assert created.json()["schema"] == response.json()["schema"]
+
+
+def test_get_table_carries_owner_created_last_read_and_health(client: TestClient) -> None:
+    _table(client)
+    body = client.get(
+        "/api/v1/environments/dev/namespaces/gold/tables/t", headers=AUTH_HEADER
+    ).json()
+    assert body["owner"]["name"] == "admin"  # the bootstrap administrator created it
+    assert body["created_at"] is not None and body["readers_7d"] == 0
+    assert body["last_read_at"] is None
+    assert body["health_summary"] == {
+        "state": "not_judged",
+        "item": "not_judged",
+        "text": "Not judged",
+        "others": 0,
+    }
+    assert body["size_bytes"] is None  # no snapshot yet
 
 
 def test_drop_table_removes_it(client: TestClient, storage_root: str) -> None:

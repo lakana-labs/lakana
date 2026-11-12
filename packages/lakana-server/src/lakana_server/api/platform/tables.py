@@ -61,6 +61,7 @@ from lakana_server.api.platform.schemas import (
     ExternalTableOut,
     HealthSignalOut,
     HealthSignalPageOut,
+    HealthSummaryOut,
     HistoryOut,
     LineageEdgeOut,
     LineageNodeOut,
@@ -68,6 +69,7 @@ from lakana_server.api.platform.schemas import (
     LoadOut,
     MaintenanceIn,
     MergeOut,
+    OwnerOut,
     QuerySubmitOut,
     ReplaceOut,
     TableCreate,
@@ -668,6 +670,15 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         file_count=description.file_count,
         expires_at=description.expires_at,
         expires_soon=description.expires_soon,
+        owner=None
+        if description.owner is None
+        else OwnerOut.model_validate(description.owner, from_attributes=True),
+        created_at=description.created_at,
+        last_read_at=description.last_read_at,
+        readers_7d=description.readers_7d,
+        health_summary=None
+        if description.health_summary is None
+        else HealthSummaryOut.model_validate(description.health_summary, from_attributes=True),
         model=None
         if description.model is None
         else TableModelOut.model_validate(description.model, from_attributes=True),

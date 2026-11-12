@@ -35,6 +35,7 @@ from lakana._models import (
     ExternalTable,
     HealthSignal,
     HealthSignalPage,
+    HealthSummary,
     HistoryResult,
     LastMaintenance,
     Lineage,
@@ -48,6 +49,7 @@ from lakana._models import (
     Table,
     TableHealth,
     TableModel,
+    TableOwner,
     TableReference,
     TableReferences,
     TableRetention,
@@ -447,6 +449,47 @@ def _table_from_json(data: dict[str, Any]) -> Table:
         if isinstance(missing, list)
         else (),
         health_never_judged=_effects_from_json(data.get("health_never_judged")),
+        owner=owner_from_json(data.get("owner")),
+        created_at=_when(data.get("created_at")),
+        last_read_at=_when(data.get("last_read_at")),
+        readers_7d=data.get("readers_7d", 0),
+        health_summary=health_summary_from_json(data.get("health_summary")),
+    )
+
+
+def owner_from_json(data: dict[str, Any] | None) -> TableOwner | None:
+    """Read a table's owner from the response body.
+
+    Parameters
+    ----------
+    data
+        The body's `owner`; absent from an older server, `null` when the owner was deleted.
+
+    Returns
+    -------
+    TableOwner or None
+        The owner, or `None` for none.
+    """
+    return None if data is None else TableOwner(name=data["name"], kind=data["kind"])
+
+
+def health_summary_from_json(data: dict[str, Any] | None) -> HealthSummary | None:
+    """Read a table's health word from the response body.
+
+    Parameters
+    ----------
+    data
+        The body's `health_summary`; absent from an older server.
+
+    Returns
+    -------
+    HealthSummary or None
+        The word, or `None` for none.
+    """
+    if data is None:
+        return None
+    return HealthSummary(
+        state=data["state"], item=data["item"], text=data["text"], others=data["others"]
     )
 
 

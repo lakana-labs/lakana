@@ -20,7 +20,8 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, PrincipalRef, Securable
-from lakana_core.catalog import usage
+from lakana_core.catalog import health, usage
+from lakana_core.catalog.health import snapshot_stats
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.usage import (
     EnvironmentUsage,
@@ -107,8 +108,13 @@ def _environment(session: Session, name: str = "dev") -> Environment:
 
 
 @pytest.fixture
-def dev(catalog: CatalogService, principal: PrincipalRef, tmp_path: Path) -> CatalogService:
+def dev(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, session: Session
+) -> CatalogService:
     """Provide `dev` with an empty table `bronze.empty` and a table `bronze.full` with rows.
+
+    A commit stores the size, so the tables are made to look like those of an upgraded
+    instance: no figure has been stored yet and the sweep has everything to measure.
 
     Parameters
     ----------
@@ -118,6 +124,8 @@ def dev(catalog: CatalogService, principal: PrincipalRef, tmp_path: Path) -> Cat
         The acting principal.
     tmp_path
         The storage root.
+    session
+        Database session.
 
     Returns
     -------
@@ -128,6 +136,16 @@ def dev(catalog: CatalogService, principal: PrincipalRef, tmp_path: Path) -> Cat
     catalog.create_table(principal, _ref("empty"), schema=_SCHEMA)
     catalog.create_table(principal, _ref("full"), schema=_SCHEMA)
     catalog.append(principal, _ref("full"), _DATA)
+    session.execute(
+        update(Table).values(
+            size_bytes=None,
+            size_metadata_location=None,
+            row_count=None,
+            last_write_at=None,
+            updated_at=Table.updated_at,
+        )
+    )
+    session.commit()
     return catalog
 
 
@@ -168,6 +186,13 @@ def test_a_sweep_measures_each_table_once_and_again_after_it_changed(
     assert measure_table_sizes(session, storage) == 0
 
     dev.append(principal, _ref("full"), _DATA)
+    assert environment_usage(session, _environment(session)).tables.unmeasured == 0
+    assert _row(session, "full").size_bytes == _files_size(dev, principal, "full")
+
+    session.execute(
+        update(Table).where(Table.name == "full").values(size_metadata_location="older.json")
+    )
+    session.commit()
     assert environment_usage(session, _environment(session)).tables.unmeasured == 1
     assert measure_table_sizes(session, storage) == 1
     assert _row(session, "full").size_bytes == _files_size(dev, principal, "full")
@@ -233,8 +258,8 @@ def test_a_table_that_changed_while_it_was_read_keeps_no_figure(
 def test_a_snapshot_without_a_size_is_counted_as_unmeasured(
     dev: CatalogService, session: Session
 ) -> None:
-    with mock.patch.object(usage, "snapshot_stats") as stats:
-        stats.return_value.size_bytes = None
+    with mock.patch.object(health, "snapshot_stats") as stats:
+        stats.return_value = health.SnapshotStats(None, None, None, None)
         measure_table_sizes(session, StorageResolver(session))
     found = environment_usage(session, _environment(session))
     assert found.tables == UsagePart(count=2, bytes=0, unmeasured=1)
@@ -434,6 +459,32 @@ def test_a_dropped_table_above_two_gibibytes_is_added_up_whole(
 
 def test_a_sum_postgres_returns_as_a_decimal_is_read_as_a_whole_number() -> None:
     assert usage._part(Decimal(3), Decimal("5368709120"), None) == UsagePart(3, 5 * 1024**3, 0)
+
+
+def test_the_size_sweep_fills_rows_and_last_write_of_an_upgraded_table(
+    dev: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    stats = snapshot_stats(dev.load_table(principal, _ref("full")).metadata)
+    session.execute(
+        update(Table)
+        .where(Table.name == "full")
+        .values(
+            row_count=None,
+            last_write_at=None,
+            size_metadata_location=None,
+            updated_at=Table.updated_at,
+        )
+    )
+    session.commit()
+    row = _row(session, "full")
+    updated_before = row.updated_at
+    assert (row.row_count, row.last_write_at) == (None, None)
+
+    assert measure_table_sizes(session, StorageResolver(session)) == 2
+    row = _row(session, "full")
+    assert (row.row_count, row.last_write_at) == (stats.row_count, stats.last_write_at)
+    assert row.row_count == 3
+    assert row.updated_at == updated_before
 
 
 def test_a_measurement_is_no_activity_of_the_table(dev: CatalogService, session: Session) -> None:

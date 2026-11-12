@@ -8,6 +8,9 @@ is refused by another instead of being misread.
 
 A list ordered by a unique key instead (the glossary's terms) has a cursor of that key and the
 list's kind, with the same refusal of another list's cursor.
+
+A list the caller sorts by a key of their choice (the tables) has a cursor of that key's values,
+the item's id, the list's kind and the sort, so a cursor of another sort is refused too.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, NamedTuple, TypeVar
 
-from sqlalchemy import ColumnElement, Select, String, and_, func, literal, or_
+from sqlalchemy import ColumnElement, Select, String, and_, func, literal, or_, true
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from lakana_core.errors import ValidationError
@@ -39,6 +42,10 @@ _OTHER_LIST = (
     "The cursor is not valid for the `{expected}` list: it came from the `{actual}` list. "
     "Start the listing again without `cursor`; pass the `next_cursor` of a page only to "
     "continue that listing."
+)
+_OTHER_SORT = (
+    "The cursor is not valid for the list sorted by `{expected}`: it came from the list sorted "
+    "by `{actual}`. Start the listing again without `cursor`."
 )
 
 
@@ -239,6 +246,37 @@ def newest_first(
     return Page(page, next_cursor)
 
 
+def _cursor_body(kind: str, cursor: str) -> dict[str, object]:
+    """Read the JSON body of a key or sorted cursor and check the list it names.
+
+    Parameters
+    ----------
+    kind
+        The list being read.
+    cursor
+        The value a client sent back.
+
+    Returns
+    -------
+    dict
+        The body; its ``k`` is `kind`.
+
+    Raises
+    ------
+    ValidationError
+        If `cursor` is no base64url JSON object naming a list, or names another list.
+    """
+    try:
+        data = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    except (binascii.Error, ValueError) as exc:
+        raise ValidationError(_BAD_CURSOR) from exc
+    if not isinstance(data, dict) or not isinstance(data.get("k"), str):
+        raise ValidationError(_BAD_CURSOR)
+    if data["k"] != kind:
+        raise ValidationError(_OTHER_LIST.format(expected=kind, actual=data["k"]))
+    return data
+
+
 def encode_key_cursor(kind: str, key: str) -> str:
     """Encode the key of a page's last item, for a list ordered by a unique key.
 
@@ -281,20 +319,34 @@ def decode_key_cursor(kind: str, cursor: str) -> str:
     ValidationError
         If `cursor` is not one this server could have issued, or belongs to another list.
     """
-    try:
-        data = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
-    except (binascii.Error, ValueError) as exc:
-        raise ValidationError(_BAD_CURSOR) from exc
-    if not isinstance(data, dict) or not isinstance(data.get("k"), str):
+    key = _cursor_body(kind, cursor).get("n")
+    if not isinstance(key, str):
         raise ValidationError(_BAD_CURSOR)
-    if data["k"] != kind:
-        raise ValidationError(_OTHER_LIST.format(expected=kind, actual=data["k"]))
-    key = data.get("n")
-    # A cursor this server issued holds a stored key, never a NUL or a lone surrogate, which
-    # the database driver could not take.
-    if not isinstance(key, str) or any(unicodedata.category(c) in ("Cc", "Cs") for c in key):
+    return _stored_text(key)
+
+
+def _stored_text(value: str) -> str:
+    """Refuse a cursor's text that no stored name or key can hold.
+
+    Parameters
+    ----------
+    value
+        A text a client sent back in a cursor.
+
+    Returns
+    -------
+    str
+        `value`, unchanged.
+
+    Raises
+    ------
+    ValidationError
+        If it holds a control character or a lone surrogate: names and keys never do, and a NUL
+        or a lone surrogate is one the database driver could not take.
+    """
+    if any(unicodedata.category(c) in ("Cc", "Cs") for c in value):
         raise ValidationError(_BAD_CURSOR)
-    return key
+    return value
 
 
 def by_key(
@@ -346,6 +398,282 @@ def by_key(
     page = rows[:limit]
     next_cursor = encode_key_cursor(kind, key_of(page[-1])) if len(rows) > limit else None
     return Page(page, next_cursor)
+
+
+CursorValue = str | int | datetime | None
+"""One sort key of a row, as a sorted cursor holds it."""
+
+_TAGS: dict[type, str] = {str: "s", int: "i", datetime: "t"}
+"""The tag of each type a sorted cursor holds; ``n`` is null."""
+
+
+class IntegerKey(NamedTuple):
+    """An integer sort key, with the range its column holds.
+
+    A cursor value outside it is refused: the database would refuse to compare with it.
+
+    Parameters
+    ----------
+    low
+        The smallest value.
+    high
+        The largest value.
+    """
+
+    low: int
+    high: int
+
+
+SMALLINT_KEY = IntegerKey(-(2**15), 2**15 - 1)
+"""A key stored as a ``SMALLINT``."""
+
+BIGINT_KEY = IntegerKey(-(2**63), 2**63 - 1)
+"""A key stored as a ``BIGINT``; a key given as plain `int` holds this range too."""
+
+KeyType = type[str] | type[int] | type[datetime] | IntegerKey
+"""The type of one key of a sorted cursor."""
+
+
+class SortedPosition(NamedTuple):
+    """Where a page of a list sorted by chosen keys ended.
+
+    Parameters
+    ----------
+    values
+        The sort keys of the last item, in the order the list sorts by them; `None` for a null.
+    id
+        Its id, which breaks ties.
+    """
+
+    values: tuple[CursorValue, ...]
+    id: uuid.UUID
+
+
+def _tagged(value: CursorValue) -> list[str | int | None]:
+    """Write one sort key with its type's tag.
+
+    Parameters
+    ----------
+    value
+        The key.
+
+    Returns
+    -------
+    list
+        ``[tag, value]``; a time as ISO text.
+    """
+    if value is None:
+        return ["n", None]
+    if isinstance(value, datetime):
+        return ["t", value.isoformat()]
+    if isinstance(value, str):
+        return ["s", value]
+    return ["i", value]
+
+
+def encode_sorted_cursor(
+    kind: str, sort: str, values: Sequence[CursorValue], row_id: uuid.UUID
+) -> str:
+    """Encode the position of a page's last item, for a list sorted by chosen keys.
+
+    Parameters
+    ----------
+    kind
+        The list the cursor belongs to (``tables``).
+    sort
+        The sort the page was read in, ``<key>:<asc|desc>``.
+    values
+        The item's sort keys, in order; a time must be timezone-aware.
+    row_id
+        The item's id.
+
+    Returns
+    -------
+    str
+        Unpadded base64url of ``{"k": kind, "s": sort, "v": [[tag, value], …], "i": id}``.
+    """
+    body = {"k": kind, "s": sort, "v": [_tagged(v) for v in values], "i": str(row_id)}
+    return base64.urlsafe_b64encode(json.dumps(body).encode()).rstrip(b"=").decode()
+
+
+def _untagged(item: object, wanted: KeyType) -> CursorValue:
+    """Read one tagged sort key back, as the type the list expects.
+
+    Parameters
+    ----------
+    item
+        The ``[tag, value]`` pair a client sent back.
+    wanted
+        The type of the key at this place; an integer's range, or `int` for a ``BIGINT``.
+
+    Returns
+    -------
+    str, int, datetime or None
+        The key; a time in UTC.
+
+    Raises
+    ------
+    ValidationError
+        If the pair is malformed, of another type, or holds what no stored key does.
+    """
+    if not isinstance(item, list) or len(item) != 2:
+        raise ValidationError(_BAD_CURSOR)
+    tag, value = item
+    if tag == "n" and value is None:
+        return None
+    if wanted is int or isinstance(wanted, IntegerKey):
+        span = wanted if isinstance(wanted, IntegerKey) else BIGINT_KEY
+        if (
+            tag == "i"
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and span.low <= value <= span.high
+        ):
+            return value
+        raise ValidationError(_BAD_CURSOR)
+    if tag != _TAGS[wanted]:
+        raise ValidationError(_BAD_CURSOR)
+    if not isinstance(value, str):
+        raise ValidationError(_BAD_CURSOR)
+    if wanted is str:
+        return _stored_text(value)
+    try:
+        at = datetime.fromisoformat(value)
+        if at.tzinfo is None:
+            raise ValidationError(_BAD_CURSOR)
+        # A zone that moves a time past the first or last day the calendar holds overflows.
+        return at.astimezone(UTC)
+    except (ValueError, OverflowError) as exc:
+        raise ValidationError(_BAD_CURSOR) from exc
+
+
+def decode_sorted_cursor(
+    kind: str,
+    sort: str,
+    cursor: str,
+    types: Sequence[KeyType],
+) -> SortedPosition:
+    """Decode a cursor produced by `encode_sorted_cursor` for the list `kind` in the sort `sort`.
+
+    Parameters
+    ----------
+    kind
+        The list being read.
+    sort
+        The sort it is read in, ``<key>:<asc|desc>``.
+    cursor
+        The value a client sent back.
+    types
+        The type of each sort key, in order; an integer as the range of its column.
+
+    Returns
+    -------
+    SortedPosition
+        The position to resume after.
+
+    Raises
+    ------
+    ValidationError
+        If `cursor` is not one this server could have issued for these keys, or belongs to
+        another list or another sort; the message says to start again without it.
+    """
+    data = _cursor_body(kind, cursor)
+    if not isinstance(data.get("s"), str):
+        raise ValidationError(_BAD_CURSOR)
+    if data["s"] != sort:
+        raise ValidationError(_OTHER_SORT.format(expected=sort, actual=data["s"]))
+    values, raw_id = data.get("v"), data.get("i")
+    if not isinstance(values, list) or len(values) != len(types) or not isinstance(raw_id, str):
+        raise ValidationError(_BAD_CURSOR)
+    try:
+        row_id = uuid.UUID(raw_id)
+    except ValueError as exc:
+        raise ValidationError(_BAD_CURSOR) from exc
+    return SortedPosition(
+        tuple(_untagged(v, t) for v, t in zip(values, types, strict=True)), row_id
+    )
+
+
+def sorted_order(
+    keys: Sequence[ColumnElement[Any]], row_id: ColumnElement[uuid.UUID], descending: bool
+) -> list[ColumnElement[Any]]:
+    """Order a list by its keys and then its id, all in one direction, a null key last.
+
+    Parameters
+    ----------
+    keys
+        The sort keys, most significant first.
+    row_id
+        The id column, which breaks ties.
+    descending
+        Whether the list runs from the largest key down.
+
+    Returns
+    -------
+    list of ColumnElement
+        The ``ORDER BY`` terms.
+    """
+    if descending:
+        return [*(k.desc().nulls_last() for k in keys), row_id.desc()]
+    return [*(k.asc().nulls_last() for k in keys), row_id.asc()]
+
+
+def after_sorted(
+    keys: Sequence[ColumnElement[Any]],
+    row_id: ColumnElement[uuid.UUID],
+    descending: bool,
+    at: SortedPosition | None,
+) -> ColumnElement[bool]:
+    """Keep the rows strictly after a position, in the order of `sorted_order`.
+
+    Only a list sorted by one key can meet a null: it sorts last in both directions. A list
+    sorted by several keys sorts by keys that are never null.
+
+    Parameters
+    ----------
+    keys
+        The sort keys, most significant first.
+    row_id
+        The id column, which breaks ties.
+    descending
+        Whether the list runs from the largest key down.
+    at
+        Where the previous page ended; `None` for the first page.
+
+    Returns
+    -------
+    ColumnElement
+        The condition; true for every row on the first page.
+    """
+    if at is None:
+        return true()
+
+    def beyond(left: ColumnElement[Any], right: object) -> ColumnElement[bool]:
+        """Compare in the direction of the list.
+
+        Parameters
+        ----------
+        left
+            The column.
+        right
+            The value of the position.
+
+        Returns
+        -------
+        ColumnElement
+            True where `left` comes after `right`.
+        """
+        return left < right if descending else left > right
+
+    if len(keys) == 1:
+        key, value = keys[0], at.values[0]
+        if value is None:
+            return and_(key.is_(None), beyond(row_id, at.id))
+        return or_(beyond(key, value), and_(key == value, beyond(row_id, at.id)), key.is_(None))
+    condition = beyond(row_id, at.id)
+    for key, value in reversed(list(zip(keys, at.values, strict=True))):
+        condition = or_(beyond(key, value), and_(key == value, condition))
+    return condition
 
 
 def escape_like(value: str) -> str:

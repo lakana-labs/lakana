@@ -101,8 +101,8 @@ lakana table expiring --within 7d
 
 It lists the tables you may read that expire within the window, soonest first, with when, the
 rule and who set it. Without `--within` the window is the server's warning window,
-`LAKANA_TABLES__EXPIRY_WARNING_DAYS` (7 days by default). Within that window, `lakana table list`
-shows an `expires` column and `lakana table get` says when the table expires and how to keep it.
+`LAKANA_TABLES__EXPIRY_WARNING_DAYS` (7 days by default). Within that window, `lakana table list NAMESPACE`
+shows an `expires` column (the list across namespaces has none) and `lakana table get` says when the table expires and how to keep it.
 
 ## What counts as activity
 
