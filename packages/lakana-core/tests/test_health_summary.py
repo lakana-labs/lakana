@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 from home_test_helpers import check_result, deployed_job, environment, run_of
-from sqlalchemy import event, select, update
+from sqlalchemy import delete, event, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog import health_summary
@@ -474,6 +474,40 @@ def test_backfill_takes_the_lowest_ids_first_and_commits_a_chunk_at_a_time(
     assert backfill_health_keys(session, limit=2) == 2
     session.expire_all()
     assert {t.id for t in tables if t.health_item is not None} == set(first_two)
+
+
+def test_backfill_skips_a_table_dropped_while_it_runs(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = sorted((_table(session, "a"), _table(session, "b")), key=lambda t: t.id)
+    session.commit()
+    gone = first.id
+    compute = health_summary._compute
+
+    def drop_then_compute(s: Session, table_id: uuid.UUID) -> object:
+        """Drop the first table just before its word is computed.
+
+        Parameters
+        ----------
+        s
+            Database session.
+        table_id
+            The table.
+
+        Returns
+        -------
+        object
+            What the real computation gives.
+        """
+        if table_id == gone:
+            s.execute(delete(Table).where(Table.id == gone))
+        return compute(s, table_id)
+
+    monkeypatch.setattr(health_summary, "_compute", drop_then_compute)
+    assert backfill_health_keys(session) == 2
+    session.expire_all()
+    assert session.get(Table, gone) is None
+    assert second.health_item == "not_judged"
 
 
 def test_a_check_name_with_two_segments_is_not_a_reference_check(session: Session) -> None:

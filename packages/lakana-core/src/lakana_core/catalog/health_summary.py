@@ -333,7 +333,7 @@ def backfill_health_keys(session: Session, *, limit: int = 500) -> int:
     """Compute the health word of tables that have none, as housekeeping.
 
     The tables are taken in id order and committed `_CHUNK` at a time, so a commit to one of them
-    never waits behind the whole batch.
+    never waits behind the whole batch. A table dropped after its id was read is skipped.
 
     Parameters
     ----------
@@ -353,7 +353,8 @@ def backfill_health_keys(session: Session, *, limit: int = 500) -> int:
     for start in range(0, len(ids), _CHUNK):
         for table_id in ids[start : start + _CHUNK]:
             summary = _compute(session, table_id)
-            assert summary is not None  # nosec B101 -- the id was just read
+            if summary is None:
+                continue
             _store(session, table_id, summary, only_unset=True)
         session.commit()
     session.commit()

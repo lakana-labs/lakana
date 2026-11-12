@@ -526,7 +526,7 @@ Without NAMESPACE: one page of the tables you may read in the environment (or in
 | `--search` | text | none | Only tables whose name, label, description or grain, or a column's name, label, description or measure, contains this text (1 to 200 characters). |
 | `--under` | text | none | Only this namespace and the ones beneath it, dotted (no NAMESPACE). |
 | `--all-environments` | flag | off | List the tables of every environment you may read. |
-| `--sort` | text | `name` | What to sort by: name, owner, health, rows, size, last_write, last_read or created. A table with no value comes last. |
+| `--sort` | text | none | What to sort by: name (the default), owner, health, rows, size, last_write, last_read or created. A table with no value comes last. |
 | `--order` | text | none | asc or desc (default: asc for name, owner and health, desc for the rest). |
 | `--limit` | whole number, 1 to 200 | none | Most rows to list (default 50, at most 200). |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |

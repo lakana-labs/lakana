@@ -17,7 +17,7 @@ Both need a signed-in caller (`401` otherwise) and take no environment in the pa
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `environment` | every environment you may read | Only this environment. `404` if it does not exist. |
+| `environment` | every environment you may read | Only this environment. If it does not exist: a `404` when you may read environments (`READ_ENVIRONMENT`), otherwise an empty page, as for one that exists. |
 | `namespace` | every namespace | Only this namespace and the ones beneath it, dotted: `gold` lists `gold` and `gold.sales`, not `golden`. |
 | `q` | no search | Only tables whose name, label, description or grain, or a column's name, label, description or measure, contains this text, in any letter case. 1 to 200 characters after trimming. `%`, `_` and `\` match themselves. The rules are those of [Search](search.md). |
 | `model_kind` | any | Only tables whose asset header declares this kind: `fact`, `dimension`, `wide` or `staging`. |

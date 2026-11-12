@@ -21,7 +21,8 @@ from __future__ import annotations
 import enum
 import re
 import uuid
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Generator, Sequence
+from contextlib import closing
 from dataclasses import dataclass
 from functools import partial
 from itertools import islice
@@ -85,7 +86,7 @@ SNIPPET_LENGTH = 160
 """The most characters of a description a hit shows."""
 
 CHUNK = 200
-"""How many ranked candidates are fetched, and then checked against the caller's rights, at once."""
+"""How many ranked candidates are fetched at once, from the one ranked statement a search runs."""
 
 MAX_SCANNED = 5000
 """The most candidates one search examines. A caller who may read few of many matches gets what
@@ -652,8 +653,8 @@ class CatalogSearch:
         """
         readable: dict[tuple[str, str], bool] = {}
         may_see = partial(self._may_see, p, environment, readable=readable)
-        walk = _walk(self._session, selects, may_see, max_scanned=MAX_SCANNED)
-        return [_hit(row, needle) for row in islice(walk, offset, wanted)]
+        with closing(_walk(self._session, selects, may_see, max_scanned=MAX_SCANNED)) as walk:
+            return [_hit(row, needle) for row in islice(walk, offset, wanted)]
 
     def table_matches(
         self,
@@ -720,14 +721,15 @@ class CatalogSearch:
             """
             return uuid.UUID(row.sort_id) in readable
 
-        for row in _walk(self._session, selects, may_see, max_scanned=None):
-            table_id = uuid.UUID(row.sort_id)
-            if table_id in hits:
-                continue
-            if len(hits) == limit:
-                capped = True
-                break
-            hits[table_id] = _hit(row, needle)
+        with closing(_walk(self._session, selects, may_see, max_scanned=None)) as walk:
+            for row in walk:
+                table_id = uuid.UUID(row.sort_id)
+                if table_id in hits:
+                    continue
+                if len(hits) == limit:
+                    capped = True
+                    break
+                hits[table_id] = _hit(row, needle)
         return TableMatches(hits, capped)
 
     def _may_see(
@@ -775,8 +777,11 @@ def _walk(
     may_see: Callable[[_Candidate], bool],
     *,
     max_scanned: int | None,
-) -> Iterator[_Candidate]:
+) -> Generator[_Candidate]:
     """Walk the ranked candidates, best first, and yield the ones the caller may see.
+
+    The ranked select runs once and is read `CHUNK` rows at a time, so a walk costs one sort of
+    the union however far it goes. Close the generator when done with it: that closes the select.
 
     Parameters
     ----------
@@ -813,13 +818,12 @@ def _walk(
         union.c.f4,
     )
     seen: set[tuple[object, ...]] = set()
-    scanned = position = 0
-    while True:
-        rows = session.execute(ranked.limit(CHUNK).offset(position)).all()
-        if not rows:
-            return
-        position += len(rows)
-        for row in rows:
+    scanned = 0
+    # One statement, read `CHUNK` rows at a time: re-running it per chunk with an offset would
+    # sort the whole union again for each chunk.
+    result = session.execute(ranked.execution_options(yield_per=CHUNK))
+    try:
+        for row in result:
             if max_scanned is not None and scanned >= max_scanned:
                 return
             scanned += 1
@@ -836,6 +840,8 @@ def _walk(
                 seen.add(identity)
             if may_see(row):
                 yield row
+    finally:
+        result.close()
 
 
 def _header_language(main_language: str) -> ColumnElement[str]:

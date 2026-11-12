@@ -194,7 +194,7 @@ def list_tables(
     return TableListPageOut.model_validate(page, from_attributes=True)
 
 
-@router.get("/tree", response_model=TableTreeOut, responses=errors(404))
+@router.get("/tree", response_model=TableTreeOut)
 def table_tree(
     principal: PrincipalRef = Depends(get_principal),
     service: TableListing = Depends(get_table_listing),

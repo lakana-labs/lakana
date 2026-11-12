@@ -312,13 +312,13 @@ def list_tables(
         ),
     ] = False,
     sort: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--sort",
-            help="What to sort by: name, owner, health, rows, size, last_write, last_read or "
-            "created. A table with no value comes last.",
+            help="What to sort by: name (the default), owner, health, rows, size, last_write, "
+            "last_read or created. A table with no value comes last.",
         ),
-    ] = "name",
+    ] = None,
     order: Annotated[
         str | None,
         typer.Option(
@@ -398,24 +398,18 @@ def list_tables(
             None if all_environments else resolve_environment(state, env),
             search=search,
             under=under,
-            sort=sort,
+            sort=sort or "name",
             order=order,
             limit=limit,
             cursor=cursor,
             env=env,
         )
         return
-    if (
-        search is not None
-        or under is not None
-        or all_environments
-        or sort != "name"
-        or order is not None
-        or cursor is not None
-    ):
+    across = (search, under, sort, order, limit, cursor)
+    if all_environments or any(option is not None for option in across):
         raise CliError(
-            "--search, --under, --all-environments, --sort, --order and --cursor list across "
-            "namespaces: leave out NAMESPACE and pass --under NAMESPACE instead."
+            "--search, --under, --all-environments, --sort, --order, --limit and --cursor list "
+            "across namespaces: leave out NAMESPACE and pass --under NAMESPACE instead."
         )
     environment = resolve_environment(state, env)
     if dropped:

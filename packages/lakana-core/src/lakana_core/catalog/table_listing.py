@@ -48,7 +48,10 @@ from lakana_core.models import (
 )
 from lakana_core.models.table import table_kind
 from lakana_core.pagination import (
+    BIGINT_KEY,
+    SMALLINT_KEY,
     CursorValue,
+    KeyType,
     SortedPosition,
     after_sorted,
     decode_sorted_cursor,
@@ -129,17 +132,18 @@ READERS_DAYS = 7
 CURSOR_KIND = "tables"
 """The list's name in its cursor."""
 
-_KEY_TYPES: Mapping[TableSort, tuple[type[str] | type[int] | type[datetime], ...]] = {
+_KEY_TYPES: Mapping[TableSort, tuple[KeyType, ...]] = {
     TableSort.NAME: (str, str, str),
     TableSort.OWNER: (str,),
-    TableSort.HEALTH: (int,),
-    TableSort.ROWS: (int,),
-    TableSort.SIZE: (int,),
+    TableSort.HEALTH: (SMALLINT_KEY,),
+    TableSort.ROWS: (BIGINT_KEY,),
+    TableSort.SIZE: (BIGINT_KEY,),
     TableSort.LAST_WRITE: (datetime,),
     TableSort.LAST_READ: (datetime,),
     TableSort.CREATED: (datetime,),
 }
-"""The type of each key of a sort, as its cursor holds them."""
+"""The type of each key of a sort, as its cursor holds them; an integer as its column's range
+(`Table.health_rank` is a ``SMALLINT``, `row_count` and `size_bytes` ``BIGINT``)."""
 
 
 # jscpd:ignore-start

@@ -595,6 +595,38 @@ def test_a_search_gives_up_after_looking_at_a_bounded_number_of_matches(world: W
     assert page.has_more is False
 
 
+def test_a_search_reads_the_ranked_union_once_whatever_the_chunk(world: World) -> None:
+    statements: list[str] = []
+
+    def _keep(conn: object, cursor: object, statement: str, *args: object) -> None:
+        """Keep one statement.
+
+        Parameters
+        ----------
+        conn
+            The connection.
+        cursor
+            The cursor.
+        statement
+            The SQL.
+        *args
+            The rest.
+        """
+        statements.append(statement)
+
+    whole = world.search(world.bob, "o", limit=5)
+    engine = world.session.get_bind()
+    event.listen(engine, "before_cursor_execute", _keep)
+    try:
+        with mock.patch.object(search_module, "CHUNK", 1):
+            page = world.search(world.bob, "o", limit=5)
+    finally:
+        event.remove(engine, "before_cursor_execute", _keep)
+    assert len(page.results) > 1
+    assert page == whole
+    assert sum("ORDER BY hits.rank" in s for s in statements) == 1
+
+
 def test_the_authorization_is_asked_once_per_table(world: World) -> None:
     authz = GrantAuthorization(world.session)
     with mock.patch.object(authz, "permits", wraps=authz.permits) as permits:

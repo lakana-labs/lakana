@@ -6050,16 +6050,6 @@
               }
             }
           },
-          "404": {
-            "description": "What the request names does not exist, or the caller may not know that it does.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorOut"
-                }
-              }
-            }
-          },
           "422": {
             "description": "Validation Error",
             "content": {

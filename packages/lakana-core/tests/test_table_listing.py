@@ -45,6 +45,7 @@ from lakana_core.models import (
     TableType,
     TextTranslation,
 )
+from lakana_core.pagination import encode_sorted_cursor
 
 _T0 = datetime(2026, 10, 1, tzinfo=UTC)
 
@@ -379,6 +380,24 @@ def _count_statements(engine: Engine, call: Callable[[], object]) -> int:
     int
         The statements it sent.
     """
+    return len(_statements(engine, call))
+
+
+def _statements(engine: Engine, call: Callable[[], object]) -> list[str]:
+    """Record the statements a call sends.
+
+    Parameters
+    ----------
+    engine
+        The engine the call uses.
+    call
+        What to run.
+
+    Returns
+    -------
+    list of str
+        The statements it sent, in order.
+    """
     statements: list[str] = []
 
     def _count(conn: object, cursor: object, statement: str, *args: object) -> None:
@@ -402,7 +421,7 @@ def _count_statements(engine: Engine, call: Callable[[], object]) -> int:
         call()
     finally:
         event.remove(engine, "before_cursor_execute", _count)
-    return len(statements)
+    return statements
 
 
 def _page_through(listing: TableListing, p: PrincipalRef, **filters: object) -> list[uuid.UUID]:
@@ -844,3 +863,92 @@ def test_the_statements_do_not_grow_with_the_page(session: Session) -> None:
     assert large == small
     words = {i.health_summary.item for i in fresh().list(admin, limit=12).items}
     assert words == {"check_failed"}
+
+
+def test_a_search_reads_the_ranked_matches_once_however_many_there_are(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # chunks of 2 rows: 3 tables of 3 matching columns are 12 ranked rows, 12 tables are 48
+    monkeypatch.setattr(search, "CHUNK", 2)
+    admin = person(session, "admin")
+    GrantService(session, AllowAllAuthorization()).grant(
+        admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    silver = _namespace(session, environment(session, "dev"), "silver")
+
+    def add_tables(first: int, count: int) -> None:
+        """Add tables named ``cN``, each with three columns ``cN_M``.
+
+        Parameters
+        ----------
+        first
+            The first N.
+        count
+            How many.
+        """
+        for n in range(first, first + count):
+            table = _table(session, silver, f"c{n}")
+            for m in range(3):
+                session.add(
+                    TableColumn(
+                        id=uuid.uuid4(), table_id=table.id, name=f"c{n}_{m}", type="int", position=m
+                    )
+                )
+        session.commit()
+
+    def listed() -> list[str]:
+        """List the tables matching ``c``, as a fresh request would.
+
+        Returns
+        -------
+        list of str
+            Their names.
+        """
+        return _names(TableListing(session, GrantAuthorization(session)).list(admin, q="c"))
+
+    engine = session.get_bind()
+    assert isinstance(engine, Engine)
+    add_tables(0, 3)
+    small = _statements(engine, listed)
+    add_tables(3, 9)
+    large = _statements(engine, listed)
+    assert len(large) == len(small)
+    assert sum("ORDER BY hits.rank" in s for s in large) == 1
+    assert len(listed()) == 12
+
+
+@pytest.mark.parametrize(
+    ("sort", "value"),
+    [
+        (TableSort.HEALTH, 2**15),
+        (TableSort.HEALTH, -(2**15) - 1),
+        (TableSort.ROWS, 2**63),
+        (TableSort.ROWS, -(2**63) - 1),
+        (TableSort.SIZE, 2**63),
+        (TableSort.SIZE, -(2**63) - 1),
+    ],
+)
+def test_a_forged_integer_cursor_outside_its_column_is_refused(
+    world: ListingWorld, sort: TableSort, value: int
+) -> None:
+    sort_name = f"{sort.value}:{DEFAULT_ORDER[sort].value}"
+    cursor = encode_sorted_cursor("tables", sort_name, (value,), uuid.uuid4())
+    with pytest.raises(ValidationError, match="cursor is not valid"):
+        world.listing.list(world.admin, sort=sort, cursor=cursor)
+
+
+@pytest.mark.parametrize(
+    ("sort", "value"),
+    [
+        (TableSort.HEALTH, 2**15 - 1),
+        (TableSort.HEALTH, -(2**15)),
+        (TableSort.ROWS, 2**63 - 1),
+        (TableSort.SIZE, -(2**63)),
+    ],
+)
+def test_an_integer_cursor_at_the_edge_of_its_column_is_read(
+    world: ListingWorld, sort: TableSort, value: int
+) -> None:
+    sort_name = f"{sort.value}:{DEFAULT_ORDER[sort].value}"
+    cursor = encode_sorted_cursor("tables", sort_name, (value,), uuid.uuid4())
+    assert world.listing.list(world.admin, sort=sort, cursor=cursor).next_cursor is None

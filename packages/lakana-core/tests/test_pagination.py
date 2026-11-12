@@ -13,7 +13,10 @@ from lakana_core.errors import ValidationError
 from lakana_core.pagination import (
     _BAD_CURSOR,
     _OTHER_LIST,
+    BIGINT_KEY,
+    SMALLINT_KEY,
     CursorValue,
+    KeyType,
     Position,
     SortedPosition,
     decode_cursor,
@@ -27,7 +30,7 @@ from lakana_core.pagination import (
 
 _AT = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
 ID = uuid.UUID("00000000-0000-0000-0000-000000000042")
-_KeyType = type[str] | type[int] | type[datetime]
+_KeyType = KeyType
 
 
 def _raw(payload: bytes) -> str:
@@ -249,12 +252,46 @@ def test_a_sorted_cursor_that_was_not_issued_is_refused(body: bytes) -> None:
         ('["s", "a\\ud800"]', str),
         ('["s", 1]', str),
         ('["i", "2026-11-12T00:00:00+00:00"]', int),
+        ('["i", 1]', str),
+        ('["s", "2026-11-12T00:00:00+00:00"]', datetime),
     ],
 )
 def test_a_sorted_cursor_value_that_was_not_issued_is_refused(value: str, type_: _KeyType) -> None:
     body = '{"k": "tables", "s": "name:asc", "v": [' + value + '], "i": ' + _GOOD_ID + "}"
     with pytest.raises(ValidationError, match="cursor is not valid"):
         decode_sorted_cursor("tables", "name:asc", _raw(body.encode()), (type_,))
+
+
+@pytest.mark.parametrize(
+    ("value", "type_", "ok"),
+    [
+        (2**15 - 1, SMALLINT_KEY, True),
+        (-(2**15), SMALLINT_KEY, True),
+        (2**15, SMALLINT_KEY, False),
+        (-(2**15) - 1, SMALLINT_KEY, False),
+        (2**63 - 1, BIGINT_KEY, True),
+        (-(2**63), BIGINT_KEY, True),
+        (2**63, BIGINT_KEY, False),
+        (-(2**63) - 1, BIGINT_KEY, False),
+        (2**63, int, False),
+        (2**63 - 1, int, True),
+    ],
+)
+def test_an_integer_key_holds_only_what_its_column_holds(
+    value: int, type_: _KeyType, ok: bool
+) -> None:
+    c = encode_sorted_cursor("tables", "rows:desc", (value,), ID)
+    if ok:
+        assert decode_sorted_cursor("tables", "rows:desc", c, (type_,)).values == (value,)
+    else:
+        with pytest.raises(ValidationError, match="cursor is not valid"):
+            decode_sorted_cursor("tables", "rows:desc", c, (type_,))
+
+
+def test_an_integer_key_wants_the_integer_tag() -> None:
+    c = encode_sorted_cursor("tables", "health:asc", ("1",), ID)
+    with pytest.raises(ValidationError, match="cursor is not valid"):
+        decode_sorted_cursor("tables", "health:asc", c, (SMALLINT_KEY,))
 
 
 @pytest.mark.parametrize("character", ["\x00", "\t", "\x1f", "\x7f", "\ud800"])

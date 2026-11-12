@@ -231,6 +231,15 @@ Each cell is a summary. The page named in the last column has the detail. The ch
   `http://localhost:<port>`: a value in your shell (for example from a bundle's `.env`) is ignored
   with one line saying so.
 
+### Table sizes are measured again after the upgrade
+
+- Migration `0075` adds each table's rows, last write, last read and health in one word to
+  `tables`, for the new table list, and marks the size of every managed table as not yet
+  measured. Until the worker's hourly sweep has measured a table again (up to 200 per sweep),
+  `lakana env usage` counts it as `unmeasured` and its total ends with `+`
+  ([Disk use](../how-to/instance-health.md#disk-use)). The sweeps fill the
+  figures in by themselves: nothing has to be done.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

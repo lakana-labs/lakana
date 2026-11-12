@@ -407,6 +407,33 @@ _TAGS: dict[type, str] = {str: "s", int: "i", datetime: "t"}
 """The tag of each type a sorted cursor holds; ``n`` is null."""
 
 
+class IntegerKey(NamedTuple):
+    """An integer sort key, with the range its column holds.
+
+    A cursor value outside it is refused: the database would refuse to compare with it.
+
+    Parameters
+    ----------
+    low
+        The smallest value.
+    high
+        The largest value.
+    """
+
+    low: int
+    high: int
+
+
+SMALLINT_KEY = IntegerKey(-(2**15), 2**15 - 1)
+"""A key stored as a ``SMALLINT``."""
+
+BIGINT_KEY = IntegerKey(-(2**63), 2**63 - 1)
+"""A key stored as a ``BIGINT``; a key given as plain `int` holds this range too."""
+
+KeyType = type[str] | type[int] | type[datetime] | IntegerKey
+"""The type of one key of a sorted cursor."""
+
+
 class SortedPosition(NamedTuple):
     """Where a page of a list sorted by chosen keys ended.
 
@@ -469,7 +496,7 @@ def encode_sorted_cursor(
     return base64.urlsafe_b64encode(json.dumps(body).encode()).rstrip(b"=").decode()
 
 
-def _untagged(item: object, wanted: type[str] | type[int] | type[datetime]) -> CursorValue:
+def _untagged(item: object, wanted: KeyType) -> CursorValue:
     """Read one tagged sort key back, as the type the list expects.
 
     Parameters
@@ -477,7 +504,7 @@ def _untagged(item: object, wanted: type[str] | type[int] | type[datetime]) -> C
     item
         The ``[tag, value]`` pair a client sent back.
     wanted
-        The type of the key at this place.
+        The type of the key at this place; an integer's range, or `int` for a ``BIGINT``.
 
     Returns
     -------
@@ -494,11 +521,17 @@ def _untagged(item: object, wanted: type[str] | type[int] | type[datetime]) -> C
     tag, value = item
     if tag == "n" and value is None:
         return None
-    if tag != _TAGS[wanted]:
-        raise ValidationError(_BAD_CURSOR)
-    if wanted is int:
-        if isinstance(value, int) and not isinstance(value, bool):
+    if wanted is int or isinstance(wanted, IntegerKey):
+        span = wanted if isinstance(wanted, IntegerKey) else BIGINT_KEY
+        if (
+            tag == "i"
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and span.low <= value <= span.high
+        ):
             return value
+        raise ValidationError(_BAD_CURSOR)
+    if tag != _TAGS[wanted]:
         raise ValidationError(_BAD_CURSOR)
     if not isinstance(value, str):
         raise ValidationError(_BAD_CURSOR)
@@ -518,7 +551,7 @@ def decode_sorted_cursor(
     kind: str,
     sort: str,
     cursor: str,
-    types: Sequence[type[str] | type[int] | type[datetime]],
+    types: Sequence[KeyType],
 ) -> SortedPosition:
     """Decode a cursor produced by `encode_sorted_cursor` for the list `kind` in the sort `sort`.
 
@@ -531,7 +564,7 @@ def decode_sorted_cursor(
     cursor
         The value a client sent back.
     types
-        The type of each sort key, in order.
+        The type of each sort key, in order; an integer as the range of its column.
 
     Returns
     -------

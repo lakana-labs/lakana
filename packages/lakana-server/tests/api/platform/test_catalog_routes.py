@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.models import AuditEvent, AuditEventType, Principal, Table
+from lakana_core.pagination import encode_sorted_cursor
 from tests.api.platform.test_tables_descriptions import _person
 from tests.api.platform.test_tables_health import _add_reads, _health, _table
 from tests.conftest import AUTH_HEADER
@@ -117,6 +118,21 @@ def test_a_cursor_of_another_sort_is_422(client: TestClient) -> None:
         "/api/v1/tables", params={"sort": "rows", "limit": 1}, headers=AUTH_HEADER
     ).json()["next_cursor"]
     r = client.get("/api/v1/tables", params={"sort": "size", "cursor": c}, headers=AUTH_HEADER)
+    assert r.status_code == 422 and "Start the listing again without `cursor`" in r.text
+
+
+@pytest.mark.parametrize(
+    ("sort", "value"), [("health:asc", 2**15), ("rows:desc", 2**63), ("size:desc", -(2**63) - 1)]
+)
+def test_a_forged_integer_cursor_is_422(client: TestClient, sort: str, value: int) -> None:
+    _table(client, "a")
+    key, order = sort.split(":")
+    cursor = encode_sorted_cursor("tables", sort, (value,), uuid.uuid4())
+    r = client.get(
+        "/api/v1/tables",
+        params={"sort": key, "order": order, "cursor": cursor},
+        headers=AUTH_HEADER,
+    )
     assert r.status_code == 422 and "Start the listing again without `cursor`" in r.text
 
 
