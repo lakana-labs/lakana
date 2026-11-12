@@ -255,7 +255,7 @@ def _note_of(world: World, dotted: str) -> tuple[uuid.UUID | None, uuid.UUID | N
 
 # One more than before #282: recording an attempt reads its write run's figures
 # (`_write_run_figures`) until the worker passes the figures it measured itself.
-_STATEMENTS = {False: 65, True: 130}
+_STATEMENTS = {False: 74, True: 151}
 """Statements of a task's own thread, by whether it has checks (measured before the note).
 
 Two of them look for the project's descriptions of the table the task creates. With checks, each
@@ -266,7 +266,13 @@ table's location (#90): the database's time and the insert of the claim, the rel
 namespace and the environment that its commit expired, and the publish fence's update. One more
 is the share lock on the environment row that the publish takes before the fence (#213). Two
 come with the table's health signals at its first snapshot (#340): the database's time and the
-insert of the signal rows."""
+insert of the signal rows.
+
+The stored keys of the table list (#551) add 9, and with checks 21. Each refresh of the stored
+health word is 9: the table's type, its latest checks, the six reads of its current signals and
+the update of the word. The commit that gives the table data refreshes it once; with checks the
+recording of the check result does again, after locking the table row (one more). And each of the
+two check queries that read the table moves its `last_read_at` (one update each)."""
 
 
 def _statements_of(world: World, claimed: ClaimedTask) -> int:

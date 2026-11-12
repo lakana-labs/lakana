@@ -23,6 +23,7 @@ from lakana_core.auth import (
     TaskScope,
 )
 from lakana_core.catalog import service as catalog_service
+from lakana_core.catalog.health import StoredStats
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -338,6 +339,7 @@ def test_a_zombie_write_in_an_unprotected_environment_lands_nothing(
         expected_location: str | None,
         new_location: str,
         publish: bool = False,
+        stats: StoredStats | None = None,
     ) -> None:
         with Session(pointer_session.get_bind()) as scheduler:
             _reclaim(scheduler, task_run_id)
@@ -347,6 +349,7 @@ def test_a_zombie_write_in_an_unprotected_environment_lands_nothing(
             expected_location=expected_location,
             new_location=new_location,
             publish=publish,
+            stats=stats,
         )
 
     monkeypatch.setattr(catalog_service, "commit_metadata_pointer", reclaim_first)
