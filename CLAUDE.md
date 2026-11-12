@@ -141,6 +141,11 @@ that says what to do next, and the user documentation in the same change. A feat
 user documentation is not finished.
 </important>
 
+<important if="you are building, changing or reviewing anything under `ui/src` that a person sees (a screen, component, stylesheet, string or glyph)">
+Read `docs/agent/still-water.md`, the Still Water checklist every screen pull request is checked
+against, and "The `ui/` project" in `docs/agent/conventions.md`.
+</important>
+
 <important if="you are writing or changing tests">
 Read `docs/agent/testing.md` for the unit/integration split, fixtures, and the coverage
 ratchet. Integration tests use testcontainers against real Postgres and SeaweedFS (S3), never mocks.

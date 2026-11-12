@@ -240,12 +240,12 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   `ui/src/shell/Breadcrumbs.tsx`, above the heading: a `nav` landmark named "Breadcrumb", every
   part but the last a link, `aria-current="page"` on the last, separators hidden from screen
   readers, wrapping at 320 px. An area's own pages (a list, a tab of the area) have none.
-- **Every screen pull request is checked against the project skill `lakana-ui`**
-  (`.claude/skills/lakana-ui/SKILL.md`): the Still Water tokens and component rules, one pattern
+- **Every screen pull request is checked against the Still Water checklist**
+  (`docs/agent/still-water.md`): the Still Water tokens and component rules, one pattern
   per area, rows that open their object, breadcrumbs, refusals that name the cause and the next
   step, the accessibility rules and the forbidden list (what makes an interface look generated).
   The reasons are on the contributor page `docs/site/explanation/how-lakana-looks.md`; change
-  the skill and the page together.
+  the checklist and the page together.
 - **A button that waits for the server is a `PendingButton`** (`ui/src/shell/PendingButton.tsx`):
   it shows the pending sign from the first moment and cannot be pressed again; words that say
   what the person waits for follow within 1 s. The sign is an indeterminate React Aria
