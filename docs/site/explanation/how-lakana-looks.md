@@ -3,7 +3,7 @@
 This page explains the look of Lakana's web interface and the reasons behind it. It is
 for anyone who changes a screen, and for anyone who wants to know why the interface is so
 quiet. The rules themselves live in the code: the token file `ui/src/styles/tokens.css` and
-its tests, and the project skill `.claude/skills/lakana-ui/SKILL.md`, which every pull request
+its tests, and the checklist `docs/agent/still-water.md`, which every pull request
 that changes a screen is checked against.
 
 **Short answer.** The interface should feel calm and familiar after ten minutes: few
@@ -152,7 +152,7 @@ The interface fails, even if every feature works, when it:
 - asks for workflows that are too complex;
 - looks full or dense.
 
-The project skill lists the patterns that make an interface look generated, such as purple
+The checklist lists the patterns that make an interface look generated, such as purple
 and blue gradients, frosted glass, emoji as icons, and shadowed rounded cards for everything.
 
 ## Influences

@@ -1,12 +1,9 @@
----
-name: lakana-ui
-description: Still Water, the look of Lakana's web interface, as rules for building or reviewing a screen in ui/. Use before writing or changing anything under ui/src that a person sees (a screen, component, stylesheet, string or glyph), and when reviewing a pull request that does; every screen pull request is checked against this skill.
----
-
 # Lakana UI: Still Water
 
-The reasons behind every rule here are on the contributor page
-`docs/site/explanation/how-lakana-looks.md`; read it once. This skill is the checklist.
+This is the Still Water checklist for the web interface in `ui/`: the rules to follow when you
+build or change anything under `ui/src` that a person sees (a screen, component, stylesheet,
+string or glyph). Every screen pull request is checked against it. The reasons behind every
+rule are on the contributor page `docs/site/explanation/how-lakana-looks.md`; read that once.
 Code rules for `ui/` (CSP, i18n, parity, breadcrumb component, licences) are in
 `docs/agent/conventions.md`, "The `ui/` project"; its gates in `docs/agent/testing.md`.
 
