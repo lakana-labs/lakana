@@ -320,11 +320,33 @@ def decode_key_cursor(kind: str, cursor: str) -> str:
         If `cursor` is not one this server could have issued, or belongs to another list.
     """
     key = _cursor_body(kind, cursor).get("n")
-    # A cursor this server issued holds a stored key, never a NUL or a lone surrogate, which
-    # the database driver could not take.
-    if not isinstance(key, str) or any(unicodedata.category(c) in ("Cc", "Cs") for c in key):
+    if not isinstance(key, str):
         raise ValidationError(_BAD_CURSOR)
-    return key
+    return _stored_text(key)
+
+
+def _stored_text(value: str) -> str:
+    """Refuse a cursor's text that no stored name or key can hold.
+
+    Parameters
+    ----------
+    value
+        A text a client sent back in a cursor.
+
+    Returns
+    -------
+    str
+        `value`, unchanged.
+
+    Raises
+    ------
+    ValidationError
+        If it holds a control character or a lone surrogate: names and keys never do, and a NUL
+        or a lone surrogate is one the database driver could not take.
+    """
+    if any(unicodedata.category(c) in ("Cc", "Cs") for c in value):
+        raise ValidationError(_BAD_CURSOR)
+    return value
 
 
 def by_key(
@@ -481,18 +503,15 @@ def _untagged(item: object, wanted: type[str] | type[int] | type[datetime]) -> C
     if not isinstance(value, str):
         raise ValidationError(_BAD_CURSOR)
     if wanted is str:
-        # A cursor this server issued holds a stored name, never a NUL or a lone surrogate,
-        # which the database driver could not take.
-        if any(c == "\x00" or unicodedata.category(c) == "Cs" for c in value):
-            raise ValidationError(_BAD_CURSOR)
-        return value
+        return _stored_text(value)
     try:
         at = datetime.fromisoformat(value)
-    except ValueError as exc:
+        if at.tzinfo is None:
+            raise ValidationError(_BAD_CURSOR)
+        # A zone that moves a time past the first or last day the calendar holds overflows.
+        return at.astimezone(UTC)
+    except (ValueError, OverflowError) as exc:
         raise ValidationError(_BAD_CURSOR) from exc
-    if at.tzinfo is None:
-        raise ValidationError(_BAD_CURSOR)
-    return at.astimezone(UTC)
 
 
 def decode_sorted_cursor(

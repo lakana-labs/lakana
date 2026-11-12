@@ -419,27 +419,12 @@ def table_facts(
     }
 
 
-def _forms(namespace: str) -> list[str]:
-    """Give the stored paths a dotted namespace filter may name.
-
-    Every dot separates a component, as the dotted form is read everywhere else; the text as one
-    component is kept too, so a namespace created before dots were refused stays listable.
-
-    Parameters
-    ----------
-    namespace
-        The filter, dotted.
-
-    Returns
-    -------
-    list of str
-        The stored paths, without repeats.
-    """
-    return sorted({NAMESPACE_SEPARATOR.join(namespace.split(".")), namespace})
-
-
 def _under(namespace: str) -> ColumnElement[bool]:
     """Keep the tables of a namespace and of the namespaces beneath it, never a sibling's.
+
+    The filter is compared with the namespace's path as it is shown, dotted: equal, or followed
+    by a dot. So a namespace created before dots were refused, whose component holds a dot, is
+    listed by the path it is shown with, whichever of its components holds the dot.
 
     Parameters
     ----------
@@ -451,15 +436,8 @@ def _under(namespace: str) -> ColumnElement[bool]:
     ColumnElement
         The condition on `Namespace.path`; ``%`` and ``_`` are taken literally.
     """
-    return or_(
-        *(
-            or_(
-                Namespace.path == form,
-                Namespace.path.like(escape_like(form) + NAMESPACE_SEPARATOR + "%", escape="\\"),
-            )
-            for form in _forms(namespace)
-        )
-    )
+    dotted = func.replace(Namespace.path, NAMESPACE_SEPARATOR, ".")
+    return or_(dotted == namespace, dotted.like(escape_like(namespace) + ".%", escape="\\"))
 
 
 def _is_under(path: str, namespace: str) -> bool:
@@ -477,9 +455,8 @@ def _is_under(path: str, namespace: str) -> bool:
     bool
         Whether a table of `path` is listed under `namespace`.
     """
-    return any(
-        path == form or path.startswith(form + NAMESPACE_SEPARATOR) for form in _forms(namespace)
-    )
+    dotted = path.replace(NAMESPACE_SEPARATOR, ".")
+    return dotted == namespace or dotted.startswith(namespace + ".")
 
 
 def _sort_keys(sort: TableSort) -> list[ColumnElement[Any]]:
@@ -670,7 +647,7 @@ class TableListing:
                 list(environments), q, readable=allowed, languages=languages
             )
             hits, capped = found.hits, found.capped
-            allowed = set(hits)
+            allowed = {table_id for table_id in hits if table_id in allowed}
         if not allowed:
             return TableListPage([], None, capped)
         keys = _sort_keys(sort)

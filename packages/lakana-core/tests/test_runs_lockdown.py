@@ -41,6 +41,7 @@ from lakana_core.auth import (
 )
 from lakana_core.catalog import service as catalog_service
 from lakana_core.catalog.append import build_transaction
+from lakana_core.catalog.health import StoredStats
 from lakana_core.catalog.query_service import QueryService, WriteTarget
 from lakana_core.catalog.service import CatalogService, _added_records
 from lakana_core.catalog.writes import LineageSource
@@ -759,6 +760,7 @@ def test_a_write_whose_attempt_is_superseded_before_the_commit_lands_nothing(
         expected_location: str | None,
         new_location: str,
         publish: bool = False,
+        stats: StoredStats | None = None,
     ) -> None:
         if cause == "reclaimed":
             _reclaim(pointer_session, context)
@@ -774,6 +776,7 @@ def test_a_write_whose_attempt_is_superseded_before_the_commit_lands_nothing(
             expected_location=expected_location,
             new_location=new_location,
             publish=publish,
+            stats=stats,
         )
 
     monkeypatch.setattr(catalog_service, "commit_metadata_pointer", change_standing)
@@ -871,6 +874,7 @@ def test_a_reclaim_before_the_commit_lands_nothing_in_an_unprotected_environment
         expected_location: str | None,
         new_location: str,
         publish: bool = False,
+        stats: StoredStats | None = None,
     ) -> None:
         _reclaim(pointer_session, context)
         original(
@@ -879,6 +883,7 @@ def test_a_reclaim_before_the_commit_lands_nothing_in_an_unprotected_environment
             expected_location=expected_location,
             new_location=new_location,
             publish=publish,
+            stats=stats,
         )
 
     monkeypatch.setattr(catalog_service, "commit_metadata_pointer", reclaim_first)
@@ -2577,6 +2582,7 @@ def test_the_fence_is_taken_after_the_pointer_swap_not_before_the_metadata_uploa
         expected_location: str | None,
         new_location: str,
         publish: bool = False,
+        stats: StoredStats | None = None,
     ) -> None:
         real(
             pointer_session,
@@ -2584,6 +2590,7 @@ def test_the_fence_is_taken_after_the_pointer_swap_not_before_the_metadata_uploa
             expected_location=expected_location,
             new_location=new_location,
             publish=publish,
+            stats=stats,
         )
         pointer_session.execute(
             update(QueryRun).where(QueryRun.id == run.id).values(status=QueryRunStatus.FAILED)

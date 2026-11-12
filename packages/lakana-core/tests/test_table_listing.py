@@ -219,7 +219,7 @@ class ListingWorld:
             last_read_at=_T0 + timedelta(days=2),
             owner_id=self.admin.id,
             created_at=_T0 + timedelta(days=3),
-            **_health("not_judged"),
+            **_health("late"),
         )
         _table(
             session,
@@ -522,10 +522,17 @@ def test_owner_sorts_by_name_with_no_owner_last(world: ListingWorld) -> None:
     )
 
 
-def test_health_sorts_worst_first(world: ListingWorld) -> None:
+def test_health_sorts_worst_first_by_the_stored_word(world: ListingWorld) -> None:
     items = world.listing.list(world.admin, sort=TableSort.HEALTH, limit=200).items
-    ranks = [HEALTH_ITEMS.index(i.health_summary.item) for i in items]
+    stored = {r[0]: r[1] for r in world.session.execute(select(Table.id, Table.health_rank))}
+    ranks = [stored[i.id] for i in items]
     assert ranks == sorted(ranks)
+    # dev:silver.orders is stored healthy but shown "check_failed" to admin; it sorts by its
+    # stored word, after gold.sales.b's "late", so the shown words are out of order here.
+    shown = [HEALTH_ITEMS.index(i.health_summary.item) for i in items]
+    assert shown != sorted(shown)
+    names = _names(TableListPage(items, None, False))
+    assert names.index("dev:gold.sales.b") < names.index("dev:silver.orders")
 
 
 def test_a_table_without_a_snapshot_shows_no_size(world: ListingWorld) -> None:
@@ -619,16 +626,29 @@ def test_a_legacy_dotted_namespace_stays_listable(session: Session) -> None:
     GrantService(session, AllowAllAuthorization()).grant(
         admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
     )
-    legacy = Namespace(id=uuid.uuid4(), environment_id=environment(session, "dev"), path="le.gacy")
-    session.add(legacy)
+    dev = environment(session, "dev")
+    legacy = Namespace(id=uuid.uuid4(), environment_id=dev, path="le.gacy")
+    # The dot sits in the first of two components.
+    beneath = Namespace(
+        id=uuid.uuid4(), environment_id=dev, path=f"le.gacy{NAMESPACE_SEPARATOR}sub"
+    )
+    session.add_all([legacy, beneath])
     session.flush()
     _table(session, legacy.id, "t")
+    _table(session, beneath.id, "u")
     session.commit()
     listing = TableListing(session, GrantAuthorization(session))
-    assert _names(listing.list(admin, namespace="le.gacy")) == ["dev:le.gacy.t"]
-    assert _names(listing.list(admin, namespace="le")) == []
+    both = ["dev:le.gacy.t", "dev:le.gacy.sub.u"]
+    assert _names(listing.list(admin, namespace="le.gacy")) == both
+    assert _names(listing.list(admin, namespace="le.gacy.sub")) == ["dev:le.gacy.sub.u"]
+    # A filter matches the dotted path as it is shown, at a dot.
+    assert _names(listing.list(admin, namespace="le")) == both
+    assert listing.list(admin, namespace="le.g").items == []
     tree = listing.tree(admin)
-    assert [(n.path, n.count) for n in tree.environments[0].namespaces] == [("le.gacy", 1)]
+    assert [(n.path, n.count) for n in tree.environments[0].namespaces] == [
+        ("le.gacy", 2),
+        ("le.gacy.sub", 1),
+    ]
 
 
 def test_capped_counts_only_readable_matches(
@@ -639,6 +659,10 @@ def test_capped_counts_only_readable_matches(
     assert page.capped is True
     assert len(page.items) == 1
     assert world.listing.list(world.alice, q="secret").capped is False  # unreadable never count
+    # `orders` also matches dev:gold.orders and prod:silver.orders, which alice may not read:
+    # counting them would cap her one readable match.
+    page = world.listing.list(world.alice, q="orders")
+    assert (_names(page), page.capped) == (["dev:silver.orders"], False)
 
 
 def test_a_missing_environment_is_404_only_for_a_reader_of_environments(
@@ -777,15 +801,30 @@ def test_the_tree_shows_empty_namespaces_only_to_a_reader_of_namespaces(
 
 
 def test_the_statements_do_not_grow_with_the_page(session: Session) -> None:
-    # its own world: 12 readable tables, 6 in each of dev and prod, no failing reference check
+    # its own world: 12 readable tables, 6 in each of dev and prod, each with a failing
+    # reference check of one run per environment, so each page needs one check filter per
+    # environment and one manifest per run, however many of its rows hold such a check
     admin = person(session, "admin")
     GrantService(session, AllowAllAuthorization()).grant(
         admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
     )
+    now = datetime.now(UTC)
     for env in ("dev", "prod"):
         silver = _namespace(session, environment(session, env), "silver")
-        for n in range(6):
-            _table(session, silver, f"t{n}", owner_id=admin.id)
+        tables = [_table(session, silver, f"t{n}", owner_id=admin.id) for n in range(6)]
+        session.commit()
+        repo, version = deployed_job(session, env, f"shop-{env}", "daily")
+        run = run_of(session, repo, version)
+        for table in tables:
+            check_result(
+                session,
+                run,
+                table.id,
+                name=f"silver.{table.name}/ref_store_id",
+                outcome=CheckOutcome.FAILED,
+                finished_at=now,
+                generated=True,
+            )
     session.commit()
 
     def fresh() -> TableListing:
@@ -803,3 +842,5 @@ def test_the_statements_do_not_grow_with_the_page(session: Session) -> None:
     small = _count_statements(engine, lambda: fresh().list(admin, limit=2))
     large = _count_statements(engine, lambda: fresh().list(admin, limit=12))
     assert large == small
+    words = {i.health_summary.item for i in fresh().list(admin, limit=12).items}
+    assert words == {"check_failed"}

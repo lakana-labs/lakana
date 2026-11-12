@@ -241,6 +241,10 @@ def test_a_sorted_cursor_that_was_not_issued_is_refused(body: bytes) -> None:
     [
         ('["t", "2026-11-12T00:00:00"]', datetime),
         ('["t", "not a time"]', datetime),
+        ('["t", "9999-12-31T23:59:59-05:00"]', datetime),
+        ('["t", "0001-01-01T00:00:00+05:00"]', datetime),
+        ('["s", "a\\tb"]', str),
+        ('["s", "a\\u007fb"]', str),
         ('["s", "a\\u0000b"]', str),
         ('["s", "a\\ud800"]', str),
         ('["s", 1]', str),
@@ -251,3 +255,14 @@ def test_a_sorted_cursor_value_that_was_not_issued_is_refused(value: str, type_:
     body = '{"k": "tables", "s": "name:asc", "v": [' + value + '], "i": ' + _GOOD_ID + "}"
     with pytest.raises(ValidationError, match="cursor is not valid"):
         decode_sorted_cursor("tables", "name:asc", _raw(body.encode()), (type_,))
+
+
+@pytest.mark.parametrize("character", ["\x00", "\t", "\x1f", "\x7f", "\ud800"])
+def test_both_cursor_decoders_refuse_the_same_characters(character: str) -> None:
+    text = f"a{character}b"
+    with pytest.raises(ValidationError, match="cursor is not valid"):
+        decode_key_cursor("terms", encode_key_cursor("terms", text))
+    with pytest.raises(ValidationError, match="cursor is not valid"):
+        decode_sorted_cursor(
+            "tables", "name:asc", encode_sorted_cursor("tables", "name:asc", (text,), ID), (str,)
+        )
