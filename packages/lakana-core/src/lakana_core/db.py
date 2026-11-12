@@ -332,7 +332,7 @@ _CONCURRENT_STATES = frozenset({"40P01", "40001"})
 """SQLSTATEs of a deadlock and a serialization failure: a concurrent change, safe to retry."""
 
 
-def _sqlstate(error: BaseException | None) -> str | None:
+def sqlstate(error: BaseException | None) -> str | None:
     """Read the SQLSTATE a driver attached to its error.
 
     Parameters
@@ -387,7 +387,7 @@ def refuse_concurrent_change(session: Session, what: str) -> Generator[None]:
     try:
         yield
     except sqlalchemy.exc.DBAPIError as exc:
-        if _sqlstate(exc.orig) not in _CONCURRENT_STATES:
+        if sqlstate(exc.orig) not in _CONCURRENT_STATES:
             raise
         session.rollback()
         raise ConflictError(f"{what} changed at the same time; try again.") from exc

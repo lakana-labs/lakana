@@ -5,13 +5,15 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import logging
+import sqlite3
 import uuid
 from collections.abc import Callable
 from typing import cast
 
 import pytest
 import test_projects_deploys
-from sqlalchemy import select, update
+from sqlalchemy import Delete, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from test_projects_dag import make_asset
 from test_projects_deploys import _deployed, _python, _repo
@@ -385,6 +387,24 @@ def test_a_text_referenced_meanwhile_is_kept_and_the_sweep_goes_on(
     monkeypatch.setattr(source_map, "_unreferenced", seen_before_the_reference)
     assert sweep_project_file_texts(session, batch=2) == 2
     assert session.scalars(select(ProjectFileText.sha256)).all() == [REC_F.sha256]
+
+
+def test_another_database_error_of_the_sweep_is_raised(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the foreign key's refusal keeps a text; any other error leaves the sweep."""
+    session.add(ProjectFileText(sha256="e" * 64, text="orphan"))
+    session.commit()
+    real_execute = session.execute
+
+    def locked(statement: object, *args: object, **kwargs: object) -> object:
+        if isinstance(statement, Delete):
+            raise OperationalError("DELETE", {}, sqlite3.OperationalError("database is locked"))
+        return real_execute(statement, *args, **kwargs)  # ty: ignore[no-matching-overload]
+
+    monkeypatch.setattr(session, "execute", locked)
+    with pytest.raises(OperationalError, match="database is locked"):
+        sweep_project_file_texts(session)
 
 
 PY_TEXT = "def p(df):\n    return df\n"

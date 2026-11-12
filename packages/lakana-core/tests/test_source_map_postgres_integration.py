@@ -16,6 +16,7 @@ from test_projects_deploys import _manifest
 from test_projects_source_map import ASSET_F, REC_F
 from testcontainers.postgres import PostgresContainer
 
+import lakana_core.projects.source_map as source_map
 from lakana_core.auth import AllowAllAuthorization
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
@@ -117,3 +118,34 @@ def test_the_sweep_never_deletes_a_text_a_running_deploy_takes(
             other.execute(delete(ProjectFileText).where(ProjectFileText.sha256 == REC_F.sha256))
         other.rollback()
     assert session.get(ProjectFileText, REC_F.sha256) is not None
+
+
+def test_a_text_another_session_references_meanwhile_is_kept_and_the_rest_go(
+    engine: Engine, session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The foreign key refuses one delete (`23503`): that text stays, the other texts go.
+
+    The sweep's select is made to read the text as unreferenced while another session commits
+    a file that names it, the window a real race has between the select's snapshot and its lock.
+    """
+    version = _version(session, tmp_path)
+    session.add_all(
+        [ProjectFileText(sha256=c * 64, text="orphan") for c in "ef"]
+        + [ProjectFileText(sha256=REC_F.sha256, text=REC_F.text)]
+    )
+    session.commit()
+    real = source_map._unreferenced
+    calls: list[int] = []
+
+    def referenced_meanwhile(sweep: Session, batch: int, refused: set[str]) -> list[str]:
+        calls.append(batch)
+        if len(calls) > 1:
+            return real(sweep, batch, refused)
+        assert write_source_map(session, version, [REC_F]) == 1
+        session.commit()
+        return [REC_F.sha256, "e" * 64]
+
+    monkeypatch.setattr(source_map, "_unreferenced", referenced_meanwhile)
+    with Session(engine) as sweep:
+        assert sweep_project_file_texts(sweep, batch=2) == 2
+        assert sweep.scalars(select(ProjectFileText.sha256)).all() == [REC_F.sha256]

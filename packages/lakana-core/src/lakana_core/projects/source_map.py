@@ -26,9 +26,10 @@ from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from lakana_core.db import sqlstate
 from lakana_core.identifiers import shown
 from lakana_core.models import JobVersion, ProjectFile, ProjectFileText
 from lakana_core.projects.asset_model import ParsedAsset, ResolvedReference
@@ -367,15 +368,66 @@ def _unreferenced(session: Session, batch: int, refused: set[str]) -> list[str]:
     )
 
 
+def _named_meanwhile(error: DBAPIError) -> bool:
+    """Tell whether a delete failed because a file names the text (the foreign key).
+
+    Parameters
+    ----------
+    error
+        The error of the delete.
+
+    Returns
+    -------
+    bool
+        True for Postgres's SQLSTATE ``23503`` (whatever class the driver maps it to) and for
+        SQLite's foreign key ``IntegrityError``, which carries no SQLSTATE.
+    """
+    state = sqlstate(error.orig)
+    return state == "23503" or (state is None and isinstance(error, IntegrityError))
+
+
+def _deleted(session: Session, shas: list[str]) -> bool:
+    """Delete texts in a savepoint, unless the foreign key refuses it.
+
+    Parameters
+    ----------
+    session
+        The sweep's session.
+    shas
+        The texts to delete.
+
+    Returns
+    -------
+    bool
+        True when they were deleted; False when a file names one of them (nothing deleted).
+
+    Raises
+    ------
+    DBAPIError
+        For any other database error.
+    """
+    try:
+        with session.begin_nested():
+            session.execute(delete(ProjectFileText).where(ProjectFileText.sha256.in_(shas)))
+    except DBAPIError as exc:
+        if not _named_meanwhile(exc):
+            raise
+        return False
+    return True
+
+
 def sweep_project_file_texts(
     session: Session, *, batch: int = 500, should_stop: Callable[[], bool] = lambda: False
 ) -> int:
     """Delete the texts no project file references, in batches, each committed.
 
     Each batch takes its rows with ``FOR UPDATE SKIP LOCKED``, so a text a running deploy has
-    upserted (and so locked) is skipped. The ``RESTRICT`` foreign key refuses any delete that
-    would still leave a file without its text; each text is deleted in a savepoint of its own,
-    so such a refusal keeps that text and the sweep goes on with the others.
+    upserted (and so locked) is skipped. A file committed between the select's snapshot and its
+    lock can still name a text; the ``RESTRICT`` foreign key then refuses the batch's delete
+    (SQLite's ``IntegrityError``, Postgres's SQLSTATE ``23503``, which pg8000 reports as a
+    ``ProgrammingError``). The batch is then deleted text by text, each in a savepoint, so the
+    named text stays, is not taken again in this sweep, and the others still go. Any other
+    database error is raised.
 
     Parameters
     ----------
@@ -398,15 +450,14 @@ def sweep_project_file_texts(
         if not shas:
             session.commit()
             return deleted
-        for sha in shas:
-            try:
-                with session.begin_nested():
-                    session.execute(delete(ProjectFileText).where(ProjectFileText.sha256 == sha))
-            except IntegrityError:
-                # A file came to name the text after the select read it; the text stays.
-                refused.add(sha)
-            else:
-                deleted += 1
+        if _deleted(session, shas):
+            deleted += len(shas)
+        else:
+            for sha in shas:
+                if _deleted(session, [sha]):
+                    deleted += 1
+                else:
+                    refused.add(sha)
         session.commit()
         if should_stop():
             return deleted
