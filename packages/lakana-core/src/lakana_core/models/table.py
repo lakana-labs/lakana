@@ -21,7 +21,10 @@ from sqlalchemy import (
     false,
     text,
 )
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.schema import CreateIndex
+from sqlalchemy.sql.compiler import DDLCompiler
 
 from lakana_core.models.base import Base, TimestampMixin, UTCDateTime
 
@@ -56,29 +59,37 @@ _SORT_KEYS = (
     "health_rank",
     "created_at",
 )
-"""The stored keys the table list sorts by, each with an index in either direction."""
+"""The stored keys the table list sorts by, each with an index in either direction.
+
+The descending ones (`ix_tables_<key>_id_desc`, declared below `Table`) are `key DESC NULLS LAST,
+id DESC`: PostgreSQL reads an ascending index backwards only as ``DESC NULLS FIRST``, and the list
+sorts a null key last in both directions."""
 
 
-def _descending(key: str) -> dict[str, str]:
-    """Order a `(key, id)` index the way a descending page of the table list reads it.
+@compiles(CreateIndex, "sqlite")
+def _sqlite_create_index(element: CreateIndex, compiler: DDLCompiler, **kw: object) -> str:
+    """Write an index for SQLite without the null order it refuses on an index column.
 
-    PostgreSQL reads an ascending index backwards only as ``DESC NULLS FIRST``, and the list
-    sorts a null key last in both directions. `postgresql_ops` is the one place SQLAlchemy writes
-    text after a column of an index, so the order goes there. SQLite ignores it: it reads the
-    ascending index backwards in exactly that order (a null is its smallest value), and keeps an
-    ascending copy, which costs little in local mode.
+    SQLite refuses ``NULLS FIRST`` and ``NULLS LAST`` in ``CREATE INDEX``. Its own order already
+    puts a null first ascending and last descending (a null is its smallest value), so only
+    those two spellings are dropped; any other stays, and SQLite refuses it.
 
     Parameters
     ----------
-    key
-        The sort key's column.
+    element
+        The statement.
+    compiler
+        SQLite's DDL compiler.
+    **kw
+        The compiler's options.
 
     Returns
     -------
-    dict of str to str
-        The column's order, then the id's.
+    str
+        The statement as SQLite takes it.
     """
-    return {key: "DESC NULLS LAST", "id": "DESC"}
+    statement = compiler.visit_create_index(element, **kw)
+    return statement.replace(" DESC NULLS LAST", " DESC").replace(" ASC NULLS FIRST", " ASC")
 
 
 def table_kind(table_type: TableType) -> str:
@@ -121,10 +132,6 @@ class Table(Base, TimestampMixin):
         Index("ix_tables_health_rank_id", "health_rank", "id"),
         Index("ix_tables_created_at_id", "created_at", "id"),
         Index("ix_tables_name_id", "name", "id"),
-        *(
-            Index(f"ix_tables_{key}_id_desc", key, "id", postgresql_ops=_descending(key))
-            for key in _SORT_KEYS
-        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -354,3 +361,11 @@ class Table(Base, TimestampMixin):
             raw-zone table, ``"VIEW"`` for a view, ``"ARTIFACT"`` for an artifact.
         """
         return table_kind(self.table_type)
+
+
+for _key in _SORT_KEYS:
+    Index(
+        f"ix_tables_{_key}_id_desc",
+        Table.__table__.c[_key].desc().nulls_last(),
+        Table.__table__.c.id.desc(),
+    )

@@ -8,6 +8,7 @@ Create Date: 2026-11-13 09:00:00.000000
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -25,17 +26,18 @@ def upgrade() -> None:
     Six indexes, each on a sort key and `id`, on PostgreSQL in the order a descending page reads
     them: `key DESC NULLS LAST, id DESC`. The ascending indexes of `0075` serve only the
     ascending pages there, since PostgreSQL reads an index backwards as `DESC NULLS FIRST` and
-    the list sorts a null key last in both directions. SQLite takes no order on an index
-    column's nulls; it gets ascending copies (its backwards read of `0075`'s indexes already
-    gives the descending order). No row changes.
+    the list sorts a null key last in both directions. SQLite refuses a null order on an index
+    column; it gets `key DESC, id DESC`, the same order there, since a null is its smallest
+    value. No row changes.
     """
+    postgres = op.get_bind().dialect.name == "postgresql"
     for column in _INDEXED:
+        key = sa.desc(sa.column(column))
         op.create_index(
             f"ix_tables_{column}_id_desc",
             "tables",
-            [column, "id"],
+            [key.nulls_last() if postgres else key, sa.desc(sa.column("id"))],
             unique=False,
-            postgresql_ops={column: "DESC NULLS LAST", "id": "DESC"},
         )
 
 
