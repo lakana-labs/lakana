@@ -135,6 +135,11 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### Lineage of tables in deep namespaces
+
+Lineage recorded before this release for a table in a namespace three or more levels deep keeps
+the cut name (`bronze.raw.orders` for `bronze.raw.eu.orders`); only new runs record the full name.
+
 ### Indexes for the descending sorts of the table list
 
 Migration `0078` adds six indexes to the `tables` table, one for each sort of the table list by

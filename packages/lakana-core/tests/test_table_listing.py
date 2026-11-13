@@ -956,6 +956,161 @@ def test_a_passed_reference_check_makes_a_not_judged_table_healthy_for_who_may_s
     assert item.health_summary.item == "not_judged"
 
 
+def _reference_entry(table: str, check: str, target: str) -> dict[str, object]:
+    """Build a manifest entry of a generated reference check with a target that can be told.
+
+    Parameters
+    ----------
+    table
+        The checked table, dotted.
+    check
+        The check's short name.
+    target
+        The referenced table, dotted.
+
+    Returns
+    -------
+    dict
+        The entry.
+    """
+    return {
+        "name": f"{table}/{check}",
+        "table": table,
+        "check": check,
+        "path": f"assets/{table.replace('.', '/')}.sql:2",
+        "on_failure": "block",
+        "sql": f"SELECT 1 FROM {table}",
+        "generated": {
+            "family": "references",
+            "columns": ["store_id"],
+            "target": target,
+            "target_column": "store_id",
+        },
+    }
+
+
+class ReferenceWorld:
+    """Two not-judged tables whose reference checks name their targets, and three readers.
+
+    `silver.facts` has one passed check on `gold.dim_store`; `silver.mixed` has that one passed
+    and a failed one on `gold.dim_region`. `of_target` reads both tables and `dim_store`;
+    `of_table` reads both tables alone.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.admin = person(session, "admin")
+        self.of_target, self.of_table = person(session, "of_target"), person(session, "of_table")
+        dev = environment(session, "dev")
+        silver, gold = _namespace(session, dev, "silver"), _namespace(session, dev, "gold")
+        facts = _table(session, silver, "facts", **_health("not_judged"))
+        mixed = _table(session, silver, "mixed", **_health("not_judged"))
+        _table(session, gold, "dim_store")
+        _table(session, gold, "dim_region")
+        repo, version = deployed_job(session, "dev", "shop", "daily")
+        version.manifest_json = {
+            **version.manifest_json,
+            "checks": [
+                _reference_entry("silver.facts", "ref_store_id", "gold.dim_store"),
+                _reference_entry("silver.mixed", "ref_store_id", "gold.dim_store"),
+                _reference_entry("silver.mixed", "ref_region_id", "gold.dim_region"),
+            ],
+        }
+        run = run_of(session, repo, version)
+        now = datetime.now(UTC)
+        for row, check, outcome in (
+            (facts, "ref_store_id", CheckOutcome.PASSED),
+            (mixed, "ref_store_id", CheckOutcome.PASSED),
+            (mixed, "ref_region_id", CheckOutcome.FAILED),
+        ):
+            check_result(
+                session,
+                run,
+                row.id,
+                name=f"silver.{row.name}/{check}",
+                outcome=outcome,
+                finished_at=now,
+                generated=True,
+            )
+        session.commit()
+        grants = GrantService(session, AllowAllAuthorization())
+        grants.grant(self.admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+        for reader, namespace, table in (
+            ("of_target", "silver", "facts"),
+            ("of_target", "silver", "mixed"),
+            ("of_target", "gold", "dim_store"),
+            ("of_table", "silver", "facts"),
+            ("of_table", "silver", "mixed"),
+        ):
+            grants.grant(
+                self.admin,
+                principal=reader,
+                role=Role.VIEWER,
+                kind=SecurableKind.TABLE,
+                environment="dev",
+                namespace=namespace,
+                table=table,
+            )
+        self.listing = TableListing(session, GrantAuthorization(session))
+
+    def words(self, reader: PrincipalRef) -> dict[str, str]:
+        """List the health word a reader is shown for each silver table.
+
+        Parameters
+        ----------
+        reader
+            The reader.
+
+        Returns
+        -------
+        dict of str to str
+            Table name → the item of its word.
+        """
+        page = self.listing.list(reader, namespace="silver")
+        return {item.name: item.health_summary.item for item in page.items}
+
+
+@pytest.fixture
+def references(session: Session) -> ReferenceWorld:
+    """Provide the world of reference checks with targets.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    ReferenceWorld
+        The world.
+    """
+    return ReferenceWorld(session)
+
+
+def test_a_reader_of_the_target_sees_a_passed_reference_check_as_healthy(
+    references: ReferenceWorld,
+) -> None:
+    assert references.words(references.of_target)["facts"] == "healthy"
+
+
+def test_a_reader_of_the_table_alone_sees_a_passed_reference_check_as_not_judged(
+    references: ReferenceWorld,
+) -> None:
+    assert references.words(references.of_table) == {"facts": "not_judged", "mixed": "not_judged"}
+
+
+def test_a_hidden_failing_check_beside_a_visible_passed_one_reads_healthy(
+    references: ReferenceWorld,
+) -> None:
+    # `of_target` may not read `dim_region`, so the failed check on it does not exist for them
+    assert references.words(references.of_target)["mixed"] == "healthy"
+    assert references.words(references.admin)["mixed"] == "check_failed"
+
+
 def test_listing_writes_no_audit_event(world: ListingWorld) -> None:
     before = world.session.scalar(select(func.count(AuditEvent.id)))
     world.listing.list(world.alice)
