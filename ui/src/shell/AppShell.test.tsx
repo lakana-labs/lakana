@@ -40,4 +40,15 @@ describe("AppShell", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
   });
+
+  it("focuses the heading again when returning to the first page", async () => {
+    const { router } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    await act(() => router.navigate("/"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toHaveFocus();
+    await act(() => router.navigate("/catalog"));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Catalog" })).toHaveFocus();
+  });
 });

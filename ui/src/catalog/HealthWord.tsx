@@ -40,7 +40,7 @@ export function HealthWord({ summary }: HealthWordProps): JSX.Element {
   const described =
     summary.others > 0 ? t("catalog.healthMore", { word, count: summary.others }) : null;
   return (
-    <span className="health-word" {...(described === null ? {} : { title: described })}>
+    <span className="health-word">
       {summary.state === "not_judged" ? (
         <span className="health-none" aria-hidden="true">
           –
@@ -52,9 +52,9 @@ export function HealthWord({ summary }: HealthWordProps): JSX.Element {
         <span>{word}</span>
       ) : (
         <>
-          <span aria-hidden="true">{word}</span>
-          <span className="health-more" aria-hidden="true">
-            +{summary.others}
+          <span className="health-text" aria-hidden="true" title={described}>
+            {word}
+            <span className="health-more">+{summary.others}</span>
           </span>
           <span className="visually-hidden">{described}</span>
         </>

@@ -60,7 +60,7 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const main = useRef<HTMLElement>(null);
-  const firstPath = useRef(location.pathname);
+  const shownPath = useRef(location.pathname);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const openShortcuts = useCallback(() => {
@@ -69,7 +69,8 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   const areas = visibleAreas(access);
 
   useEffect(() => {
-    if (location.pathname !== firstPath.current) {
+    if (location.pathname !== shownPath.current) {
+      shownPath.current = location.pathname;
       main.current?.querySelector("h1")?.focus();
     }
   }, [location.pathname]);

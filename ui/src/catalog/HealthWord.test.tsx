@@ -42,6 +42,16 @@ describe("HealthWord", () => {
     );
   });
 
+  it("shows the full text on hover without a second reading for a screen reader", () => {
+    const { container } = render(
+      <HealthWord summary={summary({ state: "warning", item: "late", text: "Late", others: 2 })} />,
+    );
+
+    const titled = container.querySelector("[title]");
+    expect(titled).toHaveAttribute("title", "Late, and 2 more, listed on the table page");
+    expect(titled).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("adds nothing when there are no others", () => {
     render(<HealthWord summary={summary({ state: "warning", item: "late", others: 0 })} />);
 

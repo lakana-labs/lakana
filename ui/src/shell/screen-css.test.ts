@@ -47,3 +47,7 @@ it("right-aligns numbers with tabular figures", () => {
     /\.list \.number\s*{[^}]*text-align:\s*right;[^}]*font-variant-numeric:\s*tabular-nums/,
   );
 });
+
+it("lifts what carries a title above the row's link, so the hover reaches it", () => {
+  expect(screen).toMatch(/\.list \[title\]\s*{[^}]*position:\s*relative/);
+});

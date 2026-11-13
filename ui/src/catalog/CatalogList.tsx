@@ -66,6 +66,8 @@ export function CatalogList(): JSX.Element {
   const { items, busy, error, capped, hasMore, loadMore, reload } = useTablePages(view);
   const main = useRef<HTMLElement>(null);
   const focusFrom = useRef<number | null>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  const hadRows = useRef(false);
   const loading = items === undefined ? error === null : items.length === 0 && busy;
   const slow = useLonger(loading, SAY_LOADING_AFTER_MS);
 
@@ -84,6 +86,16 @@ export function CatalogList(): JSX.Element {
       main.current?.querySelectorAll<HTMLElement>("tbody .row-name")[from]?.focus();
     }
   }, [items]);
+
+  // A failed first page unmounts the table, and the header button that started it with it: focus
+  // goes to the way forward instead of to the page's start.
+  useEffect(() => {
+    if (items !== undefined) {
+      hadRows.current = true;
+    } else if (error !== null && hadRows.current && document.activeElement === document.body) {
+      retry.current?.focus();
+    }
+  }, [items, error]);
 
   let result = "";
   if (slow) {
@@ -107,7 +119,7 @@ export function CatalogList(): JSX.Element {
               <p className="step-error" role="alert">
                 {error}
               </p>
-              <Button className="button" onPress={reload}>
+              <Button className="button" onPress={reload} ref={retry}>
                 {t("catalog.tryAgain")}
               </Button>
             </>

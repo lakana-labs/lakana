@@ -40,11 +40,11 @@
 
 .list-scroll:focus-visible {
   outline: var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: var(--focus-offset);
 }
 
 .list-scroll .list {
-  min-width: 56rem;
+  min-width: 896px;
 }
 
 .list-scroll .row-name {
@@ -71,7 +71,7 @@
 
 .sort-head[data-focus-visible] {
   outline: var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: var(--focus-offset);
 }
 
 th[aria-sort] .sort-head {
@@ -79,7 +79,8 @@ th[aria-sort] .sort-head {
   font-weight: 500;
 }
 
-.health-word {
+.health-word,
+.health-text {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -95,9 +96,14 @@ th[aria-sort] .sort-head {
 }
 
 /* Static blocks, no motion: the rows' height, so nothing jumps when the page arrives. */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 .skeleton-row {
   height: var(--row-height);
-  margin: 0 0 1px;
   border-radius: var(--radius-control);
   background: var(--color-sunk);
 }

@@ -224,4 +224,22 @@ describe("CatalogList", () => {
 
     expect(await screen.findByRole("heading", { name: "This page does not exist" })).toBeVisible();
   });
+
+  it("keeps focus in the page when a sort fails on its first page", async () => {
+    const { user, server } = renderShell("/catalog");
+    await screen.findByRole("link", { name: "fact_sales" });
+    server.route({
+      "GET /api/v1/tables": {
+        status: 500,
+        body: { detail: "The catalog database is not reachable. Check the server's log." },
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Rows" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Try again" })).toHaveFocus();
+    });
+  });
 });

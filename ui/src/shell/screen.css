@@ -111,7 +111,9 @@ tr:hover .row-name {
   text-decoration: underline;
 }
 
-.list .button {
+/* What carries a hover title sits above the row's link, so the pointer reaches it. */
+.list .button,
+.list [title] {
   position: relative;
 }
 
