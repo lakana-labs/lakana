@@ -276,10 +276,13 @@ def purge(
     tables, and frees the name. Its files, if any, are not touched: delete them in the storage
     yourself if you no longer need them.
 
-    Refused for an environment that is not deleted (`lakana env delete NAME` first), and for
-    one whose root can be reached (`lakana env delete NAME --purge` has the clean-up delete its
-    files and then the environment); a storage secret that cannot be used does not count, fix
-    it instead. Needs MANAGE_ENVIRONMENT on the instance.
+    Refused for an environment that is not deleted (`lakana env delete NAME` first); for one
+    whose root can be reached (`lakana env delete NAME --purge` has the clean-up delete its
+    files and then the environment), and a storage secret that cannot be used does not count,
+    fix it instead; and for a root that contains `::`, because releases before 0.18.0 wrote its
+    files to the part before `::` (look there; give a new environment another name). The
+    question and the answer name the storage root, where any files are. Needs
+    MANAGE_ENVIRONMENT on the instance.
 
     Parameters
     ----------
@@ -306,17 +309,24 @@ def purge(
             f"worker's clean-up delete its files and then the environment, run "
             f"`lakana env delete {shown} --purge`."
         )
+    client = state.client()
+    root = next(
+        (env.storage_root for env in client.environments.list(deleted=True) if env.name == name),
+        None,
+    )
+    storage = f" {_output.inline(root)}" if root is not None else ""
     confirm(
         state,
         f"Remove the deleted environment {name!r} from the catalog? Its files, if any, are not "
-        "touched and stay in its storage. This cannot be undone.",
+        f"touched and stay in its storage{storage}. This cannot be undone.",
         yes,
     )
-    state.client().environments.purge_rows(name)
+    client.environments.purge_rows(name)
+    where = f"; its storage was {_output.inline(root)}" if root is not None else ""
     _output.done(
         state,
         f"Removed environment {shown} from the catalog; its name is free again. Its files, if "
-        "any, were not touched.",
+        f"any, were not touched{where}.",
     )
 
 

@@ -392,7 +392,8 @@ def purge_environment_rows(
     lakana_core.errors.NotFoundError
         No environment of that name; mapped to 404.
     lakana_core.errors.ConflictError
-        It is not deleted, or its storage can still be reached; mapped to 409.
+        It is not deleted, its storage can still be reached, or its root contains `::`
+        (releases before 0.18.0 wrote files to the part before it); mapped to 409.
     """
     catalog.purge_environment_rows(principal, name)
     return Response(status_code=204)

@@ -269,8 +269,9 @@ class Environments:
         lakana.errors.NotFound
             If no environment of this name exists.
         lakana.errors.Conflict
-            If it is not deleted, or its storage can still be reached (the clean-up deletes it
-            then; `delete(name, purge=True)` makes that happen at the next clean-up).
+            If it is not deleted, its storage can still be reached (the clean-up deletes it
+            then; `delete(name, purge=True)` makes that happen at the next clean-up), or its root
+            contains ``::`` (releases before 0.18.0 wrote files to the part before it).
         """
         self._transport.request(ROUTES["environments.purge_rows"], path_params={"name": name})
 
