@@ -6802,7 +6802,7 @@
           "graph"
         ],
         "summary": "Walk the tables and assets upstream and downstream of a table, a column or an asset",
-        "description": "The answer comes from what the projects declare (their assets' inputs and outputs, in every repository), not from runs. `depth` counts the assets crossed. A column starts at its table, plus the references that name it. You see a node only when you may: a table and its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. The walk stops at a node you may not see, and nothing in the answer counts or marks it. Answers 404 when the start or the environment does not exist or you may not see it (one answer for both), 422 for a node, depth, limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
+        "description": "The answer comes from what the projects declare (their assets' inputs and outputs, in every repository), not from runs. `depth` counts the assets crossed. A column starts at its table, plus the references that name it. You see a node only when you may: a table and its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. Each asset of the answer brings the jobs that run it (`runs`) and the connections it reads through (`uses`), at its distance: a job needs `READ_ENVIRONMENT`, a connection `READ_ENVIRONMENT` and a caller that is not a task token. The walk stops at a node you may not see, and nothing in the answer counts or marks it. Answers 404 when the start or the environment does not exist or you may not see it (one answer for both), 422 for a node, depth, limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
         "operationId": "graph_lineage_api_v1_environments__env__graph_lineage_get",
         "parameters": [
           {
@@ -7023,10 +7023,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds).",
+              "description": "Only edges of these kinds: builds, checks, filters, has_column, links, masks, measures, reads, references, runs, uses; repeat the parameter (kinds=reads&kinds=builds).",
               "title": "Kinds"
             },
-            "description": "Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds)."
+            "description": "Only edges of these kinds: builds, checks, filters, has_column, links, masks, measures, reads, references, runs, uses; repeat the parameter (kinds=reads&kinds=builds)."
           },
           {
             "name": "lang",
@@ -27385,6 +27385,17 @@
             "type": "boolean",
             "title": "May Use",
             "default": false
+          },
+          "connection_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Kind"
           }
         },
         "type": "object",
@@ -27395,7 +27406,7 @@
           "distance"
         ],
         "title": "GraphNodeOut",
-        "description": "A node of the metadata graph, with the attributes the caller may see.\n\nParameters\n----------\nid\n    Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,\n    `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,\n    `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`); store it and pass\n    it back as `node`.\nkind\n    `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,\n    `column_mask` or `job`.\nname\n    A name to read: a dotted table, `<table>.<column>`, a term's key.\ndistance\n    Steps from the start: assets crossed for lineage, 1 for a neighbour.\ntable_type\n    A table's `managed`, `external`, `view` or `artifact`.\nmodel_kind\n    A table's declared kind.\ngrain\n    A table's grain, in your language.\nkey\n    A table's declared key columns.\nowner\n    The owner of a table's asset (`None` for a reader without ``READ_ENVIRONMENT``), an\n    asset or a term.\nrepository\n    The repository that declares it (or builds its table).\nlabel\n    A table's label, or a term's name, in your language.\ncolumn_type\n    A column's type.\nreason\n    Always `null` for lineage and neighbours.\nmay_use\n    Always `false` for lineage and neighbours."
+        "description": "A node of the metadata graph, with the attributes the caller may see.\n\nParameters\n----------\nid\n    Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,\n    `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,\n    `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`,\n    `connection:<name>`); store it and pass it back as `node`.\nkind\n    `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,\n    `column_mask`, `job` or `connection`.\nname\n    A name to read: a dotted table, `<table>.<column>`, a term's key.\ndistance\n    Steps from the start: assets crossed for lineage, 1 for a neighbour.\ntable_type\n    A table's `managed`, `external`, `view` or `artifact`.\nmodel_kind\n    A table's declared kind.\ngrain\n    A table's grain, in your language.\nkey\n    A table's declared key columns.\nowner\n    The owner of a table's asset (`None` for a reader without ``READ_ENVIRONMENT``), an\n    asset or a term.\nrepository\n    The repository that declares it (or builds its table).\nlabel\n    A table's label, or a term's name, in your language.\ncolumn_type\n    A column's type.\nreason\n    Always `null` for lineage and neighbours.\nmay_use\n    Always `false` for lineage and neighbours.\nconnection_kind\n    A connection's kind, such as `postgresql`; `null` for any other node, and for a\n    connection the manifest names that the environment does not have."
       },
       "GraphOut": {
         "properties": {

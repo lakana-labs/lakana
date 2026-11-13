@@ -3660,11 +3660,11 @@ class GraphNodeOut(BaseModel):
     id
         Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,
         `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,
-        `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`); store it and pass
-        it back as `node`.
+        `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`,
+        `connection:<name>`); store it and pass it back as `node`.
     kind
         `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,
-        `column_mask` or `job`.
+        `column_mask`, `job` or `connection`.
     name
         A name to read: a dotted table, `<table>.<column>`, a term's key.
     distance
@@ -3690,6 +3690,9 @@ class GraphNodeOut(BaseModel):
         Always `null` for lineage and neighbours.
     may_use
         Always `false` for lineage and neighbours.
+    connection_kind
+        A connection's kind, such as `postgresql`; `null` for any other node, and for a
+        connection the manifest names that the environment does not have.
     """
 
     id: str
@@ -3706,6 +3709,7 @@ class GraphNodeOut(BaseModel):
     column_type: str | None = None
     reason: str | None = None
     may_use: bool = False
+    connection_kind: str | None = None
 
 
 class GraphEdgeOut(BaseModel):

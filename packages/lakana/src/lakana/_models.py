@@ -2555,11 +2555,11 @@ class GraphNode:
         Its stable id, such as ``table:<uuid>``; store it and pass it back as a node.
     kind
         ``table``, ``column``, ``asset``, ``reference``, ``measure``, ``term``, ``check``,
-        ``row_filter``, ``column_mask`` or ``job``.
+        ``row_filter``, ``column_mask``, ``job`` or ``connection``.
     name
         A name to read: a dotted table, ``<table>.<column>``, a term's key.
     distance
-        Steps from the start.
+        Steps from the start; a job's or connection's is that of its asset.
     table_type
         A table's ``managed``, ``external``, ``view`` or ``artifact``.
     model_kind
@@ -2582,6 +2582,9 @@ class GraphNode:
         Always `None` for lineage and neighbours.
     may_use
         Always `False` for lineage and neighbours.
+    connection_kind
+        A connection's kind, such as ``postgresql``; `None` for any other node, for a
+        connection the environment does not have, and from an older server.
     """
 
     id: str
@@ -2598,6 +2601,7 @@ class GraphNode:
     column_type: str | None = None
     reason: str | None = None
     may_use: bool = False
+    connection_kind: str | None = None
 
 
 # jscpd:ignore-end
