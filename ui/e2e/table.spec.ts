@@ -136,6 +136,8 @@ test.describe("the table page in real Chromium", () => {
     const edit = page.getByRole("button", { name: "Edit", exact: true });
     await tabTo(page, edit);
     await page.keyboard.press("Enter");
+    await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
+    await page.keyboard.press("Tab");
     const description = page.getByRole("textbox", { name: "Description" });
     await expect(description).toBeFocused();
     await page.keyboard.type(" Edited by keyboard.");
