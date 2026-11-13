@@ -8,7 +8,7 @@ import { Link } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
 
-import type { ShippedArea } from "./areas";
+import { AREA_NAVIGATION, type ShippedArea } from "./areas";
 import { HelpMenu } from "./HelpMenu";
 import { LakanaMark } from "./LakanaMark";
 import { shortcutLabel } from "./shortcut";
@@ -122,7 +122,7 @@ export function Sidebar({ areas, onSearch, onShortcuts }: SidebarProps): JSX.Ele
                     className="sidebar-link"
                     data-tour={area.id}
                     href={area.path}
-                    routerOptions={{ state: { restore: true } }}
+                    routerOptions={AREA_NAVIGATION}
                     aria-current={isCurrent(area, pathname) ? "page" : false}
                   >
                     {t(`areas.${area.id}.name`)}

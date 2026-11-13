@@ -27,6 +27,12 @@ export interface Area {
 /** An area that is in the interface, so it has a part and a command line. */
 export type ShippedArea = Area & { readonly part: number; readonly shipped: true };
 
+/**
+ * How the menu and the palette go to an area: the area opens where the person left it (the
+ * Catalog at the last choice), which a plain link to the same path does not.
+ */
+export const AREA_NAVIGATION = { state: { restore: true } } as const;
+
 /** The areas a user may use. */
 export type AreaAccess = ReadonlySet<AreaId>;
 

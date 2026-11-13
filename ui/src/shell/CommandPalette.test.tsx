@@ -129,6 +129,22 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("searchbox", { name: "Search" })).toBeInTheDocument();
   });
 
+  it("opens the Catalog at the last choice, like the menu's link", async () => {
+    window.localStorage.setItem(
+      "lakana.catalog.admin",
+      JSON.stringify({ environment: "prod", namespace: "gold" }),
+    );
+    const { user, router } = renderShell("/catalog?env=staging");
+    await screen.findByText(/There is no environment named staging/);
+
+    await user.keyboard("{Control>}k{/Control}");
+    await user.click(await screen.findByRole("menuitem", { name: "Go to Catalog" }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+    });
+  });
+
   it("Enter goes to the area and closes; Escape closes and returns focus", async () => {
     const { user, router } = await shellAtHome();
     const search = screen.getByRole("button", { name: "Search" });
