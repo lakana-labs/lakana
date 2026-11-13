@@ -34,6 +34,11 @@ storage with ``include_deleted``). `purge_environment` then deletes the row, onc
 `purge_after` has passed and no location record of it is left in any state; the database
 cascades the rest (namespaces, artifact rows, secrets, runs). An artifact's files are left in
 storage then, as a deletion always left them.
+
+The sweep skips an environment whose storage cannot be resolved (a root in a scheme Lakana cannot
+read), so such a row would stay for ever. `purge_rows` deletes it on an administrator's request
+(`CatalogService.purge_environment_rows`) with its location records, in the same lock order, and
+touches no file.
 """
 
 from __future__ import annotations
@@ -88,7 +93,9 @@ NAME_HELD_MESSAGE = (
     "Environment {name!r} cannot be created: an environment of that name was deleted, and its "
     "tables' files are kept so that it can be restored until {purge_after} (UTC). Restore it "
     "with `lakana env restore {name}`, or delete its files now with `lakana env delete {name} "
-    "--purge`; the name is free again once the worker's clean-up has deleted them."
+    "--purge`; the name is free again once the worker's clean-up has deleted them. If its "
+    "storage cannot be reached any more, an administrator frees the name with `lakana env purge "
+    "{name} --rows-only`."
 )
 """The `AlreadyExistsError` of a create whose name a deleted environment holds."""
 
@@ -128,6 +135,26 @@ ENVIRONMENT_GONE_MESSAGE = (
     "Nothing was published, and the worker's clean-up removes the files it wrote."
 )
 """The `NotFoundError` of a create whose environment was deleted before its commit."""
+
+ROWS_PURGE_MISSING_MESSAGE = (
+    "No environment named {name!r}, deleted or not. `lakana env list --deleted` lists the "
+    "deleted environments."
+)
+"""The `NotFoundError` of a rows-only purge that finds no environment of the name (`{name}`)."""
+
+ROWS_PURGE_NOT_DELETED_MESSAGE = (
+    "Environment {name!r} is not deleted, so its rows were not purged. Delete it first with "
+    "`lakana env delete {name}`; a deleted environment is removed by the worker's clean-up, "
+    "or with `lakana env purge {name} --rows-only` when its storage cannot be reached."
+)
+"""The `ConflictError` of a rows-only purge of an environment that exists (`{name}`)."""
+
+ROWS_PURGE_REACHABLE_MESSAGE = (
+    "Environment {name!r} was not purged: its storage can still be reached, so the worker's "
+    "clean-up deletes its tables' files and then the environment itself, from {purge_after} "
+    "(UTC) on. To have that done at the next clean-up, run `lakana env delete {name} --purge`."
+)
+"""The `ConflictError` of a rows-only purge whose storage resolves (`{name}`, `{purge_after}`)."""
 
 
 def lock_live_environment(session: Session, environment_id: uuid.UUID) -> bool:
@@ -513,22 +540,95 @@ def purge_environment(session: Session, environment_id: uuid.UUID, *, now: datet
         # The row's delete cascades through the namespaces to the tables left (the artifacts)
         # and their read counts; locked first, in id order, like a query's completion (#558).
         lock_tables_in_id_order(session, _in_environment(environment_id))
-        revoke_attached(session, None, environment_id=environment_id, now=now)
-        AuditService(session).record(
-            None,
-            AuditEventType.ENVIRONMENT_PURGED,
-            securable=Securable.environment_scope(env.name),
-            detail={
-                "deleted_at": env.deleted_at.isoformat(),
-                "purge_after": env.purge_after.isoformat(),
-            },
-        )
-        session.execute(
-            delete(Environment)
-            .where(Environment.id == environment_id)
-            .execution_options(synchronize_session=False)
-        )
+        _remove_row(session, None, env, now=now, detail={})
         session.commit()
         return True
     finally:
         session.rollback()
+
+
+def purge_rows(session: Session, actor: PrincipalRef, env: Environment, *, now: datetime) -> int:
+    """Delete a deleted environment's row and its location records, and touch no file.
+
+    For an environment whose storage cannot be resolved, which the location sweep skips: what
+    the sweep and `purge_environment` would remove goes, in their lock order (the environment's
+    row, held by the caller, then its tables in id order, then its location records in id
+    order); the files stay where they are.
+
+    Parameters
+    ----------
+    session
+        Database session; the caller holds the environment's row lock and commits.
+    actor
+        The administrator who asked.
+    env
+        The deleted environment, locked.
+    now
+        The time of the revocations.
+
+    Returns
+    -------
+    int
+        How many location records went with the row.
+    """
+    lock_tables_in_id_order(session, _in_environment(env.id))
+    records = list(
+        session.scalars(
+            select(TableLocation.id)
+            .where(TableLocation.environment_id == env.id)
+            .order_by(TableLocation.id)
+            .with_for_update()
+        )
+    )
+    session.execute(
+        delete(TableLocation)
+        .where(TableLocation.environment_id == env.id)
+        .execution_options(synchronize_session=False)
+    )
+    _remove_row(session, actor, env, now=now, detail={"rows_only": True, "locations": len(records)})
+    return len(records)
+
+
+def _remove_row(
+    session: Session,
+    actor: PrincipalRef | None,
+    env: Environment,
+    *,
+    now: datetime,
+    detail: dict[str, Any],
+) -> None:
+    """Revoke what is still bound to a deleted environment, record its purge, delete its row.
+
+    The caller has locked the row and then the environment's tables; the database cascades the
+    rest (namespaces, artifact rows, secrets, runs).
+
+    Parameters
+    ----------
+    session
+        Database session; the caller commits.
+    actor
+        Who purged it; `None` for the sweep.
+    env
+        The deleted environment, locked.
+    now
+        The time of the revocations.
+    detail
+        Added to the `ENVIRONMENT_PURGED` event's `deleted_at` and `purge_after`.
+    """
+    assert env.deleted_at is not None and env.purge_after is not None  # nosec B101 -- deleted
+    revoke_attached(session, actor, environment_id=env.id, now=now)
+    AuditService(session).record(
+        actor.id if actor is not None else None,
+        AuditEventType.ENVIRONMENT_PURGED,
+        securable=Securable.environment_scope(env.name),
+        detail={
+            "deleted_at": env.deleted_at.isoformat(),
+            "purge_after": env.purge_after.isoformat(),
+            **detail,
+        },
+    )
+    session.execute(
+        delete(Environment)
+        .where(Environment.id == env.id)
+        .execution_options(synchronize_session=False)
+    )

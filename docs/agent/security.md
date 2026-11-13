@@ -2906,6 +2906,22 @@ A nested or shared-root location still blocks a purge as before (`location_in_us
 `test_the_row_stays_until_the_last_record_is_gone`,
 `test_a_live_table_in_another_environment_on_the_root_is_never_purged`.
 
+**The rows-only purge (#261).** The sweep skips a deleted environment whose storage cannot be
+resolved (a root in a scheme `_parse_scheme` refuses, which older releases accepted), so its row
+and name would stay. `CatalogService.purge_environment_rows` (`POST
+/api/v1/environments/{name}/purge-rows`, `lakana env purge NAME --rows-only --yes`) authorizes
+`MANAGE_ENVIRONMENT` at **instance** scope first (a grant on the environment's name is not enough,
+as for create and re-root), locks the row, refuses 404 for no row, 409 when it is not deleted, and
+409 while `for_environment(name, include_deleted=True)` succeeds: only its `ValidationError`
+counts as unreachable, so an environment with files the sweep can delete keeps its undo period and
+its file purge, and any other error (a missing secret, a wrong master key) is raised as it is. Then
+`environment_deletion.purge_rows`, in the lock order of the deletion and the last purge: the
+tables of the environment in id order (`lock_tables_in_id_order`), its location records in id
+order (`FOR UPDATE`), their delete, `revoke_attached`, an `ENVIRONMENT_PURGED` by the caller
+with `rows_only` and `locations`, and the row's delete, which cascades the rest; one commit. No
+file is read or deleted. Pins: `test_environment_rows_purge.py` (refusals, instance scope, lock
+order, the name free again) and its Postgres twin.
+
 **Residuals, accepted.** An environment-scoped admin who deleted an environment cannot restore it
 (the deletion revoked that grant; an administrator can). Views and external tables are not
 restored. A view created through a lookup made before the deletion can land in the deleted
@@ -3022,7 +3038,8 @@ alone: one in a scheme `_parse_scheme` does not know fails closed at every `for_
 as a failed environment and touch nothing, `lakana env orphaned-locations` (with and without
 `--delete`) is refused, so nothing of it lands in the working directory. **Residual:** deleting
 such an environment works, but its purge never comes (the sweep skips it, `ValidationError`, each
-run), so the row and its name stay. One created as `s3` with a
+run), so the row and its name stay until an administrator removes them with `lakana env purge NAME
+--rows-only` (#261; "The rows-only purge" under "Deleting an environment" above). One created as `s3` with a
 `file://` root (or the other way round) cannot be told apart from a correct one, since the sent
 scheme was never stored: it has always been, and stays, an environment of its root's scheme.
 `check_storage_root` also refuses an `s3`/`abfs` root (aliases and case included) whose normalised

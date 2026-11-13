@@ -1306,7 +1306,9 @@ refused at every use: create it again on a plain root.
   clean-up of it fails with `Unsupported storage scheme`, and nothing of it was written. Create a
   new environment under another name on a supported root, and delete the old one with
   `lakana env delete`. The deleted one keeps its name and stays in the database: its storage
-  cannot be reached to purge it, so the clean-up logs that it skipped it on each run.
+  cannot be reached to purge it, so the clean-up logs that it skipped it on each run. A later
+  release adds `lakana env purge NAME --rows-only`, which removes it from the catalog and frees
+  the name (see [Delete and restore an environment](../how-to/drop-and-restore-a-table.md#when-the-storage-of-a-deleted-environment-cannot-be-reached)).
 - **Scripts that create environments** with a root in another scheme fail at that step: send the
   scheme of the root, or a root in the scheme you meant.
 

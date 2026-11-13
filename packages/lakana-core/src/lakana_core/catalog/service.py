@@ -98,9 +98,13 @@ from lakana_core.catalog.environment_deletion import (
     NAME_HELD_MESSAGE,
     NO_DELETED_MESSAGE,
     NOT_DELETED_MESSAGE,
+    ROWS_PURGE_MISSING_MESSAGE,
+    ROWS_PURGE_NOT_DELETED_MESSAGE,
+    ROWS_PURGE_REACHABLE_MESSAGE,
     delete_rows,
     lock_live_environment,
     purge_early,
+    purge_rows,
     restore_rows,
 )
 from lakana_core.catalog.external_location import check_claim_free, parse_external_location
@@ -1790,6 +1794,58 @@ class CatalogService:
         )
         self._session.commit()
         return env
+
+    def purge_environment_rows(self, p: PrincipalRef, name: str) -> int:
+        """Remove a deleted environment whose storage cannot be resolved, rows only.
+
+        The location sweep skips an environment whose storage cannot be resolved (a root in a
+        scheme Lakana cannot read, such as ``local://`` or ``memory://``), so its row and its
+        name would stay for ever. This deletes the row and what the sweep would have removed
+        with it (`lakana_core.catalog.environment_deletion.purge_rows`), under the row's lock,
+        and touches no file. An environment whose storage resolves keeps its undo period and its
+        file purge.
+
+        Parameters
+        ----------
+        p
+            The acting principal; needs ``MANAGE_ENVIRONMENT`` on the instance.
+        name
+            Environment name.
+
+        Returns
+        -------
+        int
+            How many location records went with the row.
+
+        Raises
+        ------
+        NotFoundError
+            If no environment has that name (`ROWS_PURGE_MISSING_MESSAGE`).
+        ConflictError
+            If it is not deleted (`ROWS_PURGE_NOT_DELETED_MESSAGE`) or its storage can still be
+            resolved (`ROWS_PURGE_REACHABLE_MESSAGE`).
+        PermissionDenied
+            If the principal may not manage environments on the instance.
+        """
+        self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        env = self._lock_environment_row(name)
+        if env is None:
+            self._session.rollback()
+            raise NotFoundError(ROWS_PURGE_MISSING_MESSAGE.format(name=name))
+        if env.deleted_at is None or env.purge_after is None:
+            self._session.rollback()
+            raise ConflictError(ROWS_PURGE_NOT_DELETED_MESSAGE.format(name=name))
+        try:
+            self._storage.for_environment(name, include_deleted=True)
+        except ValidationError:
+            pass
+        else:
+            until = env.purge_after.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
+            self._session.rollback()
+            raise ConflictError(ROWS_PURGE_REACHABLE_MESSAGE.format(name=name, purge_after=until))
+        forgotten = purge_rows(self._session, p, env, now=db_now(self._session))
+        self._session.commit()
+        return forgotten
 
     def list_deleted_environments(self, p: PrincipalRef) -> list[Environment]:
         """List the deleted environments `p` may read, whose files are not deleted yet.

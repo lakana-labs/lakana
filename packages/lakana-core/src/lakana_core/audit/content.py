@@ -215,6 +215,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "replaced",
         "request_trigger",
         "reset",
+        "rows_only",
         "secret_ref_set",
         "shortened",
         # the environments a deploy key was not made in: their secrets are not the caller's

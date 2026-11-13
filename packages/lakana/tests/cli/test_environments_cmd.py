@@ -138,6 +138,37 @@ def test_env_restore_and_list_deleted(tmp_path: Path) -> None:
     assert api.requests[-1].url.params["deleted"] == "true"
 
 
+def test_env_purge_rows_only_asks_first_and_says_files_are_not_touched(tmp_path: Path) -> None:
+    """Without a TTY it needs `--yes`; then it POSTs `/purge-rows` and frees the name."""
+    api = FakeApi()
+    api.on("POST", "/api/v1/environments/old/purge-rows", status=204)
+
+    asked = invoke(make_state(tmp_path, api), "env", "purge", "old", "--rows-only")
+    purged = invoke(make_state(tmp_path, api), "env", "purge", "old", "--rows-only", "--yes")
+
+    assert asked.exit_code == 2
+    assert "files, if any, are not touched" in " ".join(asked.stderr.split())
+    assert purged.exit_code == 0, purged.stderr
+    assert "files, if any, were not touched" in purged.stdout
+    assert "name is free again" in purged.stdout
+    assert [(r.method, r.url.path) for r in api.requests] == [
+        ("POST", "/api/v1/environments/old/purge-rows")
+    ]
+
+
+def test_env_purge_without_rows_only_names_both_ways(tmp_path: Path) -> None:
+    """It sends nothing, and names `--rows-only` and the purge that deletes the files."""
+    api = FakeApi()
+
+    refused = invoke(make_state(tmp_path, api), "env", "purge", "old", "--yes")
+
+    assert refused.exit_code == 2
+    message = " ".join(refused.stderr.split())
+    assert "--rows-only" in message
+    assert "lakana env delete old --purge" in message
+    assert api.requests == []
+
+
 def test_env_set_storage_needs_something_to_change(tmp_path: Path) -> None:
     """`set-storage` with neither `--option` nor `--secret-ref` is a usage error."""
     assert invoke(make_state(tmp_path, FakeApi()), "env", "set-storage", "dev").exit_code == 2

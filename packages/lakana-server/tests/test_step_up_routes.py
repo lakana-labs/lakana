@@ -827,6 +827,9 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
         "data operation, undone with restore; joins step-up with its screen in part 8 (spec)"
     ),
     ("POST", "/api/v1/environments/{name}/restore"): "brings back a deleted environment as it was",
+    ("POST", "/api/v1/environments/{name}/purge-rows"): (
+        "removes the catalog rows of a deleted environment; touches no file and hands out nothing"
+    ),
     (
         "PUT",
         "/api/v1/environments/{name}/retention",

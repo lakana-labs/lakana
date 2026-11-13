@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.orphaned_locations import DEFAULT_OLDER_THAN_DAYS
@@ -352,6 +352,46 @@ def restore_environment(
         files; mapped to 409.
     """
     return EnvironmentOut.model_validate(catalog.restore_environment(principal, name))
+
+
+@router.post("/{name}/purge-rows", status_code=204, responses=errors(403, 404, 409))
+def purge_environment_rows(
+    name: str,
+    principal: PrincipalRef = Depends(get_principal),
+    catalog: CatalogService = Depends(get_catalog),
+) -> Response:
+    """Remove a deleted environment whose storage cannot be reached, rows only.
+
+    Removes the environment from the catalog, with its records of dropped tables, and frees
+    its name. Its files, if there are any, are not touched. Only for a deleted environment
+    whose storage cannot be resolved (a root in a scheme Lakana cannot read), which the
+    worker's clean-up skips. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when no
+    environment has the name, and 409 when it is not deleted or its storage can still be
+    reached.
+
+    Parameters
+    ----------
+    name
+        Environment name.
+    principal
+        The authenticated caller; needs `MANAGE_ENVIRONMENT` on the instance.
+    catalog
+        The catalog service for this request.
+
+    Returns
+    -------
+    Response
+        204, no body.
+
+    Raises
+    ------
+    lakana_core.errors.NotFoundError
+        No environment of that name; mapped to 404.
+    lakana_core.errors.ConflictError
+        It is not deleted, or its storage can still be reached; mapped to 409.
+    """
+    catalog.purge_environment_rows(principal, name)
+    return Response(status_code=204)
 
 
 @router.get("/{name}/usage", response_model=EnvironmentUsageOut, responses=errors(403, 404))
