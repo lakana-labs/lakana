@@ -14,6 +14,8 @@ import { type Resource, useResource } from "../../shell/useResource";
 import type { TableOut } from "../../api";
 import { catalogPath, type TableTab } from "../paths";
 import { DEFAULT_VIEW } from "../view";
+import { ColumnsTab } from "./ColumnsTab";
+import { Overview } from "./Overview";
 import { TableHeader } from "./TableHeader";
 import { TableProvider } from "./TableContext";
 import { TableSkeleton } from "./TableSkeleton";
@@ -83,7 +85,7 @@ function Problem({ place, resource, headingRef }: ProblemProps): JSX.Element {
 
 /**
  * Reads the table when the page opens, records it as opened once, and shows its header and the
- * tab the address names. The tabs' content arrives with the later tasks of this part.
+ * tab the address names; Preview's content arrives with a later task of this part.
  *
  * @param props - The table, the tab and the heading.
  * @param props.place - The table the address names.
@@ -122,7 +124,10 @@ export function TablePage({ place, tab, headingRef }: TablePageProps): JSX.Eleme
   return (
     <TableProvider place={place} loaded={loaded}>
       <TableHeader />
-      <section className="table-tab" aria-label={t(`table.tabs.${tab}`)} />
+      <section className="table-tab" aria-label={t(`table.tabs.${tab}`)}>
+        {tab === "overview" && <Overview />}
+        {tab === "columns" && <ColumnsTab />}
+      </section>
     </TableProvider>
   );
 }

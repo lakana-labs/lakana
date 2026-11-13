@@ -248,6 +248,83 @@ const TABLE_PATH = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_
 /** The path of what the administrator may do with a table. */
 const PERMISSIONS_PATH = "/api/v1/principals/admin/permissions";
 
+/** The path of the table's health, which Overview reads without the readers. */
+const HEALTH_PATH = `${TABLE_PATH}/health`;
+
+/** The path of the lineage Overview reads one step each way. */
+const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
+
+/** The table's health: a failed check that set the table back, a signal that fired and a pass. */
+const HEALTH = {
+  days: 7,
+  last_maintenance: null,
+  readers: null,
+  hidden_checks: 0,
+  checks: [
+    {
+      name: "unique_sale_id",
+      check: "unique",
+      run_id: "5b1f0c52-0e0d-4b0a-9b53-6a53b8d2f001",
+      outcome: "failed",
+      on_failure: "fail",
+      failing_rows: 12,
+      error: null,
+      rollback_outcome: "rolled_back",
+      kept: false,
+      not_published: false,
+      finished_at: "2026-11-10T06:05:00Z",
+    },
+    {
+      name: "amount_positive",
+      check: "expression",
+      run_id: "5b1f0c52-0e0d-4b0a-9b53-6a53b8d2f002",
+      outcome: "passed",
+      on_failure: "warn",
+      failing_rows: null,
+      error: null,
+      rollback_outcome: null,
+      kept: false,
+      not_published: false,
+      finished_at: "2026-11-10T06:05:00Z",
+    },
+  ],
+  signals: [
+    {
+      id: "0c7d7f0e-5c10-4b64-a3f0-5a0b9f6b1001",
+      signal: "volume",
+      column: null,
+      state: "fired",
+      effect: "alert",
+      snapshot_id: 4821,
+      observed_at: "2026-11-10T06:06:00Z",
+      observed: null,
+      band: null,
+      alert: null,
+      values_hidden: true,
+    },
+  ],
+};
+
+/**
+ * What a lineage question answers: the table itself and one table on the asked side.
+ *
+ * @param direction - `up` or `down`.
+ * @returns The answer.
+ */
+function lineageAnswer(direction: string | null): unknown {
+  const root = {
+    id: "table:9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+    kind: "table",
+    name: "gold.sales.fact_sales",
+    distance: 0,
+  };
+  const other =
+    direction === "up"
+      ? { id: "table:aaaa", kind: "table", name: "bronze.sales_raw", distance: 1 }
+      : { id: "table:bbbb", kind: "table", name: "gold.sales.daily_sales", distance: 1 };
+  return { nodes: [root, other], edges: [], next_cursor: null };
+}
+
 /** The table `fact_sales` as its page reads it. */
 const TABLE_DETAIL = {
   name: "fact_sales",
@@ -281,7 +358,26 @@ const TABLE_DETAIL = {
   file_count: 3,
   expires_at: null,
   expires_soon: false,
-  model: null,
+  model: {
+    kind: "fact",
+    grain: "one row per sale",
+    key: ["sale_id"],
+    key_none: false,
+    references: [
+      {
+        id: "gold.sales.fact_sales/ref_store_id",
+        table: "gold.sales.fact_sales",
+        column: "store_id",
+        target: "gold.dim_store",
+        target_column: "store_id",
+        target_exists: true,
+        at: null,
+      },
+    ],
+    hidden_references: 0,
+    measures: [],
+    checks: [],
+  },
   label: null,
   label_source: null,
   label_language: null,
@@ -330,6 +426,8 @@ export const STUBBED = [
   ...Object.keys(CATALOG),
   TABLES,
   TABLE_PATH,
+  HEALTH_PATH,
+  LINEAGE_PATH,
   PERMISSIONS_PATH,
 ];
 
@@ -379,6 +477,17 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname === TABLE_PATH,
     (route) => route.fulfill({ json: TABLE_DETAIL }),
+  );
+  await page.route(
+    (url) => url.pathname === HEALTH_PATH,
+    (route) => route.fulfill({ json: HEALTH }),
+  );
+  await page.route(
+    (url) => url.pathname === LINEAGE_PATH,
+    (route) =>
+      route.fulfill({
+        json: lineageAnswer(new URL(route.request().url()).searchParams.get("direction")),
+      }),
   );
   await page.route(
     (url) => url.pathname === PERMISSIONS_PATH,

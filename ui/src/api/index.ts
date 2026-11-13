@@ -29,6 +29,7 @@ export type { PasskeyOut } from "./account";
 export { getTableTree, listTables, TABLE_SORTS } from "./catalog";
 export type {
   HealthSummaryOut,
+  OwnerOut,
   SortOrder,
   TableListItemOut,
   TableMatchOut,
@@ -78,7 +79,16 @@ export type {
 } from "./repositories";
 export { changeSignInSettings, getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";
-export { getTable, myPermissions } from "./table";
-export type { ColumnOut, PermissionsOut, TableOut, TableRef } from "./table";
+export { getLineage, getTable, getTableHealth, myPermissions } from "./table";
+export type {
+  ColumnOut,
+  GraphNodeOut,
+  GraphOut,
+  ModelReferenceOut,
+  PermissionsOut,
+  TableHealthOut,
+  TableOut,
+  TableRef,
+} from "./table";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";

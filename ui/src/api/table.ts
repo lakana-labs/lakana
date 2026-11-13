@@ -53,7 +53,7 @@ export interface ColumnOut {
 }
 
 /** One reference a table's header declares. */
-interface ModelReferenceOut {
+export interface ModelReferenceOut {
   /** The name of the reference's generated check. */
   readonly id: string;
   /** The dotted name of the table that declares it. */
@@ -336,5 +336,160 @@ export function myPermissions(
   return api.request<PermissionsOut>(
     "GET",
     `/api/v1/principals/${encodeURIComponent(person)}/permissions?${query.toString()}`,
+  );
+}
+
+/** One health signal of a table, as the caller may see it. */
+interface HealthSignalOut {
+  /** The observation's id. */
+  readonly id: string;
+  /** `freshness`, `volume`, `null_rate`, `range` or `schema`. */
+  readonly signal: string;
+  /** The column, for a column signal. */
+  readonly column: string | null;
+  /** `ok`, `fired`, `no_history`, `no_metrics` or `off`. */
+  readonly state: string;
+  /** The effect that applied; `block` stops a publication. */
+  readonly effect: string;
+  /** The snapshot observed. */
+  readonly snapshot_id: number | null;
+  /** When it was recorded. */
+  readonly observed_at: string;
+  /** What was observed; null when hidden. */
+  readonly observed: Readonly<Record<string, unknown>> | null;
+  /** The usual band it was judged against; null when hidden or none. */
+  readonly band: Readonly<Record<string, unknown>> | null;
+  /** The server's sentence for a fired signal; null when it did not fire or its values are hidden. */
+  readonly alert: string | null;
+  /** Whether a column mask or row filter left out `observed`, `band` and `alert`. */
+  readonly values_hidden: boolean;
+  /** When it last fired; only in the current state. */
+  readonly last_fired_at?: string | null;
+  /** Whether a failed check set the observed snapshot back. */
+  readonly set_back?: boolean;
+}
+
+/** A person's use of a table over the window. */
+interface ReaderOut {
+  /** The person's name. */
+  readonly principal: string;
+  /** How many of their queries named the table. */
+  readonly read_count: number;
+  /** When the last of them completed. */
+  readonly last_read_at: string;
+}
+
+/** The last maintenance run that changed a table. */
+interface LastMaintenanceOut {
+  /** The query run that did it. */
+  readonly run_id: string;
+  /** When it ended. */
+  readonly finished_at: string;
+  /** `complete`, or `stopped` at a safe point. */
+  readonly status: "complete" | "stopped";
+  /** Snapshots it expired. */
+  readonly snapshots_expired: number;
+  /** Orphaned files it deleted. */
+  readonly files_deleted: number;
+  /** Their total size. */
+  readonly bytes_deleted: number;
+  /** Tags of failed checks it removed. */
+  readonly tags_removed: number;
+}
+
+/** A table's health at a glance, as `GET .../tables/{name}/health` answers it. */
+export interface TableHealthOut {
+  /** The window the readers cover. */
+  readonly days: number;
+  /** The last maintenance that changed the table; null if there is none. */
+  readonly last_maintenance: LastMaintenanceOut | null;
+  /** The newest result of each check of the table. */
+  readonly checks: readonly CheckHealthOut[];
+  /** Who read the table, most reads first; null when left out or not visible to the caller. */
+  readonly readers: readonly ReaderOut[] | null;
+  /** How many results were left out of `checks`. */
+  readonly hidden_checks: number;
+  /** The current state of each health signal. */
+  readonly signals: readonly HealthSignalOut[];
+}
+
+/**
+ * Reads a table's health for the last seven days.
+ *
+ * @param ref - The table.
+ * @param options - What to ask for.
+ * @param options.readers - Whether to ask for the readers; false sends `readers=false`, so the
+ *   server looks up no names and writes no audit entry.
+ * @returns The health.
+ * @throws {ApiError} for a refusal.
+ */
+export function getTableHealth(
+  ref: TableRef,
+  options: { readonly readers: boolean },
+): Promise<TableHealthOut> {
+  const query = options.readers ? "?days=7" : "?days=7&readers=false";
+  return api.request<TableHealthOut>("GET", tableApiPath(ref, `/health${query}`));
+}
+
+/** A node of the metadata graph, with the attributes the caller may see. */
+export interface GraphNodeOut {
+  /** Its stable id, such as `table:<uuid>`. */
+  readonly id: string;
+  /** `table`, `job`, `connection` and others. */
+  readonly kind: string;
+  /** A name to read: a dotted table name for a table. */
+  readonly name: string;
+  /** Steps from the start. */
+  readonly distance: number;
+  /** A table's `managed`, `external`, `view` or `artifact`. */
+  readonly table_type?: string | null;
+  /** A table's declared modelling kind. */
+  readonly model_kind?: string | null;
+  /** A table's label, in the reader's language. */
+  readonly label?: string | null;
+  /** A connection's kind. */
+  readonly connection_kind?: string | null;
+}
+
+/** An edge of the metadata graph, from `source` to `target`. */
+interface GraphEdgeOut {
+  /** `reads`, `builds`, `references` and others. */
+  readonly kind: string;
+  /** The node it leaves. */
+  readonly source: string;
+  /** The node it reaches. */
+  readonly target: string;
+}
+
+/** One page of a metadata graph answer. */
+export interface GraphOut {
+  /** The nodes; the start is the first node of the first page. */
+  readonly nodes: readonly GraphNodeOut[];
+  /** The edges whose later endpoint is on this page. */
+  readonly edges: readonly GraphEdgeOut[];
+  /** Where the next page starts; null on the last. */
+  readonly next_cursor: string | null;
+}
+
+/**
+ * Reads what feeds a node, or what it feeds, a few steps out.
+ *
+ * @param environment - The environment's name.
+ * @param node - The node's id, such as `table:<uuid>`.
+ * @param direction - `up` for what feeds it, `down` for what it feeds.
+ * @param depth - How many assets to cross, from 1 to 10.
+ * @returns The first page, at most 500 nodes.
+ * @throws {ApiError} for a refusal.
+ */
+export function getLineage(
+  environment: string,
+  node: string,
+  direction: "up" | "down",
+  depth: number,
+): Promise<GraphOut> {
+  const query = new URLSearchParams({ node, direction, depth: String(depth), limit: "500" });
+  return api.request<GraphOut>(
+    "GET",
+    `/api/v1/environments/${encodeURIComponent(environment)}/graph/lineage?${query.toString()}`,
   );
 }

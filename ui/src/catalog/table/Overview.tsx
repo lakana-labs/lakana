@@ -1,0 +1,79 @@
+/**
+ * The Overview tab: what a person wants to know about a table at a glance, on one screen.
+ *
+ * @packageDocumentation
+ */
+import { type JSX, useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
+
+import { getLineage, getTableHealth } from "../../api";
+import { useResource } from "../../shell/useResource";
+import { tablePath } from "../paths";
+import { ColumnsTable } from "./ColumnsTab";
+import { ComesFrom } from "./ComesFrom";
+import { Facts } from "./Facts";
+import { HealthBlock } from "./HealthBlock";
+import { useTableData } from "./TableContext";
+
+/** How many columns Overview shows before it links to all of them. */
+const FIRST_COLUMNS = 5;
+
+/**
+ * Renders the description with where it comes from, the first five columns, health in a
+ * sentence, the facts, and the tables directly upstream and downstream. Health is read without
+ * the readers' names and lineage one step each way; nothing here runs a preview. A block whose
+ * read fails says so on its own and leaves the rest as it is.
+ *
+ * @returns The tab's content.
+ */
+export function Overview(): JSX.Element {
+  const { t } = useTranslation();
+  const { ref, table } = useTableData();
+  const { environment, namespace, name } = ref;
+  const loadHealth = useCallback(
+    () => getTableHealth({ environment, namespace, name }, { readers: false }),
+    [environment, namespace, name],
+  );
+  const health = useResource(loadHealth);
+  const node = `table:${table.uuid}`;
+  const loadUp = useCallback(() => getLineage(environment, node, "up", 1), [environment, node]);
+  const loadDown = useCallback(() => getLineage(environment, node, "down", 1), [environment, node]);
+  const up = useResource(loadUp);
+  const down = useResource(loadDown);
+  return (
+    <div className="overview">
+      <div className="overview-main">
+        <section className="description">
+          <h2 className="block-heading">{t("table.description.heading")}</h2>
+          {table.description === null ? (
+            <p className="second">{t("table.description.none")}</p>
+          ) : (
+            <>
+              <p className="description-text">{table.description}</p>
+              {table.description_source !== null && (
+                <p className="second">
+                  {t(`table.description.source.${table.description_source}`)}
+                </p>
+              )}
+            </>
+          )}
+        </section>
+        {table.schema.length > 0 && (
+          <section className="first-columns">
+            <h2 className="block-heading">{t("table.columns.heading")}</h2>
+            <ColumnsTable columns={table.schema.slice(0, FIRST_COLUMNS)} full={false} />
+            <Link to={tablePath(environment, namespace, name, "columns")}>
+              {t("table.columns.all")}
+            </Link>
+          </section>
+        )}
+        <HealthBlock summary={table.health_summary} resource={health} />
+      </div>
+      <div className="overview-side">
+        <Facts />
+        <ComesFrom up={up} down={down} />
+      </div>
+    </div>
+  );
+}

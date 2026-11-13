@@ -4,7 +4,14 @@
  *
  * @packageDocumentation
  */
-import type { ColumnOut, PermissionsOut, TableOut } from "../api";
+import type {
+  ColumnOut,
+  GraphNodeOut,
+  GraphOut,
+  PermissionsOut,
+  TableHealthOut,
+  TableOut,
+} from "../api";
 import type { FakeRoute } from "./server";
 
 /**
@@ -147,6 +154,121 @@ export function permissions(person: string, allowed: readonly string[]): Permiss
 /** The path of the fact table on the server. */
 export const TABLE_PATH = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
 
+/** The newest result of one check, as the server answers it; the type is not exported. */
+type CheckResult = TableHealthOut["checks"][number];
+
+/** One health signal, as the server answers it; the type is not exported. */
+type SignalResult = TableHealthOut["signals"][number];
+
+/**
+ * A check that passed, with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The check's newest result.
+ */
+export function checkResult(overrides: Partial<CheckResult> = {}): CheckResult {
+  return {
+    name: "unique_sale_id",
+    check: "unique",
+    run_id: "5b1f0c52-0e0d-4b0a-9b53-6a53b8d2f001",
+    outcome: "passed",
+    on_failure: "fail",
+    failing_rows: null,
+    error: null,
+    rollback_outcome: null,
+    kept: false,
+    not_published: false,
+    finished_at: "2026-11-12T06:05:00Z",
+    ...overrides,
+  };
+}
+
+/**
+ * A signal that did not fire, with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The signal's current state.
+ */
+export function signalResult(overrides: Partial<SignalResult> = {}): SignalResult {
+  return {
+    id: "0c7d7f0e-5c10-4b64-a3f0-5a0b9f6b1001",
+    signal: "volume",
+    column: null,
+    state: "ok",
+    effect: "alert",
+    snapshot_id: 4821,
+    observed_at: "2026-11-12T06:06:00Z",
+    observed: null,
+    band: null,
+    alert: null,
+    values_hidden: false,
+    ...overrides,
+  };
+}
+
+/** A healthy table's health: one check that passed and one signal that is within its band. */
+export const HEALTH: TableHealthOut = {
+  days: 7,
+  last_maintenance: null,
+  checks: [checkResult()],
+  readers: null,
+  hidden_checks: 0,
+  signals: [signalResult()],
+};
+
+/**
+ * The health with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The health.
+ */
+export function health(overrides: Partial<TableHealthOut> = {}): TableHealthOut {
+  return { ...HEALTH, ...overrides };
+}
+
+/**
+ * A node of the lineage.
+ *
+ * @param kind - The node kind: table, job or connection.
+ * @param name - Its name; a dotted name for a table.
+ * @param distance - Steps from the table.
+ * @returns The node.
+ */
+function node(kind: string, name: string, distance: number): GraphNodeOut {
+  return { id: `${kind}:${name}`, kind, name, distance };
+}
+
+/** The table's own node: its id is built from the table's uuid. */
+export const ROOT: GraphNodeOut = {
+  id: `table:${TABLE.uuid}`,
+  kind: "table",
+  name: "gold.sales.fact_sales",
+  distance: 0,
+};
+
+/**
+ * A lineage answer: the table's own node, then the others.
+ *
+ * @param others - The other nodes.
+ * @returns The answer.
+ */
+export function lineage(others: readonly GraphNodeOut[]): GraphOut {
+  return { nodes: [ROOT, ...others], edges: [], next_cursor: null };
+}
+
+/** What feeds the fact table: a staging table, the job that builds it and a connection. */
+export const UP: GraphOut = lineage([
+  node("table", "staging.stg_sales", 1),
+  node("job", "shop/load_sales", 1),
+  node("connection", "shop_db", 2),
+]);
+
+/** What the fact table feeds: one table. */
+export const DOWN: GraphOut = lineage([node("table", "gold.sales.daily_sales", 1)]);
+
+/** The path of the table's lineage on the server. */
+export const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
+
 /**
  * The routes the table page reads and writes for a person: the table, what they may do, and
  * the record that they opened it. The person may do everything.
@@ -162,5 +284,10 @@ export function tableRoutes(person = "admin"): Record<string, FakeRoute> {
       body: permissions(person, ["READ_TABLE", "WRITE_TABLE", "DROP_TABLE", "SUBMIT_QUERY"]),
     },
     [`POST /api/v1/principals/${person}/recent`]: { status: 204 },
+    [`GET ${TABLE_PATH}/health`]: { status: 200, body: HEALTH },
+    [`GET ${LINEAGE_PATH}`]: (request) => ({
+      status: 200,
+      body: request.path.includes("direction=up") ? UP : DOWN,
+    }),
   };
 }

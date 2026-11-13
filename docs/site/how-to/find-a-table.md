@@ -110,8 +110,8 @@ row shows:
   a red diamond for a failed check or a blocking signal ("Check failed", "Blocked: late"), an
   amber triangle for a warning ("Late", "Rows dropped"), a green circle for "Healthy", and a
   grey dash for "Not judged". When more than one thing was found, the word names the worst and
-  "+2" counts the others; they are listed on the table page. The words and what each means are
-  in [Table list](../reference/table-list.md).
+  "+2" counts the others; they are [listed on the table page](open-a-table.md#overview). The words
+  and what each means are in [Table list](../reference/table-list.md).
 - **Rows** and **Size**: the rows of the newest snapshot and the size of its data files, right
   aligned.
 - **Last write** and **Last read**: how long ago, such as "2 hours ago". Hover a time, or let a

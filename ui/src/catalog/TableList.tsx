@@ -11,11 +11,9 @@ import { Link } from "react-router";
 
 import { TABLE_SORTS } from "../api";
 import type { TableListItemOut, TableSort } from "../api";
-import { Avatar } from "../profile/Avatar";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
-import { useWhen } from "../shell/useWhen";
-import { kindWord } from "./cells";
-import { formatBytes, formatRows, relativeTime } from "./format";
+import { kindWord, OwnerName, RowCount, Unknown, When } from "./cells";
+import { formatBytes } from "./format";
 import { HealthWord } from "./HealthWord";
 import { MatchLine, showsMatch } from "./MatchLine";
 import { tablePath } from "./paths";
@@ -24,22 +22,6 @@ import type { CatalogView } from "./view";
 // Created sorts the list but is not a column.
 const COLUMNS = TABLE_SORTS.filter((sort) => sort !== "created");
 const NUMBERS: readonly TableSort[] = ["rows", "size"];
-
-/**
- * What a cell shows where nothing is known: a dash for the eye and the words for a screen reader.
- *
- * @param props - The words.
- * @param props.words - What is not known, in words.
- * @returns The dash and the words.
- */
-function Unknown({ words }: { readonly words: string }): JSX.Element {
-  return (
-    <>
-      <span aria-hidden="true">–</span>
-      <span className="visually-hidden">{words}</span>
-    </>
-  );
-}
 
 /**
  * Hands a plain primary click on a row's cell to the row's link, so the cells that carry hover
@@ -77,7 +59,7 @@ export interface TableListProps {
 /**
  * Renders the table inside a region that scrolls on its own, so a narrow screen scrolls the
  * list and never the page. Every header is a button; the sorted one says so with `aria-sort`
- * and an arrow. Times are relative with the absolute time in words, computed once per render.
+ * and an arrow. Times are relative with the absolute time in words.
  *
  * @param props - The rows, the view, the sort handler and the busy flag.
  * @param props.items - The rows to show.
@@ -88,43 +70,8 @@ export interface TableListProps {
  */
 export function TableList({ items, view, onSort, busy }: TableListProps): JSX.Element {
   const { t, i18n } = useTranslation();
-  const when = useWhen();
   const language = i18n.language;
   const numbers = new Intl.NumberFormat(language);
-  const now = Date.now();
-
-  const time = (iso: string | null, never: string): JSX.Element => {
-    if (iso === null) {
-      return <Unknown words={never} />;
-    }
-    const absolute = when(iso);
-    return (
-      <>
-        <time dateTime={iso} title={absolute}>
-          {relativeTime(iso, now, language) ?? t("catalog.justNow")}
-        </time>
-        <span className="visually-hidden"> {absolute}</span>
-      </>
-    );
-  };
-
-  const rowCount = (value: number | null): JSX.Element => {
-    if (value === null) {
-      return <Unknown words={t("catalog.notKnown")} />;
-    }
-    const short = formatRows(value, language);
-    const exact = numbers.format(value);
-    return short === exact ? (
-      <>{short}</>
-    ) : (
-      <>
-        <span aria-hidden="true" title={exact}>
-          {short}
-        </span>
-        <span className="visually-hidden">{exact}</span>
-      </>
-    );
-  };
 
   return (
     <div
@@ -191,22 +138,14 @@ export function TableList({ items, view, onSort, busy }: TableListProps): JSX.El
                 </span>
               </td>
               <td>
-                {row.owner === null ? (
-                  <Unknown words={t("catalog.noOwner")} />
-                ) : (
-                  <div className="person-cell">
-                    <Avatar name={row.owner.name} displayName={null} etag={null} size={24} />
-                    <span>{row.owner.name}</span>
-                    {row.owner.kind === "SERVICE_ACCOUNT" && (
-                      <span className="second">{t("catalog.serviceAccount")}</span>
-                    )}
-                  </div>
-                )}
+                <OwnerName owner={row.owner} />
               </td>
               <td>
                 <HealthWord summary={row.health_summary} />
               </td>
-              <td className="number">{rowCount(row.row_count)}</td>
+              <td className="number">
+                <RowCount value={row.row_count} />
+              </td>
               <td className="number">
                 {row.size_bytes === null ? (
                   <Unknown words={t("catalog.notKnown")} />
@@ -216,8 +155,12 @@ export function TableList({ items, view, onSort, busy }: TableListProps): JSX.El
                   </span>
                 )}
               </td>
-              <td>{time(row.last_write_at, t("catalog.neverWritten"))}</td>
-              <td>{time(row.last_read_at, t("catalog.neverRead"))}</td>
+              <td>
+                <When iso={row.last_write_at} never={t("catalog.neverWritten")} />
+              </td>
+              <td>
+                <When iso={row.last_read_at} never={t("catalog.neverRead")} />
+              </td>
               <td>
                 <span className="chevron" aria-hidden="true">
                   ›

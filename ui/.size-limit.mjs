@@ -38,13 +38,21 @@ const NAMED_LIMITS = [
   { name: "Catalog", prefix: "CatalogScreen-", limit: "32.6 kB" },
   // Measured 1.49 kB (a table's page: the read, the record of it as opened, the header with its
   // tabs and the states, 2026-11-13) + 10 %. It loads on /catalog/{environment}/{namespace}/{table}.
-  { name: "a table's page", prefix: "TablePage-", limit: "1.64 kB" },
+  // Raised to the measured 4.07 kB (2026-11-13) + 10 % with the Overview (description, first
+  // columns, health in sentences, facts, comes from and goes to) and the Columns tab.
+  { name: "a table's page", prefix: "TablePage-", limit: "4.48 kB" },
   // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
   // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
   { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },
   // Measured 789 B (React Aria's text field, shared by the Catalog's search and the screens with
   // a text field; a chunk of its own since the table page's route, 2026-11-13) + 10 %.
   { name: "the text field", prefix: "TextField-", limit: "0.87 kB" },
+  // Measured 180 B (a date and time in the person's language; the Catalog's list and the table
+  // page share it, 2026-11-13) + 10 %.
+  { name: "dates and times", prefix: "useWhen-", limit: "0.2 kB" },
+  // Measured 239 B (focus after a control removes itself; the Access screens and the table page
+  // share it, 2026-11-13) + 10 %.
+  { name: "focus after a change", prefix: "useFocusAfter-", limit: "0.27 kB" },
   // Measured 357 B (reading and reading again, now with the typed failure, 2026-11-13) + 10 %.
   { name: "reading for a screen", prefix: "useResource-", limit: "0.39 kB" },
   // Measured 219 B (the row of tabs; the router's link code it shared moved into the first load,
@@ -114,11 +122,13 @@ export default [
     limit: "212 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
+  // Raised from 6.62 kB: measured 6.55 kB with the Overview's layout, facts, health lines and
+  // columns table (2026-11-13) + 10 %.
   // Measured 6.02 kB (the Catalog's rules: the tree, the search, the bar, the scrolling table
   // region, the sorting headers, the health word and the skeleton rows, 2026-11-13) + 10 %.
   // Raised from 5.13 kB (4.66 kB measured with the profile pictures' circle, file field and
   // People cell, 2026-11-11, + 10 %: the circle is drawn on the first paint, so its rules cannot
   // wait for the dialog that loads on demand).
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "6.62 kB" },
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "7.21 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

@@ -468,7 +468,84 @@
     "toCatalog": "Back to the Catalog",
     "notFound": "{{namespace}}.{{name}} is no longer in {{environment}}; it may have been dropped or renamed.",
     "forbidden": "You may not read {{namespace}}.{{name}}, or there is no table by that name. Check the name, or ask an administrator for access.",
-    "unavailable": "The table's storage cannot be reached right now. Try again in a moment."
+    "unavailable": "The table's storage cannot be reached right now. Try again in a moment.",
+    "description": {
+      "heading": "Description",
+      "none": "No description yet.",
+      "source": {
+        "project": "From the project in Git",
+        "edited": "Edited here"
+      }
+    },
+    "columns": {
+      "heading": "Columns",
+      "region": "Table columns",
+      "first": "The first columns",
+      "all": "All columns ›",
+      "none": "This table has no columns.",
+      "noDescription": "No description",
+      "name": "Name",
+      "type": "Type",
+      "nulls": "Nulls",
+      "role": "Role",
+      "joins": "Joins",
+      "description": "Description",
+      "terms": "Terms",
+      "nullable": "Allowed",
+      "required": "Never",
+      "joinsTo": "Joins",
+      "roles": {
+        "key": "Key",
+        "measure": "Measure"
+      }
+    },
+    "facts": {
+      "heading": "Facts",
+      "owner": "Owner",
+      "rows": "Rows",
+      "size": "Size",
+      "sizeInFiles_one": "{{size}} in {{count}} file",
+      "sizeInFiles_other": "{{size}} in {{count}} files",
+      "lastWrite": "Last write",
+      "lastRead": "Last read",
+      "readers_one": "{{count}} reader in the last 7 days",
+      "readers_other": "{{count}} readers in the last 7 days",
+      "created": "Created",
+      "grain": "Grain"
+    },
+    "healthBlock": {
+      "heading": "Health",
+      "more": "and {{count}} more",
+      "healthy": "Every check passed and no signal fired.",
+      "notJudged": "Not judged yet: the table has no checks or signals.",
+      "failed_one": "Check {{name}} failed: {{count}} row broke it.",
+      "failed_other": "Check {{name}} failed: {{count}} rows broke it.",
+      "failedUncounted": "Check {{name}} failed.",
+      "rolled_back": "The table was set back to its last good snapshot.",
+      "unpublished": "The table was not published.",
+      "errored": "Check {{name}} could not run: {{error}}",
+      "erroredPlain": "Check {{name}} could not run.",
+      "warned_one": "Check {{name}} warned: {{count}} row broke it.",
+      "warned_other": "Check {{name}} warned: {{count}} rows broke it.",
+      "warnedUncounted": "Check {{name}} warned.",
+      "valuesHidden": "Its values are hidden for you.",
+      "signal": {
+        "freshness": "The table was not written when expected.",
+        "volume": "The number of rows written is outside its usual band.",
+        "null_rate": "The share of empty values in {{column}} is outside its usual band.",
+        "range": "Values in {{column}} are outside their usual band.",
+        "schema": "The table's columns changed.",
+        "unknown": "The {{signal}} signal fired."
+      }
+    },
+    "comes": {
+      "heading": "Comes from · goes to",
+      "from": "Comes from",
+      "to": "Goes to",
+      "nothingUp": "Nothing upstream.",
+      "nothingDown": "Nothing downstream.",
+      "more": "and {{count}} more"
+    }
   },
   "list": {
     "name": "Name",
