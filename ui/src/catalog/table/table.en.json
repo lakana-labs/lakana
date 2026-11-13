@@ -3,7 +3,8 @@
   "tabs": {
     "overview": "Overview",
     "columns": "Columns",
-    "preview": "Preview"
+    "preview": "Preview",
+    "lineage": "Lineage"
   },
   "toCatalog": "Back to the Catalog",
   "notFound": "{{namespace}}.{{name}} is no longer in {{environment}}; it may have been dropped or renamed.",
@@ -122,7 +123,8 @@
     "to": "Goes to",
     "nothingUp": "Nothing upstream.",
     "nothingDown": "Nothing downstream.",
-    "more": "and {{count}} more"
+    "more": "and {{count}} more",
+    "lineage": "Lineage ›"
   },
   "preview": {
     "region": "Preview of {{name}}",
@@ -158,5 +160,6 @@
     "value": "Value",
     "valueOf": "{{column}}, row {{row}}",
     "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here."
-  }
+  },
+  "loadingTab": "Loading the tab…"
 }

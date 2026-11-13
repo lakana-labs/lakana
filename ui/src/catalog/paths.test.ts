@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { catalogPath, splitDotted, tablePath } from "./paths";
+import { catalogPath, splitDotted, TABLE_TABS, tablePath } from "./paths";
 import { DEFAULT_VIEW } from "./view";
 
 describe("catalog paths", () => {
@@ -31,6 +31,13 @@ describe("catalog paths", () => {
     );
     expect(tablePath("prod", "gold.sales", "fact_sales", "overview")).toBe(
       "/catalog/prod/gold.sales/fact_sales",
+    );
+  });
+
+  it("has the Lineage tab after Preview", () => {
+    expect(TABLE_TABS).toEqual(["overview", "columns", "preview", "lineage"]);
+    expect(tablePath("prod", "gold.sales", "fact_sales", "lineage")).toBe(
+      "/catalog/prod/gold.sales/fact_sales/lineage",
     );
   });
 

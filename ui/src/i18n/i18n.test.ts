@@ -25,3 +25,15 @@ it("ships no string of a table's page in the first load, and the page registers 
   expect(i18n.t("table.tabs.overview")).toBe("Overview");
   expect(i18n.t("table.loading")).toBe("Loading the table…");
 });
+
+it("ships no lineage string in the first load, and the Lineage tab registers its own", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("table.lineage.stepUp")).toBe(false);
+  await import("../catalog/table/TablePage");
+  expect(i18n.exists("table.lineage.stepUp")).toBe(false);
+
+  await import("../catalog/table/LineageTab");
+
+  expect(i18n.t("table.lineage.stepUp")).toBe("One step up");
+});

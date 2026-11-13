@@ -82,15 +82,21 @@ describe("TablePage", () => {
       expect(await screen.findByText("Sales facts")).toBeVisible();
     });
 
-    it("shows Overview, Columns and Preview in order, each with its own address", async () => {
+    it("shows Overview, Columns, Preview and Lineage in order, each with its own address", async () => {
       renderShell(PAGE);
 
       const links = await tabs();
-      expect(links.map((link) => link.textContent)).toEqual(["Overview", "Columns", "Preview"]);
+      expect(links.map((link) => link.textContent)).toEqual([
+        "Overview",
+        "Columns",
+        "Preview",
+        "Lineage",
+      ]);
       expect(links.map((link) => link.getAttribute("href"))).toEqual([
         PAGE,
         `${PAGE}/columns`,
         `${PAGE}/preview`,
+        `${PAGE}/lineage`,
       ]);
       expect(links[0]).toHaveAttribute("aria-current", "page");
     });
@@ -98,6 +104,7 @@ describe("TablePage", () => {
     it.each([
       ["columns", "Columns"],
       ["preview", "Preview"],
+      ["lineage", "Lineage"],
     ])("opens the %s tab at its address", async (segment, name) => {
       renderShell(`${PAGE}/${segment}`);
 
@@ -149,6 +156,7 @@ describe("TablePage", () => {
         "Overview",
         "Columns",
         "Preview",
+        "Lineage",
       ]);
     });
 
@@ -340,6 +348,7 @@ describe("TablePage", () => {
         "Overview",
         "Columns",
         "Preview",
+        "Lineage",
       ]);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });

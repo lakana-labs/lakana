@@ -83,8 +83,9 @@ function Side({ label, nothing, graph }: SideProps): JSX.Element | null {
 }
 
 /**
- * Renders the two sides under one heading. A side that cannot be read says why beside Try again,
- * which reads only what failed; the focus then goes to the heading, because the button is gone.
+ * Renders the two sides under one heading, with "Lineage ›" to the Lineage tab beside it. A
+ * side that cannot be read says why beside Try again, which reads only what failed; the focus
+ * then goes to the heading, because the button is gone.
  *
  * @param props - The two reads.
  * @param props.up - What feeds the table.
@@ -93,14 +94,21 @@ function Side({ label, nothing, graph }: SideProps): JSX.Element | null {
  */
 export function ComesFrom({ up, down }: ComesFromProps): JSX.Element {
   const { t } = useTranslation();
+  const { ref } = useTableData();
   const answers = useMemo(() => ({ up: up.data, down: down.data }), [up.data, down.data]);
   const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(answers);
   const failed = up.error ?? down.error;
   return (
     <section className="comes-from">
-      <h2 className="block-heading" tabIndex={-1} ref={headingRef}>
-        {t("table.comes.heading")}
-      </h2>
+      {/* Lineage › sits beside the heading, so Overview keeps fitting one screen. */}
+      <div className="block-head">
+        <h2 className="block-heading" tabIndex={-1} ref={headingRef}>
+          {t("table.comes.heading")}
+        </h2>
+        <Link to={tablePath(ref.environment, ref.namespace, ref.name, "lineage")}>
+          {t("table.comes.lineage")}
+        </Link>
+      </div>
       {failed === null ? (
         <>
           <Side

@@ -18,8 +18,8 @@ The page has:
 - **The table's name** as the heading, with its label under it when the table has one.
 - **A line under the name** with what the table is and where it lives, such as `Fact · gold.sales`,
   and the environment's label.
-- **Tabs**: Overview, Columns and Preview. Every tab has its own address, so a link opens the
-  tab you were looking at. Everyone sees the same tabs.
+- **Tabs**: Overview, Columns, Preview and Lineage. Every tab has its own address, so a link
+  opens the tab you were looking at. Everyone sees the same tabs.
 
 The page has no button beside the name. What you may do is in the tabs.
 
@@ -62,7 +62,8 @@ follow each other.
 - **Comes from · goes to.** The tables directly upstream, which feed this one, and directly
   downstream, which it feeds, as links, at most five each way and then "and 2 more". "Nothing
   upstream." and "Nothing downstream." mean there is none you may see. Jobs and connections are
-  not listed here. If lineage cannot be read, the block says why and offers **Try again**.
+  not listed here; **Lineage ›**, beside the heading, opens the Lineage tab, which shows them.
+  If lineage cannot be read, the block says why and offers **Try again**.
 
 Opening Overview runs no query. It reads the table, its health without the readers' names, and
 one step of lineage each way.
@@ -91,6 +92,36 @@ you. Its address ends in `/preview`. The preview runs only while the tab is open
 tab cancels one that still waits. A person who may read the table but not run queries sees one
 line that says so and what to ask for. See
 [In the web interface](preview-a-table.md#in-the-web-interface).
+
+## Lineage
+
+Lineage shows where the table's data comes from and where it goes. Its address ends in
+`/lineage`.
+
+- **What is drawn.** The tables upstream to the left, the tables downstream to the right, and
+  between them the assets that build them, each box naming the job that runs the asset, such as
+  "Job daily_sales" with "asset gold.sales.fact_sales · analytics" under it, or "Run by no
+  job". At the edges are the connections an asset loads from or writes to, with their kind,
+  such as "PostgreSQL"; a connection the environment does not have says "Connection not set
+  up". Columns are not drawn.
+- **One step at a time.** The tab opens one step each way: a step crosses one asset. **One step
+  up** and **One step down** add a step, up to ten; a button goes when nothing is further that
+  way. The steps are kept in the address, such as `/lineage?up=2`, so **Back** returns to fewer
+  steps and a link opens the same view.
+- **Opening a table.** Press a table's box to open its page. Jobs and connections are not links
+  yet.
+- **Full screen.** **Full screen** shows the same drawing scaled to the window. **Close** or
+  <kbd>Esc</kbd> returns to the tab.
+- **As a list.** Under the drawing, the same tables, assets, jobs and connections are listed in
+  words, with each table a link. A large drawing scrolls in its own region: press <kbd>Tab</kbd>
+  to focus it and use the arrow keys.
+
+Lineage looks the same to everyone who may read the table, except that what you may not see is
+simply absent: a table you may not read, and the assets, jobs and connections of an environment
+you may not read, are not drawn, and nothing counts them. If you see only the table itself, the
+tab says "Nothing upstream or downstream." A very large lineage shows its first 500 nodes and
+says "Showing the first 500 nodes." If lineage cannot be read, the tab says why and offers
+**Try again**.
 
 ## When the page cannot be shown
 

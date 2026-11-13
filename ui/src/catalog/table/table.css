@@ -91,6 +91,20 @@
   font-weight: var(--type-section-weight);
 }
 
+/* A block's heading with a link to more beside it. */
+.block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.block-head .block-heading {
+  margin: 0;
+}
+
 .block-heading:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
@@ -322,4 +336,105 @@
   font-size: var(--type-code-size);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* The Lineage tab: the step buttons, the drawing scrolling both ways in its own region, and the
+   list. Boxes are the surface with a hairline edge, the table itself the accent background;
+   nothing moves. */
+.lineage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.lineage-region {
+  max-height: 70vh;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+}
+
+.lineage-region:focus-visible,
+.lineage:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.lineage-graph {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: var(--type-data-size);
+}
+
+.lineage-graph rect {
+  fill: var(--color-surface);
+  stroke: var(--color-line);
+}
+
+.lineage-graph .lineage-root rect {
+  fill: var(--color-accent-bg);
+  stroke: var(--color-accent);
+}
+
+.lineage-graph text {
+  fill: var(--color-text);
+}
+
+.lineage-graph .lineage-second {
+  fill: var(--color-text-muted);
+}
+
+.lineage-graph a .lineage-first {
+  fill: var(--color-accent);
+  text-decoration: underline;
+}
+
+.lineage-graph .char-mark {
+  fill: var(--color-warn);
+  font-family: var(--font-mono);
+}
+
+.lineage-edge {
+  stroke: var(--color-edge);
+}
+
+/* The full-screen view: the same drawing, scaled to the window. */
+.dialog.lineage-dialog {
+  width: 100%;
+}
+
+.lineage-graph.lineage-full {
+  width: 100%;
+  height: auto;
+  max-height: 75vh;
+  margin-bottom: var(--space-4);
+}
+
+.lineage-list ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
+}
+
+@media (forced-colors: active) {
+  .lineage-graph rect,
+  .lineage-edge {
+    stroke: CanvasText;
+  }
+
+  .lineage-graph rect,
+  .lineage-graph .lineage-root rect {
+    fill: Canvas;
+  }
+
+  .lineage-graph text,
+  .lineage-graph .lineage-second,
+  .lineage-graph .char-mark {
+    fill: CanvasText;
+  }
+
+  .lineage-graph a .lineage-first {
+    fill: LinkText;
+  }
 }

@@ -55,6 +55,11 @@ const NAMED_LIMITS = [
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
   // the cells as text and the Value panel. It loads only when the Preview tab is opened.
   { name: "the Preview tab", prefix: "PreviewTab-", limit: "24.17 kB" },
+  // Measured 4.06 kB (2026-11-13) + 10 %: the Lineage tab, its layered layout of tables, assets
+  // and connections, the drawing with its links, the list beside it, the steps kept in the
+  // address, the full-screen view and its own strings. It loads only when the Lineage tab is
+  // opened; the table's page stays at 10.32 kB with the tab's lazy import, inside its limit.
+  { name: "the Lineage tab", prefix: "LineageTab-", limit: "4.47 kB" },
   // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
   // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
   { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },
@@ -141,6 +146,10 @@ export default [
     limit: "212 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
+  // Raised from 7.21 kB: measured 7.3 kB with the Lineage tab's rules (the step buttons, the
+  // drawing's scrolling region, its boxes, lines and marks in light, dark and forced colours, the
+  // full-screen view and the nested list) and Overview's heading row with Lineage ›
+  // (2026-11-13) + 10 %.
   // Raised from 6.62 kB: measured 6.55 kB with the Overview's layout, facts, health lines and
   // columns table (2026-11-13) + 10 %.
   // Measured 6.02 kB (the Catalog's rules: the tree, the search, the bar, the scrolling table
@@ -148,6 +157,6 @@ export default [
   // Raised from 5.13 kB (4.66 kB measured with the profile pictures' circle, file field and
   // People cell, 2026-11-11, + 10 %: the circle is drawn on the first paint, so its rules cannot
   // wait for the dialog that loads on demand).
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "7.21 kB" },
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "8.03 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

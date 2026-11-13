@@ -231,16 +231,50 @@ export function health(overrides: Partial<TableHealthOut> = {}): TableHealthOut 
   return { ...HEALTH, ...overrides };
 }
 
+/** An edge of a lineage answer. */
+type GraphEdge = GraphOut["edges"][number];
+
 /**
- * A node of the lineage.
+ * A node of the lineage, with its id built as the server builds it from the kind and the name.
  *
- * @param kind - The node kind: table, job or connection.
- * @param name - Its name; a dotted name for a table.
- * @param distance - Steps from the table.
+ * @param kind - The node kind: table, asset, job or connection.
+ * @param name - Its name; a dotted name for a table and an asset, `<repository>/<job>` for a job.
+ * @param distance - Assets crossed from the table; a job or connection has its asset's.
+ * @param overrides - The fields that differ, such as an asset's `id` and `repository`.
  * @returns The node.
  */
-function node(kind: string, name: string, distance: number): GraphNodeOut {
-  return { id: `${kind}:${name}`, kind, name, distance };
+export function graphNode(
+  kind: string,
+  name: string,
+  distance: number,
+  overrides: Partial<GraphNodeOut> = {},
+): GraphNodeOut {
+  return { id: `${kind}:${name}`, kind, name, distance, ...overrides };
+}
+
+/**
+ * An asset of the lineage: its id names its repository, its name is the table it builds.
+ *
+ * @param name - The dotted table it builds.
+ * @param distance - Assets crossed from the table, itself included.
+ * @param repository - The repository that declares it.
+ * @returns The node.
+ */
+export function assetNode(name: string, distance: number, repository = "analytics"): GraphNodeOut {
+  return graphNode("asset", name, distance, { id: `asset:${repository}/${name}`, repository });
+}
+
+/**
+ * An edge of the lineage, as the server writes it: `builds` and `reads` from an asset to a table,
+ * `runs` from a job to an asset, `uses` from an asset to a connection.
+ *
+ * @param kind - The edge's kind.
+ * @param source - The node it leaves.
+ * @param target - The node it reaches.
+ * @returns The edge.
+ */
+export function graphEdge(kind: string, source: GraphNodeOut, target: GraphNodeOut): GraphEdge {
+  return { kind, source: source.id, target: target.id };
 }
 
 /** The table's own node: its id is built from the table's uuid. */
@@ -255,21 +289,70 @@ export const ROOT: GraphNodeOut = {
  * A lineage answer: the table's own node, then the others.
  *
  * @param others - The other nodes.
+ * @param edges - The edges between them.
  * @returns The answer.
  */
-export function lineage(others: readonly GraphNodeOut[]): GraphOut {
-  return { nodes: [ROOT, ...others], edges: [], next_cursor: null };
+export function lineage(
+  others: readonly GraphNodeOut[],
+  edges: readonly GraphEdge[] = [],
+): GraphOut {
+  return { nodes: [ROOT, ...others], edges, next_cursor: null };
 }
 
-/** What feeds the fact table: a staging table, the job that builds it and a connection. */
-export const UP: GraphOut = lineage([
-  node("table", "staging.stg_sales", 1),
-  node("job", "shop/load_sales", 1),
-  node("connection", "shop_db", 2),
-]);
+/** The asset that builds the fact table. */
+const FACT_ASSET = assetNode("gold.sales.fact_sales", 1);
 
-/** What the fact table feeds: one table. */
-export const DOWN: GraphOut = lineage([node("table", "gold.sales.daily_sales", 1)]);
+/** The staging table the fact table's asset reads. */
+const STG_SALES = graphNode("table", "staging.stg_sales", 1);
+
+/** The job that runs the fact table's asset; a job's name starts with its repository. */
+const DAILY_SALES_JOB = graphNode("job", "analytics/daily_sales", 1, { repository: "analytics" });
+
+/** The connection the fact table's asset loads from. */
+const PG_SALES = graphNode("connection", "pg-sales", 1, { connection_kind: "postgresql" });
+
+/**
+ * What feeds the fact table, one step up, as the server answers it: the asset that builds it,
+ * the staging table that asset reads, the job that runs it and the connection it uses. The job
+ * and the connection are leaves at their asset's distance.
+ */
+export const UP: GraphOut = lineage(
+  [FACT_ASSET, STG_SALES, DAILY_SALES_JOB, PG_SALES],
+  [
+    graphEdge("builds", FACT_ASSET, ROOT),
+    graphEdge("reads", FACT_ASSET, STG_SALES),
+    graphEdge("runs", DAILY_SALES_JOB, FACT_ASSET),
+    graphEdge("uses", FACT_ASSET, PG_SALES),
+  ],
+);
+
+/** The asset that builds the staging table, two steps up. */
+const STG_ASSET = assetNode("staging.stg_sales", 2);
+
+/** The raw table the staging table's asset reads, two steps up. */
+const SALES_RAW = graphNode("table", "bronze.sales_raw", 2);
+
+/** What feeds the fact table two steps up: {@link UP}, and the staging table's asset and its source. */
+export const UP2: GraphOut = lineage(
+  [...UP.nodes.slice(1), STG_ASSET, SALES_RAW],
+  [
+    ...UP.edges,
+    graphEdge("builds", STG_ASSET, STG_SALES),
+    graphEdge("reads", STG_ASSET, SALES_RAW),
+  ],
+);
+
+/** The asset that builds the daily table from the fact table. */
+const DAILY_ASSET = assetNode("gold.sales.daily_sales", 1);
+
+/** The table the fact table feeds. */
+const DAILY_SALES = graphNode("table", "gold.sales.daily_sales", 1);
+
+/** What the fact table feeds, one step down: the asset that reads it and the table it builds. */
+export const DOWN: GraphOut = lineage(
+  [DAILY_ASSET, DAILY_SALES],
+  [graphEdge("reads", DAILY_ASSET, ROOT), graphEdge("builds", DAILY_ASSET, DAILY_SALES)],
+);
 
 /** The path of the table's lineage on the server. */
 export const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";

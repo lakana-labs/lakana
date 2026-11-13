@@ -34,20 +34,22 @@ function markOf(character: string): string {
   return `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
+/** A part of a text: plain text, or the mark that stands for one character or a run of it. */
+export type MarkedPart = string | { readonly mark: string };
+
 /**
- * Renders text as text nodes, never as markup, and every character of {@link INVISIBLE} as a
- * visible mark such as `U+202E`, so a file, a path or a value cannot hide or reorder what the
- * person reads. Tabs and line feeds stay as they are. A run of the same character becomes one
- * mark with its count, such as `U+200B ×350000`, so a file full of one invisible character cannot
- * freeze the page with a mark per character.
+ * Splits text into plain parts and marks: every character of {@link INVISIBLE} becomes a mark
+ * such as `U+202E`, and a run of the same character one mark with its count, such as
+ * `U+200B ×350000`, so a file full of one invisible character cannot freeze the page with a
+ * mark per character. Tabs and line feeds stay in the plain parts. {@link VisibleText} and
+ * {@link VisibleTspan} both show text through it, so HTML and SVG mark the same characters.
  *
- * @param props - The text.
- * @param props.text - The text, as the server sent it.
- * @returns The text and its marks.
+ * @param text - The text, as the server sent it.
+ * @returns The parts, in order; none for an empty text.
  */
-export function VisibleText({ text }: VisibleTextProps): JSX.Element {
-  // Plain text, or a run of one marked character: where it starts and how many it holds.
-  const parts: (string | { index: number; character: string; count: number })[] = [];
+export function markInvisible(text: string): readonly MarkedPart[] {
+  // Plain text, or a run of one marked character and how many it holds.
+  const parts: (string | { character: string; count: number })[] = [];
   let start = 0;
   for (const match of text.matchAll(INVISIBLE)) {
     const last = parts.at(-1);
@@ -57,22 +59,63 @@ export function VisibleText({ text }: VisibleTextProps): JSX.Element {
       if (match.index > start) {
         parts.push(text.slice(start, match.index));
       }
-      parts.push({ index: match.index, character: match[0], count: 1 });
+      parts.push({ character: match[0], count: 1 });
     }
     start = match.index + match[0].length;
   }
   if (start < text.length) {
     parts.push(text.slice(start));
   }
-  const shown: ReactNode[] = parts.map((part) =>
+  return parts.map((part) =>
+    typeof part === "string"
+      ? part
+      : {
+          mark:
+            part.count === 1
+              ? markOf(part.character)
+              : `${markOf(part.character)} ×${String(part.count)}`,
+        },
+  );
+}
+
+/**
+ * Renders text as text nodes, never as markup, and every character of {@link INVISIBLE} as a
+ * visible mark such as `U+202E` (see {@link markInvisible}), so a file, a path or a value cannot
+ * hide or reorder what the person reads.
+ *
+ * @param props - The text.
+ * @param props.text - The text, as the server sent it.
+ * @returns The text and its marks.
+ */
+export function VisibleText({ text }: VisibleTextProps): JSX.Element {
+  const shown: ReactNode[] = markInvisible(text).map((part, index) =>
     typeof part === "string" ? (
       part
     ) : (
-      <span key={part.index} className="char-mark">
-        {part.count === 1
-          ? markOf(part.character)
-          : `${markOf(part.character)} ×${String(part.count)}`}
+      <span key={index} className="char-mark">
+        {part.mark}
       </span>
+    ),
+  );
+  return <>{shown}</>;
+}
+
+/**
+ * {@link VisibleText} inside an SVG `<text>`: the same parts, each mark a
+ * `<tspan class="char-mark">`, so a name in a drawing carries the same marks as in HTML.
+ *
+ * @param props - The text.
+ * @param props.text - The text, as the server sent it.
+ * @returns The text and its marks, as SVG text content.
+ */
+export function VisibleTspan({ text }: VisibleTextProps): JSX.Element {
+  const shown: ReactNode[] = markInvisible(text).map((part, index) =>
+    typeof part === "string" ? (
+      part
+    ) : (
+      <tspan key={index} className="char-mark">
+        {part.mark}
+      </tspan>
     ),
   );
   return <>{shown}</>;

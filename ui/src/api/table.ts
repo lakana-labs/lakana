@@ -449,6 +449,8 @@ export interface GraphNodeOut {
   readonly label?: string | null;
   /** A connection's kind. */
   readonly connection_kind?: string | null;
+  /** The repository that declares an asset or a job, or builds a table. */
+  readonly repository?: string | null;
 }
 
 /** An edge of the metadata graph, from `source` to `target`. */

@@ -17,10 +17,10 @@ export function catalogPath(view: CatalogView): string {
 }
 
 /** The tabs of a table's page. */
-export type TableTab = "overview" | "columns" | "preview";
+export type TableTab = "overview" | "columns" | "preview" | "lineage";
 
 /** Every tab, in the order they are shown. */
-export const TABLE_TABS: readonly TableTab[] = ["overview", "columns", "preview"];
+export const TABLE_TABS: readonly TableTab[] = ["overview", "columns", "preview", "lineage"];
 
 /**
  * The address of one table, or of one of its tabs.
