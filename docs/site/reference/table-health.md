@@ -485,9 +485,10 @@ Without a right to see the grants the command says that the readers are not show
 
 ## SDK
 
-`client.tables.health(environment, "namespace.table", days=None, readers=True)` returns a `TableHealth` with
-`days`, `last_maintenance` (a `LastMaintenance` or `None`), `checks` (a list of `CheckHealth`) and
-`readers` (a list of `Reader`, or `None`; `readers=False` asks the server to leave them out, and nothing is audited). `Table.last_write_at`, `Table.row_count`,
+`client.tables.health(environment, "namespace.table", days=None, readers=True)` returns a
+`TableHealth` with `days`, `last_maintenance` (a `LastMaintenance` or `None`), `checks` (a list of
+`CheckHealth`) and `readers` (a list of `Reader`, or `None`; `readers=False` asks the server to
+leave them out, and nothing is audited). `Table.last_write_at`, `Table.row_count`,
 `Table.size_bytes` and `Table.file_count` hold the numbers of the snapshot; they are `None` for a
 server that is older than table health. `Table.health` holds the effects that are not `warn` (empty when
 every signal warns, and from an older server), `Table.health_missing` the keys of it that name a

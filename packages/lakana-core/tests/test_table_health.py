@@ -19,6 +19,7 @@ from sqlalchemy.orm import ORMExecuteState, Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.catalog import health
+from lakana_core.catalog import service as service_module
 from lakana_core.catalog.health import (
     StoredStats,
     last_maintenance,
@@ -1039,3 +1040,26 @@ def test_table_health_without_readers_names_none_even_to_an_administrator(
     _read(session, _orders_id(session), principal, _NOW.date(), 4, _NOW)
     shown = catalog.table_health(principal, _ORDERS, days=30, now=_NOW, with_readers=False)
     assert shown.readers is None
+
+
+def test_table_health_without_readers_runs_no_reader_lookup(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(service_module, "readers", lambda *args, **kwargs: calls.append(args) or [])
+    catalog = _table_health_catalog(session, tmp_path, {Action.READ_TABLE, Action.MANAGE_GRANT})
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            principal_id=principal.id,
+            role=Role.ADMIN,
+            kind=SecurableKind.INSTANCE,
+            granted_by=principal.id,
+            granted_at=_NOW,
+        )
+    )
+    session.commit()
+    catalog.table_health(principal, _ORDERS, days=30, now=_NOW, with_readers=False)
+    assert calls == []
+    catalog.table_health(principal, _ORDERS, days=30, now=_NOW)
+    assert len(calls) == 1
