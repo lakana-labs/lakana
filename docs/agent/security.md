@@ -469,7 +469,8 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired); a setup link
   records the operator's bootstrap PAT (`source_pat_id`) at issue and fails once it is revoked,
   expired or not recorded (`_operator_token_lapse`, reasons `operator_token_revoked`,
-  `operator_token_expired`; 403 naming `lakana sign-in setup-link`, #520). Each such link is then withdrawn (audited
+  `operator_token_expired`, and `operator_token_not_recorded` for a link issued before setup links
+  recorded the token, with its own sentence; 403 naming `lakana sign-in setup-link`, #520). Each such link is then withdrawn (audited
   with the reason, gone from the open lists) and the error names the next step (an
   administrator's recovery: `lakana recovery create NAME`; an invite: `lakana invite create`).
 - **A local link** (`POST /api/v1/sign-in/local-link`) exists only with

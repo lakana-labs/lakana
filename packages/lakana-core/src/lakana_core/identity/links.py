@@ -112,6 +112,13 @@ SETUP_LINK_ISSUER_LAPSED = (
 )
 """The refusal of a setup link whose issuing bootstrap token no longer stands."""
 
+SETUP_LINK_NOT_RECORDED = (
+    "This setup link was issued before the server was upgraded, so it does not record the "
+    "bootstrap token that issued it, and it was closed. Issue a new setup link with the current "
+    "bootstrap token: run `lakana sign-in setup-link` where the server runs."
+)
+"""The refusal of a setup link issued before links recorded the operator's token."""
+
 
 def not_operator_recovery(name: str) -> str:
     """Word the refusal of an administrator's recovery to anyone but the server operator.
@@ -1200,15 +1207,14 @@ class LinkService:
         -------
         str or None
             `None` when `source_pat_id` names a bootstrap PAT that is still unrevoked and
-            unexpired, as `is_operator` asks at issue; ``operator_token_expired`` for an
-            expired one; ``operator_token_revoked`` otherwise (revoked, gone, not a bootstrap
-            PAT, or none recorded).
+            unexpired, as `is_operator` asks at issue; ``operator_token_not_recorded`` when
+            the link records none (a setup link issued before links recorded it);
+            ``operator_token_expired`` for an expired one; ``operator_token_revoked``
+            otherwise (revoked, gone, or not a bootstrap PAT).
         """
-        pat = (
-            self._session.get(PersonalAccessToken, row.source_pat_id)
-            if row.source_pat_id is not None
-            else None
-        )
+        if row.source_pat_id is None:
+            return "operator_token_not_recorded"
+        pat = self._session.get(PersonalAccessToken, row.source_pat_id)
         if pat is None or not pat.bootstrap or pat.revoked_at is not None:
             return "operator_token_revoked"
         if pat.expires_at is not None and pat.expires_at <= self._clock():
@@ -1323,7 +1329,12 @@ class LinkService:
                 "not_local",
             )
         if kind == "setup" and (lapse := self._operator_token_lapse(row)) is not None:
-            raise _CloseLink(PermissionDenied(SETUP_LINK_ISSUER_LAPSED), lapse)
+            refusal = (
+                SETUP_LINK_NOT_RECORDED
+                if lapse == "operator_token_not_recorded"
+                else SETUP_LINK_ISSUER_LAPSED
+            )
+            raise _CloseLink(PermissionDenied(refusal), lapse)
         if kind == "setup" and has_passkey(self._session, principal_id, usable=False):
             raise _CloseLink(ConflictError(already_set_up(self._bootstrap_name)), "already_set_up")
         if (

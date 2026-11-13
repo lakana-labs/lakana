@@ -34,6 +34,7 @@ from lakana_core.identity.groups import GroupService
 from lakana_core.identity.links import (
     LINK_LIFETIMES,
     SETUP_LINK_ISSUER_LAPSED,
+    SETUP_LINK_NOT_RECORDED,
     IssuedLink,
     LinkService,
     Redeemed,
@@ -1474,15 +1475,15 @@ def _lapse_operator_token(world: World, link: IssuedLink, how: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("how", "reason"),
+    ("how", "reason", "message"),
     [
-        ("revoked", "operator_token_revoked"),
-        ("expired", "operator_token_expired"),
-        ("unrecorded", "operator_token_revoked"),
+        ("revoked", "operator_token_revoked", SETUP_LINK_ISSUER_LAPSED),
+        ("expired", "operator_token_expired", SETUP_LINK_ISSUER_LAPSED),
+        ("unrecorded", "operator_token_not_recorded", SETUP_LINK_NOT_RECORDED),
     ],
 )
 def test_setup_link_fails_once_the_operators_token_lapsed(
-    world: World, how: str, reason: str
+    world: World, how: str, reason: str, message: str
 ) -> None:
     """A setup link stands only while the bootstrap token that issued it does.
 
@@ -1494,12 +1495,14 @@ def test_setup_link_fails_once_the_operators_token_lapsed(
         How the token lapsed.
     reason
         The withdrawal's audited reason.
+    message
+        The refusal's sentence.
     """
     link = world.links.issue_setup(world.operator)
     _lapse_operator_token(world, link, how)
     with pytest.raises(PermissionDenied) as refused:
         world.redeem(link)
-    assert str(refused.value) == SETUP_LINK_ISSUER_LAPSED
+    assert str(refused.value) == message
     assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
     assert _withdrawal_reasons(world, link) == [reason]
     used = world.session.execute(
