@@ -362,10 +362,14 @@ def purge_environment_rows(
 ) -> Response:
     """Remove a deleted environment whose storage cannot be reached, rows only.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Removes the environment from the catalog, with its records of dropped tables, and frees
     its name. Its files, if there are any, are not touched. Only for a deleted environment
-    whose storage cannot be resolved (a root in a scheme Lakana cannot read), which the
-    worker's clean-up skips. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when no
+    whose storage root no process can read (a scheme Lakana does not support, or an fsspec
+    chain), which the worker's clean-up skips; a storage secret that cannot be used does not
+    count. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when no
     environment has the name, and 409 when it is not deleted or its storage can still be
     reached.
 

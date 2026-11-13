@@ -594,6 +594,9 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
     (`PATCH`) and `PUT …/secrets/{secret_name}/use` (binding hands the value to code);
     connections: `POST`, `PATCH` (their credentials and address); package indexes and
     repositories: `POST`, `PATCH /{name}` (where code and packages come from);
+  - irreversible erasure: `POST /api/v1/environments/{name}/purge-rows` (#261), which removes a
+    deleted environment's rows and with them the only record of where its files are; nothing
+    restores it;
   - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
     passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
     (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.
@@ -603,7 +606,7 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   token. Every other write of `/api/v1` sits in `NO_STEP_UP` with a one-line reason, so a new
   write route fails the test until it is placed. The rule: step-up when a write changes who or
   what can act or read (identities, rights, run-as, CI trust), handles credentials or secrets, or
-  changes where code or data come from or go; none for removing access (revoking a token,
+  changes where code or data come from or go, or irreversibly erases catalog records; none for removing access (revoking a token,
   withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
   one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
   descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
@@ -2912,13 +2915,17 @@ and name would stay. `CatalogService.purge_environment_rows` (`POST
 /api/v1/environments/{name}/purge-rows`, `lakana env purge NAME --rows-only --yes`) authorizes
 `MANAGE_ENVIRONMENT` at **instance** scope first (a grant on the environment's name is not enough,
 as for create and re-root), locks the row, refuses 404 for no row, 409 when it is not deleted, and
-409 while `for_environment(name, include_deleted=True)` succeeds: only its `ValidationError`
-counts as unreachable, so an environment with files the sweep can delete keeps its undo period and
-its file purge, and any other error (a missing secret, a wrong master key) is raised as it is. Then
+409 unless the stored root alone says no process can ever reach it
+(`storage.resolver.root_never_resolves`: a scheme `_parse_scheme` refuses, or an fsspec chain
+`::`). It never calls `for_environment`: a storage secret bound to another use
+(`SecretUseRefused`), a missing secret, a missing key provider or a wrong master key are settings
+to fix on a storage that may hold every file, so they keep the row and its file purge (#261 review;
+`test_an_object_store_whose_secret_cannot_be_used_keeps_its_row`). After the authorization it
+takes step-up (`require_step_up`): the purge cannot be undone. Then
 `environment_deletion.purge_rows`, in the lock order of the deletion and the last purge: the
 tables of the environment in id order (`lock_tables_in_id_order`), its location records in id
 order (`FOR UPDATE`), their delete, `revoke_attached`, an `ENVIRONMENT_PURGED` by the caller
-with `rows_only` and `locations`, and the row's delete, which cascades the rest; one commit. No
+with `rows_only`, `locations` and `storage_root` (where any files are; the records' own locations are not listed, their number is unbounded), and the row's delete, which cascades the rest; one commit. No
 file is read or deleted. Pins: `test_environment_rows_purge.py` (refusals, instance scope, lock
 order, the name free again) and its Postgres twin.
 

@@ -276,9 +276,10 @@ def purge(
     tables, and frees the name. Its files, if any, are not touched: delete them in the storage
     yourself if you no longer need them.
 
-    Refused for an environment that is not deleted (`lakana env delete NAME` first), and while
-    its storage can still be reached (`lakana env delete NAME --purge` has the clean-up delete
-    its files and then the environment). Needs MANAGE_ENVIRONMENT on the instance.
+    Refused for an environment that is not deleted (`lakana env delete NAME` first), and for
+    one whose root can be reached (`lakana env delete NAME --purge` has the clean-up delete its
+    files and then the environment); a storage secret that cannot be used does not count, fix
+    it instead. Needs MANAGE_ENVIRONMENT on the instance.
 
     Parameters
     ----------

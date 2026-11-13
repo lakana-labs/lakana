@@ -30,6 +30,7 @@ from lakana_core.config import StorageConfig
 from lakana_core.errors import (
     AlreadyExistsError,
     ConflictError,
+    LakanaError,
     NotFoundError,
     PermissionDenied,
 )
@@ -38,6 +39,9 @@ from lakana_core.models import (
     AuditEventType,
     Environment,
     Namespace,
+    PackageIndex,
+    Secret,
+    SecretUseKind,
     Table,
     TableLocation,
     TableLocationState,
@@ -46,8 +50,10 @@ from lakana_core.models import (
 from lakana_core.storage.resolver import StorageResolver
 
 
-def _old(session: Session, principal: PrincipalRef, name: str = "old") -> Environment:
-    """Insert an environment as an older release accepted it, on a `local://` root.
+def _old(
+    session: Session, principal: PrincipalRef, name: str = "old", root: str = "local:///data"
+) -> Environment:
+    """Insert an environment as an older release accepted it, on a root it cannot read.
 
     It has a namespace with two artifacts, whose name order is the reverse of their id order.
 
@@ -59,13 +65,15 @@ def _old(session: Session, principal: PrincipalRef, name: str = "old") -> Enviro
         The artifacts' owner.
     name
         Its name.
+    root
+        Its storage root.
 
     Returns
     -------
     Environment
         The row.
     """
-    env = Environment(id=uuid.uuid4(), name=name, storage_root="local:///data", storage_options={})
+    env = Environment(id=uuid.uuid4(), name=name, storage_root=root, storage_options={})
     namespace = Namespace(id=uuid.uuid4(), environment_id=env.id, path="gold")
     session.add_all([env, namespace])
     ids = sorted(uuid.uuid4() for _ in range(2))
@@ -175,6 +183,7 @@ def test_the_rows_go_and_the_name_is_free_again(
     assert event.securable_environment == "old"
     assert event.detail["rows_only"] is True
     assert event.detail["locations"] == 2
+    assert event.detail.get("storage_root") == "local:///data"
     assert event.detail["deleted_at"]
     session.rollback()
     storage = StorageConfig(scheme="file", root=f"file://{tmp_path}", options={})
@@ -277,3 +286,82 @@ def test_a_create_of_the_held_name_names_the_rows_purge(
         catalog.create_environment(principal, name="old", storage=storage)
 
     assert "`lakana env purge old --rows-only`" in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "root", ["local:///data", "memory://", "gs://bucket/lake", "file:///data/lake::memory://x"]
+)
+def test_a_root_no_process_can_read_is_purged(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, root: str
+) -> None:
+    """An unsupported scheme or an fsspec chain: no clean-up will ever reach its files."""
+    _old(session, principal, root=root)
+    catalog.delete_environment(principal, "old")
+
+    assert catalog.purge_environment_rows(principal, "old") == 0
+
+    session.rollback()
+    assert session.scalars(select(Environment)).all() == []
+
+
+def _object_store_with_secret(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, *, bound: bool
+) -> str:
+    """Delete an `s3` environment whose storage secret cannot be used, and say until when.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    catalog
+        The catalog.
+    principal
+        The deleter.
+    bound
+        Give it a secret bound to a package index; otherwise name a secret that does not exist.
+
+    Returns
+    -------
+    str
+        Its `purge_after`, as the refusal writes it.
+    """
+    env = _old(session, principal, root="s3://bucket/prod")
+    env.storage_secret_ref = "corp-token"
+    if bound:
+        index = PackageIndex(id=uuid.uuid4(), name="corp", url="https://corp.example.org/simple")
+        session.add(index)
+        session.add(
+            Secret(
+                id=uuid.uuid4(),
+                environment_id=env.id,
+                name="corp-token",
+                ciphertext=b"x",
+                nonce=b"n" * 12,
+                wrapped_data_key=b"k",
+                format_version=2,
+                key_id="env",
+                created_by=principal.id,
+                created_at=datetime.now(UTC),
+                use_kind=SecretUseKind.PACKAGE_INDEX,
+                use_target_id=index.id,
+            )
+        )
+    session.commit()
+    deleted = catalog.delete_environment(principal, "old")
+    assert deleted.purge_after is not None
+    return deleted.purge_after.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
+
+
+@pytest.mark.parametrize("bound", [True, False], ids=["bound-elsewhere", "missing"])
+def test_an_object_store_whose_secret_cannot_be_used_keeps_its_row(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, bound: bool
+) -> None:
+    """A secret is a setting to fix, not a storage that is gone: its files may all be there."""
+    until = _object_store_with_secret(session, catalog, principal, bound=bound)
+
+    with pytest.raises(LakanaError) as info:
+        catalog.purge_environment_rows(principal, "old")
+
+    assert str(info.value) == ROWS_PURGE_REACHABLE_MESSAGE.format(name="old", purge_after=until)
+    session.rollback()
+    assert session.scalars(select(Environment.name)).all() == ["old"]

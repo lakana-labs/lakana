@@ -392,6 +392,7 @@ from lakana_core.storage.resolver import (
     is_id_suffixed_location,
     is_within_location,
     nested_locations_within,
+    root_never_resolves,
     table_root_from_metadata_location,
 )
 from lakana_core.storage.unavailable import (
@@ -1799,8 +1800,10 @@ class CatalogService:
         """Remove a deleted environment whose storage cannot be resolved, rows only.
 
         The location sweep skips an environment whose storage cannot be resolved (a root in a
-        scheme Lakana cannot read, such as ``local://`` or ``memory://``), so its row and its
-        name would stay for ever. This deletes the row and what the sweep would have removed
+        scheme Lakana cannot read, such as ``local://`` or ``memory://``, or an fsspec chain),
+        so its row and its name would stay for ever. Only the stored root decides
+        (`root_never_resolves`): a storage secret that cannot be used is a setting to fix, and
+        its storage may hold every file. This deletes the row and what the sweep would have removed
         with it (`lakana_core.catalog.environment_deletion.purge_rows`), under the row's lock,
         and touches no file. An environment whose storage resolves keeps its undo period and its
         file purge.
@@ -1822,12 +1825,15 @@ class CatalogService:
         NotFoundError
             If no environment has that name (`ROWS_PURGE_MISSING_MESSAGE`).
         ConflictError
-            If it is not deleted (`ROWS_PURGE_NOT_DELETED_MESSAGE`) or its storage can still be
-            resolved (`ROWS_PURGE_REACHABLE_MESSAGE`).
+            If it is not deleted (`ROWS_PURGE_NOT_DELETED_MESSAGE`) or its root can be resolved
+            (`ROWS_PURGE_REACHABLE_MESSAGE`), whatever its secret or options say.
         PermissionDenied
             If the principal may not manage environments on the instance.
+        StepUpRequired
+            If a browser session's last passkey touch is not fresh: the purge cannot be undone.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        require_step_up(p)
         env = self._lock_environment_row(name)
         if env is None:
             self._session.rollback()
@@ -1835,11 +1841,9 @@ class CatalogService:
         if env.deleted_at is None or env.purge_after is None:
             self._session.rollback()
             raise ConflictError(ROWS_PURGE_NOT_DELETED_MESSAGE.format(name=name))
-        try:
-            self._storage.for_environment(name, include_deleted=True)
-        except ValidationError:
-            pass
-        else:
+        # Decided on the stored root alone: a secret, a key or an option can be fixed, and the
+        # files behind them may all be there, so only a root no process can read counts.
+        if not root_never_resolves(env.storage_root):
             until = env.purge_after.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
             self._session.rollback()
             raise ConflictError(ROWS_PURGE_REACHABLE_MESSAGE.format(name=name, purge_after=until))

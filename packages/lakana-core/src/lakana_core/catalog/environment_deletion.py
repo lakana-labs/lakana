@@ -585,7 +585,8 @@ def purge_rows(session: Session, actor: PrincipalRef, env: Environment, *, now: 
         .where(TableLocation.environment_id == env.id)
         .execution_options(synchronize_session=False)
     )
-    _remove_row(session, actor, env, now=now, detail={"rows_only": True, "locations": len(records)})
+    detail = {"rows_only": True, "locations": len(records), "storage_root": env.storage_root}
+    _remove_row(session, actor, env, now=now, detail=detail)
     return len(records)
 
 

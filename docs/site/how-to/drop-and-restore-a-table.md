@@ -169,7 +169,10 @@ on every run, and the environment keeps its name: `lakana env create` refuses th
 administrator of the instance removes such an environment from the catalog with
 `lakana env purge NAME --rows-only --yes`, for example `lakana env purge old --rows-only --yes`.
 
-It removes the environment and its records of dropped tables, and the name is free again. Its
+It removes the environment and its records of dropped tables, and the name is free again. Only the
+root decides: a storage secret that cannot be used (missing, or bound to a connection, an index or a
+repository) can be fixed, so such an environment is refused; fix the secret, and the clean-up
+deletes it. Its
 files, if there are any, are not touched: delete them in the storage yourself if you no longer need
 them. It is refused for an environment that is not deleted, and for one whose storage can still be
 reached: the clean-up deletes that one's files and then the environment, and
@@ -187,7 +190,8 @@ reached: the clean-up deletes that one's files and then the environment, and
   environment and its `deleted_at` and `purge_after`; `GET /api/v1/environments?deleted=true` lists
   the deleted ones; `POST /api/v1/environments/{name}/restore` restores one;
   `POST /api/v1/environments/{name}/purge-rows` removes a deleted environment whose storage cannot
-  be reached from the catalog (204, no body).
+  be reached from the catalog (204, no body); from the web interface it asks for a passkey touch
+  within the last 15 minutes, a token never does.
 - **SDK.** `client.tables.delete(env, "silver.orders", purge=False)`,
   `client.tables.list_dropped(env, "silver")` and
   `client.tables.undrop(env, "silver.orders", new_name=None)`; for an environment
@@ -231,5 +235,6 @@ reached: the clean-up deletes that one's files and then the environment, and
 - `ENVIRONMENT_RESTORED` for a restore: `tables`, `restored_policies` (how many came back) and
   `deleted_at`; each table has its own `TABLE_UNDROPPED` with `reason` `environment_restored`.
 - `ENVIRONMENT_PURGED` when the sweep removes a deleted environment after its last files, with no
-  person; or by the administrator who ran `lakana env purge --rows-only`, with `rows_only` and
-  `locations`, the number of dropped tables' records that went with it.
+  person; or by the administrator who ran `lakana env purge --rows-only`, with `rows_only`,
+  `locations`, the number of dropped tables' records that went with it, and `storage_root`, where
+  any files it left are.
