@@ -49,7 +49,8 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import PrincipalRef, Securable
 from lakana_core.catalog.locations import lock_location, own_table_id
-from lakana_core.catalog.retention import lock_row, lock_tables_in_id_order
+from lakana_core.catalog.retention import lock_row
+from lakana_core.catalog.table_locks import lock_tables_in_id_order
 from lakana_core.catalog.tombstones import (
     drop_row,
     refresh_restored,

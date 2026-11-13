@@ -4,7 +4,9 @@ Read recording (`record_table_reads`) locks the tables a query read in id order.
 an environment drops every table of it; when it locked them in another order (by name), it
 could hold one table the completion wanted while waiting for one the completion held, and
 Postgres ended one of them with a deadlock (#558). The completion here holds the first table
-by id, waits until the deletion is blocked, and then records its read of the second.
+by id, waits until the deletion is blocked, and then records its read of the second. In the
+second sequence a later read of the first table was recorded already, so the update of its
+``last_read_at`` locks nothing; the table lock of its own keeps that case in order too.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -123,8 +125,10 @@ def _in_thread(work: Callable[[], object]) -> tuple[threading.Thread, dict[str, 
     return thread, outcome
 
 
-def _two_views(session: Session, principal: PrincipalRef) -> tuple[uuid.UUID, uuid.UUID]:
-    """Add two views to ``dev.gold`` whose name order is the reverse of their id order.
+def _two_views(
+    session: Session, principal: PrincipalRef, environment_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Add two views to ``gold`` whose name order is the reverse of their id order.
 
     Parameters
     ----------
@@ -132,13 +136,19 @@ def _two_views(session: Session, principal: PrincipalRef) -> tuple[uuid.UUID, uu
         Database session; commits.
     principal
         Their owner.
+    environment_id
+        The environment whose ``gold`` namespace takes them.
 
     Returns
     -------
     tuple
         The lower id (named ``zz_first``) and the higher id (named ``aa_second``).
     """
-    namespace_id = session.scalars(select(Namespace.id).where(Namespace.path == "gold")).one()
+    namespace_id = session.scalars(
+        select(Namespace.id).where(
+            Namespace.environment_id == environment_id, Namespace.path == "gold"
+        )
+    ).one()
     low = uuid.UUID(int=uuid.uuid4().int >> 8)
     high = uuid.UUID(int=(0xFF << 120) | (uuid.uuid4().int >> 8))
     for table_id, name in ((low, "zz_first"), (high, "aa_second")):
@@ -161,12 +171,12 @@ def test_a_deletion_and_a_completion_that_read_two_of_its_tables_do_not_deadlock
     """Both commit: the deletion waits for the completion instead of holding the second table."""
     with Session(engine) as session:
         principal = ensure_bootstrap_principal(session, "admin")
-        _catalog(session).create_environment(
+        environment = _catalog(session).create_environment(
             principal,
             name="dev",
             storage=StorageConfig(scheme="file", root=f"file://{tmp_path}", options={}),
         )
-        _two_views(session, principal)
+        _two_views(session, principal, environment.id)
 
     with Session(engine) as completion:
         now = datetime.now(UTC)
@@ -189,6 +199,70 @@ def test_a_deletion_and_a_completion_that_read_two_of_its_tables_do_not_deadlock
             record_table_reads(
                 completion,
                 environment="dev",
+                principal_id=principal.id,
+                dotted_refs=["gold.aa_second"],
+                now=now,
+            )
+            completion.commit()
+        finally:
+            completion.rollback()
+            thread.join(_JOIN_SECONDS)
+
+    assert not thread.is_alive(), "the deletion never finished"
+    assert "error" not in outcome, outcome.get("error")
+    with Session(engine) as session:
+        assert session.scalars(select(Table.id)).all() == []
+        assert session.scalars(select(TableRead.id)).all() == []
+
+
+def test_a_completion_whose_read_was_already_recorded_later_still_locks_the_table_first(
+    engine: sqlalchemy.Engine, tmp_path: Path
+) -> None:
+    """Both commit, although the update of ``last_read_at`` skips the first table.
+
+    Another completion recorded a later read of the first table. This completion's update of it
+    then matches no row and locks nothing, while its count's upsert holds the table's
+    ``table_reads`` row. Without a lock of its own, the deletion took both tables, waited in its
+    cascade for that count, and the completion waited for the second table: a deadlock.
+    """
+    with Session(engine) as session:
+        principal = ensure_bootstrap_principal(session, "admin")
+        environment = _catalog(session).create_environment(
+            principal,
+            name="test",
+            storage=StorageConfig(scheme="file", root=f"file://{tmp_path}", options={}),
+        )
+        _two_views(session, principal, environment.id)
+        now = datetime.now(UTC)
+        record_table_reads(
+            session,
+            environment="test",
+            principal_id=principal.id,
+            dotted_refs=["gold.zz_first"],
+            now=now + timedelta(seconds=1),
+        )
+        session.commit()
+
+    with Session(engine) as completion:
+        record_table_reads(
+            completion,
+            environment="test",
+            principal_id=principal.id,
+            dotted_refs=["gold.zz_first"],
+            now=now,
+        )
+
+        def delete() -> None:
+            """Delete the environment in a session of its own."""
+            with Session(engine) as deletion:
+                _catalog(deletion).delete_environment(principal, "test")
+
+        thread, outcome = _in_thread(delete)
+        try:
+            _wait_until_blocked(engine)
+            record_table_reads(
+                completion,
+                environment="test",
                 principal_id=principal.id,
                 dotted_refs=["gold.aa_second"],
                 now=now,

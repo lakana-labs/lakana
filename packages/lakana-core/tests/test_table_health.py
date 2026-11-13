@@ -6,6 +6,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pyarrow as pa
 import pytest
@@ -13,7 +14,8 @@ from core_test_helpers import ActionAllowList, _prepared_catalog, python_task_ru
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
 from sqlalchemy import event, select
-from sqlalchemy.orm import Session
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import ORMExecuteState, Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.catalog import health
@@ -46,6 +48,9 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.storage.resolver import StorageResolver
+
+if TYPE_CHECKING:
+    from sqlalchemy.sql import ClauseElement
 
 _SILVER = NamespacePath.from_parts(["silver"])
 _ORDERS = TableRef("dev", _SILVER, "orders")
@@ -711,6 +716,61 @@ def test_a_read_takes_the_table_row_before_its_counts_in_id_order(
         ("tables", second),
         ("table_reads", second),
     ]
+
+
+def test_a_read_locks_every_table_it_read_in_id_order_first_even_one_read_later_already(
+    session: Session, principal: PrincipalRef, catalog_with_orders: CatalogService
+) -> None:
+    """The lock does not depend on ``last_read_at < now``, which skips a table read later.
+
+    A skipped update locks nothing on Postgres, and the count's upsert then holds the table's
+    ``table_reads`` row; a deletion that holds the table and cascades to that row would wait
+    for the completion while the completion waits for the deletion's next table (#558).
+    """
+    catalog_with_orders.create_table(principal, TableRef("dev", _SILVER, "items"), schema=_SCHEMA)
+    record_table_reads(
+        session,
+        environment="dev",
+        principal_id=principal.id,
+        dotted_refs=["silver.orders"],
+        now=_NOW + timedelta(hours=1),
+    )
+    session.commit()
+    seen: list[str] = []
+
+    def record(state: ORMExecuteState) -> None:
+        """Keep one statement; a select compiled for PostgreSQL, which renders ``FOR UPDATE``.
+
+        Parameters
+        ----------
+        state
+            The statement about to run.
+        """
+        statement = cast("ClauseElement", state.statement)
+        dialect = postgresql.dialect() if state.is_select else session.get_bind().dialect
+        seen.append(str(statement.compile(dialect=dialect)))
+
+    event.listen(session, "do_orm_execute", record)
+    try:
+        record_table_reads(
+            session,
+            environment="dev",
+            principal_id=principal.id,
+            dotted_refs=["silver.items", "silver.orders"],
+            now=_NOW,
+        )
+    finally:
+        event.remove(session, "do_orm_execute", record)
+    writes = [
+        i
+        for i, sql in enumerate(seen)
+        if sql.startswith(("UPDATE tables", "INSERT INTO table_reads"))
+    ]
+    locks = [i for i, sql in enumerate(seen) if sql.rstrip().endswith("FOR UPDATE")]
+    assert len(locks) == 1, seen
+    assert "ORDER BY tables.id FOR UPDATE" in seen[locks[0]]
+    assert writes, seen
+    assert all(locks[0] < i for i in writes), seen
 
 
 def test_a_read_moves_last_read_at_forward_only_and_keeps_updated_at(
