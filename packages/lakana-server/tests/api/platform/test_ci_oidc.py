@@ -489,6 +489,28 @@ def test_with_ci_oidc_off_the_exchange_says_how_to_turn_it_on(client: TestClient
     assert "LAKANA_CI_OIDC__ISSUERS" in response.json()["detail"]
 
 
+def test_whoami_of_an_administrators_ci_token_is_no_admin_but_may_deploy(
+    ci_client: TestClient,
+) -> None:
+    """`admin` follows the CI token's scope (none), `may_deploy` its one environment."""
+    _setup(ci_client)
+    granted = ci_client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "deployer", "role": "ADMIN", "kind": "INSTANCE"},
+    )
+    assert granted.status_code == 201, granted.text
+    answer = _exchange(ci_client)
+    assert answer.status_code == 200, answer.text
+    body = ci_client.get("/api/v1/whoami", headers=_bearer(answer.json()["token"])).json()
+    assert (body["name"], body["admin"], body["may_deploy"]) == ("deployer", False, True)
+    issued = ci_client.post(
+        "/api/v1/principals/deployer/tokens", headers=AUTH_HEADER, json={"name": "laptop"}
+    )
+    personal = ci_client.get("/api/v1/whoami", headers=_bearer(issued.json()["token"])).json()
+    assert (personal["admin"], personal["may_deploy"]) == (True, True)
+
+
 def test_a_disabled_rule_ends_the_token_at_the_next_request(
     ci_client: TestClient, db: Session
 ) -> None:

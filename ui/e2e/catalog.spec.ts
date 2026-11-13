@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
-import { consoleErrors, signInAsAdmin, STUBBED, violations } from "./session";
+import { consoleErrors, signInAsAdmin, STUBBED, tabTo, violations } from "./session";
 
 const KEY = "lakana.preferences";
 const CHOICE = "lakana.catalog.admin";
@@ -20,22 +20,6 @@ async function openCatalog(
   await page.goto(address);
   await expect(page.getByRole("heading", { level: 1, name: "Catalog" })).toBeVisible();
   await expect(waitFor).toBeVisible();
-}
-
-/**
- * Moves the focus with Tab until it reaches the element.
- *
- * @param page - The page.
- * @param target - The element.
- */
-async function tabTo(page: Page, target: Locator): Promise<void> {
-  for (let step = 0; step < 40; step += 1) {
-    if (await target.evaluate((node) => node === document.activeElement)) {
-      return;
-    }
-    await page.keyboard.press("Tab");
-  }
-  throw new Error("Tab never reached the element");
 }
 
 /**

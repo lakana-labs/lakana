@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ValidationError
@@ -17,6 +18,7 @@ from lakana_core.models import RowFilter
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.policy.shown import ShownPolicy
 from lakana_server.api.platform.schemas import RowFilterCreate, RowFilterOut
+from lakana_server.api.platform.subjects import SubjectNames, subject_names
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import (
@@ -24,6 +26,7 @@ from lakana_server.deps import (
     get_managed_write_principal,
     get_principal,
     get_row_filter_service,
+    get_session,
 )
 
 router = APIRouter(
@@ -66,7 +69,7 @@ def _joined_to_dotted(namespace: str) -> str:
     return ".".join(NamespacePath.parse(namespace).parts)
 
 
-def _to_out(row: RowFilter, shown: ShownPolicy) -> RowFilterOut:
+def _to_out(row: RowFilter, shown: ShownPolicy, names: SubjectNames) -> RowFilterOut:
     """Build a response body from a RowFilter row.
 
     Parameters
@@ -76,6 +79,8 @@ def _to_out(row: RowFilter, shown: ShownPolicy) -> RowFilterOut:
     shown
         How a listing shows the filter: its expression in the table's current column names, and
         whether the filter is bound.
+    names
+        The names of the row's principal or group.
 
     Returns
     -------
@@ -93,6 +98,8 @@ def _to_out(row: RowFilter, shown: ShownPolicy) -> RowFilterOut:
         created_by=row.created_by,
         created_at=row.created_at,
         bound=shown.bound,
+        principal=names.principal(row.principal_id),
+        group=names.group(row.group_id),
     )
 
 
@@ -102,6 +109,7 @@ def create_row_filter(
     request: Request,
     principal: PrincipalRef = Depends(get_managed_write_principal),
     service: RowFilterService = Depends(get_row_filter_service),
+    session: Session = Depends(get_session),
 ) -> RowFilterOut:
     """Create a row filter.
 
@@ -126,6 +134,8 @@ def create_row_filter(
         The authenticated caller.
     service
         The row filter service for this request.
+    session
+        The request's database session, to name the people and groups the answer is for.
 
     Returns
     -------
@@ -150,7 +160,11 @@ def create_row_filter(
         table=body.table,
         expression=body.expression,
     )
-    return _to_out(created, service.shown(principal, [created])[created.id])
+    return _to_out(
+        created,
+        service.shown(principal, [created])[created.id],
+        subject_names(session, [created]),
+    )
 
 
 @router.get("", response_model=list[RowFilterOut], responses=errors(403, 404))
@@ -162,6 +176,7 @@ def list_row_filters(
     table: str | None = None,
     principal: PrincipalRef = Depends(get_principal),
     service: RowFilterService = Depends(get_row_filter_service),
+    session: Session = Depends(get_session),
 ) -> list[RowFilterOut]:
     """List the row filters of a principal, group or table.
 
@@ -186,6 +201,8 @@ def list_row_filters(
         The authenticated caller.
     service
         The row filter service for this request.
+    session
+        The request's database session, to name the people and groups the answer is for.
 
     Returns
     -------
@@ -210,7 +227,8 @@ def list_row_filters(
             "Provide 'principal_name', 'group_name', or 'environment'+'namespace'+'table' together."
         )
     shown = service.shown(principal, rows)
-    return [_to_out(row, shown[row.id]) for row in rows]
+    names = subject_names(session, rows)
+    return [_to_out(row, shown[row.id], names) for row in rows]
 
 
 @router.delete("/{row_filter_id}", status_code=204, responses=errors(403, 404, 409))

@@ -85,7 +85,9 @@ The web interface is off unless you ask for it:
 works once, signs you in and asks you to register a passkey (a fingerprint, a face or a
 security key); every later sign-in is one touch. Only the bootstrap token in the `team`
 profile may ask for it, and only until the first administrator has a passkey; after that it
-answers with `lakana recovery create`.
+answers with `lakana recovery create`. The link works only while the token that printed it is
+valid: once that token is revoked or expired, opening the link says so and asks for a new one,
+so run `lakana sign-in setup-link` again with the current bootstrap token.
 
 Then invite your team with `lakana invite create NAME`, which prints a link to send that
 person yourself (it works once, for 7 days, and creates an account with no rights): confirm
@@ -489,7 +491,9 @@ bucket's own rules decide when a deleted file is gone. See
 sweep deletes their files after the undo period in the same way. Once none of its tables' files are
 left and its own undo period has passed, the sweep removes the environment from the catalog too
 (audit event `ENVIRONMENT_PURGED`, with no principal), and its name is free again. Nothing in a
-deleted environment expires. See
+deleted environment expires. A deleted environment whose storage cannot be reached (a root an older
+release accepted in a scheme Lakana cannot read) is skipped on every run; an administrator removes
+it from the catalog with `lakana env purge NAME --rows-only`. See
 [Delete and restore an environment](drop-and-restore-a-table.md#delete-and-restore-an-environment).
 
 **Tables whose retention has passed.** Before anything else, the same sweep drops the managed

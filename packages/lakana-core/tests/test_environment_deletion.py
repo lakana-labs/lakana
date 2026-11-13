@@ -10,10 +10,12 @@ it. These tests run on a SQLite file.
 from __future__ import annotations
 
 import contextlib
+import re
 import uuid
 from collections.abc import Generator, Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 import pyarrow as pa
@@ -24,7 +26,9 @@ from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField
 from sqlalchemy import Select, event, select, update
 from sqlalchemy import delete as sa_delete
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import ORMExecuteState, Session
+from sqlalchemy.sql import ClauseElement
 from test_table_writes import _orders, _ref, _write
 
 from lakana_core.auth import (
@@ -1201,3 +1205,137 @@ def test_the_environment_names_a_read_check_walks_leave_out_a_deleted_one(
     catalog.create_environment(principal, name="test", storage=_storage(store / "test"))
     catalog.delete_environment(principal, "dev")
     assert live_environment_names(session) == ["test"]
+
+
+@contextlib.contextmanager
+def _statements_as_postgres(session: Session) -> Generator[list[str]]:
+    """Record what `session` executes, compiled for PostgreSQL, and mark each delete of a table.
+
+    A `Table` deleted through the unit of work is flushed, not executed, so a flush that
+    deletes one appends ``DELETE tables`` in its place.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Yields
+    ------
+    list of str
+        The statements, in the order they ran.
+    """
+    seen: list[str] = []
+
+    def record(state: ORMExecuteState) -> None:
+        """Keep one statement.
+
+        Parameters
+        ----------
+        state
+            The statement about to run.
+        """
+        seen.append(
+            str(cast("ClauseElement", state.statement).compile(dialect=postgresql.dialect()))
+        )
+
+    def flushed(flushing: Session, context: object, instances: object) -> None:
+        """Mark a flush that deletes a table.
+
+        Parameters
+        ----------
+        flushing
+            The session.
+        context
+            The flush context.
+        instances
+            Unused.
+        """
+        if any(isinstance(row, Table) for row in flushing.deleted):
+            seen.append("DELETE tables")
+
+    event.listen(session, "do_orm_execute", record)
+    event.listen(session, "before_flush", flushed)
+    try:
+        yield seen
+    finally:
+        event.remove(session, "do_orm_execute", record)
+        event.remove(session, "before_flush", flushed)
+
+
+def _table_lock(seen: list[str]) -> int:
+    """Find the statement that locks the tables, and check it locks them in id order.
+
+    Parameters
+    ----------
+    seen
+        The statements, from `_statements_as_postgres`.
+
+    Returns
+    -------
+    int
+        Its position.
+    """
+    locks = [
+        i
+        for i, sql in enumerate(seen)
+        if sql.startswith("SELECT tables.id") and sql.rstrip().endswith("FOR UPDATE")
+    ]
+    assert locks, "no SELECT tables.id ... FOR UPDATE"
+    assert "ORDER BY tables.id FOR UPDATE" in seen[locks[0]]
+    return locks[0]
+
+
+def test_a_deletion_locks_its_tables_in_id_order_before_anything_else(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """The order read recording takes them, so a completion and the deletion cannot deadlock.
+
+    The table locks come before every other table or location statement (#558): a completion
+    of a query that read two of these tables locks them in id order too.
+    """
+    for name in ("gold.zeta", "gold.alpha", "silver.mid"):
+        _table(catalog, principal, name)
+    session.rollback()
+
+    with _statements_as_postgres(session) as seen:
+        catalog.delete_environment(principal, "dev")
+
+    lock = _table_lock(seen)
+    later = [
+        i
+        for i, sql in enumerate(seen)
+        if i != lock and re.search(r"\b(tables|table_locations)\b", sql)
+    ]
+    assert "DELETE tables" in seen
+    assert all(i > lock for i in later), seen[: lock + 1]
+    session.rollback()
+    assert session.scalars(select(Table)).all() == []
+
+
+def test_the_last_purge_locks_the_remaining_tables_in_id_order_before_the_delete(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """The artifacts the deletion kept go with the row: their locks come first, in id order."""
+    namespace_id = session.scalars(select(Namespace.id).where(Namespace.path == "gold")).one()
+    for name in ("model_b", "model_a"):
+        session.add(
+            Table(
+                id=uuid.uuid4(),
+                namespace_id=namespace_id,
+                name=name,
+                table_type=TableType.ARTIFACT,
+                owner_id=principal.id,
+            )
+        )
+    session.commit()
+    catalog.delete_environment(principal, "dev")
+    env = _env(session)
+    purge_after = _purge_after(session)
+
+    with _statements_as_postgres(session) as seen:
+        assert environment_deletion.purge_environment(session, env.id, now=purge_after)
+
+    lock = _table_lock(seen)
+    delete = next(i for i, sql in enumerate(seen) if sql.startswith("DELETE FROM environments"))
+    assert lock < delete
+    assert session.scalars(select(Table)).all() == []

@@ -58,6 +58,8 @@ for (const scheme of ["light", "dark"] as const) {
     for (const [vision, matrix] of Object.entries(MACHADO_2009)) {
       await page.evaluate(
         (markup) => {
+          // The test's own SVG filter, built in this file from constants: no untrusted text.
+          // eslint-disable-next-line no-restricted-syntax
           document.body.insertAdjacentHTML("beforeend", markup);
         },
         visionFilter(vision, matrix),

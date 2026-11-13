@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Iterator
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
-from graph_test_helpers import KEY_IMPACT, Grants, build_star
+from graph_test_helpers import CONNECTION, KEY_IMPACT, Grants, add_ingest, build_star
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
 
-from lakana_core.auth import PrincipalRef
-from lakana_core.catalog.graph_model import NodeKind
+from lakana_core.auth import PrincipalRef, TaskScope
+from lakana_core.catalog.graph_model import LineageWay, NodeKind
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
@@ -68,9 +70,31 @@ def test_lineage_and_neighbours_read_the_same_on_postgres(
         (NodeKind.TABLE, "bronze.stores_raw"),
         (NodeKind.ASSET, "gold.fact_sales"),
         (NodeKind.TABLE, "gold.fact_sales"),
+        (NodeKind.JOB, "sales/nightly"),
     }
     near = service.neighbours(principal, "dev", "column:gold.dim_store/store_id")
     assert star.reference("gold.fact_sales", "store_id") in {n.id for n in near.nodes}
+
+
+def test_connections_in_lineage_read_the_same_on_postgres(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    star = build_star(session, tmp_path, principal)
+    add_ingest(star, principal)
+    service = GraphService(session, Grants(), "en")
+    page = service.lineage(principal, "dev", "bronze.sales_raw", direction=LineageWay.UP, depth=1)
+    assert {(n.kind, n.name, n.distance, n.connection_kind) for n in page.nodes} == {
+        (NodeKind.TABLE, "bronze.sales_raw", 0, None),
+        (NodeKind.ASSET, "bronze.sales_raw", 1, None),
+        (NodeKind.JOB, "ingest/load", 1, None),
+        (NodeKind.CONNECTION, CONNECTION, 1, "postgresql"),
+    }
+    task = dataclasses.replace(
+        principal,
+        task_scope=TaskScope(environment="dev", asset_scope=["bronze.sales_raw"], token_id=uuid4()),
+    )
+    hidden = service.lineage(task, "dev", "bronze.sales_raw", direction=LineageWay.UP, depth=1)
+    assert NodeKind.CONNECTION not in {n.kind for n in hidden.nodes}
 
 
 def test_impact_reads_the_same_on_postgres(

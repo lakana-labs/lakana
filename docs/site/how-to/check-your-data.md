@@ -446,7 +446,10 @@ that right the command refuses before anything else: ``You may not read every ta
 reads, so its rows and its SQL are not shown to you. Ask an administrator for READ on the tables
 the check reads, or run the check's file from the project repository yourself.`` The message names
 none of the tables. The SQL of such a check is also left out of `lakana project-version show`, which
-counts the tables you may not read instead, as it does for an asset.
+counts the tables you may not read instead, as it does for an asset. That command is stricter
+still: it shows a check's SQL only under the rules of a table's file, so not while a row filter or
+column mask applies to you on one of its tables ([Who may read the
+file](see-where-a-table-is-defined.md#who-may-read-the-file)).
 
 A task of a pipeline cannot use the command. A blocking check keeps the rows that failed away from
 everything downstream, and a task that could read them would get them after all. It is a command

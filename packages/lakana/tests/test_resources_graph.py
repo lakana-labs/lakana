@@ -106,6 +106,28 @@ def test_neighbours_repeats_the_kinds_and_sends_the_page_size() -> None:
     assert sent[0].url.params["limit"] == "50"
 
 
+def test_lineage_reads_jobs_and_connections_with_their_kind() -> None:
+    asset = {"id": "asset:ingest/bronze.raw", "kind": "asset", "name": "bronze.raw", "distance": 1}
+    job = {"id": "job:ingest/load", "kind": "job", "name": "ingest/load", "distance": 1}
+    pg = {"id": "connection:pg-sales", "kind": "connection", "name": "pg-sales", "distance": 1}
+    edges = [
+        {"kind": "runs", "source": job["id"], "target": asset["id"]},
+        {"kind": "uses", "source": asset["id"], "target": pg["id"]},
+    ]
+    body = {
+        "nodes": [_NODE, asset, {**pg, "connection_kind": "postgresql"}, job],
+        "edges": edges,
+        "next_cursor": None,
+    }
+    graph = _graph([body], []).lineage("dev", "gold.dim_store")
+    shown = {n.id: (n.kind, getattr(n, "connection_kind", "absent")) for n in graph.nodes}
+    assert shown["connection:pg-sales"] == ("connection", "postgresql")
+    assert shown["job:ingest/load"] == ("job", None)
+    assert {e.kind for e in graph.edges} == {"runs", "uses"}
+    older = {"nodes": [pg], "edges": [], "next_cursor": None}
+    assert _graph([older], []).neighbours("dev", pg["id"]).nodes[0].connection_kind is None
+
+
 def test_a_node_without_a_repository_may_be_null() -> None:
     body = {"nodes": [{**_NODE, "repository": None, "key": None}], "edges": [], "next_cursor": None}
     graph = _graph([body], []).neighbours("dev", "t")

@@ -17,9 +17,9 @@ A view that shows nobody else's activity, and names nobody else, writes nothing.
 holds the filters and counts, and the targeting key the viewer typed, never the names of the
 people seen, row ids or SQL.
 
-`record_source_view` writes `SOURCE_VIEWED` for a read of the file that defines a table
-(`lakana_core.projects.definition`), the same way: once per reader, table and commit within the
-same window, failing closed. Both share `_record_once`.
+`record_source_view` writes `SOURCE_VIEWED` for a read of a project file ("Defined in",
+`lakana_core.projects.definition`, and a project version), the same way: once per reader, table,
+commit and path within the same window, failing closed. Both share `_record_once`.
 """
 
 from __future__ import annotations
@@ -261,8 +261,9 @@ def record_source_view(
     """Record that `principal` read the file that defines a table, once per window.
 
     The row is `SOURCE_VIEWED`, written whatever `LAKANA_VIEW_AUDIT__ENABLED` says: that switch
-    governs `ACTIVITY_VIEWED` only. A row of the same reader, table and commit within the window
-    counts as this one.
+    governs `ACTIVITY_VIEWED` only. A row of the same reader, table, commit and path within the
+    window counts as this one: a project version shows an asset's file and its checks' files under
+    one table, and each is recorded.
 
     Parameters
     ----------
@@ -298,6 +299,10 @@ def record_source_view(
         scope,
         {"repository": repository, "path": path, "commit": commit},
         window_minutes=window_minutes,
-        same=lambda stored: isinstance(stored, dict) and stored.get("commit") == commit,
+        same=lambda stored: (
+            isinstance(stored, dict)
+            and stored.get("commit") == commit
+            and stored.get("path") == path
+        ),
         refused="a read of a project file",
     )

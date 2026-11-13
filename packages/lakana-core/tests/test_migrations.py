@@ -5933,3 +5933,55 @@ def test_0077_creates_the_source_map_tables(migrated_db: MigratedDb) -> None:
         engine.dispose()
     command.downgrade(config, _REVISION_0076)
     assert tables() == set()
+
+
+_REVISION_0078 = "ada48b713c93"
+_DESCENDING_SORT_INDEXES = {
+    f"ix_tables_{key}_id_desc": [key, "id"]
+    for key in (
+        "row_count",
+        "size_bytes",
+        "last_write_at",
+        "last_read_at",
+        "health_rank",
+        "created_at",
+    )
+}
+
+
+def test_0078_adds_an_index_for_each_descending_sort_and_downgrade_drops_them(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0078`: six `(key, id)` indexes beside the ascending ones of `0075`.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0077)
+    config = Config(str(ALEMBIC_INI))
+
+    def descending() -> dict[str, list[str | None]]:
+        """Read the descending sort indexes present.
+
+        Returns
+        -------
+        dict
+            Index name → its columns.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            return {
+                i["name"]: i["column_names"]
+                for i in inspect(engine).get_indexes("tables")
+                if i["name"] in _DESCENDING_SORT_INDEXES
+            }
+        finally:
+            engine.dispose()
+
+    assert descending() == {}
+    command.upgrade(config, _REVISION_0078)
+    assert descending() == _DESCENDING_SORT_INDEXES
+    command.downgrade(config, _REVISION_0077)
+    assert descending() == {}

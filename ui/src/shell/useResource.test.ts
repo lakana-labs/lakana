@@ -56,4 +56,37 @@ describe("useResource", () => {
     });
     expect(result.current.data).toBe("kept");
   });
+
+  it("keeps the failure's status beside the sentence", async () => {
+    const missing = (): Promise<string> =>
+      Promise.reject(new ApiError(404, "NotFoundError", "No such table."));
+    const { result } = renderHook(() => useResource(missing));
+
+    await waitFor(() => {
+      expect(result.current.error).toBe("No such table.");
+    });
+    expect(result.current.failure?.status).toBe(404);
+  });
+
+  it("has no typed failure for what is not an API error, and none after an answer", async () => {
+    let attempt = 0;
+    const flaky = (): Promise<string> => {
+      attempt += 1;
+      return attempt === 1 ? Promise.reject(new TypeError("boom")) : Promise.resolve("ok");
+    };
+    const { result } = renderHook(() => useResource(flaky));
+
+    await waitFor(() => {
+      expect(result.current.error).not.toBeNull();
+    });
+    expect(result.current.failure).toBeNull();
+
+    act(() => {
+      result.current.reload();
+    });
+    await waitFor(() => {
+      expect(result.current.data).toBe("ok");
+    });
+    expect(result.current.failure).toBeNull();
+  });
 });

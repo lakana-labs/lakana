@@ -1696,6 +1696,25 @@ class MintedTaskToken:
 
 
 @dataclass(frozen=True)
+class SubjectPrincipal:
+    """The principal a grant, row filter or column mask is for.
+
+    Parameters
+    ----------
+    id
+        The principal's id.
+    name
+        The principal's name.
+    principal_type
+        `user` for a person, `service` for a service account.
+    """
+
+    id: str
+    name: str
+    principal_type: str
+
+
+@dataclass(frozen=True)
 class Grant:
     """A grant of a role or a raw action to a principal or a group.
 
@@ -1729,6 +1748,12 @@ class Grant:
         ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant of
         `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`, which work only with the `ADMIN`
         role on the instance; `None` otherwise, and from a server that sends none.
+    principal
+        Who the principal is by name, or `None` when the grant is for a group, when its principal
+        is gone, and from a server before this release.
+    group
+        The name of the group, or `None` when the grant is for a principal, and from a server before
+        this release.
     """
 
     id: str
@@ -1743,6 +1768,8 @@ class Grant:
     granted_by: str
     granted_at: datetime
     note: str | None = None
+    principal: SubjectPrincipal | None = None
+    group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1924,6 +1951,12 @@ class RowFilter:
         right after an upgrade, while the worker binds earlier policies over the next passes (see
         the upgrade notes); only a policy that stays `False` after that needs to be created again.
         `None` from a server before this release.
+    principal
+        Who the principal is by name, or `None` when the filter is for a group, when its principal
+        is gone, and from a server before this release.
+    group
+        The name of the group, or `None` when the filter is for a principal, and from a server
+        before this release.
     """
 
     id: str
@@ -1936,6 +1969,8 @@ class RowFilter:
     created_by: str
     created_at: datetime
     bound: bool | None = None
+    principal: SubjectPrincipal | None = None
+    group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1968,6 +2003,12 @@ class ColumnMask:
         When this mask was created.
     bound
         As `RowFilter.bound`.
+    principal
+        Who the principal is by name, or `None` when the mask is for a group, when its principal
+        is gone, and from a server before this release.
+    group
+        The name of the group, or `None` when the mask is for a principal, and from a server before
+        this release.
     """
 
     id: str
@@ -1981,6 +2022,8 @@ class ColumnMask:
     created_by: str
     created_at: datetime
     bound: bool | None = None
+    principal: SubjectPrincipal | None = None
+    group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2512,11 +2555,11 @@ class GraphNode:
         Its stable id, such as ``table:<uuid>``; store it and pass it back as a node.
     kind
         ``table``, ``column``, ``asset``, ``reference``, ``measure``, ``term``, ``check``,
-        ``row_filter``, ``column_mask`` or ``job``.
+        ``row_filter``, ``column_mask``, ``job`` or ``connection``.
     name
         A name to read: a dotted table, ``<table>.<column>``, a term's key.
     distance
-        Steps from the start.
+        Steps from the start; a job's or connection's is that of its asset.
     table_type
         A table's ``managed``, ``external``, ``view`` or ``artifact``.
     model_kind
@@ -2539,6 +2582,9 @@ class GraphNode:
         Always `None` for lineage and neighbours.
     may_use
         Always `False` for lineage and neighbours.
+    connection_kind
+        A connection's kind, such as ``postgresql``; `None` for any other node, for a
+        connection the environment does not have, and from an older server.
     """
 
     id: str
@@ -2555,6 +2601,7 @@ class GraphNode:
     column_type: str | None = None
     reason: str | None = None
     may_use: bool = False
+    connection_kind: str | None = None
 
 
 # jscpd:ignore-end
@@ -2566,7 +2613,7 @@ class GraphEdge:
     ----------
     kind
         ``reads``, ``builds``, ``references``, ``measures``, ``checks``, ``filters``,
-        ``masks``, ``links``, ``runs`` or ``has_column``.
+        ``masks``, ``links``, ``runs``, ``uses`` or ``has_column``.
     source
         The node it leaves.
     target
@@ -4634,8 +4681,8 @@ class TableListPage:
     next_cursor
         Pass it as ``cursor`` for the next page; `None` on the last.
     capped
-        Whether a search text stopped early, with more readable candidates than one search
-        reads; narrow it.
+        Whether a search text stopped early while a further readable table matched; narrow
+        it.
     """
 
     items: list[TableListItem]

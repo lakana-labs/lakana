@@ -6,7 +6,13 @@ Every node goes through `_Visibility` before a walk reaches it (spec §4):
 - a generated `ref_` check also needs its target readable;
 - a row filter or column mask needs `MANAGE_POLICY` and the table (R2);
 - an asset needs `READ_ENVIRONMENT` and its output table readable;
-- a job or glossary term needs `READ_ENVIRONMENT`.
+- a job or glossary term needs `READ_ENVIRONMENT`;
+- a connection needs `READ_ENVIRONMENT` and a caller that does not act with a task token
+  (`connections.service.acts_for_a_task`, the rule of `GET .../connections`).
+
+`lineage` adds, after its walk, the jobs that run each asset of the answer and the connections
+each uses, at that asset's distance (`_attach_leaves`). They are leaves: they cost no depth and
+the walk never goes through them. A hidden one is not added, and its edge is left out.
 
 Which repository builds a table, or declares a check, and who owns the asset that builds a
 table, are facts about the environment's deployments: a table, reference, measure or check names
@@ -39,6 +45,7 @@ from lakana_core.catalog.graph_join import JoinPath, JoinPaths, JoinStep, shorte
 from lakana_core.catalog.graph_load import (
     AssetRecord,
     CheckRecord,
+    ConnectionRecord,
     EnvironmentGraph,
     JobRecord,
     ManifestPart,
@@ -84,6 +91,7 @@ from lakana_core.catalog.graph_model import (
     table_part,
 )
 from lakana_core.catalog.texts import TextChooser
+from lakana_core.connections.service import acts_for_a_task
 from lakana_core.errors import GraphBusyError, NotFoundError, ValidationError
 from lakana_core.identifiers import TableRef, shown
 from lakana_core.languages import DEFAULT_MAIN_LANGUAGE
@@ -161,7 +169,8 @@ class _Visibility:
 
     Built once per request: every table of the graph, every table name its records point at,
     `READ_ENVIRONMENT` and `MANAGE_POLICY` are asked in one `permits_each`, so what deciding
-    visibility costs does not grow with the tables a walk reaches or hides (R8).
+    visibility costs does not grow with the tables a walk reaches or hides (R8). Whether the
+    reader acts with a task token is decided here too, once.
 
     Parameters
     ----------
@@ -177,6 +186,7 @@ class _Visibility:
         self, authz: AuthorizationService, p: PrincipalRef, graph: EnvironmentGraph
     ) -> None:
         self._graph = graph
+        self._task = acts_for_a_task(p)
         environment = graph.environment
         tables = list(graph.tables.values())
         names: dict[str, TableRef] = {}
@@ -276,6 +286,8 @@ class _Visibility:
             return self.environment() and self.name(record.name)
         if isinstance(record, JobRecord | TermRecord):
             return self.environment()
+        if isinstance(record, ConnectionRecord):
+            return self.environment() and not self._task
         if isinstance(record, ReferenceRecord):
             return self.table(record.source_table_id) and self.name(record.target_name)
         if isinstance(record, MeasureRecord):
@@ -826,7 +838,34 @@ class GraphService:
         ways = (LineageWay.UP, LineageWay.DOWN) if direction is LineageWay.BOTH else (direction,)
         for way in ways:
             self._walk_lineage(ctx, starts, way, depth, found, edges)
+        self._attach_leaves(ctx, found, edges)
         return self._page(ctx, _LINEAGE, found, edges, languages, limit, after)
+
+    @staticmethod
+    def _attach_leaves(ctx: _Context, found: dict[str, _Found], edges: set[GraphEdge]) -> None:
+        """Add the jobs that run each asset of the answer, and the connections each uses.
+
+        They are leaves: added after the walk, never walked from, at no cost in depth. A leaf
+        takes the distance of the nearest asset of the answer it is attached to, and only its
+        edges to those assets are added. A hidden leaf is never added and its edge is left out
+        (`_Context.around`); each edge to a visible leaf counts against the step budget.
+
+        Parameters
+        ----------
+        ctx
+            The request's context.
+        found
+            The answer's nodes; filled.
+        edges
+            The answer's edges; filled.
+        """
+        assets = sorted(n for n in found if node_kind(n) is NodeKind.ASSET)
+        for asset in assets:
+            distance = found[asset].distance
+            for edge, leaf in ctx.around(asset, (EdgeKind.RUNS, EdgeKind.USES)):
+                edges.add(edge)
+                if leaf not in found or found[leaf].distance > distance:
+                    found[leaf] = _Found(distance)
 
     @staticmethod
     def _column_starts(
@@ -1345,6 +1384,8 @@ class GraphService:
         if isinstance(record, JobRecord):
             name = f"{record.repository}/{record.name}"
             return GraphNode(name=name, repository=record.repository, **base)
+        if isinstance(record, ConnectionRecord):
+            return GraphNode(name=record.name, connection_kind=record.kind, **base)
         if isinstance(record, TermRecord):
             return GraphNode(
                 name=record.key,

@@ -4,19 +4,15 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Annotated, Protocol
+from typing import Annotated, Protocol
 
 import typer
 
-from lakana._models import Grant
+from lakana._models import Grant, SubjectPrincipal
 from lakana.cli import _output
 from lakana.cli._override import OVERRIDE_MANAGED, OVERRIDE_REASON, override_reason
 from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, CliState, confirm, state_of
-from lakana.errors import LakanaError
-
-if TYPE_CHECKING:
-    from lakana.client import Client
 
 grant_app = typer.Typer(help="Manage grants.", no_args_is_help=True)
 
@@ -49,6 +45,14 @@ class HasScope(Protocol):
 
 class _HasSubject(Protocol):
     """What names who a grant or a policy is for."""
+
+    @property
+    def principal(self) -> SubjectPrincipal | None:
+        """The principal's name and type, or `None` when the subject is a group or unnamed."""
+
+    @property
+    def group(self) -> str | None:
+        """The group's name, or `None` when the subject is a principal or unnamed."""
 
     @property
     def principal_id(self) -> str | None:
@@ -117,10 +121,6 @@ def _marker(grant: Grant) -> str:
     return "no effect" if grant.note else ""
 
 
-_SUBJECT_KINDS = {"USER": "user", "SERVICE_ACCOUNT": "service"}
-"""How a principal's type is written in front of its name."""
-
-
 def securable_of(grant: HasScope) -> str:
     """Say what a grant (or a permission) is on, naming the environment.
 
@@ -145,111 +145,23 @@ def securable_of(grant: HasScope) -> str:
     return f"table {grant.namespace}.{grant.table} in {where}"
 
 
-def _names_of(client: Client, grants: Sequence[Grant]) -> dict[str, str]:
-    """Find the name behind each principal and group id the grants carry.
-
-    The API names a grant's subject by id only, and has no call that turns an id into a
-    name. Each principal's and each group's own grants carry those ids, so the names are
-    found by listing them, until every id is known. Admin-only listings that the caller
-    may not read leave their ids unresolved.
-
-    Parameters
-    ----------
-    client
-        The SDK client.
-    grants
-        The listed grants.
-
-    Returns
-    -------
-    dict
-        `id` to `user alice`, `service ci-bot` or `group analysts`, for the ids found.
-    """
-    wanted = {i for g in grants for i in (g.principal_id, g.group_id) if i is not None}
-    found: dict[str, str] = {}
-    try:
-        for principal in client.principals.iter():
-            if wanted.issubset(found):
-                return found
-            kind = _SUBJECT_KINDS.get(principal.type, "principal")
-            for grant in client.grants.iter(principal_name=principal.name):
-                if grant.principal_id is not None and grant.principal_id in wanted:
-                    found[grant.principal_id] = f"{kind} {principal.name}"
-        for group in client.groups.iter():
-            if wanted.issubset(found):
-                return found
-            for grant in client.grants.iter(group_name=group.name):
-                if grant.group_id is not None and grant.group_id in wanted:
-                    found[grant.group_id] = f"group {group.name}"
-    except LakanaError:
-        pass
-    return found
-
-
-def _subject_namer(
-    state: CliState,
-    client: Client,
-    grants: Sequence[Grant],
-    principal: str | None,
-    group: str | None,
-) -> Callable[[Grant], str]:
-    """Build the function that says who a grant is for, by name where it can.
+def _warn_about_unnamed(state: CliState, grants: Sequence[Grant]) -> None:
+    """Say, on stderr, that some grants show an id because the answer carried no name.
 
     Parameters
     ----------
     state
         The CLI state (for the output mode).
-    client
-        The SDK client.
     grants
         The listed grants.
-    principal
-        The `--principal` filter: every grant is then this principal's.
-    group
-        The `--group` filter: every grant is then this group's.
-
-    Returns
-    -------
-    Callable
-        Reads `user alice`, `service ci-bot` or `group analysts` from a grant, and falls back
-        to `principal <id>` or `group <id>` for an id whose name could not be found.
     """
-    names: dict[str, str] = {}
-    if group is not None:
-        names = {g.group_id: f"group {group}" for g in grants if g.group_id is not None}
-    elif principal is not None:
-        try:
-            kind = _SUBJECT_KINDS.get(client.principals.get(principal).type, "principal")
-        except LakanaError:
-            kind = "principal"
-        names = {g.principal_id: f"{kind} {principal}" for g in grants if g.principal_id}
-    else:
-        names = _names_of(client, grants)
-        if any(i not in names for g in grants if (i := g.principal_id or g.group_id)):
-            _output.next_step(
-                state,
-                "Names not found for some subjects, so their ids are shown: reading the names "
-                "needs the right to list principals and groups. Ask an administrator, or map "
-                "the ids with `lakana principal list` and `lakana group list`.",
-            )
-
-    def subject(grant: Grant) -> str:
-        """Say who one grant is for.
-
-        Parameters
-        ----------
-        grant
-            A listed grant.
-
-        Returns
-        -------
-        str
-            The name with its kind, or the id-based fallback.
-        """
-        known = names.get(grant.principal_id or grant.group_id or "")
-        return known if known is not None else subject_of(grant)
-
-    return subject
+    if any(g.principal is None and g.group is None for g in grants):
+        _output.next_step(
+            state,
+            "Names not found for some subjects, so their ids are shown: the server may be "
+            "older than this CLI (upgrade it to see names), or the person or group was deleted "
+            "a moment ago. Map the ids with `lakana principal list` and `lakana group list`.",
+        )
 
 
 def subject_of(item: _HasSubject) -> str:
@@ -263,8 +175,13 @@ def subject_of(item: _HasSubject) -> str:
     Returns
     -------
     str
-        `principal <id>` or `group <id>`.
+        `user alice`, `service ci-bot` or `group analysts`, as the answer names the subject; the
+        id-based `principal <id>` or `group <id>` when it names none.
     """
+    if item.principal is not None:
+        return f"{item.principal.principal_type} {item.principal.name}"
+    if item.group is not None:
+        return f"group {item.group}"
     if item.principal_id is not None:
         return f"principal {item.principal_id}"
     return f"group {item.group_id}"
@@ -385,13 +302,13 @@ def list_grants(
     command that shows the next page.
 
     The table names who each grant is for in `subject` (`user alice`, `service ci-bot`,
-    `group analysts`); the API sends ids only, so the names cost one request per principal
-    and group until all are found, and a caller that may not list them sees the ids. A
-    column with nothing in it is left out. When the terminal is too narrow the table leaves
-    out `kind`, `namespace`, `table`, `environment` and `action`, in that order, and folds a
-    long `subject` onto more lines, so that the `id` that `grant revoke` needs always stays
-    whole, and a line under the table shows the revoke command; `--output json` always has
-    every field.
+    `group analysts`); the API answers with the names, so listing costs one request. Only an
+    answer without a name shows the id and a notice (a server older than this CLI, or a
+    person or group deleted a moment ago). A column with nothing in it is left out. When the
+    terminal is too narrow the table leaves out `kind`, `namespace`, `table`, `environment` and
+    `action`, in that order, and folds a long `subject` onto more lines, so that the `id` that
+    `grant revoke` needs always stays whole, and a line under the table shows the revoke
+    command; `--output json` always has every field.
 
     A grant of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN` as a single action has the
     marker `no effect` in a `note` column, which never drops (a narrow terminal leaves out
@@ -435,9 +352,8 @@ def list_grants(
         cursor=cursor,
     )
     grants = page.items
-    subject = (
-        _subject_namer(state, client, grants, principal, group) if state.output != "json" else None
-    )
+    if state.output != "json":
+        _warn_about_unnamed(state, grants)
     columns = ["id", "subject", "role", "action", "kind", "environment", "namespace", "table"]
     for name in ("role", "action", "environment", "namespace", "table"):
         if not any(getattr(grant, name) for grant in grants):
@@ -452,15 +368,13 @@ def list_grants(
         footnotes["id"] = "Revoke one with: lakana grant revoke ID"
     if any(grant.note for grant in grants):
         columns.append("note")
-        footnotes["note"] = "\n".join(
-            [_NO_EFFECT_LINE, *_revoke_lines(grants, subject or subject_of)]
-        )
+        footnotes["note"] = "\n".join([_NO_EFFECT_LINE, *_revoke_lines(grants, subject_of)])
     _output.emit(
         state,
         grants,
         columns=columns,
         droppable=droppable,
-        derived={"subject": subject or subject_of, "note": _marker},
+        derived={"subject": subject_of, "note": _marker},
         whole=["note"],
         footnotes=footnotes,
     )
