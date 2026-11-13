@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -69,7 +69,7 @@ class AssetRow:
     owner
         Owner.
     sql
-        ``shown`` or ``hidden (N references)``.
+        ``shown``, ``hidden (N references)``, ``hidden (restricted)`` or ``not recorded``.
     """
 
     table: str
@@ -665,6 +665,31 @@ _MAX_INDEX_LINES = 20
 """The most package indexes `project-version show` lists; `--output json` has every one."""
 
 
+def _sql_state(asset: dict[str, Any]) -> str:
+    """Say whether a project version shows an asset's SQL, and if not, why.
+
+    Parameters
+    ----------
+    asset
+        The asset's manifest entry, as the server filtered it for the caller.
+
+    Returns
+    -------
+    str
+        ``hidden (N references)`` for tables the caller may not read, ``hidden (restricted)``
+        for the content rule, ``not recorded`` when Lakana kept no record of the file, else
+        ``shown``.
+    """
+    if asset.get("hidden_references"):
+        return f"hidden ({asset['hidden_references']} references)"
+    reason = asset.get("content_reason")
+    if reason == "not_recorded":
+        return "not recorded"
+    if reason is not None:
+        return "hidden (restricted)"
+    return "shown"
+
+
 @project_version_app.command("show")
 def show_project_version(ctx: typer.Context, project_version_id: str, env: _ENV = None) -> None:
     """Show project version ID: its assets, the package indexes its lock uses and the DAG as a tree.
@@ -700,15 +725,14 @@ def show_project_version(ctx: typer.Context, project_version_id: str, env: _ENV 
             table=asset["table"],
             materialize=asset.get("materialize", ""),
             owner=(asset.get("metadata") or {}).get("owner"),
-            sql=(
-                f"hidden ({asset['hidden_references']} references)"
-                if asset.get("hidden_references")
-                else "shown"
-            ),
+            sql=_sql_state(asset),
         )
         for asset in version.manifest.get("assets", [])
     ]
     _output.emit(state, rows)
+    messages = [asset.get("content_message") for asset in version.manifest.get("assets", [])]
+    for message in dict.fromkeys(m for m in messages if isinstance(m, str)):
+        typer.echo(_output.inline(message))
     for line in dag_lines(version.manifest):
         typer.echo(line)
     hidden = version.manifest.get("hidden_external_inputs", 0)

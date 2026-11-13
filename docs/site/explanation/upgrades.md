@@ -176,6 +176,21 @@ Lakana instead: `lakana deployments` lists it for each repository, and `lakana t
 shows the commit that defines a table. To find such placeholders, run `git grep -n '\$Format:'`
 in the repository. `export-ignore` still leaves a file out of a deploy, as before.
 
+### A project version shows SQL only under the rules of a table's file (breaking)
+
+`lakana project-version show` (`GET /api/v1/environments/{env}/project-versions/{id}`) now shows
+an asset's or a check's `sql` and `normalized_sql` only to a reader who would be shown the file
+by `lakana table definition --show`: no row filter or column mask on any table the file uses, no
+read of a path or a connection, no view among those tables (for a check, not even the table it
+checks), and, for an asset, a file Lakana recorded at deploy
+([Who may read the file](../how-to/see-where-a-table-is-defined.md#who-may-read-the-file)). Each
+asset and check now carries `content_reason` (`restricted`, `not_recorded` or `null`) and
+`content_message`, and each file shown is recorded in the audit log as `SOURCE_VIEWED`. In a version
+deployed before you upgrade to this release, no asset's SQL is shown to anyone (`not_recorded`)
+until you deploy a new commit, or read the file in your git host; its checks' SQL follows the rules
+above. A script that reads `sql` from a project version
+should handle its absence and print `content_message`.
+
 ### Project files are recorded at deploy
 
 Migration `0077` adds two tables, which hold the files of each deployed project version; it runs
@@ -221,6 +236,9 @@ destination, and a webhook or a connection that names one is refused the way one
   `lakana server start --local` use the default name and need nothing). Otherwise no token is
   marked: the bootstrap token keeps its administrator rights, but `lakana sign-in setup-link`
   answers that it is not the operator's.
+- A setup link still open when you upgrade stops working: it was issued before links recorded
+  their token, so it is refused as `operator_token_not_recorded`. Run `lakana sign-in setup-link`
+  again with the current token.
 - The mark goes by that name, so a token an administrator issued for that principal with the
   name `bootstrap` before this release is marked too and gets the operator's powers. Check with
   `lakana token list <bootstrap admin>` after upgrading and revoke any `bootstrap` token you do
@@ -246,6 +264,10 @@ destination, and a webhook or a connection that names one is refused the way one
   on their next sign-in, sees Get started, and gets no update note for this release.
 - `GET /api/v1/whoami` has a new field `may_deploy`: whether you may deploy in at least one
   environment.
+- `GET /api/v1/whoami`'s `admin` and `may_deploy` follow the credential: a task token or a CI
+  token answers `admin: false` even when its principal holds `ADMIN` on the instance, since it
+  can use no administrator route. A script that decides from `admin` whether to offer an
+  administrator's action should ask with a personal token.
 
 ### Profile pictures, repository checks and deploy keys
 

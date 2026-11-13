@@ -2824,7 +2824,10 @@ class WhoamiOut(BaseModel):
     language
         Your preferred language for catalog texts; `null` for none.
     admin
-        Whether you hold the `ADMIN` role on the instance (directly or through a group).
+        Whether you act as the instance administrator with this credential: you hold the
+        `ADMIN` role on the instance (directly or through a group) and the credential may use
+        the administrator routes. A personal token or a browser session of an administrator is;
+        a task or CI token never is, whoever its principal.
     has_access
         Whether you have any grant at all, at any scope, directly or through a group; `false`
         for a new person nobody has granted anything yet.

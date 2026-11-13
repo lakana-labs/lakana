@@ -114,10 +114,21 @@ command still succeeds:
 ## Reading a file is recorded
 
 Each time someone reads a file, the audit log records a `SOURCE_VIEWED` event with the repository,
-path and commit: once per person, table and commit in each window (an hour by default; see
+path and commit: once per person, file and commit in each window (an hour by default; see
 [Export and keep the audit log](export-and-keep-the-audit-log.md)). Seeing only the location is
 not recorded. When the event cannot be written, the file is not shown: the command fails with a
 message to try again.
+
+## The same rules in a project version
+
+`lakana project-version show` (and `--output json`, which has each asset's and check's `sql`)
+follows these rules too, file by file: an asset's or a check's SQL is shown only when you would be
+shown its file here, and each file it shows is recorded the same way. A check is stricter in one
+point: it is hidden when any table it reads is a view, also the table it checks, since a view's
+rules sit on the tables beneath it. For any other asset, the `sql` column says
+`hidden (restricted)` or `not recorded`, and the sentence of the table above is printed once
+under the table. The text output lists only assets; a check's reason is in `--output json`,
+where a hidden entry has no `sql` and carries `content_reason` and `content_message`.
 
 ## Control characters
 

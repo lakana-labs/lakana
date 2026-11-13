@@ -49,7 +49,10 @@ query path sit relative to `lakana-core`/`lakana-server`, see `docs/agent/archit
   use.
 - **A route that shows a deployed file takes an object reference, never a path, commit or version,
   and shows content only to a reader of the environment and of every table the file uses, with no
-  policy applying to them.**
+  policy applying to them.** Every such route asks one function,
+  `lakana_core.projects.definition.passes_content_gate`, per file, and records each file it shows
+  as `SOURCE_VIEWED` (fail-closed): "Defined in" and the project-versions route (#560), whose
+  version id selects a stored manifest, never a file on disk.
 
 ## Syntax errors name only the reader's own SQL
 
@@ -463,7 +466,11 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   an invite fails when its name was taken meanwhile; an invite or recovery link fails when its
   issuer is gone, deactivated or no longer holds instance ADMIN (`_check_issuer`, reasons
   `issuer_gone`, `issuer_deactivated`, `issuer_not_admin`; the operator's links too, and an
-  operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired). Each such link is then withdrawn (audited
+  operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired); a setup link
+  records the operator's bootstrap PAT (`source_pat_id`) at issue and fails once it is revoked,
+  expired or not recorded (`_operator_token_lapse`, reasons `operator_token_revoked`,
+  `operator_token_expired`, and `operator_token_not_recorded` for a link issued before setup links
+  recorded the token, with its own sentence; 403 naming `lakana sign-in setup-link`, #520). Each such link is then withdrawn (audited
   with the reason, gone from the open lists) and the error names the next step (an
   administrator's recovery: `lakana recovery create NAME`; an invite: `lakana invite create`).
 - **A local link** (`POST /api/v1/sign-in/local-link`) exists only with
@@ -1120,7 +1127,7 @@ without `detail`: it is asked with `permits(MANAGE_ENVIRONMENT)`, which applies 
 
 | List | Who | Kinds and the right asked per row |
 |---|---|---|
-| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin`) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables whose newest freshness row is fired, ranked in one statement, since the sweep records a row only on a change), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host: `replaced_by_restart`, shared with the instance status), `query_failed` (their own, as for anyone else). The `ADMIN` role holds every right these need, so nothing more is asked. |
+| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin` for a person's own token or session; a task or CI token is refused here and is never `admin`, #542) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables whose newest freshness row is fired, ranked in one statement, since the sweep records a row only on a change), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host: `replaced_by_restart`, shared with the instance status), `query_failed` (their own, as for anyone else). The `ADMIN` role holds every right these need, so nothing more is asked. |
 | Needs your attention | anyone else | `table_late` and `check_failed` only among the tables they read within 7 days (`table_reads`) or opened (`recent_opens`), each kept while `READ_TABLE` holds on it now (one `permits_each` for all of them: a fixed number of statements per environment, however many tables; pin: `test_a_readers_attention_costs_the_same_for_five_tables_or_forty`); a check also needs `READ_ENVIRONMENT` (the check list's right) and is left out when it is a generated reference check whose target they may not read (`ReferenceCheckFilter`, as `check list`). `query_failed`: their own failed ad-hoc queries within 7 days (`task_run_id IS NULL`; a pipeline's query is its run's failure), only where they still hold `SUBMIT_QUERY`, as the query's own page shows it only to its submitter. No runs, links or workers. |
 | Your work | a caller with `may_deploy_somewhere` | The repositories they created (`created_by`) or deployed (`deploy_runs.principal_id`); environments and jobs (`JobService.list`, asked only after `permits(READ_ENVIRONMENT)`) only where they may read the environment; nothing without a readable environment (the repository listing's right). Anyone else gets two empty lists. |
 
@@ -3385,7 +3392,8 @@ found through a query run of their own that is bound to the check result
   check's SQL from the manifest, so only a caller who may read every table it names ever sees
   it. `DeployService.job_version` applies the same rule to the manifest's `checks`
   (`_visible_checks`): a check whose SQL names an unreadable table, or whose tables cannot be
-  listed, loses `sql` and `references` and carries `hidden_references`, as an asset does.
+  listed, loses `sql` and `references` and carries `hidden_references`, as an asset does; and
+  since #560 a check's `sql` also needs the content gate ("Preview and Defined in").
   The reference targets of an asset's `model` name tables as well: `_visible_model` keeps only
   the targets the reader may read and counts the rest in the entry's `hidden_model_references`
   (`test_a_project_version_hides_model_references_the_reader_may_not_read`). At deploy, a
@@ -5506,7 +5514,7 @@ already allows.
 - **Reads of a deployed file are audited (M7 part 3a).** `table_definition_file`
   (`lakana_core.projects.definition`) writes `SOURCE_VIEWED` (the table as scope; `repository`,
   `path`, `commit`) through `record_source_view` before it returns a file's text, once per reader,
-  table and commit within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. `record_view` and
+  table, commit and path within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. `record_view` and
   `record_source_view` share `_record_once` (lookup, write, fail closed). `LAKANA_VIEW_AUDIT__ENABLED`
   never turns it off. A location answer, `restricted`, `not_recorded` and `too_large` write nothing
   beyond the usual `AUTHORIZATION_DENIED` of the first `READ_TABLE` check; the gate's own checks use
@@ -5583,7 +5591,9 @@ already allows.
 - `GET /api/v1/whoami` requires authentication but performs **no authorization check**:
   it only describes the caller back to itself (name, type, task-token scope, and its own
   access flags `admin`, `has_access` and `may_deploy`, each about the caller only and asked with
-  `permits`), which reveals nothing a 200-versus-401 probe of any other route doesn't. `lakana login` uses it
+  `permits`; `admin` and `may_deploy` follow the credential's scope, so a task or CI token is
+  never `admin` (`GrantService.is_admin`: `grants.admin.credential_acts_as_admin`, i.e. `permits(MANAGE_GRANT)` and `holds_instance_admin`
+  on the instance, #542)), which reveals nothing a 200-versus-401 probe of any other route doesn't. `lakana login` uses it
   to confirm a credential before saving it.
 - `GET /api/v1/info` likewise requires authentication, performs no authorization check and
   returns only the platform version (`importlib.metadata`, never a string in the code) and the
@@ -5652,8 +5662,9 @@ exit criterion is being re-run after the M3f fixes above — see
 | `GET …/queries/{id}/result?format=json` | the submitter only | At most 1,000 rows (100 for a preview). A bounded writer stops inside a cell at 64 KiB and inside a row at 4 MiB a page, the first row included (`{"cut": true}`, `row_cut`). Strings are pre-cut in pyarrow, and the page is UTF-8. Binary is never sent. 4 concurrent conversions per process and 1 per principal; `503` beyond. |
 | `GET …/tables/{name}/definition` | `READ_TABLE` | Path, line, commit and link of the current version; no path, commit or version parameter. **Loosening:** a reader of the table sees the repository's name and HTTPS browse URL without `READ_ENVIRONMENT`. A `local` path is never shown. |
 | `GET …/tables/{name}/definition/file` | `READ_TABLE`; for `content` also `READ_ENVIRONMENT`, read on every table of `gate_tables`, no view among them at read time other than the file's own table, `gate_raw` false, and no applicable row filter or column mask on any of them | Served from `project_files`, never from the tarball. One `restricted` reason for every failed condition. `SOURCE_VIEWED` once per window, fail-closed. The CLI escapes C0, C1, `Cf`, U+2028 and U+2029. |
+| `GET …/project-versions/{id}` (#560) | `READ_ENVIRONMENT`; an asset's or check's `sql` and `normalized_sql` also need `passes_content_gate`, per file | `DeployService.job_version`. An asset is judged on the version's own `project_files` row (by table and path): none, or another `gate_version`, is `not_recorded` before any other condition, as in "Defined in"; a check on its table and the tables its SQL names (read again from the SQL), with `gate_raw` from `sql_file_references` over that SQL, a string `path`, and `defines=False`: any view in its gate refuses, its own table included, since a check's gate set does not list a view's base tables. Every entry carries `content_reason` and `content_message` (the "Defined in" sentences, `null` when shown); a withheld entry keeps everything else the older rules leave (`references` and `lineage` stay for a reader of every referenced table). `SOURCE_VIEWED` per shown file, table scope, the same window and dedup as "Defined in" (a reader, table, commit and path, so an asset file and each check file of one table get a row each, and "Defined in" shares the asset file's row), on `sessions_like` sessions; any failure is 503 and nothing is returned. A version deployed before 0077 shows no asset's SQL to anyone until a redeploy; its checks' SQL is judged by the check rule above. |
 | Source map at deploy | written by the worker in `record_deploy`, both branches | `git archive` runs with `* -export-subst` in `$GIT_DIR/info/attributes` (`export-ignore` unchanged). A reused version writes a row only for a missing or stale `gate_version`, and only when the text matches the manifest (`normalized_sql` or the Python source digest). A foreign key to the texts (`ON DELETE RESTRICT`); the text insert locks the row and the sweep skips locked rows. C0 and C1 controls in asset files are refused at deploy (breaking, see the release note). Unreferenced texts are swept. |
-| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) `DeployService.job_version` shows `sql` to `READ_ENVIRONMENT` holders without the policy condition and without `SOURCE_VIEWED` (issue after 3a). (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
+| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) Closed by #560: `DeployService.job_version` applies the same gate and audit. Left: a version is judged under today's grants and policies, so an old version's SQL is shown to whoever passes the gate now; and `lakana check rows` still puts a check's SQL into the caller's own query under `READ_TABLE` alone (the rows stay filtered and masked). (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
 
 The preview route asks for no step-up: it is a read under the caller's own rights, like `POST …/queries` (`NO_STEP_UP` in `test_step_up_routes.py`). The conversion slot (`ThreadSafeConcurrencyLimiter`, one `threading.Lock` over the total and the count per principal, because the route runs in the thread pool) is given back once the page's bytes are built, before they are sent, and also when the conversion fails.
 
