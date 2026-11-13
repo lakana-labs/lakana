@@ -43,7 +43,9 @@ instead.
 **Helpers that tests of two packages share live in `scripts/test_support/`** (test code only,
 never installed; `scripts` is on every test run's import path). The local HTTPS server with a
 throwaway CA and the CONNECT proxy of the egress tests are there (`egress_helpers.py`); import them as
-`from scripts.test_support.egress_helpers import ...`. Never add another package's `tests/`
+`from scripts.test_support.egress_helpers import ...`. A test that needs a port nothing serves uses
+`closed_port()` from `scripts/test_support/ports.py`: it keeps the port bound (not listening) until the
+test ends, so a parallel test cannot take it; never bind, close and reuse a port number. Never add another package's `tests/`
 directory to `sys.path`.
 
 **A test may leave a read-only tree** (the code-unpack tests do, on purpose). A session fixture

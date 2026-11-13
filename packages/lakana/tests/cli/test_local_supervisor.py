@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import IO
 
 import pytest
+from scripts.test_support.ports import closed_port
 
 from lakana.cli.local._supervisor import (
     MEMORY_RESTART_WINDOW,
@@ -365,11 +366,7 @@ def test_real_spawn_and_probe() -> None:
         if child.stdout is not None:
             child.stdout.close()
 
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        closed_port = sock.getsockname()[1]
-
-    assert _probe(f"http://127.0.0.1:{closed_port}/healthz") is False
+    assert _probe(f"http://127.0.0.1:{closed_port()}/healthz") is False
 
 
 def test_real_probe_ignores_http_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 
 import pytest
+from scripts.test_support.ports import release_closed_ports
 
 from lakana import _usage
 
@@ -19,3 +20,16 @@ def _fresh_usage() -> Iterator[None]:
     _usage.reset()
     yield
     _usage.reset()
+
+
+@pytest.fixture(autouse=True)
+def _release_closed_ports() -> Iterator[None]:
+    """Free the ports `closed_port` reserved for the test.
+
+    Yields
+    ------
+    None
+        Control to the test.
+    """
+    yield
+    release_closed_ports()

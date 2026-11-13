@@ -332,16 +332,3 @@ class ConnectProxy:
 
     def __exit__(self, *exc: object) -> None:
         self._listener.close()
-
-
-def closed_port() -> int:
-    """Find a loopback port nothing listens on.
-
-    Returns
-    -------
-    int
-        The port.
-    """
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])

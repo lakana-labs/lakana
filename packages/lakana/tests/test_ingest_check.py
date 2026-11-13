@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from scripts.test_support.ports import closed_port
 from sdk_tls_fixture import (
     Answer,
     Authority,
@@ -123,19 +124,6 @@ def listening(
         server.close()
         for sock in held:
             sock.close()
-
-
-def closed_port() -> int:
-    """Find a loopback port nothing listens on.
-
-    Returns
-    -------
-    int
-        The port.
-    """
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def wait_for(condition: Callable[[], bool], seconds: float = 3.0) -> None:

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import FakeApi, invoke, make_state
+from scripts.test_support.ports import closed_port
 from typer.testing import Result
 
 from lakana.cli import _profiles, server
@@ -1734,11 +1735,7 @@ def test_make_supervisor_builds_a_real_supervisor() -> None:
 
 def test_probe_health_against_a_closed_port_is_false() -> None:
     """The real `_probe_health`, against nothing listening."""
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        closed_port = sock.getsockname()[1]
-
-    assert server._probe_health(f"http://127.0.0.1:{closed_port}") is False
+    assert server._probe_health(f"http://127.0.0.1:{closed_port()}") is False
 
 
 def test_probe_health_against_a_real_200_is_true() -> None:
