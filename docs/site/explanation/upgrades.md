@@ -236,6 +236,9 @@ destination, and a webhook or a connection that names one is refused the way one
   `lakana server start --local` use the default name and need nothing). Otherwise no token is
   marked: the bootstrap token keeps its administrator rights, but `lakana sign-in setup-link`
   answers that it is not the operator's.
+- A setup link still open when you upgrade stops working: it was issued before links recorded
+  their token, so it is refused as `operator_token_not_recorded`. Run `lakana sign-in setup-link`
+  again with the current token.
 - The mark goes by that name, so a token an administrator issued for that principal with the
   name `bootstrap` before this release is marked too and gets the operator's powers. Check with
   `lakana token list <bootstrap admin>` after upgrading and revoke any `bootstrap` token you do
