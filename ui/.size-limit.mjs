@@ -99,10 +99,9 @@ export default [
   ...onDemandChunks(INITIAL).map(onDemandCheck),
   // Measured 6.02 kB (the Catalog's rules: the tree, the search, the bar, the scrolling table
   // region, the sorting headers, the health word and the skeleton rows, 2026-11-13) + 10 %.
-  // Raised from 5.13 kB
-  // (4.66 kB measured with the profile pictures' circle, file field and People cell, 2026-11-11,
-  // + 10 %: the circle is drawn on the first paint, so its rules cannot wait for the dialog that
-  // loads on demand).
+  // Raised from 5.13 kB (4.66 kB measured with the profile pictures' circle, file field and
+  // People cell, 2026-11-11, + 10 %: the circle is drawn on the first paint, so its rules cannot
+  // wait for the dialog that loads on demand).
   { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "6.62 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

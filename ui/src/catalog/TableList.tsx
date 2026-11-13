@@ -43,14 +43,20 @@ function Unknown({ words }: { readonly words: string }): JSX.Element {
 /**
  * Hands a plain primary click on a row's cell to the row's link, so the cells that carry hover
  * text open the table page like the rest of the row. A click on the link or a button, one with
- * a modifier key and a middle click are left alone.
+ * a modifier key, a middle click and the end of a text selection are left alone.
  *
  * @param event - The click on the row.
  */
 function openFromCell(event: MouseEvent<HTMLTableRowElement>): void {
   const plain =
     event.button === 0 && !(event.ctrlKey || event.metaKey || event.shiftKey || event.altKey);
-  if (plain && !event.defaultPrevented && !(event.target as Element).closest("a, button")) {
+  const selecting = window.getSelection()?.isCollapsed === false;
+  if (
+    plain &&
+    !selecting &&
+    !event.defaultPrevented &&
+    !(event.target as Element).closest("a, button")
+  ) {
     event.currentTarget.querySelector<HTMLAnchorElement>("a.row-name")?.click();
   }
 }

@@ -15,7 +15,9 @@ import {
 } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
+import { useMe } from "../shell/me";
 import { catalogPath } from "./paths";
+import { writeChoice } from "./remember";
 import { ancestorIds, type CatalogNode, nodeId } from "./tree";
 import { type CatalogView, placed } from "./view";
 
@@ -52,6 +54,7 @@ function openAtFirst(root: CatalogNode, view: CatalogView): Set<Key> {
  */
 export function CatalogTree({ root, view }: CatalogTreeProps): JSX.Element {
   const { t } = useTranslation();
+  const me = useMe();
   const [expanded, setExpanded] = useState<Set<Key>>(() => openAtFirst(root, view));
   const { environment, namespace } = view;
   // A view that moves deeper opens the places above it; set while rendering, as React advises
@@ -64,12 +67,13 @@ export function CatalogTree({ root, view }: CatalogTreeProps): JSX.Element {
 
   const render = (node: CatalogNode): JSX.Element => {
     const label = node.environment === null ? t("catalog.allTables") : node.label;
+    const text = t("catalog.treeNode", { label, count: node.count });
     return (
       <NavigationTreeItem
         key={node.id}
         id={node.id}
         href={catalogPath(placed(view, node.environment, node.namespace))}
-        textValue={t("catalog.treeNode", { label, count: node.count })}
+        textValue={text}
       >
         <NavigationTreeItemContent>
           {({ isExpanded, hasChildItems }) => (
@@ -81,7 +85,18 @@ export function CatalogTree({ root, view }: CatalogTreeProps): JSX.Element {
               ) : (
                 <span className="tree-chevron" aria-hidden="true" />
               )}
-              <Link className="tree-link">
+              <Link
+                className="tree-link"
+                aria-label={text}
+                onPress={() => {
+                  // Written before the address changes, so that an empty address (All tables)
+                  // is never taken for "open the last choice".
+                  writeChoice(me.name, {
+                    environment: node.environment,
+                    namespace: node.namespace,
+                  });
+                }}
+              >
                 {label}
                 <span className="tree-count" aria-hidden="true">
                   · {node.count}

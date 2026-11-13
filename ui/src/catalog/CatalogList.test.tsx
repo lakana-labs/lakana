@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { TableMatchOut } from "../api";
 import { item, PAGE, TREE } from "../test/catalog";
@@ -160,15 +160,39 @@ describe("CatalogList", () => {
       expect(router.state.location.pathname).toBe("/catalog");
     });
 
-    it("does not open the table twice from a click on the link", async () => {
+    it("navigates once, not twice, for a click on the link", async () => {
       const { user, router } = renderShell("/catalog");
       const link = await screen.findByRole("link", { name: "fact_sales" });
+      const navigate = vi.spyOn(router, "navigate");
 
       await user.click(link);
 
       expect(router.state.location.pathname).toBe(TABLE);
-      await router.navigate(-1);
+      expect(navigate).toHaveBeenCalledTimes(1);
+    });
+
+    it("navigates once for a click on a hover-text cell", async () => {
+      const { user, router } = renderShell("/catalog");
+      const [cell] = await titled();
+      const navigate = vi.spyOn(router, "navigate");
+
+      await user.click(cell as HTMLElement);
+
+      expect(navigate).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not open the table when the click ends a text selection", async () => {
+      const { router } = renderShell("/catalog");
+      const [cell] = await titled();
+      window.getSelection()?.selectAllChildren(cell as HTMLElement);
+      expect(window.getSelection()?.isCollapsed).toBe(false);
+
+      fireEvent.click(cell as HTMLElement);
+
       expect(router.state.location.pathname).toBe("/catalog");
+      window.getSelection()?.removeAllRanges();
+      fireEvent.click(cell as HTMLElement);
+      expect(router.state.location.pathname).toBe(TABLE);
     });
   });
 
@@ -580,11 +604,65 @@ describe("CatalogList", () => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
 
+    it("shows the skeleton, not rows, until the tree has arrived", async () => {
+      const slow = held();
+      const { server } = renderShell("/catalog", {
+        routes: { "GET /api/v1/tables/tree": slow.route },
+      });
+      await screen.findByRole("heading", { level: 1, name: "Catalog" });
+      await waitFor(() => {
+        expect(server.sent.some((r) => r.path.startsWith("/api/v1/tables?"))).toBe(true);
+      });
+
+      expect(document.querySelectorAll(".skeleton-row")).toHaveLength(5);
+      expect(screen.queryByRole("link", { name: "fact_sales" })).not.toBeInTheDocument();
+      slow.release({ status: 200, body: TREE });
+      expect(await screen.findByRole("link", { name: "fact_sales" })).toBeInTheDocument();
+    });
+
+    it("does not say there are no tables in an environment it is about to call unknown", async () => {
+      const slow = held();
+      renderShell("/catalog?env=staging", {
+        routes: {
+          "GET /api/v1/tables/tree": slow.route,
+          "GET /api/v1/tables": { status: 200, body: EMPTY },
+        },
+      });
+      await screen.findByRole("heading", { level: 1, name: "Catalog" });
+      await waitFor(() => {
+        expect(document.querySelectorAll(".skeleton-row")).toHaveLength(5);
+      });
+
+      expect(screen.queryByText(/No tables in/)).not.toBeInTheDocument();
+      slow.release({ status: 200, body: TREE });
+      expect(await screen.findByText(/There is no environment named staging/)).toBeInTheDocument();
+      expect(screen.queryByText(/No tables in/)).not.toBeInTheDocument();
+    });
+
+    it("does not say there are no tables to a person who may read no environment", async () => {
+      const slow = held();
+      renderShell("/catalog", {
+        routes: {
+          "GET /api/v1/tables/tree": slow.route,
+          "GET /api/v1/tables": { status: 200, body: EMPTY },
+        },
+      });
+      await screen.findByRole("heading", { level: 1, name: "Catalog" });
+      await waitFor(() => {
+        expect(document.querySelectorAll(".skeleton-row")).toHaveLength(5);
+      });
+
+      expect(screen.queryByText(/No tables in/)).not.toBeInTheDocument();
+      slow.release({ status: 200, body: { count: 0, environments: [] } });
+      expect(await screen.findByText(/You may read no environment yet/)).toBeInTheDocument();
+      expect(screen.queryByText(/No tables in/)).not.toBeInTheDocument();
+    });
+
     it("keeps no empty complementary landmark before the tree arrives", async () => {
       const slow = held();
       renderShell("/catalog", { routes: { "GET /api/v1/tables/tree": slow.route } });
 
-      await screen.findByRole("link", { name: "fact_sales" });
+      await screen.findByRole("heading", { level: 1, name: "Catalog" });
 
       expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
       slow.release({ status: 200, body: TREE });
@@ -603,11 +681,12 @@ describe("CatalogList", () => {
         expect(router.state.location.search).toBe("?env=prod&ns=gold");
       });
       expect(router.state.historyAction).toBe("REPLACE");
-      await waitFor(() => {
-        expect(
-          server.sent.filter((r) => r.path.startsWith("/api/v1/tables?")).at(-1)?.path,
-        ).toContain("environment=prod&namespace=gold");
-      });
+      await screen.findByRole("link", { name: "fact_sales" });
+      const lists = server.sent.filter((r) => r.path.startsWith("/api/v1/tables?"));
+      expect(lists.length).toBeGreaterThan(0);
+      for (const list of lists) {
+        expect(list.path).toContain("environment=prod&namespace=gold");
+      }
     });
 
     it("lets a link win over the last choice", async () => {
@@ -629,13 +708,18 @@ describe("CatalogList", () => {
       const { router } = renderShell("/catalog");
       await screen.findByRole("treegrid");
 
-      expect(router.state.location.search).toBe("");
+      await waitFor(() => {
+        expect(router.state.location.search).toBe("");
+      });
       await waitFor(() => {
         expect(JSON.parse(window.localStorage.getItem(KEY) ?? "null")).toEqual({
           environment: null,
           namespace: null,
         });
       });
+      expect(screen.queryByText(/There is no environment/)).not.toBeInTheDocument();
+      expect(router.state.historyAction).toBe("REPLACE");
+      expect(await screen.findByRole("link", { name: "fact_sales" })).toBeInTheDocument();
     });
 
     it("remembers the place that was chosen and restores it once only", async () => {
@@ -656,6 +740,45 @@ describe("CatalogList", () => {
           environment: null,
           namespace: null,
         });
+      });
+      expect(router.state.location.search).toBe("");
+    });
+
+    it("restores the last choice when the sidebar's Catalog is pressed on the Catalog", async () => {
+      window.localStorage.setItem(KEY, JSON.stringify({ environment: "prod", namespace: "gold" }));
+      const { user, router } = renderShell("/catalog?env=prod&ns=gold");
+      await screen.findByRole("treegrid");
+
+      await user.click(
+        within(screen.getByRole("navigation")).getByRole("link", { name: "Catalog" }),
+      );
+
+      await waitFor(() => {
+        expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      });
+      expect(JSON.parse(window.localStorage.getItem(KEY) ?? "null")).toEqual({
+        environment: "prod",
+        namespace: "gold",
+      });
+      expect(
+        within(screen.getByRole("row", { name: "gold, 4 tables" })).getByRole("link"),
+      ).toHaveAttribute("aria-current", "page");
+    });
+
+    it("does not restore the last choice on Back to the empty address", async () => {
+      const { user, router } = renderShell("/catalog");
+      await screen.findByRole("treegrid");
+      await user.click(
+        within(screen.getByRole("row", { name: "prod, 6 tables" })).getByRole("link"),
+      );
+      expect(router.state.location.search).toBe("?env=prod");
+
+      await router.navigate(-1);
+
+      await waitFor(() => {
+        expect(
+          within(screen.getByRole("row", { name: "All tables, 9 tables" })).getByRole("link"),
+        ).toHaveAttribute("aria-current", "page");
       });
       expect(router.state.location.search).toBe("");
     });

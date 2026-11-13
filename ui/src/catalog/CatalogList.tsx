@@ -9,7 +9,14 @@ import "./catalog.css";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import {
+  Link,
+  NavigationType,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+  useSearchParams,
+} from "react-router";
 
 import { getTableTree } from "../api";
 import { CopyLine } from "../shell/CopyLine";
@@ -71,19 +78,41 @@ export function CatalogList(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const me = useMe();
+  const navigationType = useNavigationType();
   const [params, setParams] = useSearchParams();
-  const view = readView(params);
+  // An empty address opens the place last chosen: when the page opens and when the Catalog is
+  // pressed again in the menu, not on Back or after the search was cleared. The place is known
+  // from the first render, so the list is never read for any other.
+  const [first] = useState(() => ({
+    key: location.key,
+    choice: location.search === "" ? readChoice(me.name) : null,
+  }));
+  let remembered = null;
+  if (location.search === "") {
+    remembered = navigationType === NavigationType.Push ? readChoice(me.name) : null;
+    remembered ??= location.key === first.key ? first.choice : null;
+  }
+  const restored =
+    remembered?.environment == null
+      ? null
+      : placed(DEFAULT_VIEW, remembered.environment, remembered.namespace);
+  const restoredAddress = restored === null ? null : catalogPath(restored);
+  const view = restored ?? readView(params);
   const address = catalogPath(view);
+  const fromMemory = (location.state as { remembered?: boolean } | null)?.remembered === true;
   const loadTree = useCallback(() => getTableTree(), []);
   const tree = useResource(loadTree);
   const root = useMemo(() => (tree.data === undefined ? null : buildTree(tree.data)), [tree.data]);
-  const settled = useRef(false);
   const { items, busy, error, capped, hasMore, loadMore, reload } = useTablePages(view);
   const main = useRef<HTMLElement>(null);
   const focusFrom = useRef<number | null>(null);
   const retry = useRef<HTMLButtonElement>(null);
   const hadRows = useRef(false);
-  const loading = items === undefined ? error === null : items.length === 0 && busy;
+  // The list and the tree are read together. Rows and empty states wait for the tree, so that no
+  // "no tables" is shown for a place the tree is about to call unknown, or for no environment.
+  const treeKnown = root !== null || tree.error !== null;
+  const reading = items === undefined ? error === null : items.length === 0 && busy;
+  const loading = reading || !treeKnown;
   const slow = useLonger(loading, SAY_LOADING_AFTER_MS);
 
   const go = (next: CatalogView): void => {
@@ -99,29 +128,27 @@ export function CatalogList(): JSX.Element {
   );
   const { environment, namespace } = view;
 
-  // Once the tree is known: an address without a query opens the last choice (by replacing it,
-  // so Back does not return to the empty address), and from then on the place is remembered.
+  // The address takes the remembered place, by replacing the empty one so Back does not return
+  // to it. The entry says where it came from.
+  useEffect(() => {
+    if (restoredAddress !== null) {
+      void navigate(restoredAddress, { replace: true, state: { remembered: true } });
+    }
+  }, [restoredAddress, navigate]);
+
+  // Once the tree is known: a remembered place it no longer has is forgotten and the address
+  // goes back to all tables, without a word; any other place is remembered as the last choice.
   useEffect(() => {
     if (root === null) {
       return;
     }
-    if (!settled.current) {
-      settled.current = true;
-      const choice = location.search === "" ? readChoice(me.name) : null;
-      if (
-        choice?.environment != null &&
-        findNode(root, choice.environment, choice.namespace) !== null
-      ) {
-        void navigate(catalogPath(placed(DEFAULT_VIEW, choice.environment, choice.namespace)), {
-          replace: true,
-        });
-        return;
-      }
-    }
     if (findNode(root, environment, namespace) !== null) {
       writeChoice(me.name, { environment, namespace });
+    } else if (fromMemory) {
+      writeChoice(me.name, { environment: null, namespace: null });
+      void navigate("/catalog", { replace: true });
     }
-  }, [root, environment, namespace, location.search, me.name, navigate]);
+  }, [root, environment, namespace, fromMemory, me.name, navigate]);
 
   useEffect(() => {
     focusFrom.current = null;
@@ -150,7 +177,7 @@ export function CatalogList(): JSX.Element {
   let result = "";
   if (slow) {
     result = t("catalog.loading");
-  } else if (items !== undefined && items.length > 0 && (hasMore || !busy)) {
+  } else if (treeKnown && items !== undefined && items.length > 0 && (hasMore || !busy)) {
     const kind = view.q === "" ? "result" : "matches";
     result = t(`catalog.${kind}.${hasMore ? "first" : "all"}`, { count: items.length, place });
   }
@@ -163,7 +190,7 @@ export function CatalogList(): JSX.Element {
     </Button>
   );
   let unknown: string | null = null;
-  if (root !== null && environment !== null) {
+  if (root !== null && environment !== null && !fromMemory) {
     if (findNode(root, environment, null) === null) {
       unknown = t("catalog.unknown.environment", { environment });
     } else if (namespace !== null && findNode(root, environment, namespace) === null) {
@@ -214,11 +241,11 @@ export function CatalogList(): JSX.Element {
                   <p className="catalog-result" role="status">
                     {result}
                   </p>
-                  {items !== undefined && items.length > 0 && widenButton}
+                  {treeKnown && items !== undefined && items.length > 0 && widenButton}
                 </div>
                 <SortControl view={view} onChange={go} />
               </div>
-              {error !== null && items === undefined && (
+              {treeKnown && error !== null && items === undefined && (
                 <>
                   <p className="step-error" role="alert">
                     {error}
@@ -235,13 +262,13 @@ export function CatalogList(): JSX.Element {
                   ))}
                 </div>
               )}
-              {items !== undefined && items.length === 0 && !busy && view.q !== "" && (
+              {treeKnown && items !== undefined && items.length === 0 && !busy && view.q !== "" && (
                 <div className="empty">
                   <p>{t("catalog.noHits", { place, q: view.q })}</p>
                   {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
                 </div>
               )}
-              {items !== undefined && items.length === 0 && !busy && view.q === "" && (
+              {treeKnown && items !== undefined && items.length === 0 && !busy && view.q === "" && (
                 <div className="empty">
                   <p>
                     {t("catalog.empty.text", {
@@ -260,7 +287,7 @@ export function CatalogList(): JSX.Element {
                   </p>
                 </div>
               )}
-              {items !== undefined && items.length > 0 && (
+              {treeKnown && items !== undefined && items.length > 0 && (
                 <>
                   <TableList
                     items={items}

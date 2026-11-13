@@ -134,6 +134,13 @@ describe("CatalogTree", () => {
     expect(router.state.location.search).toBe("?env=prod&q=store&sort=rows");
   });
 
+  it("names a node's link with its count, as its row", async () => {
+    renderShell("/catalog");
+    await screen.findByRole("treegrid");
+
+    expect(screen.getByRole("link", { name: "gold, 4 tables" })).toBeInTheDocument();
+  });
+
   it("opens a node in a new tab from its link", async () => {
     renderShell("/catalog?q=store");
     await screen.findByRole("treegrid");
