@@ -238,3 +238,14 @@ th[aria-sort] .sort-head {
   content: "✓";
   color: var(--color-accent);
 }
+
+/* The link in an empty state: the accent, underlined on hover, as on Home. Unstyled it is the
+   browser's blue, which the dark theme's ground cannot carry (WCAG 1.4.3). */
+.empty p a {
+  color: var(--color-accent);
+}
+
+.empty p a:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}

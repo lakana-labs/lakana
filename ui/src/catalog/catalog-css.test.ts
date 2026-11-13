@@ -11,3 +11,9 @@ it("shows a collapsed ancestor of the current place, by weight and not by colour
 
   expect(rule?.[1]).toMatch(/font-weight:\s*500/);
 });
+
+it("colours the link in an empty state with the accent, not the browser's blue", () => {
+  const rule = /\.empty p a\s*{([^}]*)}/.exec(css);
+
+  expect(rule?.[1]).toMatch(/color:\s*var\(--color-accent\)/);
+});
