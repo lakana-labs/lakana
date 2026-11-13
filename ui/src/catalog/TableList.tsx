@@ -135,7 +135,7 @@ export function TableList({ items, view, onSort, busy }: TableListProps): JSX.El
       // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
       tabIndex={0}
     >
-      <table className="list">
+      <table className="list catalog-list">
         <thead>
           <tr>
             {COLUMNS.map((sort) => (

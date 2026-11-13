@@ -149,8 +149,8 @@ may read. **Esc** clears the field.
 
 A row whose match is not its name shows why on the second line, with the matching part marked:
 `Column store_id · int · joins dim_store`, or `Description · One row per store visit`. A
-translated text adds its language. When nothing matches, the page says so and offers **Search
-all namespaces**. A search that reaches 5,000 tables stops and says so; use a longer text or
+translated text adds its language. When nothing matches, the page says so; while you have chosen a place it offers
+**Search all namespaces**, and on All tables it suggests a shorter text. A search that reaches 5,000 tables stops and says so; use a longer text or
 choose a namespace.
 
 ### Share a view, and come back to it

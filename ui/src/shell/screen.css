@@ -111,9 +111,10 @@ tr:hover .row-name {
   text-decoration: underline;
 }
 
-/* What carries a hover title sits above the row's link, so the pointer reaches it. */
+/* In the Catalog list, what carries a hover title sits above the row's link, so the pointer
+   reaches it. TableList forwards the click; use this class only where a list does too. */
 .list .button,
-.list [title] {
+.catalog-list [title] {
   position: relative;
 }
 

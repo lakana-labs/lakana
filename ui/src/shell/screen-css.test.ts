@@ -48,6 +48,7 @@ it("right-aligns numbers with tabular figures", () => {
   );
 });
 
-it("lifts what carries a title above the row's link, so the hover reaches it", () => {
-  expect(screen).toMatch(/\.list \[title\]\s*{[^}]*position:\s*relative/);
+it("lifts what carries a title above the row's link in the Catalog list only", () => {
+  expect(screen).toMatch(/\.catalog-list \[title\]\s*{[^}]*position:\s*relative/);
+  expect(screen).not.toMatch(/\.list \[title\]/);
 });

@@ -104,7 +104,10 @@ export function CatalogList(): JSX.Element {
   const restoredAddress = restored === null ? null : catalogPath(restored);
   const view = restored ?? readView(params);
   const address = catalogPath(view);
+  const { environment, namespace } = view;
+  const locationState: unknown = location.state;
   const fromMemory = (location.state as { remembered?: boolean } | null)?.remembered === true;
+  const allTablesAddress = catalogPath(placed(view, null, null));
   const loadTree = useCallback(() => getTableTree(), []);
   const tree = useResource(loadTree);
   const root = useMemo(() => (tree.data === undefined ? null : buildTree(tree.data)), [tree.data]);
@@ -112,12 +115,21 @@ export function CatalogList(): JSX.Element {
   const main = useRef<HTMLElement>(null);
   const focusFrom = useRef<number | null>(null);
   const retry = useRef<HTMLButtonElement>(null);
+  const side = useRef<HTMLElement>(null);
+  const resultLine = useRef<HTMLParagraphElement>(null);
+  // Set by the control that removes itself as its own result, so that focus lands somewhere
+  // useful instead of on the page.
+  const focusAfter = useRef<"result" | "tree" | null>(null);
   const hadRows = useRef(false);
   // The list and the tree are read together. Rows and empty states wait for the tree, so that no
   // "no tables" is shown for a place the tree is about to call unknown, or for no environment.
   const treeKnown = root !== null || tree.error !== null;
+  // A remembered place the tree does not have is about to be replaced by all tables: the list
+  // waits behind the skeleton, so its error for the gone place never shows.
+  const stale = fromMemory && root !== null && findNode(root, environment, namespace) === null;
+  const settled = treeKnown && !stale;
   const reading = items === undefined ? error === null : items.length === 0 && busy;
-  const loading = reading || !treeKnown;
+  const loading = reading || !settled;
   const slow = useLonger(loading, SAY_LOADING_AFTER_MS);
 
   const go = (next: CatalogView): void => {
@@ -127,11 +139,12 @@ export function CatalogList(): JSX.Element {
     (q: string): void => {
       setParams((current) => new URLSearchParams(viewSearch({ ...readView(current), q })), {
         replace: true,
+        // Typing keeps where the entry came from, so a remembered place stays one.
+        state: locationState,
       });
     },
-    [setParams],
+    [setParams, locationState],
   );
-  const { environment, namespace } = view;
 
   // The address takes the remembered place, by replacing the empty one so Back does not return
   // to it. The entry says where it came from.
@@ -151,9 +164,9 @@ export function CatalogList(): JSX.Element {
       writeChoice(me.name, { environment, namespace });
     } else if (fromMemory) {
       writeChoice(me.name, { environment: null, namespace: null });
-      void navigate("/catalog", { replace: true });
+      void navigate(allTablesAddress, { replace: true });
     }
-  }, [root, environment, namespace, fromMemory, me.name, navigate]);
+  }, [root, allTablesAddress, environment, namespace, fromMemory, me.name, navigate]);
 
   useEffect(() => {
     focusFrom.current = null;
@@ -182,12 +195,13 @@ export function CatalogList(): JSX.Element {
   let result = "";
   if (slow) {
     result = t("catalog.loading");
-  } else if (treeKnown && items !== undefined && items.length > 0 && (hasMore || !busy)) {
+  } else if (settled && items !== undefined && items.length > 0 && (hasMore || !busy)) {
     const kind = view.q === "" ? "result" : "matches";
     result = t(`catalog.${kind}.${hasMore ? "first" : "all"}`, { count: items.length, place });
   }
   const widen = (): void => {
     go(placed(view, null, null));
+    main.current?.querySelector<HTMLElement>('input[type="search"]')?.focus();
   };
   const widenButton = narrowed && view.q !== "" && (
     <Button className="button" onPress={widen}>
@@ -204,6 +218,19 @@ export function CatalogList(): JSX.Element {
   }
   const readsNothing = root !== null && root.children.length === 0;
 
+  const noNotice = !readsNothing && unknown === null;
+  useEffect(() => {
+    if (focusAfter.current === "result" && noNotice) {
+      focusAfter.current = null;
+      resultLine.current?.focus();
+    } else if (focusAfter.current === "tree" && root !== null) {
+      focusAfter.current = null;
+      side.current?.querySelector<HTMLElement>('[role="treegrid"]')?.focus();
+    }
+  }, [noNotice, root]);
+
+  // Only one alert is announced when the server is down: the list's, the tree's stays visible.
+  const listAlert = settled && error !== null && items === undefined;
   let notice: JSX.Element | null = null;
   if (readsNothing) {
     notice = <p className="page-notice">{t("catalog.noEnvironment")}</p>;
@@ -211,7 +238,13 @@ export function CatalogList(): JSX.Element {
     notice = (
       <div className="empty">
         <p>{unknown}</p>
-        <Link className="button" to="/catalog">
+        <Link
+          className="button"
+          to="/catalog"
+          onClick={() => {
+            focusAfter.current = "result";
+          }}
+        >
           {t("catalog.showAll")}
         </Link>
       </div>
@@ -223,16 +256,22 @@ export function CatalogList(): JSX.Element {
       <div className="catalog">
         {tree.error !== null && root === null && (
           <aside className="catalog-side" aria-label={t("catalog.tree")}>
-            <p className="step-error" role="alert">
+            <p className="step-error" role={listAlert ? undefined : "alert"}>
               {tree.error}
             </p>
-            <Button className="button" onPress={tree.reload}>
+            <Button
+              className="button"
+              onPress={() => {
+                focusAfter.current = "tree";
+                tree.reload();
+              }}
+            >
               {t("catalog.tryAgain")}
             </Button>
           </aside>
         )}
         {root !== null && !readsNothing && (
-          <aside className="catalog-side">
+          <aside className="catalog-side" ref={side}>
             <CatalogTree root={root} view={view} />
           </aside>
         )}
@@ -243,14 +282,14 @@ export function CatalogList(): JSX.Element {
               <CatalogSearch view={view} onSearch={search} />
               <div className="catalog-bar">
                 <div className="catalog-result-line">
-                  <p className="catalog-result" role="status">
+                  <p className="catalog-result" role="status" tabIndex={-1} ref={resultLine}>
                     {result}
                   </p>
-                  {treeKnown && items !== undefined && items.length > 0 && widenButton}
+                  {settled && items !== undefined && items.length > 0 && widenButton}
                 </div>
                 <SortControl view={view} onChange={go} />
               </div>
-              {treeKnown && error !== null && items === undefined && (
+              {listAlert && (
                 <>
                   <p className="step-error" role="alert">
                     {error}
@@ -267,13 +306,13 @@ export function CatalogList(): JSX.Element {
                   ))}
                 </div>
               )}
-              {treeKnown && items !== undefined && items.length === 0 && !busy && view.q !== "" && (
+              {settled && items !== undefined && items.length === 0 && !busy && view.q !== "" && (
                 <div className="empty">
                   <p>{t("catalog.noHits", { place, q: view.q })}</p>
                   {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
                 </div>
               )}
-              {treeKnown && items !== undefined && items.length === 0 && !busy && view.q === "" && (
+              {settled && items !== undefined && items.length === 0 && !busy && view.q === "" && (
                 <div className="empty">
                   <p>
                     {t("catalog.empty.text", {
@@ -292,7 +331,7 @@ export function CatalogList(): JSX.Element {
                   </p>
                 </div>
               )}
-              {treeKnown && items !== undefined && items.length > 0 && (
+              {settled && items !== undefined && items.length > 0 && (
                 <>
                   <TableList
                     items={items}

@@ -883,4 +883,142 @@ describe("CatalogList", () => {
       });
     });
   });
+
+  describe("focus after a control removes itself", () => {
+    it("moves focus to the search field after Search all namespaces in the result line", async () => {
+      const { user } = renderShell("/catalog?env=prod&ns=gold&q=store_id");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await user.click(screen.getByRole("button", { name: "Search all namespaces" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("searchbox")).toHaveFocus();
+      });
+    });
+
+    it("moves focus to the search field after Search all namespaces when nothing matches", async () => {
+      const { user } = renderShell("/catalog?env=prod&ns=gold&q=zzz", {
+        routes: { "GET /api/v1/tables": { status: 200, body: EMPTY } },
+      });
+      await screen.findByText("No table in gold matches “zzz”.");
+
+      await user.click(screen.getByRole("button", { name: "Search all namespaces" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("searchbox")).toHaveFocus();
+      });
+    });
+
+    it("moves focus to the result line after Show all tables", async () => {
+      const { user } = renderShell("/catalog?env=staging");
+      await user.click(await screen.findByRole("link", { name: "Show all tables" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveFocus();
+      });
+    });
+
+    it("moves focus to the tree after a Try again that succeeds", async () => {
+      const { user, server } = renderShell("/catalog", {
+        routes: {
+          "GET /api/v1/tables/tree": { status: 500, body: { detail: "The catalog is down." } },
+        },
+      });
+      const alert = await screen.findByRole("alert");
+      server.route({ "GET /api/v1/tables/tree": { status: 200, body: TREE } });
+
+      await user.click(within(alert.closest("aside") as HTMLElement).getByRole("button"));
+
+      const tree = await screen.findByRole("treegrid");
+      await waitFor(() => {
+        expect(tree.contains(document.activeElement)).toBe(true);
+      });
+    });
+  });
+
+  describe("a remembered place that is gone", () => {
+    const KEY = "lakana.catalog.admin";
+    const GONE = JSON.stringify({ environment: "staging", namespace: null });
+
+    it("never shows the list's error while the tree is on its way", async () => {
+      window.localStorage.setItem(KEY, GONE);
+      const slow = held();
+      const alerts: string[] = [];
+      const watch = new MutationObserver(() => {
+        for (const node of document.querySelectorAll("[role=alert]")) {
+          alerts.push(node.textContent);
+        }
+      });
+      watch.observe(document.body, { childList: true, subtree: true });
+      const { server } = renderShell("/catalog", {
+        routes: {
+          "GET /api/v1/tables/tree": slow.route,
+          "GET /api/v1/tables": {
+            status: 404,
+            body: { detail: "There is no environment named staging." },
+          },
+        },
+      });
+      await waitFor(() => {
+        expect(server.sent.some((r) => r.path.startsWith("/api/v1/tables?"))).toBe(true);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      server.route({ "GET /api/v1/tables": { status: 200, body: PAGE } });
+
+      slow.release({ status: 200, body: TREE });
+      await screen.findByRole("link", { name: "fact_sales" });
+      watch.disconnect();
+
+      expect(alerts).toEqual([]);
+    });
+
+    it("keeps the typed text and the focused field when the place turns out gone", async () => {
+      window.localStorage.setItem(KEY, GONE);
+      const slow = held();
+      const { router, server } = renderShell("/catalog", {
+        routes: { "GET /api/v1/tables/tree": slow.route },
+      });
+      const field = await screen.findByRole("searchbox");
+      field.focus();
+      fireEvent.change(field, { target: { value: "store" } });
+      await waitFor(() => {
+        expect(router.state.location.search).toContain("q=store");
+      });
+
+      slow.release({ status: 200, body: TREE });
+
+      await waitFor(() => {
+        expect(router.state.location.search).toBe("?q=store");
+      });
+      expect(screen.queryByText(/There is no environment/)).not.toBeInTheDocument();
+      expect(screen.getByRole("searchbox")).toBe(field);
+      expect(field).toHaveFocus();
+      expect(field).toHaveValue("store");
+      await waitFor(() => {
+        expect(JSON.parse(window.localStorage.getItem(KEY) ?? "null")).toEqual({
+          environment: null,
+          namespace: null,
+        });
+      });
+      await screen.findByRole("link", { name: "fact_sales" });
+      expect(server.sent.at(-1)?.path).toContain("q=store");
+    });
+  });
+
+  describe("an outage", () => {
+    it("announces one alert when both reads fail", async () => {
+      renderShell("/catalog", {
+        routes: {
+          "GET /api/v1/tables/tree": { status: 500, body: { detail: "The server is down." } },
+          "GET /api/v1/tables": { status: 500, body: { detail: "The server is down." } },
+        },
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText("The server is down.")).toHaveLength(2);
+      });
+
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+    });
+  });
 });
