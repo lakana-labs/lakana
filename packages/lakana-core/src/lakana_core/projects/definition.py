@@ -429,8 +429,8 @@ def passes_content_gate(
 ) -> bool:
     """Apply the strict content rule to one file: the rule of every route that shows a file.
 
-    "Defined in" (`table_definition_file`) asks it with a current source-map row; a project
-    version (`DeployService.job_version`) asks it for each asset file and each check. The
+    "Defined in" (`table_definition_file`) asks it with a current source-map row; the
+    project-versions route asks it for each asset file and each check. The
     conditions use `permits`, so a refusal writes no audit event per gate table.
 
     Parameters
