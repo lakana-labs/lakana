@@ -148,12 +148,12 @@ line and the first seven characters of the deployed commit, such as
   opens the line at that commit in a new tab. Lakana builds the link on the server; without one,
   the path and the commit are plain text you can select and copy.
 - **The file.** Press the path to open the file in a dialog. The file is read only then, so each
-  opening counts as a read and is recorded as described below. The dialog names the repository,
+  opening counts as a read and is recorded as described above. The dialog names the repository,
   the path and the whole commit, and shows the file with numbered lines and the defining line
   highlighted; the text scrolls in its own area, which you can also reach with Tab and scroll with
   the arrow keys. **Close** or Escape closes it and puts the focus back on the path.
 - **When the file is not shown,** the dialog shows the server's sentence for the reason in the
-  table below instead of the text. When the read cannot be recorded in the audit log, it shows no
+  table above instead of the text. When the read cannot be recorded in the audit log, it shows no
   text and says so; **Try again** reads it again.
 - **Characters you could not see.** The page shows the file as plain text: markup in it is shown
   as the characters it is made of, never run. A control character, a zero-width character or a
