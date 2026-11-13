@@ -55,7 +55,12 @@ from lakana_core.projects.definition import (
     table_definition,
     table_definition_file,
 )
-from lakana_core.projects.source_map import SOURCE_FILE_MAX_BYTES, ProjectFileRecord, text_digest
+from lakana_core.projects.source_map import (
+    GATE_VERSION,
+    SOURCE_FILE_MAX_BYTES,
+    ProjectFileRecord,
+    text_digest,
+)
 
 F_REF = TableRef.from_dotted("dev", "gold.f")
 REC = ProjectFileRecord(
@@ -785,6 +790,13 @@ def test_a_stale_row_answers_not_recorded_even_to_a_table_only_reader(session: S
         DefinitionReason.NOT_RECORDED,
         NOT_RECORDED_MESSAGE,
     )
+
+
+def test_a_row_from_a_newer_gate_version_answers_not_recorded(session: Session) -> None:
+    # after a code rollback, a row written under a gate this release does not know is not trusted
+    _world(session, gate_version=GATE_VERSION + 1)
+    got = _file(session, _analyst(session))
+    assert (got.content, got.reason) == (None, DefinitionReason.NOT_RECORDED)
 
 
 def test_a_reader_with_a_mask_gets_no_content(session: Session) -> None:

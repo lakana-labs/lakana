@@ -83,12 +83,15 @@ the escapes above, so read it with a program rather than on the screen.
 
 Everyone who may read the table sees where it is defined. The file itself can show more than the
 table does: the other tables it reads, and the logic and values written into it. So Lakana shows it
-only to a person for whom all three of these hold:
+only when all four of these hold:
 
 - you may read the environment;
 - you may read every table the file uses, and none of them is a view (other than the table
   itself), so a file that reads a view is shown to nobody here;
-- no row filter or column mask applies to you on any of those tables.
+- no row filter or column mask applies to you on any of those tables;
+- the file reads only tables: a file that reads a file path directly (such as
+  `read_parquet('s3://…')`) or uses a [connection](../reference/connections.md) reads
+  something no table grant covers, so it is shown to nobody here, administrators included.
 
 These are checked when you ask, against the rules of that moment (see
 [Access](../reference/access.md), [Filter rows](filter-rows.md) and [Mask a column](mask-a-column.md)).

@@ -9,7 +9,7 @@ reader who holds `READ_ENVIRONMENT`, may read every table the file uses (`gate_t
 defined table included), and has no row filter or column mask on any of them, for a file that
 reads no raw path or connection (`gate_raw`) and no view other than the table it defines. Every
 failed condition gives the same `restricted` answer, so the answer never tells which one failed.
-A row whose gate was worked out by an older extraction (`gate_version`) answers `not_recorded`
+A row whose gate was worked out by another extraction (`gate_version`) answers `not_recorded`
 before any of these conditions, so every reader of the table gets the same answer for it. A text
 that is returned is first recorded as `SOURCE_VIEWED`; if that fails, nothing is returned.
 
@@ -492,9 +492,9 @@ def table_definition_file(
     """Give a table's definition with the file's text, when the reader passes the content gate.
 
     The first outcome that applies: a table no deployment defines has no content and no
-    reason; a version without a current row for the file (none, or one of an older
-    `gate_version`) is `not_recorded`; a reader or file that fails the content rule is
-    `restricted`; a file above `SOURCE_FILE_MAX_BYTES` is `too_large`. Otherwise the text is
+    reason; a version without a current row for the file (none, or one whose `gate_version`
+    is not this release's) is `not_recorded`; a reader or file that fails the content rule
+    is `restricted`; a file above `SOURCE_FILE_MAX_BYTES` is `too_large`. Otherwise the text is
     read by its digest, the read is recorded as `SOURCE_VIEWED`, and the text is returned.
 
     Parameters
@@ -529,7 +529,7 @@ def table_definition_file(
     definition, row = _locate(session, authorization, p, ref)
     if not definition.defined:
         return TableDefinitionFile(definition, None, None, None, None)
-    if row is None or row.gate_version < GATE_VERSION:
+    if row is None or row.gate_version != GATE_VERSION:
         return _refused(definition, DefinitionReason.NOT_RECORDED)
     if not _passes_gate(session, authorization, p, ref, row):
         return _refused(definition, DefinitionReason.RESTRICTED)
