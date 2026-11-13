@@ -102,6 +102,17 @@ for (const theme of ["light", "dark"] as const) {
         expect(await violations(page), "an empty namespace").toEqual([]);
       });
 
+      test("axe finds nothing on a table's page, on each of its tabs", async ({ page }) => {
+        for (const tab of ["", "/columns", "/preview"]) {
+          await page.goto(`/catalog/prod/gold.sales/fact_sales${tab}`);
+          await expect(page.getByRole("heading", { level: 1, name: "fact_sales" })).toBeVisible();
+          await expect(
+            page.getByRole("navigation", { name: "Sections of the table" }),
+          ).toBeVisible();
+          expect(await violations(page), `the table page${tab}`).toEqual([]);
+        }
+      });
+
       test("at least 24 px between the content of every two neighbouring cells", async ({
         page,
       }) => {
@@ -353,6 +364,28 @@ test.describe("the Catalog in real Chromium", () => {
     expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
     // The stubbed 404 of the unknown environment is the one answer the browser logs.
     expect(errors.filter((error) => !error.includes("404"))).toEqual([]);
+  });
+
+  test("a table's page asks only for the stubbed routes, logs no error and does not scroll sideways at 320 px", async ({
+    page,
+  }) => {
+    const errors = consoleErrors(page);
+    const requests: string[] = [];
+    page.on("request", (request) => requests.push(request.url()));
+    await page.setViewportSize({ width: 320, height: 640 });
+
+    await page.goto("/catalog/prod/gold.sales/fact_sales");
+    await expect(page.getByRole("heading", { level: 1, name: "fact_sales" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Sections of the table" })).toBeVisible();
+    await page.waitForLoadState("networkidle");
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+    const api = requests.filter((url) => url.includes("/api/")).map((url) => new URL(url).pathname);
+    expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test("hovering a time, a size or a health word reaches the text that explains it", async ({

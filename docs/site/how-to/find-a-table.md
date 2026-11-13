@@ -118,7 +118,8 @@ row shows:
   screen reader read it, for the exact one. Last read tells you when, never who.
 
 A dash with its words ("Not known", "Never written", "Never read") means the figure does not
-exist yet, as for a view. Press a row, or its name, to open the table.
+exist yet, as for a view. Press a row, or its name, to open the table's page (see
+[Open a table](open-a-table.md)).
 
 Press a column heading to sort by it; press it again to reverse the order. The sorted heading
 shows an arrow. **Sort by** at the top right offers the same columns and **Created**, which is

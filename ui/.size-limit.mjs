@@ -32,7 +32,24 @@ const NAMED_LIMITS = [
   // the Sort by and Order menus, paging and states, 2026-11-13, 13.44 kB; and the tree of places
   // with React Aria's NavigationTree, the search field and the match line, +15.64 kB, almost all
   // of it React Aria's Tree) + 10 %.
-  { name: "Catalog", prefix: "CatalogScreen-", limit: "32 kB" },
+  // Raised from 32 kB: measured 29.64 kB with the route of a table's page (the heading and the
+  // breadcrumb from the address, so the focus the shell puts on the heading survives the page's
+  // own chunk and its read), 2026-11-13, + 10 %.
+  { name: "Catalog", prefix: "CatalogScreen-", limit: "32.6 kB" },
+  // Measured 1.49 kB (a table's page: the read, the record of it as opened, the header with its
+  // tabs and the states, 2026-11-13) + 10 %. It loads on /catalog/{environment}/{namespace}/{table}.
+  { name: "a table's page", prefix: "TablePage-", limit: "1.64 kB" },
+  // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
+  // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
+  { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },
+  // Measured 789 B (React Aria's text field, shared by the Catalog's search and the screens with
+  // a text field; a chunk of its own since the table page's route, 2026-11-13) + 10 %.
+  { name: "the text field", prefix: "TextField-", limit: "0.87 kB" },
+  // Measured 357 B (reading and reading again, now with the typed failure, 2026-11-13) + 10 %.
+  { name: "reading for a screen", prefix: "useResource-", limit: "0.39 kB" },
+  // Measured 219 B (the row of tabs; the router's link code it shared moved into the first load,
+  // 2026-11-13) + 10 %.
+  { name: "the tabs", prefix: "SectionTabs-", limit: "0.24 kB" },
 ];
 
 /**

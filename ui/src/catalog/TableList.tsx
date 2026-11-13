@@ -14,6 +14,7 @@ import type { TableListItemOut, TableSort } from "../api";
 import { Avatar } from "../profile/Avatar";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useWhen } from "../shell/useWhen";
+import { kindWord } from "./cells";
 import { formatBytes, formatRows, relativeTime } from "./format";
 import { HealthWord } from "./HealthWord";
 import { MatchLine, showsMatch } from "./MatchLine";
@@ -182,12 +183,7 @@ export function TableList({ items, view, onSort, busy }: TableListProps): JSX.El
                     <MatchLine match={row.match} q={view.q} />
                   ) : (
                     t("catalog.secondLine", {
-                      kind:
-                        row.model_kind === null
-                          ? t(`catalog.kind.${row.kind}`)
-                          : t(`catalog.modelKind.${row.model_kind}`, {
-                              defaultValue: t(`catalog.kind.${row.kind}`),
-                            }),
+                      kind: kindWord(t, row.kind, row.model_kind),
                       namespace: row.namespace,
                     })
                   )}{" "}

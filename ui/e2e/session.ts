@@ -242,6 +242,78 @@ function tablesAnswer(url: URL): { status: number; json: unknown } {
   return page([STATION_RANKING, FACT_SALES, DIM_STORE], "page-two");
 }
 
+/** The path of the table page's table, `prod/gold.sales/fact_sales`. */
+const TABLE_PATH = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
+
+/** The path of what the administrator may do with a table. */
+const PERMISSIONS_PATH = "/api/v1/principals/admin/permissions";
+
+/** The table `fact_sales` as its page reads it. */
+const TABLE_DETAIL = {
+  name: "fact_sales",
+  namespace: "gold.sales",
+  uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+  kind: "TABLE",
+  metadata_location: "s3://warehouse/gold/sales/fact_sales/metadata/00001.metadata.json",
+  schema: ["sale_id", "store_id", "sold_at", "amount"].map((name, index) => ({
+    name,
+    type: index === 2 ? "timestamp" : "long",
+    nullable: index !== 0,
+    description: null,
+    description_source: null,
+    label: null,
+    label_source: null,
+    label_language: null,
+    description_language: null,
+    terms: [],
+  })),
+  sql: null,
+  references: null,
+  hidden_references: 0,
+  snapshot_id: 4821,
+  state: "published",
+  state_message: null,
+  description: "Every sale in every store, one row per sale.",
+  description_source: "project",
+  last_write_at: "2026-11-10T06:00:00Z",
+  row_count: 1204000,
+  size_bytes: 98304,
+  file_count: 3,
+  expires_at: null,
+  expires_soon: false,
+  model: null,
+  label: null,
+  label_source: null,
+  label_language: null,
+  description_language: "en",
+  language: "en",
+  main_language: "en",
+  translations: [],
+  terms: [],
+  health: {},
+  health_missing: [],
+  health_never_judged: {},
+  owner: { name: "ana.nowak", kind: "USER" },
+  created_at: "2026-10-01T08:00:00Z",
+  last_read_at: "2026-11-10T07:50:00Z",
+  readers_7d: 2,
+  health_summary: { state: "failing", item: "check_failed", text: "Check failed", others: 2 },
+};
+
+/** What the administrator may do with `fact_sales`: everything the page asks about. */
+const PERMISSIONS = {
+  principal: "admin",
+  active: true,
+  scope: { kind: "TABLE", environment: "prod", namespace: "gold.sales", table: "fact_sales" },
+  permissions: ["READ_TABLE", "WRITE_TABLE", "DROP_TABLE", "SUBMIT_QUERY"].map((action) => ({
+    action,
+    allowed: true,
+    via: [],
+    reason: null,
+  })),
+  note: null,
+};
+
 /** The administrator's profile picture: one pixel, a PNG. */
 const PICTURE =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -257,12 +329,14 @@ export const STUBBED = [
   ...Object.keys(HOME),
   ...Object.keys(CATALOG),
   TABLES,
+  TABLE_PATH,
+  PERMISSIONS_PATH,
 ];
 
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
- * health), the administrator's profile picture, and the first screens of Access (the people) and
+ * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture, and the first screens of Access (the people) and
  * Settings (the session lengths).
  *
  * @param page - The page.
@@ -302,6 +376,14 @@ export async function signInAsAdmin(page: Page): Promise<void> {
       (route) => route.fulfill({ json }),
     );
   }
+  await page.route(
+    (url) => url.pathname === TABLE_PATH,
+    (route) => route.fulfill({ json: TABLE_DETAIL }),
+  );
+  await page.route(
+    (url) => url.pathname === PERMISSIONS_PATH,
+    (route) => route.fulfill({ json: PERMISSIONS }),
+  );
   await page.route(
     (url) => url.pathname === TABLES,
     (route) => route.fulfill(tablesAnswer(new URL(route.request().url()))),

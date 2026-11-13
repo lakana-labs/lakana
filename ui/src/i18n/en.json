@@ -194,7 +194,7 @@
     },
     "recent": {
       "title": "Recently opened",
-      "none": "Nothing opened yet. The tables, queries, jobs and runs you open will show here once the Catalog, Queries and Jobs pages arrive in a later release.",
+      "none": "Nothing opened yet. The tables you open will show here; queries, jobs and runs follow once their pages arrive in a later release.",
       "toCatalog": "Find a table in the Catalog",
       "opened": "Opened",
       "queryName": "Query {{id}}",
@@ -455,6 +455,20 @@
       "copy": "Copy command",
       "tutorial": "Open the getting-started tutorial"
     }
+  },
+  "table": {
+    "tabsLabel": "Sections of the table",
+    "tabs": {
+      "overview": "Overview",
+      "columns": "Columns",
+      "preview": "Preview"
+    },
+    "loading": "Loading the table…",
+    "retry": "Try again",
+    "toCatalog": "Back to the Catalog",
+    "notFound": "There is no table {{namespace}}.{{name}} in {{environment}} that you may read.",
+    "forbidden": "You may not read {{namespace}}.{{name}}. Ask its owner or an administrator for access.",
+    "unavailable": "The table's storage cannot be reached right now. Try again in a moment."
   },
   "list": {
     "name": "Name",

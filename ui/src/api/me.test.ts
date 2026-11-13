@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { changeInterfaceState, getInfo, getInterfaceState, listRecent } from "./me";
+import { changeInterfaceState, getInfo, getInterfaceState, listRecent, recordOpened } from "./me";
 
 import { fakeServer } from "../test/server";
 
@@ -51,5 +51,19 @@ describe("me", () => {
     });
 
     expect(await getInfo()).toEqual({ version: "0.23.0" });
+  });
+});
+
+describe("recordOpened", () => {
+  it("tells the server that the person opened a table", async () => {
+    const server = fakeServer({ "POST /api/v1/principals/kim lee/recent": { status: 204 } });
+
+    await recordOpened("kim lee", "table", "prod", "gold.sales.fact_sales");
+
+    expect(server.sent[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/principals/kim%20lee/recent",
+      body: { kind: "table", environment: "prod", ref: "gold.sales.fact_sales" },
+    });
   });
 });
