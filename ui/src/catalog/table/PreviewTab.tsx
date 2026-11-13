@@ -322,7 +322,7 @@ export function PreviewTab(): JSX.Element {
       </div>
       {phase === "failed" && (
         <p role="alert">
-          <VisibleText text={error ?? ""} />
+          <VisibleText text={String(error)} />
         </p>
       )}
       {shown !== null && (
