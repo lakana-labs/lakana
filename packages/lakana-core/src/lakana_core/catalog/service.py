@@ -787,7 +787,7 @@ class TableDescription:
     readers_7d
         How many distinct principals read it in the last 7 UTC days, today included; never who.
     health_summary
-        Its health in one word, with the failing reference checks the reader may see.
+        Its health in one word, with the reference checks the reader may see.
     """
 
     ref: TableRef

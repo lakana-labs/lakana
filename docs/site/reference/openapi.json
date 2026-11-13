@@ -32988,7 +32988,7 @@
           "capped"
         ],
         "title": "TableListPageOut",
-        "description": "One page of the catalog list.\n\nParameters\n----------\nitems\n    The tables, in the list's order.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last.\ncapped\n    Whether a search text stopped early, with more readable candidates than one search reads."
+        "description": "One page of the catalog list.\n\nParameters\n----------\nitems\n    The tables, in the list's order.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last.\ncapped\n    Whether a search text stopped early while a further readable table matched."
       },
       "TableMatchOut": {
         "properties": {

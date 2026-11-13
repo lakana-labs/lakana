@@ -1293,7 +1293,7 @@ class TableListPageOut(BaseModel):
     next_cursor
         Pass it as `cursor` for the next page; `null` on the last.
     capped
-        Whether a search text stopped early, with more readable candidates than one search reads.
+        Whether a search text stopped early while a further readable table matched.
     """
 
     items: list[TableListItemOut]

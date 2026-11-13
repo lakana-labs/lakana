@@ -48,6 +48,38 @@ _KINDS: dict[TableType, str] = {
 }
 """The API's `kind` for each `table_type`."""
 
+_SORT_KEYS = (
+    "row_count",
+    "size_bytes",
+    "last_write_at",
+    "last_read_at",
+    "health_rank",
+    "created_at",
+)
+"""The stored keys the table list sorts by, each with an index in either direction."""
+
+
+def _descending(key: str) -> dict[str, str]:
+    """Order a `(key, id)` index the way a descending page of the table list reads it.
+
+    PostgreSQL reads an ascending index backwards only as ``DESC NULLS FIRST``, and the list
+    sorts a null key last in both directions. `postgresql_ops` is the one place SQLAlchemy writes
+    text after a column of an index, so the order goes there. SQLite ignores it: it reads the
+    ascending index backwards in exactly that order (a null is its smallest value), and keeps an
+    ascending copy, which costs little in local mode.
+
+    Parameters
+    ----------
+    key
+        The sort key's column.
+
+    Returns
+    -------
+    dict of str to str
+        The column's order, then the id's.
+    """
+    return {key: "DESC NULLS LAST", "id": "DESC"}
+
 
 def table_kind(table_type: TableType) -> str:
     """Name a table type the way the API does.
@@ -89,6 +121,10 @@ class Table(Base, TimestampMixin):
         Index("ix_tables_health_rank_id", "health_rank", "id"),
         Index("ix_tables_created_at_id", "created_at", "id"),
         Index("ix_tables_name_id", "name", "id"),
+        *(
+            Index(f"ix_tables_{key}_id_desc", key, "id", postgresql_ops=_descending(key))
+            for key in _SORT_KEYS
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)

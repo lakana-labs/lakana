@@ -4681,8 +4681,8 @@ class TableListPage:
     next_cursor
         Pass it as ``cursor`` for the next page; `None` on the last.
     capped
-        Whether a search text stopped early, with more readable candidates than one search
-        reads; narrow it.
+        Whether a search text stopped early while a further readable table matched; narrow
+        it.
     """
 
     items: list[TableListItem]

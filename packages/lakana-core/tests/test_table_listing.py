@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind, TaskScope
 from lakana_core.catalog import search, table_listing
 from lakana_core.catalog.health import readers
-from lakana_core.catalog.health_summary import HEALTH_ITEMS
+from lakana_core.catalog.health_summary import HEALTH_ITEMS, HealthSummary
 from lakana_core.catalog.table_listing import (
     DEFAULT_ORDER,
     MAX_LIMIT,
@@ -640,6 +640,65 @@ def test_q_takes_percent_and_underscore_literally(session: Session) -> None:
     assert listing.list(admin, q="%").items == []
 
 
+def _admin_listing(
+    session: Session, namespaces: dict[str, str]
+) -> tuple[PrincipalRef, TableListing]:
+    """Build `dev` with one table in each namespace, and an administrator.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    namespaces
+        Dotted namespace → the name of its one table.
+
+    Returns
+    -------
+    tuple
+        The administrator and the listing.
+    """
+    admin = person(session, "admin")
+    GrantService(session, AllowAllAuthorization()).grant(
+        admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    dev = environment(session, "dev")
+    for dotted, name in namespaces.items():
+        _table(session, _namespace(session, dev, dotted), name)
+    session.commit()
+    return admin, TableListing(session, GrantAuthorization(session))
+
+
+def test_the_namespace_filter_is_case_sensitive_as_on_postgres(session: Session) -> None:
+    admin, listing = _admin_listing(
+        session, {"gold": "a", "gold.sales": "b", "Gold": "c", "Gold.sales": "d", "GOLD.x": "e"}
+    )
+    assert _names(listing.list(admin, namespace="gold")) == ["dev:gold.a", "dev:gold.sales.b"]
+    assert _names(listing.list(admin, namespace="Gold")) == ["dev:Gold.c", "dev:Gold.sales.d"]
+    assert listing.list(admin, namespace="gOLD").items == []
+
+
+@pytest.mark.parametrize(
+    ("namespace", "found"),
+    [("a*", "star"), ("a?", "mark"), ("[a]", "bracket"), ("a", "plain"), ("a[", "open")],
+)
+def test_the_namespace_filter_takes_pattern_characters_literally(
+    session: Session, namespace: str, found: str
+) -> None:
+    admin, listing = _admin_listing(
+        session,
+        {
+            "a*.n": "star",
+            "a?.n": "mark",
+            "[a].n": "bracket",
+            "a.n": "plain",
+            "a[.n": "open",
+            "ab.n": "other",
+            "a%.n": "percent",
+        },
+    )
+    assert [item.name for item in listing.list(admin, namespace=namespace).items] == [found]
+
+
 def test_a_legacy_dotted_namespace_stays_listable(session: Session) -> None:
     admin = person(session, "admin")
     GrantService(session, AllowAllAuthorization()).grant(
@@ -727,6 +786,30 @@ def test_a_search_stops_after_max_scanned_candidates_and_says_so(
     # (substring); the walk stops after three, so `zc` is never reached
     admin, _ = _wide_world(session)
     monkeypatch.setattr(search, "MAX_SCANNED", 3)
+    page = TableListing(session, GrantAuthorization(session)).list(admin, q="c")
+    assert (_names(page), page.capped) == (["dev:silver.wide"], True)
+
+
+@pytest.mark.parametrize("scanned", [1, 4])
+def test_a_cut_that_leaves_only_texts_of_listed_tables_is_not_capped(
+    session: Session, monkeypatch: pytest.MonkeyPatch, scanned: int
+) -> None:
+    # `wide` alone matches, by its five columns; with 4 scanned the fifth candidate, the first
+    # one left, is `wide`'s last column: the walk is cut, yet no further table matched
+    admin, _ = _wide_world(session)
+    session.execute(delete(Table).where(Table.name == "zc"))
+    session.commit()
+    monkeypatch.setattr(search, "MAX_SCANNED", scanned)
+    page = TableListing(session, GrantAuthorization(session)).list(admin, q="c")
+    assert (_names(page), page.capped) == (["dev:silver.wide"], False)
+
+
+def test_a_search_cut_with_a_further_table_beyond_texts_of_listed_ones_is_capped(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the candidate after the cut is `wide`'s last column; `zc` comes after it
+    admin, _ = _wide_world(session)
+    monkeypatch.setattr(search, "MAX_SCANNED", 4)
     page = TableListing(session, GrantAuthorization(session)).list(admin, q="c")
     assert (_names(page), page.capped) == (["dev:silver.wide"], True)
 
@@ -829,6 +912,48 @@ def test_a_hidden_reference_check_is_not_in_a_readers_word(world: ListingWorld) 
     assert (admin_gold.item, admin_gold.others) == ("blocked_late", 1)
     tim_gold = _item(world.listing.list(world.tim), "dev:gold.orders").health_summary
     assert (tim_gold.item, tim_gold.others) == ("blocked_late", 0)
+
+
+def test_a_passed_reference_check_makes_a_not_judged_table_healthy_for_who_may_see_it(
+    session: Session,
+) -> None:
+    admin, reader = person(session, "admin"), person(session, "reader")
+    silver = _namespace(session, environment(session, "dev"), "silver")
+    only_ref = _table(session, silver, "facts", **_health("not_judged"))
+    view = _table(session, silver, "v", table_type=TableType.VIEW, **_health("not_judged"))
+    unset = _table(session, silver, "unset", **_health(None))
+    repo, version = deployed_job(session, "dev", "shop", "daily")
+    run = run_of(session, repo, version)
+    for row in (only_ref, view, unset):
+        check_result(
+            session,
+            run,
+            row.id,
+            name=f"silver.{row.name}/ref_store_id",
+            outcome=CheckOutcome.PASSED,
+            finished_at=datetime.now(UTC),
+            generated=True,
+        )
+    session.commit()
+    grants = GrantService(session, AllowAllAuthorization())
+    grants.grant(admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    grants.grant(
+        admin,
+        principal="reader",
+        role=Role.VIEWER,
+        kind=SecurableKind.TABLE,
+        environment="dev",
+        namespace="silver",
+        table="facts",
+    )
+    listing = TableListing(session, GrantAuthorization(session))
+    words = {item.name: item.health_summary for item in listing.list(admin).items}
+    assert words["facts"] == HealthSummary("healthy", "healthy", "Healthy", 0)
+    # a view is never judged; a word not computed yet may hide a finding
+    assert (words["v"].item, words["unset"].item) == ("not_judged", "not_judged")
+    # the check's target cannot be told, so a reader of the table alone may not see it
+    [item] = listing.list(reader).items
+    assert item.health_summary.item == "not_judged"
 
 
 def test_listing_writes_no_audit_event(world: ListingWorld) -> None:

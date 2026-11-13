@@ -9,7 +9,7 @@ retention counts a table's activity from it.
 
 A generated reference check tells of its target table, so a reader who may not read the target is
 not shown it (`lakana_core.runs.hidden_checks`). The stored key therefore leaves those checks
-out, and `shown_health` adds the ones a reader may see to the stored word.
+out, and `shown_health` merges the ones a reader may see into the stored word.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.health import CheckHealth, check_health, latest_checks
@@ -35,7 +35,7 @@ __all__ = [
     "HealthState",
     "HealthSummary",
     "backfill_health_keys",
-    "failing_reference_checks",
+    "reference_checks",
     "refresh_health_key",
     "shown_health",
     "summarize",
@@ -226,7 +226,7 @@ def summarize(
 
 
 def shown_health(item: str | None, others: int, extra: Sequence[CheckHealth]) -> HealthSummary:
-    """Worsen a stored word by the reference checks a reader may see.
+    """Merge into a stored word the reference checks a reader may see.
 
     Parameters
     ----------
@@ -235,17 +235,23 @@ def shown_health(item: str | None, others: int, extra: Sequence[CheckHealth]) ->
     others
         The stored count of other findings.
     extra
-        The reader's visible generated reference checks that did not pass.
+        The reader's visible generated reference checks: those that did not pass, and for a
+        managed table whose stored word is ``not_judged`` the passed ones too.
 
     Returns
     -------
     HealthSummary
-        The stored word when `extra` is empty; otherwise the worst of it and `extra`, with the
-        rest counted.
+        The worst of the stored word and the checks of `extra` that did not pass, with the rest
+        counted. Without such a check, ``healthy`` when the stored item is ``not_judged`` and
+        `extra` holds a passed check, the evidence the stored word lacked; otherwise the
+        stored word. An item not computed yet (`None`) is never made ``healthy``: it may hide a
+        finding.
     """
     stored = item or "not_judged"
     found = _check_items(extra)
     if not found:
+        if item == "not_judged" and any(c.outcome == CheckOutcome.PASSED.value for c in extra):
+            return _summary("healthy", 0)
         return _summary(stored, others)
     # A stored "healthy" or "not_judged" is no finding to count.
     stored_findings = [] if _RANK[stored] >= _HEALTHY else [stored]
@@ -361,12 +367,16 @@ def backfill_health_keys(session: Session, *, limit: int = 500) -> int:
     return len(ids)
 
 
-def failing_reference_checks(
-    session: Session, table_ids: Collection[uuid.UUID]
+def reference_checks(
+    session: Session,
+    table_ids: Collection[uuid.UUID],
+    *,
+    passed_for: Collection[uuid.UUID] = (),
 ) -> dict[uuid.UUID, list[CheckHealth]]:
-    """Find, per table, its generated reference checks whose newest result did not pass.
+    """Find, per table, the newest result of each generated reference check that did not pass.
 
-    One statement, however many tables. A check that failed once and passed since is not failing.
+    One statement, however many tables. A check that failed once and passed since is not failing;
+    its pass is found only for a table in `passed_for`.
 
     Parameters
     ----------
@@ -374,11 +384,14 @@ def failing_reference_checks(
         Database session.
     table_ids
         The tables.
+    passed_for
+        Tables whose passed reference checks are wanted too: the evidence `shown_health` needs
+        to show a table whose stored word is ``not_judged`` as healthy.
 
     Returns
     -------
     dict
-        Table id → its failing reference checks, by name; tables with none are left out.
+        Table id → its reference checks, by name; tables with none are left out.
     """
     if not table_ids:
         return {}
@@ -404,7 +417,10 @@ def failing_reference_checks(
     rows = session.scalars(
         select(CheckResult)
         .join(ranked, ranked.c.id == CheckResult.id)
-        .where(ranked.c.position == 1, CheckResult.outcome != CheckOutcome.PASSED)
+        .where(
+            ranked.c.position == 1,
+            or_(CheckResult.outcome != CheckOutcome.PASSED, CheckResult.table_id.in_(passed_for)),
+        )
         .order_by(CheckResult.check_name)
         .execution_options(populate_existing=True)
     )
