@@ -383,7 +383,7 @@ def test_grant_list_with_a_filter_reads_the_type_from_the_answer(tmp_path: Path)
 
 
 def test_grant_list_falls_back_to_ids_when_names_cannot_be_read(tmp_path: Path) -> None:
-    """A caller that may not list principals still sees the grants."""
+    """An older server that sends no names still gets its grants listed, by id."""
     api = FakeApi()
     api.on("GET", "/api/v1/grants", json=[_without_names(_GRANTS[0])])
 

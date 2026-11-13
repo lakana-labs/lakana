@@ -308,8 +308,7 @@ def list_grants(
     terminal is too narrow the table leaves out `kind`, `namespace`, `table`, `environment` and
     `action`, in that order, and folds a long `subject` onto more lines, so that the `id` that
     `grant revoke` needs always stays whole, and a line under the table shows the revoke
-    command; `--output json` always has
-    every field.
+    command; `--output json` always has every field.
 
     A grant of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN` as a single action has the
     marker `no effect` in a `note` column, which never drops (a narrow terminal leaves out

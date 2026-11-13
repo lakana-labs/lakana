@@ -421,10 +421,11 @@ def test_listing_grants_resolves_names_in_one_query(client: TestClient) -> None:
     admin_id = uuid.uuid4()
     with Session(engine) as session:
         session.add(Principal(id=admin_id, type=PrincipalType.USER, name="granter"))
-        session.add(Group(id=(team := uuid.uuid4()), name="everyone"))
         session.flush()
         for number in range(200):
             who = uuid.uuid4()
+            team = uuid.uuid4()
+            session.add(Group(id=team, name=f"team{number}"))
             session.add(Principal(id=who, type=PrincipalType.USER, name=f"user{number}"))
             session.flush()
             session.add(
@@ -448,7 +449,7 @@ def test_listing_grants_resolves_names_in_one_query(client: TestClient) -> None:
     page = client.get("/api/v1/grants?limit=200", headers=AUTH_HEADER).json()
     assert len(page) == 200
     assert {g["principal"]["name"] for g in page if g["principal"]} >= {"user1", "user199"}
-    assert {g["group"] for g in page if g["group"]} == {"everyone"}
+    assert {g["group"] for g in page if g["group"]} >= {"team0", "team198"}
 
 
 def test_a_subject_that_is_gone_has_no_name() -> None:
