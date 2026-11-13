@@ -415,7 +415,7 @@ export interface ColumnMaskOut extends PolicyOut {
 }
 
 /** The most grants one level of the Access tab reads; the server's largest page. */
-export const MOST_GRANTS = 200;
+const MOST_GRANTS = 200;
 
 /** One level of the object hierarchy, matched exactly by the grants listing. */
 export interface GrantLevel {
@@ -427,15 +427,24 @@ export interface GrantLevel {
   readonly table: string | null;
 }
 
+/** The first page of the grants on one level. */
+interface GrantPage {
+  /** The grants, newest first. */
+  readonly grants: readonly GrantOut[];
+  /** Whether the level has more than this page. */
+  readonly more: boolean;
+}
+
 /**
  * Lists the grants on exactly one object: a table, a namespace or an environment. Only an
  * administrator may list grants.
  *
  * @param level - The object.
- * @returns The first {@link MOST_GRANTS} grants on it, newest first.
+ * @returns The first {@link MOST_GRANTS} grants on it, newest first, and whether the server has
+ *   more (it names a next page).
  * @throws {ApiError} for a refusal.
  */
-export function listGrantsAt(level: GrantLevel): Promise<readonly GrantOut[]> {
+export async function listGrantsAt(level: GrantLevel): Promise<GrantPage> {
   const query = new URLSearchParams({ environment: level.environment });
   if (level.namespace !== null) {
     query.set("namespace", level.namespace);
@@ -444,7 +453,8 @@ export function listGrantsAt(level: GrantLevel): Promise<readonly GrantOut[]> {
     }
   }
   query.set("limit", String(MOST_GRANTS));
-  return api.request<readonly GrantOut[]>("GET", `/api/v1/grants?${query.toString()}`);
+  const page = await api.page(`/api/v1/grants?${query.toString()}`);
+  return { grants: page.body as readonly GrantOut[], more: page.nextCursor !== null };
 }
 
 /**

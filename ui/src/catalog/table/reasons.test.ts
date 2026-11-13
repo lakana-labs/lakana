@@ -111,7 +111,13 @@ describe("allowedBecause", () => {
 describe("editTextsAnswer", () => {
   it("says you may edit texts because you own the table", () => {
     expect(
-      editTextsAnswer(table({ owner: { name: "kim.schulz", kind: "USER" } }), KIM, drop(false), t),
+      editTextsAnswer(
+        table({ owner: { name: "kim.schulz", kind: "USER" } }),
+        KIM,
+        true,
+        drop(false),
+        t,
+      ),
     ).toEqual({
       allowed: true,
       words: "You own the table.",
@@ -119,7 +125,7 @@ describe("editTextsAnswer", () => {
   });
 
   it("says you may edit texts because you may drop the table, and why you may", () => {
-    expect(editTextsAnswer(table(), KIM, drop(true, [via()]), t)).toEqual({
+    expect(editTextsAnswer(table(), KIM, true, drop(true, [via()]), t)).toEqual({
       allowed: true,
       words:
         "You may drop the table, so you may edit its texts. Through the Analyst role on table gold.sales.fact_sales in prod.",
@@ -127,7 +133,7 @@ describe("editTextsAnswer", () => {
   });
 
   it("tells someone who may not edit texts to ask the owner", () => {
-    expect(editTextsAnswer(table(), KIM, drop(false), t)).toEqual({
+    expect(editTextsAnswer(table(), KIM, false, drop(false), t)).toEqual({
       allowed: false,
       words:
         "Only the owner (ana.nowak) or someone who may drop the table may edit its texts. Ask the owner.",
@@ -135,10 +141,29 @@ describe("editTextsAnswer", () => {
   });
 
   it("tells someone who may not edit the texts of a table without an owner to ask an administrator", () => {
-    expect(editTextsAnswer(table({ owner: null }), KIM, undefined, t)).toEqual({
+    expect(editTextsAnswer(table({ owner: null }), KIM, false, undefined, t)).toEqual({
       allowed: false,
       words:
         "Only someone who may drop the table may edit its texts, and the table has no owner. Ask an administrator.",
+    });
+  });
+});
+
+describe("editTextsAnswer and the page's rule", () => {
+  it("follows whether the page lets the person edit, not a rule of its own", () => {
+    expect(editTextsAnswer(table(), KIM, false, drop(true, [via()]), t).allowed).toBe(false);
+    expect(
+      editTextsAnswer(
+        table({ owner: { name: "kim.schulz", kind: "USER" } }),
+        KIM,
+        false,
+        undefined,
+        t,
+      ).allowed,
+    ).toBe(false);
+    expect(editTextsAnswer(table(), KIM, true, undefined, t)).toEqual({
+      allowed: true,
+      words: "You may drop the table, so you may edit its texts.",
     });
   });
 });
@@ -153,9 +178,12 @@ describe("namespaceLevels", () => {
 describe("grantListCommand", () => {
   it("names the CLI command that lists every grant on one level", () => {
     expect(grantListCommand("prod", "gold.sales", "fact_sales")).toBe(
-      "lakana grant list --env prod --ns gold.sales --table fact_sales",
+      "lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'",
     );
-    expect(grantListCommand("prod", "gold", null)).toBe("lakana grant list --env prod --ns gold");
-    expect(grantListCommand("prod", null, null)).toBe("lakana grant list --env prod");
+    expect(grantListCommand("prod", "gold", null)).toBe(
+      "lakana grant list --env 'prod' --ns 'gold'",
+    );
+    expect(grantListCommand("prod", null, null)).toBe("lakana grant list --env 'prod'");
+    expect(grantListCommand("it's", null, null)).toBe("lakana grant list --env 'it'\\''s'");
   });
 });

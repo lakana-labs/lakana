@@ -16,11 +16,10 @@ import {
   listColumnMasks,
   listGrantsAt,
   listRowFilters,
-  MOST_GRANTS,
   type PermissionOut,
   type RowFilterOut,
 } from "../../api";
-import { personPath } from "../../access/paths";
+import { personPath } from "../../access/personPath";
 import { useMe } from "../../shell/me";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { type Resource, useResource } from "../../shell/useResource";
@@ -94,7 +93,7 @@ interface Answer {
 function Answers({ permissions }: { readonly permissions: readonly PermissionOut[] }): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
-  const { table } = useTableData();
+  const { table, mayEdit } = useTableData();
   const find = (action: string): PermissionOut | undefined =>
     permissions.find((one) => one.action === action);
   // The server answers every table action, so each of these is in the answer once.
@@ -109,7 +108,7 @@ function Answers({ permissions }: { readonly permissions: readonly PermissionOut
   );
   answers.push({
     label: t("table.access.actions.editTexts"),
-    ...editTextsAnswer(table, me, find("DROP_TABLE"), t),
+    ...editTextsAnswer(table, me, mayEdit, find("DROP_TABLE"), t),
   });
   return (
     <table className="list list-static">
@@ -143,7 +142,7 @@ function Answers({ permissions }: { readonly permissions: readonly PermissionOut
 /** Properties of {@link ListSection}. */
 interface ListSectionProps<T> {
   /** The heading. */
-  readonly heading: string;
+  readonly heading: ReactNode;
   /** The heading's level: 2 for a section of the tab, 3 for a level of grants. */
   readonly level: 2 | 3;
   /** What the read answered. */
@@ -232,12 +231,12 @@ interface GrantsAtProps {
   /** The level whose grants are listed. */
   readonly level: GrantLevel;
   /** The level's heading, such as "On namespace gold". */
-  readonly heading: string;
+  readonly heading: ReactNode;
 }
 
 /**
- * The grants on one level, at most {@link MOST_GRANTS}; with that many, the CLI command that
- * lists them all.
+ * The grants on one level, the first page of at most 200; when the server has more, the CLI
+ * command that lists them all.
  *
  * @param props - The level.
  * @param props.level - The level whose grants are listed.
@@ -259,7 +258,7 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
       resource={resource}
       reading={t("table.access.who.reading")}
     >
-      {(grants) =>
+      {({ grants, more }) =>
         grants.length === 0 ? (
           <p className="second">{t("table.access.who.none")}</p>
         ) : (
@@ -293,7 +292,7 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
                 ))}
               </tbody>
             </table>
-            {grants.length >= MOST_GRANTS && (
+            {more && (
               <p className="second grants-cut">
                 <Trans
                   t={t}
@@ -331,13 +330,28 @@ function WhoHasAccess(): JSX.Element {
         <GrantsAt
           key={level}
           level={{ environment, namespace: level, table: null }}
-          heading={t("table.access.who.namespace", { namespace: level })}
+          heading={
+            <Trans
+              t={t}
+              i18nKey="table.access.who.namespace"
+              components={{ name: <VisibleText text={level} /> }}
+            />
+          }
         />
       ))}
       <GrantsAt
         level={{ environment, namespace: null, table: null }}
-        heading={t("table.access.who.environment", { environment })}
+        heading={
+          <Trans
+            t={t}
+            i18nKey="table.access.who.environment"
+            components={{ name: <VisibleText text={environment} /> }}
+          />
+        }
       />
+      <p className="second">
+        <Trans t={t} i18nKey="table.access.who.instance" components={{ code: <code /> }} />
+      </p>
     </section>
   );
 }

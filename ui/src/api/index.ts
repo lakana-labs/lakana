@@ -94,7 +94,6 @@ export {
   listColumnMasks,
   listGrantsAt,
   listRowFilters,
-  MOST_GRANTS,
   myPermissions,
   submitPreview,
 } from "./table";

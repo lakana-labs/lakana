@@ -135,7 +135,7 @@ Health shows everything the Overview's health block sums up. Its address ends in
   count them) and when it finished. A reference check whose target is a table you may not read is
   not shown; the tab counts them: "2 reference checks are not shown: their target is a table you
   may not read." Every earlier result is a command away: the tab shows
-  `lakana check list --env prod --table gold.sales.fact_sales` with **Copy command**.
+  `lakana check list --env 'prod' --table 'gold.sales.fact_sales'` with **Copy command**.
 - **Signals.** Every signal that watches the table: what it watches (the whole table, or a
   column), its state, the value it observed, its usual band, its effect (Warns or "Blocks
   publication") and when it last fired. Under the list, each signal that fired has its sentence,
@@ -146,8 +146,10 @@ Health shows everything the Overview's health block sums up. Its address ends in
   and their size, and how many tags of failed checks it removed.
 - **Readers.** An administrator sees who read the table in the last 7 days, each name a link to
   the person, with how many reads and when the last one was. Seeing the names is recorded in the
-  audit log; if the record cannot be written, the tab shows no names, says why and offers **Try
-  again**. Everyone else sees only how many people read it, such as "3 people read it in the last
+  audit log. If that record cannot be written, the tab still shows everything else, shows the
+  count instead of the names and says "Who read the table cannot be shown: seeing it could not be
+  recorded in the audit log." Open the tab again in a moment; if it keeps failing, ask an
+  administrator to check the server. Everyone else sees only how many people read it, such as "3 people read it in the last
   7 days." **Readers ›** on Overview opens this part directly.
 
 If health cannot be read, the tab says why and offers **Try again**.
@@ -165,9 +167,11 @@ shows; changing access comes with the Access area.
 - **Who has access** (administrators only). The grants on the table, on its namespace and each
   namespace above it, and on the environment, each level under its own heading: the person or
   service account (a link to them), or the group, and the role or action with when it was
-  granted. A level shows its first 200 grants and then names the command that lists all, such as
-  `lakana grant list --env prod --ns gold.sales --table fact_sales`. A grant whose person was
-  removed while the list was read says "a removed person or group" with its id.
+  granted. A level with more than 200 grants shows the first 200 and names the command that lists
+  all, such as `lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'`. A grant
+  whose person was removed while the list was read says "a removed person or group" with its id.
+  Grants on the whole instance, such as the Admin role, are not listed here; `lakana grant list`
+  shows every grant.
 - **Row filters** and **Column masks** (administrators only). Who each one is for, the masked
   column for a mask, and the expression, shown as text.
 

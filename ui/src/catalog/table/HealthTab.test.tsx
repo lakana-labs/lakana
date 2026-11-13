@@ -121,7 +121,7 @@ describe("HealthTab", () => {
       "status-glyph status-glyph-failed",
     ]);
     expect(
-      within(checks).getByText("lakana check list --env prod --table gold.sales.fact_sales"),
+      within(checks).getByText("lakana check list --env 'prod' --table 'gold.sales.fact_sales'"),
     ).toBeVisible();
     expect(within(checks).getByRole("button", { name: "Copy command" })).toBeVisible();
   });
@@ -417,29 +417,52 @@ describe("HealthTab", () => {
     expect(heading).not.toHaveFocus();
   });
 
-  it("names the cause when the readers cannot be shown", async () => {
+  it("shows the rest of the health when the readers cannot be shown, and says why", async () => {
+    const { server } = renderShell(TAB, {
+      routes: {
+        [HEALTH_ROUTE]: (request) =>
+          request.path.includes("readers=false")
+            ? { status: 200, body: health({ checks: [checkResult({ name: "amount_positive" })] }) }
+            : {
+                status: 503,
+                body: {
+                  detail:
+                    "The readers are not shown because reading them could not be recorded (OperationalError). Try again.",
+                },
+              },
+      },
+    });
+
+    const readers = await section("Readers");
+    expect(
+      within(readers).getByText(
+        "Who read the table cannot be shown: seeing it could not be recorded in the audit log. Open the tab again in a moment; if it keeps failing, ask an administrator to check the server.",
+      ),
+    ).toBeVisible();
+    expect(within(readers).getByText("3 people read it in the last 7 days.")).toBeVisible();
+    expect(within(await section("Checks")).getByText("amount_positive")).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(healthPaths(server)).toEqual([
+      `${TABLE_PATH}/health?days=7`,
+      `${TABLE_PATH}/health?days=7&readers=false`,
+    ]);
+  });
+
+  it("names the cause and offers Try again when health cannot be read", async () => {
     let calls = 0;
     const { user } = renderShell(TAB, {
       routes: {
         [HEALTH_ROUTE]: () => {
           calls += 1;
           return calls === 1
-            ? {
-                status: 503,
-                body: {
-                  detail:
-                    "The readers are not shown because reading them could not be recorded (OperationalError). Try again.",
-                },
-              }
+            ? { status: 500, body: { detail: "The health store broke." } }
             : { status: 200, body: health({ readers: READERS }) };
         },
       },
     });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The readers are not shown because reading them could not be recorded (OperationalError). Try again.",
-    );
-    expect(screen.queryByRole("link", { name: "kim.schulz" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("The health store broke.");
+    expect(calls).toBe(1);
 
     await user.click(screen.getByRole("button", { name: "Try again" }));
 

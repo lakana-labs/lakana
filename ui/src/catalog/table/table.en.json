@@ -247,7 +247,8 @@
       "none": "Nobody read the table in the last 7 days.",
       "count_one": "{{count}} person read it in the last 7 days.",
       "count_other": "{{count}} people read it in the last 7 days.",
-      "audited": "Seeing who read the table is recorded in the audit log."
+      "audited": "Seeing who read the table is recorded in the audit log.",
+      "unavailable": "Who read the table cannot be shown: seeing it could not be recorded in the audit log. Open the tab again in a moment; if it keeps failing, ask an administrator to check the server."
     }
   },
   "access": {
@@ -294,15 +295,16 @@
     "who": {
       "heading": "Who has access",
       "table": "On this table",
-      "namespace": "On namespace {{namespace}}",
-      "environment": "On environment {{environment}}",
+      "namespace": "On namespace <name/>",
+      "environment": "On environment <name/>",
       "subject": "Person or group",
       "grant": "Grant",
       "since": "Since",
       "none": "No grants at this level.",
       "reading": "Reading the grants…",
       "cut": "The first 200 at this level; <code>{{command}}</code> lists all.",
-      "role": "{{role}} role"
+      "role": "{{role}} role",
+      "instance": "Grants on the whole instance, such as the Admin role, are not listed here; <code>lakana grant list</code> shows every grant."
     },
     "group": "group <name/>",
     "removed": "a removed person or group",

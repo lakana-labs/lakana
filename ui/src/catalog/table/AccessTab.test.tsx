@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PermissionsOut } from "../../api";
@@ -12,6 +12,7 @@ import {
   permissions,
   rowFilter,
   table,
+  TABLE,
   TABLE_PATH,
 } from "../../test/table";
 
@@ -99,6 +100,11 @@ const KIM_MAY: PermissionsOut = {
 };
 
 const KIM_PERMISSIONS = "GET /api/v1/principals/kim.schulz/permissions";
+
+/** A page of 200 grants on every level: the server's largest. */
+const MANY = Array.from({ length: 200 }, (_, at) =>
+  grant({ id: `6d5c4b3a-2f1e-4d0c-9b8a-${String(at).padStart(12, "0")}` }),
+);
 
 describe("AccessTab", () => {
   beforeEach(() => {
@@ -305,22 +311,67 @@ describe("AccessTab", () => {
     expect(level.textContent).not.toContain("\u202E");
   });
 
-  it("names the CLI command per level when a level has 200 grants", async () => {
-    const many = Array.from({ length: 200 }, (_, at) =>
-      grant({ id: `6d5c4b3a-2f1e-4d0c-9b8a-${String(at).padStart(12, "0")}` }),
-    );
-    renderShell(TAB, { routes: { [`GET ${GRANTS_PATH}`]: { status: 200, body: many } } });
+  it("names the CLI command per level when a level has more than 200 grants", async () => {
+    renderShell(TAB, {
+      routes: {
+        [`GET ${GRANTS_PATH}`]: {
+          status: 200,
+          body: MANY,
+          headers: { "X-Next-Cursor": "eyJhZnRlciI6IjIwMCJ9" },
+        },
+      },
+    });
 
     const who = await section("Who has access");
     await within(who).findAllByText(/lists all\.$/);
     const commands = [...who.querySelectorAll(".grants-cut code")].map((code) => code.textContent);
     expect(commands).toEqual([
-      "lakana grant list --env prod --ns gold.sales --table fact_sales",
-      "lakana grant list --env prod --ns gold.sales",
-      "lakana grant list --env prod --ns gold",
-      "lakana grant list --env prod",
+      "lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'",
+      "lakana grant list --env 'prod' --ns 'gold.sales'",
+      "lakana grant list --env 'prod' --ns 'gold'",
+      "lakana grant list --env 'prod'",
     ]);
     expect(within(who).getAllByText(/^The first 200 at this level;/)).toHaveLength(4);
+  });
+
+  it("says nothing about a first 200 when a level has exactly 200 grants", async () => {
+    renderShell(TAB, { routes: { [`GET ${GRANTS_PATH}`]: { status: 200, body: MANY } } });
+
+    const who = await section("Who has access");
+    // Plain selectors: role queries over 800 rows are slow.
+    await waitFor(() => {
+      expect(who.querySelectorAll("tbody tr")).toHaveLength(800);
+    });
+    expect(who.querySelector(".grants-cut")).toBeNull();
+    expect(who.textContent).not.toContain("lists all");
+  });
+
+  it("says that grants on the whole instance are not listed, and which command lists them", async () => {
+    renderShell(TAB);
+
+    const who = await section("Who has access");
+    const line = within(who).getByText(/^Grants on the whole instance, such as the Admin role,/);
+    expect(line).toHaveTextContent(
+      "Grants on the whole instance, such as the Admin role, are not listed here; lakana grant list shows every grant.",
+    );
+    expect(line.querySelector("code")).toHaveTextContent("lakana grant list");
+  });
+
+  it("marks an invisible character in a level's namespace and environment", async () => {
+    const place = "/api/v1/environments/pr\u202Eod/namespaces/gold.sales/tables/fact_sales";
+    renderShell("/catalog/pr%E2%80%AEod/gold.sales/fact_sales/access", {
+      routes: { [`GET ${place}`]: { status: 200, body: TABLE } },
+    });
+
+    const who = await section("Who has access");
+    const headings = within(who).getAllByRole("heading", { level: 3 });
+    expect(headings.map((heading) => heading.textContent)).toEqual([
+      "On this table",
+      "On namespace gold.sales",
+      "On namespace gold",
+      "On environment prU+202Eod",
+    ]);
+    expect(within(headings[3] as HTMLElement).getByText("U+202E")).toHaveClass("char-mark");
   });
 
   it("shows row filters without a column and masks with one", async () => {

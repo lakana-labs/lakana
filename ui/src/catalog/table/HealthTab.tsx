@@ -13,9 +13,10 @@ import { type JSX, type ReactNode, useCallback, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
 
-import { getTableHealth, type TableHealthOut } from "../../api";
-import { personPath } from "../../access/paths";
+import { ApiError, getTableHealth, type TableHealthOut, type TableRef } from "../../api";
+import { personPath } from "../../access/personPath";
 import { CopyLine } from "../../shell/CopyLine";
+import { shellQuote } from "../../shell/shellQuote";
 import { useMe } from "../../shell/me";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { useResource } from "../../shell/useResource";
@@ -146,7 +147,7 @@ function Checks({ health }: HealthProps): JSX.Element {
       )}
       <p className="second">{t("table.healthTab.checks.history")}</p>
       <CopyLine
-        text={`lakana check list --env ${ref.environment} --table ${ref.namespace}.${ref.name}`}
+        text={`lakana check list --env ${shellQuote(ref.environment)} --table ${shellQuote(`${ref.namespace}.${ref.name}`)}`}
         copyLabel={t("table.healthTab.checks.copy")}
       />
     </section>
@@ -319,13 +320,16 @@ function Maintenance({ health }: HealthProps): JSX.Element {
 /**
  * Who read the table in the last 7 days. An administrator sees each name, linked to the person,
  * with the reads and the last read; everyone else, and an administrator the server sent no
- * names, sees only how many people read it. Opened at `#readers`, the heading takes the focus.
+ * names, sees only how many people read it. When the names were refused because the read could
+ * not be recorded, a line says so with the next step. Opened at `#readers`, the heading takes the
+ * focus.
  *
- * @param props - The health.
+ * @param props - The health and whether the names were refused.
  * @param props.health - The health the server answered.
+ * @param props.refused - Whether the names were refused because the read could not be audited.
  * @returns The section.
  */
-function Readers({ health }: HealthProps): JSX.Element {
+function Readers({ health, refused }: HealthProps & { readonly refused: boolean }): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
   const { table } = useTableData();
@@ -340,7 +344,12 @@ function Readers({ health }: HealthProps): JSX.Element {
   const readers = me.admin ? health.readers : null;
   let shown: ReactNode;
   if (readers === null) {
-    shown = <p>{t("table.healthTab.readers.count", { count: table.readers_7d })}</p>;
+    shown = (
+      <>
+        {refused && <p role="status">{t("table.healthTab.readers.unavailable")}</p>}
+        <p>{t("table.healthTab.readers.count", { count: table.readers_7d })}</p>
+      </>
+    );
   } else if (readers.length === 0) {
     shown = <p className="second">{t("table.healthTab.readers.none")}</p>;
   } else {
@@ -388,6 +397,37 @@ function Readers({ health }: HealthProps): JSX.Element {
   );
 }
 
+/** What the tab read: the health, and whether the readers' names were refused. */
+interface HealthRead {
+  /** The health the server answered. */
+  readonly health: TableHealthOut;
+  /** Whether an administrator's read with the names was refused because it could not be audited. */
+  readonly readersRefused: boolean;
+}
+
+/**
+ * Reads the health: for an administrator with the readers' names, and when the server cannot
+ * record that read (503) once more without them, so checks and signals still show; for everyone
+ * else without them.
+ *
+ * @param ref - The table.
+ * @param admin - Whether the person is an administrator.
+ * @returns The health, and whether the names were refused.
+ * @throws {ApiError} for any other refusal.
+ */
+async function readHealth(ref: TableRef, admin: boolean): Promise<HealthRead> {
+  if (admin) {
+    try {
+      return { health: await getTableHealth(ref, { readers: true }), readersRefused: false };
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 503)) {
+        throw error;
+      }
+    }
+  }
+  return { health: await getTableHealth(ref, { readers: false }), readersRefused: admin };
+}
+
 /**
  * The Health tab. It reads the health with the readers' names for an administrator and without
  * them for everyone else. A failed read, the audit's 503 included, says why with Try again; the
@@ -401,12 +441,12 @@ export default function HealthTab(): JSX.Element {
   const { ref } = useTableData();
   const { environment, namespace, name } = ref;
   const load = useCallback(
-    () => getTableHealth({ environment, namespace, name }, { readers: me.admin }),
+    () => readHealth({ environment, namespace, name }, me.admin),
     [environment, namespace, name, me.admin],
   );
   const resource = useResource(load);
   const { target, arm } = useFocusAfter<HTMLDivElement>(resource.data);
-  const health = resource.data;
+  const read = resource.data;
   let shown: ReactNode;
   if (resource.error !== null) {
     shown = (
@@ -418,16 +458,17 @@ export default function HealthTab(): JSX.Element {
         }}
       />
     );
-  } else if (health === undefined) {
+  } else if (read === undefined) {
     shown = <p role="status">{t("table.healthTab.reading")}</p>;
   } else {
+    const { health } = read;
     shown = (
       <>
         {!judged(health) && <p>{t("table.healthTab.notJudged")}</p>}
         <Checks health={health} />
         <Signals health={health} />
         <Maintenance health={health} />
-        <Readers health={health} />
+        <Readers health={health} refused={read.readersRefused} />
       </>
     );
   }

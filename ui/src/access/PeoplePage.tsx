@@ -14,7 +14,7 @@ import { ListHead } from "../shell/ListHead";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
 import { AccessFrame } from "./AccessFrame";
-import { personPath } from "./paths";
+import { personPath } from "./personPath";
 
 // How long typing must pause before the list is read again.
 const SEARCH_PAUSE_MS = 250;

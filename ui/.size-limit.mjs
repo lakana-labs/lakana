@@ -61,26 +61,31 @@ const NAMED_LIMITS = [
   // its own strings. It loads only when the Lineage tab is opened; the table's page stays at
   // 10.24 kB with the tab's lazy import, inside its limit.
   { name: "the Lineage tab", prefix: "LineageTab-", limit: "4.72 kB" },
-  // Measured 2.22 kB (2026-11-13) + 10 %: the Health tab, its checks, signals, last maintenance
+  // Measured 2.4 kB (2026-11-13, with the read again without names when the audit fails) + 10 %:
+  // the Health tab, its checks, signals, last maintenance
   // and readers (the names for an administrator, the count for everyone else) and the focus on
   // #readers. It loads only when the Health tab is opened.
-  { name: "the Health tab", prefix: "HealthTab-", limit: "2.44 kB" },
-  // Measured 2.17 kB (2026-11-13) + 10 %: the Access tab, what the person may do and why, and for
+  { name: "the Health tab", prefix: "HealthTab-", limit: "2.64 kB" },
+  // Measured 2.24 kB (2026-11-13) + 10 %: the Access tab, what the person may do and why, and for
   // an administrator the grants level by level, the row filters and the column masks. It loads
   // only when the Access tab is opened.
-  { name: "the Access tab", prefix: "AccessTab-", limit: "2.39 kB" },
-  // Measured 3.76 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
+  { name: "the Access tab", prefix: "AccessTab-", limit: "2.46 kB" },
+  // Measured 3.83 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
   // included. The page and the two tabs share them, so the bundler gave them a chunk of their own,
-  // loaded with the page and never in the first load; the table's page fell to 8.38 kB with it.
-  { name: "the table page's strings", prefix: "tableStrings-", limit: "4.14 kB" },
+  // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.
+  { name: "the table page's strings", prefix: "tableStrings-", limit: "4.21 kB" },
   // Measured 662 B (2026-11-13) + 10 %: the status glyph, which the table page, the Health tab
   // and the Access tab share.
   { name: "the status glyph", prefix: "StatusGlyph-", limit: "0.73 kB" },
   // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
-  // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %. The Access area's
-  // addresses (95 B, a person's page, shared since the Health and Access tabs link to people) have
-  // a file name that starts the same way and are held to the same limit.
+  // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
   { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },
+  // Measured 95 B (a person's address, which the Access area and the Health and Access tabs
+  // share, 2026-11-13) + 10 %.
+  { name: "a person's address", prefix: "personPath-", limit: "0.11 kB" },
+  // Measured 88 B (quoting a command line to copy, which Connect a repository and the Health and
+  // Access tabs share, 2026-11-13) + 10 %.
+  { name: "quoting a command", prefix: "shellQuote-", limit: "0.1 kB" },
   // Measured 789 B (React Aria's text field, shared by the Catalog's search and the screens with
   // a text field; a chunk of its own since the table page's route, 2026-11-13) + 10 %.
   { name: "the text field", prefix: "TextField-", limit: "0.87 kB" },
@@ -153,7 +158,7 @@ export default [
   // The table page's strings load with its chunk (src/catalog/table/tableStrings.ts), which took the
   // first load from 209.3 to 207.5 kB (2026-11-13); the limit stays at 212 kB so that the
   // strings of Lineage, Health and Access, which load there too, do not use it up. With the Health
-  // and Access tabs it measures 208.2 kB (2026-11-13), with the copy line and the signed-in
+  // and Access tabs it measures 208.3 kB (2026-11-13), with the copy line and the signed-in
   // person, which the tabs share with the first load, in chunks of their own that index.html
   // preloads.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of

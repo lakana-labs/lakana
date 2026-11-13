@@ -191,13 +191,24 @@ describe("table", () => {
     expect(ACTIVE_STATUSES).toEqual(["QUEUED", "RUNNING"]);
   });
 
-  it("lists the grants on exactly one level, at most 200, leaving out what the level has not", async () => {
-    const server = fakeServer({ [`GET ${GRANTS_PATH}`]: { status: 200, body: GRANTS } });
+  it("lists the grants on exactly one level, at most 200, and says whether the server has more", async () => {
+    const server = fakeServer({
+      [`GET ${GRANTS_PATH}`]: (request) => ({
+        status: 200,
+        body: GRANTS,
+        ...(request.path.includes("namespace=gold&")
+          ? { headers: { "X-Next-Cursor": "abc" } }
+          : {}),
+      }),
+    });
 
     expect(
       await listGrantsAt({ environment: "prod", namespace: "gold.sales", table: "fact_sales" }),
-    ).toEqual(GRANTS);
-    await listGrantsAt({ environment: "prod", namespace: "gold", table: null });
+    ).toEqual({ grants: GRANTS, more: false });
+    expect(await listGrantsAt({ environment: "prod", namespace: "gold", table: null })).toEqual({
+      grants: GRANTS,
+      more: true,
+    });
     await listGrantsAt({ environment: "prod", namespace: null, table: null });
 
     expect(server.sent.map((request) => request.path)).toEqual([

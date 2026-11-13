@@ -31,16 +31,11 @@ import { CopyLine } from "../shell/CopyLine";
 import { HOW_TO_URL } from "../shell/docs";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
+import { shellQuote } from "../shell/shellQuote";
 import { useFocusAfter } from "../shell/useFocusAfter";
 import { useAttempt } from "../sign-in/Attempt";
 import { problemText } from "../sign-in/messages";
-import {
-  httpsForm,
-  queryOrFragment,
-  type RecognisedHost,
-  recogniseHost,
-  shellQuote,
-} from "./hosts";
+import { httpsForm, queryOrFragment, type RecognisedHost, recogniseHost } from "./hosts";
 import "./connect.css";
 
 /** How long a check runs before the page says what it waits for. */

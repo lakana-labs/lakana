@@ -7,6 +7,7 @@
 import type { TFunction } from "i18next";
 
 import type { AccessOut, PermissionOut, ScopeOut, TableOut, ViaOut } from "../../api";
+import { shellQuote } from "../../shell/shellQuote";
 import "./tableStrings";
 
 /**
@@ -62,11 +63,14 @@ export function allowedBecause(permission: PermissionOut, t: TFunction): string 
 }
 
 /**
- * Whether the person may edit the table's texts, and why: its owner may, and so may whoever may
- * drop it; anyone else is sent to the owner, or to an administrator for a table without one.
+ * Whether the person may edit the table's texts, and why. Whether they may is the page's own
+ * answer (`mayEdit` of the table's context: the owner, or whoever may drop the table); this only
+ * words it: "You own the table.", the reasons they may drop it, or, for a refusal, the owner to
+ * ask, or an administrator for a table without one.
  *
  * @param table - The table.
  * @param me - The person.
+ * @param mayEdit - Whether the page lets the person edit the texts.
  * @param drop - The person's permission to drop the table, if it was read.
  * @param t - The translation function.
  * @returns The answer and its words.
@@ -74,14 +78,16 @@ export function allowedBecause(permission: PermissionOut, t: TFunction): string 
 export function editTextsAnswer(
   table: TableOut,
   me: AccessOut,
+  mayEdit: boolean,
   drop: PermissionOut | undefined,
   t: TFunction,
 ): { allowed: boolean; words: string } {
-  if (table.owner?.name === me.name) {
-    return { allowed: true, words: t("table.access.owner") };
-  }
-  if (drop?.allowed === true) {
-    return { allowed: true, words: `${t("table.access.byDrop")} ${allowedBecause(drop, t)}` };
+  if (mayEdit) {
+    if (table.owner?.name === me.name) {
+      return { allowed: true, words: t("table.access.owner") };
+    }
+    const why = drop === undefined ? [] : [allowedBecause(drop, t)];
+    return { allowed: true, words: [t("table.access.byDrop"), ...why].join(" ") };
   }
   return {
     allowed: false,
@@ -109,19 +115,19 @@ export function namespaceLevels(namespace: string): readonly string[] {
  * @param environment - The environment.
  * @param namespace - The dotted namespace, or null for the environment.
  * @param table - The table, or null for a namespace or the environment.
- * @returns The command.
+ * @returns The command, each value quoted for a POSIX shell.
  */
 export function grantListCommand(
   environment: string,
   namespace: string | null,
   table: string | null,
 ): string {
-  const parts = ["lakana grant list", `--env ${environment}`];
+  const parts = ["lakana grant list", `--env ${shellQuote(environment)}`];
   if (namespace !== null) {
-    parts.push(`--ns ${namespace}`);
+    parts.push(`--ns ${shellQuote(namespace)}`);
   }
   if (table !== null) {
-    parts.push(`--table ${table}`);
+    parts.push(`--table ${shellQuote(table)}`);
   }
   return parts.join(" ");
 }
