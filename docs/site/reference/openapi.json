@@ -15649,7 +15649,7 @@
           "deploys"
         ],
         "summary": "Show a project version",
-        "description": "Shows the version's manifest, limited to what the caller may see. Needs `READ_ENVIRONMENT`. Answers 404 when the environment has no such project version.",
+        "description": "Shows the version's manifest, limited to what the caller may see. Needs `READ_ENVIRONMENT`. Answers 404 when the environment has no such project version.\n\nAn asset's or check's SQL is the text of a project file, so it is shown only under the rule of a table's \"Defined in\" file: to a reader of every table the file uses, with no row filter or column mask on any of them, for a file that reads no raw path or connection and that Lakana recorded at deploy. Every asset and check carries `content_reason` and `content_message`: both `null` when its SQL is shown, otherwise `restricted` or `not_recorded` and the sentence that says what to do. Each file shown is recorded in the audit log (`SOURCE_VIEWED`); when that fails, the answer is 503 and shows nothing.",
         "operationId": "get_project_version_api_v1_environments__env__project_versions__project_version_id__get",
         "parameters": [
           {
@@ -15725,6 +15725,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
             "content": {
               "application/json": {
                 "schema": {

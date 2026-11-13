@@ -55,6 +55,7 @@ from lakana_core.projects.definition import (
     table_definition,
     table_definition_file,
 )
+from lakana_core.projects.deploys import DeployService, JobVersionView
 from lakana_core.projects.source_map import (
     GATE_VERSION,
     SOURCE_FILE_MAX_BYTES,
@@ -1034,3 +1035,307 @@ def test_a_failed_audit_write_returns_no_content(
     monkeypatch.setattr(AuditService, "record", refuse)
     with pytest.raises(AuditUnavailableError, match="a read of a project file is always recorded"):
         _file(session, analyst)
+
+
+# --- the same gate on a project version (#560) ----------------------------------------------------
+
+_CHECK_PATH = "checks/gold/f.sql"
+"""The path of the check `_with_sql` adds."""
+
+
+def _with_sql(session: Session, *checks: str) -> JobVersion:
+    """Give the current version's assets their SQL and references, and add checks on `gold.f`.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    *checks
+        The SQL of each check, all on `gold.f` at `_CHECK_PATH`.
+
+    Returns
+    -------
+    JobVersion
+        The current version.
+    """
+    version = session.scalars(select(JobVersion).order_by(JobVersion.created_at.desc())).first()
+    assert version is not None
+    gates = {
+        row.table_name: row.gate_tables
+        for row in session.scalars(
+            select(ProjectFile).where(ProjectFile.job_version_id == version.id)
+        )
+    }
+    assets = []
+    for entry in version.manifest_json["assets"]:
+        others = [name for name in gates.get(entry["table"], []) if name != entry["table"]]
+        assets.append(
+            {
+                **entry,
+                "sql": f"SELECT a FROM {', '.join(others) or 'silver.a'}",
+                "references": others,
+            }
+        )
+    version.manifest_json = {
+        "assets": assets,
+        "checks": [
+            {"name": f"c{i}", "table": "gold.f", "check": "custom", "path": _CHECK_PATH, "sql": sql}
+            for i, sql in enumerate(checks)
+        ],
+    }
+    session.commit()
+    return version
+
+
+def _version(
+    session: Session,
+    p: PrincipalRef,
+    *,
+    window_minutes: int = 60,
+    session_factory: Callable[[], Session] | None = None,
+) -> JobVersionView:
+    """Ask for the current project version of `dev` as `p`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    p
+        The reader.
+    window_minutes
+        The audit window.
+    session_factory
+        Given, the sessions the audit uses.
+
+    Returns
+    -------
+    JobVersionView
+        The answer.
+    """
+    version = session.scalars(select(JobVersion).order_by(JobVersion.created_at.desc())).first()
+    assert version is not None
+    return DeployService(session, GrantAuthorization(session)).job_version(
+        p,
+        "dev",
+        version.id,
+        window_minutes=window_minutes,
+        session_factory=session_factory,
+    )
+
+
+def _asset(view: JobVersionView, table: str = "gold.f") -> dict[str, object]:
+    """Find an asset's entry in a version's manifest.
+
+    Parameters
+    ----------
+    view
+        The answer.
+    table
+        The asset's table.
+
+    Returns
+    -------
+    dict
+        The entry.
+    """
+    [entry] = [e for e in view.manifest["assets"] if e["table"] == table]
+    return entry
+
+
+def _content_withheld(entry: dict[str, object], reason: DefinitionReason) -> bool:
+    """Tell whether an asset or check entry holds no SQL and names `reason`.
+
+    Parameters
+    ----------
+    entry
+        The entry.
+    reason
+        The expected reason.
+
+    Returns
+    -------
+    bool
+        Whether `sql` and `normalized_sql` are gone and the reason and its message are set.
+    """
+    message = {
+        DefinitionReason.RESTRICTED: RESTRICTED_MESSAGE,
+        DefinitionReason.NOT_RECORDED: NOT_RECORDED_MESSAGE,
+    }[reason]
+    return (
+        "sql" not in entry
+        and "normalized_sql" not in entry
+        and entry["content_reason"] == reason.value
+        and entry["content_message"] == message
+    )
+
+
+def test_a_project_version_shows_sql_to_a_reader_who_passes_the_gate(session: Session) -> None:
+    _world(session)
+    _with_sql(session)
+    analyst = _analyst(session)
+    entry = _asset(_version(session, analyst))
+    assert entry["sql"] == "SELECT a FROM silver.a"
+    assert entry["normalized_sql"] == REC.normalized_sql
+    assert (entry["content_reason"], entry["content_message"]) == (None, None)
+    [event] = _source_viewed(session)
+    assert event.principal_id == analyst.id
+    assert event.detail == {"repository": "analytics", "path": REC.path, "commit": "a" * 40}
+    assert (event.securable_namespace, event.securable_table) == ("gold", "f")
+
+
+@pytest.mark.parametrize(
+    ("kind", "table"),
+    [("mask", "silver.a"), ("filter", "silver.a"), ("mask", "gold.f"), ("filter", "gold.f")],
+)
+def test_a_project_version_withholds_sql_from_a_reader_under_a_policy(
+    session: Session, kind: str, table: str
+) -> None:
+    _world(session)
+    _with_sql(session)
+    analyst = _analyst(session)
+    _policy(session, kind, analyst, table)
+    entry = _asset(_version(session, analyst))
+    assert _content_withheld(entry, DefinitionReason.RESTRICTED)
+    # The reader may read every table it names, so the rest of the entry stays.
+    assert entry["references"] == ["silver.a"] and entry["hidden_references"] == 0
+    assert _source_viewed(session) == []
+
+
+def test_a_project_version_withholds_sql_of_a_file_that_reads_a_raw_path(
+    session: Session,
+) -> None:
+    _world(session, _rec("gold.f", "silver.a", raw=True))
+    _with_sql(session)
+    assert _content_withheld(
+        _asset(_version(session, _analyst(session))), DefinitionReason.RESTRICTED
+    )
+    assert _source_viewed(session) == []
+
+
+def test_a_project_version_withholds_sql_from_a_reader_who_may_not_read_an_input(
+    session: Session,
+) -> None:
+    _world(session)
+    _with_sql(session)
+    reader = _person(session, "r", "gold.f", environment=True)
+    entry = _asset(_version(session, reader))
+    assert _content_withheld(entry, DefinitionReason.RESTRICTED)
+    assert "references" not in entry and entry["hidden_references"] == 1
+    assert _source_viewed(session) == []
+
+
+def test_a_project_version_without_a_current_file_row_answers_not_recorded(
+    session: Session,
+) -> None:
+    _world(session, gate_version=GATE_VERSION - 1)
+    _with_sql(session)
+    entry = _asset(_version(session, _analyst(session)))
+    assert _content_withheld(entry, DefinitionReason.NOT_RECORDED)
+    session.execute(delete(ProjectFile))
+    session.commit()
+    entry = _asset(_version(session, _analyst(session, "other")))
+    assert _content_withheld(entry, DefinitionReason.NOT_RECORDED)
+    assert _source_viewed(session) == []
+
+
+def test_a_project_version_applies_the_gate_per_file(session: Session) -> None:
+    _tables(session, "silver.b", "gold.g")
+    _world(session, _rec("gold.f", "silver.a"), _rec("gold.g", "silver.b"))
+    _with_sql(session)
+    analyst = _analyst(session)
+    _policy(session, "mask", analyst, "silver.b")
+    view = _version(session, analyst)
+    assert _asset(view, "gold.f")["sql"] == "SELECT a FROM silver.a"
+    assert _content_withheld(_asset(view, "gold.g"), DefinitionReason.RESTRICTED)
+    assert [(e.securable_table, e.detail["path"]) for e in _source_viewed(session)] == [
+        ("f", "assets/gold/f.sql")
+    ]
+
+
+def test_a_project_version_records_source_viewed_once_per_window(session: Session) -> None:
+    _world(session)
+    _with_sql(session)
+    analyst = _analyst(session)
+    _version(session, analyst)
+    _version(session, analyst)
+    # Defined in shares the window: the same reader, table and commit.
+    _file(session, analyst)
+    assert len(_source_viewed(session)) == 1
+    _version(session, analyst, window_minutes=0)
+    assert len(_source_viewed(session)) == 2
+
+
+def test_a_project_version_whose_audit_fails_returns_nothing(session: Session) -> None:
+    _world(session)
+    _with_sql(session)
+
+    def broken() -> Session:
+        """Fail to open a session, as a lost database would.
+
+        Raises
+        ------
+        OperationalError
+            Always.
+        """
+        raise OperationalError("x", {}, Exception())
+
+    with pytest.raises(AuditUnavailableError, match="a read of a project file is always recorded"):
+        _version(session, _analyst(session), session_factory=broken)
+    # A reader who sees no SQL needs no audit row, so the failure does not touch them.
+    reader = _person(session, "r", "gold.f", environment=True)
+    _asset(_version(session, reader, session_factory=broken))
+
+
+def test_a_project_version_withholds_a_checks_sql_from_a_reader_under_a_policy(
+    session: Session,
+) -> None:
+    _world(session)
+    _with_sql(session, "SELECT * FROM silver.a WHERE a IS NULL")
+    analyst = _analyst(session)
+    _policy(session, "filter", analyst, "silver.a")
+    [check] = _version(session, analyst).manifest["checks"]
+    assert _content_withheld(check, DefinitionReason.RESTRICTED)
+    assert check["references"] == ["silver.a"] and check["hidden_references"] == 0
+    assert _source_viewed(session) == []
+
+
+def test_a_project_version_shows_a_checks_sql_that_passes_the_gate(session: Session) -> None:
+    # The asset's file reads a raw path, so only the check's own file is shown and recorded.
+    _world(session, _rec("gold.f", "silver.a", raw=True))
+    _with_sql(session, "SELECT * FROM gold.f WHERE a IS NULL")
+    analyst = _analyst(session)
+    view = _version(session, analyst)
+    [check] = view.manifest["checks"]
+    assert check["sql"] == "SELECT * FROM gold.f WHERE a IS NULL"
+    assert (check["content_reason"], check["content_message"]) == (None, None)
+    assert _content_withheld(_asset(view), DefinitionReason.RESTRICTED)
+    assert [e.detail["path"] for e in _source_viewed(session)] == [_CHECK_PATH]
+
+
+def test_a_project_version_withholds_a_checks_sql_on_a_view(session: Session) -> None:
+    _world(session)
+    _tables(session, "silver.v")
+    _retype(session, "silver.v", TableType.VIEW)
+    _with_sql(session, "SELECT * FROM silver.v")
+    [check] = _version(session, _analyst(session)).manifest["checks"]
+    assert _content_withheld(check, DefinitionReason.RESTRICTED)
+
+
+def test_a_project_version_withholds_a_check_without_a_usable_table_or_path(
+    session: Session,
+) -> None:
+    _world(session)
+    version = _with_sql(session, "SELECT * FROM silver.a")
+    [check] = version.manifest_json["checks"]
+    version.manifest_json = {
+        **version.manifest_json,
+        "checks": [
+            {**check, "table": 1},
+            {**check, "path": None},
+            {**check, "table": "not a name"},
+        ],
+    }
+    session.commit()
+    checks = _version(session, _analyst(session)).manifest["checks"]
+    assert [_content_withheld(c, DefinitionReason.RESTRICTED) for c in checks] == [True] * 3
+    assert [e.detail["path"] for e in _source_viewed(session)] == [REC.path]

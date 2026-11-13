@@ -85,11 +85,12 @@ TOO_LARGE_MESSAGE: str = (
 )
 """The answer for a recorded file above `SOURCE_FILE_MAX_BYTES`."""
 
-_MESSAGES: dict[DefinitionReason, str] = {
+REASON_MESSAGES: dict[DefinitionReason, str] = {
     DefinitionReason.RESTRICTED: RESTRICTED_MESSAGE,
     DefinitionReason.NOT_RECORDED: NOT_RECORDED_MESSAGE,
     DefinitionReason.TOO_LARGE: TOO_LARGE_MESSAGE,
 }
+"""The fixed sentence of each reason; a project version's entries use the same ones."""
 
 
 @dataclass(frozen=True)
@@ -179,7 +180,7 @@ def _refused(definition: TableDefinition, reason: DefinitionReason) -> TableDefi
     TableDefinitionFile
         No content, no size, the reason and its fixed message.
     """
-    return TableDefinitionFile(definition, None, None, reason, _MESSAGES[reason])
+    return TableDefinitionFile(definition, None, None, reason, REASON_MESSAGES[reason])
 
 
 def _live_table(session: Session, ref: TableRef) -> Row[*tuple[Any, ...]] | None:
@@ -415,16 +416,20 @@ def table_definition(
     return _locate(session, authorization, p, ref)[0]
 
 
-def _passes_gate(
+def passes_content_gate(
     session: Session,
     authorization: AuthorizationService,
     p: PrincipalRef,
-    ref: TableRef,
-    row: Row[*tuple[Any, ...]],
+    environment: str,
+    table: object,
+    gate_tables: object,
+    gate_raw: object,
 ) -> bool:
-    """Apply the strict content rule to a current source-map row.
+    """Apply the strict content rule to one file: the rule of every route that shows a file.
 
-    The conditions use `permits`, so a refusal writes no audit event per gate table.
+    "Defined in" (`table_definition_file`) asks it with a current source-map row; a project
+    version (`DeployService.job_version`) asks it for each asset file and each check. The
+    conditions use `permits`, so a refusal writes no audit event per gate table.
 
     Parameters
     ----------
@@ -434,45 +439,48 @@ def _passes_gate(
         Authorization service.
     p
         The reader.
-    ref
-        The defined table.
-    row
-        The file's row.
+    environment
+        The environment's name.
+    table
+        The dotted name of the table the file defines (or checks); untrusted.
+    gate_tables
+        The table names the file uses; untrusted, so anything but a list of strings refuses.
+    gate_raw
+        Whether the file reads a raw path or a connection; only `False` passes.
 
     Returns
     -------
     bool
         Whether the reader holds READ_ENVIRONMENT; the file reads no raw path or connection;
-        every gate name is a table name the reader may read; no gate table other than the
-        defined one is a view; and no row filter or column mask (or an unreadable one) applies
+        `table` and every gate name are table names the reader may read; no gate table other
+        than `table` is a view; and no row filter or column mask (or an unreadable one) applies
         to the reader on any gate table that exists.
     """
     if not authorization.permits(
-        p, Action.READ_ENVIRONMENT, Securable.environment_scope(ref.environment)
+        p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment)
     ):
         return False
-    names = row.gate_tables
-    if row.gate_raw or not isinstance(names, list):
+    if gate_raw is not False or not isinstance(gate_tables, list) or not isinstance(table, str):
         return False
-    if not all(isinstance(name, str) for name in names):
+    if not all(isinstance(name, str) for name in gate_tables):
         return False
-    dotted = f"{ref.namespace}.{ref.name}"
-    names = sorted({dotted, *names})
+    dotted = table
+    names = sorted({dotted, *gate_tables})
     try:
-        gate = [TableRef.from_dotted(ref.environment, name) for name in names]
+        gate = [TableRef.from_dotted(environment, name) for name in names]
     except ValidationError:
         return False
-    if not may_read_every(authorization, p, ref.environment, names):
+    if not may_read_every(authorization, p, environment, names):
         return False
     resolver = PolicyResolver(session)
     for name, table_ref in zip(names, gate, strict=True):
-        table = _live_table(session, table_ref)
-        if table is None:
+        live = _live_table(session, table_ref)
+        if live is None:
             continue
-        if table.table_type is TableType.VIEW and name != dotted:
+        if live.table_type is TableType.VIEW and name != dotted:
             return False
         try:
-            policy = resolver.resolve(p, table_ref, table_id=table.id)
+            policy = resolver.resolve(p, table_ref, table_id=live.id)
         except UnreadablePolicyError:
             return False
         if policy.row_filters or policy.column_masks:
@@ -531,7 +539,10 @@ def table_definition_file(
         return TableDefinitionFile(definition, None, None, None, None)
     if row is None or row.gate_version != GATE_VERSION:
         return _refused(definition, DefinitionReason.NOT_RECORDED)
-    if not _passes_gate(session, authorization, p, ref, row):
+    dotted = f"{ref.namespace}.{ref.name}"
+    if not passes_content_gate(
+        session, authorization, p, ref.environment, dotted, row.gate_tables, row.gate_raw
+    ):
         return _refused(definition, DefinitionReason.RESTRICTED)
     if row.bytes > SOURCE_FILE_MAX_BYTES:
         return _refused(definition, DefinitionReason.TOO_LARGE)

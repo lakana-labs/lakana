@@ -434,7 +434,12 @@ for every query.
 /api/v1/environments/{env}/project-versions/{id}`) shows a check's `sql` and `references` only to a reader who
 may read every table the SQL names, read again from the SQL itself. For anyone else the entry keeps
 `name`, `table`, `check`, `path`, `on_failure` and `description`, and `hidden_references` counts
-the tables they may not read (0 when nothing is hidden).
+the tables they may not read (0 when nothing is hidden). The `sql` also needs the rules of a
+table's file ([Who may read the file](../how-to/see-where-a-table-is-defined.md#who-may-read-the-file)):
+no row filter or column mask on the check's table or any table its SQL names, and none of them a
+view other than the check's table. Otherwise the entry has no `sql` and says why in
+`content_reason` (`restricted`) and `content_message`; both are `null` when the SQL is shown, and
+showing it is recorded as `SOURCE_VIEWED`.
 
 **In the audit log.** The `QUERY_COMPLETED` event of such a query has, next to `sql_text`,
 `tables_touched`, `row_count` and `status`, the field `check_result_id`: the id of the check

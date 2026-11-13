@@ -176,6 +176,19 @@ Lakana instead: `lakana deployments` lists it for each repository, and `lakana t
 shows the commit that defines a table. To find such placeholders, run `git grep -n '\$Format:'`
 in the repository. `export-ignore` still leaves a file out of a deploy, as before.
 
+### A project version shows SQL only under the rules of a table's file (breaking)
+
+`lakana project-version show` (`GET /api/v1/environments/{env}/project-versions/{id}`) now shows
+an asset's or a check's `sql` and `normalized_sql` only to a reader who would be shown the file
+by `lakana table definition --show`: no row filter or column mask on any table the file uses, no
+read of a path or a connection, and a file Lakana recorded at deploy
+([Who may read the file](../how-to/see-where-a-table-is-defined.md#who-may-read-the-file)). Each
+asset and check now carries `content_reason` (`restricted`, `not_recorded` or `null`) and
+`content_message`, and each file shown is recorded in the audit log as `SOURCE_VIEWED`. A version
+deployed before you upgrade to this release shows no SQL to anyone (`not_recorded`): deploy a
+new commit, or read the file in your git host. A script that reads `sql` from a project version
+should handle its absence and print `content_message`.
+
 ### Project files are recorded at deploy
 
 Migration `0077` adds two tables, which hold the files of each deployed project version; it runs

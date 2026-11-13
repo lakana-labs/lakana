@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from lakana_core.audit.service import AuditService
+from lakana_core.audit.views import record_source_view, sessions_like
 from lakana_core.auth import (
     Action,
     AuthorizationService,
@@ -76,6 +77,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    ProjectFile,
     Repository,
     Run,
     Secret,
@@ -88,6 +90,7 @@ from lakana_core.pagination import decode_cursor, encode_cursor
 from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference, key_columns
 from lakana_core.projects.checks import ParsedCheck, check_sql_references, may_read_every
 from lakana_core.projects.dag import ProjectGraph
+from lakana_core.projects.definition import REASON_MESSAGES, DefinitionReason, passes_content_gate
 from lakana_core.projects.deploy_jobs import (
     OUTCOME_PENDING,
     DeployJobStart,
@@ -127,7 +130,7 @@ from lakana_core.projects.manifest import (
 )
 from lakana_core.projects.model import TargetInfo, resolve_references
 from lakana_core.projects.parse import ParsedAsset, file_references, sql_file_references
-from lakana_core.projects.source_map import ProjectFileRecord, write_source_map
+from lakana_core.projects.source_map import GATE_VERSION, ProjectFileRecord, write_source_map
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.pools import PIPELINE
 from lakana_core.runs.waiting import (
@@ -444,6 +447,32 @@ harness (`lakana.runner`, which keeps the same pattern) refuses any other name w
 status 2. A parameter that reads a table may be any Python name."""
 
 _HIDDEN_KEYS = ("sql", "normalized_sql", "references", "lineage", "inputs", "input_kinds")
+_CONTENT_KEYS = ("sql", "normalized_sql")
+"""The keys of a project version's entry that hold a file's text (or its digest)."""
+
+
+def _gate_content(
+    entry: dict[str, Any], reason: DefinitionReason | None, shown_files: set[tuple[str, str]]
+) -> None:
+    """Apply the content gate's outcome to an asset or check entry of a project version.
+
+    Parameters
+    ----------
+    entry
+        The entry, changed in place.
+    reason
+        Why its text is withheld, or `None` when it is shown.
+    shown_files
+        The `(table, path)` of each file shown; the entry's is added when shown. A caller
+        passes `None` as `reason` only for an entry whose table and path are strings.
+    """
+    if reason is None:
+        shown_files.add((entry["table"], entry["path"]))
+    else:
+        for key in _CONTENT_KEYS:
+            entry.pop(key, None)
+    entry["content_reason"] = None if reason is None else reason.value
+    entry["content_message"] = None if reason is None else REASON_MESSAGES[reason]
 
 
 def _artifact_parameter_issues(
@@ -2393,7 +2422,13 @@ class DeployService:
         self._session.commit()
 
     def job_version(
-        self, p: PrincipalRef, environment: str, job_version_id: uuid.UUID
+        self,
+        p: PrincipalRef,
+        environment: str,
+        job_version_id: uuid.UUID,
+        *,
+        window_minutes: int,
+        session_factory: Callable[[], Session] | None = None,
     ) -> JobVersionView:
         """Show a project version's manifest, withholding what the reader may not see.
 
@@ -2410,6 +2445,16 @@ class DeployService:
         targets of an asset's `model` name tables too: each one `p` may not read is removed and
         counted in the entry's `hidden_model_references` (`_visible_model`).
 
+        On top of that, the SQL of each asset and check is the text of a file, so it is shown
+        only behind the strict content gate of "Defined in"
+        (`lakana_core.projects.definition.passes_content_gate`), judged per file: an asset on
+        the version's current source-map row (none, or one of another `gate_version`, is
+        `not_recorded`), a check on the tables its SQL names. Every entry gets
+        `content_reason` and `content_message` (both `None` when the SQL is shown); a withheld
+        entry loses `sql` and `normalized_sql`. Each file shown is recorded as `SOURCE_VIEWED`
+        first, once per reader, table and commit within the window, and nothing is returned
+        when that fails.
+
         Parameters
         ----------
         p
@@ -2418,6 +2463,11 @@ class DeployService:
             Environment name.
         job_version_id
             The project version.
+        window_minutes
+            `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`.
+        session_factory
+            Opens the session the audit rows are written on; `sessions_like` of this service's
+            session when `None`.
 
         Returns
         -------
@@ -2430,6 +2480,8 @@ class DeployService:
             Without READ_ENVIRONMENT.
         NotFoundError
             If no such project version exists in this environment.
+        AuditUnavailableError
+            If a `SOURCE_VIEWED` row could not be written; nothing is returned.
         """
         env = self._authorize_read(p, environment)
         row = self._session.execute(
@@ -2440,6 +2492,19 @@ class DeployService:
         if row is None:
             raise NotFoundError(f"No project version {job_version_id} in {environment}.")
         version, repository_name = row
+        files = {
+            (file.table_name, file.path): file
+            for file in self._session.execute(
+                select(
+                    ProjectFile.table_name,
+                    ProjectFile.path,
+                    ProjectFile.gate_tables,
+                    ProjectFile.gate_raw,
+                    ProjectFile.gate_version,
+                ).where(ProjectFile.job_version_id == version.id)
+            )
+        }
+        shown_files: set[tuple[str, str]] = set()
         manifest = dict(version.manifest_json)
         assets = []
         hidden_assets: set[str] = set()
@@ -2459,10 +2524,27 @@ class DeployService:
                 entry["model"], entry["hidden_model_references"] = self._visible_model(
                     p, environment, entry["model"]
                 )
+            table, path = entry.get("table"), entry.get("path")
+            file = (
+                files.get((table, path))
+                if isinstance(table, str) and isinstance(path, str)
+                else None
+            )
+            if file is None or file.gate_version != GATE_VERSION:
+                reason: DefinitionReason | None = DefinitionReason.NOT_RECORDED
+            elif unreadable or not passes_content_gate(
+                self._session, self._authz, p, environment, table, file.gate_tables, file.gate_raw
+            ):
+                reason = DefinitionReason.RESTRICTED
+            else:
+                reason = None
+            _gate_content(entry, reason, shown_files)
             assets.append(entry)
         manifest["assets"] = assets
         if "checks" in manifest:
-            manifest["checks"] = self._visible_checks(p, environment, manifest["checks"])
+            manifest["checks"] = self._visible_checks(
+                p, environment, manifest["checks"], shown_files
+            )
         edges = manifest.get("edges", [])
         # An edge into a hidden asset reveals what its SQL reads; an edge from a table the
         # reader may not read can come from `references:` alone, and reveals the target that
@@ -2477,6 +2559,18 @@ class DeployService:
         visible = [name for name in inputs if self._may_read(p, environment, name)]
         manifest["external_inputs"] = visible
         manifest["hidden_external_inputs"] = len(inputs) - len(visible)
+        factory = session_factory if session_factory is not None else sessions_like(self._session)
+        for table, path in sorted(shown_files):
+            ref = TableRef.from_dotted(environment, table)
+            record_source_view(
+                factory,
+                p,
+                Securable.table_scope(environment, ref.namespace, ref.name),
+                repository=repository_name,
+                path=path,
+                commit=version.commit_sha,
+                window_minutes=window_minutes,
+            )
         return JobVersionView(
             id=version.id,
             environment=environment,
@@ -2521,9 +2615,13 @@ class DeployService:
         return {**model, "references": visible}, len(listed) - len(visible)
 
     def _visible_checks(
-        self, p: PrincipalRef, environment: str, checks: object
+        self,
+        p: PrincipalRef,
+        environment: str,
+        checks: object,
+        shown_files: set[tuple[str, str]],
     ) -> list[dict[str, Any]]:
-        """Withhold the SQL of every check that names a table the reader may not read.
+        """Withhold the SQL of every check the reader may not see.
 
         The tables are read again from each check's SQL, never taken from the stored
         `references`.
@@ -2536,6 +2634,8 @@ class DeployService:
             Environment name.
         checks
             The manifest's `checks`; untrusted.
+        shown_files
+            The `(table, path)` of each file whose text is shown; a check shown is added.
 
         Returns
         -------
@@ -2544,8 +2644,10 @@ class DeployService:
             whose tables cannot be listed, loses `sql` and `references`, and
             `hidden_references` counts the unreadable names (1 when they cannot be listed);
             name, table, check, path, on_failure and description stay, and a generated check's
-            `generated` keeps only its family and columns. A value that is not a list, and an
-            entry that is not a mapping, show as nothing.
+            `generated` keeps only its family and columns. A check that fails the content gate
+            on its table and the tables its SQL names, or has no string `path`, loses `sql`
+            (`restricted`). A value that is not a list, and an entry that is not a mapping,
+            show as nothing.
         """
         if not isinstance(checks, list):
             return []
@@ -2572,6 +2674,16 @@ class DeployService:
             else:
                 entry["references"] = list(names)
             entry["hidden_references"] = hidden
+            table, path = entry.get("table"), entry.get("path")
+            passes = (
+                names is not None
+                and not hidden
+                and isinstance(path, str)
+                and passes_content_gate(
+                    self._session, self._authz, p, environment, table, list(names), False
+                )
+            )
+            _gate_content(entry, None if passes else DefinitionReason.RESTRICTED, shown_files)
             visible.append(entry)
         return visible
 

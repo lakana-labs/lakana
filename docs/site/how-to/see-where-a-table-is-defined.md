@@ -119,6 +119,15 @@ path and commit: once per person, table and commit in each window (an hour by de
 not recorded. When the event cannot be written, the file is not shown: the command fails with a
 message to try again.
 
+## The same rules in a project version
+
+`lakana project-version show` (and `--output json`, which has each asset's and check's `sql`)
+follows these rules too, file by file: an asset's or a check's SQL is shown only when you would be
+shown its file here, and each file it shows is recorded the same way. For any other asset or check
+the `sql` column says `hidden (restricted)` or `not recorded`, and the sentence of the table
+above is printed once under the table; in JSON the entry has no `sql` and carries
+`content_reason` and `content_message`.
+
 ## Control characters
 
 A deploy refuses an asset file that contains a control character, so a file Lakana records cannot

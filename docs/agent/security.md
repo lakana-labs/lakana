@@ -49,7 +49,10 @@ query path sit relative to `lakana-core`/`lakana-server`, see `docs/agent/archit
   use.
 - **A route that shows a deployed file takes an object reference, never a path, commit or version,
   and shows content only to a reader of the environment and of every table the file uses, with no
-  policy applying to them.**
+  policy applying to them.** Every such route asks one function,
+  `lakana_core.projects.definition.passes_content_gate`, per file, and records each file it shows
+  as `SOURCE_VIEWED` (fail-closed): "Defined in" and the project-versions route (#560), whose
+  version id selects a stored manifest, never a file on disk.
 
 ## Syntax errors name only the reader's own SQL
 
@@ -3385,7 +3388,8 @@ found through a query run of their own that is bound to the check result
   check's SQL from the manifest, so only a caller who may read every table it names ever sees
   it. `DeployService.job_version` applies the same rule to the manifest's `checks`
   (`_visible_checks`): a check whose SQL names an unreadable table, or whose tables cannot be
-  listed, loses `sql` and `references` and carries `hidden_references`, as an asset does.
+  listed, loses `sql` and `references` and carries `hidden_references`, as an asset does; and
+  since #560 a check's `sql` also needs the content gate ("Preview and Defined in").
   The reference targets of an asset's `model` name tables as well: `_visible_model` keeps only
   the targets the reader may read and counts the rest in the entry's `hidden_model_references`
   (`test_a_project_version_hides_model_references_the_reader_may_not_read`). At deploy, a
@@ -5652,8 +5656,9 @@ exit criterion is being re-run after the M3f fixes above — see
 | `GET …/queries/{id}/result?format=json` | the submitter only | At most 1,000 rows (100 for a preview). A bounded writer stops inside a cell at 64 KiB and inside a row at 4 MiB a page, the first row included (`{"cut": true}`, `row_cut`). Strings are pre-cut in pyarrow, and the page is UTF-8. Binary is never sent. 4 concurrent conversions per process and 1 per principal; `503` beyond. |
 | `GET …/tables/{name}/definition` | `READ_TABLE` | Path, line, commit and link of the current version; no path, commit or version parameter. **Loosening:** a reader of the table sees the repository's name and HTTPS browse URL without `READ_ENVIRONMENT`. A `local` path is never shown. |
 | `GET …/tables/{name}/definition/file` | `READ_TABLE`; for `content` also `READ_ENVIRONMENT`, read on every table of `gate_tables`, no view among them at read time other than the file's own table, `gate_raw` false, and no applicable row filter or column mask on any of them | Served from `project_files`, never from the tarball. One `restricted` reason for every failed condition. `SOURCE_VIEWED` once per window, fail-closed. The CLI escapes C0, C1, `Cf`, U+2028 and U+2029. |
+| `GET …/project-versions/{id}` (#560) | `READ_ENVIRONMENT`; an asset's or check's `sql` and `normalized_sql` also need `passes_content_gate`, per file | `DeployService.job_version`. An asset is judged on the version's own `project_files` row (by table and path): none, or another `gate_version`, is `not_recorded` before any other condition, as in "Defined in"; a check on its table and the tables its SQL names (read again from the SQL), with `gate_raw` false and a string `path`. Every entry carries `content_reason` and `content_message` (the "Defined in" sentences, `null` when shown); a withheld entry keeps everything else the older rules leave (`references` and `lineage` stay for a reader of every referenced table). `SOURCE_VIEWED` per shown file, table scope, the same window and dedup as "Defined in" (a reader, table and commit), on `sessions_like` sessions; any failure is 503 and nothing is returned. A version deployed before 0077 shows no SQL to anyone. |
 | Source map at deploy | written by the worker in `record_deploy`, both branches | `git archive` runs with `* -export-subst` in `$GIT_DIR/info/attributes` (`export-ignore` unchanged). A reused version writes a row only for a missing or stale `gate_version`, and only when the text matches the manifest (`normalized_sql` or the Python source digest). A foreign key to the texts (`ON DELETE RESTRICT`); the text insert locks the row and the sweep skips locked rows. C0 and C1 controls in asset files are refused at deploy (breaking, see the release note). Unreferenced texts are swept. |
-| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) `DeployService.job_version` shows `sql` to `READ_ENVIRONMENT` holders without the policy condition and without `SOURCE_VIEWED` (issue after 3a). (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
+| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) Closed by #560: `DeployService.job_version` applies the same gate and audit. Left: a version is judged under today's grants and policies, so an old version's SQL is shown to whoever passes the gate now; and `lakana check rows` still puts a check's SQL into the caller's own query under `READ_TABLE` alone (the rows stay filtered and masked). (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
 
 The preview route asks for no step-up: it is a read under the caller's own rights, like `POST …/queries` (`NO_STEP_UP` in `test_step_up_routes.py`). The conversion slot (`ThreadSafeConcurrencyLimiter`, one `threading.Lock` over the total and the count per principal, because the route runs in the thread pool) is given back once the page's bytes are built, before they are sent, and also when the conversion fails.
 
