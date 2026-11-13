@@ -255,7 +255,7 @@ def _note_of(world: World, dotted: str) -> tuple[uuid.UUID | None, uuid.UUID | N
 
 # One more than before #282: recording an attempt reads its write run's figures
 # (`_write_run_figures`) until the worker passes the figures it measured itself.
-_STATEMENTS = {False: 74, True: 151}
+_STATEMENTS = {False: 74, True: 153}
 """Statements of a task's own thread, by whether it has checks (measured before the note).
 
 Two of them look for the project's descriptions of the table the task creates. With checks, each
@@ -272,7 +272,8 @@ The stored keys of the table list (#551) add 9, and with checks 21. Each refresh
 health word is 9: the table's type, its latest checks, the six reads of its current signals and
 the update of the word. The commit that gives the table data refreshes it once; with checks the
 recording of the check result does again, after locking the table row (one more). And each of the
-two check queries that read the table moves its `last_read_at` (one update each)."""
+two check queries that read the table moves its `last_read_at` (one update each), after
+locking the table row on its own (one more each, whatever the update skips; #558)."""
 
 
 def _statements_of(world: World, claimed: ClaimedTask) -> int:
