@@ -3,6 +3,7 @@
 # scripts/tests/test_ui_parity.py (CI's generate_reference.py --check keeps that file equal to the app).
 # Key: CLI command path ("table undrop") or "METHOD /api/v1/path" as OpenAPI spells it.
 # class ui|read: part 1-8 of the interface (read = shown, not changed). class git|exception: reason.
+# done: true (ui and read only) = the interface already shows it; set by the PR that builds it.
 # Rule: docs/agent/conventions.md, "The ui/ project".
 
 "access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }

@@ -146,6 +146,14 @@ def _invalid(key: str, entry: Mapping[str, Any]) -> str | None:
     cls = entry.get("class")
     if cls not in CLASSES:
         return f"{key!r} has class {cls!r}; use one of {', '.join(CLASSES)}."
+    if "done" in entry:
+        if cls not in ("ui", "read"):
+            return f"{key!r} is class {cls}; drop `done:` (only ui and read entries can be done)."
+        if entry["done"] is not True:
+            return (
+                f"{key!r} has done: {entry['done']!r}; use `done: true` once the interface "
+                "shows it, or remove the line."
+            )
     if cls in ("ui", "read"):
         part = entry.get("part")
         if isinstance(part, bool) or part not in PARTS:
