@@ -2127,9 +2127,9 @@ class Tables:
         Raises
         ------
         lakana.errors.NotFound
-            If the environment or the table does not exist.
+            If the environment does not exist, or a table you may read is gone (dropped).
         lakana.errors.PermissionDenied
-            If you may not read the table.
+            If the table does not exist or you may not read it: the two answers are the same.
         """
         namespace, name = _split_namespace_table(qualified_name)
         response = self._transport.request(
@@ -2160,10 +2160,10 @@ class Tables:
         Raises
         ------
         lakana.errors.NotFound
-            If the environment or the table does not exist.
+            If the environment does not exist, or a table you may read is gone (dropped).
         lakana.errors.PermissionDenied
-            If you may not read the table.
-        lakana.errors.LakanaError
+            If the table does not exist or you may not read it: the two answers are the same.
+        lakana.errors.ServerError
             With status 503 when the read could not be recorded in the audit log; try again.
         """
         namespace, name = _split_namespace_table(qualified_name)

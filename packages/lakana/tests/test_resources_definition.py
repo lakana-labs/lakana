@@ -7,10 +7,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
 from lakana._models import TableDefinition, TableDefinitionFile
+from lakana.errors import ServerError
 from lakana.resources.tables import Tables
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
@@ -129,3 +131,11 @@ def test_definition_file_reads_content_or_reason() -> None:
         "restricted",
         "M",
     )
+
+
+def test_definition_file_raises_server_error_when_the_read_cannot_be_recorded() -> None:
+    def refuse(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "try again"}, headers={"Retry-After": "1"})
+
+    with pytest.raises(ServerError):
+        Tables(_transport(refuse, [])).definition_file("dev", "silver.orders")
