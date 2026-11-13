@@ -63,7 +63,7 @@ function DescriptionBlock(): JSX.Element {
           )}
         </>
       )}
-      {fallback && (
+      {fallback && mayEdit && (
         <p className="second">
           {t("table.edit.fallback", { language: languageName(lang, i18n.language) })}
         </p>

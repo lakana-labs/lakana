@@ -48,8 +48,8 @@ export interface TextEditorProps {
 
 /** Which field a refusal belongs to, and its words. */
 interface Refusal {
-  /** The field the words are shown next to. */
-  readonly field: "label" | "description";
+  /** The field the words are shown next to; `form` when no one field is meant. */
+  readonly field: "label" | "description" | "form";
   /** What went wrong and what to do next. */
   readonly message: string;
 }
@@ -62,6 +62,27 @@ interface Refusal {
  */
 function characters(text: string): number {
   return Array.from(text).length;
+}
+
+/**
+ * Finds the field a refusal is about: the one the server's sentence names, else the only one
+ * that was sent, else none, because the sentence does not say which of two it means.
+ *
+ * @param message - The refusal's words.
+ * @param change - What was sent.
+ * @returns The field, or `form` when it cannot be told.
+ */
+function refusedField(message: string, change: TextChange): Refusal["field"] {
+  const named = (["label", "description"] as const).filter((field) =>
+    message.toLowerCase().includes(field),
+  );
+  if (named.length === 1) {
+    return named[0] as "label" | "description";
+  }
+  if (change.label === undefined) {
+    return "description";
+  }
+  return change.description === undefined ? "label" : "form";
 }
 
 /**
@@ -93,8 +114,8 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
   const language = named ? languageName(lang, i18n.language) : null;
   const name = (key: "label" | "description"): string =>
     language === null ? t(`table.edit.${key}`) : t(`table.edit.${key}In`, { language });
-  const descriptionUsed = characters(description);
-  const labelUsed = characters(label);
+  const descriptionUsed = characters(description.trim());
+  const labelUsed = characters(label.trim());
 
   /**
    * Checks the fields and the changes, then saves them.
@@ -144,10 +165,8 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
     onSave(change).then(onDone, (failure: unknown) => {
       sending.current = false;
       setPending(false);
-      setRefusal({
-        field: change.description === undefined ? "label" : "description",
-        message: problemText(t, failure),
-      });
+      const message = problemText(t, failure);
+      setRefusal({ field: refusedField(message, change), message });
     });
   }
 
@@ -157,7 +176,7 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
    * @param event - The key press.
    */
   function leave(event: KeyboardEvent): void {
-    if (event.key === "Escape" && !sending.current) {
+    if (event.key === "Escape" && !event.nativeEvent.isComposing && !sending.current) {
       onDone();
     }
   }
@@ -192,14 +211,15 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
       >
         <Label>{name("label")}</Label>
         <Input />
-        <Text slot="description">
-          {`${t("table.edit.labelHelp")} ${count(labelUsed, LABEL_MAX)}`.trim()}
-        </Text>
+        <Text slot="description">{t("table.edit.labelHelp")}</Text>
         {refusal?.field === "label" && (
           <Text slot="errorMessage" role="alert">
             {refusal.message}
           </Text>
         )}
+        <p className="second" role="status" aria-label={name("label")}>
+          {count(labelUsed, LABEL_MAX)}
+        </p>
       </TextField>
       <TextField
         className="field"
@@ -209,13 +229,20 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
       >
         <Label>{name("description")}</Label>
         <TextArea rows={6} ref={start} />
-        <Text slot="description">{count(descriptionUsed, DESCRIPTION_MAX)}</Text>
+        <p className="second" role="status" aria-label={name("description")}>
+          {count(descriptionUsed, DESCRIPTION_MAX)}
+        </p>
         {refusal?.field === "description" && (
           <Text slot="errorMessage" role="alert">
             {refusal.message}
           </Text>
         )}
       </TextField>
+      {refusal?.field === "form" && (
+        <p className="step-error" role="alert">
+          {refusal.message}
+        </p>
+      )}
       <div className="text-editor-actions">
         <PendingButton type="submit" className="button button-primary" pending={pending}>
           {t("table.edit.save")}

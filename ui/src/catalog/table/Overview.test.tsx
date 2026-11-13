@@ -317,6 +317,19 @@ describe("Overview editing", () => {
     expect(screen.getByRole("form", { name: "Edit the texts" })).toBeVisible();
   });
 
+  it("does not tell someone who may not edit that the page edits the main language", async () => {
+    const { server } = renderShell(PAGE, {
+      routes: {
+        [PERMISSIONS]: READ_ONLY,
+        [`GET ${TABLE_PATH}`]: { status: 200, body: table({ language: "de" }) },
+      },
+    });
+
+    await permissionsRead(server);
+
+    expect(screen.queryByText(/shows and edits the main language/)).not.toBeInTheDocument();
+  });
+
   it("keeps the text and shows the refusal next to the field", async () => {
     const { user } = renderShell(PAGE, {
       routes: {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -115,11 +115,11 @@ describe("TextEditor", () => {
   it("counts characters near the limit and not before", async () => {
     const { user } = show({ texts: { description: "a".repeat(3600), label: null } });
     const box = screen.getByRole("textbox", { name: "Description" });
-    expect(box).not.toHaveAccessibleDescription();
+    expect(screen.getByRole("status", { name: "Description" })).toBeEmptyDOMElement();
 
     await user.type(box, "b".repeat(212));
 
-    expect(box).toHaveAccessibleDescription("3,812 of 4,000");
+    expect(screen.getByRole("status", { name: "Description" })).toHaveTextContent("3,812 of 4,000");
   });
 
   it("refuses a description over the limit and says by how much it is over", async () => {
@@ -224,6 +224,83 @@ describe("TextEditor", () => {
     await user.keyboard("{Escape}");
 
     expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("does not cancel on Escape while an input method is composing", () => {
+    const { onDone } = show();
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Label" }), {
+      key: "Escape",
+      isComposing: true,
+    });
+
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("shows a refusal under the label when the server names the label, both fields changed", async () => {
+    const refusal = new ApiError(
+      422,
+      "ValidationError",
+      "The label has a character it may not hold.",
+    );
+    const { user } = show({ onSave: vi.fn().mockRejectedValue(refusal) });
+
+    await user.type(screen.getByRole("textbox", { name: "Label" }), "!");
+    await user.type(screen.getByRole("textbox", { name: "Description" }), "!");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("alert");
+    expect(screen.getByRole("textbox", { name: "Label" })).toHaveAccessibleDescription(
+      /character it may not hold/,
+    );
+    expect(screen.getByRole("textbox", { name: "Description" })).not.toHaveAccessibleDescription(
+      /character it may not hold/,
+    );
+  });
+
+  it("shows a refusal that names neither field above the buttons when both changed", async () => {
+    const refusal = new ApiError(422, "ValidationError", "A text has a character it may not hold.");
+    const { user } = show({ onSave: vi.fn().mockRejectedValue(refusal) });
+
+    await user.type(screen.getByRole("textbox", { name: "Label" }), "!");
+    await user.type(screen.getByRole("textbox", { name: "Description" }), "!");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("A text has a character");
+    expect(screen.getByRole("textbox", { name: "Label" })).not.toHaveAccessibleDescription(
+      /character it may not hold/,
+    );
+    expect(screen.getByRole("textbox", { name: "Description" })).not.toHaveAccessibleDescription(
+      /character it may not hold/,
+    );
+  });
+
+  it("shows an unnamed refusal under the only field that was sent", async () => {
+    const refusal = new ApiError(
+      422,
+      "ValidationError",
+      "That text has a character it may not hold.",
+    );
+    const { user } = show({ onSave: vi.fn().mockRejectedValue(refusal) });
+
+    await user.type(screen.getByRole("textbox", { name: "Label" }), "!");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("alert");
+    expect(screen.getByRole("textbox", { name: "Label" })).toHaveAccessibleDescription(
+      /character it may not hold/,
+    );
+  });
+
+  it("counts the text after the blanks around it are stripped, as the server does", async () => {
+    const { onSave, user } = show({ texts: { description: "a".repeat(3999), label: null } });
+
+    await user.type(screen.getByRole("textbox", { name: "Description" }), "b      ");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledOnce();
+    });
   });
 
   it("renders text as text", () => {
