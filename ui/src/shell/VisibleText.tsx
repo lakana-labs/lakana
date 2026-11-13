@@ -79,6 +79,20 @@ export function markInvisible(text: string): readonly MarkedPart[] {
 }
 
 /**
+ * The text as one string with every invisible or control character replaced by its mark, for a
+ * place that takes only plain text, such as an SVG `<title>`. Built on {@link markInvisible}, so
+ * it marks the same characters.
+ *
+ * @param text - The text, as the server sent it.
+ * @returns The text with marks such as `U+202E` in place of those characters.
+ */
+export function markedText(text: string): string {
+  return markInvisible(text)
+    .map((part) => (typeof part === "string" ? part : part.mark))
+    .join("");
+}
+
+/**
  * Renders text as text nodes, never as markup, and every character of {@link INVISIBLE} as a
  * visible mark such as `U+202E` (see {@link markInvisible}), so a file, a path or a value cannot
  * hide or reorder what the person reads.

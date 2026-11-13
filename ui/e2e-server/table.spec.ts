@@ -55,7 +55,7 @@ function sidewaysOverflow(page: Page): Promise<number> {
   );
 }
 
-test("an administrator opens a table from the list and sees Overview, Columns and Preview", async ({
+test("an administrator opens a table from the list and sees Overview, Columns, Preview and Lineage", async ({
   browser,
   request,
 }) => {
@@ -66,7 +66,12 @@ test("an administrator opens a table from the list and sees Overview, Columns an
   await page.locator(`a[href="${address}"]`).click();
   await expect(page).toHaveURL(new RegExp(`${address}$`));
   await expect(page.getByRole("heading", { level: 1, name: "fact_sales" })).toBeFocused();
-  await expect(tabsOf(page).getByRole("link")).toHaveText(["Overview", "Columns", "Preview"]);
+  await expect(tabsOf(page).getByRole("link")).toHaveText([
+    "Overview",
+    "Columns",
+    "Preview",
+    "Lineage",
+  ]);
   await expect(page.getByRole("heading", { level: 2, name: "Facts" })).toBeVisible();
   await expect(page.getByText("No description yet.")).toBeVisible();
   // A table the API created is defined by no project in Git, so there is no file to show.

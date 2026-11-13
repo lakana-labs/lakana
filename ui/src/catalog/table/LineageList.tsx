@@ -3,23 +3,25 @@
  *
  * @packageDocumentation
  */
-import { Fragment, type JSX, type ReactNode } from "react";
+import { Fragment, type JSX, type ReactNode, useMemo } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { GraphNodeOut, GraphOut } from "../../api";
 import { VisibleText } from "../../shell/VisibleText";
 import { splitDotted, tablePath } from "../paths";
-import { jobLabel, layout, type LineageBox } from "./layout";
-import { mergeGraphs } from "./lineage";
+import { jobLabel, type LineageBox, type LineageLayout } from "./layout";
 import { kindName } from "./lineageStrings";
+
+/** An edge of a lineage answer. */
+type Edge = GraphOut["edges"][number];
 
 /** Properties of {@link LineageList}. */
 export interface LineageListProps {
-  /** What feeds the table. */
-  readonly up: GraphOut;
-  /** What the table feeds. */
-  readonly down: GraphOut;
+  /** The drawing's layout: the list names its boxes, in its order. */
+  readonly layout: LineageLayout;
+  /** The edges of both answers, merged (`mergeGraphs`). */
+  readonly edges: readonly Edge[];
   /** The environment, for the links of the tables. */
   readonly environment: string;
 }
@@ -153,69 +155,77 @@ function Builder({ box, reads, uses, environment }: BuilderProps): JSX.Element {
  * Lists every table of the drawing, left to right, each with the asset that builds it, the job
  * that runs that asset, the tables it reads and the connections it uses. An asset that builds no
  * table of the drawing is an item of its own. Tables link to their page; jobs and connections are
- * text. Every name shows with its invisible characters marked.
+ * text. Every name shows with its invisible characters marked. The edges are indexed by their
+ * source once, so a list of 500 nodes costs no more than reading its edges.
  *
- * @param props - The two answers and the environment.
- * @param props.up - What feeds the table.
- * @param props.down - What the table feeds.
+ * @param props - The layout, the edges and the environment.
+ * @param props.layout - The drawing's layout, whose boxes the list follows.
+ * @param props.edges - The edges of both answers, merged.
  * @param props.environment - The environment.
  * @returns The list.
  */
-export function LineageList({ up, down, environment }: LineageListProps): JSX.Element {
+export function LineageList({ layout: drawn, edges, environment }: LineageListProps): JSX.Element {
   const { t } = useTranslation();
-  const drawn = layout(up, down);
-  const boxes = new Map(drawn.nodes.map((box) => [box.node.id, box]));
-  const edges = mergeGraphs(up, down).edges;
+  const { order, bySource } = useMemo(() => {
+    const index = new Map(drawn.nodes.map((box, at) => [box.node.id, at]));
+    // The edges leaving each drawn box; an edge from a node not drawn (a job) is not needed.
+    const leaving = new Map(drawn.nodes.map((box) => [box.node.id, [] as Edge[]]));
+    for (const edge of edges) {
+      leaving.get(edge.source)?.push(edge);
+    }
+    return { order: index, bySource: leaving };
+  }, [drawn, edges]);
   /**
-   * The drawn nodes an edge of a kind leads to from a node, in the drawing's order.
+   * The drawn boxes the edges of a kind lead to from a node, in the drawing's order.
    *
    * @param kind - The edge's kind.
    * @param source - The node it leaves.
-   * @returns The nodes it reaches.
+   * @returns The boxes it reaches.
    */
-  const from = (kind: string, source: string): GraphNodeOut[] =>
-    drawn.nodes
-      .filter((box) =>
-        edges.some(
-          (edge) => edge.kind === kind && edge.source === source && edge.target === box.node.id,
-        ),
-      )
-      .map((box) => box.node);
-  const builtBy = (table: string): LineageBox[] =>
-    drawn.nodes.filter(
-      (box) =>
-        box.node.kind === "asset" &&
-        edges.some(
-          (edge) => edge.kind === "builds" && edge.source === box.node.id && edge.target === table,
-        ),
-    );
+  const from = (kind: string, source: string): LineageBox[] =>
+    (bySource.get(source) as Edge[])
+      .filter((edge) => edge.kind === kind)
+      .map((edge) => order.get(edge.target))
+      .filter((at) => at !== undefined)
+      .sort((a, b) => a - b)
+      .map((at) => drawn.nodes[at] as LineageBox);
+  // Each drawn asset under the drawn table it builds, in the drawing's order.
+  const builders = new Map<string, LineageBox[]>();
+  const loose: LineageBox[] = [];
+  for (const box of drawn.nodes) {
+    if (box.node.kind === "asset") {
+      const built = from("builds", box.node.id);
+      if (built.length === 0) {
+        loose.push(box);
+      }
+      for (const table of built) {
+        builders.set(table.node.id, [...(builders.get(table.node.id) ?? []), box]);
+      }
+    }
+  }
   const builder = (box: LineageBox): JSX.Element => (
     <Builder
       key={box.node.id}
       box={box}
-      reads={from("reads", box.node.id)}
-      uses={from("uses", box.node.id)}
+      reads={from("reads", box.node.id).map((one) => one.node)}
+      uses={from("uses", box.node.id).map((one) => one.node)}
       environment={environment}
     />
   );
-  const builds = (box: LineageBox): boolean =>
-    edges.some(
-      (edge) => edge.kind === "builds" && edge.source === box.node.id && boxes.has(edge.target),
-    );
   return (
     <ul className="plain-list lineage-list" aria-label={t("table.lineage.listLabel")}>
       {drawn.nodes.map((box) => {
         if (box.node.kind === "table") {
-          const builders = builtBy(box.node.id);
+          const built = builders.get(box.node.id) ?? [];
           return (
             <li key={box.node.id}>
               <TableName node={box.node} environment={environment} />
               {box.node.distance === 0 && <> {t("table.lineage.thisTable")}</>}
-              {builders.length > 0 && <ul>{builders.map(builder)}</ul>}
+              {built.length > 0 && <ul>{built.map(builder)}</ul>}
             </li>
           );
         }
-        return box.node.kind === "asset" && !builds(box) ? builder(box) : null;
+        return loose.includes(box) ? builder(box) : null;
       })}
     </ul>
   );

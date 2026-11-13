@@ -1,11 +1,72 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { GraphOut } from "../../api";
 import { expectPending, held } from "../../test/pending";
 import { renderShell } from "../../test/render";
 import type { FakeServer } from "../../test/server";
-import { DOWN, graphNode, LINEAGE_PATH, lineage, TABLE, UP, UP2 } from "../../test/table";
+import {
+  assetNode,
+  DOWN,
+  graphEdge,
+  graphNode,
+  LINEAGE_PATH,
+  lineage,
+  ROOT,
+  TABLE,
+  UP,
+  UP2,
+} from "../../test/table";
+
+/** How often the tab laid out its drawing. */
+const counted = vi.hoisted(() => ({ layouts: 0 }));
+
+vi.mock("./layout", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./layout")>();
+  return {
+    ...actual,
+    layout: (...args: Parameters<typeof actual.layout>) => {
+      counted.layouts += 1;
+      return actual.layout(...args);
+    },
+  };
+});
+
+/**
+ * An upstream answer of 400 nodes and 650 edges, about what the server's 500-node page allows:
+ * 150 assets, each building the table before it and reading the next (and the first 50 one
+ * more), 150 tables, 50 jobs running three assets each and 50 connections used by three each.
+ *
+ * @returns The answer.
+ */
+function largeUpstream(): GraphOut {
+  const tables = [
+    ROOT,
+    ...Array.from({ length: 150 }, (_, at) =>
+      graphNode("table", `staging.t${String(at + 1)}`, at + 1),
+    ),
+  ];
+  const assets = Array.from({ length: 150 }, (_, at) =>
+    assetNode(`staging.a${String(at)}`, at + 1),
+  );
+  const jobs = Array.from({ length: 50 }, (_, at) =>
+    graphNode("job", `analytics/job${String(at)}`, 1),
+  );
+  const connections = Array.from({ length: 50 }, (_, at) =>
+    graphNode("connection", `pg-${String(at)}`, 1, { connection_kind: "postgresql" }),
+  );
+  const edges = assets.flatMap((asset, at) => [
+    graphEdge("builds", asset, tables[at] as GraphOut["nodes"][number]),
+    graphEdge("reads", asset, tables[at + 1] as GraphOut["nodes"][number]),
+    ...(at < 50 ? [graphEdge("reads", asset, tables[at + 2] as GraphOut["nodes"][number])] : []),
+    graphEdge("runs", jobs[Math.floor(at / 3)] as GraphOut["nodes"][number], asset),
+    graphEdge("uses", asset, connections[Math.floor(at / 3)] as GraphOut["nodes"][number]),
+  ]);
+  return lineage([...tables.slice(1), ...assets, ...jobs, ...connections], edges);
+}
+
+/** The large answer, built once. */
+const LARGE = largeUpstream();
 
 const PAGE = "/catalog/prod/gold.sales/fact_sales";
 const TAB = `${PAGE}/lineage`;
@@ -245,15 +306,46 @@ describe("LineageTab", () => {
     expect(router.state.location.pathname).toBe(path);
   });
 
-  it.each(["Enter", " "])("opens a table from the drawing with %j on its link", async (key) => {
+  it("leaves a key on a link in the drawing to the browser: keyboard users open tables from the list", async () => {
     const { router } = renderShell(TAB);
-    const link = (await boxLink("/catalog/prod/staging/stg_sales")) as SVGAElement;
+    const link = await boxLink("/catalog/prod/staging/stg_sales");
 
-    expect(fireEvent.keyDown(link, { key: "Tab" })).toBe(true);
+    expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(true);
+
     expect(router.state.location.pathname).toBe(TAB);
-    expect(fireEvent.keyDown(link, { key })).toBe(false);
+  });
 
-    expect(router.state.location.pathname).toBe("/catalog/prod/staging/stg_sales");
+  it("lays out a large lineage once per answer, not on every render", async () => {
+    const slow = held();
+    const { user } = renderShell(TAB, {
+      routes: {
+        [ROUTE]: (request) =>
+          request.path.includes("direction=up&depth=2")
+            ? slow.route()
+            : answering({ up1: LARGE })(request),
+      },
+    });
+    counted.layouts = 0;
+    expect([LARGE.nodes.length - 1, LARGE.edges.length]).toEqual([400, 650]);
+    // Plain selectors: role queries over a drawing and list this large cost seconds each.
+    await waitFor(() => {
+      // The table itself, the 150 tables of the large answer and the one downstream.
+      expect(document.querySelectorAll(".lineage-list > li")).toHaveLength(152);
+    });
+    expect(counted.layouts).toBe(1);
+    const step = screen.getByText("One step up").closest("button") as HTMLButtonElement;
+
+    await user.click(step);
+
+    expectPending(step);
+    expect(counted.layouts).toBe(1);
+    await act(async () => {
+      slow.release({ status: 200, body: UP2 });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(counted.layouts).toBe(2);
+    });
   });
 
   it("shows no hidden count", async () => {

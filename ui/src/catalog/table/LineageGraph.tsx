@@ -4,12 +4,13 @@
  *
  * @packageDocumentation
  */
-import type { JSX, KeyboardEvent } from "react";
+import type { JSX } from "react";
+import type { TFunction } from "i18next";
 import { Trans, useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 
 import type { GraphNodeOut } from "../../api";
-import { VisibleTspan } from "../../shell/VisibleText";
+import { markedText, VisibleTspan } from "../../shell/VisibleText";
 import { splitDotted, tablePath } from "../paths";
 import { BOX_H, BOX_W, jobLabel, type LineageBox, type LineageLayout } from "./layout";
 import { kindName } from "./lineageStrings";
@@ -100,6 +101,38 @@ function BoxText({ box }: BoxTextProps): JSX.Element {
 }
 
 /**
+ * A box's title, shown on hover: its names whole, one per line, which the box may cut at its
+ * edge. Plain text with every invisible character as its mark, never the character itself.
+ *
+ * @param t - The translation function.
+ * @param box - The box.
+ * @returns The title.
+ */
+function boxTitle(t: TFunction, box: LineageBox): string {
+  const { node } = box;
+  let lines: string[];
+  if (node.kind === "asset") {
+    const jobs = box.jobs.map((job) => markedText(jobLabel(job).job)).join(", ");
+    const asset = [node.name, node.repository ?? null]
+      .filter((part) => part !== null)
+      .map(markedText)
+      .join(" · ");
+    lines = [
+      box.jobs.length === 0
+        ? t("table.lineage.noJob")
+        : `${t("table.lineage.job", { count: box.jobs.length })} ${jobs}`,
+      asset,
+    ];
+  } else if (node.kind === "connection") {
+    const kind = kindName(t, node.connection_kind);
+    lines = [markedText(node.name), "word" in kind ? kind.word : markedText(kind.raw)];
+  } else {
+    lines = [markedText(node.name)];
+  }
+  return lines.join("\n");
+}
+
+/**
  * The page a table's box opens, or null for the table itself and a name that is no table's.
  *
  * @param node - The box's node.
@@ -114,8 +147,10 @@ function boxPath(node: GraphNodeOut, environment: string): string | null {
 /**
  * Draws the boxes and lines at their own size, hidden from assistive technology and out of the
  * tab order: the list beside it carries the same nodes and edges. A table's box is a link to its
- * page, so a middle click or "copy link" works; a plain click, Enter or Space opens the page in
- * place. Jobs and connections are not links. Every name is text, with invisible characters marked.
+ * page: a plain click opens it in place through the router, and a click with a modifier key, a
+ * middle click or "copy link" are the browser's. Jobs and connections are not links. Every name
+ * is text, with invisible characters marked; each box has a title with its whole names, so a name
+ * cut at the box's edge can be read on hover.
  *
  * @param props - The layout and the environment.
  * @param props.layout - Where each box goes.
@@ -128,7 +163,7 @@ export function LineageGraph({
   environment,
   className = "lineage-graph",
 }: LineageGraphProps): JSX.Element {
-  const navigate = useNavigate();
+  const { t } = useTranslation();
   return (
     <svg
       className={className}
@@ -157,6 +192,7 @@ export function LineageGraph({
             data-node={box.node.id}
             className={`lineage-box lineage-${box.node.kind}${root ? " lineage-root" : ""}`}
           >
+            <title>{boxTitle(t, box)}</title>
             <rect x={0.5} y={0.5} width={BOX_W - 1} height={BOX_H - 1} rx={4} />
             <BoxText box={box} />
           </svg>
@@ -168,13 +204,8 @@ export function LineageGraph({
           <Link
             key={box.node.id}
             to={path}
+            // Out of the tab order: keyboard users open tables from the list beside the drawing.
             tabIndex={-1}
-            onKeyDown={(event: KeyboardEvent) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                void navigate(path);
-              }
-            }}
           >
             {drawn}
           </Link>

@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { INVISIBLE, markInvisible, VisibleText, VisibleTspan } from "./VisibleText";
+import { INVISIBLE, markedText, markInvisible, VisibleText, VisibleTspan } from "./VisibleText";
 
 /** C0 without tab and line feed, DEL and C1. */
 const CONTROLS = [
@@ -117,5 +117,12 @@ describe("VisibleTspan", () => {
     const shown = container.querySelector("text")?.textContent;
     expect(shown).toBe("aU+202EbU+0007c<b>x</b>");
     expect(container.querySelector("text b")).toBeNull();
+  });
+});
+
+describe("markedText", () => {
+  it("puts the marks in place of the characters, as plain text", () => {
+    expect(markedText("a\u202E\u202Eb\u0007<b>")).toBe("aU+202E \u00D72bU+0007<b>");
+    expect(markedText("")).toBe("");
   });
 });

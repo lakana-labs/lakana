@@ -15,7 +15,7 @@ import { PendingButton } from "../../shell/PendingButton";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { useResource } from "../../shell/useResource";
 import { ReadFailed } from "../cells";
-import { depthQuery, layout, MOST_STEPS, readDepths } from "./layout";
+import { depthQuery, layout, mergeGraphs, MOST_STEPS, readDepths } from "./layout";
 import { LineageGraph } from "./LineageGraph";
 import { LineageList } from "./LineageList";
 import { useTableData } from "./TableContext";
@@ -86,7 +86,10 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
   const [, setParams] = useSearchParams();
   const region = useRef<HTMLDivElement>(null);
   const pressed = useRef<Way | null>(null);
+  // Laid out and merged once per pair of answers, not on every render: a step press or an
+  // answer re-renders the tab, and a large lineage costs time to lay out.
   const drawn = useMemo(() => layout(up.graph, down.graph), [up.graph, down.graph]);
+  const edges = useMemo(() => mergeGraphs(up.graph, down.graph).edges, [up.graph, down.graph]);
   const steps: Record<Way, Step> = { up: stepOf(up, depths.up), down: stepOf(down, depths.down) };
   useEffect(() => {
     const way = pressed.current;
@@ -167,7 +170,7 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
         <LineageGraph layout={drawn} environment={ref.environment} />
       </div>
       <h2 className="block-heading">{t("table.lineage.listHeading")}</h2>
-      <LineageList up={up.graph} down={down.graph} environment={ref.environment} />
+      <LineageList layout={drawn} edges={edges} environment={ref.environment} />
     </>
   );
 }

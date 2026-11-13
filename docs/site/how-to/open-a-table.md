@@ -108,8 +108,9 @@ Lineage shows where the table's data comes from and where it goes. Its address e
   up** and **One step down** add a step, up to ten; a button goes when nothing is further that
   way. The steps are kept in the address, such as `/lineage?up=2`, so **Back** returns to fewer
   steps and a link opens the same view.
-- **Opening a table.** Press a table's box to open its page. Jobs and connections are not links
-  yet.
+- **Opening a table.** Press a table's box to open its page, or a table's link in the list
+  below. Jobs and connections are not links yet. A box cuts a long name at its edge; hold the
+  pointer over the box to read its names whole.
 - **Full screen.** **Full screen** shows the same drawing scaled to the window. **Close** or
   <kbd>Esc</kbd> returns to the tab.
 - **As a list.** Under the drawing, the same tables, assets, jobs and connections are listed in

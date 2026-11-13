@@ -192,6 +192,78 @@ describe("LineageGraph", () => {
     expect(drawing.querySelector("a")).toBeNull();
   });
 
+  it.each<[string, () => { up: GraphOut; id: string }]>([
+    [
+      "a job",
+      () => {
+        const asset = UP.nodes[1] as GraphNodeOut;
+        const job = graphNode("job", "analytics/daily\u202Esales", 1);
+        const up = lineage(
+          [asset, job],
+          [graphEdge("builds", asset, ROOT), graphEdge("runs", job, asset)],
+        );
+        return { up, id: asset.id };
+      },
+    ],
+    [
+      "an asset",
+      () => {
+        const asset = { ...assetNode("gold.sales.fact_sales", 1), name: "gold.fact\u202Esales" };
+        return { up: lineage([asset], [graphEdge("builds", asset, ROOT)]), id: asset.id };
+      },
+    ],
+    [
+      "a repository",
+      () => {
+        const asset = assetNode("gold.sales.fact_sales", 1, "analy\u202Etics");
+        return { up: lineage([asset], [graphEdge("builds", asset, ROOT)]), id: asset.id };
+      },
+    ],
+    [
+      "a namespace",
+      () => {
+        const asset = UP.nodes[1] as GraphNodeOut;
+        const table = graphNode("table", "stag\u202Eing.stg_sales", 1);
+        const up = lineage(
+          [asset, table],
+          [graphEdge("builds", asset, ROOT), graphEdge("reads", asset, table)],
+        );
+        return { up, id: table.id };
+      },
+    ],
+    ["a connection", () => withConnection("postgresql", "pg\u202Esales")],
+  ])("marks a bidi character in %s's name", (_, build) => {
+    const { up, id } = build();
+
+    const drawing = draw(up);
+
+    expect(lines(drawing, id).join(" ")).toContain("U+202E");
+    expect(drawing.querySelector("text tspan.char-mark")?.textContent).toBe("U+202E");
+    expect(drawing.textContent).not.toMatch(RAW);
+    const box = drawing.querySelector(`[data-node="${CSS.escape(id)}"]`);
+    expect(box?.querySelector("title")?.textContent).toContain("U+202E");
+  });
+
+  it("gives every box a title with its whole names, for a name cut at the edge", () => {
+    const long = graphNode("table", "staging." + "stg_sales_".repeat(8), 1);
+    const asset = UP.nodes[1] as GraphNodeOut;
+    const up = lineage(
+      [asset, long, ...UP.nodes.slice(3)],
+      [graphEdge("builds", asset, ROOT), graphEdge("reads", asset, long), ...UP.edges.slice(2)],
+    );
+
+    const drawing = draw(up, DOWN);
+    const title = (one: string): string | null | undefined =>
+      drawing.querySelector(`[data-node="${CSS.escape(one)}"] > title`)?.textContent;
+
+    expect(title(long.id)).toBe(long.name);
+    expect(title(asset.id)).toBe("Job daily_sales\ngold.sales.fact_sales · analytics");
+    expect(title("connection:pg-sales")).toBe("pg-sales\nPostgreSQL");
+    expect(title("asset:analytics/gold.sales.daily_sales")).toBe(
+      "Run by no job\ngold.sales.daily_sales · analytics",
+    );
+  });
+
   it("keeps the drawing out of the tab order and the accessibility tree", () => {
     const drawing = draw(UP, DOWN);
 

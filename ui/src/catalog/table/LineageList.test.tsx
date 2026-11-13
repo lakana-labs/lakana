@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GraphNodeOut, GraphOut } from "../../api";
 import { assetNode, DOWN, graphEdge, graphNode, lineage, ROOT, UP } from "../../test/table";
-import { layout } from "./layout";
+import { layout, mergeGraphs } from "./layout";
 import { LineageList } from "./LineageList";
 
 /**
@@ -16,7 +16,18 @@ import { LineageList } from "./LineageList";
  */
 function list(up: GraphOut, down: GraphOut = lineage([])): HTMLElement {
   const router = createMemoryRouter(
-    [{ path: "*", element: <LineageList up={up} down={down} environment="prod" /> }],
+    [
+      {
+        path: "*",
+        element: (
+          <LineageList
+            layout={layout(up, down)}
+            edges={mergeGraphs(up, down).edges}
+            environment="prod"
+          />
+        ),
+      },
+    ],
     { initialEntries: ["/catalog/prod/gold.sales/fact_sales/lineage"] },
   );
   render(<RouterProvider router={router} />);
