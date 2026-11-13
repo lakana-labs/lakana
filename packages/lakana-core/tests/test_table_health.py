@@ -1030,3 +1030,12 @@ def test_only_the_newest_result_of_each_check_is_read(
         event.remove(session, "loaded_as_persistent", count)
     assert only.finished_at == _NOW + timedelta(hours=4)
     assert sum(isinstance(row, CheckResult) for row in loaded) == 1
+
+
+def test_table_health_without_readers_names_none_even_to_an_administrator(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    catalog = _table_health_catalog(session, tmp_path, {Action.READ_TABLE})
+    _read(session, _orders_id(session), principal, _NOW.date(), 4, _NOW)
+    shown = catalog.table_health(principal, _ORDERS, days=30, now=_NOW, with_readers=False)
+    assert shown.readers is None

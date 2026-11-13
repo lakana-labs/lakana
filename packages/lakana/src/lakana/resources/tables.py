@@ -898,7 +898,12 @@ class Tables:
         return _table_from_json(response.json())
 
     def health(
-        self, environment: str, qualified_name: str, *, days: int | None = None
+        self,
+        environment: str,
+        qualified_name: str,
+        *,
+        days: int | None = None,
+        readers: bool = True,
     ) -> TableHealth:
         """Show a table's last maintenance, the newest result of each check, and its readers.
 
@@ -911,12 +916,15 @@ class Tables:
         days
             The window of the readers in days, from 1 to the server's kept period (90 by
             default); the server's default window (30) when `None`.
+        readers
+            `False` asks the server to leave the readers out: no names and no audit entry on
+            the server. `True` by default.
 
         Returns
         -------
         TableHealth
-            The health. `readers` is `None` unless you may see the table's grants (the `ADMIN`
-            role).
+            The health. `readers` is `None` when `readers` is `False`, or unless you may see the
+            table's grants (the `ADMIN` role).
 
         Raises
         ------
@@ -931,7 +939,11 @@ class Tables:
         response = self._transport.request(
             ROUTES["tables.health"],
             path_params={"env": environment, "path": namespace, "name": name},
-            params=None if days is None else {"days": days},
+            params={
+                **({} if days is None else {"days": days}),
+                **({} if readers else {"readers": "false"}),
+            }
+            or None,
         )
         return _health_from_json(response.json())
 
