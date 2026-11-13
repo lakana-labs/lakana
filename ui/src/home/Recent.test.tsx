@@ -22,15 +22,22 @@ async function region(): Promise<HTMLElement> {
 }
 
 describe("Recent", () => {
+  it("says that opened tables appear here, and that the rest follows later", async () => {
+    renderShell("/");
+
+    const list = await region();
+    await within(list).findByText(/Nothing opened yet/);
+    // Only the table page records an open so far: say so.
+    expect(list).toHaveTextContent(
+      "Nothing opened yet. The tables you open will show here; queries, jobs and runs follow once their pages arrive in a later release.",
+    );
+  });
+
   it("invites to the Catalog while nothing was opened", async () => {
     const { user, router } = renderShell("/");
 
     const list = await region();
     expect(await within(list).findByText(/Nothing opened yet/)).toBeVisible();
-    // Nothing records an open before the Catalog, Queries and Jobs screens arrive: say so.
-    expect(list).toHaveTextContent(
-      "Nothing opened yet. The tables, queries, jobs and runs you open will show here once the Catalog, Queries and Jobs pages arrive in a later release.",
-    );
     await user.click(within(list).getByRole("link", { name: "Find a table in the Catalog" }));
     // The Catalog is loaded on demand: the router waits for its chunk before it moves.
     await waitFor(() => {
@@ -39,7 +46,7 @@ describe("Recent", () => {
   });
 
   it.each([
-    ["gold.station_ranking", "Table", "prod", "/catalog"],
+    ["gold.station_ranking", "Table", "prod", "/catalog/prod/gold/station_ranking"],
     ["Query 3f9c2a1b", "Query", "dev", "/queries"],
     ["analytics/daily_sales", "Job", "prod", "/jobs"],
     ["Run 8d2e4f60", "Run", "prod", "/jobs"],
@@ -61,5 +68,20 @@ describe("Recent", () => {
       expect(router.state.location.pathname).toBe(path);
     });
     cleanup();
+  });
+
+  it("shows a table without a namespace as plain text, with no link", async () => {
+    renderShell("/", {
+      routes: {
+        "GET /api/v1/principals/admin/recent": {
+          status: 200,
+          body: [{ kind: "table", environment: "prod", ref: "orphan", opened_at: AT }],
+        },
+      },
+    });
+
+    const list = await region();
+    expect(await within(list).findByText("orphan")).toBeVisible();
+    expect(within(list).queryByRole("link", { name: "orphan" })).not.toBeInTheDocument();
   });
 });

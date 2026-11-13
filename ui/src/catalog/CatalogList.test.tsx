@@ -96,7 +96,7 @@ describe("CatalogList", () => {
     await user.click(await screen.findByRole("link", { name: "fact_sales" }));
 
     expect(router.state.location.pathname).toBe("/catalog/prod/gold.sales/fact_sales");
-    expect(await screen.findByRole("heading", { name: "This page does not exist" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "fact_sales" })).toBeVisible();
   });
 
   describe("a row opens from its hover-text cells too", () => {

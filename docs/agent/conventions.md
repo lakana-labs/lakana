@@ -216,6 +216,18 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   it imports only itself and npm packages (its own tests may also use the helpers in
   `src/test/`). (`fetch` is a global, not an import, so
   dependency-cruiser cannot see it; ESLint guards it.)
+- **Untrusted text renders as text nodes only** (`docs/agent/security.md`, Preview and Defined in).
+  ESLint refuses the `dangerouslySetInnerHTML` and `srcDoc` attributes, an object literal key
+  (by name or quoted) `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`, `srcdoc` or `srcDoc`,
+  assignment to `innerHTML` and `outerHTML` (also as `el["innerHTML"]`), calls to
+  `insertAdjacentHTML`, `createContextualFragment`, `parseFromString` and `setHTMLUnsafe`, and
+  `document.write` and `document.writeln`, everywhere, with "Render text nodes only";
+  `ui/scripts/lint-ban.test.ts` lints one fixture per form in `ui/scripts/lint-fixtures/`
+  (ignored by the normal run) and expects exactly that error. A file, path, repository name or
+  preview value goes through `VisibleText` (`ui/src/shell/VisibleText.tsx`), which shows C0
+  and C1 controls (tab and line feed excepted), U+2028, U+2029 and every `Cf` character, bidi
+  controls included, as a visible `U+XXXX` mark; a run of one character is one mark with its
+  count (`U+200B ×350000`).
 - **No Node globals in browser code.** `globals.node` is on for the config files and scripts, so
   ESLint refuses `process` and `Buffer` inside `ui/src/` (`src/api/` included): Vite does not
   polyfill them, so they would fail only in the browser. Use `import.meta.env` and `Uint8Array`.
@@ -255,7 +267,10 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   to extend. Where several buttons share one request, only the pressed one is `pending`. Never `isDisabled` for the pressed button, which
   drops focus; other disabling conditions stay `isDisabled` beside `pending`.
 - **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
-  stylesheet and string on (part 1a, Task 3).
+  stylesheet and string on (part 1a, Task 3). A screen that loads on demand may keep its strings
+  beside it and register them with `addResourceBundle` in a module each of its files imports
+  (the table page: `ui/src/catalog/table/table.en.json` and `tableStrings.ts`), so they stay out
+  of the first load; a string the first load shows (a skeleton's, an error's) stays in `en.json`.
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools
   (`axe-core`, `@axe-core/playwright`, `lightningcss` and its platform packages) and the OFL-1.1
   fonts are the only exceptions; see "Copyleft rule: none strong, weak only via a justified

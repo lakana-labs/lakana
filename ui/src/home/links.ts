@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import type { AttentionKind } from "../api";
+import { splitDotted, tablePath } from "../catalog/paths";
 
 /** Where the release notes of each version are. */
 const RELEASES_URL = "https://github.com/lakana-labs/lakana/releases/tag/";
@@ -13,13 +14,19 @@ const RELEASES_URL = "https://github.com/lakana-labs/lakana/releases/tag/";
 export type ObjectKind = "table" | "query" | "job" | "run" | "check" | "worker" | "recovery_link";
 
 /**
- * The place each kind of object opens at, from its environment and reference. Until an area's
- * part brings its detail pages, an object opens the area's own page, which names the command to
- * use meanwhile; each later part changes its kinds' lines here to the detail page (part 3 tables, part 4 queries, part 5 jobs,
- * runs and checks, part 8 workers).
+ * The place each kind of object opens at, from its environment and reference; null for an
+ * object that has no place (a table with no environment or no namespace in its name). A table
+ * opens its page; until an area's part brings its detail pages, the other kinds open the area's
+ * own page, which names the command to use meanwhile; each later part changes its kinds' lines
+ * here to the detail page (part 4 queries, part 5 jobs, runs and checks, part 8 workers).
  */
-const PLACES: Record<ObjectKind, (environment: string | null, ref: string) => string> = {
-  table: () => "/catalog",
+const PLACES: Record<ObjectKind, (environment: string | null, ref: string) => string | null> = {
+  table: (environment, ref) => {
+    const place = environment === null ? null : splitDotted(ref);
+    return environment === null || place === null
+      ? null
+      : tablePath(environment, place.namespace, place.name);
+  },
   query: () => "/queries",
   job: () => "/jobs",
   run: () => "/jobs",
@@ -49,9 +56,14 @@ export const ATTENTION_OBJECTS: Record<AttentionKind, ObjectKind> = {
  * @param kind - What the object is.
  * @param environment - Its environment; null for a worker and a recovery link.
  * @param ref - The object within its kind.
- * @returns The interface path.
+ * @returns The interface path; null when the object has no place, which the caller shows as
+ *   plain text.
  */
-export function objectPath(kind: ObjectKind, environment: string | null, ref: string): string {
+export function objectPath(
+  kind: ObjectKind,
+  environment: string | null,
+  ref: string,
+): string | null {
   return PLACES[kind](environment, ref);
 }
 

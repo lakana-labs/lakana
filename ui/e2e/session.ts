@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import AxeBuilder from "@axe-core/playwright";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 /** The session of a signed-in administrator, as `GET /api/v1/sign-in/session` answers it. */
 export const ADMIN_SESSION = {
@@ -242,6 +242,238 @@ function tablesAnswer(url: URL): { status: number; json: unknown } {
   return page([STATION_RANKING, FACT_SALES, DIM_STORE], "page-two");
 }
 
+/** The path of the table page's table, `prod/gold.sales/fact_sales`. */
+const TABLE_PATH = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
+
+/** The path of what the administrator may do with a table. */
+const PERMISSIONS_PATH = "/api/v1/principals/admin/permissions";
+
+/** The path of the table's health, which Overview reads without the readers. */
+const HEALTH_PATH = `${TABLE_PATH}/health`;
+
+/** The path of where the table is defined, which Overview reads for its Defined in fact. */
+const DEFINITION_PATH = `${TABLE_PATH}/definition`;
+
+/** The path of the file that defines the table, read only when its dialog opens. */
+const DEFINITION_FILE_PATH = `${TABLE_PATH}/definition/file`;
+
+/** Where the table is defined: a file on GitHub, so Defined in has its link. */
+const DEFINITION = {
+  defined: true,
+  repository: "analytics",
+  path: "models/gold/fact_sales.sql",
+  commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+  line: 1,
+  project_version_id: "7f3e2d1c-0b9a-4876-9543-210fedcba987",
+  deployed_at: "2026-11-12T05:50:00Z",
+  browse_url:
+    "https://github.com/acme/analytics/blob/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/models/gold/fact_sales.sql#L1",
+};
+
+/**
+ * The file's text: a header, a line wider than a phone, a right-to-left override to mark and
+ * markup that must show as text.
+ */
+const DEFINITION_FILE = {
+  ...DEFINITION,
+  content: `/* lakana\ngrain: one row per sale\n*/\nSELECT sale_id, store_id, sold_at, amount, customer_email, channel, note FROM silver.sales -- \u202Eevil\n-- <img src=x onerror="window.pwned = 1"> <b>bold</b>\n`,
+  bytes: 139,
+  reason: null,
+  message: null,
+};
+
+/** The path of the lineage Overview reads one step each way. */
+const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
+
+/** The path the Preview tab queues its preview at. */
+const PREVIEW_PATH = `${TABLE_PATH}/preview`;
+
+/** The preview's query run, which is queued at the first poll and has finished at the second. */
+const PREVIEW_RUN_PATH = "/api/v1/environments/prod/queries/5b0e7c1a-3d2f-4e6a-9b8c-7d6e5f4a3b2c";
+
+/** The preview's page: a masked column, a long note with a right-to-left override, binary. */
+const PREVIEW_PAGE = {
+  columns: [
+    { name: "sale_id", type: "int64" },
+    { name: "customer_email", type: "string" },
+    { name: "note", type: "string" },
+    { name: "receipt", type: "binary" },
+  ],
+  columns_cut: 0,
+  masked_columns: [{ table: "gold.sales.fact_sales", column: "customer_email" }],
+  masked_columns_cut: 0,
+  rows: [
+    [
+      "1",
+      "****",
+      `Delivered to the back door \u202Eevil ${"and more ".repeat(40)}`,
+      { binary: 12 },
+    ],
+    ["2", "****", null, null],
+  ],
+  row_cut: [],
+  row_count: 2,
+  next_offset: null,
+  duration_ms: 800,
+  preview: { table: "gold.sales.fact_sales" },
+};
+
+/** The table's health: a failed check that set the table back, a signal that fired and a pass. */
+const HEALTH = {
+  days: 7,
+  last_maintenance: null,
+  readers: null,
+  hidden_checks: 0,
+  checks: [
+    {
+      name: "unique_sale_id",
+      check: "unique",
+      run_id: "5b1f0c52-0e0d-4b0a-9b53-6a53b8d2f001",
+      outcome: "failed",
+      on_failure: "fail",
+      failing_rows: 12,
+      error: null,
+      rollback_outcome: "rolled_back",
+      kept: false,
+      not_published: false,
+      finished_at: "2026-11-10T06:05:00Z",
+    },
+    {
+      name: "amount_positive",
+      check: "expression",
+      run_id: "5b1f0c52-0e0d-4b0a-9b53-6a53b8d2f002",
+      outcome: "passed",
+      on_failure: "warn",
+      failing_rows: null,
+      error: null,
+      rollback_outcome: null,
+      kept: false,
+      not_published: false,
+      finished_at: "2026-11-10T06:05:00Z",
+    },
+  ],
+  signals: [
+    {
+      id: "0c7d7f0e-5c10-4b64-a3f0-5a0b9f6b1001",
+      signal: "volume",
+      column: null,
+      state: "fired",
+      effect: "alert",
+      snapshot_id: 4821,
+      observed_at: "2026-11-10T06:06:00Z",
+      observed: null,
+      band: null,
+      alert: null,
+      values_hidden: true,
+    },
+  ],
+};
+
+/**
+ * What a lineage question answers: the table itself and one table on the asked side.
+ *
+ * @param direction - `up` or `down`.
+ * @returns The answer.
+ */
+function lineageAnswer(direction: string | null): unknown {
+  const root = {
+    id: "table:9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+    kind: "table",
+    name: "gold.sales.fact_sales",
+    distance: 0,
+  };
+  const other =
+    direction === "up"
+      ? { id: "table:aaaa", kind: "table", name: "bronze.sales_raw", distance: 1 }
+      : { id: "table:bbbb", kind: "table", name: "gold.sales.daily_sales", distance: 1 };
+  return { nodes: [root, other], edges: [], next_cursor: null };
+}
+
+/** The table `fact_sales` as its page reads it. */
+const TABLE_DETAIL = {
+  name: "fact_sales",
+  namespace: "gold.sales",
+  uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+  kind: "TABLE",
+  metadata_location: "s3://warehouse/gold/sales/fact_sales/metadata/00001.metadata.json",
+  schema: ["sale_id", "store_id", "sold_at", "amount"].map((name, index) => ({
+    name,
+    type: index === 2 ? "timestamp" : "long",
+    nullable: index !== 0,
+    description: null,
+    description_source: null,
+    label: null,
+    label_source: null,
+    label_language: null,
+    description_language: null,
+    terms: [],
+  })),
+  sql: null,
+  references: null,
+  hidden_references: 0,
+  snapshot_id: 4821,
+  state: "published",
+  state_message: null,
+  description: "Every sale in every store, one row per sale.",
+  description_source: "project",
+  last_write_at: "2026-11-10T06:00:00Z",
+  row_count: 1204000,
+  size_bytes: 98304,
+  file_count: 3,
+  expires_at: null,
+  expires_soon: false,
+  model: {
+    kind: "fact",
+    grain: "one row per sale",
+    key: ["sale_id"],
+    key_none: false,
+    references: [
+      {
+        id: "gold.sales.fact_sales/ref_store_id",
+        table: "gold.sales.fact_sales",
+        column: "store_id",
+        target: "gold.dim_store",
+        target_column: "store_id",
+        target_exists: true,
+        at: null,
+      },
+    ],
+    hidden_references: 0,
+    measures: [],
+    checks: [],
+  },
+  label: null,
+  label_source: null,
+  label_language: null,
+  description_language: "en",
+  language: "en",
+  main_language: "en",
+  translations: [],
+  terms: [],
+  health: {},
+  health_missing: [],
+  health_never_judged: {},
+  owner: { name: "ana.nowak", kind: "USER" },
+  created_at: "2026-10-01T08:00:00Z",
+  last_read_at: "2026-11-10T07:50:00Z",
+  readers_7d: 2,
+  health_summary: { state: "failing", item: "check_failed", text: "Check failed", others: 2 },
+};
+
+/** What the administrator may do with `fact_sales`: everything the page asks about. */
+const PERMISSIONS = {
+  principal: "admin",
+  active: true,
+  scope: { kind: "TABLE", environment: "prod", namespace: "gold.sales", table: "fact_sales" },
+  permissions: ["READ_TABLE", "WRITE_TABLE", "DROP_TABLE", "SUBMIT_QUERY"].map((action) => ({
+    action,
+    allowed: true,
+    via: [],
+    reason: null,
+  })),
+  note: null,
+};
+
 /** The administrator's profile picture: one pixel, a PNG. */
 const PICTURE =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -257,12 +489,22 @@ export const STUBBED = [
   ...Object.keys(HOME),
   ...Object.keys(CATALOG),
   TABLES,
+  TABLE_PATH,
+  HEALTH_PATH,
+  LINEAGE_PATH,
+  PERMISSIONS_PATH,
+  DEFINITION_PATH,
+  DEFINITION_FILE_PATH,
+  PREVIEW_PATH,
+  PREVIEW_RUN_PATH,
+  `${PREVIEW_RUN_PATH}/result`,
+  `${PREVIEW_RUN_PATH}/cancel`,
 ];
 
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
- * health), the administrator's profile picture, and the first screens of Access (the people) and
+ * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture, and the first screens of Access (the people) and
  * Settings (the session lengths).
  *
  * @param page - The page.
@@ -302,6 +544,52 @@ export async function signInAsAdmin(page: Page): Promise<void> {
       (route) => route.fulfill({ json }),
     );
   }
+  await page.route(
+    (url) => url.pathname === TABLE_PATH,
+    (route) => route.fulfill({ json: TABLE_DETAIL }),
+  );
+  await page.route(
+    (url) => url.pathname === HEALTH_PATH,
+    (route) => route.fulfill({ json: HEALTH }),
+  );
+  await page.route(
+    (url) => url.pathname === DEFINITION_PATH,
+    (route) => route.fulfill({ json: DEFINITION }),
+  );
+  await page.route(
+    (url) => url.pathname === DEFINITION_FILE_PATH,
+    (route) => route.fulfill({ json: DEFINITION_FILE }),
+  );
+  await page.route(
+    (url) => url.pathname === LINEAGE_PATH,
+    (route) =>
+      route.fulfill({
+        json: lineageAnswer(new URL(route.request().url()).searchParams.get("direction")),
+      }),
+  );
+  await page.route(
+    (url) => url.pathname === PERMISSIONS_PATH,
+    (route) => route.fulfill({ json: PERMISSIONS }),
+  );
+  await page.route(
+    (url) => url.pathname === PREVIEW_PATH,
+    (route) =>
+      route.fulfill({ status: 202, json: { query_id: PREVIEW_RUN_PATH.split("/").at(-1) } }),
+  );
+  let polls = 0;
+  await page.route(
+    (url) => url.pathname.startsWith(PREVIEW_RUN_PATH),
+    (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/result")) {
+        return route.fulfill({ json: PREVIEW_PAGE });
+      }
+      const status = path.endsWith("/cancel") || polls++ > 0 ? "SUCCEEDED" : "QUEUED";
+      return route.fulfill({
+        json: { query_id: PREVIEW_RUN_PATH.split("/").at(-1), status },
+      });
+    },
+  );
   await page.route(
     (url) => url.pathname === TABLES,
     (route) => route.fulfill(tablesAnswer(new URL(route.request().url()))),
@@ -344,4 +632,20 @@ export function consoleErrors(page: Page): string[] {
   });
   page.on("pageerror", (error) => errors.push(error.message));
   return errors;
+}
+
+/**
+ * Moves the focus with Tab until it reaches the element.
+ *
+ * @param page - The page.
+ * @param target - The element.
+ */
+export async function tabTo(page: Page, target: Locator): Promise<void> {
+  for (let step = 0; step < 40; step += 1) {
+    if (await target.evaluate((node) => node === document.activeElement)) {
+      return;
+    }
+    await page.keyboard.press("Tab");
+  }
+  throw new Error("Tab never reached the element");
 }

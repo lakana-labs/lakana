@@ -96,15 +96,16 @@ The order is the same for everyone; what you may do changes what is inside the b
    workers that are down. Everyone else sees failed checks and late tables among the tables they
    read or opened recently, and their own failed queries. With nothing to report it says
    "Nothing needs your attention."
-5. **Recently opened**: the tables, queries, jobs and runs you opened, kept on the server so the
-   list follows you to another browser. It fills once the Catalog, Queries and Jobs pages arrive
-   in a later release; until then it stays empty.
+5. **Recently opened**: the tables you opened, kept on the server so the list follows you to
+   another browser. A table's row opens its page. Queries, jobs and runs appear here once their
+   pages arrive in a later release; until then only tables fill it.
 6. **Your work**, only if you may deploy: your jobs with their last run, and the repositories
    you connected or deployed with the last deploy in each environment.
 
-A row opens its object when you click anywhere on it. Until the screen for tables, queries and
-jobs arrives in a later release, a row opens that area's page, which names the command to use
-meanwhile.
+A row opens its object when you click anywhere on it. A table opens its page; a table whose
+environment or namespace is not known shows its name without a link. Until the screens for
+queries and jobs arrive in a later release, their rows open that area's page, which names the
+command to use meanwhile.
 
 Home reads the status every 30 seconds and Needs your attention every minute, and only while
 its browser tab is visible. These reads do not count as activity, so a Home left open does not
