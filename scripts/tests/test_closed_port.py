@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 from collections.abc import Iterator
 
 import pytest
@@ -62,6 +63,10 @@ def test_the_old_helper_lets_another_test_take_the_port() -> None:
         pass
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="only Linux keeps the port bound; elsewhere it is bind-and-close",
+)
 def test_the_port_cannot_be_taken_by_another_test() -> None:
     port = closed_port()
     with pytest.raises(OSError):

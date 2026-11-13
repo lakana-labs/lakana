@@ -45,7 +45,7 @@ never installed; `scripts` is on every test run's import path). The local HTTPS 
 throwaway CA and the CONNECT proxy of the egress tests are there (`egress_helpers.py`); import them as
 `from scripts.test_support.egress_helpers import ...`. A test that needs a port nothing serves uses
 `closed_port()` from `scripts/test_support/ports.py`: it keeps the port bound (not listening) until the
-test ends, so a parallel test cannot take it; never bind, close and reuse a port number to get one that nothing serves (a port a server is about to listen on is the exception: it has to be free, so it cannot be held). Never add another package's `tests/`
+test ends, so a parallel test cannot take it (Linux only: on macOS a connect to a bound, non-listening socket times out instead of being refused, so there it is bind-and-close and a parallel test could in theory take the port, a race accepted); never bind, close and reuse a port number to get one that nothing serves (a port a server is about to listen on is the exception: it has to be free, so it cannot be held). Never add another package's `tests/`
 directory to `sys.path`.
 
 **A test may leave a read-only tree** (the code-unpack tests do, on purpose). A session fixture
