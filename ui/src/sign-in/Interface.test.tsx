@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Interface, type RouterFactory } from "./Interface";
 
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
+import { catalogRoutes } from "../test/catalog";
 import { homeRoutes } from "../test/home";
 import { ADMIN_SESSION, type FakeRoute, type FakeServer, fakeServer, whoami } from "../test/server";
 import { MemoryStorage } from "../test/storage";
@@ -45,6 +46,7 @@ function renderInterface(
     "GET /api/v1/whoami": { status: 200, body: whoami("admin", true) },
     ...homeRoutes("admin"),
     ...homeRoutes("kim"),
+    ...catalogRoutes(),
     ...routes,
   });
   let newest: ReturnType<typeof createMemoryRouter> | null = null;

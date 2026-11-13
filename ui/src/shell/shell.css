@@ -471,3 +471,15 @@
     padding-top: var(--space-4);
   }
 }
+
+/* The environment of a row: a quiet label, never colour alone. */
+.env-label {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  vertical-align: 1px;
+}

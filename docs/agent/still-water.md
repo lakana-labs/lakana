@@ -53,6 +53,8 @@ Light and dark are equals: check both, every time.
   two levels.
 - **Rows open their object:** the name is a real link in the accent colour, a quiet `›` ends the
   row, the whole row is clickable. Something without a detail page is not a list row.
+- **Lists keep at least 24 px between columns** (`--space-3` on each side of a cell); numbers
+  right-aligned with tabular figures (`.number`).
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
   own list or tab.
 - **State** uses `StatusGlyph`/`StatusLabel` (shape + word, never colour alone). A new state

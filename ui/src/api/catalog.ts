@@ -29,12 +29,12 @@ export const TABLE_SORTS: readonly TableSort[] = [
 const PAGE_SIZE = 50;
 
 /** The worst thing a table's checks found, in one line. */
-interface HealthSummaryOut {
+export interface HealthSummaryOut {
   /** The verdict. */
   readonly state: "failing" | "warning" | "healthy" | "not_judged";
-  /** What the verdict is about, such as a check's name; empty when healthy or not judged. */
+  /** The word's name, such as `check_failed`, `late`, `healthy` or `not_judged`. */
   readonly item: string;
-  /** The reason, in a sentence. */
+  /** The word as the server writes it, in English. */
   readonly text: string;
   /** How many more items share the verdict. */
   readonly others: number;

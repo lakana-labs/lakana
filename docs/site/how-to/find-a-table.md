@@ -95,6 +95,42 @@ is the exact command for the next page. The list shows only what you may read an
 out without saying that anything is missing. Every column, the sorts, the REST routes and the SDK
 calls are in [Table list](../reference/table-list.md).
 
+## In the web interface
+
+Open **Catalog** in the sidebar. It lists every table you may read, one row each, in every
+environment you may read, and leaves out the rest without saying that anything is missing. A
+row shows:
+
+- **Name**: the table's name, in the accent colour, with its kind, its namespace and its
+  environment under it (`Fact · gold.sales`, `prod`). The kind is Table, View, External or
+  Artifact, or Fact, Dimension, Wide or Staging for a table whose asset header declares one.
+- **Owner**: the owner's initials and name, with "Service account" under it when it is not a
+  person. A table whose owner was deleted shows a dash, and "No owner" for a screen reader.
+- **Health**: the worst thing the table's checks found, in one word with a shape and a colour:
+  a red diamond for a failed check or a blocking signal ("Check failed", "Blocked: late"), an
+  amber triangle for a warning ("Late", "Rows dropped"), a green circle for "Healthy", and a
+  grey dash for "Not judged". When more than one thing was found, the word names the worst and
+  "+2" counts the others; they are listed on the table page. The words and what each means are
+  in [Table list](../reference/table-list.md).
+- **Rows** and **Size**: the rows of the newest snapshot and the size of its data files, right
+  aligned.
+- **Last write** and **Last read**: how long ago, such as "2 hours ago". Hover a time, or let a
+  screen reader read it, for the exact one. Last read tells you when, never who.
+
+A dash with its words ("Not known", "Never written", "Never read") means the figure does not
+exist yet, as for a view. Press a row, or its name, to open the table.
+
+Press a column heading to sort by it; press it again to reverse the order. The sorted heading
+shows an arrow. **Sort by** at the top right offers the same columns and **Created**, which is
+not a column, and **Order** names the direction in words that fit the key ("Newest first",
+"Worst first"). The list starts sorted by name, A to Z, and a table with no value for the key
+comes last. The sort is in the address, so Back returns to the previous order and a link
+shares it.
+
+The list shows 50 tables at a time. **Show more** adds the next 50 and moves you to the first
+new row. The line above the list says "The first 50 tables" until the last page is loaded, then
+"120 tables".
+
 ## Use the answer in a script
 
 <!-- source: docs/examples/find-a-table/run.sh#json -->

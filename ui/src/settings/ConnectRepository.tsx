@@ -26,7 +26,7 @@ import {
   requestProbe,
   waitForProbe,
 } from "../api";
-import { EnvironmentLabel } from "../home/EnvironmentLabel";
+import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { CopyLine } from "../shell/CopyLine";
 import { HOW_TO_URL } from "../shell/docs";
 import { Page } from "../shell/Page";

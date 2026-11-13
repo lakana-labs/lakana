@@ -12,6 +12,7 @@ import { PreferencesProvider } from "../preferences/PreferencesProvider";
 import { ALL_SHIPPED, type AreaAccess } from "../shell/areas";
 import { type AreaPages, appRoutes } from "../shell/routes";
 import { SessionContext, type SessionValue } from "../sign-in/SessionProvider";
+import { catalogRoutes } from "./catalog";
 import { homeRoutes } from "./home";
 import { type FakeRoute, type FakeServer, fakeServer } from "./server";
 import { signedIn } from "./session";
@@ -50,7 +51,8 @@ export interface ShellOptions {
  *
  * @param path - The URL path to start at.
  * @param options - The access set, the storage, the session, what the person may do and the
- *   server's routes (Home's and the interface state's answer "nothing to report" by default).
+ *   server's routes (Home's and the interface state's answer "nothing to report" by default, and the
+ *   catalog answers with a page of three tables and a tree of two environments).
  * @returns The router, the storage, a user-event session and the fake server.
  */
 export function renderShell(path = "/", options: ShellOptions = {}): RenderedShell {
@@ -66,6 +68,7 @@ export function renderShell(path = "/", options: ShellOptions = {}): RenderedShe
   const server = fakeServer({
     "GET /api/v1/sign-in/notices": { status: 200, body: [] },
     ...homeRoutes(me.name),
+    ...catalogRoutes(),
     ...options.routes,
   });
   const router = createMemoryRouter(appRoutes(options.access ?? ALL_SHIPPED, options.pages, me), {

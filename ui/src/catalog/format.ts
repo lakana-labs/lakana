@@ -43,7 +43,7 @@ export function formatBytes(value: number, language: string): string {
   const number = new Intl.NumberFormat(language, {
     maximumFractionDigits: unit === 0 ? 0 : 1,
   }).format(scaled);
-  return `${number} ${BYTE_UNITS[unit] ?? "B"}`;
+  return `${number} ${BYTE_UNITS[unit] as string}`;
 }
 
 const STEPS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
@@ -65,14 +65,14 @@ const STEPS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
  */
 export function relativeTime(iso: string, now: number, language: string): string | null {
   const elapsed = now - Date.parse(iso);
-  if (!(elapsed >= 60_000)) {
+  // The smallest step is a minute, so a time under a minute, in the future or unreadable (NaN)
+  // matches none.
+  const step = STEPS.find(([, size]) => elapsed >= size);
+  if (step === undefined) {
     return null;
   }
-  const format = new Intl.RelativeTimeFormat(language, { numeric: "always" });
-  for (const [unit, size] of STEPS) {
-    if (elapsed >= size) {
-      return format.format(-Math.floor(elapsed / size), unit);
-    }
-  }
-  return null;
+  return new Intl.RelativeTimeFormat(language, { numeric: "always" }).format(
+    -Math.floor(elapsed / step[1]),
+    step[0],
+  );
 }

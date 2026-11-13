@@ -102,6 +102,89 @@ const HOME: Record<string, unknown> = {
   "/api/v1/info": { version: "0.23.0" },
 };
 
+/** What the Catalog reads: a tree of two environments and a page of tables in every health. */
+const CATALOG: Record<string, unknown> = {
+  "/api/v1/tables/tree": {
+    count: 4,
+    environments: [
+      { name: "dev", count: 1, namespaces: [{ path: "gold", count: 1 }] },
+      {
+        name: "prod",
+        count: 3,
+        namespaces: [
+          { path: "gold", count: 3 },
+          { path: "gold.sales", count: 1 },
+        ],
+      },
+    ],
+  },
+  "/api/v1/tables": {
+    items: [
+      {
+        environment: "prod",
+        namespace: "gold",
+        name: "station_ranking",
+        uuid: "5d0c7a1e-3f51-4a0e-9b0e-2a6f4c1d8e11",
+        kind: "TABLE",
+        model_kind: null,
+        state: "published",
+        owner: { name: "kim.schulz", kind: "USER" },
+        created_at: "2026-10-01T08:00:00Z",
+        row_count: 48210,
+        size_bytes: 3100000,
+        last_write_at: "2026-11-09T06:00:00Z",
+        last_read_at: "2026-11-10T07:30:00Z",
+        readers_7d: 4,
+        health_summary: { state: "healthy", item: "healthy", text: "Healthy", others: 0 },
+        match: null,
+      },
+      {
+        environment: "prod",
+        namespace: "gold.sales",
+        name: "fact_sales",
+        uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+        kind: "TABLE",
+        model_kind: "fact",
+        state: "published",
+        owner: { name: "ana.nowak", kind: "USER" },
+        created_at: "2026-10-02T08:00:00Z",
+        row_count: 1204000,
+        size_bytes: 98304,
+        last_write_at: "2026-11-10T06:00:00Z",
+        last_read_at: "2026-11-10T07:50:00Z",
+        readers_7d: 2,
+        health_summary: {
+          state: "failing",
+          item: "check_failed",
+          text: "Check failed",
+          others: 2,
+        },
+        match: null,
+      },
+      {
+        environment: "dev",
+        namespace: "gold",
+        name: "dim_store",
+        uuid: "c7e2b5f0-1d34-4e8a-a6b9-3f5d0c8e7a63",
+        kind: "VIEW",
+        model_kind: "dimension",
+        state: "published",
+        owner: { name: "loader", kind: "SERVICE_ACCOUNT" },
+        created_at: "2026-10-03T08:00:00Z",
+        row_count: null,
+        size_bytes: null,
+        last_write_at: null,
+        last_read_at: null,
+        readers_7d: 0,
+        health_summary: { state: "not_judged", item: "not_judged", text: "Not judged", others: 0 },
+        match: null,
+      },
+    ],
+    next_cursor: null,
+    capped: false,
+  },
+};
+
 /** The administrator's profile picture: one pixel, a PNG. */
 const PICTURE =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -115,12 +198,14 @@ export const STUBBED = [
   "/api/v1/principals/admin/picture",
   "/api/v1/settings/sign-in",
   ...Object.keys(HOME),
+  ...Object.keys(CATALOG),
 ];
 
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
- * worker down, an update note and rows in every box), the administrator's profile picture, and
- * the first screens of Access (the people) and Settings (the session lengths).
+ * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
+ * health), the administrator's profile picture, and the first screens of Access (the people) and
+ * Settings (the session lengths).
  *
  * @param page - The page.
  */
@@ -153,7 +238,7 @@ export async function signInAsAdmin(page: Page): Promise<void> {
       },
     }),
   );
-  for (const [path, json] of Object.entries(HOME)) {
+  for (const [path, json] of Object.entries({ ...HOME, ...CATALOG })) {
     await page.route(
       (url) => url.pathname === path,
       (route) => route.fulfill({ json }),

@@ -320,6 +320,114 @@
   "common": {
     "working": "Working…"
   },
+  "catalog": {
+    "tables": "Tables",
+    "columns": {
+      "name": "Name",
+      "owner": "Owner",
+      "health": "Health",
+      "rows": "Rows",
+      "size": "Size",
+      "last_write": "Last write",
+      "last_read": "Last read",
+      "created": "Created"
+    },
+    "open": "Open",
+    "sortBy": "Sort by",
+    "order": "Order",
+    "orders": {
+      "name": {
+        "asc": "A to Z",
+        "desc": "Z to A"
+      },
+      "owner": {
+        "asc": "A to Z",
+        "desc": "Z to A"
+      },
+      "health": {
+        "asc": "Worst first",
+        "desc": "Best first"
+      },
+      "rows": {
+        "asc": "Smallest first",
+        "desc": "Largest first"
+      },
+      "size": {
+        "asc": "Smallest first",
+        "desc": "Largest first"
+      },
+      "last_write": {
+        "asc": "Oldest first",
+        "desc": "Newest first"
+      },
+      "last_read": {
+        "asc": "Oldest first",
+        "desc": "Newest first"
+      },
+      "created": {
+        "asc": "Oldest first",
+        "desc": "Newest first"
+      }
+    },
+    "kind": {
+      "TABLE": "Table",
+      "VIEW": "View",
+      "EXTERNAL": "External",
+      "ARTIFACT": "Artifact"
+    },
+    "modelKind": {
+      "fact": "Fact",
+      "dimension": "Dimension",
+      "wide": "Wide",
+      "staging": "Staging"
+    },
+    "secondLine": "{{kind}} · {{namespace}}",
+    "serviceAccount": "Service account",
+    "noOwner": "No owner",
+    "notKnown": "Not known",
+    "neverWritten": "Never written",
+    "neverRead": "Never read",
+    "justNow": "just now",
+    "exactBytes": "{{bytes}} bytes",
+    "health": {
+      "blocked_late": "Blocked: late",
+      "blocked_rows_dropped": "Blocked: rows dropped",
+      "blocked_rows_rose": "Blocked: rows rose",
+      "blocked_nulls_changed": "Blocked: nulls changed",
+      "blocked_out_of_range": "Blocked: out of range",
+      "blocked_schema_changed": "Blocked: schema changed",
+      "check_failed": "Check failed",
+      "check_errored": "Check could not run",
+      "late": "Late",
+      "rows_dropped": "Rows dropped",
+      "rows_rose": "Rows rose",
+      "nulls_changed": "Nulls changed",
+      "out_of_range": "Out of range",
+      "schema_changed": "Schema changed",
+      "check_warned": "Check warned",
+      "healthy": "Healthy",
+      "not_judged": "Not judged"
+    },
+    "healthMore": "{{word}}, and {{count}} more, listed on the table page",
+    "result": {
+      "all_one": "{{count}} table",
+      "all_other": "{{count}} tables",
+      "first_one": "The first {{count}} table",
+      "first_other": "The first {{count}} tables",
+      "capped": "The search stopped after {{count, number}} tables. Use a longer text or choose a namespace."
+    },
+    "place": {
+      "all": "all environments"
+    },
+    "loading": "Loading tables…",
+    "tryAgain": "Try again",
+    "showMore": "Show more",
+    "empty": {
+      "text": "No tables in {{place}} yet. Tables appear once a project is deployed.",
+      "copy": "Copy command",
+      "tutorial": "Open the getting-started tutorial"
+    }
+  },
   "list": {
     "name": "Name",
     "expires": "Expires",

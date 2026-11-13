@@ -32,7 +32,10 @@ describe("Recent", () => {
       "Nothing opened yet. The tables, queries, jobs and runs you open will show here once the Catalog, Queries and Jobs pages arrive in a later release.",
     );
     await user.click(within(list).getByRole("link", { name: "Find a table in the Catalog" }));
-    expect(router.state.location.pathname).toBe("/catalog");
+    // The Catalog is loaded on demand: the router waits for its chunk before it moves.
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/catalog");
+    });
   });
 
   it.each([

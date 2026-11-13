@@ -38,7 +38,7 @@ export const TREE: TableTreeOut = {
  * @param overrides - The fields that differ.
  * @returns The row.
  */
-function item(overrides: Partial<TableListItemOut> = {}): TableListItemOut {
+export function item(overrides: Partial<TableListItemOut> = {}): TableListItemOut {
   return {
     environment: "prod",
     namespace: "gold",
@@ -54,7 +54,7 @@ function item(overrides: Partial<TableListItemOut> = {}): TableListItemOut {
     last_write_at: "2026-11-12T06:00:00Z",
     last_read_at: "2026-11-13T07:30:00Z",
     readers_7d: 4,
-    health_summary: { state: "healthy", item: "", text: "", others: 0 },
+    health_summary: { state: "healthy", item: "healthy", text: "Healthy", others: 0 },
     match: null,
     ...overrides,
   };
@@ -89,7 +89,7 @@ export const PAGE: TableListPageOut = {
       last_write_at: null,
       last_read_at: null,
       readers_7d: 0,
-      health_summary: { state: "not_judged", item: "", text: "", others: 0 },
+      health_summary: { state: "not_judged", item: "not_judged", text: "Not judged", others: 0 },
     }),
   ],
   next_cursor: null,

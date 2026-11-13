@@ -1,0 +1,108 @@
+/* The Catalog list: the bar above it, the table that scrolls on its own, the health word and
+   the skeleton shown while the first page loads. */
+.catalog-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.catalog-result {
+  min-height: var(--type-body-line);
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.sort-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-left: auto;
+}
+
+.sort-select {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sort-select label {
+  color: var(--color-text-muted);
+}
+
+/* A data table is the exception to reflow (WCAG 1.4.10): it scrolls inside its own region, and
+   the page never scrolls sideways. */
+.list-scroll {
+  overflow-x: auto;
+}
+
+.list-scroll:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.list-scroll .list {
+  min-width: 56rem;
+}
+
+.list-scroll .row-name {
+  overflow-wrap: anywhere;
+}
+
+/* A column header that sorts: text that looks like the header, with the arrow of the sorted one. */
+.sort-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sort-head[data-hovered] {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.sort-head[data-focus-visible] {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+th[aria-sort] .sort-head {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.health-word {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.health-none,
+.health-more {
+  color: var(--color-text-muted);
+}
+
+.health-more {
+  font-size: var(--type-dense-size);
+}
+
+/* Static blocks, no motion: the rows' height, so nothing jumps when the page arrives. */
+.skeleton-row {
+  height: var(--row-height);
+  margin: 0 0 1px;
+  border-radius: var(--radius-control);
+  background: var(--color-sunk);
+}
+
+.menu-item[aria-selected="true"] .menu-check::before {
+  content: "✓";
+  color: var(--color-accent);
+}

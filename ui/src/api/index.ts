@@ -26,6 +26,8 @@ export {
 export type { InviteOut, RecoveryLinkOut } from "./access";
 export { endSessions, listPasskeys, listSessions, removePasskey } from "./account";
 export type { PasskeyOut } from "./account";
+export { listTables, TABLE_SORTS } from "./catalog";
+export type { HealthSummaryOut, SortOrder, TableListItemOut, TableSort } from "./catalog";
 export { ApiError, onUnauthorized } from "./client";
 export { getAttention, getGetStarted, getWork } from "./home";
 export type { AttentionKind, GetStartedOut, GetStartedStepId, WorkRepositoryOut } from "./home";

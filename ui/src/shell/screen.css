@@ -75,10 +75,16 @@
   text-align: left;
 }
 
+/* 24 px between columns: a right-aligned number never meets the text after it. */
 .list td {
   height: var(--row-height);
   padding: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--color-line);
+}
+
+.list .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* A row that opens its object: the name is the link, and its ::after covers the whole row. */
