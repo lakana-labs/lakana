@@ -320,7 +320,11 @@ export function PreviewTab(): JSX.Element {
           {t("table.preview.refresh")}
         </button>
       </div>
-      {phase === "failed" && <p role="alert">{error}</p>}
+      {phase === "failed" && (
+        <p role="alert">
+          <VisibleText text={error ?? ""} />
+        </p>
+      )}
       {shown !== null && (
         <>
           {shown.masked_columns !== null && shown.masked_columns.length > 0 && (

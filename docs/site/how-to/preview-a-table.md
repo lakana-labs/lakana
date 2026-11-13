@@ -106,7 +106,8 @@ tabs never start one.
 - **Leaving the tab cancels it.** When you go to another tab or page, reload the page or close the
   browser tab while the preview is queued or running, the interface cancels the query, so no
   preview is left waiting for a worker. A
-  preview that has finished is not touched.
+  preview that has finished is not touched. When your browser brings the page back from its
+  back-forward cache, the preview runs again.
 - **The rows.** Each value is cut to one line. Move to a cell with Tab and the arrow keys, or click
   it, and the **Value** panel below the rows shows it whole. The rows are one stop for Tab: Tab
   enters them and Tab again leaves them, and the arrow keys move between the cells. A value with a

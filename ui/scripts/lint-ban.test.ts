@@ -17,6 +17,7 @@ const FORMS = [
   "outer-html.tsx",
   "insert-adjacent.tsx",
   "jsx-srcdoc.tsx",
+  "jsx-srcdoc-lowercase.tsx",
   "property-name.tsx",
   "property-quoted.tsx",
   "computed-assignment.tsx",

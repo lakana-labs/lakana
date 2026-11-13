@@ -196,18 +196,30 @@ export function usePreview(
 
     // A reload or a closed browser tab runs no cleanup: cancel with a request that outlives the
     // page, so the run does not wait for a worker until the server's timeout.
+    let cancelledOnLeave = false;
     const leave = (): void => {
       if (runId !== null && active) {
         active = false;
+        cancelledOnLeave = true;
         cancelQuery(environment, runId, { keepalive: true }).catch(ignore);
       }
     };
     window.addEventListener("pagehide", leave);
+    // A page kept in the back-forward cache comes back with its poll frozen and its run
+    // cancelled above: run the preview again rather than show the cancellation.
+    const back = (event: PageTransitionEvent): void => {
+      if (event.persisted && cancelledOnLeave) {
+        cancelledOnLeave = false;
+        setRound((previous) => previous + 1);
+      }
+    };
+    window.addEventListener("pageshow", back);
 
     return () => {
       alive = false;
       clearTimeout(timer);
       window.removeEventListener("pagehide", leave);
+      window.removeEventListener("pageshow", back);
       if (runId !== null && active) {
         cancelQuery(environment, runId).catch(ignore);
       }

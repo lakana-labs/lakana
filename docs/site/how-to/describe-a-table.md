@@ -69,7 +69,8 @@ To see what depends on a table or one of its columns, and how it joins other tab
 
 On the table's page, **Edit** beside the description on the Overview tab, and **Edit** on a column's
 row on the Columns tab, open the same fields as the command: a **Label** and a **Description**, each
-with Save and Cancel.
+with Save and Cancel. One column's editor is open at a time: while it is, the other columns' Edit
+buttons wait, and the open one keeps your text until you save or cancel.
 
 - **Who sees Edit.** The table's owner and anyone who holds `DROP_TABLE` on it. Everyone else sees
   no Edit button at all. If the server refuses a save for that reason, it says so next to the field.

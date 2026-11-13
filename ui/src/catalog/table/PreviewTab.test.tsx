@@ -387,6 +387,22 @@ describe("PreviewTab", () => {
     expect(screen.getByRole("button", { name: "Refresh" })).toBeVisible();
   });
 
+  it("marks an invisible character in a failed run's message", async () => {
+    renderShell(PREVIEW, {
+      routes: {
+        [STATUS_ROUTE]: {
+          status: 200,
+          body: queryStatus("FAILED", { error_message: "Cannot cast 'ab\u202Ecd' to INTEGER." }),
+        },
+      },
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Cannot cast 'ab");
+    expect(alert.textContent).not.toContain("\u202E");
+    expect(alert.querySelector(".char-mark")).not.toBeNull();
+  });
+
   it("cuts long values and shows one whole on focus or click", async () => {
     const long = "a".repeat(500);
     const { user } = renderShell(PREVIEW, {

@@ -29,7 +29,7 @@ const NODE_GLOBALS = ["process", "Buffer"].map((name) => ({
 const TEXT_NODES_ONLY = "Render text nodes only (docs/agent/security.md, Preview and Defined in)";
 const HTML_KEYS = "/^(dangerouslySetInnerHTML|innerHTML|outerHTML|srcdoc|srcDoc)$/";
 const RAW_HTML = [
-  "JSXAttribute[name.name=/^(dangerouslySetInnerHTML|srcDoc)$/]",
+  "JSXAttribute[name.name=/^(dangerouslySetInnerHTML|srcDoc|srcdoc)$/]",
   // A props or options object (createElement's, Object.assign's), by name or quoted; a
   // destructuring pattern only reads, so it is left alone.
   `ObjectExpression > Property[key.name=${HTML_KEYS}]`,

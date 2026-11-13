@@ -88,6 +88,8 @@ interface ColumnRowProps {
   readonly full: boolean;
   /** Whether this column's editor is open. */
   readonly editing: boolean;
+  /** Whether another column's editor is open: Edit waits until it is saved or cancelled. */
+  readonly blocked: boolean;
   /** Opens or closes this column's editor. */
   readonly onEditing: (editing: boolean) => void;
 }
@@ -100,10 +102,11 @@ interface ColumnRowProps {
  * @param props.column - The column.
  * @param props.full - Whether to show every fact and the way to edit.
  * @param props.editing - Whether the editor is open.
+ * @param props.blocked - Whether another column's editor is open.
  * @param props.onEditing - Opens or closes the editor.
  * @returns The row, and the editor's row while it is open.
  */
-function ColumnRow({ column, full, editing, onEditing }: ColumnRowProps): JSX.Element {
+function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps): JSX.Element {
   const { t } = useTranslation();
   const { table, mayEdit } = useTableData();
   const { lang, named, saveColumn } = useDescribe(column.description_language);
@@ -148,7 +151,10 @@ function ColumnRow({ column, full, editing, onEditing }: ColumnRowProps): JSX.El
               <Button
                 className="button"
                 ref={edit}
-                aria-label={t("table.edit.buttonFor", { name: column.name })}
+                isDisabled={blocked}
+                aria-label={t(blocked ? "table.edit.buttonBlocked" : "table.edit.buttonFor", {
+                  name: column.name,
+                })}
                 onPress={() => {
                   onEditing(true);
                 }}
@@ -226,6 +232,7 @@ export function ColumnsTable({ columns, full }: ColumnsTableProps): JSX.Element 
             column={column}
             full={full}
             editing={editing === column.name}
+            blocked={editing !== null && editing !== column.name}
             onEditing={(open) => {
               setEditing(open ? column.name : null);
             }}

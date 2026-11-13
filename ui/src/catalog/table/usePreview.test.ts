@@ -504,4 +504,41 @@ describe("usePreview", () => {
     expect(sentTo(server, "POST", QUERIES_PATH)).toEqual([`${QUERIES_PATH}/${QUERY_ID}/cancel`]);
     expect(result.current).toMatchObject({ phase: "done", page: RESULT });
   });
+
+  it("runs a fresh preview when the page returns from the back-forward cache", async () => {
+    let next = 0;
+    const server = serve(["QUEUED"], {
+      [`POST ${TABLE_PATH}/preview`]: () => {
+        next += 1;
+        return { status: 202, body: { query_id: next === 1 ? QUERY_ID : "run-2" } };
+      },
+      [`GET ${QUERIES_PATH}/run-2`]: { status: 200, body: queryStatus("SUCCEEDED") },
+      [`GET ${QUERIES_PATH}/run-2/result`]: { status: 200, body: RESULT },
+    });
+    const { result } = preview();
+    await settle();
+    window.dispatchEvent(new Event("pagehide"));
+    await settle();
+
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await settle();
+
+    expect(sentTo(server, "POST", `${TABLE_PATH}/preview`)).toHaveLength(2);
+    expect(result.current).toMatchObject({ phase: "done", page: RESULT });
+  });
+
+  it("does not run again for a pageshow that is no return from the cache", async () => {
+    const server = serve(["QUEUED"]);
+    preview();
+    await settle();
+
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+    });
+    await settle();
+
+    expect(sentTo(server, "POST", `${TABLE_PATH}/preview`)).toHaveLength(1);
+  });
 });

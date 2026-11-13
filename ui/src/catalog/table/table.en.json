@@ -20,6 +20,7 @@
   "edit": {
     "button": "Edit",
     "buttonFor": "Edit {{name}}",
+    "buttonBlocked": "Edit {{name}}: save or cancel the open editor first",
     "formLabel": "Edit the texts",
     "save": "Save",
     "cancel": "Cancel",

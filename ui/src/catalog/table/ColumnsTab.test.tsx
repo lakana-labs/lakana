@@ -236,6 +236,25 @@ describe("ColumnsTab editing", () => {
     expect(put?.body).toEqual({ description: "The store." });
   });
 
+  it("keeps one editor and its unsaved text until it is saved or cancelled", async () => {
+    const { user } = renderShell(PAGE);
+
+    await user.click(await screen.findByRole("button", { name: "Edit store_id" }));
+    const form = screen.getByRole("form", { name: "Edit the texts" });
+    await user.type(within(form).getByRole("textbox", { name: "Description" }), "Unsaved.");
+
+    const other = screen.getByRole("button", { name: /^Edit sale_id/ });
+    expect(other).toBeDisabled();
+    expect(other).toHaveAccessibleName(/save or cancel the open editor first/);
+    await user.click(other);
+    expect(
+      within(screen.getByRole("form")).getByRole("textbox", { name: "Description" }),
+    ).toHaveValue("Unsaved.");
+
+    await user.click(within(form).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Edit sale_id" })).toBeEnabled();
+  });
+
   it("moves focus to the column's Edit after Cancel and after Escape", async () => {
     const { user } = renderShell(PAGE);
 
@@ -247,15 +266,6 @@ describe("ColumnsTab editing", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("form")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit note" })).toHaveFocus();
-  });
-
-  it("edits one column at a time", async () => {
-    const { user } = renderShell(PAGE);
-
-    await user.click(await screen.findByRole("button", { name: "Edit note" }));
-    await user.click(screen.getByRole("button", { name: "Edit channel" }));
-
-    expect(screen.getAllByRole("form")).toHaveLength(1);
   });
 
   it("goes back to the text from Git for one column and returns focus to its Edit", async () => {
