@@ -5874,3 +5874,62 @@ def test_0076_adds_the_preview_binding_and_the_masked_columns(
     assert columns() == {}
     with sqlite3.connect(db_path) as connection:
         assert connection.execute("SELECT count(*) FROM query_runs").fetchone() == (1,)
+
+
+_REVISION_0077 = "b9f4e2a7c058"
+
+
+def test_0077_creates_the_source_map_tables(migrated_db: MigratedDb) -> None:
+    """Revision `0077`: the texts and the files, keyed and indexed by digests, `RESTRICT` on text.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0076)
+    config = Config(str(ALEMBIC_INI))
+    source_map = {"project_files", "project_file_texts"}
+
+    def tables() -> set[str]:
+        """List the source map's tables present.
+
+        Returns
+        -------
+        set of str
+            The names.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            return source_map & set(inspect(engine).get_table_names())
+        finally:
+            engine.dispose()
+
+    assert tables() == set()
+    command.upgrade(config, _REVISION_0077)
+    assert tables() == source_map
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = inspect(engine)
+        assert inspector.get_pk_constraint("project_file_texts")["constrained_columns"] == [
+            "sha256"
+        ]
+        assert inspector.get_pk_constraint("project_files")["constrained_columns"] == [
+            "job_version_id",
+            "path_sha256",
+        ]
+        assert {i["name"]: i["column_names"] for i in inspector.get_indexes("project_files")} == {
+            "ix_project_files_version_table": ["job_version_id", "table_sha256"],
+            "ix_project_files_sha256": ["sha256"],
+        }
+        assert {
+            (f["constrained_columns"][0], f["referred_table"], f["options"].get("ondelete"))
+            for f in inspector.get_foreign_keys("project_files")
+        } == {
+            ("job_version_id", "job_versions", "CASCADE"),
+            ("sha256", "project_file_texts", "RESTRICT"),
+        }
+    finally:
+        engine.dispose()
+    command.downgrade(config, _REVISION_0076)
+    assert tables() == set()

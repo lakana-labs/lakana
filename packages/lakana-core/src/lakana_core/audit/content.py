@@ -97,6 +97,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "ci_rule_id",
         "claim",
         "column",
+        # the deployed commit of a file read (`SOURCE_VIEWED`)
+        "commit",
         # a CI trust rule's claim conditions: claim names and the texts an administrator set
         # (a repository id, a ref, an environment name); configuration, never data.
         "conditions",

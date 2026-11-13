@@ -22,6 +22,7 @@ backfilled values from the still-present source rows on real Postgres.
 from __future__ import annotations
 
 import json
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -3592,4 +3593,84 @@ def test_0076_on_postgres() -> None:
         assert not added & {c["name"] for c in sqlalchemy.inspect(engine).get_columns("query_runs")}
         with engine.connect() as conn:
             assert conn.execute(sqlalchemy.text("SELECT count(*) FROM query_runs")).scalar() == 1
+        engine.dispose()
+
+
+def test_0077_on_postgres() -> None:
+    """0077 adds the source map: a text a file names cannot go; a version's files go with it.
+
+    A path and a table name of 4 KB each fit, because only their digests are keyed and indexed.
+    """
+    revision_0076 = "a7d3e9c1b406"
+    revision_0077 = "b9f4e2a7c058"
+    version_id = uuid.uuid4()
+    # random hex does not compress, so a name in a btree key would exceed its size limit
+    long_path = "assets/" + secrets.token_hex(2048) + ".sql"
+    long_table = "gold." + secrets.token_hex(2048)
+    insert_file = sqlalchemy.text(
+        "INSERT INTO project_files (job_version_id, path_sha256, path, table_sha256, table_name, "
+        "sha256, line, bytes, gate_tables, gate_raw, gate_version) VALUES (:v, :ps, :p, :ts, :t, "
+        "'a', 1, 1, CAST('[]' AS JSON), false, 1)"
+    )
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0077)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0077
+        inspector = sqlalchemy.inspect(engine)
+        assert inspector.get_pk_constraint("project_files")["constrained_columns"] == [
+            "job_version_id",
+            "path_sha256",
+        ]
+        assert {i["name"]: i["column_names"] for i in inspector.get_indexes("project_files")} == {
+            "ix_project_files_version_table": ["job_version_id", "table_sha256"],
+            "ix_project_files_sha256": ["sha256"],
+        }
+        assert {
+            (f["constrained_columns"][0], f["referred_table"], f["options"].get("ondelete"))
+            for f in inspector.get_foreign_keys("project_files")
+        } == {
+            ("job_version_id", "job_versions", "CASCADE"),
+            ("sha256", "project_file_texts", "RESTRICT"),
+        }
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO job_versions (id, repository_id, environment_id, commit_sha, "
+                    "manifest_json, code_uri, code_sha256, created_at) VALUES (:id, :r, :e, "
+                    "'a', CAST('{}' AS JSON), 'file:///c', '0', now())"
+                ),
+                {"id": version_id, "r": uuid.uuid4(), "e": uuid.uuid4()},
+            )
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("INSERT INTO project_file_texts VALUES ('a', 'x')"))
+            conn.execute(
+                insert_file,
+                {"v": version_id, "ps": "1", "p": long_path, "ts": "2", "t": long_table},
+            )
+            assert conn.execute(
+                sqlalchemy.text(
+                    "SELECT path, table_name FROM project_files "
+                    "WHERE job_version_id = :v AND table_sha256 = '2'"
+                ),
+                {"v": version_id},
+            ).one() == (long_path, long_table)
+        with pytest.raises(DBAPIError, match="23503"), engine.begin() as conn:
+            conn.execute(sqlalchemy.text("DELETE FROM project_file_texts WHERE sha256 = 'a'"))
+        with engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text("DELETE FROM job_versions WHERE id = :v"), {"v": version_id}
+            )
+            assert conn.execute(sqlalchemy.text("SELECT count(*) FROM project_files")).scalar() == 0
+            assert (
+                conn.execute(sqlalchemy.text("SELECT count(*) FROM project_file_texts")).scalar()
+                == 1
+            )
+
+        migrate.downgrade(url, revision_0076)
+        assert _alembic_version(engine) == revision_0076
+        assert not {"project_files", "project_file_texts"} & set(
+            sqlalchemy.inspect(engine).get_table_names()
+        )
         engine.dispose()

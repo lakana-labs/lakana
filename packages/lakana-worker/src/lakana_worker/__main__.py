@@ -48,6 +48,7 @@ from lakana_core.policy.legacy_binding import bind_legacy_policies
 from lakana_core.projects.code_sweep import CODE_SWEEP_MAX_SECONDS, sweep_code_archives
 from lakana_core.projects.limits import DeployLimits
 from lakana_core.projects.run_policy import RunCaps
+from lakana_core.projects.source_map import sweep_project_file_texts
 from lakana_core.secrets.crypto import ACCEPT_FORMAT_1_WARNING
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.storage.resolver import StorageResolver
@@ -622,6 +623,8 @@ def main() -> None:
     def housekeeping(now: datetime, stop: threading.Event) -> None:
         """Sweep artifacts, table locations (and expire tables), code archives, job fires and reads.
 
+        Also deletes the project file texts that no deployed version references.
+
         Also checks the freshness of tables and deletes their health signals past the kept period.
 
         Also stores the columns of up to 50 tables that have none stored yet, so search finds them,
@@ -686,6 +689,16 @@ def main() -> None:
         except Exception as exc:
             logger.warning(
                 "The code archive sweep failed (%s).",
+                type(exc).__name__,
+                exc_info=True,
+                extra=log_event(LogEvent.SWEEP_FAILED),
+            )
+        try:
+            with session_factory() as session:
+                sweep_project_file_texts(session, should_stop=stop.is_set)
+        except Exception as exc:
+            logger.warning(
+                "The project file sweep failed (%s).",
                 type(exc).__name__,
                 exc_info=True,
                 extra=log_event(LogEvent.SWEEP_FAILED),

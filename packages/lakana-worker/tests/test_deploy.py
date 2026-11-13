@@ -22,7 +22,7 @@ from typing import Any, NamedTuple, cast
 import pytest
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 from worker_git_helpers import GitHttpServer, bare_copy, commit, git, make_repo
 
@@ -48,6 +48,8 @@ from lakana_core.models import (
     PackageIndex,
     Principal,
     PrincipalType,
+    ProjectFile,
+    ProjectFileText,
     Repository,
     RepositoryKind,
     Run,
@@ -4192,3 +4194,122 @@ def test_a_table_whose_columns_cannot_be_read_is_counted_in_its_assets_order(
     with caplog.at_level(logging.WARNING, logger="lakana_worker.deploy"):
         assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
     assert any("Could not read the columns of bronze.wide" in r.message for r in caplog.records)
+
+
+def _member(session: Session, run: DeployRun, name: str) -> bytes:
+    """Read one file of the tarball a deploy stored.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run
+        The finished deploy.
+    name
+        The file's repository-relative path.
+
+    Returns
+    -------
+    bytes
+        The file's bytes in the stored tarball.
+    """
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    path = code_path("analytics", version.commit_sha, version.code_sha256)
+    stored = StorageResolver(session).for_environment("dev").storage.read(path)
+    with tarfile.open(fileobj=io.BytesIO(gzip.decompress(stored))) as archive:
+        member = archive.extractfile(name)
+        assert member is not None
+        return member.read()
+
+
+def _paths(session: Session, run: DeployRun) -> list[str]:
+    """List the paths of the source map a deploy recorded, sorted.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run
+        The finished deploy.
+
+    Returns
+    -------
+    list of str
+        The recorded files' paths.
+    """
+    return sorted(
+        session.scalars(
+            select(ProjectFile.path).where(ProjectFile.job_version_id == run.job_version_id)
+        )
+    )
+
+
+def test_a_deploy_records_the_source_map_of_each_asset(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """The file, its table, its gate set and its text are recorded with the version."""
+    run = _submit_and_run(session, principal, world)
+    [row] = session.scalars(
+        select(ProjectFile).where(ProjectFile.job_version_id == run.job_version_id)
+    ).all()
+    assert (row.path, row.table_name, row.gate_tables) == (
+        "assets/silver/clean.sql",
+        "silver.clean",
+        ["bronze.events", "silver.clean"],
+    )
+    text_row = session.get(ProjectFileText, row.sha256)
+    assert text_row is not None
+    assert text_row.text == _FILES["assets/silver/clean.sql"]
+
+
+def test_export_subst_does_not_change_the_deployed_text(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """`$Format:…$` stays as committed, in the source map and in the tarball that runs."""
+    body = "SELECT id FROM bronze.events -- $Format:%H$\n"
+    commit(
+        world.repo_path, {".gitattributes": "*.sql export-subst\n", "assets/silver/clean.sql": body}
+    )
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.SUCCEEDED
+    row = session.scalars(
+        select(ProjectFile).where(ProjectFile.job_version_id == run.job_version_id)
+    ).one()
+    text_row = session.get(ProjectFileText, row.sha256)
+    assert text_row is not None
+    assert text_row.text == body
+    assert _member(session, run, "assets/silver/clean.sql") == body.encode()
+
+
+def test_export_ignore_still_leaves_a_file_out_of_the_deploy_and_the_source_map(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """The archive decides what discovery sees, so the deploy and its source map agree."""
+    commit(
+        world.repo_path,
+        {
+            ".gitattributes": "assets/silver/skip.sql export-ignore\n",
+            "assets/silver/skip.sql": "SELECT 1 AS id\n",
+        },
+    )
+    run = _submit_and_run(session, principal, world)
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    assert [a["table"] for a in version.manifest_json["assets"]] == ["silver.clean"]
+    assert _paths(session, run) == ["assets/silver/clean.sql"]
+
+
+def test_a_control_character_fails_the_deploy_with_file_and_line(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """The refusal names the file and line, and nothing of the source map is written."""
+    commit(world.repo_path, {"assets/silver/clean.sql": "SELECT id FROM bronze.events -- \x1b\n"})
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert (
+        "assets/silver/clean.sql:1: control character U+001B on line 1; remove it"
+        in run.error_message
+    )
+    assert session.scalar(select(func.count()).select_from(ProjectFile)) == 0

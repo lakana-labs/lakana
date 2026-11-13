@@ -705,6 +705,20 @@ Your row filters and column masks apply: the rows are the ones you may see. On s
 | `--env` | text | none | Environment (default: the profile's). |
 | `--timeout` | number | none | Seconds to wait before giving up. |
 
+### `lakana table definition`
+
+Usage: `lakana table definition [OPTIONS] {name}`
+
+Show the file and line that define table NAME, at the deployed commit.
+
+The answer comes from the environment's current deployment, never the branch head: the repository, the file and line, the commit, and a link to the line when the repository is on github.com, gitlab.com, codeberg.org, gitea.com, bitbucket.org or Azure DevOps. With `--show`, the file itself goes to standard output, with every control and invisible formatting character written as an escape, and the location to standard error; when the file is not shown to you, a line on standard error says why and what to do.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--show` | flag | off | Also print the file, on standard output; the location goes to standard error. |
+| `--env` | text | none | Environment (default: the profile's). |
+
 ### `lakana table lineage`
 
 Usage: `lakana table lineage [OPTIONS] {name}`

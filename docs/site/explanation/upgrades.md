@@ -135,6 +135,48 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### Control characters in asset files are refused (breaking)
+
+A deploy now refuses an asset file that contains a control character (NUL, a C0 control other
+than tab and line feed, DEL, or a C1 control). The error names the file and the line, for
+example `assets/silver/a.sql:12: control character U+001B on line 12; remove it`. Find them
+before you upgrade:
+
+<!-- source: docs/examples/find-control-characters.sh#find -->
+```bash
+find assets -type f \( -iname '*.sql' -o -iname '*.py' \) -exec perl -CSDA -e '
+  while (<<>>) {
+    if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]|\r(?!\n)/) {
+      my $code = ord $&;
+      (my $name = $ARGV) =~ s/([\x00-\x1f\x7f-\x9f])/sprintf "\\x%02x", ord $1/ge;
+      printf "%s:%d: control character U+%04X\n", $name, $., $code;
+    }
+    close ARGV if eof;
+  }' {} +
+```
+
+It looks only at `.sql` and `.py` files, the ones a deploy reads. It prints one line for each
+place a deploy would refuse, and nothing when the folder is clean; it needs only `find` and
+`perl` 5.22 or later, which Linux and macOS ship; a file name with a control character is
+printed with `\x..` escapes. A dry run (`lakana deploy --dry-run`) shows the refusal only on a
+server that already has this rule, so run the command above before you upgrade.
+
+### $Format placeholders are no longer expanded (breaking)
+
+A deploy no longer expands `$Format:…$` placeholders: an `export-subst` attribute in
+`.gitattributes` is ignored, so a file that used one to write the commit into its own text now
+deploys the placeholder itself. The other attributes that change a file on checkout (`ident`,
+`eol` and `working-tree-encoding`) still apply, as before. Read the deployed commit from
+Lakana instead: `lakana deployments` lists it for each repository, and `lakana table definition`
+shows the commit that defines a table. To find such placeholders, run `git grep -n '\$Format:'`
+in the repository. `export-ignore` still leaves a file out of a deploy, as before.
+
+### Project files are recorded at deploy
+
+Migration `0077` adds two tables, which hold the files of each deployed project version; it runs
+with the other migrations, and nothing else has to be done. A table's "Defined in" answers
+`not_recorded` for a project until its next deploy.
+
 ### A proxy is trusted for client addresses only when you list it
 
 - A proxy on the same host is no longer trusted for `X-Forwarded-For` by default: set

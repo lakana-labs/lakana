@@ -7,6 +7,7 @@ import json
 import math
 import re
 import sys
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time
@@ -140,6 +141,60 @@ def safe_text(text: str) -> str:
     """
     flat = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", _TAB_SPACES)
     return _UNSAFE.sub(_escaped, flat)
+
+
+_SOURCE_CANDIDATE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]|[^\x00-\x7f]")
+"""Every ASCII control but the tab and the line feed, and every non-ASCII character: the ones
+`_source_escape` has to look at. Plain ASCII text, most of a file, never reaches it."""
+
+_SEPARATORS = frozenset("\u2028\u2029")
+"""The line and paragraph separators, which some terminals and editors take as a line break."""
+
+
+def _source_escape(match: re.Match[str]) -> str:
+    r"""Escape one character of a file when it is a control, format or surrogate character.
+
+    Parameters
+    ----------
+    match
+        One character `_SOURCE_CANDIDATE` found.
+
+    Returns
+    -------
+    str
+        The escape (`\x1b`, `\u202e`) for a character of category `Cc`, `Cf` or `Cs` and for
+        U+2028 and U+2029; any other character, such as an accent, a CJK character or an
+        emoji, unchanged.
+    """
+    char = match.group()
+    if unicodedata.category(char) in ("Cc", "Cf", "Cs") or char in _SEPARATORS:
+        return _escaped(match)
+    return char
+
+
+def safe_source(text: str) -> str:
+    r"""Make a file's text safe to print to a terminal, changing nothing else.
+
+    A file is data, not instructions to the terminal: an escape sequence could clear the screen
+    or forge a link, and a bidirectional override could reorder what the reader sees. Unlike
+    `safe_text`, a tab stays a tab and a line break stays as it is, so the output is the file
+    wherever it holds no such character. Write the result with `sys.stdout.write`, never Rich,
+    which would read `[bold]` as markup and wrap long lines.
+
+    Parameters
+    ----------
+    text
+        The file's text.
+
+    Returns
+    -------
+    str
+        `text` with every control character but the tab and the line feed (a carriage return
+        among them), every format character (`Cf`: bidirectional controls, zero-width
+        characters, the byte-order mark), every lone surrogate, and U+2028 and U+2029 written as
+        an escape.
+    """
+    return _SOURCE_CANDIDATE.sub(_source_escape, text)
 
 
 def _visible(text: str) -> str:

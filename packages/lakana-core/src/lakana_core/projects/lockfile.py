@@ -62,7 +62,7 @@ def lock_digest(lock: bytes) -> str:
     Parameters
     ----------
     lock
-        The file's raw bytes, exactly as committed.
+        The file's bytes as `git archive` produced them for the deployed commit.
 
     Returns
     -------

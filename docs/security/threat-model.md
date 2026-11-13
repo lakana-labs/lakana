@@ -31,7 +31,8 @@ What an attacker, or an over-broad grant, could reach:
   carries (#88, #239), and every read of other people's events
   is itself recorded (`ACTIVITY_VIEWED`).
 - **The code in linked git repositories** — the Python and SQL that tasks execute, and the
-  history of who reviewed and approved it.
+  history of who reviewed and approved it. Reading a deployed file's text through Lakana is
+  itself recorded (`SOURCE_VIEWED`).
 - **Artifacts (M5c2b)** — stored model files and other files that Python assets produce, and
   the training data that a model can reveal.
 

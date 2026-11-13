@@ -898,6 +898,7 @@ def _run_main(
         mock.patch("lakana_worker.__main__.SchedulerLoop") as scheduler_mock,
         mock.patch("lakana_worker.__main__.sweep_artifacts") as sweep_mock,
         mock.patch("lakana_worker.__main__.sweep_code_archives"),
+        mock.patch("lakana_worker.__main__.sweep_project_file_texts"),
         mock.patch("lakana_worker.__main__.sweep_table_locations"),
         mock.patch("lakana_worker.__main__.backfill_table_columns"),
         mock.patch("lakana_worker.__main__.bind_legacy_policies"),
@@ -957,6 +958,7 @@ def _housekeeping(
     health: mock.MagicMock | None = None,
     policies: mock.MagicMock | None = None,
     health_keys: mock.MagicMock | None = None,
+    texts: mock.MagicMock | None = None,
 ) -> None:
     """Run `main`, then the housekeeping callable it gave the scheduler, once.
 
@@ -986,6 +988,8 @@ def _housekeeping(
         Stands in for `bind_legacy_policies`; a mock that succeeds when `None`.
     health_keys
         Stands in for `backfill_health_keys`; a mock that succeeds when `None`.
+    texts
+        Stands in for `sweep_project_file_texts`; a mock that succeeds when `None`.
     """
     monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
@@ -994,6 +998,7 @@ def _housekeeping(
         mock.patch("lakana_worker.__main__.SchedulerLoop") as scheduler_mock,
         mock.patch("lakana_worker.__main__.sweep_artifacts", artifacts),
         mock.patch("lakana_worker.__main__.sweep_code_archives", code),
+        mock.patch("lakana_worker.__main__.sweep_project_file_texts", texts or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.sweep_job_fires", fires or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.sweep_table_reads", reads or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.backfill_table_columns", columns or mock.MagicMock()),
@@ -1041,6 +1046,33 @@ def test_a_failing_code_archive_sweep_does_not_raise(
         _housekeeping(tmp_path, monkeypatch, artifacts, code)
     assert artifacts.call_count == 1
     assert "RuntimeError" in caplog.text
+    assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
+
+
+def test_housekeeping_also_sweeps_unreferenced_project_file_texts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    texts = mock.MagicMock()
+    _housekeeping(tmp_path, monkeypatch, mock.MagicMock(), mock.MagicMock(), texts=texts)
+    assert texts.call_count == 1
+    assert texts.call_args.kwargs["should_stop"]() is False
+
+
+def test_a_failing_project_file_sweep_is_logged_and_the_others_still_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    artifacts, code, fires = mock.MagicMock(), mock.MagicMock(), mock.MagicMock()
+    with caplog.at_level(logging.WARNING):
+        _housekeeping(
+            tmp_path,
+            monkeypatch,
+            artifacts,
+            code,
+            fires,
+            texts=mock.MagicMock(side_effect=RuntimeError("x")),
+        )
+    assert artifacts.call_count == code.call_count == fires.call_count == 1
+    assert "The project file sweep failed (RuntimeError)." in caplog.text
     assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
 
 

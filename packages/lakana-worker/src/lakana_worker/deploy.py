@@ -85,6 +85,7 @@ from lakana_core.projects.package_sources import KnownSources, RegisteredIndex
 from lakana_core.projects.parse import ParsedAsset, parse_assets
 from lakana_core.projects.project_config import normalize_source, parse_project_config
 from lakana_core.projects.run_policy import RunCaps, run_policy_issues
+from lakana_core.projects.source_map import source_map_records
 from lakana_core.projects.translations import (
     NO_GLOSSARY,
     coverage_hints,
@@ -979,6 +980,8 @@ def _deploy(
                 principal, environment_name, graph, repository_id=repository_id
             ),
         )
+        # Built here, from the model references: the upload below rebinds `resolved`.
+        files = source_map_records(checkout.assets, assets, resolved)
         current = service.current_job_version(environment_id, repository_id)
         diff = dataclasses.replace(
             diff_manifests(
@@ -1048,6 +1051,7 @@ def _deploy(
                 worker_id=worker_id,
                 checks=checks_listing(every_check) or None,
                 code_bytes=code_bytes,
+                files=files,
             )
             if uploaded is not None:
                 _restore_if_missing(

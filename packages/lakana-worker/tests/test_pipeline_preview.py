@@ -332,6 +332,84 @@ def test_a_preview_of_a_recreated_view_is_refused(
     assert rows == []
 
 
+def test_a_preview_of_a_dropped_table_is_refused(
+    session: Session, tmp_path: Path, admin: PrincipalRef
+) -> None:
+    """A table dropped after the preview was queued leaves nothing to read: refused as changed."""
+    write(session, admin, orders([1], ["eu"]), WriteMode.CREATE)
+    alice = _person(session, admin, "alice", "orders")
+    queued = submit_preview(session, GrantAuthorization(session), alice, ORDERS)
+    catalog(session).drop_table(admin, ORDERS)
+
+    finished, rows = run(session, tmp_path, queued.id)
+
+    assert (finished.status, finished.error_message, finished.error_cause) == (
+        QueryRunStatus.FAILED,
+        PREVIEW_TABLE_CHANGED,
+        QueryErrorCause.NOT_FOUND.value,
+    )
+    assert rows == []
+    assert finished.masked_columns is None
+
+
+def test_a_preview_of_a_table_recreated_unreadable_to_the_reader_is_refused(
+    session: Session, tmp_path: Path, admin: PrincipalRef
+) -> None:
+    """A table created again under the name, with no grant for the reader, is refused as changed.
+
+    The answer is the same as for a table the reader may read, so it says nothing about the
+    reader's grants on the new table.
+    """
+    write(session, admin, orders([1], ["eu"]), WriteMode.CREATE)
+    alice = _person(session, admin, "alice", "orders")
+    queued = submit_preview(session, GrantAuthorization(session), alice, ORDERS)
+    drop_and_create(session, admin, "gold.orders")
+
+    finished, rows = run(session, tmp_path, queued.id)
+
+    assert (finished.status, finished.error_message, finished.error_cause) == (
+        QueryRunStatus.FAILED,
+        PREVIEW_TABLE_CHANGED,
+        QueryErrorCause.NOT_FOUND.value,
+    )
+    assert rows == []
+    assert finished.masked_columns is None
+    assert reads_of(session, alice.id, _orders_id(session)) == 0
+
+
+def test_a_preview_of_a_table_replaced_by_a_view_is_refused(
+    session: Session, tmp_path: Path, admin: PrincipalRef
+) -> None:
+    """A view created under the name of a dropped table is another object: nothing is read.
+
+    The reader may read the view and the table under it, so only the id check refuses it.
+    """
+    write(session, admin, orders([1], ["eu"]), WriteMode.CREATE)
+    write(
+        session,
+        admin,
+        orders([2], ["us"]),
+        WriteMode.CREATE,
+        ref=TableRef.from_dotted("dev", "gold.other"),
+    )
+    alice = _person(session, admin, "alice", "orders")
+    queued = submit_preview(session, GrantAuthorization(session), alice, ORDERS)
+    catalog(session).drop_table(admin, ORDERS)
+    create_view(session, admin, "gold.orders", "SELECT * FROM gold.other")
+    grant_read(session, admin, "alice", "orders")
+    grant_read(session, admin, "alice", "other")
+
+    finished, rows = run(session, tmp_path, queued.id)
+
+    assert (finished.status, finished.error_message, finished.error_cause) == (
+        QueryRunStatus.FAILED,
+        PREVIEW_TABLE_CHANGED,
+        QueryErrorCause.NOT_FOUND.value,
+    )
+    assert rows == []
+    assert finished.masked_columns is None
+
+
 def test_a_preview_of_a_quoted_name_reads_that_table(
     session: Session, tmp_path: Path, admin: PrincipalRef
 ) -> None:

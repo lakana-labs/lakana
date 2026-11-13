@@ -1004,6 +1004,7 @@ def fetch_commit(
                 repository_name=repository_name,
             )
         sha = _fetch(wanted, repo=repo, env=env, limits=limits, deadline=deadline, secrets=secrets)
+        _neutralise_export_subst(repo)
         archive = run / "code.tar"
         _archive(
             sha,
@@ -1017,6 +1018,25 @@ def fetch_commit(
         tree = run / "tree"
         _extract(archive, tree, limit=limits.checkout_bytes, max_members=limits.checkout_members)
         return FetchedCommit(sha=sha, archive=archive, tree=tree)
+
+
+def _neutralise_export_subst(repo: Path) -> None:
+    """Make `git archive` leave every `$Format:…$` placeholder unexpanded.
+
+    `$GIT_DIR/info/attributes` takes precedence over the commit's own `.gitattributes`, so
+    `* -export-subst` turns the expansion off: one commit always gives the same text, for what
+    runs and for the source map. `export-ignore` stays in force, and so do the attributes that
+    convert a file's text on checkout (`ident`, `eol`, `working-tree-encoding`), which depend
+    only on the commit.
+
+    Parameters
+    ----------
+    repo
+        The temporary repository's git directory.
+    """
+    info = repo / "info"
+    info.mkdir(exist_ok=True)
+    (info / "attributes").write_text("* -export-subst\n", encoding="utf-8")
 
 
 def _init(

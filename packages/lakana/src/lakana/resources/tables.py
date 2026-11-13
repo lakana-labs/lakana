@@ -47,6 +47,8 @@ from lakana._models import (
     ModelReference,
     Reader,
     Table,
+    TableDefinition,
+    TableDefinitionFile,
     TableHealth,
     TableModel,
     TableOwner,
@@ -291,6 +293,26 @@ def _measure_from_json(data: dict[str, Any]) -> Measure:
         label_language=data.get("label_language"),
         description_language=data.get("description_language"),
     )
+
+
+def _definition_fields(model: type[TableDefinition], data: dict[str, Any]) -> dict[str, Any]:
+    """Read the fields of a `TableDefinition` or `TableDefinitionFile` from the API's answer.
+
+    Parameters
+    ----------
+    model
+        `TableDefinition` or `TableDefinitionFile`.
+    data
+        The decoded `TableDefinitionOut` or `TableDefinitionFileOut` JSON body.
+
+    Returns
+    -------
+    dict
+        The model's fields, `deployed_at` parsed.
+    """
+    found = known_fields(model, data)
+    found["deployed_at"] = _when(found["deployed_at"])
+    return found
 
 
 def _references_from_json(data: dict[str, Any]) -> TableReferences:
@@ -2082,6 +2104,74 @@ class Tables:
             path_params={"env": environment, "path": namespace, "name": name},
         )
         return QueryRun(self._transport, id=response.json()["query_id"], environment=environment)
+
+    def definition(self, environment: str, qualified_name: str) -> TableDefinition:
+        """Say where the environment's current deployment defines a table.
+
+        The answer is the deployed commit's file and line, never the branch head's, and a link
+        to the line on the repository's git host when one can be built.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+
+        Returns
+        -------
+        TableDefinition
+            The location; `defined` is `False` for a table created or renamed outside a
+            project.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the environment does not exist, or a table you may read is gone (dropped).
+        lakana.errors.PermissionDenied
+            If the table does not exist or you may not read it: the two answers are the same.
+        """
+        namespace, name = _split_namespace_table(qualified_name)
+        response = self._transport.request(
+            ROUTES["tables.definition"],
+            path_params={"env": environment, "path": namespace, "name": name},
+        )
+        return TableDefinition(**_definition_fields(TableDefinition, response.json()))
+
+    def definition_file(self, environment: str, qualified_name: str) -> TableDefinitionFile:
+        """Read the file that defines a table, as the current deployment recorded it.
+
+        The text is returned only to someone who may read the environment and every table the
+        file uses, without a row filter or column mask; anyone else gets the location and a
+        `reason`. Reading the text is recorded in the audit log.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+
+        Returns
+        -------
+        TableDefinitionFile
+            The location with the text, or with the `reason` and `message` it is not shown.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the environment does not exist, or a table you may read is gone (dropped).
+        lakana.errors.PermissionDenied
+            If the table does not exist or you may not read it: the two answers are the same.
+        lakana.errors.ServerError
+            With status 503 when the read could not be recorded in the audit log; try again.
+        """
+        namespace, name = _split_namespace_table(qualified_name)
+        response = self._transport.request(
+            ROUTES["tables.definition_file"],
+            path_params={"env": environment, "path": namespace, "name": name},
+        )
+        return TableDefinitionFile(**_definition_fields(TableDefinitionFile, response.json()))
 
     def _send_arrow(
         self,

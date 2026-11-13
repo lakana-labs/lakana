@@ -771,3 +771,63 @@ def test_a_symlink_under_glossary_is_reported_once_in_a_python_project(tmp_path:
     with pytest.raises(ProjectValidationError) as info:
         discover(tmp_path)
     assert _messages(info.value) == ["glossary/link.yaml: symlinks are not allowed under glossary/"]
+
+
+def test_a_nul_in_an_asset_is_a_project_issue_with_its_line(tmp_path: Path) -> None:
+    """A NUL byte is refused, naming the file and the line."""
+    (tmp_path / "assets/silver").mkdir(parents=True)
+    (tmp_path / "assets/silver/a.sql").write_bytes(b"SELECT 1 AS a\n-- x\n-- \x00\n")
+    with pytest.raises(ProjectValidationError) as caught:
+        discover(tmp_path)
+    assert _messages(caught.value) == [
+        "assets/silver/a.sql:3: control character U+0000 on line 3; remove it"
+    ]
+
+
+def test_an_escape_sequence_in_a_comment_is_refused_at_deploy(tmp_path: Path) -> None:
+    """An ANSI escape in a comment is refused with its line."""
+    _write(tmp_path, "assets/silver/a.sql", "SELECT 1 AS a -- \x1b[31mred\n")
+    with pytest.raises(ProjectValidationError) as caught:
+        discover(tmp_path)
+    assert caught.value.issues[0].line == 1
+    assert caught.value.issues[0].message == "control character U+001B on line 1; remove it"
+
+
+@pytest.mark.parametrize("char", ["\x7f", "\x85", "\x9f", "\x0c", "\x01"])
+def test_del_c1_and_other_c0_are_refused(tmp_path: Path, char: str) -> None:
+    """DEL, C1 controls and C0 controls other than tab and LF are refused."""
+    _write(tmp_path, "assets/silver/a.sql", f"SELECT 1 AS a\n-- {char}\n")
+    with pytest.raises(ProjectValidationError) as caught:
+        discover(tmp_path)
+    assert (
+        caught.value.issues[0].message
+        == f"control character U+{ord(char):04X} on line 2; remove it"
+    )
+
+
+def test_crlf_and_tabs_are_accepted_and_a_lone_cr_is_refused(tmp_path: Path) -> None:
+    """CRLF is normalised and tabs pass; a lone CR is refused, never changed."""
+    (tmp_path / "assets/silver").mkdir(parents=True)
+    (tmp_path / "assets/silver/a.sql").write_bytes(b"SELECT\t1 AS a\r\nFROM x\r\n")
+    assert discover(tmp_path).assets[0].text == "SELECT\t1 AS a\nFROM x\n"
+    (tmp_path / "assets/silver/a.sql").write_bytes(b"SELECT 1 AS a\rFROM x\n")
+    with pytest.raises(ProjectValidationError) as caught:
+        discover(tmp_path)
+    assert caught.value.issues[0].message == "control character U+000D on line 1; remove it"
+
+
+def test_printable_unicode_is_accepted(tmp_path: Path) -> None:
+    """Accents, CJK, emoji, a ZWJ, a mid-file BOM and a bidi mark deploy unchanged."""
+    text = "SELECT 'é€日本' AS a -- 👩‍💻 ﻿ ‮\n"
+    _write(tmp_path, "assets/silver/a.sql", text)
+    assert discover(tmp_path).assets[0].text == text
+
+
+def test_one_issue_per_file_names_the_first_character(tmp_path: Path) -> None:
+    """Only the first control character of a file is reported."""
+    _write(tmp_path, "assets/silver/a.sql", "SELECT 1 AS a\n\x01\x02\n\x1b\n")
+    with pytest.raises(ProjectValidationError) as caught:
+        discover(tmp_path)
+    assert [i.message for i in caught.value.issues] == [
+        "control character U+0001 on line 2; remove it"
+    ]

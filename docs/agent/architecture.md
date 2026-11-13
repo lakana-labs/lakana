@@ -294,6 +294,16 @@ an archive a failed deploy leaves is removed by `lakana_core.projects.code_sweep
 deploy is queued or running on its storage root)
 and records the project version, the pointer compare-and-swap and the audit event in one transaction
 (`DeployService.record_deploy`). A rollback skips the fetch and only moves the pointer.
+The same transaction writes the version's source map (`lakana_core.projects.source_map`, M7
+part 3a): one `project_files` row per asset file, keyed by the path's digest, with the table it
+defines and its gate set (`gate_tables`, `gate_raw`, `gate_version`) worked out from the deploy's
+own parse, and the file's text in `project_file_texts`, stored once per digest behind a `RESTRICT`
+foreign key. It is written for a new and a reused version alike, after every `tables` lock, and
+only for a file whose table, path and `normalized_sql` equal the version's manifest entry; a
+reused version's current rows are never replaced. `sweep_project_file_texts`, from the same
+`housekeeping`, deletes texts no row names, in batches taken `FOR UPDATE SKIP LOCKED`. The
+worker writes `* -export-subst` to the bare repository's `info/attributes` before `git archive`,
+so a commit always gives the same text, for the source map and for what runs.
 
 ## The run engine (M5c1)
 

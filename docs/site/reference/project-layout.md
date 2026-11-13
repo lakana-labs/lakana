@@ -14,7 +14,7 @@ asset of the same repository is a DAG edge; anything else is an external input a
 the environment (readable by whoever deploys) or be produced by another repository's current
 deployment.
 
-Refused: symlinks, files over 1 MiB, SQL longer than 100,000 characters (`LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS`), more than 2000 assets, a `.sql` and a `.py` file for the
+Refused: symlinks, files over 1 MiB, control characters other than tab and line feed in an asset file, SQL longer than 100,000 characters (`LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS`), more than 2000 assets, a `.sql` and a `.py` file for the
 same table, `__init__.py` under `assets/`, and paths that collide once case-folded or
 Unicode-normalised (`Events.sql` next to `events.sql`, `model.sql` next to `Model.py`, or two
 spellings of the same accented name) — they would be one table on a case-insensitive

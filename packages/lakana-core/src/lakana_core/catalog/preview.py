@@ -21,10 +21,10 @@ from sqlalchemy.orm import Session
 from sqlglot import exp
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.catalog.identity import live_table
 from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied
 from lakana_core.identifiers import NamespacePath, TableRef, shown
 from lakana_core.models import (
-    LIVE_ENVIRONMENT,
     Environment,
     Namespace,
     QueryRun,
@@ -248,14 +248,11 @@ def submit_preview(
     if p.run_context is not None or p.task_scope is not None:
         raise PermissionDenied(PREVIEW_NOT_FOR_A_TASK)
     found = session.execute(
-        select(Table, Namespace.path, Environment.id)
-        .join(Namespace, Table.namespace_id == Namespace.id)
-        .join(Environment, Namespace.environment_id == Environment.id)
-        .where(
-            Environment.name == ref.environment,
-            LIVE_ENVIRONMENT,
-            Namespace.path == ref.namespace.joined(),
-            Table.name == ref.name,
+        live_table(
+            select(Table, Namespace.path, Environment.id),
+            ref.environment,
+            ref.namespace.joined(),
+            ref.name,
         )
     ).one_or_none()
     if found is None:

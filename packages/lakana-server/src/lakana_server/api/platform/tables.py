@@ -31,6 +31,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
 
+from lakana_core.audit.views import sessions_like
 from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.catalog.descriptions import KEEP, Keep
 from lakana_core.catalog.files_read import FilesReadReport, parse_files_read, split_files_read
@@ -52,6 +53,12 @@ from lakana_core.errors import LakanaError, ValidationError
 from lakana_core.heap import trim_heap
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.projects.asset_model import require_model_kind
+from lakana_core.projects.definition import (
+    TableDefinition,
+    TableDefinitionFile,
+    table_definition,
+    table_definition_file,
+)
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
 from lakana_server.api.platform.schemas import (
     AppendOut,
@@ -74,6 +81,8 @@ from lakana_server.api.platform.schemas import (
     QuerySubmitOut,
     ReplaceOut,
     TableCreate,
+    TableDefinitionFileOut,
+    TableDefinitionOut,
     TableHealthOut,
     TableModelOut,
     TableOut,
@@ -1833,6 +1842,180 @@ def preview_table(
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
     run = submit_preview(session, authorization, principal, ref)
     return QuerySubmitOut(query_id=str(run.id))
+
+
+def _definition_out(d: TableDefinition) -> TableDefinitionOut:
+    """Turn core's location of a table's definition into its REST shape.
+
+    Parameters
+    ----------
+    d
+        The location from `lakana_core.projects.definition.table_definition`.
+
+    Returns
+    -------
+    TableDefinitionOut
+        The same fields, with the project version's id as a string.
+    """
+    return TableDefinitionOut(
+        defined=d.defined,
+        repository=d.repository,
+        path=d.path,
+        commit=d.commit,
+        line=d.line,
+        project_version_id=None if d.project_version_id is None else str(d.project_version_id),
+        deployed_at=d.deployed_at,
+        browse_url=d.browse_url,
+    )
+
+
+def _definition_file_out(f: TableDefinitionFile) -> TableDefinitionFileOut:
+    """Flatten core's nested answer with the file into its REST shape.
+
+    Parameters
+    ----------
+    f
+        The answer from `lakana_core.projects.definition.table_definition_file`.
+
+    Returns
+    -------
+    TableDefinitionFileOut
+        The location's fields, then the file's text or the reason it is not returned.
+    """
+    return TableDefinitionFileOut(
+        **_definition_out(f.definition).model_dump(),
+        content=f.content,
+        bytes=f.bytes,
+        reason=None if f.reason is None else f.reason.value,
+        message=f.message,
+    )
+
+
+@router.get("/{name}/definition", response_model=TableDefinitionOut, responses=errors(403, 404))
+def get_table_definition(
+    env: str,
+    path: str,
+    name: str,
+    principal: PrincipalRef = Depends(get_principal),
+    session: Session = Depends(get_session),
+    authorization: AuthorizationService = Depends(get_grant_authorization),
+) -> TableDefinitionOut:
+    """Tell where the environment's current deployment defines a table.
+
+    Answers the repository, the file's path and line, the deployed commit and project version,
+    and an HTTPS link to the line on the git host when the repository is on one of the five
+    public hosts. The commit is always the one deployed, never the branch head. The request
+    takes no parameter beyond the table's name: the server finds the file from the current
+    deployment, so no path, commit or version is ever read from the caller. Needs `READ_TABLE`
+    on the table; a reader of the table sees the repository's name and link without any right
+    on the environment. A table no current deployment defines answers 200 with `defined: false`
+    and every other field `null`. Answers 403 alike for a table you may not read and one that
+    does not exist, and 404 when the environment does not exist or for a table you may read
+    that is gone.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table or view name.
+    principal
+        The authenticated caller.
+    session
+        The request's database session.
+    authorization
+        The authorization service.
+
+    Returns
+    -------
+    TableDefinitionOut
+        The location, or `defined: false`.
+
+    Raises
+    ------
+    lakana_core.errors.PermissionDenied
+        Mapped to 403: without `READ_TABLE` on the table, also when it does not exist.
+    lakana_core.errors.NotFoundError
+        Mapped to 404: the environment does not exist, or the table is gone.
+    """
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    return _definition_out(table_definition(session, authorization, principal, ref))
+
+
+@router.get(
+    "/{name}/definition/file",
+    response_model=TableDefinitionFileOut,
+    responses=errors(403, 404, 503),
+)
+def get_table_definition_file(
+    env: str,
+    path: str,
+    name: str,
+    request: Request,
+    principal: PrincipalRef = Depends(get_principal),
+    session: Session = Depends(get_session),
+    authorization: AuthorizationService = Depends(get_grant_authorization),
+) -> TableDefinitionFileOut:
+    """Give the file that defines a table, when you may see its text.
+
+    Answers the location as `…/definition` does, with the file's text read from what Lakana
+    recorded at deploy, never from the repository or the git host. The text is shown only to
+    someone who may read the environment (`READ_ENVIRONMENT`) and every table the file uses,
+    the table itself included, with no row filter or column mask applying to them on any of
+    those tables, when no other table the file uses is a view, and when the file reads no file
+    path and uses no connection. Anyone else gets `content: null` with `reason: restricted` and
+    one sentence that names no table and no failed condition. `not_recorded` means the deployed
+    version has no record of the file (deploy a new commit), and `too_large` a file over 1 MiB.
+    Each read of a text is recorded in the audit log as `SOURCE_VIEWED`, once per reader, table
+    and commit within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`, before the text is returned. Needs
+    `READ_TABLE` on the table. Answers 403 alike for a table you may not read and one that does
+    not exist, 404 when the environment does not exist or for a table you may read that is gone,
+    and 503 with `Retry-After` when the audit row could not be written; no text is returned then.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table or view name.
+    request
+        The current request, for `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`.
+    principal
+        The authenticated caller.
+    session
+        The request's database session.
+    authorization
+        The authorization service.
+
+    Returns
+    -------
+    TableDefinitionFileOut
+        The location with the text, or with the reason it is not returned.
+
+    Raises
+    ------
+    lakana_core.errors.PermissionDenied
+        Mapped to 403: without `READ_TABLE` on the table, also when it does not exist.
+    lakana_core.errors.NotFoundError
+        Mapped to 404: the environment does not exist, or the table is gone.
+    lakana_core.errors.AuditUnavailableError
+        Mapped to 503 with `Retry-After`: the `SOURCE_VIEWED` row could not be written; no text
+        is returned.
+    """
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    answer = table_definition_file(
+        session,
+        authorization,
+        principal,
+        ref,
+        session_factory=sessions_like(session),
+        window_minutes=request.app.state.settings.view_audit.window_minutes,
+    )
+    return _definition_file_out(answer)
 
 
 @router.delete("/{name}", status_code=204, responses=errors(403, 404))
