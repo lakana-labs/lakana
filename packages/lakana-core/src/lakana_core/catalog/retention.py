@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal, TypeVar
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import ColumnElement, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.tombstones import drop_row
@@ -607,6 +607,33 @@ def lock_row(session: Session, model: type[_M], row_id: uuid.UUID) -> _M | None:
     return session.scalars(
         select(model).where(model.id == row_id).execution_options(populate_existing=True)
     ).one()
+
+
+def lock_tables_in_id_order(session: Session, *criteria: ColumnElement[bool]) -> list[uuid.UUID]:
+    """Lock every table row that matches, in id order, before a delete of several of them.
+
+    ``SELECT … ORDER BY id FOR UPDATE``: Postgres takes the locks in the order it returns the
+    rows. Read recording (`lakana_core.catalog.health.record_table_reads`) locks the tables a
+    query read in id order too, so a delete of several tables and the completion of a query that
+    read two of them wait for each other instead of deadlocking (#558). Taken after the
+    environment's row lock and before any location record's. SQLite has no row locks; its write
+    lock orders the two there.
+
+    Parameters
+    ----------
+    session
+        Database session; the locks last until the caller commits or rolls back.
+    *criteria
+        What selects the tables, as for `Select.where`.
+
+    Returns
+    -------
+    list of uuid.UUID
+        The ids of the locked tables, in the order they were locked.
+    """
+    return list(
+        session.scalars(select(Table.id).where(*criteria).order_by(Table.id).with_for_update())
+    )
 
 
 def write_running(session: Session, row: Table, ref: TableRef, environment_id: uuid.UUID) -> bool:

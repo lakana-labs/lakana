@@ -2855,7 +2855,13 @@ listing runs after the claims step, drops its table too) or sees the deletion. A
 after the deletion (a create that found the environment earlier) is never published; the sweep
 abandons it once its holder ended or its grace period passed. `undrop_table` takes the same share
 lock before the tombstone's lock; `create_external_table` checks `deleted_at` on the row it locks.
-The lock order is always environment row, then table row, then location record. Pins:
+The lock order is always environment row, then table row, then location record. A delete of
+several tables (the deletion of an environment, and the last purge, whose cascade takes the
+artifacts left) locks all of their rows first, `ORDER BY id FOR UPDATE`
+(`retention.lock_tables_in_id_order`), the order read recording locks the tables a query read
+(`record_table_reads`), so the two wait instead of deadlocking (#558;
+`test_table_delete_lock_order_postgres_integration.py`). An expiry drops one table per
+transaction and needs no such order. Pins:
 `test_environment_deletion.py` (`test_a_create_whose_claim_came_before_the_deletion_is_not_published`,
 `test_a_claim_made_after_the_deletion_is_never_published`,
 `test_an_undrop_while_the_environment_is_deleted_is_refused`).
