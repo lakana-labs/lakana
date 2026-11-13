@@ -23,8 +23,7 @@ from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.grants.admin import (
     ADMIN_ONLY_ACTIONS,
     authorize_admin_only,
-    holds_instance_admin,
-    may_see_grants,
+    credential_acts_as_admin,
 )
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
@@ -551,13 +550,11 @@ class GrantService:
         -------
         bool
             Whether the caller holds the `ADMIN` role on the instance
-            (`lakana_core.grants.admin.holds_instance_admin`) and its credential passes the
-            administrator routes' own check (`may_see_grants`, `authorize_admin_only` asked as
-            a yes or no); a personal token and a browser session do, a task or CI token does not.
+            and its credential passes the administrator routes' own check
+            (`lakana_core.grants.admin.credential_acts_as_admin`, which asks the role once); a
+            personal token and a browser session do, a task or CI token does not.
         """
-        return holds_instance_admin(self._session, p.id) and may_see_grants(
-            self._session, self._authz, p
-        )
+        return credential_acts_as_admin(self._session, self._authz, p)
 
     def has_any_grant(self, p: PrincipalRef) -> bool:
         """Say whether the caller has any right at all, so the interface can tell a new person.

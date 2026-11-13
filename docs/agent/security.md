@@ -5592,7 +5592,7 @@ already allows.
   it only describes the caller back to itself (name, type, task-token scope, and its own
   access flags `admin`, `has_access` and `may_deploy`, each about the caller only and asked with
   `permits`; `admin` and `may_deploy` follow the credential's scope, so a task or CI token is
-  never `admin` (`GrantService.is_admin`: `holds_instance_admin` and `may_see_grants`, i.e. `permits(MANAGE_GRANT)`
+  never `admin` (`GrantService.is_admin`: `grants.admin.credential_acts_as_admin`, i.e. `permits(MANAGE_GRANT)` and `holds_instance_admin`
   on the instance, #542)), which reveals nothing a 200-versus-401 probe of any other route doesn't. `lakana login` uses it
   to confirm a credential before saving it.
 - `GET /api/v1/info` likewise requires authentication, performs no authorization check and
