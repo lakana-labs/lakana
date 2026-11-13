@@ -1,7 +1,7 @@
 # Upgrade policy
 
 This page says what to expect when you move to a newer Lakana release, and what every upgrade
-asks of you. It describes what is true today, before the public beta. For what the maintainer
+asks of you. It describes what is true today, before v1.0.0. For what the maintainer
 promises and does not promise, see [Support](support.md).
 
 ## Versions

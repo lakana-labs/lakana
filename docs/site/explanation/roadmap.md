@@ -93,8 +93,7 @@ output blocks in the documentation are checked (#54). The next element was the m
 until at least October 2027 (#96 is closed). A few SQL forms behave differently; see the
 [notes for 0.19.0](upgrades.md). The query sandbox was hardened for DuckDB 2. A store
 certificate that cannot be verified now fails at once with a message that says why (#277). The
-next elements were M7b, task isolation (#38), then M6 and the public beta (M7c,
-#33).
+next elements were M7b, task isolation (#38), then M6 and the web interface.
 
 0.20.0 (2026-10-23) completed M7b, task isolation (#38 is closed). Each Python task runs in a
 container of its own, started by a launcher that alone holds the Docker socket. An environment
@@ -103,8 +102,8 @@ Compose bundle uses the docker runner by default, and a protected environment ru
 only in containers. See [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md)
 and the [notes for 0.20.0](upgrades.md#notes-for-0200). The next elements are the open
 dependency updates and a batch of small issues, then M6 ingestion, M8d data modelling, M7 web
-interface and sign-in, a small private test round on a hosted instance, M7c (the public beta,
-#33), M8, M8b, M8c, M9, M10 and v1.0.0.
+interface and sign-in, M8, M8b, M8c, M9, M10 and the release candidates (#33) that lead to
+v1.0.0.
 
 M6, ingestion (#1), shipped with 0.21.0 (see the
 [notes for 0.21.0](upgrades.md#notes-for-0210)). An administrator registers
@@ -117,19 +116,20 @@ GCS, Azure and HTTPS (#26), PostgreSQL, SQLite, MariaDB and MySQL (#27) and REST
 OAuth2 (#28); assets replace, append or merge. `lakana load` loads a local file into bronze
 (#29), and `lakana init --template` starts a project from a tested asset for files, SQL or REST,
 with a recipe for SQL Server (#56), or from a whole star schema, `--template medallion` (#254).
-The next elements are M8d data modelling, M7 web interface and sign-in, a small private test round on a hosted instance, M7c (the public beta, #33), M8,
-M8b, M8c, M9, M10 and v1.0.0.
+The next elements are M8d data modelling, M7 web interface and sign-in, M8, M8b, M8c, M9, M10
+and the release candidates (#33) that lead to v1.0.0.
 
 ## To v1.0.0
 
-The order up to the public beta is: M6 ingestion (built), M8d data modelling, M7 web interface and
-sign-in, a small private test round on a hosted instance, and then M7c, the public beta. Dates
-follow the plan. The reasons: the first audience, teams without a senior data engineer, needs
+The order up to v1.0.0 is: M6 ingestion (built), M8d data modelling, M7 web interface and
+sign-in, M8, M8b, M8c, M9, M10, and then the release candidates. There is no public beta: Lakana
+has no active users yet, so a beta would add nothing. Development stays on 0.x until v1.0.0.
+Dates follow the plan. The reasons: the first audience, teams without a senior data engineer, needs
 the web interface and real sign-in from the start; the strict data-model rules (a declared kind,
 grain, key and references, with generated checks, #250) should exist before anyone builds projects
 on Lakana; and the interface then shows model metadata from its first version. Ingestion (M6)
 came first, after task isolation (M7b): a new team's first job is getting its data in, so the
-beta ships with the ingestion helpers and named connections.
+the first release ships with the ingestion helpers and named connections.
 
 1. **M5d, triggers, data quality checks and notifications (built).** Runs start by hand, on a schedule
    or through an API call. A check, a SQL file that must return no rows, can block, keep or
@@ -163,7 +163,7 @@ beta ships with the ingestion helpers and named connections.
    directory, a PostgreSQL database and a REST API outside the stack, and every helper has a
    tested recipe.
 5. **M8d, data modelling (epic #249).** Decided on 2026-10-20; on 2026-10-24 it moved before the
-    public beta, after M6 and before M7. Opinionated support for medallion layers (bronze, silver,
+    web interface, after M6 and before M7. Opinionated support for medallion layers (bronze, silver,
     gold) and Kimball-lite star schemas, with optional wide tables. The parts: model metadata in the
     asset header (#250); translated labels and descriptions with a main language (#251); layer
     rules, opt-in and enforced at deploy once declared (#252); the write mode `history` (SCD type 2)
@@ -180,35 +180,31 @@ beta ships with the ingestion helpers and named connections.
    loading a file, and a first-run tour. No file browser, dashboards or notebooks. The Compose
    bundle can set up a TLS proxy, because passkeys need HTTPS. Done when a new user can sign in and answer a question
    without the CLI. A second security review is due when the interface and sign-in arrive. M7 is designed first (#66): a spec and its slices come before any screen, built around what the
-   first audience needs, and the private test round checks it before the public beta. After
-   M7, a small private test round on a hosted instance comes before the beta.
-7. **M7c, public beta.** The repository is open and the packages are on PyPI as a pre-beta from
-   0.12.0; the beta is the 0.x release that says it is ready to try, planned for about early
-   January 2027. The web interface takes the time it needs, so this date is orientation.
-   The beta includes the web interface (M7) with sign-in by OIDC, or by an invite link and a
-   passkey for teams without an identity provider, and the data-modelling features of M8d, after a
-   small private test round on a hosted instance. The CLI, the SDK and the REST API stay. Tokens
-   remain for the CLI, the SDK and automation. The API may still change. Done when a stranger can
-   install it from PyPI and follow the documentation to a working instance, a second person can
-   sign in through the interface, a new team can load data from a file, a SQL database and a
-   JSON API with the M6 helpers, and model it with the M8d template.
-8. **M8, ML.** Experiment tracking, the model registry, and the offline feature store, all
+   first audience needs. After M7 comes the rest of the plan; the release candidates test the
+   interface with real teams before v1.0.0. The web interface is under way; a first preview that
+   signs you in exists and is off by default.
+7. **M8, ML.** Experiment tracking, the model registry, and the offline feature store, all
     queryable and tied to commits. The registry is the artifact store of M5c2b. It adds named
     pointers such as `production`, pinned versions that a consumer can name, and metrics on a
     version. Done when a model can be traced to the
     exact code, data and parameters that produced it.
-9. **M8b, agents.** An MCP server so AI agents can operate Lakana under the same authorization
+8. **M8b, agents.** An MCP server so AI agents can operate Lakana under the same authorization
     and audit as a person. The server exposes the graph queries of M8d (lineage, impact and
     join paths) as tools. Done when an agent can run a deploy and a query and both appear in
     the audit log under its own identity.
-10. **M8c, BI tools.** A read-only governed SQL endpoint over the PostgreSQL wire protocol, with
+9. **M8c, BI tools.** A read-only governed SQL endpoint over the PostgreSQL wire protocol, with
     a token as the password. A service account is refused on a table that has a row filter or
     column mask; a dashboard on restricted data reads a table built for its audience. Done when
     each tool on the tested list connects and sees only what its identity may.
-11. **M9, performance and multi-host workers.** Measured query performance, and workers that
+10. **M9, performance and multi-host workers.** Measured query performance, and workers that
     run on more than one host. Done when adding a host increases throughput as documented.
-12. **M10, hardening and v1.0.0.** Security review, upgrade paths, documentation pass and the
-    API freeze. Done when the release criteria are met and v1.0.0 is tagged.
+11. **M10, hardening and v1.0.0.** Security review, upgrade paths, documentation pass and the
+    API freeze. Done when the release criteria are met and the first release candidate is tagged.
+12. **Release candidates, then v1.0.0.** The last step before v1.0.0: 1.0.0-rcN, published as
+    pre-releases on PyPI and tested on real work by two or three friendly teams. It checks ease
+    of use and the documentation before the API, the CLI and the project-file formats are frozen.
+    It is testing only, with no scope decisions; findings are fixed in the next release candidate.
+    Done when a release candidate has no open findings and v1.0.0 is tagged.
 
 ## After v1.0.0
 
