@@ -26,8 +26,14 @@ const BINARY_TYPE =
 /** The string types, whose cut cells keep a prefix: `{"cut": true, "text": <prefix>}`. */
 const STRING_TYPE = /^(?:string|large_string|string_view|utf8|large_utf8|varchar|text)$/i;
 
-/** The types whose cells are JSON objects of their own, so `{"cut": true}` may be a value. */
-const OBJECT_TYPE = /^(?:struct|map)</i;
+/** A union's cell is its member's value, which may be any object, `{"cut": true}` included. */
+const UNION_TYPE = /^(?:sparse_|dense_)?union</i;
+
+/**
+ * The one struct type whose value can be `{"cut": true}`: a struct of one boolean field named
+ * `cut`. Any other struct, and every map (an array), cannot hold it.
+ */
+const ONLY_CUT_FIELD = /^struct<cut: bool>$/i;
 
 /**
  * Whether a value is a plain object with exactly these keys.
@@ -46,8 +52,8 @@ function hasKeys(value: unknown, keys: readonly string[]): value is Record<strin
 
 /**
  * The server's cut marker, read only where it cannot be a value: `{"cut": true, "text"}` in a
- * string column, and `{"cut": true}` in a column whose cells are not objects, or in any column of
- * a row the page lists as cut.
+ * string column, and `{"cut": true}` in any column but a union or a `struct<cut: bool>`, and in
+ * every column of a row the page lists as cut.
  *
  * @param value - The cell.
  * @param columnType - The column's type name.
@@ -63,7 +69,8 @@ function cutText(value: unknown, columnType: string, rowCut: boolean): string | 
       : null;
   }
   if (hasKeys(value, ["cut"]) && value["cut"] === true) {
-    return rowCut || !OBJECT_TYPE.test(columnType) ? "" : null;
+    const mayBeValue = UNION_TYPE.test(columnType) || ONLY_CUT_FIELD.test(columnType);
+    return rowCut || !mayBeValue ? "" : null;
   }
   return null;
 }
@@ -72,7 +79,7 @@ function cutText(value: unknown, columnType: string, rowCut: boolean): string | 
  * Writes one cell as text. A marker counts only with its exact keys and only in the columns
  * where the server writes it, so a real struct with fields named `binary` or `cut` reads as JSON.
  *
- * @param value - The cell as the JSON page has it.
+ * @param value - The cell as the JSON page has it; undefined for a cell the row does not have.
  * @param columnType - The column's type name.
  * @param rowCut - Whether the page lists the cell's row in `row_cut`.
  * @param t - The translation function.
@@ -84,6 +91,10 @@ export function previewValue(
   rowCut: boolean,
   t: TFunction,
 ): PreviewText {
+  if (value === undefined && rowCut) {
+    // The page budget left the rest of a cut row out.
+    return { text: "", muted: false, cut: true };
+  }
   if (value === null || value === undefined) {
     return { text: t("table.preview.null"), muted: true, cut: false };
   }

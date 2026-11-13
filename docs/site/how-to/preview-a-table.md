@@ -99,11 +99,13 @@ tabs never start one.
 - **Masked columns.** The line **Masked for you** names the columns a mask replaced for you, such
   as "Masked for you: email". A column that a view takes from another table is named with that
   table, such as "column email of gold.customers". It never shows the rule or the replacement.
-- **While it waits.** The tab shows **Queued** or **Running**, and after a second "Waiting for a
-  worker…" while no worker has taken the query yet. **Refresh** runs the preview again; pressed
+- **While it waits.** The line says each step: checking that you may run queries, queuing the
+  preview, **Queued** (after a second "Waiting for a worker…" while no worker has taken the
+  query yet), **Running**, and reading the rows. **Refresh** runs the preview again; pressed
   while one waits, it cancels that one first.
-- **Leaving the tab cancels it.** When you go to another tab or page while the preview is queued
-  or running, the interface cancels the query, so no preview is left waiting for a worker. A
+- **Leaving the tab cancels it.** When you go to another tab or page, reload the page or close the
+  browser tab while the preview is queued or running, the interface cancels the query, so no
+  preview is left waiting for a worker. A
   preview that has finished is not touched.
 - **The rows.** Each value is cut to one line. Move to a cell with Tab and the arrow keys, or click
   it, and the **Value** panel below the rows shows it whole. The rows are one stop for Tab: Tab
@@ -111,7 +113,7 @@ tabs never start one.
   character you could not see, such as U+202E (right-to-left override), shows that character as a
   small mark with its code, as in [Characters you could not see](see-where-a-table-is-defined.md#in-the-web-interface).
   Binary data reads as its size, such as "binary, 12 bytes", and a value too large to send is
-  marked "(cut)".
+  marked "(cut)", with a note over the rows.
 - **It counts as a read and a query.** A preview is a query you ran: it is recorded in the audit
   log like any preview, and it counts as a read of the table in **Last read** on Overview.
 - **A viewer sees one line.** Without the right to run queries in the environment, the tab says so

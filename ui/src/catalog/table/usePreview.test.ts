@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import i18next from "i18next";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
@@ -278,6 +279,57 @@ describe("usePreview", () => {
       expect(second.result.current).toBe(shown);
       expect(sentTo(read, "GET", `${QUERIES_PATH}/${QUERY_ID}/result`)).toHaveLength(1);
     }
+  });
+
+  it("cancels a waiting run when the page goes away, with a request that outlives the page", async () => {
+    const server = serve(["QUEUED"]);
+    const { unmount } = preview();
+    await settle();
+
+    window.dispatchEvent(new Event("pagehide"));
+    await settle();
+    unmount();
+    window.dispatchEvent(new Event("pagehide"));
+    await settle();
+
+    const cancels = server.sent.filter((request) => request.path.endsWith("/cancel"));
+    expect(
+      cancels.map((request) => ({
+        path: request.path,
+        keepalive: request.keepalive,
+        background: request.headers["x-lakana-background"],
+      })),
+    ).toEqual([{ path: `${QUERIES_PATH}/${QUERY_ID}/cancel`, keepalive: true, background: "1" }]);
+  });
+
+  it("does not cancel a finished run when the page goes away", async () => {
+    const server = serve(["SUCCEEDED"]);
+    preview();
+    await settle();
+
+    window.dispatchEvent(new Event("pagehide"));
+    await settle();
+
+    expect(sentTo(server, "POST", QUERIES_PATH)).toEqual([]);
+  });
+
+  it("keeps the run when the language changes", async () => {
+    const server = serve(["QUEUED"]);
+    preview();
+    await settle();
+
+    try {
+      await act(async () => {
+        await i18next.changeLanguage("en-GB");
+      });
+      await settle();
+    } finally {
+      await act(async () => {
+        await i18next.changeLanguage("en");
+      });
+    }
+
+    expect(sentTo(server, "POST", "/")).toEqual([`${TABLE_PATH}/preview`]);
   });
 
   it("stops polling after the tab is left", async () => {

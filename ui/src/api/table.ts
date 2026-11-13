@@ -746,10 +746,17 @@ export function getResultPage(environment: string, id: string): Promise<ResultPa
  *
  * @param environment - The environment's name.
  * @param id - The query's id.
+ * @param options - What the request needs besides the cancel.
+ * @param options.keepalive - Lets the request finish after the page is gone (on `pagehide`).
  * @throws {ApiError} for a refusal; 409 for a run that has already ended.
  */
-export async function cancelQuery(environment: string, id: string): Promise<void> {
+export async function cancelQuery(
+  environment: string,
+  id: string,
+  options: { readonly keepalive?: boolean } = {},
+): Promise<void> {
   await api.request<unknown>("POST", queryPath(environment, id, "/cancel"), undefined, {
     background: true,
+    ...options,
   });
 }

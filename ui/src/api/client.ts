@@ -39,6 +39,11 @@ export interface RequestOptions {
    * so it never keeps an idle session alive, and it never asks for a passkey touch.
    */
   readonly background?: boolean;
+  /**
+   * Lets the request finish after the page is gone (a reload or a closed tab), such as a cancel
+   * sent on `pagehide`.
+   */
+  readonly keepalive?: boolean;
 }
 
 /** A refusal or failure the server answered, with its cause and the next step. */
@@ -266,6 +271,7 @@ async function exchangeWith(
       credentials: "same-origin",
       ...(exchange.body === undefined ? {} : { body: exchange.body }),
       ...(exchange.cache === undefined ? {} : { cache: exchange.cache }),
+      ...(options.keepalive === true ? { keepalive: true } : {}),
     });
   } catch {
     throw new ApiError(0, "NetworkError", "The server could not be reached.");

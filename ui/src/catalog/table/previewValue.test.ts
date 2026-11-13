@@ -65,6 +65,40 @@ describe("previewValue", () => {
     expect(previewValue({ cut: true, text: "a" }, "map<string, string>", false, t).cut).toBe(false);
   });
 
+  it("reads a struct or map cell the server cut as cut", () => {
+    const cut = { text: "", muted: false, cut: true };
+    expect(previewValue({ cut: true }, "map<string, int32>", false, t)).toEqual(cut);
+    expect(
+      previewValue({ cut: true }, "struct<a: int32, b: list<item: string>>", false, t),
+    ).toEqual(cut);
+    // Only a struct of exactly one boolean field named cut can hold this value.
+    expect(previewValue({ cut: true }, "struct<cut: bool>", false, t).cut).toBe(false);
+  });
+
+  it("reads a union's value as JSON, unless its row was cut", () => {
+    for (const type of [
+      "sparse_union<a: int32=0, b: struct<cut: bool>=1>",
+      "dense_union<a: int32=0, b: struct<cut: bool>=1>",
+      "union<a: int32=0>",
+    ]) {
+      expect(previewValue({ cut: true }, type, false, t).text, type).toBe('{"cut":true}');
+      expect(previewValue({ cut: true }, type, true, t).cut, type).toBe(true);
+    }
+  });
+
+  it("marks a cell the server left out of a cut row as cut, not null", () => {
+    expect(previewValue(undefined, "int64", true, t)).toEqual({
+      text: "",
+      muted: false,
+      cut: true,
+    });
+    expect(previewValue(undefined, "int64", false, t)).toEqual({
+      text: "null",
+      muted: true,
+      cut: false,
+    });
+  });
+
   it("counts a marker only with its exact keys and values", () => {
     expect(previewValue({ cut: false }, "int64", false, t).text).toBe('{"cut":false}');
     expect(previewValue({ cut: true, text: 5 }, "string", false, t).text).toBe(

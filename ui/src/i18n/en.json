@@ -598,6 +598,9 @@
       "notAllowed": "Preview runs a query as you, which needs the right to run queries in {{environment}}. Ask an administrator for the Analyst role there.",
       "artifact": "An artifact holds files, not rows, so it has no preview. Download its files with lakana artifact download.",
       "starting": "Starting the preview…",
+      "checking": "Checking that you may run queries…",
+      "queuing": "Queuing the preview…",
+      "reading": "Reading the rows…",
       "waiting": "Waiting for a worker…",
       "status": {
         "QUEUED": "Queued",

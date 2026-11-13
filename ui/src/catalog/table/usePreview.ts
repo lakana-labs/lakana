@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -84,6 +84,11 @@ export function usePreview(
   kind: TableOut["kind"],
 ): PreviewState & { readonly refresh: () => void } {
   const { t } = useTranslation();
+  // The run reads the words through a ref, so a change of language never cancels and reruns it.
+  const words = useRef(t);
+  useEffect(() => {
+    words.current = t;
+  }, [t]);
   const me = useMe();
   const [state, setState] = useState<PreviewState>(kind === "ARTIFACT" ? ARTIFACT : CHECKING);
   const [round, setRound] = useState(0);
@@ -106,7 +111,7 @@ export function usePreview(
       show({ phase: "failed", status: null, page: null, error });
     };
     const refused = (error: unknown): void => {
-      fail(problemText(t, error));
+      fail(problemText(words.current, error));
     };
     const later = (ms: number, step: () => void): void => {
       timer = setTimeout(step, ms);
@@ -128,7 +133,7 @@ export function usePreview(
               read(id, retries + 1);
             });
           } else {
-            fail(t("table.preview.busy"));
+            fail(words.current("table.preview.busy"));
           }
         },
       );
@@ -156,7 +161,7 @@ export function usePreview(
             phase: "failed",
             status: answer.status,
             page: null,
-            error: answer.error_message ?? t("table.preview.failed"),
+            error: answer.error_message ?? words.current("table.preview.failed"),
           });
         }
       }, refused);
@@ -188,14 +193,25 @@ export function usePreview(
       })
       .catch(refused);
 
+    // A reload or a closed browser tab runs no cleanup: cancel with a request that outlives the
+    // page, so the run does not wait for a worker until the server's timeout.
+    const leave = (): void => {
+      if (runId !== null && active) {
+        active = false;
+        cancelQuery(environment, runId, { keepalive: true }).catch(ignore);
+      }
+    };
+    window.addEventListener("pagehide", leave);
+
     return () => {
       alive = false;
       clearTimeout(timer);
+      window.removeEventListener("pagehide", leave);
       if (runId !== null && active) {
         cancelQuery(environment, runId).catch(ignore);
       }
     };
-  }, [environment, namespace, name, kind, me.name, round, t]);
+  }, [environment, namespace, name, kind, me.name, round]);
 
   const refresh = useCallback(() => {
     setState(CHECKING);

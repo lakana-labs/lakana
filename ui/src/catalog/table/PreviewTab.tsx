@@ -24,18 +24,22 @@ const PREVIEW_ROWS = 100;
 
 /** Properties of {@link Waiting}. */
 interface WaitingProps {
+  /** Whether the right to run queries is still being asked for, before any run exists. */
+  readonly checking: boolean;
   /** The run's state; null before it is known. */
   readonly status: QueryRunStatus | null;
 }
 
 /**
- * The words while a preview waits: its state with its glyph, and after a second the reason.
+ * The words while a preview waits, one line per step: asking for the right, queuing, queued
+ * (after a second, waiting for a worker) or running with its glyph, and reading the rows.
  *
- * @param props - The run's state.
+ * @param props - The step and the run's state.
+ * @param props.checking - Whether the right to run queries is still being asked for.
  * @param props.status - The run's state; null before it is known.
  * @returns The words.
  */
-function Waiting({ status }: WaitingProps): JSX.Element {
+function Waiting({ checking, status }: WaitingProps): JSX.Element {
   const { t } = useTranslation();
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -46,12 +50,21 @@ function Waiting({ status }: WaitingProps): JSX.Element {
       clearTimeout(timer);
     };
   }, []);
-  const shown = status === "RUNNING" ? "RUNNING" : "QUEUED";
+  if (checking) {
+    return <>{t("table.preview.checking")}</>;
+  }
+  if (status === null) {
+    return <>{t("table.preview.queuing")}</>;
+  }
+  if (status !== "QUEUED" && status !== "RUNNING") {
+    // The run has finished: its page is being read, or read again while the server is busy.
+    return <>{t("table.preview.reading")}</>;
+  }
   return (
     <span className="preview-waiting">
-      <StatusGlyph kind={statusGlyph[shown]} />
-      <span>{t(`table.preview.status.${shown}`)}</span>
-      {slow && shown === "QUEUED" && <span>{t("table.preview.waiting")}</span>}
+      <StatusGlyph kind={statusGlyph[status]} />
+      <span>{t(`table.preview.status.${status}`)}</span>
+      {slow && status === "QUEUED" && <span>{t("table.preview.waiting")}</span>}
     </span>
   );
 }
@@ -139,10 +152,31 @@ function CellText({ cell }: CellTextProps): JSX.Element {
   );
 }
 
+/**
+ * Every cell of a page as text, one entry per column: a cell the page budget left out of a cut
+ * row reads as cut.
+ *
+ * @param page - The page.
+ * @param t - The translation function.
+ * @returns The rows of cells.
+ */
+function pageCells(
+  page: ResultPageOut,
+  t: ReturnType<typeof useTranslation>["t"],
+): PreviewText[][] {
+  return page.rows.map((row, index) =>
+    page.columns.map((column, at) =>
+      previewValue(row[at], column.type, page.row_cut.includes(index), t),
+    ),
+  );
+}
+
 /** Properties of {@link PreviewGrid}. */
 interface PreviewGridProps {
   /** The page. */
   readonly page: ResultPageOut;
+  /** The page's cells as text, from {@link pageCells}. */
+  readonly cells: readonly (readonly PreviewText[])[];
   /** The table's name. */
   readonly name: string;
 }
@@ -151,21 +185,17 @@ interface PreviewGridProps {
  * The rows as a grid with one tab stop and the arrow keys inside, and the Value panel that shows
  * the focused or clicked cell whole.
  *
- * @param props - The page and the table's name.
+ * @param props - The page, its cells and the table's name.
  * @param props.page - The page.
+ * @param props.cells - The page's cells as text.
  * @param props.name - The table's name.
  * @returns The grid and the panel.
  */
-function PreviewGrid({ page, name }: PreviewGridProps): JSX.Element {
+function PreviewGrid({ page, cells, name }: PreviewGridProps): JSX.Element {
   const { t } = useTranslation();
   const region = useRef<HTMLDivElement>(null);
   const [chosen, setChosen] = useState<{ readonly row: number; readonly column: number } | null>(
     null,
-  );
-  const cells = page.rows.map((row, index) =>
-    page.columns.map((column, at) =>
-      previewValue(row[at] ?? null, column.type, page.row_cut.includes(index), t),
-    ),
   );
   useEffect(() => {
     const element = region.current;
@@ -273,11 +303,17 @@ export function PreviewTab(): JSX.Element {
   }
   const busy = phase === "checking" || phase === "waiting";
   const shown = phase === "done" ? page : null;
+  const cells = shown === null ? [] : pageCells(shown, t);
+  const anyCut =
+    shown !== null &&
+    (shown.row_cut.length > 0 ||
+      shown.columns_cut > 0 ||
+      cells.some((row) => row.some((cell) => cell.cut)));
   return (
     <div className="preview">
       <div className="preview-bar">
         <p role="status" className="preview-line">
-          {busy && <Waiting status={status} />}
+          {busy && <Waiting checking={phase === "checking"} status={status} />}
           {shown !== null && summary(shown, t)}
         </p>
         <button type="button" className="button" onClick={preview.refresh}>
@@ -294,13 +330,11 @@ export function PreviewTab(): JSX.Element {
               own={`${ref.namespace}.${ref.name}`}
             />
           )}
-          {(shown.row_cut.length > 0 || shown.columns_cut > 0) && (
-            <p className="second">{t("table.preview.cutNote")}</p>
-          )}
+          {anyCut && <p className="second">{t("table.preview.cutNote")}</p>}
           {shown.row_count === 0 ? (
             <p className="empty">{t("table.preview.empty")}</p>
           ) : (
-            <PreviewGrid page={shown} name={ref.name} />
+            <PreviewGrid page={shown} cells={cells} name={ref.name} />
           )}
         </>
       )}

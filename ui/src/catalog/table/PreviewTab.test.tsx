@@ -70,6 +70,48 @@ function rowText(table: HTMLElement, index: number): (string | null)[] {
   return Array.from(row.querySelectorAll("td, th"), (cell) => cell.textContent);
 }
 
+/** A fake server's answer: a status and a JSON body. */
+interface Reply {
+  /** The status. */
+  readonly status: number;
+  /** The body. */
+  readonly body: unknown;
+}
+
+/** Lets every answer the fake server gave reach the page, without moving the clock. */
+async function settle(): Promise<void> {
+  await act(async () => {
+    for (let round = 0; round < 20; round += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  });
+}
+
+/**
+ * Lets answers and modules loaded on demand arrive until a condition holds, for at most 5 s of
+ * real time; the fake clock does not move.
+ *
+ * @param done - The condition.
+ */
+async function settleUntil(done: () => boolean): Promise<void> {
+  const until = Date.now() + 5_000;
+  while (!done() && Date.now() < until) {
+    await settle();
+  }
+}
+
+/**
+ * Moves the clock on, then lets the answers arrive.
+ *
+ * @param ms - The milliseconds.
+ */
+async function advance(ms: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+  await settle();
+}
+
 describe("PreviewTab", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -219,20 +261,68 @@ describe("PreviewTab", () => {
   });
 
   it("waits with words after a second", async () => {
-    // Testing Library waits for a timer of 0 ms after each query, so the clock also runs on.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     renderShell(PREVIEW, {
       routes: { [STATUS_ROUTE]: { status: 200, body: queryStatus("QUEUED") } },
     });
+    await settleUntil(() => screen.queryByText("Queued") !== null);
+    expect(screen.getByText("Queued")).toBeVisible();
 
-    expect(await screen.findByText("Queued")).toBeVisible();
+    await advance(999);
     expect(screen.queryByText("Waiting for a worker…")).not.toBeInTheDocument();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-
+    await advance(1);
     expect(screen.getByText("Waiting for a worker…")).toBeVisible();
+  });
+
+  it("says each step before the rows in its own words", async () => {
+    const gates = new Map<string, () => void>();
+    /**
+     * An answer that arrives only once its gate is opened.
+     *
+     * @param name - The gate.
+     * @param reply - The answer.
+     * @returns The answer, once the gate is opened.
+     */
+    const gated = (name: string, reply: Reply): Promise<Reply> =>
+      new Promise((resolve) => {
+        gates.set(name, () => {
+          resolve(reply);
+        });
+      });
+    renderShell(PREVIEW, {
+      routes: {
+        // The table's own permissions answer at once; the environment's wait for the gate.
+        "GET /api/v1/principals/admin/permissions": (request) => {
+          const reply = { status: 200, body: permissions("admin", ["READ_TABLE", "SUBMIT_QUERY"]) };
+          return request.path.includes("table=") ? reply : gated("rights", reply);
+        },
+        [`POST ${TABLE_PATH}/preview`]: () =>
+          gated("queue", {
+            status: 202,
+            body: { query_id: QUERY_ID },
+          }),
+        [RESULT_ROUTE]: () => gated("read", { status: 200, body: result() }),
+      },
+    });
+    const line = async (words: string): Promise<void> => {
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent(new RegExp(`^${words}$`));
+      });
+    };
+
+    await waitFor(() => {
+      expect(gates.has("rights")).toBe(true);
+    });
+    await line("Checking that you may run queries…");
+    gates.get("rights")?.();
+    await waitFor(() => {
+      expect(gates.has("queue")).toBe(true);
+    });
+    await line("Queuing the preview…");
+    gates.get("queue")?.();
+    await line("Reading the rows…");
+    gates.get("read")?.();
+    await line("2 rows · read as you · 0.8 s");
   });
 
   it("says a running preview is running", async () => {
@@ -355,6 +445,37 @@ describe("PreviewTab", () => {
     expect(rowText(table, 1)).toEqual(["xU+202Ey"]);
     expect(within(table).getAllByRole("columnheader")[0]).toHaveTextContent("nU+202Eote");
     expect(RAW.test(table.textContent)).toBe(false);
+  });
+
+  it("marks the cells the server left out of a cut row as cut", async () => {
+    renderShell(PREVIEW, {
+      routes: {
+        [RESULT_ROUTE]: {
+          status: 200,
+          body: result({ rows: [["1", "****"]], row_cut: [0], columns_cut: 3 }),
+        },
+      },
+    });
+    const table = await grid();
+
+    expect(rowText(table, 1)).toEqual(["1", "****", "… (cut)", "… (cut)", "… (cut)"]);
+  });
+
+  it("marks a struct cell the server cut, and says so", async () => {
+    renderShell(PREVIEW, {
+      routes: {
+        [RESULT_ROUTE]: {
+          status: 200,
+          body: result({ rows: [["1", "****", "a", null, { cut: true }]] }),
+        },
+      },
+    });
+    const table = await grid();
+
+    expect(rowText(table, 1)).toEqual(["1", "****", "a", "null", "… (cut)"]);
+    expect(
+      screen.getByText("Some values were too large to send and are marked cut."),
+    ).toBeVisible();
   });
 
   it("marks cut values and rows", async () => {
