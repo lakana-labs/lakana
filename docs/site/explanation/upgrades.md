@@ -135,6 +135,25 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### Lineage of tables in deep namespaces
+
+Lineage recorded before this release for a table in a namespace three or more levels deep keeps
+the cut name (`bronze.raw.orders` for `bronze.raw.eu.orders`); only new runs record the full name.
+
+### Indexes for the descending sorts of the table list
+
+Migration `0078` adds six indexes to the `tables` table, one for each sort of the table list by
+rows, size, last write, last read, health or creation, in the descending order with tables that
+have no value last. It runs with the other migrations, and nothing else has to be done. On
+PostgreSQL a descending page then reads an index instead of sorting every table. Going back drops
+them.
+
+### The table list's namespace filter counts letter case on SQLite
+
+`namespace` (`--under` of `lakana table list`) now treats `Gold` and `gold` as different on SQLite
+(local mode) too, as it always did on PostgreSQL. A script that relied on SQLite matching another
+case must use the namespace's exact name.
+
 ### Upgrade the CLI together with the server
 
 - An older CLI shows the jobs and connections of a start asset as `start` and other leaves as

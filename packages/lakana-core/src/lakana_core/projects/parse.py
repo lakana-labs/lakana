@@ -24,6 +24,7 @@ from lakana_core.projects.project_config import AssetDefaults
 from lakana_core.projects.python_assets import parse_python_asset
 from lakana_core.query_rewrite import (
     _ALLOWED_TABLE_FUNCTIONS,
+    _dotted_table_name,
     _from_item_function_name,
     check_blacklist,
     extract_table_refs,
@@ -151,11 +152,8 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
     for table in tree.find_all(exp.Table):
         if _from_item_function_name(table) in _ALLOWED_TABLE_FUNCTIONS:
             continue  # a generator reads no table and no file
-        parts = [
-            part for part in (table.args.get("catalog"), table.args.get("db"), table.this) if part
-        ]
-        if any(not isinstance(part, exp.Identifier) or "." in part.name for part in parts):
-            name = ".".join(part.name for part in parts)
+        if any(not isinstance(part, exp.Identifier) or "." in part.name for part in table.parts):
+            name = _dotted_table_name(table)
             if name:  # a reader with no path in its arguments has no name to report
                 found.add(name)
     return found

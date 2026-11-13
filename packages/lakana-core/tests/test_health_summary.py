@@ -17,7 +17,7 @@ from lakana_core.catalog.health_summary import (
     HEALTH_TEXT,
     HealthSummary,
     backfill_health_keys,
-    failing_reference_checks,
+    reference_checks,
     refresh_health_key,
     shown_health,
     summarize,
@@ -222,6 +222,16 @@ def test_a_reference_check_alone_makes_the_word_of_a_healthy_table() -> None:
     assert shown_health("not_judged", 0, [check("errored")]).others == 0
 
 
+def test_a_passed_reference_check_is_the_evidence_a_not_judged_table_lacked() -> None:
+    healthy = HealthSummary("healthy", "healthy", "Healthy", 0)
+    assert shown_health("not_judged", 0, [check("passed")]) == healthy
+    # never better than a stored finding, and a failing one still wins
+    assert shown_health("late", 1, [check("passed")]) == HealthSummary("warning", "late", "Late", 1)
+    assert shown_health("not_judged", 0, [check("passed"), check("warned")]).item == "check_warned"
+    # a word not computed yet may hide a finding, so a pass does not make it healthy
+    assert shown_health(None, 0, [check("passed")]).item == "not_judged"
+
+
 def test_a_reference_check_that_ranks_below_the_stored_word_only_counts() -> None:
     assert shown_health("check_failed", 1, [check("warned")]) == HealthSummary(
         "failing", "check_failed", "Check failed", 2
@@ -388,7 +398,7 @@ def test_a_generated_reference_check_never_reaches_the_stored_key(session: Sessi
     refresh_health_key(session, t.id)
     session.commit()
     assert t.health_item == "healthy"
-    assert [c.outcome for c in failing_reference_checks(session, [t.id])[t.id]] == ["failed"]
+    assert [c.outcome for c in reference_checks(session, [t.id])[t.id]] == ["failed"]
 
 
 def test_a_hand_written_check_named_like_a_reference_check_counts(session: Session) -> None:
@@ -397,7 +407,7 @@ def test_a_hand_written_check_named_like_a_reference_check_counts(session: Sessi
     refresh_health_key(session, t.id)
     session.commit()
     assert t.health_item == "check_failed"
-    assert failing_reference_checks(session, [t.id]) == {}
+    assert reference_checks(session, [t.id]) == {}
 
 
 def test_an_old_reference_failure_followed_by_a_pass_is_not_failing(session: Session) -> None:
@@ -411,23 +421,37 @@ def test_an_old_reference_failure_followed_by_a_pass_is_not_failing(session: Ses
         generated=True,
         at=datetime(2026, 11, 2, tzinfo=UTC),
     )
-    assert failing_reference_checks(session, [t.id]) == {}
+    assert reference_checks(session, [t.id]) == {}
 
 
 def test_a_generated_key_check_is_not_a_reference_check(session: Session) -> None:
     t = _table(session, "t")
     _result(session, t, "silver.t/key_id", CheckOutcome.FAILED, generated=True, at=_AT)
-    assert failing_reference_checks(session, [t.id]) == {}
-    assert failing_reference_checks(session, []) == {}
+    assert reference_checks(session, [t.id]) == {}
+    assert reference_checks(session, []) == {}
 
 
 def test_failing_reference_checks_are_found_for_each_table(session: Session) -> None:
     a, b = _table(session, "a"), _table(session, "b")
     _result(session, a, "silver.a/ref_x", CheckOutcome.ERRORED, generated=True, at=_AT)
     _result(session, b, "silver.b/ref_x", CheckOutcome.PASSED, generated=True, at=_AT)
-    found = failing_reference_checks(session, [a.id, b.id])
+    found = reference_checks(session, [a.id, b.id])
     assert list(found) == [a.id]
     assert [c.outcome for c in found[a.id]] == ["errored"]
+
+
+def test_passed_reference_checks_are_found_only_for_the_tables_asked(session: Session) -> None:
+    a, b = _table(session, "a"), _table(session, "b")
+    _result(session, a, "silver.a/ref_x", CheckOutcome.ERRORED, generated=True, at=_AT)
+    _result(session, b, "silver.b/ref_x", CheckOutcome.PASSED, generated=True, at=_AT)
+    _result(session, b, "silver.b/ref_y", CheckOutcome.FAILED, generated=True, at=_AT)
+    found = reference_checks(session, [a.id, b.id], passed_for=[b.id])
+    assert [c.outcome for c in found[a.id]] == ["errored"]
+    assert [(c.name, c.outcome) for c in found[b.id]] == [
+        ("silver.b/ref_x", "passed"),
+        ("silver.b/ref_y", "failed"),
+    ]
+    assert list(reference_checks(session, [b.id], passed_for=[a.id])[b.id]) == [found[b.id][1]]
 
 
 def test_a_key_write_never_moves_updated_at(session: Session) -> None:
@@ -513,8 +537,6 @@ def test_backfill_skips_a_table_dropped_while_it_runs(
 def test_a_check_name_with_two_segments_is_not_a_reference_check(session: Session) -> None:
     t = _table(session, "t")
     _result(session, t, "silver.t/ref_cust/other", CheckOutcome.FAILED, generated=True, at=_AT)
-    assert failing_reference_checks(session, [t.id]) == {}
+    assert reference_checks(session, [t.id]) == {}
     _result(session, t, "silver.t/sub/ref_cust", CheckOutcome.FAILED, generated=True, at=_AT)
-    assert [c.name for c in failing_reference_checks(session, [t.id])[t.id]] == [
-        "silver.t/sub/ref_cust"
-    ]
+    assert [c.name for c in reference_checks(session, [t.id])[t.id]] == ["silver.t/sub/ref_cust"]

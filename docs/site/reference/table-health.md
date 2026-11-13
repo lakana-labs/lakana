@@ -162,7 +162,9 @@ word. A table is `Healthy` only with evidence: a check that passed or a signal t
 band. A table with neither, and every view, external table and artifact, is `Not judged`. Sorting
 the [table list](table-list.md#the-sorts) by `health` puts the table with the worst stored word
 first. The stored word leaves out the reference checks below, so a table whose word you see is
-worse because of one can sit among better words; the word shown is always yours.
+worse because of one can sit among better words; the word shown is always yours. A reference check
+that passed is evidence too, for a reader who may see it: a table whose only evidence it is shows
+`Healthy` to that reader and `Not judged` to anyone else.
 
 A check that a model table generates for a reference to another table is counted only for a reader
 who may read that other table; to anyone else it does not exist.
