@@ -44,7 +44,12 @@ function Lines({ health }: { readonly health: TableHealthOut }): JSX.Element {
   const { t } = useTranslation();
   const lines = firedLines(health, t);
   if (lines.length === 0) {
-    return <p>{t(judged(health) ? "table.healthBlock.healthy" : "table.healthBlock.notJudged")}</p>;
+    const sentence = !judged(health)
+      ? "table.healthBlock.notJudged"
+      : health.hidden_checks > 0
+        ? "table.healthBlock.healthyVisible"
+        : "table.healthBlock.healthy";
+    return <p>{t(sentence)}</p>;
   }
   return (
     <>

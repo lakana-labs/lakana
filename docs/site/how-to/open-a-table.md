@@ -45,14 +45,15 @@ follow each other.
     the kind, such as "The number of rows written is outside its usual band." If a column
     mask or a row filter applies to you, the numbers stay hidden: you get that short sentence
     and "Its values are hidden for you." and never a claim that rows rose or dropped.
-  - A table without a problem says "Every check passed and no signal fired." A table with no
-    checks and no signals says "Not judged yet: the table has no checks or signals."
+  - A table without a problem says "Every check passed and no signal fired." When some checks
+    are hidden from you, it says "Every check you may see passed and no signal fired." A table
+    with no checks and no signals says "Not judged yet: the table has no checks or signals."
   - When health cannot be read, the block says why and offers **Try again**. The rest of
     Overview stays as it is.
 - **Facts.** Owner; Rows; Size with the number of data files, such as "3.1 MB in 12 files";
   Last write; Last read with how many people read the table in the last 7 days, such as "2 hours
-  ago · 3 readers in the last 7 days" (never who); Created; and Grain, the sentence the table's header gives for what one row
-  is. A figure that does not exist yet says so in words: "Not known", "Never written", "Never
+  ago · 3 readers in the last 7 days" (never who); Created; and Grain, the sentence the table's
+  header gives for what one row is. A figure that does not exist yet says so in words: "Not known", "Never written", "Never
   read" or "No owner".
 - **Comes from · goes to.** The tables directly upstream, which feed this one, and directly
   downstream, which it feeds, as links, at most five each way and then "and 2 more". "Nothing

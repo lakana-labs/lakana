@@ -517,6 +517,7 @@
       "heading": "Health",
       "more": "and {{count}} more",
       "healthy": "Every check passed and no signal fired.",
+      "healthyVisible": "Every check you may see passed and no signal fired.",
       "notJudged": "Not judged yet: the table has no checks or signals.",
       "failed_one": "Check {{name}} failed: {{count}} row broke it.",
       "failed_other": "Check {{name}} failed: {{count}} rows broke it.",

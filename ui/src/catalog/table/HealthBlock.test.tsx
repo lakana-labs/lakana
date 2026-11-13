@@ -219,6 +219,18 @@ describe("HealthBlock", () => {
     expect(within(health_).queryByRole("listitem")).not.toBeInTheDocument();
   });
 
+  it("does not claim every check passed when some are hidden from the reader", async () => {
+    renderShell(PAGE, {
+      routes: { [HEALTH_ROUTE]: { status: 200, body: health({ hidden_checks: 2 }) } },
+    });
+
+    const health_ = await block();
+    expect(
+      await within(health_).findByText("Every check you may see passed and no signal fired."),
+    ).toBeVisible();
+    expect(within(health_).queryByText("Every check passed and no signal fired.")).toBeNull();
+  });
+
   it("calls a table without a verdict not judged", async () => {
     renderShell(PAGE, {
       routes: {
