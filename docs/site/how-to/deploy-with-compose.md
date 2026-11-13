@@ -12,7 +12,7 @@ This is the "team" deployment path; for a single user on their own laptop, see l
   runs each Python task in a container of its own, which needs Engine 28; the `launcher` service
   stops at start with a message on an older one.
 - `pip install lakana` — the `lakana` CLI generates the bundle and is also the client you use
-  against it afterwards. Lakana is pre-beta: the API and the data layout may change between 0.x
+  against it afterwards. Lakana is pre-1.0: the API and the data layout may change between 0.x
   releases.
 - The image `ghcr.io/lakana-labs/lakana` is public; pulling it needs no login.
 - A network that lets Docker pull the images, or the steps of
