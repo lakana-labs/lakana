@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import type { JSX } from "react";
+import type { JSX, MouseEvent } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -16,6 +16,7 @@ import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useWhen } from "../shell/useWhen";
 import { formatBytes, formatRows, relativeTime } from "./format";
 import { HealthWord } from "./HealthWord";
+import { MatchLine, showsMatch } from "./MatchLine";
 import { tablePath } from "./paths";
 import type { CatalogView } from "./view";
 
@@ -37,6 +38,21 @@ function Unknown({ words }: { readonly words: string }): JSX.Element {
       <span className="visually-hidden">{words}</span>
     </>
   );
+}
+
+/**
+ * Hands a plain primary click on a row's cell to the row's link, so the cells that carry hover
+ * text open the table page like the rest of the row. A click on the link or a button, one with
+ * a modifier key and a middle click are left alone.
+ *
+ * @param event - The click on the row.
+ */
+function openFromCell(event: MouseEvent<HTMLTableRowElement>): void {
+  const plain =
+    event.button === 0 && !(event.ctrlKey || event.metaKey || event.shiftKey || event.altKey);
+  if (plain && !event.defaultPrevented && !(event.target as Element).closest("a, button")) {
+    event.currentTarget.querySelector<HTMLAnchorElement>("a.row-name")?.click();
+  }
 }
 
 /** Properties of {@link TableList}. */
@@ -145,21 +161,30 @@ export function TableList({ items, view, onSort, busy }: TableListProps): JSX.El
         </thead>
         <tbody>
           {items.map((row) => (
-            <tr key={`${row.environment}/${row.namespace}/${row.name}`}>
+            <tr
+              key={`${row.environment}/${row.namespace}/${row.name}`}
+              // Cells with hover text sit above the row's link overlay so the pointer reaches
+              // them; a plain click on one is handed to the link. The keyboard has the link.
+              onClick={openFromCell}
+            >
               <td>
                 <Link className="row-name" to={tablePath(row.environment, row.namespace, row.name)}>
                   {row.name}
                 </Link>
                 <span className="second">
-                  {t("catalog.secondLine", {
-                    kind:
-                      row.model_kind === null
-                        ? t(`catalog.kind.${row.kind}`)
-                        : t(`catalog.modelKind.${row.model_kind}`, {
-                            defaultValue: t(`catalog.kind.${row.kind}`),
-                          }),
-                    namespace: row.namespace,
-                  })}{" "}
+                  {row.match !== null && showsMatch(row.match) ? (
+                    <MatchLine match={row.match} q={view.q} />
+                  ) : (
+                    t("catalog.secondLine", {
+                      kind:
+                        row.model_kind === null
+                          ? t(`catalog.kind.${row.kind}`)
+                          : t(`catalog.modelKind.${row.model_kind}`, {
+                              defaultValue: t(`catalog.kind.${row.kind}`),
+                            }),
+                      namespace: row.namespace,
+                    })
+                  )}{" "}
                   <EnvironmentLabel environment={row.environment} />
                 </span>
               </td>

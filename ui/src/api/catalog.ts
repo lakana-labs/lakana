@@ -49,10 +49,10 @@ interface OwnerOut {
 }
 
 /** Why a row matches the search. */
-interface TableMatchOut {
-  /** What matched: the name, a column, a description and so on. */
+export interface TableMatchOut {
+  /** Whose text matched: `table` for the table's own, `column` for one of its columns'. */
   readonly kind: string;
-  /** The text that matched. */
+  /** The field that matched: `name`, `label`, `description`, `grain` or `measure`. */
   readonly matched: string;
   /** The column it matched in, if any. */
   readonly column: string | null;

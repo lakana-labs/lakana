@@ -386,6 +386,29 @@ describe("Interface", () => {
     ).toBeInTheDocument();
   });
 
+  it("hides the Catalog from a person with no access yet and answers a link to it", async () => {
+    const none = {
+      "GET /api/v1/sign-in/session": { status: 200, body: { ...ADMIN_SESSION, name: "kim" } },
+      "GET /api/v1/whoami": { status: 200, body: whoami("kim", false, false) },
+    };
+    renderInterface("/", none);
+
+    const navigation = await screen.findByRole("navigation");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    expect(within(navigation).queryByRole("link", { name: "Catalog" })).not.toBeInTheDocument();
+  });
+
+  it("answers a link to the Catalog with the permission state when it is hidden", async () => {
+    renderInterface("/catalog", {
+      "GET /api/v1/sign-in/session": { status: 200, body: { ...ADMIN_SESSION, name: "kim" } },
+      "GET /api/v1/whoami": { status: 200, body: whoami("kim", false, false) },
+    });
+
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(
+      "You cannot use Catalog",
+    );
+  });
+
   it("hides the administration areas when the rights cannot be read", async () => {
     renderInterface("/", {
       "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },

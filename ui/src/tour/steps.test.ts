@@ -5,7 +5,7 @@ import { tourSteps, tourTarget } from "./steps";
 
 describe("tourSteps", () => {
   it("follows the sidebar, then Search and Help, for an administrator", () => {
-    expect(tourSteps(visibleAreas(areasFor(true)))).toEqual([
+    expect(tourSteps(visibleAreas(areasFor(true, false)))).toEqual([
       "home",
       "catalog",
       "queries",
@@ -19,7 +19,7 @@ describe("tourSteps", () => {
   });
 
   it("leaves out the areas a person cannot use", () => {
-    expect(tourSteps(visibleAreas(areasFor(false)))).toEqual([
+    expect(tourSteps(visibleAreas(areasFor(false, false)))).toEqual([
       "home",
       "catalog",
       "queries",

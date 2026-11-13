@@ -127,6 +127,43 @@ not a column, and **Order** names the direction in words that fit the key ("Newe
 comes last. The sort is in the address, so Back returns to the previous order and a link
 shares it.
 
+### Narrow the list with the tree
+
+Beside the list, the tree of places has **All tables** on top, then one entry per environment
+you may read, and the namespaces under it (`sales` under `gold` for `gold.sales`). Each entry
+ends with how many tables you may read in it (`prod · 6`). Environments start open and
+namespaces closed; the arrow at the left of an entry opens or closes it. Press an entry to show
+only the tables at and below it. The search and the sort stay as they are. On a narrow screen
+the tree sits above the list in a box that scrolls on its own.
+
+With the keyboard, the arrow keys move through the tree, Right and Left open and close an
+entry, and **Enter** chooses it. An entry is a link, so you can also open it in a new tab.
+
+### Search
+
+The field above the list searches table and column names, labels and descriptions. The list
+follows about a quarter of a second after you stop typing. It searches inside the place you
+chose in the tree; the line above the list says where, for example "3 tables in gold match".
+Press **Search all namespaces** to widen the same text to every environment and namespace you
+may read. **Esc** clears the field.
+
+A row whose match is not its name shows why on the second line, with the matching part marked:
+`Column store_id · int · joins dim_store`, or `Description · One row per store visit`. A
+translated text adds its language. When nothing matches, the page says so and offers **Search
+all namespaces**. A search that reaches 5,000 tables stops and says so; use a longer text or
+choose a namespace.
+
+### Share a view, and come back to it
+
+The place, the search and the sort are in the address, so a link shows the same list and Back
+and Forward step through your choices. Opening **Catalog** without a query takes you to the
+place you chose last. This browser keeps that choice for you, nobody else sees it, and a link
+with its own place always wins.
+
+If the address names an environment or namespace that you may not read or that does not exist,
+the page says so and offers **Show all tables**. If you may read no environment yet, it says
+"Ask an administrator for access."
+
 The list shows 50 tables at a time. **Show more** adds the next 50 and moves you to the first
 new row. The line above the list says "The first 50 tables" until the last page is loaded, then
 "120 tables".

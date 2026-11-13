@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import type { TableTreeOut } from "../api/catalog";
+import type { TableTreeOut } from "../api";
 
 /** One place in the tree. */
 export interface CatalogNode {

@@ -79,6 +79,9 @@ its environment (`dev`, `prod`), or `Instance` for something that belongs to the
 such as a worker. A person who has no access yet sees only "You have no access yet; ask an
 administrator." until an administrator grants them a role.
 
+The **Catalog** appears in the menu once you have any access at all; before that, it is not
+there.
+
 ## The boxes, top to bottom
 
 The order is the same for everyone; what you may do changes what is inside the boxes.

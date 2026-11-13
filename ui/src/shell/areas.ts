@@ -101,15 +101,19 @@ export const SHIPPED_AREAS: readonly ShippedArea[] = AREAS.filter(isShipped);
 export const ALL_SHIPPED: AreaAccess = new Set(SHIPPED_AREAS.map((area) => area.id));
 
 /**
- * The areas a person may use: Access and Settings are for administrators only.
+ * The areas a person may use: Access and Settings are for administrators only, and the Catalog
+ * is for people who hold any grant at all.
  *
  * @param admin - Whether the person holds the ADMIN role on the instance.
+ * @param noAccessYet - Whether the person holds no grant at all.
  * @returns The areas.
  */
-export function areasFor(admin: boolean): AreaAccess {
-  return admin
-    ? ALL_SHIPPED
-    : new Set(SHIPPED_AREAS.filter((area) => area.group !== "admin").map((area) => area.id));
+export function areasFor(admin: boolean, noAccessYet: boolean): AreaAccess {
+  return new Set(
+    SHIPPED_AREAS.filter(
+      (area) => (admin || area.group !== "admin") && !(noAccessYet && area.id === "catalog"),
+    ).map((area) => area.id),
+  );
 }
 
 /**

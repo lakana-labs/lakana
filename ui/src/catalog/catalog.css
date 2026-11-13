@@ -1,5 +1,126 @@
-/* The Catalog list: the bar above it, the table that scrolls on its own, the health word and
-   the skeleton shown while the first page loads. */
+/* The Catalog: the tree of places beside the list, the search above it, the bar with the result
+   line and the sort, the table that scrolls on its own, the health word and the skeleton shown
+   while the first page loads. */
+.catalog {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.catalog-side {
+  grid-column: 1;
+}
+
+.catalog-main {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.catalog-search {
+  margin: 0 0 var(--space-4);
+}
+
+.catalog-result-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+/* The tree: one row per place; a node's count is quiet text, and long names wrap. */
+.catalog-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.react-aria-NavigationTreeItem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2);
+  padding-left: calc(var(--space-2) + (var(--tree-item-level) - 1) * var(--space-4));
+  border-radius: var(--radius-control);
+  outline: none;
+}
+
+.react-aria-NavigationTreeItem > [role="gridcell"] {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.react-aria-NavigationTreeItem[data-hovered] {
+  background: var(--color-sunk);
+}
+
+.react-aria-NavigationTreeItem[data-current] {
+  background: var(--color-accent-bg);
+}
+
+.react-aria-NavigationTreeItem[data-focus-visible] {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.tree-chevron {
+  flex: none;
+  width: var(--space-5);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tree-link {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.react-aria-NavigationTreeItem[data-current] .tree-link {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.tree-count {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+}
+
+/* A match is marked by more than colour: the background and the weight. */
+.match {
+  background: var(--color-accent-bg);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+/* Narrow screens: the tree stacks above the list, in a box of at most twelve rows that scrolls
+   on its own. */
+@media (max-width: 639.98px) {
+  .catalog {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+
+  .catalog-side,
+  .catalog-main {
+    grid-column: 1;
+  }
+
+  .catalog-side {
+    max-height: 384px;
+    overflow-y: auto;
+  }
+}
+
 .catalog-bar {
   display: flex;
   flex-wrap: wrap;

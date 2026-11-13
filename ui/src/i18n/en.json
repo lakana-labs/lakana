@@ -408,7 +408,34 @@
       "healthy": "Healthy",
       "not_judged": "Not judged"
     },
+    "search": "Search tables, columns and descriptions",
+    "tree": "Environments and namespaces",
+    "allTables": "All tables",
+    "treeNode_one": "{{label}}, {{count}} table",
+    "treeNode_other": "{{label}}, {{count}} tables",
+    "match": {
+      "column": "Column",
+      "label": "Label",
+      "description": "Description",
+      "grain": "Grain",
+      "measure": "Measure"
+    },
     "healthMore": "{{word}}, and {{count}} more, listed on the table page",
+    "matches": {
+      "all_one": "{{count}} table in {{place}} matches",
+      "all_other": "{{count}} tables in {{place}} match",
+      "first_one": "The first {{count}} match in {{place}}",
+      "first_other": "The first {{count}} matches in {{place}}"
+    },
+    "searchAll": "Search all namespaces",
+    "noHits": "No table in {{place}} matches “{{q}}”.",
+    "noHitsHint": "Search looks at table and column names, labels and descriptions. Try a shorter text.",
+    "unknown": {
+      "environment": "There is no environment named {{environment}} that you may read.",
+      "namespace": "There is no namespace {{namespace}} in {{environment}} that you may read."
+    },
+    "showAll": "Show all tables",
+    "noEnvironment": "You may read no environment yet. Ask an administrator for access.",
     "result": {
       "all_one": "{{count}} table",
       "all_other": "{{count}} tables",
@@ -417,7 +444,8 @@
       "capped": "The search stopped after {{count, number}} tables. Use a longer text or choose a namespace."
     },
     "place": {
-      "all": "all environments"
+      "all": "all environments",
+      "allNamespaces": "all namespaces"
     },
     "loading": "Loading tables…",
     "tryAgain": "Try again",
