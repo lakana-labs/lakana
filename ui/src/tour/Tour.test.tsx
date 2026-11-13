@@ -45,7 +45,7 @@ function firstSignIn(options: FirstSignIn = {}): ReturnType<typeof renderShell> 
   let stored: InterfaceStateOut = { ...STATE, tour_seen: false, ...options.state };
   return renderShell("/", {
     me: options.me ?? {},
-    access: areasFor(options.me?.admin !== false),
+    access: areasFor(options.me?.admin !== false, false),
     routes: {
       [`GET ${path}`]: { status: 200, body: stored },
       [`PATCH ${path}`]: (request) => {

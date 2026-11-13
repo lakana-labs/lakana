@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -19,5 +19,36 @@ describe("AppShell", () => {
     await screen.findByRole("heading", { level: 1, name: "Home" });
 
     expect(screen.getAllByRole("link")[0]).toHaveTextContent("Skip to content");
+  });
+
+  it("keeps focus when only the query changes", async () => {
+    const { router } = renderShell("/queries");
+    await screen.findByRole("heading", { level: 1, name: "Queries" });
+    const link = screen.getByRole("link", { name: "Jobs" });
+    link.focus();
+
+    await act(() => router.navigate("/queries?sort=rows"));
+
+    expect(link).toHaveFocus();
+  });
+
+  it("still focuses the heading after moving to another page", async () => {
+    const { router } = renderShell("/queries");
+    await screen.findByRole("heading", { level: 1, name: "Queries" });
+
+    await act(() => router.navigate("/jobs"));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
+  });
+
+  it("focuses the heading again when returning to the first page", async () => {
+    const { router } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    await act(() => router.navigate("/"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toHaveFocus();
+    await act(() => router.navigate("/catalog"));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Catalog" })).toHaveFocus();
   });
 });

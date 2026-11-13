@@ -7,7 +7,15 @@
 import { type JSX, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { RouterProvider } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { Outlet, useHref, useLocation, useNavigate } from "react-router";
+import { Outlet, type NavigateOptions, useHref, useLocation, useNavigate } from "react-router";
+
+declare module "react-aria-components" {
+  /** What a React Aria link may hand to the router: the options of React Router's `navigate`. */
+  interface RouterConfig {
+    /** The options of `navigate`, such as the state of the new history entry. */
+    routerOptions: NavigateOptions;
+  }
+}
 
 import type { AccessOut } from "../api";
 import { Notices } from "../sign-in/Notices";
@@ -45,7 +53,8 @@ export interface AppShellProps {
 
 /**
  * Renders the shell. Ctrl+K and ⌘ K open the palette from anywhere, a text field included;
- * after a navigation, focus moves to the new page's heading (not on the first load, so the
+ * after a navigation to another path, focus moves to the new page's heading (not when only the
+ * query changes, so a search field or a tree keeps it, and not on the first load, so the
  * skip link stays the first stop). The person's access and interface state are there for every
  * screen inside; the interface state is read once, when the shell appears.
  *
@@ -59,7 +68,7 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const main = useRef<HTMLElement>(null);
-  const firstKey = useRef(location.key);
+  const shownPath = useRef(location.pathname);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const openShortcuts = useCallback(() => {
@@ -68,10 +77,11 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   const areas = visibleAreas(access);
 
   useEffect(() => {
-    if (location.key !== firstKey.current) {
+    if (location.pathname !== shownPath.current) {
+      shownPath.current = location.pathname;
       main.current?.querySelector("h1")?.focus();
     }
-  }, [location.key]);
+  }, [location.pathname]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -95,8 +105,8 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
     <MeContext value={me}>
       <InterfaceStateProvider name={me.name}>
         <RouterProvider
-          navigate={(path) => {
-            void navigate(path);
+          navigate={(path, options) => {
+            void navigate(path, options);
           }}
           useHref={useShellHref}
         >

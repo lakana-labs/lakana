@@ -52,7 +52,9 @@ describe("appRoutes", () => {
     expect(document.title).toBe("This page does not exist · Lakana");
 
     await user.click(screen.getByRole("link", { name: "Go to Home" }));
-    expect(router.state.location.pathname).toBe("/");
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/");
+    });
     expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
   });
 

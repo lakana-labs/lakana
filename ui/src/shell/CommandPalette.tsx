@@ -20,7 +20,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
 import { useTour } from "../tour/TourProvider";
-import type { ShippedArea } from "./areas";
+import { AREA_NAVIGATION, type ShippedArea } from "./areas";
 
 /** Properties of {@link CommandPalette}. */
 export interface CommandPaletteProps {
@@ -74,7 +74,7 @@ function PaletteContent({ areas, onClose, onShortcuts }: PaletteContentProps): J
       id: area.id,
       label: t("palette.goTo", { area: t(`areas.${area.id}.name`) }),
       run: () => {
-        void navigate(area.path);
+        void navigate(area.path, AREA_NAVIGATION);
       },
     })),
     {

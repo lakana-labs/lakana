@@ -1,48 +1,16 @@
-import AxeBuilder from "@axe-core/playwright";
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 
 import {
-  addAuthenticator,
+  freshPage,
   interfaceState,
   inviteLink,
+  invitedPerson,
   makeAdministrator,
   signInLocally,
-  uniqueName,
+  violations,
 } from "./helpers";
 
-const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-const ORIGIN = "http://localhost:4174";
 const NOT_CHROMIUM = "the virtual authenticator is CDP";
-
-/**
- * Opens a browser that has never visited the server.
- *
- * @param browser - The browser.
- * @returns A page of a fresh context.
- */
-async function freshPage(browser: Browser): Promise<Page> {
-  const context = await browser.newContext({ baseURL: ORIGIN });
-  return context.newPage();
-}
-
-// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
-// names it by the ids of the button's parts, which may be gone by then; it is the library's
-// transient node, not the page.
-const LIVE_ANNOUNCER = "[data-live-announcer]";
-
-/**
- * Runs axe over the page with the WCAG 2.2 AA tags.
- *
- * @param page - The page to check.
- * @returns The violations, each with the elements it found.
- */
-async function violations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
-  return results.violations.map(
-    (violation) =>
-      `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`,
-  );
-}
 
 /**
  * Moves the focus with Tab until it reaches the button, then presses it with Enter.
@@ -87,16 +55,9 @@ async function firstAdministrator(
   browser: Browser,
   request: Parameters<typeof inviteLink>[0],
 ): Promise<Page> {
-  const name = uniqueName("ada");
-  const page = await freshPage(browser);
-  await addAuthenticator(page.context(), page);
-  await page.goto(await inviteLink(request, name));
-  await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Add a passkey" })).toBeVisible();
-  // The person exists once the invite is redeemed; the role comes before Home reads it.
-  await makeAdministrator(request, name);
-  await page.getByRole("button", { name: "Add a passkey" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+  const { page } = await invitedPerson(browser, request, (name) =>
+    makeAdministrator(request, name),
+  );
   return page;
 }
 

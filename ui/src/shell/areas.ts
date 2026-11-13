@@ -27,6 +27,12 @@ export interface Area {
 /** An area that is in the interface, so it has a part and a command line. */
 export type ShippedArea = Area & { readonly part: number; readonly shipped: true };
 
+/**
+ * How the menu and the palette go to an area: the area opens where the person left it (the
+ * Catalog at the last choice), which a plain link to the same path does not.
+ */
+export const AREA_NAVIGATION = { state: { restore: true } } as const;
+
 /** The areas a user may use. */
 export type AreaAccess = ReadonlySet<AreaId>;
 
@@ -101,15 +107,19 @@ export const SHIPPED_AREAS: readonly ShippedArea[] = AREAS.filter(isShipped);
 export const ALL_SHIPPED: AreaAccess = new Set(SHIPPED_AREAS.map((area) => area.id));
 
 /**
- * The areas a person may use: Access and Settings are for administrators only.
+ * The areas a person may use: Access and Settings are for administrators only, and the Catalog
+ * is for people who hold any grant at all.
  *
  * @param admin - Whether the person holds the ADMIN role on the instance.
+ * @param noAccessYet - Whether the person holds no grant at all.
  * @returns The areas.
  */
-export function areasFor(admin: boolean): AreaAccess {
-  return admin
-    ? ALL_SHIPPED
-    : new Set(SHIPPED_AREAS.filter((area) => area.group !== "admin").map((area) => area.id));
+export function areasFor(admin: boolean, noAccessYet: boolean): AreaAccess {
+  return new Set(
+    SHIPPED_AREAS.filter(
+      (area) => (admin || area.group !== "admin") && !(noAccessYet && area.id === "catalog"),
+    ).map((area) => area.id),
+  );
 }
 
 /**

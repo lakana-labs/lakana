@@ -13,7 +13,7 @@ import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { StatusLabel } from "../status/StatusLabel";
 import { STATUS_KINDS, type StatusKind } from "../status/status";
-import { EnvironmentLabel } from "./EnvironmentLabel";
+import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { objectPath } from "./links";
 import { ObjectRow, ObjectTable } from "./ObjectRows";
 

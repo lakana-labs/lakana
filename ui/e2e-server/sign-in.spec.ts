@@ -1,17 +1,17 @@
-import AxeBuilder from "@axe-core/playwright";
-import { type Browser, expect, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 import {
   addAuthenticator,
+  freshPage,
   interfaceState,
   inviteLink,
   localLink,
+  ORIGIN,
   setupLink,
   uniqueName,
+  violations,
 } from "./helpers";
 
-const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-const ORIGIN = "http://localhost:4174";
 const SECRET_PARAM = /[#&?]s=/;
 const CSRF_KEY = "lakana.csrf";
 
@@ -25,33 +25,6 @@ function secretOf(link: string): string {
   const secret = new URLSearchParams(new URL(link).hash.slice(1)).get("s");
   expect(secret).toBeTruthy();
   return secret ?? "";
-}
-
-// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
-// names it by the ids of the button's parts, which may be gone by then; it is the library's
-// transient node, not the page.
-const LIVE_ANNOUNCER = "[data-live-announcer]";
-
-/**
- * Runs axe over the page with the WCAG 2.2 AA tags.
- *
- * @param page - The page to check.
- * @returns The violations' ids.
- */
-async function violations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
-  return results.violations.map((violation) => violation.id);
-}
-
-/**
- * Opens a browser that has never visited the server.
- *
- * @param browser - The browser.
- * @returns A page of a fresh context.
- */
-async function freshPage(browser: Browser): Promise<Page> {
-  const context = await browser.newContext({ baseURL: ORIGIN });
-  return context.newPage();
 }
 
 test.describe("the first administrator", () => {

@@ -2,6 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderShell } from "../test/render";
+import { areasFor } from "./areas";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -23,6 +24,15 @@ describe("Sidebar", () => {
       ["Home", "Catalog", "Queries", "Jobs", "Connections"],
       ["Access", "Settings"],
     ]);
+  });
+
+  it("leaves out the Catalog for a person with no access yet", async () => {
+    renderShell("/", { access: areasFor(false, true), me: { admin: false, noAccessYet: true } });
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+
+    const links = within(screen.getByRole("navigation")).getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(["Home", "Queries", "Jobs", "Connections"]);
+    expect(screen.queryByRole("link", { name: "Catalog" })).not.toBeInTheDocument();
   });
 
   it("shows the mark beside the product name, without naming it twice", async () => {

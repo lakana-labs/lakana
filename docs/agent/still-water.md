@@ -34,7 +34,7 @@ Literal values the merged stylesheets use, and which stay allowed:
 
 - border widths: 1 px hairlines and control edges, 2–3 px indicator bars (tab underline,
   current-area bar, notice bar);
-- layout bounds: `min-height`/`max-height`, `width`/`max-width` (also inside `min(…px, 100%)`),
+- layout bounds: `min-height`/`max-height`, `min-width` (a table inside its own scrolling region), `width`/`max-width` (also inside `min(…px, 100%)`),
   `flex-basis`, and the `max-width: 639.98px` breakpoint; a control's 32 px minimum height
   (touch targets stay ≥ 24 px);
 - icon and glyph sizes (16 px, 12 px smallest) and small optical nudges (`vertical-align`,
@@ -53,6 +53,8 @@ Light and dark are equals: check both, every time.
   two levels.
 - **Rows open their object:** the name is a real link in the accent colour, a quiet `›` ends the
   row, the whole row is clickable. Something without a detail page is not a list row.
+- **Lists keep at least 24 px between columns** (`--space-3` on each side of a cell); numbers
+  right-aligned with tabular figures (`.number`).
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
   own list or tab.
 - **State** uses `StatusGlyph`/`StatusLabel` (shape + word, never colour alone). A new state

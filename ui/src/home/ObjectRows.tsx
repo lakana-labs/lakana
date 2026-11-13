@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { ListHead } from "../shell/ListHead";
-import { EnvironmentLabel } from "./EnvironmentLabel";
+import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 
 /** Properties of {@link ObjectTable}. */
 export interface ObjectTableProps {

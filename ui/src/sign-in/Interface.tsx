@@ -224,7 +224,11 @@ function Routed({ createRouter, pages, link, onLinkDone }: RoutedProps): JSX.Ele
       { path: "/sign-in", element: <SignInRoute link={link} onLinkDone={onLinkDone} /> },
       {
         element: <Gate ready={access !== null} />,
-        children: appRoutes(areasFor(access?.admin === true), pages, access ?? noKnownRights("")),
+        children: appRoutes(
+          areasFor(access?.admin === true, access?.noAccessYet === true),
+          pages,
+          access ?? noKnownRights(""),
+        ),
       },
     ],
     [access, pages, link, onLinkDone],

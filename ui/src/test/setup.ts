@@ -1,7 +1,7 @@
 /**
  * Test setup that every Vitest file runs first: the DOM matchers of jest-dom, object URLs
- * (which jsdom lacks), and a clean document, `fetch`, CSRF token and picture cache after each
- * test.
+ * (which jsdom lacks), and a clean document, `fetch`, CSRF token, picture cache and local
+ * storage after each test.
  *
  * @packageDocumentation
  */
@@ -31,4 +31,5 @@ afterEach(() => {
   forgetPictures();
   vi.unstubAllGlobals();
   setCsrfToken(null);
+  window.localStorage.clear();
 });
