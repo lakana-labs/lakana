@@ -156,6 +156,14 @@ ROWS_PURGE_REACHABLE_MESSAGE = (
 )
 """The `ConflictError` of a rows-only purge whose storage resolves (`{name}`, `{purge_after}`)."""
 
+ROWS_PURGE_CHAINED_MESSAGE = (
+    "Environment {name!r} was not purged: its storage root {root!r} contains '::', and "
+    "releases before 0.18.0 wrote its files to {before!r}, so files may be there and this "
+    "environment is the only record of them. Look in {before!r}, and delete what you no longer "
+    "need there yourself; for a new environment, choose another name."
+)
+"""The `ConflictError` of a rows-only purge of a chained root (`{name}`, `{root}`, `{before}`)."""
+
 
 def lock_live_environment(session: Session, environment_id: uuid.UUID) -> bool:
     """Take a share lock on an environment's row and say whether it is still there, not deleted.

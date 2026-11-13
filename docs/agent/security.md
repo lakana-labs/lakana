@@ -606,8 +606,8 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   token. Every other write of `/api/v1` sits in `NO_STEP_UP` with a one-line reason, so a new
   write route fails the test until it is placed. The rule: step-up when a write changes who or
   what can act or read (identities, rights, run-as, CI trust), handles credentials or secrets, or
-  changes where code or data come from or go, or irreversibly erases catalog records; none for removing access (revoking a token,
-  withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
+  changes where code or data come from or go, or irreversibly erases catalog records; none for
+  removing access (revoking a token, withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
   one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
   descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
   is a data operation undone with restore; it joins with its screen in part 8 (spec). The
@@ -2915,9 +2915,11 @@ and name would stay. `CatalogService.purge_environment_rows` (`POST
 /api/v1/environments/{name}/purge-rows`, `lakana env purge NAME --rows-only --yes`) authorizes
 `MANAGE_ENVIRONMENT` at **instance** scope first (a grant on the environment's name is not enough,
 as for create and re-root), locks the row, refuses 404 for no row, 409 when it is not deleted, and
-409 unless the stored root alone says no process can ever reach it
-(`storage.resolver.root_never_resolves`: a scheme `_parse_scheme` refuses, or an fsspec chain
-`::`). It never calls `for_environment`: a storage secret bound to another use
+409 unless the stored root alone says no release ever wrote a file behind it
+(`storage.resolver.root_never_resolves`: a scheme `_parse_scheme` refuses, which every release
+refused to open). A root with an fsspec chain (`::`) is refused too (409,
+`ROWS_PURGE_CHAINED_MESSAGE`, naming the part before it): releases before 0.18.0 opened that part
+and wrote files there, and the row is their only record (#261 re-review). It never calls `for_environment`: a storage secret bound to another use
 (`SecretUseRefused`), a missing secret, a missing key provider or a wrong master key are settings
 to fix on a storage that may hold every file, so they keep the row and its file purge (#261 review;
 `test_an_object_store_whose_secret_cannot_be_used_keeps_its_row`). After the authorization it

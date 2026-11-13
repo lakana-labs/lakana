@@ -98,6 +98,7 @@ from lakana_core.catalog.environment_deletion import (
     NAME_HELD_MESSAGE,
     NO_DELETED_MESSAGE,
     NOT_DELETED_MESSAGE,
+    ROWS_PURGE_CHAINED_MESSAGE,
     ROWS_PURGE_MISSING_MESSAGE,
     ROWS_PURGE_NOT_DELETED_MESSAGE,
     ROWS_PURGE_REACHABLE_MESSAGE,
@@ -384,6 +385,7 @@ from lakana_core.secrets.uses import (
     require_secret_management_for_storage_change,
 )
 from lakana_core.storage.base import StoredObject
+from lakana_core.storage.fsspec_storage import FSSPEC_CHAIN
 from lakana_core.storage.resolver import (
     ResolvedStorage,
     StorageResolver,
@@ -1803,10 +1805,11 @@ class CatalogService:
         scheme Lakana cannot read, such as ``local://`` or ``memory://``, or an fsspec chain),
         so its row and its name would stay for ever. Only the stored root decides
         (`root_never_resolves`): a storage secret that cannot be used is a setting to fix, and
-        its storage may hold every file. This deletes the row and what the sweep would have removed
-        with it (`lakana_core.catalog.environment_deletion.purge_rows`), under the row's lock,
-        and touches no file. An environment whose storage resolves keeps its undo period and its
-        file purge.
+        its storage may hold every file; a chained root is refused, because releases before
+        0.18.0 wrote files to the part before ``::``. This deletes the row and what the sweep
+        would have removed with it (`lakana_core.catalog.environment_deletion.purge_rows`),
+        under the row's lock, and touches no file. An environment whose storage resolves keeps
+        its undo period and its file purge.
 
         Parameters
         ----------
@@ -1825,8 +1828,9 @@ class CatalogService:
         NotFoundError
             If no environment has that name (`ROWS_PURGE_MISSING_MESSAGE`).
         ConflictError
-            If it is not deleted (`ROWS_PURGE_NOT_DELETED_MESSAGE`) or its root can be resolved
-            (`ROWS_PURGE_REACHABLE_MESSAGE`), whatever its secret or options say.
+            If it is not deleted (`ROWS_PURGE_NOT_DELETED_MESSAGE`), its root is an fsspec chain
+            whose first part older releases wrote to (`ROWS_PURGE_CHAINED_MESSAGE`), or its root
+            can be resolved (`ROWS_PURGE_REACHABLE_MESSAGE`), whatever its secret or options say.
         PermissionDenied
             If the principal may not manage environments on the instance.
         StepUpRequired
@@ -1842,7 +1846,13 @@ class CatalogService:
             self._session.rollback()
             raise ConflictError(ROWS_PURGE_NOT_DELETED_MESSAGE.format(name=name))
         # Decided on the stored root alone: a secret, a key or an option can be fixed, and the
-        # files behind them may all be there, so only a root no process can read counts.
+        # files behind them may all be there, so only a root no release could open counts.
+        if FSSPEC_CHAIN in env.storage_root:
+            before = env.storage_root.split(FSSPEC_CHAIN, 1)[0]
+            self._session.rollback()
+            raise ConflictError(
+                ROWS_PURGE_CHAINED_MESSAGE.format(name=name, root=env.storage_root, before=before)
+            )
         if not root_never_resolves(env.storage_root):
             until = env.purge_after.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
             self._session.rollback()

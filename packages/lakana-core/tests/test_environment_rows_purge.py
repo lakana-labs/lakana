@@ -22,6 +22,7 @@ from test_environment_deletion import _statements_as_postgres, _table_lock
 from lakana_core.auth import Action, PrincipalRef, Securable
 from lakana_core.catalog import CatalogService
 from lakana_core.catalog.environment_deletion import (
+    ROWS_PURGE_CHAINED_MESSAGE,
     ROWS_PURGE_MISSING_MESSAGE,
     ROWS_PURGE_NOT_DELETED_MESSAGE,
     ROWS_PURGE_REACHABLE_MESSAGE,
@@ -289,12 +290,12 @@ def test_a_create_of_the_held_name_names_the_rows_purge(
 
 
 @pytest.mark.parametrize(
-    "root", ["local:///data", "memory://", "gs://bucket/lake", "file:///data/lake::memory://x"]
+    "root", ["local:///data", "memory://", "gs://bucket/lake", "S3://bucket/lake", "s3a://b/l"]
 )
 def test_a_root_no_process_can_read_is_purged(
     session: Session, catalog: CatalogService, principal: PrincipalRef, root: str
 ) -> None:
-    """An unsupported scheme or an fsspec chain: no clean-up will ever reach its files."""
+    """A scheme Lakana never supported: no release ever wrote a file there."""
     _old(session, principal, root=root)
     catalog.delete_environment(principal, "old")
 
@@ -363,5 +364,25 @@ def test_an_object_store_whose_secret_cannot_be_used_keeps_its_row(
         catalog.purge_environment_rows(principal, "old")
 
     assert str(info.value) == ROWS_PURGE_REACHABLE_MESSAGE.format(name="old", purge_after=until)
+    session.rollback()
+    assert session.scalars(select(Environment.name)).all() == ["old"]
+
+
+@pytest.mark.parametrize("root", ["file:///data/lake::memory://x", "s3://bucket/lake::memory://x"])
+def test_a_chained_root_keeps_its_row_and_names_where_files_may_be(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, root: str
+) -> None:
+    """Releases before 0.18.0 wrote to the part before `::`, so files may be there."""
+    _old(session, principal, root=root)
+    catalog.delete_environment(principal, "old")
+
+    with pytest.raises(LakanaError) as info:
+        catalog.purge_environment_rows(principal, "old")
+
+    before = root.split("::", 1)[0]
+    assert str(info.value) == ROWS_PURGE_CHAINED_MESSAGE.format(
+        name="old", root=root, before=before
+    )
+    assert isinstance(info.value, ConflictError)
     session.rollback()
     assert session.scalars(select(Environment.name)).all() == ["old"]

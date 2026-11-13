@@ -367,11 +367,11 @@ def purge_environment_rows(
 
     Removes the environment from the catalog, with its records of dropped tables, and frees
     its name. Its files, if there are any, are not touched. Only for a deleted environment
-    whose storage root no process can read (a scheme Lakana does not support, or an fsspec
-    chain), which the worker's clean-up skips; a storage secret that cannot be used does not
-    count. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when no
-    environment has the name, and 409 when it is not deleted or its storage can still be
-    reached.
+    whose storage root is in a scheme Lakana never supported, which the worker's clean-up
+    skips; a storage secret that cannot be used does not count. Needs `MANAGE_ENVIRONMENT` on
+    the instance. Answers 404 when no environment has the name, and 409 when it is not deleted,
+    its storage can still be reached, or its root contains `::` (releases before 0.18.0 wrote
+    files to the part before it).
 
     Parameters
     ----------

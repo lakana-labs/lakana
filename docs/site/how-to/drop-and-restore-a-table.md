@@ -172,7 +172,9 @@ administrator of the instance removes such an environment from the catalog with
 It removes the environment and its records of dropped tables, and the name is free again. Only the
 root decides: a storage secret that cannot be used (missing, or bound to a connection, an index or a
 repository) can be fixed, so such an environment is refused; fix the secret, and the clean-up
-deletes it. Its
+deletes it. A root that contains `::` is refused as well: releases before 0.18.0 wrote its files to the
+part before `::`, and the environment is the only record of them. Look there, delete what you no
+longer need yourself, and give a new environment another name. Its
 files, if there are any, are not touched: delete them in the storage yourself if you no longer need
 them. It is refused for an environment that is not deleted, and for one whose storage can still be
 reached: the clean-up deletes that one's files and then the environment, and
@@ -215,6 +217,7 @@ reached: the clean-up deletes that one's files and then the environment, and
 | `Environment 'sandbox' cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the environment was deleted with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |
 | `Environment 'sandbox' cannot be restored: the worker's clean-up has started deleting ...` | The sweep began deleting one of its tables' files. | Restore from a backup if you have one. |
 | `Environment 'old' was not purged: its storage can still be reached, ...` | `lakana env purge --rows-only` is only for an environment whose storage cannot be reached. | Let the clean-up delete it after its undo period, or run `lakana env delete old --purge`. |
+| `Environment 'old' was not purged: its storage root ... contains '::', ...` | Releases before 0.18.0 wrote this environment's files to the part of its root before `::`. | Look there and delete what you no longer need yourself; choose another name for a new environment. |
 | `Environment 'old' is not deleted, so its rows were not purged. ...` | Only a deleted environment can be purged. | Delete it first with `lakana env delete old`. |
 
 ## What the audit log records

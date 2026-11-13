@@ -788,7 +788,7 @@
           "environments"
         ],
         "summary": "Remove a deleted environment whose storage cannot be reached, rows only",
-        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nRemoves the environment from the catalog, with its records of dropped tables, and frees its name. Its files, if there are any, are not touched. Only for a deleted environment whose storage root no process can read (a scheme Lakana does not support, or an fsspec chain), which the worker's clean-up skips; a storage secret that cannot be used does not count. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when no environment has the name, and 409 when it is not deleted or its storage can still be reached.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nRemoves the environment from the catalog, with its records of dropped tables, and frees its name. Its files, if there are any, are not touched. Only for a deleted environment whose storage root is in a scheme Lakana never supported, which the worker's clean-up skips; a storage secret that cannot be used does not count. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when no environment has the name, and 409 when it is not deleted, its storage can still be reached, or its root contains `::` (releases before 0.18.0 wrote files to the part before it).",
         "operationId": "purge_environment_rows_api_v1_environments__name__purge_rows_post",
         "parameters": [
           {
