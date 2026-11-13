@@ -501,7 +501,9 @@ def test_a_query_the_watchdog_killed_keeps_its_reading_when_the_worker_then_stop
         assert dog.check_once() is True
     thread.join(10)
     with world.session() as session:
-        assert session.get(QueryRun, run_id).peak_memory_bytes == 4096  # ty: ignore[unresolved-attribute]
+        run = session.get(QueryRun, run_id)
+        assert run is not None
+        assert run.peak_memory_bytes == 4096
         assert session.scalars(select(TaskAttempt)).one().peak_memory_bytes == 4096
 
 

@@ -329,7 +329,9 @@ def test_a_failed_booking_is_logged_and_the_others_still_fire(
     real = JobService.book_fire.__func__
 
     def book(cls: type[JobService], s: Session, schedule_id: uuid.UUID, now: datetime) -> object:
-        if s.get(JobSchedule, schedule_id).job == "daily":  # ty: ignore[unresolved-attribute]
+        schedule = s.get(JobSchedule, schedule_id)
+        assert schedule is not None
+        if schedule.job == "daily":
             raise RuntimeError("no booking")
         return real(cls, s, schedule_id, now)
 

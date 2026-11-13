@@ -548,7 +548,9 @@ def test_a_failed_job_run_delivers_a_slack_message_and_stays_failed(
             scheduler_tick(session, db_now(session), lambda: 0.5)
         work()
         with Session(stack.db) as session:
-            status = session.get(Run, run_id).status  # ty: ignore[unresolved-attribute]
+            run = session.get(Run, run_id)
+            assert run is not None
+            status = run.status
         if status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
             break
     assert status is RunStatus.FAILED
@@ -571,7 +573,9 @@ def test_a_failed_job_run_delivers_a_slack_message_and_stays_failed(
     assert "not a number" not in text  # no error text, no data
     assert _row(stack, rows[0].id).state is NotificationState.DELIVERED
     with Session(stack.db) as session:
-        assert session.get(Run, run_id).status is RunStatus.FAILED  # ty: ignore[unresolved-attribute]
+        run = session.get(Run, run_id)
+        assert run is not None
+        assert run.status is RunStatus.FAILED
         failures = session.scalars(
             select(AuditEvent).where(AuditEvent.event_type == AuditEventType.NOTIFICATION_FAILED)
         ).all()
