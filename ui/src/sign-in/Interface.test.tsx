@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -439,11 +439,15 @@ describe("Interface", () => {
 
     await screen.findByRole("heading", { level: 1, name: "Jobs" });
 
-    expect(routers.length).toBeGreaterThan(1);
-    const newest = routers.at(-1);
-    for (const made of routers) {
-      expect(made.dispose).toHaveBeenCalledTimes(made === newest ? 0 : 1);
-    }
-    expect(newest?.router.state.location.pathname).toBe("/jobs");
+    // A later answer (the access list) can build one more router after the heading shows, and
+    // the previous one is disposed in that effect's cleanup, so wait for the set to settle.
+    await waitFor(() => {
+      expect(routers.length).toBeGreaterThan(1);
+      const newest = routers.at(-1);
+      for (const made of routers) {
+        expect(made.dispose).toHaveBeenCalledTimes(made === newest ? 0 : 1);
+      }
+      expect(newest?.router.state.location.pathname).toBe("/jobs");
+    });
   });
 });
