@@ -72,14 +72,14 @@ in a unit test without root; `scripts/compose_smoke_test.sh` pins it end to end.
 
 ## Running the unit suite in parallel
 
-CI runs the unit suite in **three shards per Python version**, side by side: the jobs
-`unit (3.11, 1/3)` to `unit (3.14, 3/3)`. `LAKANA_TEST_SHARD=I/N` (read by
+CI runs the unit suite in **four shards per Python version**, side by side: the jobs
+`unit (3.11, 1/4)` to `unit (3.14, 4/4)`. `LAKANA_TEST_SHARD=I/N` (read by
 `scripts/pytest_selection.py`, which both `conftest.py` files load) keeps shard I of N: whole test
 files, spread over the shards by the seconds in `scripts/test-durations.json`, the longest first,
 each to the shard with the least time so far; a file without an entry counts one second. Every
 shard and every xdist worker computes the same split from the same collection, so the shards
 together run every test once. When the shards drift apart (a budget failure shows it), refresh the
-file from the junit artifacts of a green run (`junit-unit-*`, `junit-integration-*`); a test checks that at most a tenth of the test files lack an entry, because a file without one counts one second and a stale file skews the shards (in November 2026 a quarter had none, and the three shards summed to 1082, 1429 and 1396 s of measured test time; with a fresh file they sum to 1302 s each). The macOS run uses four shards: three shards of balanced files still took 13 to 14 minutes each, too close to the 15-minute budget.
+file from the junit artifacts of a green run (`junit-unit-*`, `junit-integration-*`); a test checks that at most a tenth of the test files lack an entry, because a file without one counts one second and a stale file skews the shards (in November 2026 a quarter had none, and the three shards summed to 1082, 1429 and 1396 s of measured test time; with a fresh file they sum to 1302 s each). The macOS run and the Linux run both use four shards: three shards of balanced files still took 13 to 14 minutes each (on Linux 3.14, 9 to 16 minutes in the ten runs before November 13, 2026, with up to 6 minutes between runs of the same shard), too close to the 15-minute budget. Each coverage shard uploads `.coverage.shard-N`; `test (3.14)` downloads them all by the `coverage-data-*` pattern, so a further shard needs no change there.
 
 ```bash
 gh run download RUN_ID -p 'junit-*' -D ~/.cache/lakana-junit
@@ -1382,7 +1382,7 @@ it, the kill-or-record-equivalent policy, and the current exit-run results.
 
 `lakana[assets]` accepts `polars>=1.30` with no upper bound, and `uv.lock` holds Polars 2.x, so
 the whole suite runs on what new projects get. The oldest supported version runs as one extra
-step of the `unit (3.11, 3/3)` shard in `ci.yml` (about 3 min, not sharded itself): a first command asserts that `polars.__version__`
+step of the `unit (3.11, 3/4)` shard in `ci.yml` (about 3 min, not sharded itself): a first command asserts that `polars.__version__`
 starts with `1.30.` (the `--with` overlay shadows the locked 2.x; a change in uv's layering
 must fail the step, not pass it on Polars 2), then `uv run --with 'polars==1.30.*' pytest` runs the
 test files that touch Polars (the harness, the SDK data plane, the worker's Python tasks and

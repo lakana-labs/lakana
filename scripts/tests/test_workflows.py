@@ -916,19 +916,19 @@ def test_the_3_14_run_uploads_its_coverage_report_also_when_the_ratchet_fails() 
     assert names.index("Upload the coverage report") > names.index("Coverage ratchet")
 
 
-def test_the_unit_suite_runs_in_three_shards_per_version() -> None:
-    """Each shard runs a third of the test files, chosen by ``scripts/pytest_selection.py``."""
+def test_the_unit_suite_runs_in_four_shards_per_version() -> None:
+    """Each shard runs a quarter of the test files, chosen by ``scripts/pytest_selection.py``."""
     job = _jobs("ci.yml")["unit"]
-    assert job["strategy"]["matrix"]["shard"] == [1, 2, 3]
+    assert job["strategy"]["matrix"]["shard"] == [1, 2, 3, 4]
     assert job["strategy"]["matrix"]["python-version"] == (
         '${{ fromJSON(needs.changes.outputs.python_versions || \'["3.11","3.14"]\') }}'
     )
     assert job["strategy"]["fail-fast"] is False
-    assert job["name"] == "unit (${{ matrix.python-version }}, ${{ matrix.shard }}/3)"
+    assert job["name"] == "unit (${{ matrix.python-version }}, ${{ matrix.shard }}/4)"
     assert job["needs"] == "changes"
     steps = _test_steps("unit")
     for name in ("Unit tests (with coverage)", "Unit tests"):
-        assert steps[name]["env"] == {"LAKANA_TEST_SHARD": "${{ matrix.shard }}/3"}
+        assert steps[name]["env"] == {"LAKANA_TEST_SHARD": "${{ matrix.shard }}/4"}
     # The oldest-Polars step lists its files itself and must not be sharded.
     assert "env" not in steps["Unit tests on the oldest supported Polars"]
     assert "LAKANA_TEST_SHARD" not in str(job.get("env", {}))
@@ -2636,7 +2636,7 @@ def test_every_ci_job_has_a_time_budget() -> None:
     """``scripts/time_budgets.py jobs`` fails a job without one; this finds it before CI does."""
     budgets = read_budgets(ROOT / BUDGETS)
     names = [name for name in _check_names() if name != "time budgets"]
-    assert "unit (3.14, 3/3)" in names
+    assert "unit (3.14, 4/4)" in names
     assert "test (3.11)" in names
     assert "integration (services, 2/2)" in names
     assert "docs-examples (3/3)" in names
