@@ -21,6 +21,7 @@ import pytest
 from fake_launcher import FakeLauncher, Script, refusing
 from launcher_fakes import FakeEngine
 from launcher_fakes import settings as launcher_settings
+from scripts.test_support.ports import closed_port
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session
 
@@ -146,19 +147,6 @@ def world(tmp_path: Path) -> Iterator[World]:
     Base.metadata.create_all(engine)
     yield World(engine)
     engine.dispose()
-
-
-def closed_port() -> int:
-    """Find a loopback port nothing listens on.
-
-    Returns
-    -------
-    int
-        The port.
-    """
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 @contextmanager

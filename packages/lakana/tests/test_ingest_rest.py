@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pyarrow as pa
 import pytest
+from scripts.test_support.ports import closed_port
 from sdk_tls_fixture import Answer, Authority, Exchange, make_authority, scripted
 
 from lakana import _usage, context
@@ -438,11 +439,7 @@ def test_a_refused_credential_names_the_test_command_never_the_token(
 
 
 def test_a_network_failure_is_retried_then_named(authority: Authority, clock: Clock) -> None:
-    import socket
-
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
+    port = closed_port()
     _task(f"https://127.0.0.1:{port}", authority)
 
     with pytest.raises(SourceError, match=r"failed \(ConnectError\) after 3 attempts"):

@@ -12,7 +12,8 @@ from pathlib import Path
 
 import httpx
 import pytest
-from scripts.test_support.egress_helpers import Authority, ConnectProxy, Server, closed_port
+from scripts.test_support.egress_helpers import Authority, ConnectProxy, Server
+from scripts.test_support.ports import closed_port
 
 from lakana_core.config import WebhookConfig
 from lakana_worker import egress

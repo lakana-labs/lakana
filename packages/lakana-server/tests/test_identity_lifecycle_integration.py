@@ -38,6 +38,7 @@ def _free_port() -> int:
         A port not currently bound, suitable for uvicorn to listen on.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Not held: uvicorn must be able to listen on this port.
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 

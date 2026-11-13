@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
-from scripts.test_support.egress_helpers import Authority, ConnectProxy, Server, closed_port
+from scripts.test_support.egress_helpers import Authority, ConnectProxy, Server
+from scripts.test_support.ports import closed_port
 
 from lakana_core.net import egress, https_json
 from lakana_core.net.https_json import FetchFailed, Target, check, fetch_json

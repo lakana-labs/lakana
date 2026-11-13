@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from scripts.test_support.ports import closed_port
 
 from lakana_worker.launcher import egress, relay
 from lakana_worker.launcher.egress import EgressSettings
@@ -82,19 +83,6 @@ class _RelaySockets:
             The real module's attribute.
         """
         return getattr(socket, name)
-
-
-def _closed_port() -> int:
-    """Find a loopback port nothing listens on.
-
-    Returns
-    -------
-    int
-        The port.
-    """
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
 
 
 class _Echo(socketserver.BaseRequestHandler):
@@ -175,7 +163,7 @@ class RelayHarness:
         client.settimeout(5)
         client.bind(("127.0.0.1", 0))
         _PRETENDED[client.getsockname()[1]] = source or str(next(self.plan.subnet.hosts()))
-        port = _BOUND.get((str(self.plan.address), listen)) or _closed_port()
+        port = _BOUND.get((str(self.plan.address), listen)) or closed_port()
         try:
             client.connect(("127.0.0.1", port))
         except OSError:
@@ -859,7 +847,7 @@ def test_a_tasks_relay_never_says_connected(
 def test_a_checks_relay_that_cannot_dial_says_refused_and_never_connected(
     relay_on: Callable[..., RelayHarness],
 ) -> None:
-    harness = relay_on([(15001, "localhost", _closed_port())], verdicts=True)
+    harness = relay_on([(15001, "localhost", closed_port())], verdicts=True)
 
     with harness.connect(15001) as client:
         assert client.recv(1) == b""

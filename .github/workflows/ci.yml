@@ -230,7 +230,7 @@ jobs:
           npm ci --ignore-scripts --prefix tools/jscpd
           npm --prefix ui run prove-gates
 
-  # The unit suite in three shards per Python version, side by side. `LAKANA_TEST_SHARD=I/N`
+  # The unit suite in four shards per Python version, side by side. `LAKANA_TEST_SHARD=I/N`
   # (scripts/pytest_selection.py) keeps whole test files, spread by the seconds in
   # scripts/test-durations.json. Only the 3.14 shards measure coverage; `test (3.14)` combines
   # their data and runs the ratchets. Within a shard the run is parallel, a test file never split
@@ -240,7 +240,7 @@ jobs:
   # three: at four it peaked at 5,956-6,100 MB in October 2026, within 200 MB of the 6 GB limit of
   # scripts/pytest_memory_limit.py. Measuring costs about a third of a run, so 3.11 does not.
   unit:
-    name: unit (${{ matrix.python-version }}, ${{ matrix.shard }}/3)
+    name: unit (${{ matrix.python-version }}, ${{ matrix.shard }}/4)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
     timeout-minutes: 25
@@ -249,7 +249,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ${{ fromJSON(needs.changes.outputs.python_versions || '["3.11","3.14"]') }}
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -264,14 +264,14 @@ jobs:
       - name: Unit tests (with coverage)
         if: matrix.python-version == '3.14'
         env:
-          LAKANA_TEST_SHARD: ${{ matrix.shard }}/3
+          LAKANA_TEST_SHARD: ${{ matrix.shard }}/4
         run: >-
           uv run pytest -n auto --maxprocesses 2 --dist loadfile --cov --cov-report=
           --junitxml=junit-${{ matrix.shard }}.xml -o junit_family=xunit1
       - name: Unit tests
         if: matrix.python-version != '3.14'
         env:
-          LAKANA_TEST_SHARD: ${{ matrix.shard }}/3
+          LAKANA_TEST_SHARD: ${{ matrix.shard }}/4
         run: uv run pytest -n auto --maxprocesses 3 --dist loadfile
       - name: Unit tests on the oldest supported Polars
         # `lakana[assets]` accepts polars>=1.30 and the lock holds 2.x. The tests that touch
@@ -340,7 +340,7 @@ jobs:
           RESULT: ${{ needs.unit.result }}
         run: |
           if [ "$RESULT" != "success" ]; then
-            echo "::error::A unit shard ended with '$RESULT': the failing job of this run is named 'unit (VERSION, N/3)', and its log names the test."
+            echo "::error::A unit shard ended with '$RESULT': the failing job of this run is named 'unit (VERSION, N/4)', and its log names the test."
             exit 1
           fi
       - if: needs.changes.outputs.docs_only == 'true' || matrix.python-version == '3.14'
@@ -364,7 +364,7 @@ jobs:
           pattern: coverage-data-*
           path: coverage-data
           merge-multiple: true
-      # One report from the three shards; it lists every file below 100 % with the missed lines.
+      # One report from the four shards; it lists every file below 100 % with the missed lines.
       - name: Combine the coverage of the shards
         if: matrix.python-version == '3.14' && needs.changes.outputs.docs_only != 'true'
         run: |

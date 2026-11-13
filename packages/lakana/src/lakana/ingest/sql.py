@@ -686,8 +686,12 @@ def _open_sqlite(
                     database = lite.connect(uri)
                 except lite.Error as exc:
                     raise SourceError(f"`{conn.name}`: {_said(str(exc), None)}") from None
-                after = _open_files()
-                matched = _opened_only((seen.st_dev, seen.st_ino), handle, before, after)
+                try:
+                    after = _open_files()
+                    matched = _opened_only((seen.st_dev, seen.st_ino), handle, before, after)
+                except BaseException:
+                    database.close()
+                    raise
             finally:
                 os.close(handle)
         if matched:

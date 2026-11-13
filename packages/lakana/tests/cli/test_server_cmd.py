@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import FakeApi, invoke, make_state
+from scripts.test_support.ports import closed_port
 from typer.testing import Result
 
 from lakana.cli import _profiles, server
@@ -1734,11 +1735,7 @@ def test_make_supervisor_builds_a_real_supervisor() -> None:
 
 def test_probe_health_against_a_closed_port_is_false() -> None:
     """The real `_probe_health`, against nothing listening."""
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        closed_port = sock.getsockname()[1]
-
-    assert server._probe_health(f"http://127.0.0.1:{closed_port}") is False
+    assert server._probe_health(f"http://127.0.0.1:{closed_port()}") is False
 
 
 def test_probe_health_against_a_real_200_is_true() -> None:
@@ -1773,9 +1770,7 @@ def test_probe_health_ignores_http_proxy_env(
     proxy into a spurious 30 s readiness timeout against a perfectly good
     local server.
     """
-    with socket.socket() as dead:
-        dead.bind(("127.0.0.1", 0))
-        dead_port = dead.getsockname()[1]
+    dead_port = closed_port()
     monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{dead_port}")
 
     with socket.socket() as listener:
@@ -1852,6 +1847,7 @@ def test_reuse_addr_is_set_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_port_free_reflects_a_real_socket(tmp_path: Path) -> None:
     """`port_free` against a real, briefly-bound socket."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        # Not held: the port must be free again once the socket closes.
         sock.bind(("127.0.0.1", 0))
         bound_port = sock.getsockname()[1]
 
