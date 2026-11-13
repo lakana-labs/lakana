@@ -50,15 +50,15 @@ export function defaultOrder(sort: TableSort): SortOrder {
  * @returns The view.
  */
 export function readView(params: URLSearchParams): CatalogView {
-  const environment = params.get("env") ?? "";
-  const namespace = params.get("ns") ?? "";
+  const environment = (params.get("env") ?? "").trim();
+  const namespace = (params.get("ns") ?? "").trim();
   const requested = params.get("sort");
   const sort = TABLE_SORTS.find((key) => key === requested) ?? DEFAULT_VIEW.sort;
   const order = params.get("order");
   return {
     environment: environment === "" ? null : environment,
     namespace: environment === "" || namespace === "" ? null : namespace,
-    q: (params.get("q") ?? "").replaceAll("\u0000", "").trim().slice(0, Q_MAX),
+    q: (params.get("q") ?? "").replaceAll("\u0000", "").slice(0, Q_MAX).trim(),
     sort,
     order: order === "asc" || order === "desc" ? order : defaultOrder(sort),
   };

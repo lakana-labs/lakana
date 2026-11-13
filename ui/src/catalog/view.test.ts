@@ -46,6 +46,19 @@ describe("catalog view", () => {
     expect(Q_MAX).toBe(200);
   });
 
+  it("reads a blank environment or namespace as none", () => {
+    expect(read("env=%20")).toMatchObject({ environment: null, namespace: null });
+    expect(read("env=prod&ns=%20")).toMatchObject({ environment: "prod", namespace: null });
+    expect(read("env=%20prod%20&ns=%20gold%20")).toMatchObject({
+      environment: "prod",
+      namespace: "gold",
+    });
+  });
+
+  it("leaves no trailing space when the cut falls after a space", () => {
+    expect(read("q=" + "x".repeat(199) + "%20tail").q).toBe("x".repeat(199));
+  });
+
   it("writes only what differs from the defaults", () => {
     expect(viewSearch({ ...DEFAULT_VIEW, sort: "rows", order: "desc" })).toBe("?sort=rows");
     expect(viewSearch({ ...DEFAULT_VIEW, sort: "rows", order: "asc" })).toBe(
