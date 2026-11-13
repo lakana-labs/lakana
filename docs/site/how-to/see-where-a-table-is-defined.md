@@ -73,7 +73,7 @@ SELECT * FROM (
 The file goes to standard output and the location lines to standard error, so redirecting
 standard output saves the file alone. Tabs and line breaks are kept. A character that could change
 what your terminal shows is printed as an escape instead, such as `\x1b` for an escape character
-or `‮` for a right-to-left override; accents, other scripts and emoji are printed as they are.
+or `\u202e` for a right-to-left override (U+202E); accents, other scripts and emoji are printed as they are.
 
 `--output json` prints the answer for a script: the location's fields, and with `--show` the file
 as `content`, with `bytes`, `reason` and `message`. There the text is as JSON writes it, without
