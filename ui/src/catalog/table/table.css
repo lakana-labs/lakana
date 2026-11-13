@@ -1,5 +1,11 @@
 /* A table's page: the label and the line under the heading, the quiet blocks shown while the
    table is read, and the sentence and the way on when it cannot be shown. */
+
+/* Wider than other pages, so that Overview's facts sit on one line each and it fits 1280 × 800. */
+.table-page .page {
+  max-width: 1040px;
+}
+
 .table-page .page-title {
   overflow-wrap: anywhere;
 }
@@ -11,7 +17,7 @@
 }
 
 .table-line {
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-3);
   color: var(--color-text-muted);
 }
 
@@ -64,12 +70,18 @@
 .overview-side {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-4);
   min-width: 0;
 }
 
 .overview section > *:last-child {
   margin-bottom: 0;
+}
+
+/* The first columns are a glance, not a work surface: lower rows than the full list, so that
+   Overview fits a 1280 × 800 window in either density. */
+.first-columns .list td {
+  height: 28px;
 }
 
 .block-heading {
