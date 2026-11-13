@@ -4,7 +4,9 @@
  *
  * @packageDocumentation
  */
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import AxeBuilder from "@axe-core/playwright";
 import {
@@ -391,6 +393,79 @@ export async function queryStatus(
   });
   await ensureOk(`GET ${path}`, response);
   return ((await response.json()) as { status: string }).status;
+}
+
+/**
+ * Counts the audit entries of one type in an environment, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param environment - The environment; unique to the test, so no other test's entries count.
+ * @param eventType - The audit event type, such as `ACTIVITY_VIEWED`.
+ * @returns How many entries the audit API lists.
+ */
+export async function auditEventCount(
+  request: APIRequestContext,
+  environment: string,
+  eventType: string,
+): Promise<number> {
+  const path = `/api/v1/audit-events?event_type=${eventType}&environment=${environment}&limit=500`;
+  const response = await request.get(path, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  await ensureOk(`GET ${path}`, response);
+  return ((await response.json()) as { items: unknown[] }).items.length;
+}
+
+/**
+ * Records that a person read a table today. Only a worker writes this (when a query that names
+ * the table succeeds) and the e2e server runs none, so the row goes into the server's database
+ * directly, in the shape the worker writes: the stand-in for the worker, for a test of what the
+ * Health tab shows once someone has read the table.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param namespace - The dotted namespace.
+ * @param table - The table's name.
+ * @param person - The reader's name.
+ * @returns Resolves once the row is in.
+ */
+export async function recordRead(
+  request: APIRequestContext,
+  environment: string,
+  namespace: string,
+  table: string,
+  person: string,
+): Promise<void> {
+  const path = `/api/v1/environments/${environment}/namespaces/${namespace}/tables/${table}`;
+  const response = await request.get(path, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  await ensureOk(`GET ${path}`, response);
+  const { uuid } = (await response.json()) as { uuid: string };
+  const database = new DatabaseSync(resolve(import.meta.dirname, "..", ".e2e-server", "lakana.db"));
+  try {
+    database.exec("PRAGMA busy_timeout = 5000");
+    const principal = database.prepare("SELECT id FROM principals WHERE name = ?").get(person) as
+      { id: string } | undefined;
+    if (principal === undefined) {
+      throw new Error(`no principal named ${person}`);
+    }
+    const now = new Date();
+    database
+      .prepare(
+        "INSERT INTO table_reads (id, table_id, principal_id, day, read_count, last_read_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        randomUUID().replaceAll("-", ""),
+        uuid.replaceAll("-", ""),
+        principal.id,
+        now.toISOString().slice(0, 10),
+        3,
+        now.toISOString().replace("T", " ").replace("Z", "000"),
+      );
+  } finally {
+    database.close();
+  }
 }
 
 /**
