@@ -125,10 +125,10 @@ message to try again.
 follows these rules too, file by file: an asset's or a check's SQL is shown only when you would be
 shown its file here, and each file it shows is recorded the same way. A check is stricter in one
 point: it is hidden when any table it reads is a view, also the table it checks, since a view's
-rules sit on the tables beneath it. For any other asset or check
-the `sql` column says `hidden (restricted)` or `not recorded`, and the sentence of the table
-above is printed once under the table; in JSON the entry has no `sql` and carries
-`content_reason` and `content_message`.
+rules sit on the tables beneath it. For any other asset, the `sql` column says
+`hidden (restricted)` or `not recorded`, and the sentence of the table above is printed once
+under the table. The text output lists only assets; a check's reason is in `--output json`,
+where a hidden entry has no `sql` and carries `content_reason` and `content_message`.
 
 ## Control characters
 
