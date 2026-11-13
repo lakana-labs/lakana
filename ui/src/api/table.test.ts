@@ -7,19 +7,28 @@ import {
   DOWN,
   HEALTH,
   LINEAGE_PATH,
+  QUERIES_PATH,
+  QUERY_ID,
+  queryStatus,
+  RESULT,
   TABLE,
   TABLE_PATH,
   UP,
 } from "../test/table";
 import {
+  ACTIVE_STATUSES,
+  cancelQuery,
   describeColumn,
   describeTable,
   getDefinition,
   getDefinitionFile,
   getLineage,
+  getQueryStatus,
+  getResultPage,
   getTable,
   getTableHealth,
   myPermissions,
+  submitPreview,
   tableApiPath,
 } from "./table";
 
@@ -137,5 +146,41 @@ describe("table", () => {
       `${TABLE_PATH}/definition`,
       `${TABLE_PATH}/definition/file`,
     ]);
+  });
+
+  it("queues a preview with no body and answers its query's id", async () => {
+    const server = fakeServer({
+      [`POST ${TABLE_PATH}/preview`]: { status: 202, body: { query_id: QUERY_ID } },
+    });
+
+    expect(await submitPreview(REF)).toBe(QUERY_ID);
+
+    expect(server.sent[0]?.path).toBe(`${TABLE_PATH}/preview`);
+    expect(server.sent[0]?.body).toBeUndefined();
+  });
+
+  it("polls a query, reads its page as JSON of at most 100 rows and cancels it, in the background", async () => {
+    const server = fakeServer({
+      [`GET ${QUERIES_PATH}/${QUERY_ID}`]: { status: 200, body: queryStatus("RUNNING") },
+      [`GET ${QUERIES_PATH}/${QUERY_ID}/result`]: { status: 200, body: RESULT },
+      [`POST ${QUERIES_PATH}/${QUERY_ID}/cancel`]: { status: 200, body: queryStatus("CANCELLED") },
+    });
+
+    expect(await getQueryStatus("prod", QUERY_ID)).toEqual(queryStatus("RUNNING"));
+    expect(await getResultPage("prod", QUERY_ID)).toEqual(RESULT);
+    await expect(cancelQuery("prod", QUERY_ID)).resolves.toBeUndefined();
+
+    expect(server.sent.map((request) => `${request.method} ${request.path}`)).toEqual([
+      `GET ${QUERIES_PATH}/${QUERY_ID}`,
+      `GET ${QUERIES_PATH}/${QUERY_ID}/result?format=json&limit=100`,
+      `POST ${QUERIES_PATH}/${QUERY_ID}/cancel`,
+    ]);
+    expect(server.sent.every((request) => request.headers["x-lakana-background"] === "1")).toBe(
+      true,
+    );
+  });
+
+  it("names the active states of a run in the server's upper case", () => {
+    expect(ACTIVE_STATUSES).toEqual(["QUEUED", "RUNNING"]);
   });
 });

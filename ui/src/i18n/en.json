@@ -583,6 +583,38 @@
       "nothingUp": "Nothing upstream.",
       "nothingDown": "Nothing downstream.",
       "more": "and {{count}} more"
+    },
+    "preview": {
+      "region": "Preview of {{name}}",
+      "grid": "The first rows of {{name}}",
+      "first": "First {{count}} rows · read as you",
+      "rows_one": "{{count}} row · read as you",
+      "rows_other": "{{count}} rows · read as you",
+      "partOf": "First {{shown}} of {{count}} rows · read as you",
+      "time": " · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
+      "masked": "Masked for you:",
+      "maskedOf": "column {{column}} of {{table}}",
+      "maskedMore": "and {{count}} more",
+      "notAllowed": "Preview runs a query as you, which needs the right to run queries in {{environment}}. Ask an administrator for the Analyst role there.",
+      "artifact": "An artifact holds files, not rows, so it has no preview. Download its files with lakana artifact download.",
+      "starting": "Starting the preview…",
+      "waiting": "Waiting for a worker…",
+      "status": {
+        "QUEUED": "Queued",
+        "RUNNING": "Running"
+      },
+      "busy": "The server is busy preparing results. Try again.",
+      "failed": "The preview did not finish. Refresh to run it again.",
+      "empty": "No rows to show. Overview says when the table was last written.",
+      "cutNote": "Some values were too large to send and are marked cut.",
+      "cutMark": "… (cut)",
+      "null": "null",
+      "binary_one": "binary, {{count}} byte",
+      "binary_other": "binary, {{count}} bytes",
+      "refresh": "Refresh",
+      "value": "Value",
+      "valueOf": "{{column}}, row {{row}}",
+      "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here."
     }
   },
   "list": {

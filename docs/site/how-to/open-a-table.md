@@ -86,7 +86,11 @@ focus the list and use the arrow keys. The page itself never scrolls sideways.
 
 ## Preview
 
-Preview shows the first rows of the table. Its address ends in `/preview`.
+Preview shows the first 100 rows of the table, read as you, and names the columns masked for
+you. Its address ends in `/preview`. The preview runs only while the tab is open, and leaving the
+tab cancels one that still waits. A person who may read the table but not run queries sees one
+line that says so and what to ask for. See
+[In the web interface](preview-a-table.md#in-the-web-interface).
 
 ## When the page cannot be shown
 

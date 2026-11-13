@@ -1,7 +1,7 @@
 # Preview a table
 
-After this guide you can look at the first rows of a table in one command, without writing SQL, and
-you know what a preview hides from you. You need an environment with a table that has data (see
+After this guide you can look at the first rows of a table in one command or on the table's page in
+the web interface, without writing SQL, and you know what a preview hides from you. You need an environment with a table that has data (see
 [Getting started](../tutorials/getting-started.md)) and the right to run queries there, which the
 `ANALYST` role gives.
 
@@ -87,6 +87,37 @@ that reads the same table.
   namespace or the table.
 
 A namespace may be nested, as in `gold.finance.sales`: the table is the last part of the name.
+
+## In the web interface
+
+On a table's page, open the **Preview** tab. The preview runs only while the tab is open; the other
+tabs never start one.
+
+- **Read as you.** The tab runs the same preview as `lakana table preview`, as you: your row
+  filters and column masks apply. The line over the rows says how many there are, that you read
+  them as yourself, and how long the query took, such as "First 100 rows · read as you · 0.8 s".
+- **Masked columns.** The line **Masked for you** names the columns a mask replaced for you, such
+  as "Masked for you: email". A column that a view takes from another table is named with that
+  table, such as "column email of gold.customers". It never shows the rule or the replacement.
+- **While it waits.** The tab shows **Queued** or **Running**, and after a second "Waiting for a
+  worker…" while no worker has taken the query yet. **Refresh** runs the preview again; pressed
+  while one waits, it cancels that one first.
+- **Leaving the tab cancels it.** When you go to another tab or page while the preview is queued
+  or running, the interface cancels the query, so no preview is left waiting for a worker. A
+  preview that has finished is not touched.
+- **The rows.** Each value is cut to one line. Move to a cell with Tab and the arrow keys, or click
+  it, and the **Value** panel below the rows shows it whole. The rows are one stop for Tab: Tab
+  enters them and Tab again leaves them, and the arrow keys move between the cells. A value with a
+  character you could not see, such as U+202E (right-to-left override), shows that character as a
+  small mark with its code, as in [Characters you could not see](see-where-a-table-is-defined.md#in-the-web-interface).
+  Binary data reads as its size, such as "binary, 12 bytes", and a value too large to send is
+  marked "(cut)".
+- **It counts as a read and a query.** A preview is a query you ran: it is recorded in the audit
+  log like any preview, and it counts as a read of the table in **Last read** on Overview.
+- **A viewer sees one line.** Without the right to run queries in the environment, the tab says so
+  in one line: "Preview runs a query as you, which needs the right to run queries in prod. Ask an
+  administrator for the Analyst role there." No query is sent. An artifact has no Preview either:
+  the tab says to download its files with `lakana artifact download`.
 
 ## Use it from Python
 

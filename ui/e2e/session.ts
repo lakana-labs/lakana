@@ -282,6 +282,39 @@ const DEFINITION_FILE = {
 /** The path of the lineage Overview reads one step each way. */
 const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
 
+/** The path the Preview tab queues its preview at. */
+const PREVIEW_PATH = `${TABLE_PATH}/preview`;
+
+/** The preview's query run, which has finished at the first poll. */
+const PREVIEW_RUN_PATH = "/api/v1/environments/prod/queries/5b0e7c1a-3d2f-4e6a-9b8c-7d6e5f4a3b2c";
+
+/** The preview's page: a masked column, a long note with a right-to-left override, binary. */
+const PREVIEW_PAGE = {
+  columns: [
+    { name: "sale_id", type: "int64" },
+    { name: "customer_email", type: "string" },
+    { name: "note", type: "string" },
+    { name: "receipt", type: "binary" },
+  ],
+  columns_cut: 0,
+  masked_columns: [{ table: "gold.sales.fact_sales", column: "customer_email" }],
+  masked_columns_cut: 0,
+  rows: [
+    [
+      "1",
+      "****",
+      `Delivered to the back door \u202Eevil ${"and more ".repeat(40)}`,
+      { binary: 12 },
+    ],
+    ["2", "****", null, null],
+  ],
+  row_cut: [],
+  row_count: 2,
+  next_offset: null,
+  duration_ms: 800,
+  preview: { table: "gold.sales.fact_sales" },
+};
+
 /** The table's health: a failed check that set the table back, a signal that fired and a pass. */
 const HEALTH = {
   days: 7,
@@ -459,6 +492,10 @@ export const STUBBED = [
   PERMISSIONS_PATH,
   DEFINITION_PATH,
   DEFINITION_FILE_PATH,
+  PREVIEW_PATH,
+  PREVIEW_RUN_PATH,
+  `${PREVIEW_RUN_PATH}/result`,
+  `${PREVIEW_RUN_PATH}/cancel`,
 ];
 
 /**
@@ -530,6 +567,22 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname === PERMISSIONS_PATH,
     (route) => route.fulfill({ json: PERMISSIONS }),
+  );
+  await page.route(
+    (url) => url.pathname === PREVIEW_PATH,
+    (route) =>
+      route.fulfill({ status: 202, json: { query_id: PREVIEW_RUN_PATH.split("/").at(-1) } }),
+  );
+  await page.route(
+    (url) => url.pathname.startsWith(PREVIEW_RUN_PATH),
+    (route) => {
+      const path = new URL(route.request().url()).pathname;
+      return route.fulfill({
+        json: path.endsWith("/result")
+          ? PREVIEW_PAGE
+          : { query_id: PREVIEW_RUN_PATH.split("/").at(-1), status: "SUCCEEDED" },
+      });
+    },
   );
   await page.route(
     (url) => url.pathname === TABLES,

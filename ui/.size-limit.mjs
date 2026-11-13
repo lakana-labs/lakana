@@ -46,7 +46,13 @@ const NAMED_LIMITS = [
   // Raised to the measured 7.11 kB (2026-11-13) + 10 % with Defined in: the location, the server's
   // link, the file's dialog with its numbered lines, the marked defining line and the visible marks
   // of invisible characters. React Aria's dialog itself stays in the first load.
-  { name: "a table's page", prefix: "TablePage-", limit: "7.82 kB" },
+  // Raised to the measured 7.78 kB (2026-11-13) + 10 % with the Preview tab loaded on demand from
+  // the page: its import, the loading line and the code the bundler moved here with it.
+  { name: "a table's page", prefix: "TablePage-", limit: "8.56 kB" },
+  // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
+  // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
+  // the cells as text and the Value panel. It loads only when the Preview tab is opened.
+  { name: "the Preview tab", prefix: "PreviewTab-", limit: "24.17 kB" },
   // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
   // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
   { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },

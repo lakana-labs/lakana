@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, type RefObject, useCallback, useEffect, useRef } from "react";
+import { type JSX, lazy, type RefObject, Suspense, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -19,6 +19,12 @@ import { Overview } from "./Overview";
 import { TableHeader } from "./TableHeader";
 import { TableProvider } from "./TableContext";
 import { TableSkeleton } from "./TableSkeleton";
+
+// React Aria's grid is most of the tab's code, so the tab loads only when it is opened.
+const PreviewTab = lazy(async () => {
+  const { PreviewTab: loaded } = await import("./PreviewTab");
+  return { default: loaded };
+});
 
 /** Properties of {@link TablePage}. */
 export interface TablePageProps {
@@ -85,7 +91,7 @@ function Problem({ place, resource, headingRef }: ProblemProps): JSX.Element {
 
 /**
  * Reads the table when the page opens, records it as opened once, and shows its header and the
- * tab the address names; Preview's content arrives with a later task of this part.
+ * tab the address names.
  *
  * @param props - The table, the tab and the heading.
  * @param props.place - The table the address names.
@@ -127,6 +133,11 @@ export function TablePage({ place, tab, headingRef }: TablePageProps): JSX.Eleme
       <section className="table-tab" aria-label={t(`table.tabs.${tab}`)}>
         {tab === "overview" && <Overview />}
         {tab === "columns" && <ColumnsTab />}
+        {tab === "preview" && (
+          <Suspense fallback={<p role="status">{t("table.preview.starting")}</p>}>
+            <PreviewTab />
+          </Suspense>
+        )}
       </section>
     </TableProvider>
   );

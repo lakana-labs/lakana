@@ -109,6 +109,13 @@ for (const theme of ["light", "dark"] as const) {
           await expect(
             page.getByRole("navigation", { name: "Sections of the table" }),
           ).toBeVisible();
+          if (tab === "/preview") {
+            const grid = page.getByRole("grid", { name: "The first rows of fact_sales" });
+            await expect(grid).toBeVisible();
+            // The Value panel, with a long note that scrolls in it.
+            await grid.getByText(/Delivered to the back door/).click();
+            await expect(page.getByRole("region", { name: "note, row 1" })).toBeVisible();
+          }
           expect(await violations(page), `the table page${tab}`).toEqual([]);
         }
       });

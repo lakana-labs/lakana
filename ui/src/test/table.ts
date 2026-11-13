@@ -9,6 +9,9 @@ import type {
   GraphNodeOut,
   GraphOut,
   PermissionsOut,
+  QueryRunStatus,
+  QueryStatusOut,
+  ResultPageOut,
   TableDefinitionFileOut,
   TableDefinitionOut,
   TableHealthOut,
@@ -306,10 +309,79 @@ export function definitionFile(
   };
 }
 
+/** A view in the place of the fact table: it reads `gold.orders`. */
+export const VIEW: TableOut = table({
+  kind: "VIEW",
+  metadata_location: null,
+  sql: "SELECT * FROM gold.orders",
+  references: [{ id: "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", name: "gold.orders" }],
+});
+
+/** The path of the queries of `prod` on the server. */
+export const QUERIES_PATH = "/api/v1/environments/prod/queries";
+
+/** The id of the preview's query run. */
+export const QUERY_ID = "5b0e7c1a-3d2f-4e6a-9b8c-7d6e5f4a3b2c";
+
+/**
+ * A query run's status, as the server answers it.
+ *
+ * @param status - The state, in the server's upper case.
+ * @param overrides - The fields that differ.
+ * @returns The answer of `GET .../queries/{id}`.
+ */
+export function queryStatus(
+  status: QueryRunStatus,
+  overrides: Partial<QueryStatusOut> = {},
+): QueryStatusOut {
+  return { query_id: QUERY_ID, status, error_message: null, error_cause: null, ...overrides };
+}
+
+/**
+ * The fact table's preview page: two rows, `customer_email` masked for the reader, a bidi
+ * character in a note, a binary column and a struct whose fields are named `binary` and `cut`.
+ */
+export const RESULT: ResultPageOut = {
+  columns: [
+    { name: "sale_id", type: "int64" },
+    { name: "customer_email", type: "string" },
+    { name: "note", type: "string" },
+    { name: "receipt", type: "binary" },
+    { name: "extra", type: "struct<binary: int32, cut: bool>" },
+  ],
+  columns_cut: 0,
+  masked_columns: [{ table: "gold.sales.fact_sales", column: "customer_email" }],
+  masked_columns_cut: 0,
+  rows: [
+    ["1", "****", "x\u202Ey", { binary: 12 }, { binary: 3, cut: true }],
+    ["2", "****", null, null, null],
+  ],
+  row_cut: [],
+  row_count: 2,
+  next_offset: null,
+  duration_ms: 800,
+  preview: { table: "gold.sales.fact_sales" },
+};
+
+/**
+ * The preview page with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The page.
+ */
+export function result(overrides: Partial<ResultPageOut> = {}): ResultPageOut {
+  return { ...RESULT, ...overrides };
+}
+
+/** The view's preview page: the worker names the masked column of the base table it read. */
+export const VIEW_RESULT: ResultPageOut = result({
+  masked_columns: [{ table: "gold.orders", column: "email" }],
+});
+
 /**
  * The routes the table page reads and writes for a person: the table, what they may do, the
- * record that they opened it, its health, lineage and where it is defined. The person may do
- * everything.
+ * record that they opened it, its health, lineage, where it is defined and its preview, which
+ * has finished at the first poll. The person may do everything.
  *
  * @param person - The person's principal name.
  * @returns The routes.
@@ -329,5 +401,9 @@ export function tableRoutes(person = "admin"): Record<string, FakeRoute> {
       status: 200,
       body: request.path.includes("direction=up") ? UP : DOWN,
     }),
+    [`POST ${TABLE_PATH}/preview`]: { status: 202, body: { query_id: QUERY_ID } },
+    [`GET ${QUERIES_PATH}/${QUERY_ID}`]: { status: 200, body: queryStatus("SUCCEEDED") },
+    [`GET ${QUERIES_PATH}/${QUERY_ID}/result`]: { status: 200, body: RESULT },
+    [`POST ${QUERIES_PATH}/${QUERY_ID}/cancel`]: { status: 200, body: queryStatus("CANCELLED") },
   };
 }

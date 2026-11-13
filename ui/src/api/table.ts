@@ -605,3 +605,151 @@ export function getDefinition(ref: TableRef): Promise<TableDefinitionOut> {
 export function getDefinitionFile(ref: TableRef): Promise<TableDefinitionFileOut> {
   return api.request<TableDefinitionFileOut>("GET", tableApiPath(ref, "/definition/file"));
 }
+
+/** The states of a query run, in the server's upper case (`models/query_run.py`). */
+export type QueryRunStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+/** The states of a run that has not ended: leaving it would leave it waiting or running. */
+export const ACTIVE_STATUSES: readonly QueryRunStatus[] = ["QUEUED", "RUNNING"];
+
+/** A query run's status, as `GET .../queries/{id}` answers it (the fields the interface reads). */
+export interface QueryStatusOut {
+  /** The query's id. */
+  readonly query_id: string;
+  /** Its state. */
+  readonly status: QueryRunStatus;
+  /** Why a `FAILED` or `CANCELLED` run ended, in the server's words; else null. */
+  readonly error_message?: string | null;
+  /** The cause of a `FAILED` or `CANCELLED` run, such as `timeout`; else null. */
+  readonly error_cause?: string | null;
+}
+
+/** One column of a JSON result page. */
+interface ResultColumnOut {
+  /** The column's name. */
+  readonly name: string;
+  /** The column's Arrow type name, such as `int64`, `string` or `binary`, cut to 256 characters. */
+  readonly type: string;
+  /** True when the type name was cut; absent otherwise. */
+  readonly type_cut?: boolean | null;
+}
+
+/** A column a mask was applied to for the reader, as the worker recorded it. */
+export interface MaskedColumnOut {
+  /** The masked table's dotted name: for a view, the table the view reads. */
+  readonly table: string;
+  /** The column, named as in the read. */
+  readonly column: string;
+}
+
+/** The table a preview showed. */
+interface PreviewOut {
+  /** The dotted name, cut to 1,024 characters. */
+  readonly table: string;
+  /** True when the name was cut; absent otherwise. */
+  readonly cut?: boolean | null;
+}
+
+/**
+ * One page of a query result as JSON (`GET .../result?format=json`). The server bounds it: at
+ * most 4 MiB, each cell at most 64 KiB; a cut cell is `{"cut": true}`, or `{"cut": true, "text":
+ * <prefix>}` for a string.
+ */
+export interface ResultPageOut {
+  /** The result's columns, in order. */
+  readonly columns: readonly ResultColumnOut[];
+  /** How many columns, or cells of a cut row, were left out because the page was full. */
+  readonly columns_cut: number;
+  /** The columns masked for the reader; `[]` for none, null when not recorded. */
+  readonly masked_columns: readonly MaskedColumnOut[] | null;
+  /** How many further masked columns were left out because the page was full. */
+  readonly masked_columns_cut: number;
+  /**
+   * The rows, each a list of cells in column order: 64-bit integers and decimals as strings,
+   * binary as `{"binary": <bytes>}`, nested values as JSON.
+   */
+  readonly rows: readonly (readonly unknown[])[];
+  /** The positions on this page of the rows that were cut inside. */
+  readonly row_cut: readonly number[];
+  /** The rows the result has, at most 100 for a preview. */
+  readonly row_count: number;
+  /** The offset of the next page, or null at the end. */
+  readonly next_offset: number | null;
+  /** How long the query ran, or null when unknown. */
+  readonly duration_ms: number | null;
+  /** The previewed table for a preview, null for any other query. */
+  readonly preview: PreviewOut | null;
+}
+
+/**
+ * The API path of an environment's query run or one of its parts.
+ *
+ * @param environment - The environment's name.
+ * @param id - The query's id.
+ * @param suffix - What follows the id, such as `/cancel`.
+ * @returns The path.
+ */
+function queryPath(environment: string, id: string, suffix = ""): string {
+  return `/api/v1/environments/${encodeURIComponent(environment)}/queries/${encodeURIComponent(id)}${suffix}`;
+}
+
+/**
+ * Queues a preview of a table or view: its first 100 rows, read as the person. The server writes
+ * the query and its limit; the request carries neither.
+ *
+ * @param ref - The table.
+ * @returns The id of the preview's query run.
+ * @throws {ApiError} for a refusal: 403 without the right to run queries (or to read the table),
+ *   409 for an artifact.
+ */
+export async function submitPreview(ref: TableRef): Promise<string> {
+  const answer = await api.request<{ readonly query_id: string }>(
+    "POST",
+    tableApiPath(ref, "/preview"),
+  );
+  return answer.query_id;
+}
+
+/**
+ * Reads a query run's state; a poll, so it never counts as the person's activity.
+ *
+ * @param environment - The environment's name.
+ * @param id - The query's id.
+ * @returns The state.
+ * @throws {ApiError} for a refusal.
+ */
+export function getQueryStatus(environment: string, id: string): Promise<QueryStatusOut> {
+  return api.request<QueryStatusOut>("GET", queryPath(environment, id), undefined, {
+    background: true,
+  });
+}
+
+/**
+ * Reads the first page of a finished run as bounded JSON, at most 100 rows.
+ *
+ * @param environment - The environment's name.
+ * @param id - The query's id.
+ * @returns The page.
+ * @throws {ApiError} for a refusal; 503 with `Retry-After` while the server converts other pages.
+ */
+export function getResultPage(environment: string, id: string): Promise<ResultPageOut> {
+  return api.request<ResultPageOut>(
+    "GET",
+    queryPath(environment, id, "/result?format=json&limit=100"),
+    undefined,
+    { background: true },
+  );
+}
+
+/**
+ * Cancels a query run that has not ended.
+ *
+ * @param environment - The environment's name.
+ * @param id - The query's id.
+ * @throws {ApiError} for a refusal; 409 for a run that has already ended.
+ */
+export async function cancelQuery(environment: string, id: string): Promise<void> {
+  await api.request<unknown>("POST", queryPath(environment, id, "/cancel"), undefined, {
+    background: true,
+  });
+}

@@ -80,21 +80,30 @@ export type {
 export { changeSignInSettings, getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";
 export {
+  ACTIVE_STATUSES,
+  cancelQuery,
   describeColumn,
   describeTable,
   getDefinition,
   getDefinitionFile,
   getLineage,
+  getQueryStatus,
+  getResultPage,
   getTable,
   getTableHealth,
   myPermissions,
+  submitPreview,
 } from "./table";
 export type {
   ColumnOut,
   GraphNodeOut,
   GraphOut,
+  MaskedColumnOut,
   ModelReferenceOut,
   PermissionsOut,
+  QueryRunStatus,
+  QueryStatusOut,
+  ResultPageOut,
   TableDefinitionFileOut,
   TableDefinitionOut,
   TableHealthOut,
