@@ -373,7 +373,7 @@ def reference_checks(
     *,
     passed_for: Collection[uuid.UUID] = (),
 ) -> dict[uuid.UUID, list[CheckHealth]]:
-    """Find, per table, the newest result of each generated reference check that did not pass.
+    """Find, per table, the newest result of each reference check: failed, or passed in `passed_for`.
 
     One statement, however many tables. A check that failed once and passed since is not failing;
     its pass is found only for a table in `passed_for`.

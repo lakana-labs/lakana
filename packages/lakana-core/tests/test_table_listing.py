@@ -679,7 +679,15 @@ def test_the_namespace_filter_is_case_sensitive_as_on_postgres(session: Session)
 
 @pytest.mark.parametrize(
     ("namespace", "found"),
-    [("a*", "star"), ("a?", "mark"), ("[a]", "bracket"), ("a", "plain"), ("a[", "open")],
+    [
+        ("a*", "star"),
+        ("a?", "mark"),
+        ("[a]", "bracket"),
+        ("a", "plain"),
+        ("a[", "open"),
+        ("a%", "percent"),
+        ("a_", "under"),
+    ],
 )
 def test_the_namespace_filter_takes_pattern_characters_literally(
     session: Session, namespace: str, found: str
@@ -694,6 +702,7 @@ def test_the_namespace_filter_takes_pattern_characters_literally(
             "a[.n": "open",
             "ab.n": "other",
             "a%.n": "percent",
+            "a_.n": "under",
         },
     )
     assert [item.name for item in listing.list(admin, namespace=namespace).items] == [found]
