@@ -48,4 +48,24 @@ describe("OwnRecoveryNote", () => {
     await act(() => Promise.resolve());
     expect(screen.queryByText(/lakana recovery create/)).not.toBeInTheDocument();
   });
+
+  it("says nothing when the role cannot be read", async () => {
+    const { server } = renderShell("/account", {
+      routes: {
+        ...ownRoutes(true),
+        "GET /api/v1/principals/admin/permissions": {
+          status: 500,
+          body: { detail: "The catalog database broke." },
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(server.sent.map((request) => request.path)).toContain(
+        "/api/v1/principals/admin/permissions",
+      );
+    });
+    await act(() => Promise.resolve());
+    expect(screen.queryByText(/lakana recovery create/)).not.toBeInTheDocument();
+  });
 });

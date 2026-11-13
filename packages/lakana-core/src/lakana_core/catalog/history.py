@@ -95,12 +95,6 @@ KEY_TYPE_MESSAGE = (
 )
 """A natural key column the surrogate key cannot encode; `{cast}` is the cast to write."""
 
-UUID_KEY_MESSAGE = (
-    "key column `{column}` is a uuid, which a history key cannot be; cast it in the SELECT, for "
-    "example `CAST({column} AS VARCHAR)`."
-)
-"""A uuid key column: pyarrow can neither group nor filter on it (the spec's tag `u` is unused)."""
-
 RUN_WROTE_MESSAGE = (
     "This run already wrote this table's history (the current snapshot of {table} is its write), "
     "and a run opens at most one version per key. Start a new run to record the newer values."
@@ -458,9 +452,6 @@ def check_history_batch(
             )
     stored = data.drop_columns([valid_from]) if valid_from is not None else data
     arrow_to_iceberg_schema(stored.schema)
-    for column in key:
-        if column in data.column_names and data.schema.field(column).type == pa.uuid():
-            raise ValidationError(UUID_KEY_MESSAGE.format(column=column))
     check_merge_batch(
         data,
         key,
@@ -468,6 +459,7 @@ def check_history_batch(
         table_name=table,
         advice=advice,
         composite_cap=False,
+        write="history",
     )
     for column in key:
         _payloads(data.column(column).combine_chunks().slice(0, 0), column)

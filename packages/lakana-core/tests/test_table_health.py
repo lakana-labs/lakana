@@ -6,6 +6,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pyarrow as pa
 import pytest
@@ -13,10 +14,12 @@ from core_test_helpers import ActionAllowList, _prepared_catalog, python_task_ru
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
 from sqlalchemy import event, select
-from sqlalchemy.orm import Session
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import ORMExecuteState, Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.catalog import health
+from lakana_core.catalog import service as service_module
 from lakana_core.catalog.health import (
     StoredStats,
     last_maintenance,
@@ -46,6 +49,9 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.storage.resolver import StorageResolver
+
+if TYPE_CHECKING:
+    from sqlalchemy.sql import ClauseElement
 
 _SILVER = NamespacePath.from_parts(["silver"])
 _ORDERS = TableRef("dev", _SILVER, "orders")
@@ -713,6 +719,61 @@ def test_a_read_takes_the_table_row_before_its_counts_in_id_order(
     ]
 
 
+def test_a_read_locks_every_table_it_read_in_id_order_first_even_one_read_later_already(
+    session: Session, principal: PrincipalRef, catalog_with_orders: CatalogService
+) -> None:
+    """The lock does not depend on ``last_read_at < now``, which skips a table read later.
+
+    A skipped update locks nothing on Postgres, and the count's upsert then holds the table's
+    ``table_reads`` row; a deletion that holds the table and cascades to that row would wait
+    for the completion while the completion waits for the deletion's next table (#558).
+    """
+    catalog_with_orders.create_table(principal, TableRef("dev", _SILVER, "items"), schema=_SCHEMA)
+    record_table_reads(
+        session,
+        environment="dev",
+        principal_id=principal.id,
+        dotted_refs=["silver.orders"],
+        now=_NOW + timedelta(hours=1),
+    )
+    session.commit()
+    seen: list[str] = []
+
+    def record(state: ORMExecuteState) -> None:
+        """Keep one statement; a select compiled for PostgreSQL (``FOR NO KEY UPDATE``).
+
+        Parameters
+        ----------
+        state
+            The statement about to run.
+        """
+        statement = cast("ClauseElement", state.statement)
+        dialect = postgresql.dialect() if state.is_select else session.get_bind().dialect
+        seen.append(str(statement.compile(dialect=dialect)))
+
+    event.listen(session, "do_orm_execute", record)
+    try:
+        record_table_reads(
+            session,
+            environment="dev",
+            principal_id=principal.id,
+            dotted_refs=["silver.items", "silver.orders"],
+            now=_NOW,
+        )
+    finally:
+        event.remove(session, "do_orm_execute", record)
+    writes = [
+        i
+        for i, sql in enumerate(seen)
+        if sql.startswith(("UPDATE tables", "INSERT INTO table_reads"))
+    ]
+    locks = [i for i, sql in enumerate(seen) if sql.rstrip().endswith("FOR NO KEY UPDATE")]
+    assert len(locks) == 1, seen
+    assert "ORDER BY tables.id FOR NO KEY UPDATE" in seen[locks[0]]
+    assert writes, seen
+    assert all(locks[0] < i for i in writes), seen
+
+
 def test_a_read_moves_last_read_at_forward_only_and_keeps_updated_at(
     session: Session, principal: PrincipalRef, catalog_with_orders: CatalogService
 ) -> None:
@@ -970,3 +1031,35 @@ def test_only_the_newest_result_of_each_check_is_read(
         event.remove(session, "loaded_as_persistent", count)
     assert only.finished_at == _NOW + timedelta(hours=4)
     assert sum(isinstance(row, CheckResult) for row in loaded) == 1
+
+
+def test_table_health_without_readers_names_none_even_to_an_administrator(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    catalog = _table_health_catalog(session, tmp_path, {Action.READ_TABLE})
+    _read(session, _orders_id(session), principal, _NOW.date(), 4, _NOW)
+    shown = catalog.table_health(principal, _ORDERS, days=30, now=_NOW, with_readers=False)
+    assert shown.readers is None
+
+
+def test_table_health_without_readers_runs_no_reader_lookup(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(service_module, "readers", lambda *args, **kwargs: calls.append(args) or [])
+    catalog = _table_health_catalog(session, tmp_path, {Action.READ_TABLE, Action.MANAGE_GRANT})
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            principal_id=principal.id,
+            role=Role.ADMIN,
+            kind=SecurableKind.INSTANCE,
+            granted_by=principal.id,
+            granted_at=_NOW,
+        )
+    )
+    session.commit()
+    catalog.table_health(principal, _ORDERS, days=30, now=_NOW, with_readers=False)
+    assert calls == []
+    catalog.table_health(principal, _ORDERS, days=30, now=_NOW)
+    assert len(calls) == 1

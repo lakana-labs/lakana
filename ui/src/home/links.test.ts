@@ -4,15 +4,29 @@ import { ATTENTION_OBJECTS, isReleaseVersion, objectPath, releaseNotesUrl } from
 
 describe("links", () => {
   it.each([
-    ["table", "prod", "gold.station_ranking", "/catalog"],
+    ["table", "prod", "gold.station_ranking", "/catalog/prod/gold/station_ranking"],
     ["query", "dev", "3f9c2a1b", "/queries"],
     ["job", "prod", "analytics/daily_sales", "/jobs"],
     ["run", "prod", "8d2e4f60", "/jobs"],
     ["check", "prod", "8d2e4f60", "/jobs"],
     ["worker", null, "w-2", "/settings/status"],
     ["recovery_link", null, "link-1", "/access/recovery-links"],
-  ] as const)("opens a %s at its area for now", (kind, environment, ref, path) => {
-    expect(objectPath(kind, environment, ref)).toBe(path);
+  ] as const)(
+    "opens a %s at its page or, until it has one, at its area",
+    (kind, environment, ref, path) => {
+      expect(objectPath(kind, environment, ref)).toBe(path);
+    },
+  );
+
+  it("links a table on Home to its page", () => {
+    expect(objectPath("table", "prod", "gold.sales.fact_sales")).toBe(
+      "/catalog/prod/gold.sales/fact_sales",
+    );
+  });
+
+  it("shows a table without an environment or a dot as plain text", () => {
+    expect(objectPath("table", null, "x.y")).toBeNull();
+    expect(objectPath("table", "prod", "x")).toBeNull();
   });
 
   it("maps every attention kind to the object it opens", () => {

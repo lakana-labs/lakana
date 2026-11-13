@@ -79,7 +79,7 @@ once several people share the data:
 - You work **alone** and will keep doing so. Grants, the audit log and protected environments
   protect people and production from each other.
 - Your data or a single query needs **more than one machine**, or you need streaming.
-- You need a **platform for production data today**: Lakana is pre-beta, and the API and the data
+- You need a **platform for production data today**: Lakana is pre-1.0, and the API and the data
   layout may still change between releases ([Upgrade policy](upgrades.md)).
 
 The page [Where Lakana fits](where-lakana-fits.md) lists what Lakana lacks as a whole, and why it

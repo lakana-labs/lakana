@@ -251,6 +251,85 @@ def restore(ctx: typer.Context, name: str) -> None:
     _output.done(state, f"Restored environment {_output.inline(name)}", environment)
 
 
+@env_app.command("purge")
+def purge(
+    ctx: typer.Context,
+    name: str,
+    rows_only: Annotated[
+        bool,
+        typer.Option(
+            "--rows-only",
+            help=(
+                "Remove only the environment's rows from the catalog; its files, if any, are "
+                "not touched. Required."
+            ),
+        ),
+    ] = False,
+    yes: _YES = False,
+) -> None:
+    """Remove the deleted environment NAME from the catalog when its storage cannot be reached.
+
+    The worker's clean-up deletes a deleted environment's files and then the environment itself.
+    It skips one whose storage cannot be resolved (a root in a scheme Lakana cannot read, such
+    as `local://` or `memory://`, which older releases accepted), so that environment would
+    keep its name for ever. This removes it from the catalog, with its records of dropped
+    tables, and frees the name. Its files, if any, are not touched: delete them in the storage
+    yourself if you no longer need them.
+
+    Refused for an environment that is not deleted (`lakana env delete NAME` first); for one
+    whose root can be reached (`lakana env delete NAME --purge` has the clean-up delete its
+    files and then the environment), and a storage secret that cannot be used does not count,
+    fix it instead; and for a root that contains `::`, because releases before 0.18.0 wrote its
+    files to the part before `::` (look there; give a new environment another name). The
+    question and the answer name the storage root, where any files are. Needs
+    MANAGE_ENVIRONMENT on the instance.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The deleted environment.
+    rows_only
+        Say that only the rows are removed; nothing else is offered.
+    yes
+        Skip the confirmation prompt.
+
+    Raises
+    ------
+    CliError
+        Without `--rows-only`; nothing is sent.
+    """
+    state = state_of(ctx)
+    shown = _output.inline(name)
+    if not rows_only:
+        raise CliError(
+            f"`lakana env purge` removes only an environment's rows from the catalog and leaves "
+            f"its files; say so with `lakana env purge {shown} --rows-only`. To have the "
+            f"worker's clean-up delete its files and then the environment, run "
+            f"`lakana env delete {shown} --purge`."
+        )
+    client = state.client()
+    root = next(
+        (env.storage_root for env in client.environments.list(deleted=True) if env.name == name),
+        None,
+    )
+    storage = f" {_output.inline(root)}" if root is not None else ""
+    confirm(
+        state,
+        f"Remove the deleted environment {name!r} from the catalog? Its files, if any, are not "
+        f"touched and stay in its storage{storage}. This cannot be undone.",
+        yes,
+    )
+    client.environments.purge_rows(name)
+    where = f"; its storage was {_output.inline(root)}" if root is not None else ""
+    _output.done(
+        state,
+        f"Removed environment {shown} from the catalog; its name is free again. Its files, if "
+        f"any, were not touched{where}.",
+    )
+
+
 @env_app.command("set-storage")
 def set_storage(
     ctx: typer.Context,

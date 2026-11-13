@@ -23,7 +23,7 @@ from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.grants.admin import (
     ADMIN_ONLY_ACTIONS,
     authorize_admin_only,
-    holds_instance_admin,
+    credential_acts_as_admin,
 )
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
@@ -534,9 +534,12 @@ class GrantService:
         )
 
     def is_admin(self, p: PrincipalRef) -> bool:
-        """Say whether the caller holds the `ADMIN` role on the instance.
+        """Say whether the caller acts as the instance administrator with this credential.
 
-        About the caller only, so it needs no authorization.
+        About the caller only, so it needs no authorization; asked with `permits`, so it records
+        nothing. It follows the credential's scope, as `may_deploy_somewhere` does: a task or CI
+        token is never an administrator, whoever its principal is, since it may use no
+        administrator route (#542).
 
         Parameters
         ----------
@@ -546,9 +549,12 @@ class GrantService:
         Returns
         -------
         bool
-            `lakana_core.grants.admin.holds_instance_admin` for the caller.
+            Whether the caller holds the `ADMIN` role on the instance
+            and its credential passes the administrator routes' own check
+            (`lakana_core.grants.admin.credential_acts_as_admin`, which asks the role once); a
+            personal token and a browser session do, a task or CI token does not.
         """
-        return holds_instance_admin(self._session, p.id)
+        return credential_acts_as_admin(self._session, self._authz, p)
 
     def has_any_grant(self, p: PrincipalRef) -> bool:
         """Say whether the caller has any right at all, so the interface can tell a new person.

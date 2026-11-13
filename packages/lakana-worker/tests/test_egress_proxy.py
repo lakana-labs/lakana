@@ -26,6 +26,7 @@ from fake_launcher import FakeLauncher
 from launcher_fakes import settings
 from scripts.test_support.ports import closed_port
 
+from lakana_core.net import egress as core_egress
 from lakana_core.projects.package_sources import RegisteredIndex
 from lakana_worker.docker_environments import DockerEnvironments
 from lakana_worker.index_credentials import IndexAccess
@@ -1136,6 +1137,132 @@ def test_an_ipv4_mapped_address_is_judged_as_its_ipv4_address() -> None:
     assert egress.forbidden(mapped, frozenset(), frozenset())
     assert not egress.forbidden(mapped, frozenset(), frozenset({LOOPBACK}))
     assert not egress.forbidden(ipaddress.ip_address("10.1.2.3"), frozenset(), frozenset())
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        pytest.param("168.63.129.16", id="azure-wireserver"),
+        pytest.param("::ffff:168.63.129.16", id="azure-wireserver-ipv4-mapped"),
+        pytest.param("192.0.0.192", id="oracle-legacy-metadata"),
+        pytest.param("fd20:ce::254", id="gcp-ipv6-metadata"),
+    ],
+)
+def test_a_cloud_service_address_outside_link_local_is_forbidden(address: str) -> None:
+    """Azure's WireServer and the other fixed service addresses are refused (#543).
+
+    Parameters
+    ----------
+    address
+        A cloud provider's service address, in one of its spellings.
+    """
+    assert egress.forbidden(ipaddress.ip_address(address), frozenset(), frozenset())
+
+
+_LAUNCHER_ONLY_NEVER: frozenset[ipaddress.IPv4Network | ipaddress.IPv6Network] = frozenset()
+"""Entries of the launcher's `_NEVER` that core's list deliberately lacks: none."""
+_OPENED_BY_REACHABLE = frozenset({ipaddress.ip_network("127.0.0.0/8")})
+"""Core's never-reached networks that a test hook's `reachable` range opens: IPv4 loopback
+only, where the tests' servers listen. `reachable` is never loaded in production. ``::1`` stays
+refused: as an IPv4-compatible address it carries 0.0.0.1, which is never reached."""
+
+
+def test_the_proxy_refuses_every_address_the_shared_guard_never_reaches() -> None:
+    """The launcher cannot import `lakana_core`, so its list is a copy; this keeps it in sync.
+
+    Both ways: every core network is refused, also where `reachable` holds it (loopback aside),
+    and every entry of the launcher's copy is one of core's.
+    """
+    for network in core_egress._NEVER_NETWORKS:
+        opened = network in _OPENED_BY_REACHABLE
+        for address in (network.network_address, network.broadcast_address):
+            assert egress.forbidden(address, frozenset(), frozenset()), address
+            within = frozenset({network})
+            assert egress.forbidden(address, frozenset(), within) is not opened, address
+    extra = set(egress._NEVER) - set(core_egress._NEVER_NETWORKS)
+    assert extra == set(_LAUNCHER_ONLY_NEVER)
+
+
+def test_an_entry_only_the_launcher_has_fails_the_sync_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second direction catches drift: a launcher entry core lacks is noticed.
+
+    Parameters
+    ----------
+    monkeypatch
+        Adds an entry to the launcher's copy.
+    """
+    monkeypatch.setattr(egress, "_NEVER", (*egress._NEVER, ipaddress.ip_network("203.0.113.7/32")))
+
+    with pytest.raises(AssertionError):
+        test_the_proxy_refuses_every_address_the_shared_guard_never_reaches()
+
+
+_EMBEDDED_FORMS = [
+    pytest.param("169.254.169.254", id="ipv4"),
+    pytest.param("2001:db8::1", id="plain-ipv6"),
+    pytest.param("::ffff:169.254.169.254", id="ipv4-mapped"),
+    pytest.param("::169.254.169.254", id="ipv4-compatible"),
+    pytest.param("2002:a9fe:a9fe::1", id="6to4"),
+    pytest.param("2002:a83f:8110::1", id="6to4-wireserver"),
+    pytest.param("2001:0:4136:e378:8000:1234:5601:5601", id="teredo-client"),
+    pytest.param("2001:0:a9fe:a9fe:8000:1234:f7f7:f7f7", id="teredo-server"),
+    pytest.param("64:ff9b::a9fe:a9fe", id="nat64"),
+    pytest.param("64:ff9b:1::a83f:8110", id="local-nat64"),
+    pytest.param("64:ff9b:1:ffff::a83f:8110", id="local-nat64-high"),
+    pytest.param("fd20:ce::254", id="unique-local"),
+]
+
+
+@pytest.mark.parametrize("address", _EMBEDDED_FORMS)
+def test_the_proxy_unwraps_the_embedded_ipv4_forms_core_unwraps(address: str) -> None:
+    """The launcher's copy of `_embedded_ipv4` finds what core's finds, form by form.
+
+    Parameters
+    ----------
+    address
+        An address in one of the forms that carry an IPv4 address, or none.
+    """
+    parsed = ipaddress.ip_address(address)
+
+    assert egress._embedded_ipv4(parsed) == core_egress._embedded_ipv4(parsed)
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        pytest.param("2002:a9fe:a9fe::1", id="6to4-metadata"),
+        pytest.param("2002:a83f:8110::1", id="6to4-wireserver"),
+        pytest.param("2002:6464:64c8::1", id="6to4-alibaba"),
+        pytest.param("2001:0:4136:e378:8000:1234:5601:5601", id="teredo-client-metadata"),
+        pytest.param("2001:0:4136:e378:8000:1234:57c0:7eef", id="teredo-client-wireserver"),
+        pytest.param("2001:0:a9fe:a9fe:8000:1234:f7f7:f7f7", id="teredo-server-metadata"),
+    ],
+)
+def test_a_6to4_or_teredo_form_of_a_never_reached_address_is_forbidden(address: str) -> None:
+    """The proxy judges the IPv4 address a tunnelled form carries, as core does.
+
+    Parameters
+    ----------
+    address
+        A 6to4 or Teredo form of a cloud metadata or service address.
+    """
+    assert egress.forbidden(ipaddress.ip_address(address), frozenset(), frozenset())
+
+
+def test_a_reachable_range_does_not_open_a_never_reached_address() -> None:
+    """`reachable` lets a test reach its servers, never the cloud metadata service."""
+    metadata = ipaddress.ip_address("169.254.169.254")
+    everything = frozenset({ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0")})
+
+    assert egress.forbidden(
+        metadata, frozenset(), frozenset({ipaddress.ip_network("169.254.0.0/16")})
+    )
+    assert egress.forbidden(metadata, frozenset(), everything)
+    assert egress.forbidden(ipaddress.ip_address("168.63.129.16"), frozenset(), everything)
+    assert egress.forbidden(ipaddress.ip_address("2002:a9fe:a9fe::1"), frozenset(), everything)
+    assert not egress.forbidden(ipaddress.ip_address("10.1.2.3"), frozenset(), everything)
 
 
 def test_a_listen_address_is_read(tmp_path: Path) -> None:

@@ -1,7 +1,7 @@
 # See where a table is defined
 
 After this guide you can find the file and line in git that define a table, and read that file
-without leaving the terminal. You need a project deployed to the environment (see
+in the terminal or in the web interface. You need a project deployed to the environment (see
 [Projects](projects.md)) and the right to read the table.
 
 A table that a project builds is **defined** by one of the project's asset files. Lakana records
@@ -114,10 +114,21 @@ command still succeeds:
 ## Reading a file is recorded
 
 Each time someone reads a file, the audit log records a `SOURCE_VIEWED` event with the repository,
-path and commit: once per person, table and commit in each window (an hour by default; see
+path and commit: once per person, file and commit in each window (an hour by default; see
 [Export and keep the audit log](export-and-keep-the-audit-log.md)). Seeing only the location is
 not recorded. When the event cannot be written, the file is not shown: the command fails with a
 message to try again.
+
+## The same rules in a project version
+
+`lakana project-version show` (and `--output json`, which has each asset's and check's `sql`)
+follows these rules too, file by file: an asset's or a check's SQL is shown only when you would be
+shown its file here, and each file it shows is recorded the same way. A check is stricter in one
+point: it is hidden when any table it reads is a view, also the table it checks, since a view's
+rules sit on the tables beneath it. For any other asset, the `sql` column says
+`hidden (restricted)` or `not recorded`, and the sentence of the table above is printed once
+under the table. The text output lists only assets; a check's reason is in `--output json`,
+where a hidden entry has no `sql` and carries `content_reason` and `content_message`.
 
 ## Control characters
 
@@ -126,6 +137,30 @@ hold one; the error names the file and the line. The CLI escapes each control ch
 file anyway, as an extra safeguard. See
 [the upgrade note](../explanation/upgrades.md#control-characters-in-asset-files-are-refused-breaking)
 for how to find them in a repository.
+
+## In the web interface
+
+On a table's page, the **Facts** of the Overview tab end with **Defined in**: the file's path, its
+line and the first seven characters of the deployed commit, such as
+"models/gold/fact_sales.sql, line 1 · a1b2c3d". A table no project defines has no Defined in.
+
+- **The link.** When the repository is on one of the git hosts above, **Open in your git host ↗**
+  opens the line at that commit in a new tab. Lakana builds the link on the server; without one,
+  the path and the commit are plain text you can select and copy.
+- **The file.** Press the path to open the file in a dialog. The file is read only then, so each
+  opening counts as a read and is recorded as described above. The dialog names the repository,
+  the path and the whole commit, and shows the file with numbered lines and the defining line
+  highlighted; the text scrolls in its own area, which you can also reach with Tab and scroll with
+  the arrow keys. **Close** or Escape closes it and puts the focus back on the path.
+- **When the file is not shown,** the dialog shows the server's sentence for the reason in the
+  table above instead of the text. When the read cannot be recorded in the audit log, it shows no
+  text and says so; **Try again** reads it again.
+- **Characters you could not see.** The page shows the file as plain text: markup in it is shown
+  as the characters it is made of, never run. A control character, a zero-width character or a
+  character that changes the direction of the text, such as U+202E (right-to-left override),
+  would hide or reorder what you read, so the page shows it as a small mark with its code, such as
+  `U+202E`, in the file, the path and the repository's name. The same character many times in a
+  row is one mark with its count, such as `U+200B ×12`. Tabs and line breaks are kept.
 
 ## Use it from Python
 

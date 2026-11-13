@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.db import create_engine
@@ -162,6 +162,73 @@ def test_an_environment_admin_deletes_but_an_instance_admin_restores(
     restored = client.post("/api/v1/environments/sandbox/restore", headers=AUTH_HEADER)
     assert restored.status_code == 200, restored.text
     assert client.get("/api/v1/environments/sandbox", headers=bob).status_code == 200
+
+
+def _unreachable(settings: Settings, name: str) -> None:
+    """Give an environment a root an older release accepted and Lakana cannot read.
+
+    Parameters
+    ----------
+    settings
+        The settings the `client` fixture's app was built from.
+    name
+        Environment name.
+    """
+    engine = create_engine(settings.database)
+    with Session(engine) as session:
+        session.execute(
+            update(Environment).where(Environment.name == name).values(storage_root="local:///data")
+        )
+        session.commit()
+    engine.dispose()
+
+
+def test_the_rows_of_an_unreachable_deleted_environment_are_purged(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    """204; it is gone from the deleted list, and its name can be created again."""
+    _create(client, tmp_path)
+    _unreachable(settings, "dev")
+    client.delete("/api/v1/environments/dev", headers=AUTH_HEADER)
+
+    response = client.post("/api/v1/environments/dev/purge-rows", headers=AUTH_HEADER)
+
+    assert response.status_code == 204, response.text
+    assert client.get("/api/v1/environments?deleted=true", headers=AUTH_HEADER).json() == []
+    _create(client, tmp_path)
+
+
+def test_a_rows_purge_is_refused_with_the_cause_and_the_way_out(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """409 while not deleted or while the storage resolves; 404 for no such name."""
+    _create(client, tmp_path)
+    live = client.post("/api/v1/environments/dev/purge-rows", headers=AUTH_HEADER)
+    assert live.status_code == 409
+    assert "lakana env delete dev" in live.json()["detail"]
+    client.delete("/api/v1/environments/dev", headers=AUTH_HEADER)
+    reachable = client.post("/api/v1/environments/dev/purge-rows", headers=AUTH_HEADER)
+    assert reachable.status_code == 409
+    assert "lakana env delete dev --purge" in reachable.json()["detail"]
+    missing = client.post("/api/v1/environments/nope/purge-rows", headers=AUTH_HEADER)
+    assert missing.status_code == 404
+    assert "lakana env list --deleted" in missing.json()["detail"]
+
+
+def test_an_environment_admin_cannot_purge_its_rows(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    """Instance scope: a grant on the environment is not enough."""
+    _create(client, tmp_path, "sandbox")
+    bob = _grant_environment_admin(client, "sandbox")
+    _unreachable(settings, "sandbox")
+    client.delete("/api/v1/environments/sandbox", headers=AUTH_HEADER)
+
+    refused = client.post("/api/v1/environments/sandbox/purge-rows", headers=bob)
+
+    assert refused.status_code == 403
+    listed = client.get("/api/v1/environments?deleted=true", headers=AUTH_HEADER).json()
+    assert [e["name"] for e in listed] == ["sandbox"]
 
 
 def test_delete_unknown_is_404(client: TestClient) -> None:

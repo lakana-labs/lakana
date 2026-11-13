@@ -19,6 +19,7 @@ from lakana_core.catalog.graph_model import (
     LineageWay,
     NodeKind,
     asset_node,
+    job_node,
     table_node,
 )
 from lakana_core.catalog.graph_service import GraphService
@@ -84,6 +85,7 @@ def test_lineage_walks_both_ways_across_two_repositories(
         (_T, "bronze.stores_raw", 1),
         (_A, "gold.fact_sales", 1),
         (_T, "gold.fact_sales", 1),
+        (NodeKind.JOB, "sales/nightly", 1),
     }
     dim = star.table_id("gold.dim_store")
     assert {(e.kind, e.source, e.target) for e in page.edges} == {
@@ -99,6 +101,7 @@ def test_lineage_walks_both_ways_across_two_repositories(
             asset_node("sales", "gold.fact_sales"),
             table_node(star.table_id("gold.fact_sales")),
         ),
+        (EdgeKind.RUNS, job_node("sales", "nightly"), asset_node("sales", "gold.fact_sales")),
     }
     root = page.nodes[0]
     assert (root.id, root.table_type, root.model_kind, root.key, root.grain) == (
@@ -123,6 +126,7 @@ def test_up_and_down_and_depth_count_assets(star: StarWorld, principal: Principa
         (_T, "gold.dim_date", 2),
         (_A, "gold.fact_sales", 2),
         (_T, "gold.fact_sales", 2),
+        (NodeKind.JOB, "sales/nightly", 2),
     }
     near = _service(star).lineage(
         principal, "dev", "gold.fact_sales", direction=LineageWay.UP, depth=1
@@ -203,7 +207,7 @@ def test_lineage_starts_only_at_a_table_column_or_asset(
         (
             lambda s, p: s.neighbours(p, "dev", "gold.dim_store", kinds=["nope"]),
             "`nope` is not an edge kind. Use one of: builds, checks, filters, has_column, links, "
-            "masks, measures, reads, references, runs.",
+            "masks, measures, reads, references, runs, uses.",
         ),
     ],
 )

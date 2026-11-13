@@ -102,6 +102,8 @@ makes no claim of certification or compliance with any standard.
   kinds of token reach further, and need the same care as the passkeys themselves:
     - **The server operator's bootstrap token** issues the first administrator's setup link and
       recovery links for any person, administrators and its own account included, at any time.
+      Revoking it closes the setup links and administrators' recovery links it issued: they are
+      refused when they are opened.
     - **An administrator's personal token** issues invite and recovery links (for anyone but
       administrators) without a passkey touch, as the command line does, and can grant rights the
       same way. Whoever holds it can therefore sign into a browser as another person, or as a new
@@ -191,7 +193,7 @@ person and view per hour, so paging, other filters and a screen that refreshes i
 filter on one person (`--submitter`) is its own view. Looking only at your own activity records nothing.
 If the event cannot be written, the read is refused rather than served unrecorded. Reading the text
 of the file that defines a table writes a `SOURCE_VIEWED` event (the repository, path and commit),
-once per person, table and commit per hour, and is refused too if that event cannot be written. The events and
+once per person, file and commit per hour, and is refused too if that event cannot be written. The events and
 the setting that turns them off are in [the lists reference](../reference/lists.md#audit).
 
 ## How a query is kept inside its limits

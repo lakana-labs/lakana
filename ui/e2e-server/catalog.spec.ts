@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import {
+  administrator,
   createEnvironment,
   createNamespace,
   createTable,
@@ -9,6 +10,7 @@ import {
   invitedPerson,
   signInLocally,
   skipTheTour,
+  skipTheWelcome,
   uniqueName,
   violations,
 } from "./helpers";
@@ -29,35 +31,6 @@ async function lake(request: Request): Promise<string> {
   await createTable(request, environment, "gold.sales", "fact_sales", ["id", "store_id", "amount"]);
   await createTable(request, environment, "gold", "dim_store", ["store_id", "name"]);
   return environment;
-}
-
-/**
- * Signs the bootstrap administrator in on Home without the welcome.
- *
- * @param browser - The browser.
- * @param request - The request context.
- * @returns The page.
- */
-async function administrator(
-  browser: Parameters<typeof freshPage>[0],
-  request: Request,
-): Promise<Page> {
-  await skipTheTour(request);
-  const page = await freshPage(browser);
-  await signInLocally(page, request);
-  return page;
-}
-
-/**
- * Waits for the welcome of a person with access who has never seen the tour, and skips it.
- *
- * @param page - The page, on Home.
- */
-async function skipTheWelcome(page: Page): Promise<void> {
-  const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
-  await expect(welcome).toBeVisible();
-  await welcome.getByRole("button", { name: "Skip" }).click();
-  await expect(welcome).toBeHidden();
 }
 
 /**

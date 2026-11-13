@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from lakana_core.db import db_now
 from lakana_core.models import (
+    AuditEvent,
+    AuditEventType,
     DeployRun,
     DeployStatus,
     Environment,
@@ -21,6 +23,8 @@ from lakana_core.models import (
     TableType,
     Worker,
 )
+from lakana_core.projects.definition import NOT_RECORDED_MESSAGE
+from lakana_core.projects.source_map import ProjectFileRecord, write_source_map
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -306,6 +310,74 @@ def test_a_reader_without_table_access_sees_hidden_references_over_rest(
     ).json()
     assert admin["manifest"]["edges"] == [["silver.a", "gold.b"]]
     assert admin["manifest"]["hidden_edges"] == 0
+
+
+def _source_viewed(client: TestClient) -> list[AuditEvent]:
+    """Read the `SOURCE_VIEWED` rows.
+
+    Parameters
+    ----------
+    client
+        The test client.
+
+    Returns
+    -------
+    list of AuditEvent
+        The rows, oldest first.
+    """
+    with Session(client.app.state.engine) as session:
+        return list(
+            session.scalars(
+                select(AuditEvent)
+                .where(AuditEvent.event_type == AuditEventType.SOURCE_VIEWED)
+                .order_by(AuditEvent.occurred_at)
+            )
+        )
+
+
+def test_a_project_versions_sql_is_shown_only_for_a_recorded_file_and_audited(
+    client: TestClient,
+) -> None:
+    """The SQL of a recorded file passes the content gate and is recorded; without a record not."""
+    _setup(client)
+    version_id = _insert_job_version(client, "dev")
+    path = f"/api/v1/environments/dev/project-versions/{version_id}"
+    [asset] = client.get(path, headers=AUTH_HEADER).json()["manifest"]["assets"]
+    assert "sql" not in asset
+    assert (asset["content_reason"], asset["content_message"]) == (
+        "not_recorded",
+        NOT_RECORDED_MESSAGE,
+    )
+    assert _source_viewed(client) == []
+    record = ProjectFileRecord(
+        path="assets/silver/clean.sql",
+        table="silver.clean",
+        text="SELECT 1\n",
+        normalized_sql="SELECT 1",
+        gate_tables=("silver.clean",),
+        gate_raw=False,
+    )
+    with Session(client.app.state.engine) as session:
+        version = session.get_one(JobVersion, version_id)
+        version.manifest_json = {
+            **version.manifest_json,
+            "assets": [
+                {
+                    **version.manifest_json["assets"][0],
+                    "path": record.path,
+                    "normalized_sql": record.normalized_sql,
+                }
+            ],
+        }
+        write_source_map(session, version, [record])
+        session.commit()
+    [asset] = client.get(path, headers=AUTH_HEADER).json()["manifest"]["assets"]
+    assert asset["sql"] == "SELECT 1"
+    assert (asset["content_reason"], asset["content_message"]) == (None, None)
+    [event] = _source_viewed(client)
+    assert event.detail == {"repository": "analytics", "path": record.path, "commit": "a" * 40}
+    client.get(path, headers=AUTH_HEADER)
+    assert len(_source_viewed(client)) == 1
 
 
 def test_adopted_tables_are_hidden_from_a_reader_over_rest(client: TestClient) -> None:

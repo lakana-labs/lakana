@@ -6,8 +6,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["src/test/setup.ts"],
-    // Only unit tests: Playwright owns e2e/*.spec.ts.
-    include: ["src/**/*.test.{ts,tsx}", "build/**/*.test.ts"],
+    // Only unit tests: Playwright owns e2e/*.spec.ts. scripts/ holds the lint ban's test.
+    include: ["src/**/*.test.{ts,tsx}", "build/**/*.test.ts", "scripts/**/*.test.ts"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],

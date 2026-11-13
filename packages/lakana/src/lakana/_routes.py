@@ -81,6 +81,7 @@ ROUTES: dict[str, Route] = {
     "environments.list": Route("GET", "/api/v1/environments"),
     "environments.delete": Route("DELETE", "/api/v1/environments/{name}"),
     "environments.restore": Route("POST", "/api/v1/environments/{name}/restore"),
+    "environments.purge_rows": Route("POST", "/api/v1/environments/{name}/purge-rows"),
     "environments.update_storage": Route("PATCH", "/api/v1/environments/{name}/storage"),
     "environments.set_protection": Route("PATCH", "/api/v1/environments/{name}"),
     "environments.set_retention": Route("PUT", "/api/v1/environments/{name}/retention"),

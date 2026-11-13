@@ -23,6 +23,23 @@ const NODE_GLOBALS = ["process", "Buffer"].map((name) => ({
     "ui/src/ runs in the browser, which has no Node globals; use import.meta.env or Uint8Array.",
 }));
 
+// Untrusted text (file contents, names, preview values) is rendered as text nodes only
+// (docs/agent/security.md, Preview and Defined in). eslint-plugin-react is not installed, so the
+// HTML sinks are banned by syntax; scripts/lint-ban.test.ts proves each selector fires.
+const TEXT_NODES_ONLY = "Render text nodes only (docs/agent/security.md, Preview and Defined in)";
+const HTML_KEYS = "/^(dangerouslySetInnerHTML|innerHTML|outerHTML|srcdoc|srcDoc)$/";
+const RAW_HTML = [
+  "JSXAttribute[name.name=/^(dangerouslySetInnerHTML|srcDoc|srcdoc)$/]",
+  // A props or options object (createElement's, Object.assign's), by name or quoted; a
+  // destructuring pattern only reads, so it is left alone.
+  `ObjectExpression > Property[key.name=${HTML_KEYS}]`,
+  `ObjectExpression > Property[key.value=${HTML_KEYS}]`,
+  "AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]",
+  "AssignmentExpression > MemberExpression.left[computed=true][property.value=/^(innerHTML|outerHTML)$/]",
+  "CallExpression[callee.property.name=/^(insertAdjacentHTML|createContextualFragment|parseFromString|setHTMLUnsafe)$/]",
+  "CallExpression[callee.object.name='document'][callee.property.name=/^(write|writeln)$/]",
+].map((selector) => ({ selector, message: TEXT_NODES_ONLY }));
+
 // The TSDoc tags jsdoc does not know by itself.
 const TSDOC_TAGS = [
   "alpha",
@@ -65,7 +82,16 @@ const requireJsdoc = {
 };
 
 export default defineConfig(
-  { ignores: ["coverage/", "test-results/", "playwright-report/", "node_modules/"] },
+  // scripts/lint-fixtures/ holds the violations scripts/lint-ban.test.ts lints on purpose.
+  {
+    ignores: [
+      "coverage/",
+      "test-results/",
+      "playwright-report/",
+      "node_modules/",
+      "scripts/lint-fixtures/",
+    ],
+  },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   {
@@ -93,6 +119,7 @@ export default defineConfig(
   {
     rules: {
       "no-restricted-globals": ["error", ...NETWORK_GLOBALS],
+      "no-restricted-syntax": ["error", ...RAW_HTML],
       "no-restricted-properties": [
         "error",
         { object: "window", property: "fetch", message: SERVER_ONLY_THROUGH_API },

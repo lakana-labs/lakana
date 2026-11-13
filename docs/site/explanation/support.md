@@ -9,7 +9,7 @@ when you use it, and where to go with a question or a problem.
   allows, and may not answer at all. Nobody is owed a reply, a fix or a release.
 - **No service level, no warranty, no response times.** Lakana is provided as is, under the
   Apache License 2.0 (sections 7 and 8: disclaimer of warranty and limitation of liability).
-  This is true during the beta and stays true from v1.0.0 onwards.
+  This is true before v1.0.0 and stays true from v1.0.0 onwards.
 - **A stable API is not a support promise.** From v1.0.0 the API stops changing in ways that
   break your code ([The REST API as a contract](../reference/rest-api.md)), and that is a
   promise about compatibility only. It says nothing about how
@@ -32,7 +32,7 @@ when you use it, and where to go with a question or a problem.
 ## Versions and platforms
 
 - **Fixes, when there are any, go into the latest release only.** Upgrade first, then report.
-- **Beta.** Until v1.0.0 the API may change between 0.x minor releases. Every release comes
+- **Before v1.0.0.** Until v1.0.0 the API may change between 0.x minor releases. Every release comes
   with upgrade notes.
 - **Python** 3.11 or newer; on macOS: Python 3.13 or newer.
 - **Linux** is the platform the automated tests run on, with Python 3.11 and 3.14, and with the

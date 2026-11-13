@@ -87,8 +87,8 @@ lakana row-filter revoke "$ROW_FILTER_ID" --yes
 Revoking is the only way to change a filter: to change a condition, create the new filter and
 revoke the old one. When several filters apply to one person, a row must pass all of them. The same
 commands are `client.row_filters.create(...)`, `.list(...)` and `.revoke(...)` in the Python SDK
-(each filter has `bound`, `None` from a server before this release) and `/api/v1/row-filters` in the
-REST API.
+(each filter has `bound`, and the name of who it is for in `principal` or `group`; each is `None`
+from a server before this release) and `/api/v1/row-filters` in the REST API.
 
 ## An expression must not fail on any stored value
 

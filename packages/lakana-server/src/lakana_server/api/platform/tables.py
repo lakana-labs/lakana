@@ -1281,6 +1281,13 @@ def get_table_health(
     name: str,
     request: Request,
     days: int | None = Query(default=None),
+    readers: bool = Query(
+        default=True,
+        description=(
+            "False leaves the readers out of the answer; it then looks up no names and writes no "
+            "`ACTIVITY_VIEWED` audit entry."
+        ),
+    ),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> TableHealthOut:
@@ -1306,6 +1313,8 @@ def get_table_health(
         The window of the readers in days, from 1 to the kept period
         (`LAKANA_TABLE_READS__KEEP_DAYS`, 90 by default); the default window
         (`LAKANA_TABLE_READS__DEFAULT_DAYS`, 30) when absent.
+    readers
+        `false` leaves the readers out: no names, no lookup, no audit entry. `true` by default.
     principal
         The authenticated caller.
     catalog
@@ -1314,7 +1323,8 @@ def get_table_health(
     Returns
     -------
     TableHealthOut
-        The health. `readers` is `null` unless the caller may see the table's grants.
+        The health. `readers` is `null` unless `readers` is true and the caller may see the
+        table's grants.
 
     Raises
     ------
@@ -1338,7 +1348,9 @@ def get_table_health(
             "LAKANA_TABLE_READS__KEEP_DAYS."
         )
     ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
-    health = catalog.table_health(principal, ref, days=days, now=datetime.now(UTC))
+    health = catalog.table_health(
+        principal, ref, days=days, now=datetime.now(UTC), with_readers=readers
+    )
     return TableHealthOut.model_validate(health, from_attributes=True)
 
 

@@ -1842,7 +1842,7 @@ def test_checks_whose_worker_is_lost_every_time_end_set_back_after_the_bound(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """#99, loop 1: after the bound the table is set back and the task fails saying why."""
-    _built_once_then_redeployed(world, _check("unique_id", _DUPLICATE_IDS))
+    _built_once_then_redeployed(world, _check("unique_id", _DUPLICATE_IDS), only_silver_first=True)
     run_id = _start(world)
     claimed = _run_until(world, "silver.orders")
     _always_die_in_the_check_phase(monkeypatch)
@@ -1923,7 +1923,7 @@ def _at_the_bound_after_the_build(world: World, monkeypatch: pytest.MonkeyPatch)
     uuid.UUID
         The run's id.
     """
-    _built_once_then_redeployed(world, _check("unique_id", _DUPLICATE_IDS))
+    _built_once_then_redeployed(world, _check("unique_id", _DUPLICATE_IDS), only_silver_first=True)
     run_id = _start(world)
     claimed = _run_until(world, "silver.orders")
     _always_die_in_the_check_phase(monkeypatch)

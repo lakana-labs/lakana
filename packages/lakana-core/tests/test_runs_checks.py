@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 import lakana_core.runs.checks as checks_module
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind
-from lakana_core.catalog.health_summary import failing_reference_checks
+from lakana_core.catalog.health_summary import reference_checks
 from lakana_core.catalog.service import (
     CHANGED_BY_ANOTHER_REASON,
     ROLLBACK_NOT_KNOWN_REASON,
@@ -1922,7 +1922,7 @@ def test_a_generated_reference_check_never_reaches_the_stored_key_of_a_result(
     assert _record(session, task, _spec(), CheckOutcome.PASSED, table_id=table_id)
     assert _record(session, task, ref, CheckOutcome.FAILED, table_id=table_id)
     assert _stored(session, table_id).health_item == "healthy"
-    found = failing_reference_checks(session, [table_id])
+    found = reference_checks(session, [table_id])
     assert [c.outcome for c in found[table_id]] == ["failed"]
 
 

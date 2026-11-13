@@ -29,6 +29,7 @@ export type { PasskeyOut } from "./account";
 export { getTableTree, listTables, TABLE_SORTS } from "./catalog";
 export type {
   HealthSummaryOut,
+  OwnerOut,
   SortOrder,
   TableListItemOut,
   TableMatchOut,
@@ -40,7 +41,7 @@ export { getAttention, getGetStarted, getWork } from "./home";
 export type { AttentionKind, GetStartedOut, GetStartedStepId, WorkRepositoryOut } from "./home";
 export { describeLink, redeemLink } from "./links";
 export type { LinkDescriptionOut } from "./links";
-export { changeInterfaceState, getInfo, getInterfaceState, listRecent } from "./me";
+export { changeInterfaceState, getInfo, getInterfaceState, listRecent, recordOpened } from "./me";
 export type { InterfaceStateOut, RecentOut } from "./me";
 export { addPasskey, signInWithPasskey } from "./passkeys";
 export {
@@ -78,5 +79,37 @@ export type {
 } from "./repositories";
 export { changeSignInSettings, getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";
+export {
+  ACTIVE_STATUSES,
+  cancelQuery,
+  describeColumn,
+  describeTable,
+  getDefinition,
+  getDefinitionFile,
+  getLineage,
+  getQueryStatus,
+  getResultPage,
+  getTable,
+  getTableHealth,
+  myPermissions,
+  submitPreview,
+} from "./table";
+export type {
+  ColumnOut,
+  GraphNodeOut,
+  GraphOut,
+  MaskedColumnOut,
+  ModelReferenceOut,
+  PermissionsOut,
+  QueryRunStatus,
+  QueryStatusOut,
+  ResultPageOut,
+  TableDefinitionFileOut,
+  TableDefinitionOut,
+  TableHealthOut,
+  TableOut,
+  TableRef,
+  TextChange,
+} from "./table";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";

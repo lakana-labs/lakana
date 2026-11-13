@@ -49,7 +49,10 @@ query path sit relative to `lakana-core`/`lakana-server`, see `docs/agent/archit
   use.
 - **A route that shows a deployed file takes an object reference, never a path, commit or version,
   and shows content only to a reader of the environment and of every table the file uses, with no
-  policy applying to them.**
+  policy applying to them.** Every such route asks one function,
+  `lakana_core.projects.definition.passes_content_gate`, per file, and records each file it shows
+  as `SOURCE_VIEWED` (fail-closed): "Defined in" and the project-versions route (#560), whose
+  version id selects a stored manifest, never a file on disk.
 
 ## Syntax errors name only the reader's own SQL
 
@@ -463,7 +466,11 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   an invite fails when its name was taken meanwhile; an invite or recovery link fails when its
   issuer is gone, deactivated or no longer holds instance ADMIN (`_check_issuer`, reasons
   `issuer_gone`, `issuer_deactivated`, `issuer_not_admin`; the operator's links too, and an
-  operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired). Each such link is then withdrawn (audited
+  operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired); a setup link
+  records the operator's bootstrap PAT (`source_pat_id`) at issue and fails once it is revoked,
+  expired or not recorded (`_operator_token_lapse`, reasons `operator_token_revoked`,
+  `operator_token_expired`, and `operator_token_not_recorded` for a link issued before setup links
+  recorded the token, with its own sentence; 403 naming `lakana sign-in setup-link`, #520). Each such link is then withdrawn (audited
   with the reason, gone from the open lists) and the error names the next step (an
   administrator's recovery: `lakana recovery create NAME`; an invite: `lakana invite create`).
 - **A local link** (`POST /api/v1/sign-in/local-link`) exists only with
@@ -587,6 +594,9 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
     (`PATCH`) and `PUT …/secrets/{secret_name}/use` (binding hands the value to code);
     connections: `POST`, `PATCH` (their credentials and address); package indexes and
     repositories: `POST`, `PATCH /{name}` (where code and packages come from);
+  - irreversible erasure: `POST /api/v1/environments/{name}/purge-rows` (#261), which removes a
+    deleted environment's rows and with them the only record of where its files are; nothing
+    restores it;
   - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
     passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
     (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.
@@ -596,8 +606,8 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   token. Every other write of `/api/v1` sits in `NO_STEP_UP` with a one-line reason, so a new
   write route fails the test until it is placed. The rule: step-up when a write changes who or
   what can act or read (identities, rights, run-as, CI trust), handles credentials or secrets, or
-  changes where code or data come from or go; none for removing access (revoking a token,
-  withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
+  changes where code or data come from or go, or irreversibly erases catalog records; none for
+  removing access (revoking a token, withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
   one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
   descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
   is a data operation undone with restore; it joins with its screen in part 8 (spec). The
@@ -1039,7 +1049,7 @@ reader is shown a term with its repository. Residuals:
 
 | Read | Needs | Notes |
 |---|---|---|
-| `GET .../graph/lineage`, `.../graph/neighbours` (`client.graph`, `lakana graph`) | per node: `READ_TABLE` (table, column, measure, check); `READ_TABLE` on source and target (reference, generated `ref_` check; the target by name when it does not exist); `MANAGE_POLICY` + `READ_TABLE` (row filter, column mask); `READ_ENVIRONMENT` + `READ_TABLE` on the output (asset); `READ_ENVIRONMENT` (job, term) | `graph_service._Visibility`, decided before a node is added, in one `permits_each` batch per request: every table of the environment, every table name a record points at, `READ_ENVIRONMENT` and `MANAGE_POLICY`. With `GrantAuthorization` that batch is four statements however large the environment (memberships, grants, the environment's id, its tables: `test_graph_real_grants.py`), so the authorization work no longer grows with the tables a walk reaches or hides. A hidden node is never added, walked through or counted: there is no `hidden` field, and the step budget (200,000) counts only edges to visible nodes, so neither an answer nor a 422 reveals one. The 10 s time budget covers all of a request's work, hidden included: the clock is read after the load, after the visibility batch, and every 256 edges examined, to a visible node or a hidden one. Time is the one channel in which hidden work can show; accepted, because it tells at most that something large exists (R8). A hidden or missing start, and a missing environment for a caller without `READ_ENVIRONMENT`, all answer one `NO_NODE` 404 text. A refusal for a wrong start kind is decided from the id's prefix alone, before any lookup. Jobs: a job needs `READ_ENVIRONMENT`, and its `runs` edge to an asset the reader may not see is cut with that asset (a job is never a way round a hidden asset). Policies: `table get` shows none, so the rule is the policy listing's (`MANAGE_POLICY` at instance scope) plus the table's `READ_TABLE`. For a reader with `MANAGE_POLICY` only, the graph reads each field-id-bound masked table's current fields from storage (`current_fields`) to link a mask to its column's current name: each table once per request (`_MaskFields`), no read started once half the time budget is spent, and each read given only what is left of that half (a thread read with a timeout; a read past it is abandoned and the stored name kept), so slow storage never turns into `GraphBusyError` from these reads alone (PR #465's review; pins: `test_mask_fields_are_read_once_per_table_and_stop_while_time_is_left`, `test_a_read_past_its_time_gives_no_fields_without_waiting_for_storage`). Deployment facts need `READ_ENVIRONMENT` as well: a node's `repository` and a table's `owner` (its building asset's owner) are `None` without it, so a reader of a table alone does not learn that a hidden asset builds it or who owns that asset (`test_assets_and_jobs_need_read_environment`, `test_repositories_need_read_environment`). Node attributes never include SQL, expressions or a policy's subject. Pins: the tests in `test_graph_walk.py` (`test_a_hidden_table_cuts_the_walk_and_leaves_no_trace`, `test_the_step_budget_refuses_and_counts_only_what_the_reader_sees`) and `test_graph.py` (server). |
+| `GET .../graph/lineage`, `.../graph/neighbours` (`client.graph`, `lakana graph`) | per node: `READ_TABLE` (table, column, measure, check); `READ_TABLE` on source and target (reference, generated `ref_` check; the target by name when it does not exist); `MANAGE_POLICY` + `READ_TABLE` (row filter, column mask); `READ_ENVIRONMENT` + `READ_TABLE` on the output (asset); `READ_ENVIRONMENT` (job, term); `READ_ENVIRONMENT` and not a task token (connection, as `GET …/connections`); hidden ones are not added and their edges omitted | `graph_service._Visibility`, decided before a node is added, in one `permits_each` batch per request: every table of the environment, every table name a record points at, `READ_ENVIRONMENT` and `MANAGE_POLICY`. With `GrantAuthorization` that batch is four statements however large the environment (memberships, grants, the environment's id, its tables: `test_graph_real_grants.py`), so the authorization work no longer grows with the tables a walk reaches or hides. A hidden node is never added, walked through or counted: there is no `hidden` field, and the step budget (200,000) counts only edges to visible nodes, so neither an answer nor a 422 reveals one. The 10 s time budget covers all of a request's work, hidden included: the clock is read after the load, after the visibility batch, and every 256 edges examined, to a visible node or a hidden one. Time is the one channel in which hidden work can show; accepted, because it tells at most that something large exists (R8). A hidden or missing start, and a missing environment for a caller without `READ_ENVIRONMENT`, all answer one `NO_NODE` 404 text. A refusal for a wrong start kind is decided from the id's prefix alone, before any lookup. Jobs: a job needs `READ_ENVIRONMENT`, and its `runs` edge to an asset the reader may not see is cut with that asset (a job is never a way round a hidden asset). Jobs and connections in lineage (`_attach_leaves`): after the walk, each asset of the answer brings the jobs that run it and the connections it declares (`uses`, read with `projects.manifest.entry_connections`, so a bare string or an invalid name is never a node), at the asset's distance; they are leaves, so they cost no depth and the walk never goes through them (a connection two assets share is no way from one to the other), and each edge to a visible one counts against the step budget. A connection needs `READ_ENVIRONMENT` and a caller that is not a task token (`connections.service.acts_for_a_task`, the one predicate `_refuse_task` and `lineage_graph._may_see_connections` use too; `_Visibility` decides it once per request), because a task must not learn the environment's connection names. A hidden job or connection is not added and its edge is omitted, with no placeholder: a task token's answer for an asset that declares a connection equals one for an asset that declares none, and a `connection:<name>` start it may not see answers the same `NO_NODE` 404 as an undeclared name. `connection_kind` is the connection row's kind, or `null` for a declared name without a row. Pins: `test_graph_leaves.py` (`test_a_task_token_never_sees_a_connection_node`, `test_a_task_token_never_sees_a_connection_through_neighbours`, `test_a_hidden_connection_start_reads_like_an_undeclared_name`, `test_a_reader_without_read_environment_sees_no_job_or_connection`, `test_a_job_shows_only_its_edges_to_visible_assets`, `test_an_untrusted_connection_name_is_dropped`, `test_lineage_graph_and_connection_service_share_the_task_rule`). Policies: `table get` shows none, so the rule is the policy listing's (`MANAGE_POLICY` at instance scope) plus the table's `READ_TABLE`. For a reader with `MANAGE_POLICY` only, the graph reads each field-id-bound masked table's current fields from storage (`current_fields`) to link a mask to its column's current name: each table once per request (`_MaskFields`), no read started once half the time budget is spent, and each read given only what is left of that half (a thread read with a timeout; a read past it is abandoned and the stored name kept), so slow storage never turns into `GraphBusyError` from these reads alone (PR #465's review; pins: `test_mask_fields_are_read_once_per_table_and_stop_while_time_is_left`, `test_a_read_past_its_time_gives_no_fields_without_waiting_for_storage`). Deployment facts need `READ_ENVIRONMENT` as well: a node's `repository` and a table's `owner` (its building asset's owner) are `None` without it, so a reader of a table alone does not learn that a hidden asset builds it or who owns that asset (`test_assets_and_jobs_need_read_environment`, `test_repositories_need_read_environment`). Node attributes never include SQL, expressions or a policy's subject. Pins: the tests in `test_graph_walk.py` (`test_a_hidden_table_cuts_the_walk_and_leaves_no_trace`, `test_the_step_budget_refuses_and_counts_only_what_the_reader_sees`) and `test_graph.py` (server). |
 | `GET .../graph/impact` (`client.graph.impact`, `lakana graph impact`) | the per-node rules of lineage and neighbours | `graph_impact.py` walks only `_Context.around`, so it is cut at every hidden node; a reason names only the start, a table the walk reached, or the other end of a visible reference or asset. `may_use` is computed only from what the reader sees. `NO_KEY` (a table without a declared key) is refused only after the start is known to be visible, so a hidden table answers `NO_NODE` whatever `key` says. `KEY_NEEDS_TABLE` (`key=true` with a column) and `IMPACT_KINDS` (a start that is neither a table nor a column) are decided from the input's syntax alone, before any lookup, so they tell nothing of the environment. The time and step budgets are lineage's. |
 | `GET .../graph/join-path` (`client.graph.join_path`, `lakana graph join-path`) | `READ_TABLE` on each table of a path; a reference needs both its tables | References come from `around`, so a path never crosses a hidden table or a hidden reference. "No path" has one text (`NO_PATH`) for a pair with no path and for one whose every path is hidden; `more_paths` counts only visible paths, so neither answer nor count tells of a hidden one. A start or goal that is not a table (`JOIN_KINDS`) is refused from the input's syntax alone, before any lookup; the same table twice (`SAME_TABLE`) only after both are known to be visible. A reference whose own or target column no longer exists is never a step (a join on it would fail). |
 | The deploy warning (`DeployService`, `IMPACT_WARNING`) | the deployer's `permits` when the deploy runs; at read time the deployer (not its CI or task tokens), or `READ_ENVIRONMENT` plus `READ_TABLE` on every table the warning names | Computed with the deployer's visibility, so only what the deployer may see is named. The worker computes it with the run's principal without the CI token's scope (`lakana_worker/deploy.py` builds the principal from its row), so for a CI deploy it holds what the service account may see; the deployer shortcut (`_is_deployer`) therefore applies only to the run's principal with neither `ci_scope` nor `task_scope`. A task token of the deployer (bound or not, limited to its declared assets) is likewise an other reader: it holds `READ_ENVIRONMENT` through its principal but `READ_TABLE` only within its scope, so it is shown no warning naming a table outside it (pin: `test_a_task_token_of_the_deployer_is_shown_no_impact_warning_outside_its_scope`). A CI token (which reads nothing, `CiScope`) goes through the other-reader rule, which `GrantAuthorization` refuses it, so no impact warning reaches a CI log; people see it with `lakana deploys get` (pin: `test_a_ci_token_is_shown_no_impact_warning_its_principals_grants_would_show`, a CI token whose principal holds `VIEWER`). The check names only the references, measures, checks and glossary terms on each removed table or column, and the assets that read it (#451): every reader of a removed table; for a removed column only an asset whose manifest lineage (kept only for an entry that lists its columns) traces one of its columns to it, with what names those derived columns (`impact_of(named_only=True)`, `graph_impact._readers`, the `EnvironmentGraph.column_readers` index so a column nothing traces to costs no walk of the table's readers). An asset is visible by the graph's rule (`READ_ENVIRONMENT` and `READ_TABLE` on its output) and its stored line names its output table, so a reader who may not read that table is not shown the line (pin: `test_a_table_no_longer_built_names_the_assets_of_other_repositories_that_read_it`). Nothing further downstream is walked, and only those nodes are built, so its cost inside the deploy's locks grows with the declarations and direct readers, not with what lies downstream (`test_twenty_removals_with_much_downstream_report_the_declarations_well_within_the_budget`, 2,000 and 5,500 assets). At read time each listing asks `READ_ENVIRONMENT` and every named table once, in one `permits_each` batch per run (`_WarningReads.may_read`). Every manifest name in a line is escaped (`_named`, `_typed`: control, format and surrogate characters and line separators as escapes, hint arguments shell-quoted), the `IMPACT_UNREADABLE` line's table included (`test_a_removed_item_the_graph_cannot_read_escapes_its_tables_name`). The 2 s budget is read inside `load_graph` (after its database rows and after each repository's part, `check=budget.check`) and after the visibility batch, so a step between two reads is not itself bounded: a very large environment can hold the deploy's locks past 2 s by the reading of its rows, one repository's manifest or one `permits_each` (pin: `test_the_graph_load_stops_at_the_budget_between_repositories`). A deployer without `READ_ENVIRONMENT` sees no repository of any node (repository and owner need `READ_ENVIRONMENT`), so gets no impact warning at all. Stored as `{"warning", "tables"}` in `deploy_runs.warnings_json`; `_stored_warnings` shows it to the deployer, and to another reader only with `READ_ENVIRONMENT` (it names glossary terms and repositories) and `_may_read` on every named table (F10: a `ref_` check's target table must be readable to see that line), else leaves it out with no count. The "more" and "unchecked" lines name every removed table, so they follow the same rule (F11: readers other than the deployer need `READ_ENVIRONMENT`). Covers removed tables and columns only; a retype is not seen at deploy, it is warned of at the run that makes it (#446, next row). Pins: `test_a_reader_sees_a_stored_warning_only_when_it_may_read_every_table_it_names`, `test_the_deployers_visibility_leaves_out_what_it_may_not_see`. |
@@ -1051,7 +1061,7 @@ reader is shown a term with its repository. Residuals:
 |---|---|---|
 | `GET .../tables/{name}/health` | `READ_TABLE` on the table | Checked first, so a missing right is `403` before anything is read. |
 | `GET .../tables/{name}/health/signals`, and `signals` in the health answer | `READ_TABLE` on the table | Checked first (`403` before anything is read). The values are decided by `Visibility` below. |
-| The `readers` of that answer | `MANAGE_GRANT` and the `ADMIN` role at instance scope (`grants.admin.may_see_grants`) | The grants listing's rule asked as a yes or no: nothing is recorded as `AUTHORIZATION_DENIED` for a `False`, and the field is `null`, not an error. The helper lives in `grants/admin.py` because `test_admin_only_call_sites.py` allows the three actions nowhere else. |
+| The `readers` of that answer | `MANAGE_GRANT` and the `ADMIN` role at instance scope (`grants.admin.may_see_grants`) | The grants listing's rule asked as a yes or no: nothing is recorded as `AUTHORIZATION_DENIED` for a `False`, and the field is `null`, not an error. The helper lives in `grants/admin.py` because `test_admin_only_call_sites.py` allows the three actions nowhere else. `readers=false` returns no names and writes no `ACTIVITY_VIEWED`; the parameter exists for the table page's Overview, which does not need the names. |
 | `last_read_at` and `readers_7d` (the table answer, and the catalog list) | `READ_TABLE` on the table | The deliberate loosening of the `readers` rule by a time and a count: anyone who may read a table sees when a succeeded query last read it and how many principals read it in the last 7 UTC days, never a name. Names stay with the row above. Seeing the time and the count writes no `ACTIVITY_VIEWED`; `readers` stays audited. Pins: `test_reader_names_stay_with_administrators`, `test_the_last_read_and_its_count_are_not_audited_as_activity_viewed`, `test_readers_7d_counts_principals_never_names_and_equals_the_readers_window`. |
 
 Signal values reveal data, so `catalog/health_read.py` (`Visibility`, `visibility_for`) decides per reader, and fails closed. A masked column with a mask that applies to the reader (no unmasked access): name, state, time and snapshot id stay, `observed`, `band` and `alert` are `None` and `values_hidden` is true. A mask bound to field ids (#120) is hidden by its field id, under every name that field has had in the table's schemas (`_every_name`); a health row carries only a name, so a name the field once had stays hidden after another column takes it, and other columns' values are shown. A mask of an earlier release (`pending`, `unbound`) or a raw table's (`names`) is hidden under every name the field of its written name has had (renames). When any mask applies to the reader, values under a name the current schema no longer has are hidden too (`Visibility.columns`), and a table whose metadata cannot be read, or that has none, hides all values for such a reader. A bound mask whose field the current schema no longer has, an earlier mask whose column was renamed since it was written, and a bound row the resolver cannot read (`UnreadablePolicyError`, e.g. no `column_field_id`) hide all values (the query path refuses such reads). A row filter that applies to the reader hides every value-revealing number (bounds, null rates, bands, alert values) for all columns; volume, freshness and schema stay (freshness is the time since the last snapshot, which `last_write_at` of the health and of `table get` shows the same reader). In a message, `payload._values_withheld` still withholds a freshness alert's times under any row filter, like every other signal's values (the value-free text names what writes the table). A kept table shows aggregates and snapshot ids, never rows, current metadata or file locations (`_NOTHING_OF_A_KEPT_TABLE` in `test_catalog_kept.py`). Pins: `test_health_read.py`, `test_tables_health.py`.
@@ -1120,7 +1130,7 @@ without `detail`: it is asked with `permits(MANAGE_ENVIRONMENT)`, which applies 
 
 | List | Who | Kinds and the right asked per row |
 |---|---|---|
-| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin`) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables whose newest freshness row is fired, ranked in one statement, since the sweep records a row only on a change), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host: `replaced_by_restart`, shared with the instance status), `query_failed` (their own, as for anyone else). The `ADMIN` role holds every right these need, so nothing more is asked. |
+| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin` for a person's own token or session; a task or CI token is refused here and is never `admin`, #542) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables whose newest freshness row is fired, ranked in one statement, since the sweep records a row only on a change), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host: `replaced_by_restart`, shared with the instance status), `query_failed` (their own, as for anyone else). The `ADMIN` role holds every right these need, so nothing more is asked. |
 | Needs your attention | anyone else | `table_late` and `check_failed` only among the tables they read within 7 days (`table_reads`) or opened (`recent_opens`), each kept while `READ_TABLE` holds on it now (one `permits_each` for all of them: a fixed number of statements per environment, however many tables; pin: `test_a_readers_attention_costs_the_same_for_five_tables_or_forty`); a check also needs `READ_ENVIRONMENT` (the check list's right) and is left out when it is a generated reference check whose target they may not read (`ReferenceCheckFilter`, as `check list`). `query_failed`: their own failed ad-hoc queries within 7 days (`task_run_id IS NULL`; a pipeline's query is its run's failure), only where they still hold `SUBMIT_QUERY`, as the query's own page shows it only to its submitter. No runs, links or workers. |
 | Your work | a caller with `may_deploy_somewhere` | The repositories they created (`created_by`) or deployed (`deploy_runs.principal_id`); environments and jobs (`JobService.list`, asked only after `permits(READ_ENVIRONMENT)`) only where they may read the environment; nothing without a readable environment (the repository listing's right). Anyone else gets two empty lists. |
 
@@ -2259,8 +2269,13 @@ connections; a connection opens exactly its endpoints and nothing else.
   through two test hooks that are never settings: `EgressSettings.reachable` and
   `LauncherSettings.relay_reachable` (carried as the relay plan's `reachable`, at most 4 IPv4
   networks, always present and empty in production; `load_settings` refuses a variable of that
-  name). A refused range wins over both (`egress.forbidden`'s `refused`), so the hooks cannot
-  open a gateway or an operator's range.
+  name). A refused range wins over both (`egress.forbidden`'s `refused`), and so do the
+  never-reached addresses (`egress._never`: link-local, the cloud service addresses of `_NEVER`,
+  multicast, unspecified, `240.0.0.0/4`), so the hooks cannot open a gateway, an operator's range
+  or the metadata service; only loopback, where the tests' servers listen, reserved IPv6 that
+  carries no embedded IPv4 address, and the attached networks stay theirs to open. An IPv6 address is also judged by every IPv4 address it carries
+  (`egress._embedded_ipv4`, a copy of core's: mapped, compatible, 6to4, Teredo, NAT64), which a
+  test keeps in agreement with core form by form.
 - **Residuals, accepted:**
   - containers share the kernel (as for every task);
   - the egress token is in the task's environment: any code of the task can use it for the
@@ -2855,7 +2870,17 @@ listing runs after the claims step, drops its table too) or sees the deletion. A
 after the deletion (a create that found the environment earlier) is never published; the sweep
 abandons it once its holder ended or its grace period passed. `undrop_table` takes the same share
 lock before the tombstone's lock; `create_external_table` checks `deleted_at` on the row it locks.
-The lock order is always environment row, then table row, then location record. Pins:
+The lock order is always environment row, then table row, then location record. A delete of
+several tables (the deletion of an environment, and the last purge, whose cascade takes the
+artifacts left) locks all of their rows first, `ORDER BY id FOR UPDATE`
+(`table_locks.lock_tables_in_id_order`). Read recording (`record_table_reads`) takes the same
+lock, one level weaker (`FOR NO KEY UPDATE`: it still conflicts with the deletion's, but not with
+the `FOR KEY SHARE` of a foreign-key insert, so a deploy not yet committed does not block a query's
+completion), on every table a query read before it writes a count, whatever its update of `last_read_at`
+skips (an update a later read already fails locks no row), so the two wait instead of deadlocking
+(#558; `test_table_delete_lock_order_postgres_integration.py`, both sequences, and a pending
+foreign-key insert that read recording does not wait for). An expiry drops one table per
+transaction and needs no such order. Pins:
 `test_environment_deletion.py` (`test_a_create_whose_claim_came_before_the_deletion_is_not_published`,
 `test_a_claim_made_after_the_deletion_is_never_published`,
 `test_an_undrop_while_the_environment_is_deleted_is_refused`).
@@ -2883,6 +2908,28 @@ A nested or shared-root location still blocks a purge as before (`location_in_us
 `dropped_inside`, in every environment); the row then waits. Pins:
 `test_the_row_stays_until_the_last_record_is_gone`,
 `test_a_live_table_in_another_environment_on_the_root_is_never_purged`.
+
+**The rows-only purge (#261).** The sweep skips a deleted environment whose storage cannot be
+resolved (a root in a scheme `_parse_scheme` refuses, which older releases accepted), so its row
+and name would stay. `CatalogService.purge_environment_rows` (`POST
+/api/v1/environments/{name}/purge-rows`, `lakana env purge NAME --rows-only --yes`) authorizes
+`MANAGE_ENVIRONMENT` at **instance** scope first (a grant on the environment's name is not enough,
+as for create and re-root), locks the row, refuses 404 for no row, 409 when it is not deleted, and
+409 unless the stored root alone says no release ever wrote a file behind it
+(`storage.resolver.root_never_resolves`: a scheme `_parse_scheme` refuses, which every release
+refused to open). A root with an fsspec chain (`::`) is refused too (409,
+`ROWS_PURGE_CHAINED_MESSAGE`, naming the part before it): releases before 0.18.0 opened that part
+and wrote files there, and the row is their only record (#261 re-review). It never calls `for_environment`: a storage secret bound to another use
+(`SecretUseRefused`), a missing secret, a missing key provider or a wrong master key are settings
+to fix on a storage that may hold every file, so they keep the row and its file purge (#261 review;
+`test_an_object_store_whose_secret_cannot_be_used_keeps_its_row`). After the authorization it
+takes step-up (`require_step_up`): the purge cannot be undone. Then
+`environment_deletion.purge_rows`, in the lock order of the deletion and the last purge: the
+tables of the environment in id order (`lock_tables_in_id_order`), its location records in id
+order (`FOR UPDATE`), their delete, `revoke_attached`, an `ENVIRONMENT_PURGED` by the caller
+with `rows_only`, `locations` and `storage_root` (where any files are; the records' own locations are not listed, their number is unbounded), and the row's delete, which cascades the rest; one commit. No
+file is read or deleted. Pins: `test_environment_rows_purge.py` (refusals, instance scope, lock
+order, the name free again) and its Postgres twin.
 
 **Residuals, accepted.** An environment-scoped admin who deleted an environment cannot restore it
 (the deletion revoked that grant; an administrator can). Views and external tables are not
@@ -3000,7 +3047,8 @@ alone: one in a scheme `_parse_scheme` does not know fails closed at every `for_
 as a failed environment and touch nothing, `lakana env orphaned-locations` (with and without
 `--delete`) is refused, so nothing of it lands in the working directory. **Residual:** deleting
 such an environment works, but its purge never comes (the sweep skips it, `ValidationError`, each
-run), so the row and its name stay. One created as `s3` with a
+run), so the row and its name stay until an administrator removes them with `lakana env purge NAME
+--rows-only` (#261; "The rows-only purge" under "Deleting an environment" above). One created as `s3` with a
 `file://` root (or the other way round) cannot be told apart from a correct one, since the sent
 scheme was never stored: it has always been, and stays, an environment of its root's scheme.
 `check_storage_root` also refuses an `s3`/`abfs` root (aliases and case included) whose normalised
@@ -3370,7 +3418,8 @@ found through a query run of their own that is bound to the check result
   check's SQL from the manifest, so only a caller who may read every table it names ever sees
   it. `DeployService.job_version` applies the same rule to the manifest's `checks`
   (`_visible_checks`): a check whose SQL names an unreadable table, or whose tables cannot be
-  listed, loses `sql` and `references` and carries `hidden_references`, as an asset does.
+  listed, loses `sql` and `references` and carries `hidden_references`, as an asset does; and
+  since #560 a check's `sql` also needs the content gate ("Preview and Defined in").
   The reference targets of an asset's `model` name tables as well: `_visible_model` keeps only
   the targets the reader may read and counts the rest in the entry's `hidden_model_references`
   (`test_a_project_version_hides_model_references_the_reader_may_not_read`). At deploy, a
@@ -4601,6 +4650,15 @@ work.
   field is gone, whose ids or metadata cannot be read, or that is not bound is shown as
   written (display only; a read refuses it); `bound` is `false` for `pending` and `unbound`.
   A failed metadata read logs the error's class only.
+- **A grant, row filter or column mask names its subject (M7 part 3a).** `GrantOut`,
+  `RowFilterOut` and `ColumnMaskOut` carry `principal {id, name, principal_type}` and `group`
+  (`api/platform/subjects.py`, one query per kind per answer), built only after the listing's
+  own check has passed: `ADMIN` for grants, `MANAGE_POLICY` at instance scope for policies. An
+  administrator may list principals and groups anyway. A `MANAGE_POLICY` holder without
+  `MANAGE_PRINCIPAL` learns the names of the principals and groups that policies apply to;
+  accepted, because that holder already writes policies by subject name and is told
+  `No principal named …` for a name that does not exist, and a name comes with its type
+  (`user` or `service`) only. A subject deleted since answers `null`, never an error.
 
 - **Row filters and column masks are written** in a restricted expression subset
   (comparisons, boolean logic, literals, column references, and exactly two context
@@ -5482,7 +5540,7 @@ already allows.
 - **Reads of a deployed file are audited (M7 part 3a).** `table_definition_file`
   (`lakana_core.projects.definition`) writes `SOURCE_VIEWED` (the table as scope; `repository`,
   `path`, `commit`) through `record_source_view` before it returns a file's text, once per reader,
-  table and commit within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. `record_view` and
+  table, commit and path within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. `record_view` and
   `record_source_view` share `_record_once` (lookup, write, fail closed). `LAKANA_VIEW_AUDIT__ENABLED`
   never turns it off. A location answer, `restricted`, `not_recorded` and `too_large` write nothing
   beyond the usual `AUTHORIZATION_DENIED` of the first `READ_TABLE` check; the gate's own checks use
@@ -5559,7 +5617,9 @@ already allows.
 - `GET /api/v1/whoami` requires authentication but performs **no authorization check**:
   it only describes the caller back to itself (name, type, task-token scope, and its own
   access flags `admin`, `has_access` and `may_deploy`, each about the caller only and asked with
-  `permits`), which reveals nothing a 200-versus-401 probe of any other route doesn't. `lakana login` uses it
+  `permits`; `admin` and `may_deploy` follow the credential's scope, so a task or CI token is
+  never `admin` (`GrantService.is_admin`: `grants.admin.credential_acts_as_admin`, i.e. `permits(MANAGE_GRANT)` and `holds_instance_admin`
+  on the instance, #542)), which reveals nothing a 200-versus-401 probe of any other route doesn't. `lakana login` uses it
   to confirm a credential before saving it.
 - `GET /api/v1/info` likewise requires authentication, performs no authorization check and
   returns only the platform version (`importlib.metadata`, never a string in the code) and the
@@ -5627,9 +5687,10 @@ exit criterion is being re-run after the M3f fixes above — see
 | `masked_columns` on a query result | the submitter only | **Loosening:** names the columns masked for the reader (`{table, column}`), recorded by the worker from what it applied; never the expression, id or subject. The same reasoning as health's `values_hidden`. Row filters are not named. On the JSON page the list is written through the page budget; entries that do not fit are left out and counted in `masked_columns_cut`, never cut inside. |
 | `GET …/queries/{id}/result?format=json` | the submitter only | At most 1,000 rows (100 for a preview). A bounded writer stops inside a cell at 64 KiB and inside a row at 4 MiB a page, the first row included (`{"cut": true}`, `row_cut`). Strings are pre-cut in pyarrow, and the page is UTF-8. Binary is never sent. 4 concurrent conversions per process and 1 per principal; `503` beyond. |
 | `GET …/tables/{name}/definition` | `READ_TABLE` | Path, line, commit and link of the current version; no path, commit or version parameter. **Loosening:** a reader of the table sees the repository's name and HTTPS browse URL without `READ_ENVIRONMENT`. A `local` path is never shown. |
-| `GET …/tables/{name}/definition/file` | `READ_TABLE`; for `content` also `READ_ENVIRONMENT`, read on every table of `gate_tables`, no view among them at read time other than the file's own table, `gate_raw` false, and no applicable row filter or column mask on any of them | Served from `project_files`, never from the tarball. One `restricted` reason for every failed condition. `SOURCE_VIEWED` once per window, fail-closed. The CLI escapes C0, C1, `Cf`, U+2028 and U+2029. |
+| `GET …/tables/{name}/definition/file` | `READ_TABLE`; for `content` also `READ_ENVIRONMENT`, read on every table of `gate_tables`, no view among them at read time other than the file's own table, `gate_raw` false, and no applicable row filter or column mask on any of them | Served from `project_files`, never from the tarball. One `restricted` reason for every failed condition. `SOURCE_VIEWED` once per window, fail-closed. The CLI escapes C0, C1, `Cf`, U+2028 and U+2029. The UI renders text nodes only and marks C0, C1, `Cf`, U+2028 and U+2029 (`DefinedIn.test.tsx`: `renders_html_as_text`, `marks_control_and_bidi_characters`). |
+| `GET …/project-versions/{id}` (#560) | `READ_ENVIRONMENT`; an asset's or check's `sql` and `normalized_sql` also need `passes_content_gate`, per file | `DeployService.job_version`. An asset is judged on the version's own `project_files` row (by table and path): none, or another `gate_version`, is `not_recorded` before any other condition, as in "Defined in"; a check on its table and the tables its SQL names (read again from the SQL), with `gate_raw` from `sql_file_references` over that SQL, a string `path`, and `defines=False`: any view in its gate refuses, its own table included, since a check's gate set does not list a view's base tables. Every entry carries `content_reason` and `content_message` (the "Defined in" sentences, `null` when shown); a withheld entry keeps everything else the older rules leave (`references` and `lineage` stay for a reader of every referenced table). `SOURCE_VIEWED` per shown file, table scope, the same window and dedup as "Defined in" (a reader, table, commit and path, so an asset file and each check file of one table get a row each, and "Defined in" shares the asset file's row), on `sessions_like` sessions; any failure is 503 and nothing is returned. A version deployed before 0077 shows no asset's SQL to anyone until a redeploy; its checks' SQL is judged by the check rule above. |
 | Source map at deploy | written by the worker in `record_deploy`, both branches | `git archive` runs with `* -export-subst` in `$GIT_DIR/info/attributes` (`export-ignore` unchanged). A reused version writes a row only for a missing or stale `gate_version`, and only when the text matches the manifest (`normalized_sql` or the Python source digest). A foreign key to the texts (`ON DELETE RESTRICT`); the text insert locks the row and the sweep skips locked rows. C0 and C1 controls in asset files are refused at deploy (breaking, see the release note). Unreferenced texts are swept. |
-| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) `DeployService.job_version` shows `sql` to `READ_ENVIRONMENT` holders without the policy condition and without `SOURCE_VIEWED` (issue after 3a). (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
+| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) Closed by #560: `DeployService.job_version` applies the same gate and audit. Left: a version is judged under today's grants and policies, so an old version's SQL is shown to whoever passes the gate now; and `lakana check rows` still puts a check's SQL into the caller's own query under `READ_TABLE` alone (the rows stay filtered and masked). (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
 
 The preview route asks for no step-up: it is a read under the caller's own rights, like `POST …/queries` (`NO_STEP_UP` in `test_step_up_routes.py`). The conversion slot (`ThreadSafeConcurrencyLimiter`, one `threading.Lock` over the total and the count per principal, because the route runs in the thread pool) is given back once the page's bytes are built, before they are sent, and also when the conversion fails.
 
@@ -6075,7 +6136,8 @@ pins each line.
   disables verification. `LAKANA_WEBHOOK__ALLOW_HOSTS` exempts named hosts from the scheme and
   port rules and from the private-address check, nothing else: a listed host is still refused
   (`NEVER_REACHABLE`) when any of its addresses `is_never_reachable` (loopback, link-local,
-  unspecified, multicast, reserved, `fd00:ec2::254`, `100.100.100.200`, or an IPv6 form that
+  unspecified, multicast, reserved, `fd00:ec2::254`, `fd20:ce::254`, `100.100.100.200`,
+  `192.0.0.192`, Azure's WireServer `168.63.129.16` (#543), or an IPv6 form that
   carries such an IPv4), the rule of `LAKANA_CI_OIDC__ALLOW_HOSTS` (#243). One exception: the
   entry `localhost`, for the URL host `localhost` only, may reach loopback addresses (never the
   rest of the set), so that a receiver on the worker's own machine still works (the get-told
@@ -6229,7 +6291,9 @@ and a fake fetcher; no test reaches the network.
   the keys alike; the issuers' own hosts are not exempt unless listed, and every other host must
   be public. Even a listed host is refused when any of its addresses is loopback, link-local
   (`169.254.0.0/16`, `fe80::/10`, so 169.254.169.254), unspecified, multicast or reserved, a
-  known metadata address inside a private range (`fd00:ec2::254`, `100.100.100.200`), or an
+  known cloud service address outside link-local (`fd00:ec2::254`, `fd20:ce::254`,
+  `100.100.100.200`, `192.0.0.192`, and Azure's WireServer `168.63.129.16`, which sits in a
+  public range and so is refused for unlisted hosts too, #543), or an
   IPv6 form that carries such an IPv4 address (`is_never_reachable`). Since #243
   `LAKANA_WEBHOOK__ALLOW_HOSTS` applies the same rule (with a loopback exception for the entry
   `localhost`), and it still exempts the scheme and the port. Pinning, `https` on 443, no redirects, the 64 KiB cap and the deadlines
