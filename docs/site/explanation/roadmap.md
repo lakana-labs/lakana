@@ -119,19 +119,20 @@ OAuth2 (#28); assets replace, append or merge. `lakana load` loads a local file 
 (#29), and `lakana init --template` starts a project from a tested asset for files, SQL or REST,
 with a recipe for SQL Server (#56), or from a whole star schema, `--template medallion` (#254).
 The next elements are M8d data modelling, M7 web interface and sign-in, M8, M8b, M8c, M9, M10
-and the release candidates (#33) that lead to v1.0.0.
+and the release candidates that lead to v1.0.0.
 
 ## To v1.0.0
 
 The order up to v1.0.0 is: M6 ingestion (built), M8d data modelling, M7 web interface and
-sign-in, M8, M8b, M8c, M9, M10, and then the release candidates. There is no public beta: Lakana
-has no active users yet, so a beta would add nothing. Development stays on 0.x until v1.0.0.
+sign-in, M8, M8b, M8c, M9, M10, and then the release candidates. There is no public beta: the 0.x
+releases are on PyPI for anyone to try, but Lakana has no active users yet, so a beta would add
+nothing. Development stays on 0.x until v1.0.0.
 Dates follow the plan. The reasons: the first audience, teams without a senior data engineer, needs
 the web interface and real sign-in from the start; the strict data-model rules (a declared kind,
 grain, key and references, with generated checks, #250) should exist before anyone builds projects
 on Lakana; and the interface then shows model metadata from its first version. Ingestion (M6)
 came first, after task isolation (M7b): a new team's first job is getting its data in, so the
-first release ships with the ingestion helpers and named connections.
+ingestion helpers and named connections shipped before the web interface.
 
 1. **M5d, triggers, data quality checks and notifications (built).** Runs start by hand, on a schedule
    or through an API call. A check, a SQL file that must return no rows, can block, keep or
@@ -200,11 +201,11 @@ first release ships with the ingestion helpers and named connections.
     each tool on the tested list connects and sees only what its identity may.
 10. **M9, performance and multi-host workers.** Measured query performance, and workers that
     run on more than one host. Done when adding a host increases throughput as documented.
-11. **M10, hardening and v1.0.0.** Security review, upgrade paths, documentation pass and the
-    API freeze. Done when the release criteria are met and the first release candidate is tagged.
+11. **M10, hardening and v1.0.0.** Security review, upgrade paths, documentation pass, and the API
+    settled for the freeze at v1.0.0. Done when the release criteria are met and the first release candidate is tagged.
 12. **Release candidates, then v1.0.0.** The last step before v1.0.0: 1.0.0-rcN, published as
     pre-releases on PyPI and tested on real work by two or three friendly teams. It checks ease
-    of use and the documentation before the API, the CLI and the project-file formats are frozen.
+    of use and the documentation before the API, the CLI and the project-file formats are frozen at v1.0.0.
     It is testing only, with no scope decisions; findings are fixed in the next release candidate.
     Done when a release candidate has no open findings and v1.0.0 is tagged.
 
