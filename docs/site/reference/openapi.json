@@ -25389,6 +25389,27 @@
           "bound": {
             "type": "boolean",
             "title": "Bound"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -25406,7 +25427,7 @@
           "bound"
         ],
         "title": "ColumnMaskOut",
-        "description": "Response body for a column mask.\n\nParameters\n----------\nid\n    The column mask's id.\nprincipal_id\n    The principal this mask applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this mask applies to, or `None` if it applies to a\n    principal.\nenvironment\n    The environment this mask applies to.\nnamespace\n    The dot-joined namespace path this mask applies to.\ntable\n    The table this mask applies to.\ncolumn\n    The masked column's name, as the table has it now.\nexpression\n    The replacement value.\ncreated_by\n    The principal who created this mask.\ncreated_at\n    When this mask was created.\nbound\n    As `RowFilterOut.bound`."
+        "description": "Response body for a column mask.\n\nParameters\n----------\nid\n    The column mask's id.\nprincipal_id\n    The principal this mask applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this mask applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the mask applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the mask applies to a principal.\nenvironment\n    The environment this mask applies to.\nnamespace\n    The dot-joined namespace path this mask applies to.\ntable\n    The table this mask applies to.\ncolumn\n    The masked column's name, as the table has it now.\nexpression\n    The replacement value.\ncreated_by\n    The principal who created this mask.\ncreated_at\n    When this mask was created.\nbound\n    As `RowFilterOut.bound`."
       },
       "ColumnOut": {
         "properties": {
@@ -27164,6 +27185,27 @@
               }
             ],
             "title": "Note"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -27181,7 +27223,7 @@
           "granted_at"
         ],
         "title": "GrantOut",
-        "description": "Response body for a grant.\n\nParameters\n----------\nid\n    The grant's id.\nprincipal_id\n    The principal this grant applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this grant applies to, or `None` if it applies to a\n    principal.\nrole\n    The role template granted, or `None` if a raw action was granted.\naction\n    The raw action granted, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_by\n    The principal who created this grant.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant\n    of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`, which work only\n    with the `ADMIN` role on the instance; `None` otherwise."
+        "description": "Response body for a grant.\n\nParameters\n----------\nid\n    The grant's id.\nprincipal_id\n    The principal this grant applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this grant applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the grant applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the grant applies to a principal.\nrole\n    The role template granted, or `None` if a raw action was granted.\naction\n    The raw action granted, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_by\n    The principal who created this grant.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant\n    of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`, which work only\n    with the `ADMIN` role on the instance; `None` otherwise."
       },
       "GraphEdgeOut": {
         "properties": {
@@ -31164,6 +31206,27 @@
           "bound": {
             "type": "boolean",
             "title": "Bound"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -31180,7 +31243,7 @@
           "bound"
         ],
         "title": "RowFilterOut",
-        "description": "Response body for a row filter.\n\nParameters\n----------\nid\n    The row filter's id.\nprincipal_id\n    The principal this filter applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this filter applies to, or `None` if it applies to a\n    principal.\nenvironment\n    The environment this filter applies to.\nnamespace\n    The dot-joined namespace path this filter applies to.\ntable\n    The table this filter applies to.\nexpression\n    The restricted-subset predicate, in the table's current column names.\ncreated_by\n    The principal who created this filter.\ncreated_at\n    When this filter was created.\nbound\n    `true` when the policy follows its columns by field id (a raw table's, by name). `false`\n    right after an upgrade, while the worker binds earlier policies over the next passes (see\n    the upgrade notes); only a policy that stays `false` after that needs creating again."
+        "description": "Response body for a row filter.\n\nParameters\n----------\nid\n    The row filter's id.\nprincipal_id\n    The principal this filter applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this filter applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the filter applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the filter applies to a principal.\nenvironment\n    The environment this filter applies to.\nnamespace\n    The dot-joined namespace path this filter applies to.\ntable\n    The table this filter applies to.\nexpression\n    The restricted-subset predicate, in the table's current column names.\ncreated_by\n    The principal who created this filter.\ncreated_at\n    When this filter was created.\nbound\n    `true` when the policy follows its columns by field id (a raw table's, by name). `false`\n    right after an upgrade, while the worker binds earlier policies over the next passes (see\n    the upgrade notes); only a policy that stays `false` after that needs creating again."
       },
       "RunAsIn": {
         "properties": {
@@ -32333,6 +32396,35 @@
         ],
         "title": "StorageConfigIn",
         "description": "Storage configuration as accepted from a client.\n\nParameters\n----------\nscheme\n    Storage backend.\nroot\n    Root URI for the environment.\noptions\n    Backend-specific options."
+      },
+      "SubjectPrincipalOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "principal_type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "service"
+            ],
+            "title": "Principal Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "principal_type"
+        ],
+        "title": "SubjectPrincipalOut",
+        "description": "The principal a grant, row filter or column mask is for.\n\nParameters\n----------\nid\n    The principal's id.\nname\n    The principal's name.\nprincipal_type\n    `user` for a person, `service` for a service account."
       },
       "TableCreate": {
         "properties": {

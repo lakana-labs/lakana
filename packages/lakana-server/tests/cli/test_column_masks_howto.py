@@ -94,6 +94,8 @@ def test_the_column_mask_how_to_does_what_the_page_says(
     assert [(m["table"], m["column"], m["expression"]) for m in listed] == [
         ("customers", "ssn", "'***'")
     ]
+    table = ok(cli_state, "column-mask", "list", "--principal", "alice")
+    assert " alice " in table and listed[0]["principal_id"] not in table
 
     where = ("--principal", "alice", "--expression", "NULL", "--env", "dev")
     assert refused(cli_state, 8, *mask, "sn", *where) == (

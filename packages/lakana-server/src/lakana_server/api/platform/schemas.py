@@ -2238,6 +2238,24 @@ class GrantCreate(BaseModel):
     table: str | None = None
 
 
+class SubjectPrincipalOut(BaseModel):
+    """The principal a grant, row filter or column mask is for.
+
+    Parameters
+    ----------
+    id
+        The principal's id.
+    name
+        The principal's name.
+    principal_type
+        `user` for a person, `service` for a service account.
+    """
+
+    id: uuid.UUID
+    name: str
+    principal_type: Literal["user", "service"]
+
+
 class GrantOut(BaseModel):
     """Response body for a grant.
 
@@ -2251,6 +2269,12 @@ class GrantOut(BaseModel):
     group_id
         The group this grant applies to, or `None` if it applies to a
         principal.
+    principal
+        Who the principal is by name: its id, name and type (`user` or `service`), or `None` when
+        the grant applies to a group, or when a server read the name just as the principal was
+        deleted.
+    group
+        The name of the group, or `None` when the grant applies to a principal.
     role
         The role template granted, or `None` if a raw action was granted.
     action
@@ -2285,6 +2309,8 @@ class GrantOut(BaseModel):
     granted_by: uuid.UUID
     granted_at: datetime
     note: str | None = None
+    principal: SubjectPrincipalOut | None = None
+    group: str | None = None
 
 
 # jscpd:ignore-start
@@ -2429,6 +2455,12 @@ class RowFilterOut(BaseModel):
     group_id
         The group this filter applies to, or `None` if it applies to a
         principal.
+    principal
+        Who the principal is by name: its id, name and type (`user` or `service`), or `None` when
+        the filter applies to a group, or when a server read the name just as the principal was
+        deleted.
+    group
+        The name of the group, or `None` when the filter applies to a principal.
     environment
         The environment this filter applies to.
     namespace
@@ -2457,6 +2489,8 @@ class RowFilterOut(BaseModel):
     created_by: uuid.UUID
     created_at: datetime
     bound: bool
+    principal: SubjectPrincipalOut | None = None
+    group: str | None = None
 
 
 class ColumnMaskCreate(BaseModel):
@@ -2509,6 +2543,12 @@ class ColumnMaskOut(BaseModel):
     group_id
         The group this mask applies to, or `None` if it applies to a
         principal.
+    principal
+        Who the principal is by name: its id, name and type (`user` or `service`), or `None` when
+        the mask applies to a group, or when a server read the name just as the principal was
+        deleted.
+    group
+        The name of the group, or `None` when the mask applies to a principal.
     environment
         The environment this mask applies to.
     namespace
@@ -2538,6 +2578,8 @@ class ColumnMaskOut(BaseModel):
     created_by: uuid.UUID
     created_at: datetime
     bound: bool
+    principal: SubjectPrincipalOut | None = None
+    group: str | None = None
 
 
 def _check_secret_values(value: object) -> object:

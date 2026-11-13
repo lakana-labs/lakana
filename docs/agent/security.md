@@ -4616,6 +4616,15 @@ work.
   field is gone, whose ids or metadata cannot be read, or that is not bound is shown as
   written (display only; a read refuses it); `bound` is `false` for `pending` and `unbound`.
   A failed metadata read logs the error's class only.
+- **A grant, row filter or column mask names its subject (M7 part 3a).** `GrantOut`,
+  `RowFilterOut` and `ColumnMaskOut` carry `principal {id, name, principal_type}` and `group`
+  (`api/platform/subjects.py`, one query per kind per answer), built only after the listing's
+  own check has passed: `ADMIN` for grants, `MANAGE_POLICY` at instance scope for policies. An
+  administrator may list principals and groups anyway. A `MANAGE_POLICY` holder without
+  `MANAGE_PRINCIPAL` learns the names of the principals and groups that policies apply to;
+  accepted, because that holder already writes policies by subject name and is told
+  `No principal named …` for a name that does not exist, and a name comes with its type
+  (`user` or `service`) only. A subject deleted since answers `null`, never an error.
 
 - **Row filters and column masks are written** in a restricted expression subset
   (comparisons, boolean logic, literals, column references, and exactly two context
