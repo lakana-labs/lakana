@@ -822,7 +822,43 @@ guard rather than something the current parser reaches.
 
 _READER_PREFIXES = ("read_",)
 _READER_SUFFIXES = ("_scan",)
-_READER_NAMES = frozenset({"glob", "sniff_csv"})
+_READER_NAMES = frozenset(
+    {
+        "glob",
+        "sniff_csv",
+        # Metadata readers: each reads the file or the table at a path (#487).
+        "parquet_metadata",
+        "parquet_schema",
+        "parquet_file_metadata",
+        "parquet_kv_metadata",
+        "parquet_full_metadata",
+        "parquet_bloom_probe",
+        "avro_metadata",
+        "delta_domain_metadata",
+        "delta_get_transaction_version",
+        "delta_list_files",
+        "iceberg_column_stats",
+        "iceberg_files",
+        "iceberg_history",
+        "iceberg_load_table_response",
+        "iceberg_manifests",
+        "iceberg_metadata",
+        "iceberg_partition_specs",
+        "iceberg_partition_stats",
+        "iceberg_refs",
+        "iceberg_snapshots",
+        # Another database.
+        "sqlite_attach",
+        "sqlite_query",
+        "postgres_query",
+        "postgres_execute",
+        "mysql_query",
+        "mysql_execute",
+    }
+)
+"""The table functions of DuckDB 2.0.0 that read a file, a URL or another database by a name the
+prefix and suffix above miss. Only the refusal's message uses it: every table function outside
+the generator allow-list is refused either way."""
 
 _LOAD_FIRST = (
     'load the data into a table first (see "Load data from a source" in the user '
