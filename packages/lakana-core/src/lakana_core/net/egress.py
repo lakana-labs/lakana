@@ -176,6 +176,9 @@ def _embedded_ipv4(
 ) -> list[ipaddress.IPv4Address]:
     """Return the IPv4 addresses an IPv6 address carries.
 
+    The egress proxy of the launcher, which imports only the standard library, keeps a copy
+    (`lakana_worker.launcher.egress._embedded_ipv4`); a test keeps the two in agreement.
+
     Parameters
     ----------
     address

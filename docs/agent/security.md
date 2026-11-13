@@ -2259,8 +2259,13 @@ connections; a connection opens exactly its endpoints and nothing else.
   through two test hooks that are never settings: `EgressSettings.reachable` and
   `LauncherSettings.relay_reachable` (carried as the relay plan's `reachable`, at most 4 IPv4
   networks, always present and empty in production; `load_settings` refuses a variable of that
-  name). A refused range wins over both (`egress.forbidden`'s `refused`), so the hooks cannot
-  open a gateway or an operator's range.
+  name). A refused range wins over both (`egress.forbidden`'s `refused`), and so do the
+  never-reached addresses (`egress._never`: link-local, the cloud service addresses of `_NEVER`,
+  multicast, unspecified, `240.0.0.0/4`), so the hooks cannot open a gateway, an operator's range
+  or the metadata service; only loopback, where the tests' servers listen, and the attached
+  networks stay theirs to open. An IPv6 address is also judged by every IPv4 address it carries
+  (`egress._embedded_ipv4`, a copy of core's: mapped, compatible, 6to4, Teredo, NAT64), which a
+  test keeps in agreement with core form by form.
 - **Residuals, accepted:**
   - containers share the kernel (as for every task);
   - the egress token is in the task's environment: any code of the task can use it for the

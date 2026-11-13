@@ -382,7 +382,8 @@ not protect against. Each is accepted.
 10. **The address range.** Task and build networks take /29s from `10.207.0.0/16` unless
     `LAKANA_LAUNCHER__NETWORK_RANGE` says otherwise; a range that overlaps a route of the host's
     network shadows that route for the host. The how-to tells the operator to choose a free one.
-11. **Egress.** The proxy and the relays refuse loopback, link-local and metadata addresses, the
+11. **Egress.** The proxy and the relays refuse loopback, link-local and metadata addresses (also
+    inside an IPv6 address: mapped, compatible, 6to4, Teredo, NAT64), the
     networks they are attached to, the launcher's task range, the gateway of every Docker
     network (the Docker host's addresses there, such as `172.17.0.1`, listed again at every
     network open), the Docker host's well-known names (`host.docker.internal` and the like,

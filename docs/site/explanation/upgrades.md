@@ -183,9 +183,11 @@ Lakana now refuses `168.63.129.16` (Azure's WireServer, which hands a virtual ma
 extension settings), `192.0.0.192` (Oracle Cloud's older metadata address) and `fd20:ce::254`
 (Google Cloud's metadata service over IPv6), like `169.254.169.254`: in webhooks, even for a
 host in `LAKANA_WEBHOOK__ALLOW_HOSTS`, in the CI OIDC key fetch, in deploys and repository
-checks, and through the `egress` proxy for builds, tasks and connection tests. Nothing has to
-be done: none of them is a valid destination, and a webhook or a connection that names one is
-refused the way one that names `169.254.169.254` is.
+checks, and through the `egress` proxy for builds, tasks and connection tests. The proxy and
+the relays now also refuse these addresses and `169.254.169.254` inside a 6to4 or Teredo IPv6
+address, as the rest of Lakana already did. Nothing has to be done: none of them is a valid
+destination, and a webhook or a connection that names one is refused the way one that names
+`169.254.169.254` is.
 
 ### A proxy is trusted for client addresses only when you list it
 

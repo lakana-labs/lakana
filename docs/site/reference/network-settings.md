@@ -156,8 +156,9 @@ refuse, whatever a build's index or a connection's address says:
   and reserved addresses, in every spelling (`127.1`, `0x7f.1`);
 - the cloud service addresses outside link-local: Azure's WireServer `168.63.129.16`, Alibaba
   Cloud's metadata address `100.100.100.200`, Oracle Cloud's older `192.0.0.192`, and the IPv6
-  metadata addresses of AWS (`fd00:ec2::254`) and Google Cloud (`fd20:ce::254`), also as an
-  IPv4-mapped IPv6 address (`::ffff:168.63.129.16`);
+  metadata addresses of AWS (`fd00:ec2::254`) and Google Cloud (`fd20:ce::254`), also inside an
+  IPv6 address: IPv4-mapped (`::ffff:168.63.129.16`), IPv4-compatible, 6to4 (`2002:a83f:8110::1`),
+  Teredo or NAT64;
 - the bundle's own network (the server, the database and the object store) and every task and
   build network (`LAKANA_LAUNCHER__NETWORK_RANGE`);
 - the gateway address of every Docker network on the host, whoever made it, such as
