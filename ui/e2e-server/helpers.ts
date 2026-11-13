@@ -352,3 +352,57 @@ export async function invitedPerson(
   await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
   return { page, name };
 }
+
+/**
+ * Waits for the welcome of a person with access who has never seen the tour, skips it, and waits
+ * until the server has recorded that, so that a page loaded next does not show it again.
+ *
+ * @param page - The page, on Home.
+ */
+export async function skipTheWelcome(page: Page): Promise<void> {
+  const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
+  await expect(welcome).toBeVisible();
+  // The tour is remembered by the server; a page loaded before the answer would show it again.
+  const remembered = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" && response.url().endsWith("/interface-state"),
+  );
+  await welcome.getByRole("button", { name: "Skip" }).click();
+  await remembered;
+  await expect(welcome).toBeHidden();
+}
+
+/**
+ * Reads the state of a query run, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param queryId - The query's id.
+ * @returns The state, such as `QUEUED` or `CANCELLED`.
+ */
+export async function queryStatus(
+  request: APIRequestContext,
+  environment: string,
+  queryId: string,
+): Promise<string> {
+  const path = `/api/v1/environments/${environment}/queries/${queryId}`;
+  const response = await request.get(path, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  await ensureOk(`GET ${path}`, response);
+  return ((await response.json()) as { status: string }).status;
+}
+
+/**
+ * Signs the bootstrap administrator in on Home without the welcome.
+ *
+ * @param browser - The browser.
+ * @param request - The request context.
+ * @returns The page.
+ */
+export async function administrator(browser: Browser, request: APIRequestContext): Promise<Page> {
+  await skipTheTour(request);
+  const page = await freshPage(browser);
+  await signInLocally(page, request);
+  return page;
+}

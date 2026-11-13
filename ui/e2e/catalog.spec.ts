@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
-import { consoleErrors, signInAsAdmin, STUBBED, violations } from "./session";
+import { consoleErrors, signInAsAdmin, STUBBED, tabTo, violations } from "./session";
 
 const KEY = "lakana.preferences";
 const CHOICE = "lakana.catalog.admin";
@@ -20,22 +20,6 @@ async function openCatalog(
   await page.goto(address);
   await expect(page.getByRole("heading", { level: 1, name: "Catalog" })).toBeVisible();
   await expect(waitFor).toBeVisible();
-}
-
-/**
- * Moves the focus with Tab until it reaches the element.
- *
- * @param page - The page.
- * @param target - The element.
- */
-async function tabTo(page: Page, target: Locator): Promise<void> {
-  for (let step = 0; step < 40; step += 1) {
-    if (await target.evaluate((node) => node === document.activeElement)) {
-      return;
-    }
-    await page.keyboard.press("Tab");
-  }
-  throw new Error("Tab never reached the element");
 }
 
 /**
@@ -100,58 +84,6 @@ for (const theme of ["light", "dark"] as const) {
           page.getByText("No tables in bronze yet", { exact: false }),
         );
         expect(await violations(page), "an empty namespace").toEqual([]);
-      });
-
-      test("axe finds nothing on a table's page, on each of its tabs", async ({ page }) => {
-        for (const tab of ["", "/columns", "/preview"]) {
-          await page.goto(`/catalog/prod/gold.sales/fact_sales${tab}`);
-          await expect(page.getByRole("heading", { level: 1, name: "fact_sales" })).toBeVisible();
-          await expect(
-            page.getByRole("navigation", { name: "Sections of the table" }),
-          ).toBeVisible();
-          if (tab === "/preview") {
-            const grid = page.getByRole("grid", { name: "The first rows of fact_sales" });
-            await expect(grid).toBeVisible();
-            // The Value panel, with a long note that scrolls in it.
-            await grid.getByText(/Delivered to the back door/).click();
-            await expect(page.getByRole("region", { name: "note, row 1" })).toBeVisible();
-          }
-          expect(await violations(page), `the table page${tab}`).toEqual([]);
-        }
-      });
-
-      test("axe finds nothing while a table's or a column's texts are being edited, and Escape returns focus", async ({
-        page,
-      }) => {
-        await page.goto("/catalog/prod/gold.sales/fact_sales");
-        await page.getByRole("button", { name: "Edit", exact: true }).click();
-        await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
-        expect(await violations(page), "the editor on Overview").toEqual([]);
-        await page.keyboard.press("Escape");
-        await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeFocused();
-
-        await page.goto("/catalog/prod/gold.sales/fact_sales/columns");
-        await page.getByRole("button", { name: "Edit store_id" }).click();
-        await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
-        expect(await violations(page), "the editor under a column").toEqual([]);
-        await page.keyboard.press("Escape");
-        await expect(page.getByRole("button", { name: "Edit store_id" })).toBeFocused();
-      });
-
-      test("axe finds nothing in the file dialog of Defined in, which marks the bidi character and gives focus back", async ({
-        page,
-      }) => {
-        await page.goto("/catalog/prod/gold.sales/fact_sales");
-        const path = page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ });
-        await path.click();
-        const dialog = page.getByRole("dialog", { name: "Where fact_sales is defined" });
-        const text = dialog.getByRole("region", { name: "The file's text" });
-        await expect(text).toBeVisible();
-        await expect(text.locator(".char-mark")).toHaveText("U+202E");
-        expect(await violations(page), "the file dialog").toEqual([]);
-        await page.keyboard.press("Escape");
-        await expect(dialog).toBeHidden();
-        await expect(path).toBeFocused();
       });
 
       test("at least 24 px between the content of every two neighbouring cells", async ({
@@ -405,41 +337,6 @@ test.describe("the Catalog in real Chromium", () => {
     expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
     // The stubbed 404 of the unknown environment is the one answer the browser logs.
     expect(errors.filter((error) => !error.includes("404"))).toEqual([]);
-  });
-
-  test("a table's page asks only for the stubbed routes, logs no error and does not scroll sideways at 320 px", async ({
-    page,
-  }) => {
-    const errors = consoleErrors(page);
-    const requests: string[] = [];
-    page.on("request", (request) => requests.push(request.url()));
-    await page.setViewportSize({ width: 320, height: 640 });
-
-    await page.goto("/catalog/prod/gold.sales/fact_sales");
-    await expect(page.getByRole("heading", { level: 1, name: "fact_sales" })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "Sections of the table" })).toBeVisible();
-    await page.waitForLoadState("networkidle");
-
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    );
-    expect(overflow).toBeLessThanOrEqual(0);
-    await page.getByRole("button", { name: "Edit", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
-    const withEditor = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    );
-    expect(withEditor, "the editor open").toBeLessThanOrEqual(0);
-    await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ }).click();
-    await expect(page.getByRole("region", { name: "The file's text" })).toBeVisible();
-    const withFile = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    );
-    expect(withFile, "the file dialog open").toBeLessThanOrEqual(0);
-    const api = requests.filter((url) => url.includes("/api/")).map((url) => new URL(url).pathname);
-    expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
-    expect(errors).toEqual([]);
   });
 
   test("hovering a time, a size or a health word reaches the text that explains it", async ({

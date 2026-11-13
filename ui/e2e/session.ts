@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import AxeBuilder from "@axe-core/playwright";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 /** The session of a signed-in administrator, as `GET /api/v1/sign-in/session` answers it. */
 export const ADMIN_SESSION = {
@@ -270,10 +270,13 @@ const DEFINITION = {
     "https://github.com/acme/analytics/blob/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/models/gold/fact_sales.sql#L1",
 };
 
-/** The file's text: a header, a line wider than a phone and a right-to-left override to mark. */
+/**
+ * The file's text: a header, a line wider than a phone, a right-to-left override to mark and
+ * markup that must show as text.
+ */
 const DEFINITION_FILE = {
   ...DEFINITION,
-  content: `/* lakana\ngrain: one row per sale\n*/\nSELECT sale_id, store_id, sold_at, amount, customer_email, channel, note FROM silver.sales -- \u202Eevil\n`,
+  content: `/* lakana\ngrain: one row per sale\n*/\nSELECT sale_id, store_id, sold_at, amount, customer_email, channel, note FROM silver.sales -- \u202Eevil\n-- <img src=x onerror="window.pwned = 1"> <b>bold</b>\n`,
   bytes: 139,
   reason: null,
   message: null,
@@ -285,7 +288,7 @@ const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
 /** The path the Preview tab queues its preview at. */
 const PREVIEW_PATH = `${TABLE_PATH}/preview`;
 
-/** The preview's query run, which has finished at the first poll. */
+/** The preview's query run, which is queued at the first poll and has finished at the second. */
 const PREVIEW_RUN_PATH = "/api/v1/environments/prod/queries/5b0e7c1a-3d2f-4e6a-9b8c-7d6e5f4a3b2c";
 
 /** The preview's page: a masked column, a long note with a right-to-left override, binary. */
@@ -573,14 +576,17 @@ export async function signInAsAdmin(page: Page): Promise<void> {
     (route) =>
       route.fulfill({ status: 202, json: { query_id: PREVIEW_RUN_PATH.split("/").at(-1) } }),
   );
+  let polls = 0;
   await page.route(
     (url) => url.pathname.startsWith(PREVIEW_RUN_PATH),
     (route) => {
       const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/result")) {
+        return route.fulfill({ json: PREVIEW_PAGE });
+      }
+      const status = path.endsWith("/cancel") || polls++ > 0 ? "SUCCEEDED" : "QUEUED";
       return route.fulfill({
-        json: path.endsWith("/result")
-          ? PREVIEW_PAGE
-          : { query_id: PREVIEW_RUN_PATH.split("/").at(-1), status: "SUCCEEDED" },
+        json: { query_id: PREVIEW_RUN_PATH.split("/").at(-1), status },
       });
     },
   );
@@ -626,4 +632,20 @@ export function consoleErrors(page: Page): string[] {
   });
   page.on("pageerror", (error) => errors.push(error.message));
   return errors;
+}
+
+/**
+ * Moves the focus with Tab until it reaches the element.
+ *
+ * @param page - The page.
+ * @param target - The element.
+ */
+export async function tabTo(page: Page, target: Locator): Promise<void> {
+  for (let step = 0; step < 40; step += 1) {
+    if (await target.evaluate((node) => node === document.activeElement)) {
+      return;
+    }
+    await page.keyboard.press("Tab");
+  }
+  throw new Error("Tab never reached the element");
 }
