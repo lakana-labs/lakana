@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import { fakeServer } from "../test/server";
-import { DOWN, HEALTH, LINEAGE_PATH, TABLE, UP } from "../test/table";
-import { getLineage, getTable, getTableHealth, myPermissions, tableApiPath } from "./table";
+import { DOWN, HEALTH, LINEAGE_PATH, TABLE, TABLE_PATH, UP } from "../test/table";
+import {
+  describeColumn,
+  describeTable,
+  getLineage,
+  getTable,
+  getTableHealth,
+  myPermissions,
+  tableApiPath,
+} from "./table";
 
 const REF = { environment: "prod", namespace: "gold.sales", name: "fact_sales" };
 
@@ -81,5 +89,26 @@ describe("table", () => {
     expect(server.sent[1]?.path).toBe(
       `${LINEAGE_PATH}?node=table%3Aabc&direction=down&depth=1&limit=500`,
     );
+  });
+
+  it("sets a table's texts in one language and answers the changed table", async () => {
+    const changed = { ...TABLE, description: "New." };
+    const server = fakeServer({ [`PATCH ${TABLE_PATH}`]: { status: 200, body: changed } });
+
+    expect(await describeTable(REF, { description: "New.", label: null }, "de")).toEqual(changed);
+
+    expect(server.sent[0]?.path).toBe(`${TABLE_PATH}?lang=de`);
+    expect(server.sent[0]?.body).toEqual({ description: "New.", label: null });
+  });
+
+  it("sets a column's texts, encoding the column's name", async () => {
+    const server = fakeServer({
+      [`PUT ${TABLE_PATH}/columns/50% off/description`]: { status: 200, body: TABLE },
+    });
+
+    expect(await describeColumn(REF, "50% off", { description: null }, "en")).toEqual(TABLE);
+
+    expect(server.sent[0]?.path).toBe(`${TABLE_PATH}/columns/50%25%20off/description?lang=en`);
+    expect(server.sent[0]?.body).toEqual({ description: null });
   });
 });

@@ -79,7 +79,14 @@ export type {
 } from "./repositories";
 export { changeSignInSettings, getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";
-export { getLineage, getTable, getTableHealth, myPermissions } from "./table";
+export {
+  describeColumn,
+  describeTable,
+  getLineage,
+  getTable,
+  getTableHealth,
+  myPermissions,
+} from "./table";
 export type {
   ColumnOut,
   GraphNodeOut,
@@ -89,6 +96,7 @@ export type {
   TableHealthOut,
   TableOut,
   TableRef,
+  TextChange,
 } from "./table";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";

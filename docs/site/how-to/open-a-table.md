@@ -31,7 +31,8 @@ follow each other.
 
 - **Description.** The table's description, and where it comes from: "From the project in Git"
   for the text in the project's files, "Edited here" for a text someone wrote in the web
-  interface. A table without one says "No description yet."
+  interface. A table without one says "No description yet." If you may edit it, **Edit** is
+  beside it; see [In the web interface](describe-a-table.md#in-the-web-interface).
 - **Columns.** The first five columns with their type, and "Key" or "Measure" when the table's
   header says the column is one. **All columns ›** opens the Columns tab.
 - **Health.** The table's verdict in one word, as in the Catalog's Health column, and under it
@@ -53,8 +54,8 @@ follow each other.
 - **Facts.** Owner; Rows; Size with the number of data files, such as "3.1 MB in 12 files";
   Last write; Last read with how many people read the table in the last 7 days, such as "2 hours
   ago · 3 readers in the last 7 days" (never who); Created; and Grain, the sentence the table's
-  header gives for what one row is. A figure that does not exist yet says so in words: "Not known", "Never written", "Never
-  read" or "No owner".
+  header gives for what one row is. A figure that does not exist yet says so in words: "Not
+  known", "Never written", "Never read" or "No owner".
 - **Comes from · goes to.** The tables directly upstream, which feed this one, and directly
   downstream, which it feeds, as links, at most five each way and then "and 2 more". "Nothing
   upstream." and "Nothing downstream." mean there is none you may see. Jobs and connections are
@@ -72,7 +73,9 @@ Columns lists every column of the table. Its address ends in `/columns`. A row s
 - **Role**: "Key" for a column that identifies a row, "Measure" for a number the table's header
   declares as one;
 - **Joins**: the table and column this column refers to, as a link when that table exists;
-- **Description**, or a dash with "No description";
+- **Description**, or a dash with "No description". If you may edit the table's texts, each row
+  has **Edit** for the column's label and description, and **Back to the text from Git** once the
+  text was edited here; see [In the web interface](describe-a-table.md#in-the-web-interface);
 - **Terms**: the glossary terms that link the column, as plain text.
 
 A table with many columns, or long names, scrolls inside the list: press <kbd>Tab</kbd> to

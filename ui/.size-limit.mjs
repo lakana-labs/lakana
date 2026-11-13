@@ -40,7 +40,10 @@ const NAMED_LIMITS = [
   // tabs and the states, 2026-11-13) + 10 %. It loads on /catalog/{environment}/{namespace}/{table}.
   // Raised to the measured 4.07 kB (2026-11-13) + 10 % with the Overview (description, first
   // columns, health in sentences, facts, comes from and goes to) and the Columns tab.
-  { name: "a table's page", prefix: "TablePage-", limit: "4.48 kB" },
+  // Raised to the measured 5.92 kB (2026-11-13) + 10 % with the editor of labels and descriptions
+  // (the fields with their counts and refusals, the reset to the text from Git, the language of
+  // an edit, and the rows that open under a column).
+  { name: "a table's page", prefix: "TablePage-", limit: "6.52 kB" },
   // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
   // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
   { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },
@@ -57,7 +60,9 @@ const NAMED_LIMITS = [
   { name: "reading for a screen", prefix: "useResource-", limit: "0.39 kB" },
   // Measured 219 B (the row of tabs; the router's link code it shared moved into the first load,
   // 2026-11-13) + 10 %.
-  { name: "the tabs", prefix: "SectionTabs-", limit: "0.24 kB" },
+  // Raised to the measured 1.11 kB (2026-11-13) + 10 %: React Aria's text area and the form
+  // parts the table page's editor shares with the text field moved into this chunk.
+  { name: "the tabs", prefix: "SectionTabs-", limit: "1.22 kB" },
 ];
 
 /**

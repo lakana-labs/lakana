@@ -493,3 +493,53 @@ export function getLineage(
     `/api/v1/environments/${encodeURIComponent(environment)}/graph/lineage?${query.toString()}`,
   );
 }
+
+/** A change to the texts of a table or column: a field left out stays, `null` removes its edit. */
+export interface TextChange {
+  /** The new description (1 to 4,000 characters), or null to go back to the project's text. */
+  readonly description?: string | null;
+  /** The new label (one line, 1 to 100 characters), or null to go back to the project's text. */
+  readonly label?: string | null;
+}
+
+/**
+ * Sets or resets a table's description and label in one language.
+ *
+ * @param ref - The table.
+ * @param change - The fields to change.
+ * @param lang - The language of the texts.
+ * @returns The table as the server answers it after the change.
+ * @throws {ApiError} for a refusal: 403 for a person who may not edit, 422 for a text that breaks
+ *   a rule.
+ */
+export function describeTable(ref: TableRef, change: TextChange, lang: string): Promise<TableOut> {
+  return api.request<TableOut>(
+    "PATCH",
+    tableApiPath(ref, `?lang=${encodeURIComponent(lang)}`),
+    change,
+  );
+}
+
+/**
+ * Sets or resets a column's description and label in one language.
+ *
+ * @param ref - The table.
+ * @param column - The column's name.
+ * @param change - The fields to change.
+ * @param lang - The language of the texts.
+ * @returns The table as the server answers it after the change.
+ * @throws {ApiError} for a refusal: 403 for a person who may not edit, 422 for a text that breaks
+ *   a rule.
+ */
+export function describeColumn(
+  ref: TableRef,
+  column: string,
+  change: TextChange,
+  lang: string,
+): Promise<TableOut> {
+  const path = tableApiPath(
+    ref,
+    `/columns/${encodeURIComponent(column)}/description?lang=${encodeURIComponent(lang)}`,
+  );
+  return api.request<TableOut>("PUT", path, change);
+}

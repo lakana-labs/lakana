@@ -477,6 +477,27 @@
         "edited": "Edited here"
       }
     },
+    "edit": {
+      "button": "Edit",
+      "buttonFor": "Edit {{name}}",
+      "formLabel": "Edit the texts",
+      "save": "Save",
+      "cancel": "Cancel",
+      "back": "Back to the text from Git",
+      "backFor": "Back to the text from Git for {{name}}",
+      "deployKeeps": "A deploy never replaces a text edited here.",
+      "label": "Label",
+      "labelIn": "Label ({{language}})",
+      "labelHelp": "A short name for people, on one line.",
+      "description": "Description",
+      "descriptionIn": "Description ({{language}})",
+      "count": "{{used}} of {{max}}",
+      "blankLabel": "The label cannot be blank. Write one, or press Cancel to keep the current text.",
+      "blankDescription": "The description cannot be blank. Write one, or press Cancel to keep the current text.",
+      "tooLongLabel": "This label has {{used}} characters and the most is {{max}}. Shorten it and save again.",
+      "tooLongDescription": "This description has {{used}} characters and the most is {{max}}. Shorten it and save again.",
+      "fallback": "There is no text in your language yet, so the page shows and edits the main language, {{language}}."
+    },
     "columns": {
       "heading": "Columns",
       "region": "Table columns",
@@ -491,6 +512,7 @@
       "joins": "Joins",
       "description": "Description",
       "terms": "Terms",
+      "actions": "Actions",
       "nullable": "Allowed",
       "required": "Never",
       "joinsTo": "Joins",

@@ -113,6 +113,24 @@ for (const theme of ["light", "dark"] as const) {
         }
       });
 
+      test("axe finds nothing while a table's or a column's texts are being edited, and Escape returns focus", async ({
+        page,
+      }) => {
+        await page.goto("/catalog/prod/gold.sales/fact_sales");
+        await page.getByRole("button", { name: "Edit", exact: true }).click();
+        await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
+        expect(await violations(page), "the editor on Overview").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeFocused();
+
+        await page.goto("/catalog/prod/gold.sales/fact_sales/columns");
+        await page.getByRole("button", { name: "Edit store_id" }).click();
+        await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
+        expect(await violations(page), "the editor under a column").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("button", { name: "Edit store_id" })).toBeFocused();
+      });
+
       test("at least 24 px between the content of every two neighbouring cells", async ({
         page,
       }) => {
@@ -383,6 +401,12 @@ test.describe("the Catalog in real Chromium", () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(0);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
+    const withEditor = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(withEditor, "the editor open").toBeLessThanOrEqual(0);
     const api = requests.filter((url) => url.includes("/api/")).map((url) => new URL(url).pathname);
     expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
     expect(errors).toEqual([]);
