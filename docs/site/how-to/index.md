@@ -44,6 +44,7 @@ Pages:
 - [Clean up files left by older releases](clean-up-files-left-by-older-releases.md): list the table directories in storage that an older release left behind without a record, and delete them.
 - [Let tables expire](let-tables-expire.md): let a development table, or every table of an environment, be dropped once nobody has used it for a while; see what expires soon, and keep a table.
 - [Find a table](find-a-table.md): search tables, columns, descriptions, runs and people from one text, and what you are allowed to see.
+- [Open a table](open-a-table.md): open a table's page from the Catalog or from Home, read its columns and preview, and see what the page says when you may not read the table.
 - [Find a run, a query or a deploy](find-a-run.md): filter the lists by status, trigger, job, time, submitter or repository, and page through a long one.
 - [Stop a query](stop-a-query.md): cancel one with Ctrl-C or a command, who may, and what else ends a query.
 - [Why is my query or task waiting?](why-is-it-waiting.md): read the reason a query or a task has not started and what to do about it.

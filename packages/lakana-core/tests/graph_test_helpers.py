@@ -30,10 +30,12 @@ from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.glossary import write_glossary
 from lakana_core.catalog.graph_model import MAX_GRAPH_STEPS, NodeKind, row_node
 from lakana_core.catalog.graph_service import GraphService
+from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.errors import PermissionDenied
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     ColumnMask,
+    Connection,
     DeclaredMeasure,
     DeclaredReference,
     Environment,
@@ -710,3 +712,84 @@ def build_star(session: Session, tmp_path: Path, principal: PrincipalRef) -> Sta
     )
     session.commit()
     return world
+
+
+CONNECTION = "pg-sales"
+"""The connection the ingest repository's Python asset declares."""
+
+
+def python_entry(table: str, connections: object, owner: str = "ingest-team") -> dict[str, Any]:
+    """Build a Python asset's manifest entry that reads its source through connections.
+
+    Parameters
+    ----------
+    table
+        The table it builds.
+    connections
+        The entry's `connections` value, as stored; untrusted.
+    owner
+        The header's `owner:`.
+
+    Returns
+    -------
+    dict
+        The entry.
+    """
+    return {
+        "table": table,
+        "path": f"assets/{table.replace('.', '/')}.py",
+        "kind": "python",
+        "write": "replace",
+        "key": [],
+        "references": [],
+        "connections": connections,
+        "metadata": {"description": None, "owner": owner, "tags": [], "columns": {}},
+    }
+
+
+def add_ingest(
+    star: StarWorld,
+    principal: PrincipalRef,
+    *,
+    connections: object = (CONNECTION,),
+    with_row: bool = True,
+) -> None:
+    """Deploy the repository `ingest`: a Python asset building `bronze.sales_raw`, and a job.
+
+    Parameters
+    ----------
+    star
+        The world.
+    principal
+        Who creates the connection row.
+    connections
+        The asset entry's `connections` value; a tuple is stored as a list.
+    with_row
+        Whether `pg-sales` has a connection row (kind `postgresql`).
+    """
+    stored = list(connections) if isinstance(connections, tuple) else connections
+    repo = Repository(
+        id=uuid.uuid4(), name="ingest", kind=RepositoryKind.HTTPS, url="https://h/ingest"
+    )
+    star.session.add(repo)
+    star.session.flush()
+    manifest = {
+        "version": 13,
+        "assets": [python_entry("bronze.sales_raw", stored)],
+        "edges": [],
+        "jobs": {"load": {"select": ["bronze.sales_raw"]}},
+    }
+    point(star.session, star.env_id, repo, manifest)
+    if with_row:
+        star.session.add(
+            Connection(
+                id=uuid.uuid4(),
+                environment_id=star.env_id,
+                name=CONNECTION,
+                kind=ConnectionKind.POSTGRESQL,
+                address={"host": "db.example.com", "port": 5432, "database": "sales"},
+                settings={"user": "reader", "tls": "verify-full"},
+                created_by=principal.id,
+            )
+        )
+    star.session.commit()

@@ -782,6 +782,101 @@
         }
       }
     },
+    "/api/v1/environments/{name}/purge-rows": {
+      "post": {
+        "tags": [
+          "environments"
+        ],
+        "summary": "Remove a deleted environment whose storage cannot be reached, rows only",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nRemoves the environment from the catalog, with its records of dropped tables, and frees its name. Its files, if there are any, are not touched. Only for a deleted environment whose storage root is in a scheme Lakana never supported, which the worker's clean-up skips; a storage secret that cannot be used does not count. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when no environment has the name, and 409 when it is not deleted, its storage can still be reached, or its root contains `::` (releases before 0.18.0 wrote files to the part before it).",
+        "operationId": "purge_environment_rows_api_v1_environments__name__purge_rows_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{name}/usage": {
       "get": {
         "tags": [
@@ -2963,6 +3058,18 @@
               "title": "Days"
             },
             "description": "The window of the readers in days, from 1 to the kept period (`LAKANA_TABLE_READS__KEEP_DAYS`, 90 by default); the default window (`LAKANA_TABLE_READS__DEFAULT_DAYS`, 30) when absent."
+          },
+          {
+            "name": "readers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "False leaves the readers out of the answer; it then looks up no names and writes no `ACTIVITY_VIEWED` audit entry.",
+              "default": true,
+              "title": "Readers"
+            },
+            "description": "False leaves the readers out of the answer; it then looks up no names and writes no `ACTIVITY_VIEWED` audit entry."
           },
           {
             "name": "authorization",
@@ -6790,7 +6897,7 @@
           "graph"
         ],
         "summary": "Walk the tables and assets upstream and downstream of a table, a column or an asset",
-        "description": "The answer comes from what the projects declare (their assets' inputs and outputs, in every repository), not from runs. `depth` counts the assets crossed. A column starts at its table, plus the references that name it. You see a node only when you may: a table and its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. The walk stops at a node you may not see, and nothing in the answer counts or marks it. Answers 404 when the start or the environment does not exist or you may not see it (one answer for both), 422 for a node, depth, limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
+        "description": "The answer comes from what the projects declare (their assets' inputs and outputs, in every repository), not from runs. `depth` counts the assets crossed. A column starts at its table, plus the references that name it. You see a node only when you may: a table and its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. Each asset of the answer brings the jobs that run it (`runs`) and the connections it reads through (`uses`), at its distance: a job needs `READ_ENVIRONMENT`, a connection `READ_ENVIRONMENT` and a caller that is not a task token. The walk stops at a node you may not see, and nothing in the answer counts or marks it. Answers 404 when the start or the environment does not exist or you may not see it (one answer for both), 422 for a node, depth, limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
         "operationId": "graph_lineage_api_v1_environments__env__graph_lineage_get",
         "parameters": [
           {
@@ -7011,10 +7118,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds).",
+              "description": "Only edges of these kinds: builds, checks, filters, has_column, links, masks, measures, reads, references, runs, uses; repeat the parameter (kinds=reads&kinds=builds).",
               "title": "Kinds"
             },
-            "description": "Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds)."
+            "description": "Only edges of these kinds: builds, checks, filters, has_column, links, masks, measures, reads, references, runs, uses; repeat the parameter (kinds=reads&kinds=builds)."
           },
           {
             "name": "lang",
@@ -15637,7 +15744,7 @@
           "deploys"
         ],
         "summary": "Show a project version",
-        "description": "Shows the version's manifest, limited to what the caller may see. Needs `READ_ENVIRONMENT`. Answers 404 when the environment has no such project version.",
+        "description": "Shows the version's manifest, limited to what the caller may see. Needs `READ_ENVIRONMENT`. Answers 404 when the environment has no such project version.\n\nAn asset's or check's SQL is the text of a project file, so it is shown only under the rule of a table's \"Defined in\" file: to a reader of every table the file uses, with no row filter or column mask on any of them, for a file that reads no raw path or connection and that Lakana recorded at deploy. Every asset and check carries `content_reason` and `content_message`: both `null` when its SQL is shown, otherwise `restricted` or `not_recorded` and the sentence that says what to do. Each file shown is recorded in the audit log (`SOURCE_VIEWED`); when that fails, the answer is 503 and shows nothing.",
         "operationId": "get_project_version_api_v1_environments__env__project_versions__project_version_id__get",
         "parameters": [
           {
@@ -15713,6 +15820,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19727,7 +19844,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance, `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment: the web interface shows the administration areas, tells a new person to ask for access, and shows the deploy steps of Home from these three. `picture` is the etag of your profile picture, or `null` without one.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential: the web interface shows the administration areas, tells a new person to ask for access, and shows the deploy steps of Home from these three. `picture` is the etag of your profile picture, or `null` without one.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -25389,6 +25506,27 @@
           "bound": {
             "type": "boolean",
             "title": "Bound"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -25406,7 +25544,7 @@
           "bound"
         ],
         "title": "ColumnMaskOut",
-        "description": "Response body for a column mask.\n\nParameters\n----------\nid\n    The column mask's id.\nprincipal_id\n    The principal this mask applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this mask applies to, or `None` if it applies to a\n    principal.\nenvironment\n    The environment this mask applies to.\nnamespace\n    The dot-joined namespace path this mask applies to.\ntable\n    The table this mask applies to.\ncolumn\n    The masked column's name, as the table has it now.\nexpression\n    The replacement value.\ncreated_by\n    The principal who created this mask.\ncreated_at\n    When this mask was created.\nbound\n    As `RowFilterOut.bound`."
+        "description": "Response body for a column mask.\n\nParameters\n----------\nid\n    The column mask's id.\nprincipal_id\n    The principal this mask applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this mask applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the mask applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the mask applies to a principal.\nenvironment\n    The environment this mask applies to.\nnamespace\n    The dot-joined namespace path this mask applies to.\ntable\n    The table this mask applies to.\ncolumn\n    The masked column's name, as the table has it now.\nexpression\n    The replacement value.\ncreated_by\n    The principal who created this mask.\ncreated_at\n    When this mask was created.\nbound\n    As `RowFilterOut.bound`."
       },
       "ColumnOut": {
         "properties": {
@@ -27164,6 +27302,27 @@
               }
             ],
             "title": "Note"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -27181,7 +27340,7 @@
           "granted_at"
         ],
         "title": "GrantOut",
-        "description": "Response body for a grant.\n\nParameters\n----------\nid\n    The grant's id.\nprincipal_id\n    The principal this grant applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this grant applies to, or `None` if it applies to a\n    principal.\nrole\n    The role template granted, or `None` if a raw action was granted.\naction\n    The raw action granted, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_by\n    The principal who created this grant.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant\n    of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`, which work only\n    with the `ADMIN` role on the instance; `None` otherwise."
+        "description": "Response body for a grant.\n\nParameters\n----------\nid\n    The grant's id.\nprincipal_id\n    The principal this grant applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this grant applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the grant applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the grant applies to a principal.\nrole\n    The role template granted, or `None` if a raw action was granted.\naction\n    The raw action granted, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_by\n    The principal who created this grant.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant\n    of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`, which work only\n    with the `ADMIN` role on the instance; `None` otherwise."
       },
       "GraphEdgeOut": {
         "properties": {
@@ -27205,7 +27364,7 @@
           "target"
         ],
         "title": "GraphEdgeOut",
-        "description": "An edge of the metadata graph, from `source` to `target` (both node ids).\n\nParameters\n----------\nkind\n    `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,\n    `runs` or `has_column`.\nsource\n    The node it leaves.\ntarget\n    The node it reaches."
+        "description": "An edge of the metadata graph, from `source` to `target` (both node ids).\n\nParameters\n----------\nkind\n    `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,\n    `runs`, `uses` or `has_column`.\nsource\n    The node it leaves.\ntarget\n    The node it reaches."
       },
       "GraphNodeOut": {
         "properties": {
@@ -27331,6 +27490,17 @@
             "type": "boolean",
             "title": "May Use",
             "default": false
+          },
+          "connection_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Kind"
           }
         },
         "type": "object",
@@ -27341,7 +27511,7 @@
           "distance"
         ],
         "title": "GraphNodeOut",
-        "description": "A node of the metadata graph, with the attributes the caller may see.\n\nParameters\n----------\nid\n    Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,\n    `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,\n    `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`); store it and pass\n    it back as `node`.\nkind\n    `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,\n    `column_mask` or `job`.\nname\n    A name to read: a dotted table, `<table>.<column>`, a term's key.\ndistance\n    Steps from the start: assets crossed for lineage, 1 for a neighbour.\ntable_type\n    A table's `managed`, `external`, `view` or `artifact`.\nmodel_kind\n    A table's declared kind.\ngrain\n    A table's grain, in your language.\nkey\n    A table's declared key columns.\nowner\n    The owner of a table's asset (`None` for a reader without ``READ_ENVIRONMENT``), an\n    asset or a term.\nrepository\n    The repository that declares it (or builds its table).\nlabel\n    A table's label, or a term's name, in your language.\ncolumn_type\n    A column's type.\nreason\n    Always `null` for lineage and neighbours.\nmay_use\n    Always `false` for lineage and neighbours."
+        "description": "A node of the metadata graph, with the attributes the caller may see.\n\nParameters\n----------\nid\n    Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,\n    `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,\n    `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`,\n    `connection:<name>`); store it and pass it back as `node`.\nkind\n    `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,\n    `column_mask`, `job` or `connection`.\nname\n    A name to read: a dotted table, `<table>.<column>`, a term's key.\ndistance\n    Steps from the start: assets crossed for lineage, 1 for a neighbour.\ntable_type\n    A table's `managed`, `external`, `view` or `artifact`.\nmodel_kind\n    A table's declared kind.\ngrain\n    A table's grain, in your language.\nkey\n    A table's declared key columns.\nowner\n    The owner of a table's asset (`None` for a reader without ``READ_ENVIRONMENT``), an\n    asset or a term.\nrepository\n    The repository that declares it (or builds its table).\nlabel\n    A table's label, or a term's name, in your language.\ncolumn_type\n    A column's type.\nreason\n    Always `null` for lineage and neighbours.\nmay_use\n    Always `false` for lineage and neighbours.\nconnection_kind\n    A connection's kind, such as `postgresql`; `null` for any other node, and for a\n    connection the manifest names that the environment does not have."
       },
       "GraphOut": {
         "properties": {
@@ -31164,6 +31334,27 @@
           "bound": {
             "type": "boolean",
             "title": "Bound"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -31180,7 +31371,7 @@
           "bound"
         ],
         "title": "RowFilterOut",
-        "description": "Response body for a row filter.\n\nParameters\n----------\nid\n    The row filter's id.\nprincipal_id\n    The principal this filter applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this filter applies to, or `None` if it applies to a\n    principal.\nenvironment\n    The environment this filter applies to.\nnamespace\n    The dot-joined namespace path this filter applies to.\ntable\n    The table this filter applies to.\nexpression\n    The restricted-subset predicate, in the table's current column names.\ncreated_by\n    The principal who created this filter.\ncreated_at\n    When this filter was created.\nbound\n    `true` when the policy follows its columns by field id (a raw table's, by name). `false`\n    right after an upgrade, while the worker binds earlier policies over the next passes (see\n    the upgrade notes); only a policy that stays `false` after that needs creating again."
+        "description": "Response body for a row filter.\n\nParameters\n----------\nid\n    The row filter's id.\nprincipal_id\n    The principal this filter applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this filter applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the filter applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the filter applies to a principal.\nenvironment\n    The environment this filter applies to.\nnamespace\n    The dot-joined namespace path this filter applies to.\ntable\n    The table this filter applies to.\nexpression\n    The restricted-subset predicate, in the table's current column names.\ncreated_by\n    The principal who created this filter.\ncreated_at\n    When this filter was created.\nbound\n    `true` when the policy follows its columns by field id (a raw table's, by name). `false`\n    right after an upgrade, while the worker binds earlier policies over the next passes (see\n    the upgrade notes); only a policy that stays `false` after that needs creating again."
       },
       "RunAsIn": {
         "properties": {
@@ -32334,6 +32525,35 @@
         "title": "StorageConfigIn",
         "description": "Storage configuration as accepted from a client.\n\nParameters\n----------\nscheme\n    Storage backend.\nroot\n    Root URI for the environment.\noptions\n    Backend-specific options."
       },
+      "SubjectPrincipalOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "principal_type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "service"
+            ],
+            "title": "Principal Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "principal_type"
+        ],
+        "title": "SubjectPrincipalOut",
+        "description": "The principal a grant, row filter or column mask is for.\n\nParameters\n----------\nid\n    The principal's id.\nname\n    The principal's name.\nprincipal_type\n    `user` for a person, `service` for a service account."
+      },
       "TableCreate": {
         "properties": {
           "name": {
@@ -32863,7 +33083,7 @@
           "capped"
         ],
         "title": "TableListPageOut",
-        "description": "One page of the catalog list.\n\nParameters\n----------\nitems\n    The tables, in the list's order.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last.\ncapped\n    Whether a search text stopped early, with more readable candidates than one search reads."
+        "description": "One page of the catalog list.\n\nParameters\n----------\nitems\n    The tables, in the list's order.\nnext_cursor\n    Pass it as `cursor` for the next page; `null` on the last.\ncapped\n    Whether a search text stopped early while a further readable table matched."
       },
       "TableMatchOut": {
         "properties": {
@@ -34916,7 +35136,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you hold the `ADMIN` role on the instance (directly or through a group).\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\npicture\n    The etag of your profile picture, or `null` without one."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\npicture\n    The etag of your profile picture, or `null` without one."
       },
       "WorkEnvironmentOut": {
         "properties": {

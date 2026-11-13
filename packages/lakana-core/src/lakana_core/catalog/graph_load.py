@@ -4,8 +4,9 @@
 environment's tables, declared references and measures, glossary terms and their links, active
 row filters and column masks, and the current manifest of every deployed repository. The
 manifests give the assets, what each reads (its SQL's `references` and a Python asset's
-`inputs`), the checks and the jobs. A column is read only when a walk asks for its table
-(`columns_of`, `preload_columns`, in chunks).
+`inputs`), the connections a Python asset declares, the checks and the jobs; one more
+statement reads the kind of each connection of the environment. A column is read only when a
+walk asks for its table (`columns_of`, `preload_columns`, in chunks).
 
 Nothing here asks who may see what: `graph_service._Visibility` filters every node before a walk
 reaches it. An edge to a column is made from what names the column, and `exists` says whether the
@@ -34,6 +35,7 @@ from lakana_core.catalog.graph_model import (
     asset_node,
     check_node,
     column_node,
+    connection_node,
     job_node,
     node_kind,
     row_node,
@@ -44,6 +46,7 @@ from lakana_core.errors import ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     ColumnMask,
+    Connection,
     DeclaredMeasure,
     DeclaredReference,
     GlossaryTerm,
@@ -58,7 +61,12 @@ from lakana_core.models import (
 from lakana_core.policy.shown import shown_policies
 from lakana_core.projects.checks import read_manifest_checks
 from lakana_core.projects.lookups import current_manifests
-from lakana_core.projects.manifest import entry_inputs, manifest_assets, manifest_jobs
+from lakana_core.projects.manifest import (
+    entry_inputs,
+    manifest_assets,
+    manifest_jobs,
+    read_entry_connections,
+)
 from lakana_core.runs.selection import ManifestGraph, Selection, resolve_selection
 
 _CHUNK = 500
@@ -129,6 +137,10 @@ class AssetRecord:
         ``(its column, source table, source column)`` per source its manifest traces each of its
         columns to, sorted; empty unless the entry lists its columns (a `SELECT` with named
         columns), so only then is it known which columns of a table it reads (#451).
+    connections
+        The connections a Python asset declares, as `read_entry_connections` reads them (without
+        the warning a deploy logs): empty for any other asset, and for a value that is not a list
+        of distinct valid names.
     """
 
     id: str
@@ -137,6 +149,7 @@ class AssetRecord:
     owner: str | None
     reads: tuple[str, ...]
     lineage: tuple[tuple[str, str, str], ...] = ()
+    connections: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -287,6 +300,25 @@ class JobRecord:
 
 
 @dataclass(frozen=True)
+class ConnectionRecord:
+    """A connection that a Python asset of a current manifest declares.
+
+    Parameters
+    ----------
+    id
+        Its node id.
+    name
+        Its name, unique in the environment.
+    kind
+        Its kind (``postgresql``, ...); `None` when no connection of the environment has the name.
+    """
+
+    id: str
+    name: str
+    kind: str | None
+
+
+@dataclass(frozen=True)
 class ManifestCheck:
     """A check as a manifest declares it, before its table is looked up.
 
@@ -347,6 +379,7 @@ Record = (
     | TermRecord
     | PolicyNode
     | JobRecord
+    | ConnectionRecord
 )
 
 
@@ -379,7 +412,26 @@ def _asset(repository: str, name: str, entry: Mapping[str, Any]) -> AssetRecord:
         owner if isinstance(owner, str) else None,
         tuple(sorted(reads - {name})),
         _lineage(entry),
+        _declared_connections(entry),
     )
+
+
+def _declared_connections(entry: Mapping[str, Any]) -> tuple[str, ...]:
+    """Read the connections an asset entry declares, silently.
+
+    Parameters
+    ----------
+    entry
+        One stored manifest asset entry; untrusted.
+
+    Returns
+    -------
+    tuple of str
+        The names; empty when the value is not a list of distinct valid names. A graph request
+        reads every entry, so it does not log the damage the way a deploy does.
+    """
+    read = read_entry_connections(entry)
+    return read.names if read.readable else ()
 
 
 def _lineage(entry: Mapping[str, Any]) -> tuple[tuple[str, str, str], ...]:
@@ -545,6 +597,8 @@ class EnvironmentGraph:
         self.builder_of: dict[uuid.UUID, AssetRecord] = {}
         self.column_readers: defaultdict[tuple[str, str], set[str]] = defaultdict(set)
         """``(dotted table, case-folded column)`` → the assets whose lineage reads it."""
+        self.connection_kinds: dict[str, str] = {}
+        """The environment's connections, name → kind; set before any part is added."""
         self._term_keys: dict[str, str] = {}
         self._references_by_source: dict[tuple[uuid.UUID, str], str] = {}
         self._adjacent: defaultdict[str, list[GraphEdge]] = defaultdict(list)
@@ -655,7 +709,10 @@ class EnvironmentGraph:
             self._link(EdgeKind.MASKS, record.id, column_node(record.table_id, record.column))
 
     def add_part(self, part: ManifestPart) -> None:
-        """Add one repository's assets, checks and jobs; tables and references first.
+        """Add one repository's assets, their connections, checks and jobs.
+
+        Tables, references and `connection_kinds` first. A connection is one node per name,
+        however many assets declare it, each with its own `uses` edge.
 
         Parameters
         ----------
@@ -674,6 +731,12 @@ class EnvironmentGraph:
                 read_id = self.table_ids.get(read)
                 if read_id is not None:
                     self._link(EdgeKind.READS, asset.id, table_node(read_id))
+            for name in asset.connections:
+                node_id = connection_node(name)
+                if node_id not in self.records:
+                    kind = self.connection_kinds.get(name)
+                    self.records[node_id] = ConnectionRecord(node_id, name, kind)
+                self._link(EdgeKind.USES, asset.id, node_id)
         for check in part.checks:
             table_id = self.table_ids.get(check.table)
             if table_id is None or check_node(table_id, check.check) in self.records:
@@ -836,7 +899,7 @@ class EnvironmentGraph:
                 if table_id is not None and self.exists(build(table_id, tail)):
                     return build(table_id, tail)
             return None
-        if ref.kind in (NodeKind.ASSET, NodeKind.JOB):
+        if ref.kind in (NodeKind.ASSET, NodeKind.JOB, NodeKind.CONNECTION):
             node_id = f"{ref.kind.value}:{ref.value}"
             return node_id if node_id in self.records else None
         if ref.kind is NodeKind.TERM and ref.value in self._term_keys:
@@ -984,6 +1047,14 @@ def load_graph(
                 shown_mask.column if shown_mask and shown_mask.column else mask.column,
             )
         )
+    graph.connection_kinds = {
+        name: kind.value
+        for name, kind in session.execute(
+            select(Connection.name, Connection.kind).where(
+                Connection.environment_id == environment_id
+            )
+        )
+    }
     read = part or (lambda _version, repository, manifest: manifest_part(repository, manifest))
     looked = check or (lambda: None)
     looked()

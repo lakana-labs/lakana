@@ -104,11 +104,14 @@ def graph_lineage(
     The answer comes from what the projects declare (their assets' inputs and outputs, in
     every repository), not from runs. `depth` counts the assets crossed. A column starts at
     its table, plus the references that name it. You see a node only when you may: a table and
-    its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. The walk stops at
-    a node you may not see, and nothing in the answer counts or marks it. Answers 404 when the
-    start or the environment does not exist or you may not see it (one answer for both), 422
-    for a node, depth, limit or cursor out of bounds or a question too large to walk, and 503
-    with `Retry-After` when the walk ran past its time.
+    its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. Each asset of the
+    answer brings the jobs that run it (`runs`) and the connections it reads through (`uses`),
+    at its distance: a job needs `READ_ENVIRONMENT`, a connection `READ_ENVIRONMENT` and a
+    caller that is not a task token. The walk stops at a node you may not see, and nothing in
+    the answer counts or marks it. Answers 404 when the start or the environment does not exist
+    or you may not see it (one answer for both), 422 for a node, depth, limit or cursor out of
+    bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past
+    its time.
 
     Parameters
     ----------
@@ -161,7 +164,11 @@ def graph_neighbours(
     node: str = Query(description=NODE_DESCRIPTION),
     kinds: list[str] | None = Query(
         default=None,
-        description="Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds).",
+        description=(
+            "Only edges of these kinds: builds, checks, filters, has_column, links, masks, "
+            "measures, reads, references, runs, uses; repeat the parameter "
+            "(kinds=reads&kinds=builds)."
+        ),
     ),
     lang: str | None = _LANG,
     limit: int = _LIMIT,

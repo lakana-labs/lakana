@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.check_ui_parity import PARITY_FILE, live_keys, load_entries, problems
 
@@ -116,3 +117,42 @@ def test_a_duplicate_key_in_the_file_is_refused(tmp_path: Path) -> None:
     path.write_text('"a": {class: git, reason: x}\n"a": {class: git, reason: y}\n')
     with pytest.raises(ValueError, match="'a' appears twice"):
         load_entries(path)
+
+
+def test_done_is_refused_on_git_and_exception() -> None:
+    """``done`` belongs to ui and read; git and exception entries are refused with the next step."""
+    entries = {
+        "a": {"class": "git", "reason": "x", "done": True},
+        "task-token mint": {"class": "exception", "reason": "x", "done": True},
+    }
+    messages = problems(entries, {"a", "task-token mint"})
+    assert len(messages) == 2
+    assert "'a'" in messages[0]
+    assert "drop `done:`" in messages[0]
+    assert "'task-token mint'" in messages[1]
+
+
+def test_done_must_be_true() -> None:
+    """Only the boolean true is accepted; unquoted ``yes`` is True and passes."""
+    entries = {
+        "a": {"class": "ui", "part": 3, "done": False},
+        "b": {"class": "read", "part": 3, "done": "yes"},
+        "c": {"class": "ui", "part": 3, "done": 1},
+    }
+    messages = problems(entries, set(entries))
+    assert len(messages) == 3
+    assert "'a'" in messages[0]
+    assert "remove the line" in messages[0]
+    assert "'b'" in messages[1]
+    assert "'c'" in messages[2]
+    parsed = yaml.safe_load("d: { class: ui, part: 3, done: yes }")
+    assert problems(parsed, {"d"}) == []
+
+
+def test_done_is_allowed_on_ui_and_read() -> None:
+    """Regression guard: passes before the flag exists, since unknown keys are ignored."""
+    entries = {
+        "a": {"class": "ui", "part": 3, "done": True},
+        "b": {"class": "read", "part": 5, "done": True},
+    }
+    assert problems(entries, set(entries)) == []

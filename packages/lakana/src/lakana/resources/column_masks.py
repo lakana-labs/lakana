@@ -14,6 +14,7 @@ from lakana._http import HttpTransport, query_params
 from lakana._models import ColumnMask
 from lakana._routes import ROUTES
 from lakana.resources._override import override_params
+from lakana.resources._subject import subject_principal
 
 
 def _column_mask_from_json(data: dict[str, Any]) -> ColumnMask:
@@ -41,6 +42,8 @@ def _column_mask_from_json(data: dict[str, Any]) -> ColumnMask:
         created_by=data["created_by"],
         created_at=datetime.fromisoformat(data["created_at"]),
         bound=data.get("bound"),
+        principal=subject_principal(data.get("principal")),
+        group=data.get("group"),
     )
 
 

@@ -39,8 +39,8 @@ export function ObjectTable({ column, children }: ObjectTableProps): JSX.Element
 
 /** Properties of {@link ObjectRow}. */
 export interface ObjectRowProps {
-  /** Where the row goes. */
-  readonly to: string;
+  /** Where the row goes; null shows the name as plain text, with no link. */
+  readonly to: string | null;
   /** The object's name. */
   readonly name: string;
   /** The object's environment; null for something of the whole instance. */
@@ -52,10 +52,10 @@ export interface ObjectRowProps {
 }
 
 /**
- * One row that opens its object.
+ * One row that opens its object, or shows it as text when it has no place to open.
  *
  * @param props - The object.
- * @param props.to - Where the row goes.
+ * @param props.to - Where the row goes, or null for none.
  * @param props.name - The object's name.
  * @param props.environment - The object's environment, or null.
  * @param props.second - The line under the name.
@@ -66,9 +66,13 @@ export function ObjectRow({ to, name, environment, second, aside }: ObjectRowPro
   return (
     <tr>
       <td>
-        <Link className="row-name" to={to}>
-          {name}
-        </Link>{" "}
+        {to === null ? (
+          <span className="row-name">{name}</span>
+        ) : (
+          <Link className="row-name" to={to}>
+            {name}
+          </Link>
+        )}{" "}
         <EnvironmentLabel environment={environment} />
         <span className="second">{second}</span>
       </td>

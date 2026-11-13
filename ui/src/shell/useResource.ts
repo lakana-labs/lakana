@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ApiError } from "../api";
 import { problemText } from "../sign-in/messages";
 
 /** What a screen read, or why it could not. */
@@ -14,6 +15,8 @@ export interface Resource<T> {
   readonly data: T | undefined;
   /** The cause and next step when the latest read failed, else null. */
   readonly error: string | null;
+  /** The server's refusal behind `error`, for a screen that words a status itself; else null. */
+  readonly failure: ApiError | null;
   /** Reads it again. */
   readonly reload: () => void;
 }
@@ -24,26 +27,31 @@ export interface Resource<T> {
  *
  * @template T - What is read.
  * @param load - Reads it; keep it stable (`useCallback`) so that it is not read on every render.
- * @returns The answer, the error and `reload`.
+ * @returns The answer, the error, the typed failure and `reload`.
  */
 export function useResource<T>(load: () => Promise<T>): Resource<T> {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ data: T | undefined; error: string | null }>({
-    data: undefined,
-    error: null,
-  });
+  const [state, setState] = useState<{
+    data: T | undefined;
+    error: string | null;
+    failure: ApiError | null;
+  }>({ data: undefined, error: null, failure: null });
   const [round, setRound] = useState(0);
   useEffect(() => {
     let latest = true;
     load().then(
       (data) => {
         if (latest) {
-          setState({ data, error: null });
+          setState({ data, error: null, failure: null });
         }
       },
       (failure: unknown) => {
         if (latest) {
-          setState((previous) => ({ data: previous.data, error: problemText(t, failure) }));
+          setState((previous) => ({
+            data: previous.data,
+            error: problemText(t, failure),
+            failure: failure instanceof ApiError ? failure : null,
+          }));
         }
       },
     );
@@ -54,5 +62,5 @@ export function useResource<T>(load: () => Promise<T>): Resource<T> {
   const reload = useCallback(() => {
     setRound((previous) => previous + 1);
   }, []);
-  return { data: state.data, error: state.error, reload };
+  return { data: state.data, error: state.error, failure: state.failure, reload };
 }

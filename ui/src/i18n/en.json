@@ -194,7 +194,7 @@
     },
     "recent": {
       "title": "Recently opened",
-      "none": "Nothing opened yet. The tables, queries, jobs and runs you open will show here once the Catalog, Queries and Jobs pages arrive in a later release.",
+      "none": "Nothing opened yet. The tables you open will show here; queries, jobs and runs follow once their pages arrive in a later release.",
       "toCatalog": "Find a table in the Catalog",
       "opened": "Opened",
       "queryName": "Query {{id}}",
@@ -455,6 +455,10 @@
       "copy": "Copy command",
       "tutorial": "Open the getting-started tutorial"
     }
+  },
+  "table": {
+    "loading": "Loading the table…",
+    "retry": "Try again"
   },
   "list": {
     "name": "Name",

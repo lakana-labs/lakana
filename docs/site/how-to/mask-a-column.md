@@ -121,11 +121,11 @@ columns](../explanation/upgrades.md#row-filters-and-column-masks-follow-renamed-
 
 <!-- output -->
 ```text
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
-┃ id                                   ┃ subject                                        ┃ environment ┃ namespace ┃ table     ┃ column ┃ expression ┃ bound ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
-│ 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e │ principal 52acdc6f-ad90-4c8f-9f92-e0f4c990b1b1 │ dev         │ gold      │ customers │ ssn    │ '***'      │ yes   │
-└──────────────────────────────────────┴────────────────────────────────────────────────┴─────────────┴───────────┴───────────┴────────┴────────────┴───────┘
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃ id                                   ┃ subject    ┃ environment ┃ namespace ┃ table     ┃ column ┃ expression ┃ bound ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│ 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e │ user alice │ dev         │ gold      │ customers │ ssn    │ '***'      │ yes   │
+└──────────────────────────────────────┴────────────┴─────────────┴───────────┴───────────┴────────┴────────────┴───────┘
 ```
 
 After `revoke` (without `--yes` it asks first) the person sees the stored value again on her next
@@ -139,8 +139,8 @@ Revoked column mask 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e
 Revoking is the only way to change a mask: to change an expression, create the new mask and revoke
 the old one. Until you revoke the old one, the two masks on the column make it read `NULL`. The same
 commands are `client.column_masks.create(...)`, `.list(...)` and `.revoke(...)` in the Python SDK
-(each mask has `bound`, `None` from a server before this release) and `/api/v1/column-masks` in the
-REST API.
+(each mask has `bound`, and the name of who it is for in `principal` or `group`; each is `None`
+from a server before this release) and `/api/v1/column-masks` in the REST API.
 
 ## An expression must not fail on any stored value
 

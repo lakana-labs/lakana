@@ -110,15 +110,16 @@ row shows:
   a red diamond for a failed check or a blocking signal ("Check failed", "Blocked: late"), an
   amber triangle for a warning ("Late", "Rows dropped"), a green circle for "Healthy", and a
   grey dash for "Not judged". When more than one thing was found, the word names the worst and
-  "+2" counts the others; they are listed on the table page. The words and what each means are
-  in [Table list](../reference/table-list.md).
+  "+2" counts the others; they are [listed on the table page](open-a-table.md#overview). The words
+  and what each means are in [Table list](../reference/table-list.md).
 - **Rows** and **Size**: the rows of the newest snapshot and the size of its data files, right
   aligned.
 - **Last write** and **Last read**: how long ago, such as "2 hours ago". Hover a time, or let a
   screen reader read it, for the exact one. Last read tells you when, never who.
 
 A dash with its words ("Not known", "Never written", "Never read") means the figure does not
-exist yet, as for a view. Press a row, or its name, to open the table.
+exist yet, as for a view. Press a row, or its name, to open the table's page (see
+[Open a table](open-a-table.md)).
 
 Press a column heading to sort by it; press it again to reverse the order. The sorted heading
 shows an arrow. **Sort by** at the top right offers the same columns and **Created**, which is

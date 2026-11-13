@@ -5,13 +5,14 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, SecurableKind
 from lakana_core.catalog.location_sweep import sweep_table_locations
 from lakana_core.db import create_engine
-from lakana_core.models import Grant, Principal
+from lakana_core.grants.roles import Role
+from lakana_core.models import Grant, Group, Principal, PrincipalType
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.settings import Settings
 from tests.conftest import AUTH_HEADER
@@ -321,3 +322,149 @@ def test_a_listed_single_action_grant_of_the_three_carries_a_note(client: TestCl
     }
     stale = next(row["id"] for row in listed.json() if row["action"] == "MANAGE_TOKEN")
     assert client.delete(f"/api/v1/grants/{stale}", headers=AUTH_HEADER).status_code == 204
+
+
+def _grant_to(client: TestClient, **who: str) -> dict[str, object]:
+    """Grant ANALYST on the environment `dev` to a principal or group.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    **who
+        `principal=<name>` or `group=<name>`.
+
+    Returns
+    -------
+    dict
+        The created grant's JSON body.
+    """
+    created = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"role": "ANALYST", "kind": "ENVIRONMENT", "environment": "dev", **who},
+    )
+    assert created.status_code == 201, created.text
+    return created.json()
+
+
+def test_a_grant_names_its_principal_and_group(client: TestClient) -> None:
+    """Created and listed grants carry the subject name; a principal type is user or service."""
+    create_environment(client)
+    for name, kind in (("kim.schulz", "USER"), ("ci-bot", "SERVICE_ACCOUNT")):
+        client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": kind})
+    client.post("/api/v1/groups", headers=AUTH_HEADER, json={"name": "analysts"})
+
+    person = _grant_to(client, principal="kim.schulz")
+    bot = _grant_to(client, principal="ci-bot")
+    team = _grant_to(client, group="analysts")
+
+    assert person["principal"] == {
+        "id": person["principal_id"],
+        "name": "kim.schulz",
+        "principal_type": "user",
+    }
+    assert person["group"] is None
+    assert team["principal"] is None
+    assert team["group"] == "analysts"
+    listed = {
+        g["id"]: g
+        for g in client.get(
+            "/api/v1/grants", headers=AUTH_HEADER, params={"environment": "dev"}
+        ).json()
+    }
+    assert listed[person["id"]]["principal"]["name"] == "kim.schulz"
+    assert listed[bot["id"]]["principal"]["principal_type"] == "service"
+    assert listed[team["id"]]["group"] == "analysts"
+
+
+def _statements_of(client: TestClient, url: str) -> int:
+    """Count the SQL statements one authenticated GET runs.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    url
+        The path to request.
+
+    Returns
+    -------
+    int
+        The statements the engine saw during the request.
+    """
+    engine = client.app.state.engine
+    seen: list[str] = []
+
+    def listen(*args: object) -> None:
+        """Keep each statement's text.
+
+        Parameters
+        ----------
+        *args
+            `before_cursor_execute`'s arguments; the third is the statement.
+        """
+        seen.append(str(args[2]))
+
+    event.listen(engine, "before_cursor_execute", listen)
+    try:
+        assert client.get(url, headers=AUTH_HEADER).status_code == 200
+    finally:
+        event.remove(engine, "before_cursor_execute", listen)
+    return len(seen)
+
+
+def test_listing_grants_resolves_names_in_one_query(client: TestClient) -> None:
+    """Naming 200 grants' subjects costs the same number of statements as naming 2."""
+    create_environment(client)
+    engine = client.app.state.engine
+    admin_id = uuid.uuid4()
+    with Session(engine) as session:
+        session.add(Principal(id=admin_id, type=PrincipalType.USER, name="granter"))
+        session.flush()
+        for number in range(200):
+            who = uuid.uuid4()
+            team = uuid.uuid4()
+            session.add(Group(id=team, name=f"team{number}"))
+            session.add(Principal(id=who, type=PrincipalType.USER, name=f"user{number}"))
+            session.flush()
+            session.add(
+                Grant(
+                    id=uuid.uuid4(),
+                    principal_id=who if number % 2 else None,
+                    group_id=None if number % 2 else team,
+                    role=Role.ANALYST,
+                    kind=SecurableKind.ENVIRONMENT,
+                    environment="dev",
+                    granted_by=admin_id,
+                    granted_at=datetime.now(UTC),
+                )
+            )
+        session.commit()
+
+    few = _statements_of(client, "/api/v1/grants?limit=2")
+    many = _statements_of(client, "/api/v1/grants?limit=200")
+
+    assert many == few
+    page = client.get("/api/v1/grants?limit=200", headers=AUTH_HEADER).json()
+    assert len(page) == 200
+    assert {g["principal"]["name"] for g in page if g["principal"]} >= {"user1", "user199"}
+    assert {g["group"] for g in page if g["group"]} >= {"team0", "team198"}
+
+
+def test_a_subject_that_is_gone_has_no_name() -> None:
+    """An id the database no longer knows answers `None`, never an error."""
+    from sqlalchemy import create_engine as sa_engine
+
+    from lakana_core.models import Base
+    from lakana_server.api.platform.subjects import subject_names
+
+    engine = sa_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    gone = uuid.uuid4()
+    with Session(engine) as session:
+        names = subject_names(session, [Grant(principal_id=gone, group_id=None)])
+        assert names.principal(gone) is None
+        assert names.principal(None) is None
+        assert names.group(gone) is None
+        assert names.group(None) is None

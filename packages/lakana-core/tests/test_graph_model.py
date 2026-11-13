@@ -53,7 +53,7 @@ def test_a_text_that_is_no_node_id_is_refused_with_the_forms(text: str) -> None:
     message = str(caught.value)
     assert message.endswith(
         "it starts with table:, column:, asset:, reference:, measure:, term:, check:, "
-        "row_filter:, column_mask: or job:."
+        "row_filter:, column_mask:, job: or connection:."
     )
     assert "Give a table's dotted name, such as gold.dim_store" in message
     assert "\x00" not in message and "\u2028" not in message and len(message) < 600

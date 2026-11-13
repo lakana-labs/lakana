@@ -58,7 +58,7 @@ together.
 | `checks.on_failure: Input should be 'block' or 'warn'` | `lakana.yaml` sets another value as the default, for example `stop`. | Use `block` or `warn`. |
 | `the check has no SQL` | The file holds only the comment. | Write the `SELECT`. |
 | `a check is one SELECT that returns the rows that are wrong; this file has N statements` or `... this file is a DELETE statement` | The file holds more than one statement, or a statement that is not a `SELECT`. | Keep one `SELECT`. |
-| A message of the SQL parser, or of the rules for a submitted query, for example `table function X is not allowed ...` or `ATTACH is not permitted in a submitted query.` | The SQL is wrong, or does what no query may: it reads files directly, calls a function a query may not call, holds a statement that changes data (also inside a CTE or subquery: ``A query reads data and cannot change it: ...``), or uses `WITH RECURSIVE` or `CONNECT BY`. | Fix the SQL; load the data into a table first ([Load data from a source](../how-to/load-data-from-a-source.md)) and select from it. `table function read_parquet is not allowed: it reads data directly ...` means a file or other source is read inside the SQL: load it into a table first ([Load data from a source](../how-to/load-data-from-a-source.md)) and select from that table. |
+| A message of the SQL parser, or of the rules for a submitted query, for example `table function X is not allowed ...` or `ATTACH is not permitted in a submitted query.` | The SQL is wrong, or does what no query may: it reads files directly, calls a function a query may not call, holds a statement that changes data (also inside a CTE or subquery: ``A query reads data and cannot change it: ...``), or uses `WITH RECURSIVE` or `CONNECT BY`. | Fix the SQL; load the data into a table first ([Load data from a source](../how-to/load-data-from-a-source.md)) and select from it. `table function read_parquet is not allowed: it reaches data directly ...` means a file or other source is read inside the SQL: load it into a table first ([Load data from a source](../how-to/load-data-from-a-source.md)) and select from that table. |
 | `the SQL is nested too deeply`, or a message that the SQL is longer than the limit | The `SELECT` is too complex or too long. | Split it into two checks. |
 | `the check does not read 'TABLE', the table its path names. Select from that table, or move the file into the directory of the table it checks.` | The `SELECT` does not read the table of its directory. | Select from that table, or move the file. |
 | `table 'TABLE' is neither built nor read by this project. A check belongs to a table that an asset of this project produces or selects from. This project builds: ... It reads: ...` | No asset builds the table or reads it. A common cause is a deleted asset whose check is still there. | Move the check to a table the lists name, or add the asset, or delete the check. |
@@ -434,7 +434,12 @@ for every query.
 /api/v1/environments/{env}/project-versions/{id}`) shows a check's `sql` and `references` only to a reader who
 may read every table the SQL names, read again from the SQL itself. For anyone else the entry keeps
 `name`, `table`, `check`, `path`, `on_failure` and `description`, and `hidden_references` counts
-the tables they may not read (0 when nothing is hidden).
+the tables they may not read (0 when nothing is hidden). The `sql` also needs the rules of a
+table's file ([Who may read the file](../how-to/see-where-a-table-is-defined.md#who-may-read-the-file)):
+no row filter or column mask on the check's table or any table its SQL names, none of them a view
+(the check's own table included), and no file read in its SQL. Otherwise the entry has no `sql` and says why in
+`content_reason` (`restricted`) and `content_message`; both are `null` when the SQL is shown, and
+showing it is recorded as `SOURCE_VIEWED`.
 
 **In the audit log.** The `QUERY_COMPLETED` event of such a query has, next to `sql_text`,
 `tables_touched`, `row_count` and `status`, the field `check_result_id`: the id of the check

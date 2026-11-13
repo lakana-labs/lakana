@@ -21,7 +21,10 @@ from sqlalchemy import (
     false,
     text,
 )
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.schema import CreateIndex
+from sqlalchemy.sql.compiler import DDLCompiler
 
 from lakana_core.models.base import Base, TimestampMixin, UTCDateTime
 
@@ -47,6 +50,46 @@ _KINDS: dict[TableType, str] = {
     TableType.ARTIFACT: "ARTIFACT",
 }
 """The API's `kind` for each `table_type`."""
+
+_SORT_KEYS = (
+    "row_count",
+    "size_bytes",
+    "last_write_at",
+    "last_read_at",
+    "health_rank",
+    "created_at",
+)
+"""The stored keys the table list sorts by, each with an index in either direction.
+
+The descending ones (`ix_tables_<key>_id_desc`, declared below `Table`) are `key DESC NULLS LAST,
+id DESC`: PostgreSQL reads an ascending index backwards only as ``DESC NULLS FIRST``, and the list
+sorts a null key last in both directions."""
+
+
+@compiles(CreateIndex, "sqlite")
+def _sqlite_create_index(element: CreateIndex, compiler: DDLCompiler, **kw: object) -> str:
+    """Write an index for SQLite without the null order it refuses on an index column.
+
+    SQLite refuses ``NULLS FIRST`` and ``NULLS LAST`` in ``CREATE INDEX``. Its own order already
+    puts a null first ascending and last descending (a null is its smallest value), so only
+    those two spellings are dropped; any other stays, and SQLite refuses it.
+
+    Parameters
+    ----------
+    element
+        The statement.
+    compiler
+        SQLite's DDL compiler.
+    **kw
+        The compiler's options.
+
+    Returns
+    -------
+    str
+        The statement as SQLite takes it.
+    """
+    statement = compiler.visit_create_index(element, **kw)
+    return statement.replace(" DESC NULLS LAST", " DESC").replace(" ASC NULLS FIRST", " ASC")
 
 
 def table_kind(table_type: TableType) -> str:
@@ -318,3 +361,11 @@ class Table(Base, TimestampMixin):
             raw-zone table, ``"VIEW"`` for a view, ``"ARTIFACT"`` for an artifact.
         """
         return table_kind(self.table_type)
+
+
+for _key in _SORT_KEYS:
+    Index(
+        f"ix_tables_{_key}_id_desc",
+        Table.__table__.c[_key].desc().nulls_last(),
+        Table.__table__.c.id.desc(),
+    )

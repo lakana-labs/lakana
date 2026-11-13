@@ -213,3 +213,40 @@ def test_a_listed_filter_shows_the_current_column_name_and_bound(
     listed = client.get("/api/v1/row-filters", headers=AUTH_HEADER, params=where).json()
 
     assert [(f["expression"], f["bound"]) for f in listed] == [("dept = 'a'", False)]
+
+
+def test_a_row_filter_names_its_subject(client: TestClient) -> None:
+    """A row filter carries the name of its person or group, on create and on list."""
+    create_environment(client)
+    create_table(client, "dev", "gold", "customers")
+    client.post(
+        "/api/v1/principals",
+        headers=AUTH_HEADER,
+        json={"name": "ci-bot", "type": "SERVICE_ACCOUNT"},
+    )
+    client.post("/api/v1/groups", headers=AUTH_HEADER, json={"name": "analysts"})
+    where = {
+        "environment": "dev",
+        "namespace": "gold",
+        "table": "customers",
+        "expression": "id > 5",
+    }
+
+    mine = client.post(
+        "/api/v1/row-filters", headers=AUTH_HEADER, json={"principal": "ci-bot", **where}
+    ).json()
+    theirs = client.post(
+        "/api/v1/row-filters", headers=AUTH_HEADER, json={"group": "analysts", **where}
+    ).json()
+
+    assert mine["principal"] == {
+        "id": mine["principal_id"],
+        "name": "ci-bot",
+        "principal_type": "service",
+    }
+    assert mine["group"] is None
+    assert theirs["principal"] is None
+    assert theirs["group"] == "analysts"
+    listed = client.get("/api/v1/row-filters", headers=AUTH_HEADER, params=where).json()
+    names = {(row["principal"] or {}).get("name"): row["group"] for row in listed}
+    assert names == {"ci-bot": None, None: "analysts"}

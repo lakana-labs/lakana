@@ -251,6 +251,30 @@ class Environments:
         )
         return _environment_from_json(response.json())
 
+    def purge_rows(self, name: str) -> None:
+        """Remove a deleted environment whose storage cannot be reached, rows only.
+
+        For an environment the worker's clean-up skips because its storage cannot be resolved
+        (a root in a scheme Lakana cannot read, such as ``local://``): it is removed from the
+        catalog with its records of dropped tables, and its name is free again. Its files, if
+        there are any, are not touched. Needs ``MANAGE_ENVIRONMENT`` on the instance.
+
+        Parameters
+        ----------
+        name
+            The environment's name.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If no environment of this name exists.
+        lakana.errors.Conflict
+            If it is not deleted, its storage can still be reached (the clean-up deletes it
+            then; `delete(name, purge=True)` makes that happen at the next clean-up), or its root
+            contains ``::`` (releases before 0.18.0 wrote files to the part before it).
+        """
+        self._transport.request(ROUTES["environments.purge_rows"], path_params={"name": name})
+
     def update_storage(
         self, name: str, options: dict[str, str] | None = None, secret_ref: str | None = None
     ) -> Environment:

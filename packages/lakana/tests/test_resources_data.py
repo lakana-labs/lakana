@@ -246,6 +246,18 @@ def test_environments_restore_posts_and_list_deleted_asks_for_them() -> None:
     assert listed.purge_after == datetime(2026, 10, 27, 10, tzinfo=UTC)
 
 
+def test_environments_purge_rows_posts_and_returns_nothing() -> None:
+    """`purge_rows` POSTs `/purge-rows`, with no body, and the 204 answer returns `None`."""
+    seen: list[tuple[str, str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, request.read()))
+        return httpx.Response(204)
+
+    assert Environments(_transport(handler)).purge_rows("old") is None
+    assert seen == [("POST", "/api/v1/environments/old/purge-rows", b"")]
+
+
 def test_environments_update_storage_sends_a_patch_with_the_given_fields() -> None:
     """`environments.update_storage` PATCHes `/storage` with options/secret_ref."""
     seen: dict[str, Any] = {}
@@ -3556,3 +3568,18 @@ def test_a_query_result_counts_the_bytes_it_downloaded() -> None:
     run.result()
 
     assert _usage.bytes_read() == len(file_bytes)
+
+
+def test_sdk_health_sends_readers_false_only_when_asked() -> None:
+    """`health` adds `readers=false` when `readers=False` and nothing otherwise."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={**_HEALTH_BODY, "readers": None})
+
+    tables = Tables(_transport(handler))
+    tables.health("dev", "bronze.sales", readers=True)
+    health = tables.health("dev", "bronze.sales", days=7, readers=False)
+    assert [dict(r.url.params) for r in seen] == [{}, {"days": "7", "readers": "false"}]
+    assert health.readers is None

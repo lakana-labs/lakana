@@ -14,6 +14,7 @@ from lakana._http import HttpTransport, query_params
 from lakana._models import RowFilter
 from lakana._routes import ROUTES
 from lakana.resources._override import override_params
+from lakana.resources._subject import subject_principal
 
 
 def _row_filter_from_json(data: dict[str, Any]) -> RowFilter:
@@ -40,6 +41,8 @@ def _row_filter_from_json(data: dict[str, Any]) -> RowFilter:
         created_by=data["created_by"],
         created_at=datetime.fromisoformat(data["created_at"]),
         bound=data.get("bound"),
+        principal=subject_principal(data.get("principal")),
+        group=data.get("group"),
     )
 
 

@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    PrincipalRef,
+    SecurableKind,
+    TaskScope,
+)
+from lakana_core.grants import admin as admin_module
+from lakana_core.grants import service as service_module
+from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.models import Grant, Group, GroupMembership, Principal, PrincipalType
@@ -168,3 +178,53 @@ def test_is_admin_asks_the_instance_admin_rule(session: Session) -> None:
     )
 
     assert service.is_admin(subject) is True
+
+
+def test_is_admin_follows_the_credentials_scope(session: Session) -> None:
+    """An administrator's personal token is admin; a task token of the same principal is not."""
+    subject = _principal(session)
+    _grant(
+        session, subject.id, principal_id=subject.id, kind=SecurableKind.INSTANCE, role=Role.ADMIN
+    )
+    service = GrantService(session, GrantAuthorization(session))
+    task = dataclasses.replace(
+        subject, task_scope=TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4())
+    )
+
+    assert (service.is_admin(subject), service.is_admin(task)) == (True, False)
+
+
+def test_is_admin_asks_the_admin_role_once(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One look-up of the role per answer, not one by `is_admin` and another by the route check."""
+    subject = _principal(session)
+    _grant(
+        session, subject.id, principal_id=subject.id, kind=SecurableKind.INSTANCE, role=Role.ADMIN
+    )
+    calls: list[uuid.UUID] = []
+    real = admin_module.holds_instance_admin
+
+    def counted(session: Session, principal_id: uuid.UUID) -> bool:
+        """Count a look-up and answer as the real one.
+
+        Parameters
+        ----------
+        session
+            Database session.
+        principal_id
+            The principal.
+
+        Returns
+        -------
+        bool
+            The real answer.
+        """
+        calls.append(principal_id)
+        return real(session, principal_id)
+
+    monkeypatch.setattr(admin_module, "holds_instance_admin", counted)
+    monkeypatch.setattr(service_module, "holds_instance_admin", counted, raising=False)
+
+    assert GrantService(session, GrantAuthorization(session)).is_admin(subject) is True
+    assert calls == [subject.id]

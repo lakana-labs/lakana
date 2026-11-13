@@ -1,11 +1,11 @@
 # Metadata graph
 
-Lakana holds what your projects declare about your data: which asset reads and builds which
-table, the references between tables, measures, checks, glossary terms, row filters, column masks
-and jobs. The metadata graph puts these together, so you can ask what feeds a table, what it feeds,
-and what lies next to it. It is computed from the declarations when you ask, in every repository
-deployed to the environment. Runs do not change it; the lineage that runs record is shown
-separately, per table.
+Lakana holds what your projects declare about your data: which asset reads and builds which table,
+the references between tables, measures, checks, glossary terms, row filters, column masks, jobs and
+the connections Python assets read through. The metadata graph puts these together, so you can ask
+what feeds a table, what it feeds, and what lies next to it. It is computed from the declarations
+when you ask, in every repository deployed to the environment. Runs do not change it; the lineage
+that runs record is shown separately, per table.
 
 ## Nodes and edges
 
@@ -22,6 +22,7 @@ Every node has an id that stays the same, which you may store and link to:
 | Check | `check:<table id>/<check>` |
 | Row filter, column mask | `row_filter:<id>`, `column_mask:<id>` |
 | Job | `job:<repository>/<job>` |
+| Connection | `connection:<name>` |
 
 Where a command or route asks for a node, you may also give a table's dotted name
 (`gold.dim_store`), a column as `column:gold.dim_store/store_id` (or `--column store_id` in the
@@ -38,6 +39,7 @@ Answers always carry the ids.
 | `filters`, `masks` | row filter → its table; column mask → its column, by the column's current name: a mask follows its column through a rename, and one that is not bound to a field id (or whose column is gone) stays with the name it was made with. The current names are read from storage, each table once per question and only in the first half of the 10-second budget; when storage is slow or does not answer, a mask stays with the name it was made with rather than stopping the question |
 | `links` | glossary term → a table or a column |
 | `runs` | job → an asset it runs |
+| `uses` | asset → a connection it reads through (a Python asset's `connections:`) |
 | `has_column` | table → its column |
 
 ## Questions
@@ -54,9 +56,17 @@ feeds) or both (the default). `depth` counts the assets crossed, from 1 to 10, a
 given. An asset at the start counts as 0, with the tables it reads or builds. A column starts at
 its table, plus the references that name the column and what they join it to.
 
+Each asset in the answer brings the jobs that run it (`runs`) and the connections it reads
+through (`uses`), at the asset's distance. They cost no depth, and the walk never goes on through
+them: a connection that two assets use does not lead from one to the other. A connection's
+`connection_kind` is its kind, such as `postgresql`, or `null` when the manifest names a
+connection the environment does not have.
+
 In the CLI's table, the `side` column says where each node lies: `up` feeds the start, `down` is
 fed by it, `both` is on a loop through it, `start` is where the walk began, and `join` is joined to
-a column start by a reference. With `-o json`, the edges say the same. Both commands show a table's
+a column start by a reference. A job or a connection takes the side and distance of the nearest
+asset it runs or that reads through it, and is `join` when its assets lie both up and down; those
+of a start asset are `up`. With `-o json`, the edges say the same. Both commands show a table's
 label in the language `--lang` asks for. The CLI's table lists the nodes by distance, then kind,
 then name; JSON and the SDK keep the server's order (by distance, then node id), which the cursors
 follow.
@@ -83,14 +93,15 @@ lakana graph lineage gold.fact_sales --direction up --env dev
 │ 2        │ up    │ table │ bronze.stores   │       │ stores     │
 │ 3        │ up    │ asset │ bronze.stores   │       │ stores     │
 └──────────┴───────┴───────┴─────────────────┴───────┴────────────┘
-side: up feeds the start, down is fed by it, both is on a loop through it, join is joined to a column start by a reference.
+side: up feeds the start, down is fed by it, both is on a loop through it, join is joined to a column start by a reference. A job or connection takes the side of the nearest asset it runs or serves, and is join when its assets lie up and down.
 ```
 
 The runs record a lineage of their own, shown per table by `lakana table lineage`; this one comes
 from the declarations, before and without a run.
 
 **Neighbours** lists what is one edge away, in either direction, optionally only edges of the
-kinds you name.
+kinds you name (the edge kinds above, such as `reads` or `uses`). A connection is a valid start:
+`lakana graph neighbours connection:pg-sales --env dev` lists the assets that read through it.
 
 Every lineage, neighbours and impact answer is a page of at most 500 nodes, sorted by distance, then id, with the edges between
 them:
@@ -101,7 +112,7 @@ them:
     {"id": "table:7c1e…", "kind": "table", "name": "gold.dim_store", "distance": 0,
      "table_type": "managed", "model_kind": "dimension", "grain": "One row per store.",
      "key": ["store_id"], "owner": "stores-team", "repository": "stores", "label": null,
-     "column_type": null, "reason": null, "may_use": false}
+     "column_type": null, "reason": null, "may_use": false, "connection_kind": null}
   ],
   "edges": [
     {"kind": "builds", "source": "asset:stores/gold.dim_store", "target": "table:7c1e…"}
@@ -174,12 +185,16 @@ empty and `reason` says so, with the same text either way.
 | A row filter, a column mask | the right to manage policies, and `READ_TABLE` on its table |
 | An asset | `READ_ENVIRONMENT`, and `READ_TABLE` on the table it builds |
 | A job, a glossary term | `READ_ENVIRONMENT` |
+| A connection | `READ_ENVIRONMENT`, and a caller that is not a task token (as for `lakana connection list`) |
 
 A walk stops at a node you may not see. Nothing beyond it is reached through it, no path through
 it is shown, and no count or gap tells that it is there. A node beyond it still shows when another
 route you may see reaches it. A start you may not see is answered like one that does not exist.
 
-A job shows its edge to an asset only when you may see the asset.
+A job shows its edge to an asset only when you may see the asset. A job or connection you may not
+see is left out with its edge, and nothing takes its place: a running task, which may not see the
+environment's connections, gets the same answer as for an asset that declares none, and
+`connection:<name>` gives it the same 404 as a name no asset declares.
 
 Impact and join paths follow the same rules: a reason names only a node you may see, a join path
 never runs through a table or reference you may not see, and the text for "no path" is the same

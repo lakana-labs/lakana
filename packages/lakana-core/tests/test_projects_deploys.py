@@ -57,6 +57,7 @@ from lakana_core.models import (
 from lakana_core.projects.asset_model import ResolvedReference
 from lakana_core.projects.checks import ParsedCheck, checks_listing
 from lakana_core.projects.dag import build_graph
+from lakana_core.projects.definition import RESTRICTED_MESSAGE
 from lakana_core.projects.deploys import (
     CONFLICT_MESSAGE,
     DEPLOY_ENDED_MESSAGE,
@@ -663,7 +664,7 @@ def test_read_side_needs_read_environment(
         lambda: service.history(stranger, "dev"),
         lambda: service.get(stranger, "dev", run_id),
         lambda: service.deployments(stranger, "dev"),
-        lambda: service.job_version(stranger, "dev", version.id),
+        lambda: service.job_version(stranger, "dev", version.id, window_minutes=60),
         lambda: service.orphans(stranger, "dev"),
     ):
         with pytest.raises(PermissionDenied):
@@ -680,13 +681,13 @@ def test_reads_are_scoped_to_their_environment(
     run_id = session.execute(select(DeployRun.id)).scalar_one()
     service = DeployService(session, AllowAllAuthorization())
     assert service.get(principal, "dev", run_id).id == run_id
-    assert service.job_version(principal, "dev", version.id).id == version.id
+    assert service.job_version(principal, "dev", version.id, window_minutes=60).id == version.id
     with pytest.raises(NotFoundError):
         service.get(principal, "dev", uuid.uuid4())
     with pytest.raises(NotFoundError):
         service.get(principal, "prod", run_id)
     with pytest.raises(NotFoundError):
-        service.job_version(principal, "prod", version.id)
+        service.job_version(principal, "prod", version.id, window_minutes=60)
     assert [r.id for r in service.history(principal, "dev")] == [run_id]
     assert service.history(principal, "prod") == []
     assert service.deployments(principal, "prod") == []
@@ -745,7 +746,7 @@ def test_manifest_sql_is_hidden_from_a_reader_without_access(
         environment="dev",
     )
     view = DeployService(session, GrantAuthorization(session)).job_version(
-        reader, "dev", version.id
+        reader, "dev", version.id, window_minutes=60
     )
     [asset] = view.manifest["assets"]
     assert "sql" not in asset and "references" not in asset and "lineage" not in asset
@@ -754,8 +755,12 @@ def test_manifest_sql_is_hidden_from_a_reader_without_access(
     assert asset["metadata"]["owner"] == "o"
     assert view.manifest["external_inputs"] == []
     assert view.manifest["hidden_external_inputs"] == 1
-    full = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
-    assert full.manifest["assets"][0]["sql"].startswith("SELECT")
+    full = DeployService(session, AllowAllAuthorization()).job_version(
+        principal, "dev", version.id, window_minutes=60
+    )
+    # No file of this version was recorded, so even a reader of everything sees no SQL.
+    assert "sql" not in full.manifest["assets"][0]
+    assert full.manifest["assets"][0]["content_reason"] == "not_recorded"
     assert full.manifest["assets"][0]["input_kinds"] == {"x": "artifact"}
 
 
@@ -785,7 +790,7 @@ def test_the_layer_rules_survive_the_view_of_a_reader_with_limited_rights(
         environment="dev",
     )
     view = DeployService(session, GrantAuthorization(session)).job_version(
-        reader, "dev", version.id
+        reader, "dev", version.id, window_minutes=60
     )
     assert view.manifest["assets"][0]["hidden_references"] == 1
     assert manifest_layers(view.manifest) == MEDALLION_LAYERS
@@ -919,6 +924,31 @@ def test_an_unquoted_dotted_table_still_resolves(
     )
     repo = _repo(session)
     asset = make_asset("silver.f", ("bronze.csv",))
+    service = DeployService(session, AllowAllAuthorization())
+    assert (
+        service.validate_against_environment(
+            principal, "dev", repo.id, [asset], build_graph([asset])
+        )
+        == []
+    )
+
+
+def test_a_reference_into_a_three_level_namespace_resolves_to_its_table(
+    session: Session, env: None, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """`bronze.raw.eu.orders` resolves to that table, never to `bronze.raw.orders`."""
+    deep = NamespacePath.from_parts(["bronze", "raw", "eu"])
+    _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        namespaces=[_BRONZE, NamespacePath.from_parts(["bronze", "raw"]), deep],
+        tables=[TableRef("dev", deep, "orders")],
+    )
+    repo = _repo(session)
+    asset = _file_asset(
+        "silver.f", 'SELECT * FROM "bronze"."raw"."eu"."orders"', "bronze.raw.eu.orders"
+    )
     service = DeployService(session, AllowAllAuthorization())
     assert (
         service.validate_against_environment(
@@ -1176,7 +1206,9 @@ def test_manifest_hides_only_what_the_reader_cannot_read(
         "external_inputs": ["bronze.events", "a/b.csv"],
     }
     session.commit()
-    view = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    view = DeployService(session, AllowAllAuthorization()).job_version(
+        principal, "dev", version.id, window_minutes=60
+    )
     [asset] = view.manifest["assets"]
     assert "sql" not in asset
     assert asset["hidden_references"] == 1
@@ -1184,18 +1216,21 @@ def test_manifest_hides_only_what_the_reader_cannot_read(
     assert view.manifest["hidden_external_inputs"] == 1
 
 
-def test_manifest_with_readable_references_keeps_its_sql(
+def test_manifest_with_readable_references_keeps_them_but_not_an_unrecorded_files_sql(
     session: Session, env: None, principal: PrincipalRef
 ) -> None:
-    """When every reference is readable nothing is withheld."""
+    """Readable references stay; SQL needs the file's record, which this deploy did not write."""
     repo = _repo(session)
     version = _deployed(
         session, principal, repo, "a" * 40, make_asset("silver.clean", ("bronze.events",))
     )
-    view = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    view = DeployService(session, AllowAllAuthorization()).job_version(
+        principal, "dev", version.id, window_minutes=60
+    )
     [asset] = view.manifest["assets"]
     assert asset["hidden_references"] == 0
-    assert asset["sql"].startswith("SELECT")
+    assert asset["references"] == ["bronze.events"]
+    assert "sql" not in asset and asset["content_reason"] == "not_recorded"
     assert view.manifest["hidden_external_inputs"] == 0
 
 
@@ -1215,7 +1250,9 @@ def test_job_version_does_not_mutate_the_stored_manifest(
         kind=SecurableKind.ENVIRONMENT,
         environment="dev",
     )
-    DeployService(session, GrantAuthorization(session)).job_version(reader, "dev", version.id)
+    DeployService(session, GrantAuthorization(session)).job_version(
+        reader, "dev", version.id, window_minutes=60
+    )
     assert "sql" in version.manifest_json["assets"][0]
 
 
@@ -1224,7 +1261,9 @@ def test_unknown_job_version_is_not_found(
 ) -> None:
     """A random id is a 404."""
     with pytest.raises(NotFoundError):
-        DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", uuid.uuid4())
+        DeployService(session, AllowAllAuthorization()).job_version(
+            principal, "dev", uuid.uuid4(), window_minutes=60
+        )
 
 
 def test_authorize_deploy(session: Session, env: None, principal: PrincipalRef) -> None:
@@ -1550,7 +1589,7 @@ def test_a_deploy_only_principal_can_poll_its_run_but_not_read_history(
     for call in (
         lambda: service.history(ci, "dev"),
         lambda: service.deployments(ci, "dev"),
-        lambda: service.job_version(ci, "dev", version.id),
+        lambda: service.job_version(ci, "dev", version.id, window_minutes=60),
         lambda: service.orphans(ci, "dev"),
     ):
         with pytest.raises(PermissionDenied):
@@ -1788,11 +1827,13 @@ def test_manifest_edges_into_a_hidden_asset_are_dropped(
     ensure_table(session, "dev", "silver", "a")
     reader = _read_environment_only(session, principal, "silver.a")
     view = DeployService(session, GrantAuthorization(session)).job_version(
-        reader, "dev", version.id
+        reader, "dev", version.id, window_minutes=60
     )
     assert view.manifest["edges"] == [["silver.a", "gold.b"]]
     assert view.manifest["hidden_edges"] == 1
-    full = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    full = DeployService(session, AllowAllAuthorization()).job_version(
+        principal, "dev", version.id, window_minutes=60
+    )
     assert full.manifest["edges"] == [["silver.a", "gold.b"], ["silver.a", "gold.c"]]
     assert full.manifest["hidden_edges"] == 0
 
@@ -3321,7 +3362,7 @@ def test_a_checks_sql_is_hidden_from_a_reader_without_access_to_one_of_its_table
     reader = _read_environment_only(session, principal, "silver.clean")
 
     view = DeployService(session, GrantAuthorization(session)).job_version(
-        reader, "dev", version.id
+        reader, "dev", version.id, window_minutes=60
     )
 
     [check] = view.manifest["checks"]
@@ -3333,6 +3374,8 @@ def test_a_checks_sql_is_hidden_from_a_reader_without_access_to_one_of_its_table
         "on_failure": "block",
         "description": "d",
         "hidden_references": 1,
+        "content_reason": "restricted",
+        "content_message": RESTRICTED_MESSAGE,
     }
     assert "sql" in version.manifest_json["checks"][0]
 
@@ -3346,7 +3389,7 @@ def test_a_checks_sql_is_kept_for_a_reader_of_every_table_it_reads(
     reader = _read_environment_only(session, principal, "silver.clean", "hr.salaries")
 
     view = DeployService(session, GrantAuthorization(session)).job_version(
-        reader, "dev", version.id
+        reader, "dev", version.id, window_minutes=60
     )
 
     [check] = view.manifest["checks"]
@@ -3365,7 +3408,7 @@ def test_a_checks_sql_that_cannot_be_read_is_hidden(
     reader = _read_environment_only(session, principal, "silver.clean")
 
     view = DeployService(session, GrantAuthorization(session)).job_version(
-        reader, "dev", version.id
+        reader, "dev", version.id, window_minutes=60
     )
 
     [check] = view.manifest["checks"]
@@ -3384,7 +3427,9 @@ def test_a_check_entry_without_sql_text_is_hidden(
     version.manifest_json = {**version.manifest_json, "checks": [entry]}
     session.commit()
 
-    view = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    view = DeployService(session, AllowAllAuthorization()).job_version(
+        principal, "dev", version.id, window_minutes=60
+    )
 
     [check] = view.manifest["checks"]
     assert "sql" not in check and "references" not in check
@@ -3419,7 +3464,9 @@ def test_damaged_checks_of_a_stored_manifest_show_as_nothing(
     version.manifest_json = {**version.manifest_json, "checks": checks}
     session.commit()
 
-    view = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    view = DeployService(session, AllowAllAuthorization()).job_version(
+        principal, "dev", version.id, window_minutes=60
+    )
 
     assert view.manifest["checks"] == shown
 
@@ -4641,7 +4688,7 @@ def test_a_project_version_hides_model_references_the_reader_may_not_read(
     session.commit()
     reader = _read_environment_only(session, principal, "bronze.events")
     view = DeployService(session, GrantAuthorization(session)).job_version(
-        reader, "dev", version.id
+        reader, "dev", version.id, window_minutes=60
     )
     (shown_entry,) = view.manifest["assets"]
     assert shown_entry["model"]["references"] == [
@@ -4649,7 +4696,9 @@ def test_a_project_version_hides_model_references_the_reader_may_not_read(
     ]
     assert shown_entry["hidden_model_references"] == 2
     assert "restricted" not in str(view.manifest)
-    full = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    full = DeployService(session, AllowAllAuthorization()).job_version(
+        principal, "dev", version.id, window_minutes=60
+    )
     assert len(full.manifest["assets"][0]["model"]["references"]) == 2
     assert full.manifest["assets"][0]["hidden_model_references"] == 1
 
@@ -4700,7 +4749,7 @@ def test_a_reference_the_reader_may_not_read_leaves_no_edge_and_no_check_target(
     ensure_table(session, "dev", "gold", "fact")
     reader = _read_environment_only(session, principal, "bronze.events", "gold.fact")
     view = DeployService(session, GrantAuthorization(session)).job_version(
-        reader, "dev", version.id
+        reader, "dev", version.id, window_minutes=60
     )
     shown = view.manifest
     assert (shown["edges"], shown["hidden_edges"]) == ([], 1)
@@ -4710,7 +4759,9 @@ def test_a_reference_the_reader_may_not_read_leaves_no_edge_and_no_check_target(
     assert check["generated"] == {"family": "references", "columns": ["store_id"]}
     assert check["hidden_references"] == 1
     assert "gold.dim" not in str([shown["edges"], shown["checks"], shown_fact])
-    full = DeployService(session, AllowAllAuthorization()).job_version(principal, "dev", version.id)
+    full = DeployService(session, AllowAllAuthorization()).job_version(
+        principal, "dev", version.id, window_minutes=60
+    )
     assert (full.manifest["edges"], full.manifest["hidden_edges"]) == (
         [["gold.dim", "gold.fact"]],
         0,
