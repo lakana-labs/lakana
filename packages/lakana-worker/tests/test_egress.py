@@ -114,6 +114,11 @@ REFUSED = [
     "2001:db8::1",
     "100::1",
     "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+    "168.63.129.16",  # Azure's WireServer: a public-range address (#543)
+    "::ffff:168.63.129.16",
+    "64:ff9b::a83f:8110",
+    "192.0.0.192",
+    "fd20:ce::254",
 ]
 
 
@@ -290,6 +295,14 @@ NEVER_REACHABLE = [
     "64:ff9b:1::7f00:1",
     "64:ff9b:1:ffff::a9fe:a9fe",
     "2002:a9fe:a9fe::1",
+    "168.63.129.16",  # Azure's WireServer (#543)
+    "::ffff:168.63.129.16",
+    "::168.63.129.16",
+    "64:ff9b::a83f:8110",
+    "2002:a83f:8110::1",
+    "192.0.0.192",  # Oracle Cloud's older metadata address
+    "::ffff:192.0.0.192",
+    "fd20:ce::254",  # Google Cloud's IPv6 metadata address
 ]
 
 

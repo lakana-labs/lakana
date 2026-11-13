@@ -26,6 +26,7 @@ from fake_launcher import FakeLauncher
 from launcher_fakes import settings
 from scripts.test_support.ports import closed_port
 
+from lakana_core.net import egress as core_egress
 from lakana_core.projects.package_sources import RegisteredIndex
 from lakana_worker.docker_environments import DockerEnvironments
 from lakana_worker.index_credentials import IndexAccess
@@ -1136,6 +1137,33 @@ def test_an_ipv4_mapped_address_is_judged_as_its_ipv4_address() -> None:
     assert egress.forbidden(mapped, frozenset(), frozenset())
     assert not egress.forbidden(mapped, frozenset(), frozenset({LOOPBACK}))
     assert not egress.forbidden(ipaddress.ip_address("10.1.2.3"), frozenset(), frozenset())
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        pytest.param("168.63.129.16", id="azure-wireserver"),
+        pytest.param("::ffff:168.63.129.16", id="azure-wireserver-ipv4-mapped"),
+        pytest.param("192.0.0.192", id="oracle-legacy-metadata"),
+        pytest.param("fd20:ce::254", id="gcp-ipv6-metadata"),
+    ],
+)
+def test_a_cloud_service_address_outside_link_local_is_forbidden(address: str) -> None:
+    """Azure's WireServer and the other fixed service addresses are refused (#543).
+
+    Parameters
+    ----------
+    address
+        A cloud provider's service address, in one of its spellings.
+    """
+    assert egress.forbidden(ipaddress.ip_address(address), frozenset(), frozenset())
+
+
+def test_the_proxy_refuses_every_address_the_shared_guard_never_reaches() -> None:
+    """The launcher cannot import `lakana_core`, so its list is a copy; this keeps it in sync."""
+    for network in core_egress._NEVER_NETWORKS:
+        for address in (network.network_address, network.broadcast_address):
+            assert egress.forbidden(address, frozenset(), frozenset()), address
 
 
 def test_a_listen_address_is_read(tmp_path: Path) -> None:

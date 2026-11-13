@@ -111,10 +111,16 @@ _SUBJECTS = {"connection-test": "connection test"}
 _NEVER = (
     ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("100.100.100.200/32"),
+    ipaddress.ip_network("168.63.129.16/32"),
+    ipaddress.ip_network("192.0.0.192/32"),
     ipaddress.ip_network("fd00:ec2::254/128"),
+    ipaddress.ip_network("fd20:ce::254/128"),
 )
 """Beyond loopback, link-local, multicast, unspecified and reserved: "this network" and the
-metadata addresses outside link-local (Alibaba Cloud, AWS over IPv6)."""
+cloud service addresses outside link-local (Alibaba Cloud, Azure's WireServer, Oracle Cloud's
+older metadata address, AWS and Google Cloud over IPv6). A copy of
+`lakana_core.net.egress._NEVER_NETWORKS`, which the launcher cannot import; a test keeps the two
+in sync."""
 
 
 REFUSED_FILE = "refused.json"

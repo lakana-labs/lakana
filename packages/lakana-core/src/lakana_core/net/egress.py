@@ -19,8 +19,8 @@ what is sent:
   runs, because they log URLs and host names.
 
 - `is_never_reachable` is the stricter rule for a host an operator listed: it may resolve to a
-  private address, never to loopback, link-local, unspecified, multicast, reserved or a known
-  metadata address, nor to an IPv6 form that carries one.
+  private address, never to loopback, link-local, unspecified, multicast, reserved or a known cloud
+  service address (metadata services, Azure's WireServer), nor to an IPv6 form that carries one.
 
 The worker's webhook client (`lakana_worker.egress`) and the JSON fetcher of the CI OIDC
 verification (`lakana_core.net.https_json`) are built on these.
@@ -215,9 +215,12 @@ def is_internal(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     bool
         `True` for private, loopback, link-local, multicast, reserved, unspecified, CGNAT,
         documentation and benchmarking addresses, unique-local and site-local IPv6, anything the
-        standard library does not call global, and any IPv6 address that carries such an IPv4
-        address.
+        standard library does not call global, every address that `is_never_reachable` (Azure's
+        WireServer, 168.63.129.16, is in a public range), and any IPv6 address that carries such
+        an IPv4 address.
     """
+    if is_never_reachable(address):
+        return True
     embedded = _embedded_ipv4(address)
     if any(is_internal(inner) for inner in embedded):
         return True
@@ -265,14 +268,24 @@ _NEVER_NETWORKS = tuple(
         "240.0.0.0/4",
         # Alibaba Cloud's metadata service, inside the CGNAT range.
         "100.100.100.200/32",
+        # Azure's WireServer (VM extension settings, sometimes protected ones), in a public
+        # range, so nothing else here or in `is_internal` would catch it (#543).
+        "168.63.129.16/32",
+        # Oracle Cloud's older metadata address, inside the IETF protocol range 192.0.0.0/24.
+        "192.0.0.192/32",
         "::/128",
         "::1/128",
         "fe80::/10",
         "ff00::/8",
         # AWS's IPv6 metadata service, inside the unique-local range.
         "fd00:ec2::254/128",
+        # Google Cloud's IPv6 metadata service, inside the unique-local range.
+        "fd20:ce::254/128",
     )
 )
+"""Never reached, even for a host an operator listed. The egress proxy of the launcher, which
+imports only the standard library, keeps a copy (`lakana_worker.launcher.egress._NEVER`); a test
+keeps the two in sync."""
 
 
 def is_never_reachable(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -287,10 +300,10 @@ def is_never_reachable(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -
     -------
     bool
         `True` for loopback, link-local (the cloud metadata address 169.254.169.254 among them),
-        unspecified, multicast and reserved IPv4 addresses, the known metadata addresses inside
-        private ranges, and any IPv6 address that carries such an IPv4 address. Private ranges
-        themselves, site-local IPv6 (``fec0::/10``) among them, are not: an operator may list a
-        host on an internal network.
+        unspecified, multicast and reserved IPv4 addresses, the known cloud service addresses
+        outside link-local (metadata services, Azure's WireServer 168.63.129.16), and any IPv6
+        address that carries such an IPv4 address. Private ranges themselves, site-local IPv6
+        (``fec0::/10``) among them, are not: an operator may list a host on an internal network.
     """
     if any(is_never_reachable(inner) for inner in _embedded_ipv4(address)):
         return True

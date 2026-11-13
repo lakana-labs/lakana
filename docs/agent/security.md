@@ -6075,7 +6075,8 @@ pins each line.
   disables verification. `LAKANA_WEBHOOK__ALLOW_HOSTS` exempts named hosts from the scheme and
   port rules and from the private-address check, nothing else: a listed host is still refused
   (`NEVER_REACHABLE`) when any of its addresses `is_never_reachable` (loopback, link-local,
-  unspecified, multicast, reserved, `fd00:ec2::254`, `100.100.100.200`, or an IPv6 form that
+  unspecified, multicast, reserved, `fd00:ec2::254`, `fd20:ce::254`, `100.100.100.200`,
+  `192.0.0.192`, Azure's WireServer `168.63.129.16` (#543), or an IPv6 form that
   carries such an IPv4), the rule of `LAKANA_CI_OIDC__ALLOW_HOSTS` (#243). One exception: the
   entry `localhost`, for the URL host `localhost` only, may reach loopback addresses (never the
   rest of the set), so that a receiver on the worker's own machine still works (the get-told
@@ -6229,7 +6230,9 @@ and a fake fetcher; no test reaches the network.
   the keys alike; the issuers' own hosts are not exempt unless listed, and every other host must
   be public. Even a listed host is refused when any of its addresses is loopback, link-local
   (`169.254.0.0/16`, `fe80::/10`, so 169.254.169.254), unspecified, multicast or reserved, a
-  known metadata address inside a private range (`fd00:ec2::254`, `100.100.100.200`), or an
+  known cloud service address outside link-local (`fd00:ec2::254`, `fd20:ce::254`,
+  `100.100.100.200`, `192.0.0.192`, and Azure's WireServer `168.63.129.16`, which sits in a
+  public range and so is refused for unlisted hosts too, #543), or an
   IPv6 form that carries such an IPv4 address (`is_never_reachable`). Since #243
   `LAKANA_WEBHOOK__ALLOW_HOSTS` applies the same rule (with a loopback exception for the entry
   `localhost`), and it still exempts the scheme and the port. Pinning, `https` on 443, no redirects, the 64 KiB cap and the deadlines
