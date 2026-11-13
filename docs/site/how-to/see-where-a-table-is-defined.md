@@ -159,7 +159,8 @@ line and the first seven characters of the deployed commit, such as
   as the characters it is made of, never run. A control character, a zero-width character or a
   character that changes the direction of the text, such as U+202E (right-to-left override),
   would hide or reorder what you read, so the page shows it as a small mark with its code, such as
-  `U+202E`, in the file, the path and the repository's name. Tabs and line breaks are kept.
+  `U+202E`, in the file, the path and the repository's name. The same character many times in a
+  row is one mark with its count, such as `U+200B ×12`. Tabs and line breaks are kept.
 
 ## Use it from Python
 

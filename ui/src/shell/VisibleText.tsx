@@ -37,28 +37,43 @@ function markOf(character: string): string {
 /**
  * Renders text as text nodes, never as markup, and every character of {@link INVISIBLE} as a
  * visible mark such as `U+202E`, so a file, a path or a value cannot hide or reorder what the
- * person reads. Tabs and line feeds stay as they are.
+ * person reads. Tabs and line feeds stay as they are. A run of the same character becomes one
+ * mark with its count, such as `U+200B ×350000`, so a file full of one invisible character cannot
+ * freeze the page with a mark per character.
  *
  * @param props - The text.
  * @param props.text - The text, as the server sent it.
  * @returns The text and its marks.
  */
 export function VisibleText({ text }: VisibleTextProps): JSX.Element {
-  const parts: ReactNode[] = [];
+  // Plain text, or a run of one marked character: where it starts and how many it holds.
+  const parts: (string | { index: number; character: string; count: number })[] = [];
   let start = 0;
   for (const match of text.matchAll(INVISIBLE)) {
-    if (match.index > start) {
-      parts.push(text.slice(start, match.index));
+    const last = parts.at(-1);
+    if (match.index === start && typeof last === "object" && last.character === match[0]) {
+      last.count += 1;
+    } else {
+      if (match.index > start) {
+        parts.push(text.slice(start, match.index));
+      }
+      parts.push({ index: match.index, character: match[0], count: 1 });
     }
-    parts.push(
-      <span key={match.index} className="char-mark">
-        {markOf(match[0])}
-      </span>,
-    );
     start = match.index + match[0].length;
   }
   if (start < text.length) {
     parts.push(text.slice(start));
   }
-  return <>{parts}</>;
+  const shown: ReactNode[] = parts.map((part) =>
+    typeof part === "string" ? (
+      part
+    ) : (
+      <span key={part.index} className="char-mark">
+        {part.count === 1
+          ? markOf(part.character)
+          : `${markOf(part.character)} ×${String(part.count)}`}
+      </span>
+    ),
+  );
+  return <>{shown}</>;
 }

@@ -27,11 +27,17 @@ const NODE_GLOBALS = ["process", "Buffer"].map((name) => ({
 // (docs/agent/security.md, Preview and Defined in). eslint-plugin-react is not installed, so the
 // HTML sinks are banned by syntax; scripts/lint-ban.test.ts proves each selector fires.
 const TEXT_NODES_ONLY = "Render text nodes only (docs/agent/security.md, Preview and Defined in)";
+const HTML_KEYS = "/^(dangerouslySetInnerHTML|innerHTML|outerHTML|srcdoc|srcDoc)$/";
 const RAW_HTML = [
-  "JSXAttribute[name.name='dangerouslySetInnerHTML']",
-  "Property[key.name='dangerouslySetInnerHTML']",
+  "JSXAttribute[name.name=/^(dangerouslySetInnerHTML|srcDoc)$/]",
+  // A props or options object (createElement's, Object.assign's), by name or quoted; a
+  // destructuring pattern only reads, so it is left alone.
+  `ObjectExpression > Property[key.name=${HTML_KEYS}]`,
+  `ObjectExpression > Property[key.value=${HTML_KEYS}]`,
   "AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]",
-  "CallExpression[callee.property.name='insertAdjacentHTML']",
+  "AssignmentExpression > MemberExpression.left[computed=true][property.value=/^(innerHTML|outerHTML)$/]",
+  "CallExpression[callee.property.name=/^(insertAdjacentHTML|createContextualFragment|parseFromString|setHTMLUnsafe)$/]",
+  "CallExpression[callee.object.name='document'][callee.property.name=/^(write|writeln)$/]",
 ].map((selector) => ({ selector, message: TEXT_NODES_ONLY }));
 
 // The TSDoc tags jsdoc does not know by itself.

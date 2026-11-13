@@ -50,6 +50,20 @@ describe("VisibleText", () => {
     expect(container.textContent).toBe("U+202EU+2066abU+0007");
   });
 
+  it("collapses a run of one character into one mark with its count", () => {
+    const { container } = render(<VisibleText text={"\u200B".repeat(300_000)} />);
+
+    expect(container.querySelectorAll(".char-mark")).toHaveLength(1);
+    expect(container.textContent).toBe("U+200B \u00D7300000");
+  });
+
+  it("keeps a mark for each different character and for each run", () => {
+    const { container } = render(<VisibleText text={"a\u200B\u200Bb\u200B\u202E\u202E"} />);
+
+    const marks = [...container.querySelectorAll(".char-mark")].map((mark) => mark.textContent);
+    expect(marks).toEqual(["U+200B \u00D72", "U+200B", "U+202E \u00D72"]);
+  });
+
   it("leaves letters of every script, accents and emoji as they are", () => {
     const text = "Café 東京 שלום مرحبا 😀 a b";
 

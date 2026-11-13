@@ -16,6 +16,15 @@ const FORMS = [
   "inner-html.tsx",
   "outer-html.tsx",
   "insert-adjacent.tsx",
+  "jsx-srcdoc.tsx",
+  "property-name.tsx",
+  "property-quoted.tsx",
+  "computed-assignment.tsx",
+  "contextual-fragment.tsx",
+  "parse-from-string.tsx",
+  "set-html-unsafe.tsx",
+  "document-write.tsx",
+  "document-writeln.tsx",
 ];
 
 /**
