@@ -267,7 +267,10 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   to extend. Where several buttons share one request, only the pressed one is `pending`. Never `isDisabled` for the pressed button, which
   drops focus; other disabling conditions stay `isDisabled` beside `pending`.
 - **Every string the user sees goes through i18next** (`ui/src/i18n/en.json`), from the first
-  stylesheet and string on (part 1a, Task 3).
+  stylesheet and string on (part 1a, Task 3). A screen that loads on demand may keep its strings
+  beside it and register them with `addResourceBundle` in a module each of its files imports
+  (the table page: `ui/src/catalog/table/table.en.json` and `tableStrings.ts`), so they stay out
+  of the first load; a string the first load shows (a skeleton's, an error's) stays in `en.json`.
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools
   (`axe-core`, `@axe-core/playwright`, `lightningcss` and its platform packages) and the OFL-1.1
   fonts are the only exceptions; see "Copyleft rule: none strong, weak only via a justified

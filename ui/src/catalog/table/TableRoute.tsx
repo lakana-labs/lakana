@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useRef } from "react";
+import { type JSX, lazy, Suspense, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 
@@ -13,7 +13,7 @@ import { NotFound } from "../../shell/NotFound";
 import { Page } from "../../shell/Page";
 import { catalogPath, TABLE_TABS, type TableTab } from "../paths";
 import { DEFAULT_VIEW } from "../view";
-import { TableSkeleton } from "./TableSkeleton";
+import { LoadingStatus, TableSkeleton } from "./TableSkeleton";
 import "./table.css";
 
 const TablePage = lazy(async () => {
@@ -54,6 +54,7 @@ interface TableViewProps {
 function TableView({ place, tab }: TableViewProps): JSX.Element {
   const { t } = useTranslation();
   const heading = useRef<HTMLHeadingElement>(null);
+  const [waiting, setWaiting] = useState(true);
   const { environment, namespace, name } = place;
   return (
     <div className="table-page">
@@ -67,8 +68,9 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
         ]}
       >
         <Suspense fallback={<TableSkeleton />}>
-          <TablePage place={place} tab={tab} headingRef={heading} />
+          <TablePage place={place} tab={tab} headingRef={heading} onWaiting={setWaiting} />
         </Suspense>
+        <LoadingStatus waiting={waiting} />
       </Page>
     </div>
   );
@@ -83,11 +85,14 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
 export function TableRoute(): JSX.Element {
   const params = useParams();
   const tab = tabOf(params["*"]);
-  const place: TableRef = {
-    environment: params["env"] as string,
-    namespace: params["namespace"] as string,
-    name: params["table"] as string,
-  };
+  const environment = params["env"] as string;
+  const namespace = params["namespace"] as string;
+  const name = params["table"] as string;
+  // One object for one table, so that pressing the tab one is on reads nothing again.
+  const place = useMemo<TableRef>(
+    () => ({ environment, namespace, name }),
+    [environment, namespace, name],
+  );
   if (tab === null) {
     return <NotFound />;
   }

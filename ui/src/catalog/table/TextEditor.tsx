@@ -22,6 +22,7 @@ import { useAttempt } from "../../sign-in/Attempt";
 import { problemText } from "../../sign-in/messages";
 import { editLanguage, languageName } from "./language";
 import { useTableData } from "./TableContext";
+import "./tableStrings";
 
 /** The most characters a description may have. */
 export const DESCRIPTION_MAX = 4000;
@@ -106,7 +107,7 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
   const [pending, setPending] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const sending = useRef(false);
-  const start = useRef<HTMLTextAreaElement>(null);
+  const start = useRef<HTMLInputElement>(null);
   useEffect(() => {
     start.current?.focus();
   }, []);
@@ -210,7 +211,7 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
         isInvalid={refusal?.field === "label"}
       >
         <Label>{name("label")}</Label>
-        <Input />
+        <Input ref={start} />
         <Text slot="description">{t("table.edit.labelHelp")}</Text>
         {refusal?.field === "label" && (
           <Text slot="errorMessage" role="alert">
@@ -228,7 +229,7 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
         isInvalid={refusal?.field === "description"}
       >
         <Label>{name("description")}</Label>
-        <TextArea rows={6} ref={start} />
+        <TextArea rows={6} />
         <p className="second" role="status" aria-label={name("description")}>
           {count(descriptionUsed, DESCRIPTION_MAX)}
         </p>

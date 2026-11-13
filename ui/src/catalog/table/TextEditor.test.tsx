@@ -36,11 +36,11 @@ describe("TextEditor", () => {
     expect(LABEL_MAX).toBe(100);
   });
 
-  it("starts with the current texts and focus in the description", () => {
+  it("starts with the current texts and focus in the label, the first field", () => {
     show();
 
     expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue("Every sale.");
-    expect(screen.getByRole("textbox", { name: "Description" })).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Label" })).toHaveFocus();
     expect(screen.getByRole("textbox", { name: "Label" })).toHaveValue("Sales");
   });
 

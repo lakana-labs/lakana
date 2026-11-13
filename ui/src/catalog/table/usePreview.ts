@@ -20,6 +20,7 @@ import type { QueryRunStatus, ResultPageOut, TableOut, TableRef } from "../../ap
 import { useMe } from "../../shell/me";
 import { problemText } from "../../sign-in/messages";
 import type { StatusKind } from "../../status/status";
+import "./tableStrings";
 
 /** Where a preview is: asking, refused before asking, waiting for its run, or ended. */
 type PreviewPhase = "checking" | "not_allowed" | "artifact" | "waiting" | "done" | "failed";

@@ -48,7 +48,9 @@ const NAMED_LIMITS = [
   // of invisible characters. React Aria's dialog itself stays in the first load.
   // Raised to the measured 7.78 kB (2026-11-13) + 10 % with the Preview tab loaded on demand from
   // the page: its import, the loading line and the code the bundler moved here with it.
-  { name: "a table's page", prefix: "TablePage-", limit: "8.56 kB" },
+  // Raised to the measured 9.97 kB (2026-11-13) + 10 % with the page's strings, which moved out of
+  // the first load (about 1.8 kB gzipped less there) into this chunk, registered when it loads.
+  { name: "a table's page", prefix: "TablePage-", limit: "10.97 kB" },
   // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
   // the cells as text and the Value panel. It loads only when the Preview tab is opened.
@@ -125,6 +127,9 @@ function onDemandChunks(initial) {
 const INITIAL = firstLoad();
 
 export default [
+  // The table page's strings load with its chunk (src/catalog/table/tableStrings.ts), which took the
+  // first load from 209.3 to 207.5 kB (2026-11-13); the limit stays at 212 kB so that the
+  // strings of Lineage, Health and Access, which load there too, do not use it up.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the

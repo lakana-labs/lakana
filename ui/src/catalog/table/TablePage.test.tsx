@@ -118,6 +118,21 @@ describe("TablePage", () => {
       expect(await heading()).toHaveFocus();
     });
 
+    it("reads the definition once, however often the current tab is pressed", async () => {
+      const { user, server } = renderShell(PAGE);
+      const reads = (): number =>
+        server.sent.filter((request) => request.path === `${TABLE_PATH}/definition`).length;
+      await screen.findByText(/line 1/);
+      await waitFor(() => {
+        expect(reads()).toBe(1);
+      });
+
+      await user.click((await tabs())[0] as HTMLElement);
+      await user.click((await tabs())[0] as HTMLElement);
+
+      expect(reads()).toBe(1);
+    });
+
     it("shows the same tabs to a reader who is not an administrator", async () => {
       renderShell(PAGE, {
         me: { name: "kim", admin: false, mayDeploy: false },

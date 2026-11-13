@@ -18,6 +18,7 @@ import { ColumnsTab } from "./ColumnsTab";
 import { Overview } from "./Overview";
 import { TableHeader } from "./TableHeader";
 import { TableProvider } from "./TableContext";
+import "./tableStrings";
 import { TableSkeleton } from "./TableSkeleton";
 
 // React Aria's grid is most of the tab's code, so the tab loads only when it is opened.
@@ -34,6 +35,8 @@ export interface TablePageProps {
   readonly tab: TableTab;
   /** The page's heading, which receives the focus when the table is read again. */
   readonly headingRef: RefObject<HTMLHeadingElement | null>;
+  /** Told whether the table is still being read, so the frame can say it is loading once. */
+  readonly onWaiting: (waiting: boolean) => void;
 }
 
 /** Properties of {@link Problem}. */
@@ -97,9 +100,10 @@ function Problem({ place, resource, headingRef }: ProblemProps): JSX.Element {
  * @param props.place - The table the address names.
  * @param props.tab - The tab the address names.
  * @param props.headingRef - The page's heading.
+ * @param props.onWaiting - Told whether the table is still being read.
  * @returns The page's content.
  */
-export function TablePage({ place, tab, headingRef }: TablePageProps): JSX.Element {
+export function TablePage({ place, tab, headingRef, onWaiting }: TablePageProps): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
   const { environment, namespace, name } = place;
@@ -109,6 +113,10 @@ export function TablePage({ place, tab, headingRef }: TablePageProps): JSX.Eleme
   );
   const resource = useResource(load);
   const loaded = resource.data;
+  const waiting = loaded === undefined && resource.error === null;
+  useEffect(() => {
+    onWaiting(waiting);
+  }, [waiting, onWaiting]);
   const recorded = useRef(false);
   useEffect(() => {
     if (loaded !== undefined && !recorded.current) {

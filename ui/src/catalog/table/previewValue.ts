@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import type { TFunction } from "i18next";
+import "./tableStrings";
 
 /** A cell as the preview shows it. */
 export interface PreviewText {

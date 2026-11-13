@@ -8,6 +8,7 @@
 import type { TFunction } from "i18next";
 
 import type { TableHealthOut } from "../../api";
+import "./tableStrings";
 
 /** One line of the health block. */
 export interface FiredLine {

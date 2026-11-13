@@ -73,14 +73,14 @@ for (const theme of ["light", "dark"] as const) {
 
         await openTable(page);
         await page.getByRole("button", { name: "Edit", exact: true }).click();
-        await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
+        await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
         expect(await violations(page), "the editor on Overview").toEqual([]);
         await page.keyboard.press("Escape");
         await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeFocused();
 
         await openTable(page, "/columns");
         await page.getByRole("button", { name: "Edit store_id" }).click();
-        await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
+        await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
         expect(await violations(page), "the editor under a column").toEqual([]);
         await page.keyboard.press("Escape");
         await expect(page.getByRole("button", { name: "Edit store_id" })).toBeFocused();
@@ -302,7 +302,7 @@ test.describe("the table page in real Chromium", () => {
 
     await openTable(page);
     await page.getByRole("button", { name: "Edit", exact: true }).click();
-    await expect(page.getByRole("textbox", { name: "Description" })).toBeFocused();
+    await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ }).click();
     await expect(page.getByRole("region", { name: "The file's text" })).toBeVisible();
