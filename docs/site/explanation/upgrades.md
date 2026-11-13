@@ -144,7 +144,7 @@ before you upgrade:
 
 <!-- source: docs/examples/find-control-characters.sh#find -->
 ```bash
-find assets -type f -exec perl -CSDA -e '
+find assets -type f \( -iname '*.sql' -o -iname '*.py' \) -exec perl -CSDA -e '
   while (<<>>) {
     if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]|\r(?!\n)/) {
       my $code = ord $&;
@@ -155,10 +155,11 @@ find assets -type f -exec perl -CSDA -e '
   }' {} +
 ```
 
-It prints one line for each place a deploy would refuse, and nothing when the folder is clean; it
-needs only `find` and `perl` 5.22 or later, which Linux and macOS ship; a file name with a
-control character is printed with `\x..` escapes. A dry run (`lakana deploy --dry-run`)
-shows the same refusal before you upgrade a production deploy.
+It looks only at `.sql` and `.py` files, the ones a deploy reads. It prints one line for each
+place a deploy would refuse, and nothing when the folder is clean; it needs only `find` and
+`perl` 5.22 or later, which Linux and macOS ship; a file name with a control character is
+printed with `\x..` escapes. A dry run (`lakana deploy --dry-run`) shows the refusal only on a
+server that already has this rule, so run the command above before you upgrade.
 
 ### $Format placeholders are no longer expanded (breaking)
 

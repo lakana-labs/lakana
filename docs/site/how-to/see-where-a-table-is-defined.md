@@ -119,8 +119,8 @@ message to try again.
 ## Control characters
 
 A deploy refuses an asset file that contains a control character, so a file Lakana records cannot
-hold one; the error names the file and the line. Files deployed before that rule are still printed
-safely, with each control character escaped. See
+hold one; the error names the file and the line. The CLI escapes each control character when it prints a
+file anyway, as an extra safeguard. See
 [the upgrade note](../explanation/upgrades.md#control-characters-in-asset-files-are-refused-breaking)
 for how to find them in a repository.
 

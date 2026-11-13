@@ -991,12 +991,14 @@ class ViewAuditConfig(BaseModel):
         (`lakana table health`) and a page of the audit log with other people's events
         (`lakana audit list`) (default true). If the event cannot be written, the read is
         refused with 503. Turn it off only if you do not need to know who looked at whose
-        activity.
+        activity. It never turns off `SOURCE_VIEWED`: a read of a deployed file is always
+        recorded.
     window_minutes
         Minutes during which the same view by the same person writes no second event (default
-        60; 1 to 1,440). The next page, another status filter and a screen that refreshes itself
-        are the same view; another environment, another table, another `--submitter` or another
-        `--principal-id` is another view.
+        60; 1 to 1,440). It also applies to `SOURCE_VIEWED`: the same person reading the same
+        table's file at the same commit is recorded once per window. The next page, another
+        status filter and a screen that refreshes itself are the same view; another environment,
+        another table, another `--submitter` or another `--principal-id` is another view.
     """
 
     enabled: bool = True

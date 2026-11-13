@@ -5,7 +5,7 @@ set -euo pipefail
 # scripts/tests/test_find_control_characters.py runs it on sample files.
 
 # docs:start find
-find assets -type f -exec perl -CSDA -e '
+find assets -type f \( -iname '*.sql' -o -iname '*.py' \) -exec perl -CSDA -e '
   while (<<>>) {
     if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]|\r(?!\n)/) {
       my $code = ord $&;

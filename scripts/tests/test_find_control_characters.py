@@ -27,6 +27,8 @@ def test_the_command_lists_what_a_deploy_refuses(tmp_path: Path) -> None:
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "crlf.sql").write_bytes(b"SELECT\t1\r\nFROM x\r\n")
+    (assets / "notes.txt").write_bytes(b"\x00\n")
+    (assets / "UP.SQL").write_bytes(b"-- \x00\n")
     (assets / "ok.sql").write_bytes("SELECT 'é€日本' -- 👩‍💻\n".encode())
     (assets / "nul.sql").write_bytes(b"SELECT 1\n-- \x00\n")
     (assets / "esc.sql").write_bytes(b"SELECT 1 -- \x1b[31m\n")
@@ -42,6 +44,7 @@ def test_the_command_lists_what_a_deploy_refuses(tmp_path: Path) -> None:
         timeout=30,
     )
     assert sorted(done.stdout.splitlines()) == [
+        "assets/UP.SQL:1: control character U+0000",
         "assets/c1.sql:3: control character U+0085",
         "assets/cr.sql:1: control character U+000D",
         "assets/esc.sql:1: control character U+001B",
@@ -55,8 +58,8 @@ def test_a_file_name_is_never_run_or_printed_raw(tmp_path: Path) -> None:
     """A name ending in a pipe is read as a file, and a control character in a name is escaped."""
     assets = tmp_path / "assets"
     assets.mkdir()
-    (assets / "x|").write_bytes(b"-- \x00\n")
-    (assets / "echo PWNED >&2 |").write_bytes(b"SELECT 1\n")
+    (assets / "x|.sql").write_bytes(b"-- \x00\n")
+    (assets / "echo PWNED >&2 |.py").write_bytes(b"SELECT 1\n")
     (assets / "bad\x1bname.sql").write_bytes(b"-- \x00\n")
     (assets / "é.sql").write_bytes(b"-- \x00\n")
     done = subprocess.run(
@@ -70,6 +73,6 @@ def test_a_file_name_is_never_run_or_printed_raw(tmp_path: Path) -> None:
     assert done.stderr == ""
     assert sorted(done.stdout.splitlines()) == [
         "assets/bad\\x1bname.sql:1: control character U+0000",
-        "assets/x|:1: control character U+0000",
+        "assets/x|.sql:1: control character U+0000",
         "assets/é.sql:1: control character U+0000",
     ]
