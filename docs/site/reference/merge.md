@@ -113,6 +113,7 @@ the filter or mask for you.
 | `422` | a key that repeats in the rows | ``key `id` repeats in 12 rows of this batch; make it unique (for example with `unique(subset=['id'], keep='last')`)`` |
 | `422` | a key of the rows that matches two or more rows of the table | ``key `id` repeats in 2 rows of bronze.customers that this batch matches; a merge needs one row per key. Find them with `SELECT id, count(*) FROM bronze.customers GROUP BY id HAVING count(*) > 1` and remove the repeats (for example by replacing the table) before you merge.`` |
 | `422` | a key column holding lists or structs | the column and its type |
+| `422` | a key column holding a uuid | ``key column `id` is a uuid, which a merge key cannot be; cast it in the SELECT, for example `CAST(id AS VARCHAR)`.`` |
 | `422` | a key of several columns with more than 5,000 rows | ``A merge on a key of several columns takes at most 5,000 rows per batch, and this batch has 12,000. Merge on one key column (a column that holds the whole key), or send batches of at most 5,000 rows.`` |
 | `422` | a row filter or column mask on the table applies to you | ``Merges into bronze.customers are refused while a row filter or column mask applies to you on it: a merge compares your rows with rows you can't see. Ask someone the table is not filtered or masked for to run it, or ask an owner to lift the filter or mask for you.`` |
 | `422` | rows that do not fit the table | the column that differs, as for an append |
