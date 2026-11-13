@@ -93,17 +93,19 @@ output blocks in the documentation are checked (#54). The next element was the m
 until at least October 2027 (#96 is closed). A few SQL forms behave differently; see the
 [notes for 0.19.0](upgrades.md). The query sandbox was hardened for DuckDB 2. A store
 certificate that cannot be verified now fails at once with a message that says why (#277). The
-next elements were M7b, task isolation (#38), then M6 and the web interface.
+next elements were M7b, task isolation (#38), then M6 and the public beta (M7c,
+#33).
 
 0.20.0 (2026-10-23) completed M7b, task isolation (#38 is closed). Each Python task runs in a
 container of its own, started by a launcher that alone holds the Docker socket. An environment
 build reaches only its package indexes, through an egress proxy. Two changes are breaking: the
 Compose bundle uses the docker runner by default, and a protected environment runs Python tasks
 only in containers. See [Run Python tasks in containers](../how-to/run-python-tasks-in-containers.md)
-and the [notes for 0.20.0](upgrades.md#notes-for-0200). The next elements are the open
+and the [notes for 0.20.0](upgrades.md#notes-for-0200). The next elements were the open
 dependency updates and a batch of small issues, then M6 ingestion, M8d data modelling, M7 web
-interface and sign-in, M8, M8b, M8c, M9, M10 and the release candidates (#33) that lead to
-v1.0.0.
+interface and sign-in, a small private test round on a hosted instance, M7c (the public beta,
+#33), M8, M8b, M8c, M9, M10 and v1.0.0. The public beta was dropped on 2026-11-13 (see
+[To v1.0.0](#to-v100)).
 
 M6, ingestion (#1), shipped with 0.21.0 (see the
 [notes for 0.21.0](upgrades.md#notes-for-0210)). An administrator registers
@@ -129,7 +131,7 @@ the web interface and real sign-in from the start; the strict data-model rules (
 grain, key and references, with generated checks, #250) should exist before anyone builds projects
 on Lakana; and the interface then shows model metadata from its first version. Ingestion (M6)
 came first, after task isolation (M7b): a new team's first job is getting its data in, so the
-the first release ships with the ingestion helpers and named connections.
+first release ships with the ingestion helpers and named connections.
 
 1. **M5d, triggers, data quality checks and notifications (built).** Runs start by hand, on a schedule
    or through an API call. A check, a SQL file that must return no rows, can block, keep or
