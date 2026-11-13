@@ -3984,6 +3984,7 @@ class CatalogService:
         *,
         days: int,
         now: datetime,
+        with_readers: bool = True,
     ) -> TableHealth:
         """Show a table's last maintenance, newest check results, readers and health signals.
 
@@ -3999,12 +4000,14 @@ class CatalogService:
             The window of the readers in days, already checked against the kept period.
         now
             The present time.
+        with_readers
+            `False` leaves the readers out: no lookup, no `ACTIVITY_VIEWED` row, whoever `p` is.
 
         Returns
         -------
         TableHealth
-            The health. `readers` is `None` unless `p` may see grants (`MANAGE_GRANT` and the
-            `ADMIN` role, as for the grants listing).
+            The health. `readers` is `None` unless `with_readers` and `p` may see grants
+            (`MANAGE_GRANT` and the `ADMIN` role, as for the grants listing).
 
         Raises
         ------
@@ -4020,7 +4023,7 @@ class CatalogService:
         self._authz.authorize(p, Action.READ_TABLE, scope)
         _, row = self._find_table(ref)
         shown = None
-        if may_see_grants(self._session, self._authz, p):
+        if with_readers and may_see_grants(self._session, self._authz, p):
             shown = readers(self._session, row.id, days=days, now=now)
             others = sum(1 for reader in shown if reader.principal != p.name)
             record_view(

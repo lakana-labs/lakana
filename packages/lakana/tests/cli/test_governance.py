@@ -252,6 +252,52 @@ def test_policy_lists_show_whether_each_policy_is_bound(tmp_path: Path) -> None:
     assert '"bound": true' in as_json.stdout
 
 
+def test_policy_lists_name_the_subject_from_the_answer(tmp_path: Path) -> None:
+    """`subject` reads the answer's names, keeping the user/service words, in one request."""
+    row = {
+        "group_id": None,
+        "environment": "dev",
+        "namespace": "bronze",
+        "table": "sales",
+        "expression": "id > 1",
+        "created_by": "a1",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "bound": True,
+    }
+    bot = {"id": "p2", "name": "ci-bot", "principal_type": "service"}
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/row-filters",
+        json=[
+            {**row, "id": "r1", "principal_id": "p2", "principal": bot, "group": None},
+            {**row, "id": "r2", "principal_id": None, "group_id": "g7", "group": "analysts"},
+        ],
+    )
+    api.on(
+        "GET",
+        "/api/v1/column-masks",
+        json=[
+            {
+                **row,
+                "id": "m1",
+                "column": "c",
+                "principal_id": "p1",
+                "principal": {"id": "p1", "name": "kim.schulz", "principal_type": "user"},
+            }
+        ],
+    )
+
+    filters = invoke(make_state(tmp_path, api), "row-filter", "list")
+    masks = invoke(make_state(tmp_path, api), "column-mask", "list")
+
+    assert "service ci-bot" in filters.stdout
+    assert "group analysts" in filters.stdout
+    assert "user kim.schulz" in masks.stdout
+    assert "principal p1" not in masks.stdout and "group g7" not in filters.stdout
+    assert len(api.requests) == 2
+
+
 def test_column_mask_list(tmp_path: Path) -> None:
     """Filters are forwarded to the list route."""
     mask = {

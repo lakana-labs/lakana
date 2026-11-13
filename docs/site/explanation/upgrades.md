@@ -135,6 +135,11 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### Upgrade the CLI together with the server
+
+- An older CLI shows the jobs and connections of a start asset as `start` and other leaves as
+  `join` in the lineage and neighbours output. Upgrade the CLI together with the server.
+
 ### Control characters in asset files are refused (breaking)
 
 A deploy now refuses an asset file that contains a control character (NUL, a C0 control other

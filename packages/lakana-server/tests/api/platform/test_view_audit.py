@@ -211,3 +211,26 @@ def test_readers_that_cannot_be_audited_are_a_503(client: TestClient) -> None:
     assert response.status_code == 503
     assert _REFUSED in response.json()["detail"]
     assert "bob" not in response.text
+
+
+def test_health_without_readers_writes_no_audit_and_needs_none(client: TestClient) -> None:
+    _environment(client)
+    person(client, "bob", "ANALYST")
+    _table_with_a_reader(client)
+    _refuse_view_rows(client)
+    response = client.get(f"{_TABLES}/t/health", headers=AUTH_HEADER, params={"readers": "false"})
+    assert response.status_code == 200, response.text
+    assert response.json()["readers"] is None
+    assert "bob" not in response.text
+    assert _views(client) == []
+
+
+def test_health_with_readers_is_unchanged_by_default(client: TestClient) -> None:
+    _environment(client)
+    person(client, "bob", "ANALYST")
+    _table_with_a_reader(client)
+    plain = client.get(f"{_TABLES}/t/health", headers=AUTH_HEADER)
+    asked = client.get(f"{_TABLES}/t/health", headers=AUTH_HEADER, params={"readers": "true"})
+    for response in (plain, asked):
+        assert [r["principal"] for r in response.json()["readers"]] == ["bob"]
+    assert len(_views(client)) == 1

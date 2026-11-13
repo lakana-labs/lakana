@@ -2965,6 +2965,18 @@
             "description": "The window of the readers in days, from 1 to the kept period (`LAKANA_TABLE_READS__KEEP_DAYS`, 90 by default); the default window (`LAKANA_TABLE_READS__DEFAULT_DAYS`, 30) when absent."
           },
           {
+            "name": "readers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "False leaves the readers out of the answer; it then looks up no names and writes no `ACTIVITY_VIEWED` audit entry.",
+              "default": true,
+              "title": "Readers"
+            },
+            "description": "False leaves the readers out of the answer; it then looks up no names and writes no `ACTIVITY_VIEWED` audit entry."
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
@@ -6790,7 +6802,7 @@
           "graph"
         ],
         "summary": "Walk the tables and assets upstream and downstream of a table, a column or an asset",
-        "description": "The answer comes from what the projects declare (their assets' inputs and outputs, in every repository), not from runs. `depth` counts the assets crossed. A column starts at its table, plus the references that name it. You see a node only when you may: a table and its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. The walk stops at a node you may not see, and nothing in the answer counts or marks it. Answers 404 when the start or the environment does not exist or you may not see it (one answer for both), 422 for a node, depth, limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
+        "description": "The answer comes from what the projects declare (their assets' inputs and outputs, in every repository), not from runs. `depth` counts the assets crossed. A column starts at its table, plus the references that name it. You see a node only when you may: a table and its columns need `READ_TABLE`, an asset `READ_ENVIRONMENT` and its table. Each asset of the answer brings the jobs that run it (`runs`) and the connections it reads through (`uses`), at its distance: a job needs `READ_ENVIRONMENT`, a connection `READ_ENVIRONMENT` and a caller that is not a task token. The walk stops at a node you may not see, and nothing in the answer counts or marks it. Answers 404 when the start or the environment does not exist or you may not see it (one answer for both), 422 for a node, depth, limit or cursor out of bounds or a question too large to walk, and 503 with `Retry-After` when the walk ran past its time.",
         "operationId": "graph_lineage_api_v1_environments__env__graph_lineage_get",
         "parameters": [
           {
@@ -7011,10 +7023,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds).",
+              "description": "Only edges of these kinds: builds, checks, filters, has_column, links, masks, measures, reads, references, runs, uses; repeat the parameter (kinds=reads&kinds=builds).",
               "title": "Kinds"
             },
-            "description": "Only edges of these kinds; repeat the parameter (kinds=reads&kinds=builds)."
+            "description": "Only edges of these kinds: builds, checks, filters, has_column, links, masks, measures, reads, references, runs, uses; repeat the parameter (kinds=reads&kinds=builds)."
           },
           {
             "name": "lang",
@@ -25389,6 +25401,27 @@
           "bound": {
             "type": "boolean",
             "title": "Bound"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -25406,7 +25439,7 @@
           "bound"
         ],
         "title": "ColumnMaskOut",
-        "description": "Response body for a column mask.\n\nParameters\n----------\nid\n    The column mask's id.\nprincipal_id\n    The principal this mask applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this mask applies to, or `None` if it applies to a\n    principal.\nenvironment\n    The environment this mask applies to.\nnamespace\n    The dot-joined namespace path this mask applies to.\ntable\n    The table this mask applies to.\ncolumn\n    The masked column's name, as the table has it now.\nexpression\n    The replacement value.\ncreated_by\n    The principal who created this mask.\ncreated_at\n    When this mask was created.\nbound\n    As `RowFilterOut.bound`."
+        "description": "Response body for a column mask.\n\nParameters\n----------\nid\n    The column mask's id.\nprincipal_id\n    The principal this mask applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this mask applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the mask applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the mask applies to a principal.\nenvironment\n    The environment this mask applies to.\nnamespace\n    The dot-joined namespace path this mask applies to.\ntable\n    The table this mask applies to.\ncolumn\n    The masked column's name, as the table has it now.\nexpression\n    The replacement value.\ncreated_by\n    The principal who created this mask.\ncreated_at\n    When this mask was created.\nbound\n    As `RowFilterOut.bound`."
       },
       "ColumnOut": {
         "properties": {
@@ -27164,6 +27197,27 @@
               }
             ],
             "title": "Note"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -27181,7 +27235,7 @@
           "granted_at"
         ],
         "title": "GrantOut",
-        "description": "Response body for a grant.\n\nParameters\n----------\nid\n    The grant's id.\nprincipal_id\n    The principal this grant applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this grant applies to, or `None` if it applies to a\n    principal.\nrole\n    The role template granted, or `None` if a raw action was granted.\naction\n    The raw action granted, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_by\n    The principal who created this grant.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant\n    of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`, which work only\n    with the `ADMIN` role on the instance; `None` otherwise."
+        "description": "Response body for a grant.\n\nParameters\n----------\nid\n    The grant's id.\nprincipal_id\n    The principal this grant applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this grant applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the grant applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the grant applies to a principal.\nrole\n    The role template granted, or `None` if a raw action was granted.\naction\n    The raw action granted, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_by\n    The principal who created this grant.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant\n    of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`, which work only\n    with the `ADMIN` role on the instance; `None` otherwise."
       },
       "GraphEdgeOut": {
         "properties": {
@@ -27205,7 +27259,7 @@
           "target"
         ],
         "title": "GraphEdgeOut",
-        "description": "An edge of the metadata graph, from `source` to `target` (both node ids).\n\nParameters\n----------\nkind\n    `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,\n    `runs` or `has_column`.\nsource\n    The node it leaves.\ntarget\n    The node it reaches."
+        "description": "An edge of the metadata graph, from `source` to `target` (both node ids).\n\nParameters\n----------\nkind\n    `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,\n    `runs`, `uses` or `has_column`.\nsource\n    The node it leaves.\ntarget\n    The node it reaches."
       },
       "GraphNodeOut": {
         "properties": {
@@ -27331,6 +27385,17 @@
             "type": "boolean",
             "title": "May Use",
             "default": false
+          },
+          "connection_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Kind"
           }
         },
         "type": "object",
@@ -27341,7 +27406,7 @@
           "distance"
         ],
         "title": "GraphNodeOut",
-        "description": "A node of the metadata graph, with the attributes the caller may see.\n\nParameters\n----------\nid\n    Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,\n    `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,\n    `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`); store it and pass\n    it back as `node`.\nkind\n    `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,\n    `column_mask` or `job`.\nname\n    A name to read: a dotted table, `<table>.<column>`, a term's key.\ndistance\n    Steps from the start: assets crossed for lineage, 1 for a neighbour.\ntable_type\n    A table's `managed`, `external`, `view` or `artifact`.\nmodel_kind\n    A table's declared kind.\ngrain\n    A table's grain, in your language.\nkey\n    A table's declared key columns.\nowner\n    The owner of a table's asset (`None` for a reader without ``READ_ENVIRONMENT``), an\n    asset or a term.\nrepository\n    The repository that declares it (or builds its table).\nlabel\n    A table's label, or a term's name, in your language.\ncolumn_type\n    A column's type.\nreason\n    Always `null` for lineage and neighbours.\nmay_use\n    Always `false` for lineage and neighbours."
+        "description": "A node of the metadata graph, with the attributes the caller may see.\n\nParameters\n----------\nid\n    Its stable id (`table:<uuid>`, `column:<uuid>/<name>`, `asset:<repository>/<name>`,\n    `reference:<uuid>`, `measure:<uuid>`, `term:<uuid>`, `check:<uuid>/<name>`,\n    `row_filter:<uuid>`, `column_mask:<uuid>`, `job:<repository>/<name>`,\n    `connection:<name>`); store it and pass it back as `node`.\nkind\n    `table`, `column`, `asset`, `reference`, `measure`, `term`, `check`, `row_filter`,\n    `column_mask`, `job` or `connection`.\nname\n    A name to read: a dotted table, `<table>.<column>`, a term's key.\ndistance\n    Steps from the start: assets crossed for lineage, 1 for a neighbour.\ntable_type\n    A table's `managed`, `external`, `view` or `artifact`.\nmodel_kind\n    A table's declared kind.\ngrain\n    A table's grain, in your language.\nkey\n    A table's declared key columns.\nowner\n    The owner of a table's asset (`None` for a reader without ``READ_ENVIRONMENT``), an\n    asset or a term.\nrepository\n    The repository that declares it (or builds its table).\nlabel\n    A table's label, or a term's name, in your language.\ncolumn_type\n    A column's type.\nreason\n    Always `null` for lineage and neighbours.\nmay_use\n    Always `false` for lineage and neighbours.\nconnection_kind\n    A connection's kind, such as `postgresql`; `null` for any other node, and for a\n    connection the manifest names that the environment does not have."
       },
       "GraphOut": {
         "properties": {
@@ -31164,6 +31229,27 @@
           "bound": {
             "type": "boolean",
             "title": "Bound"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubjectPrincipalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -31180,7 +31266,7 @@
           "bound"
         ],
         "title": "RowFilterOut",
-        "description": "Response body for a row filter.\n\nParameters\n----------\nid\n    The row filter's id.\nprincipal_id\n    The principal this filter applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this filter applies to, or `None` if it applies to a\n    principal.\nenvironment\n    The environment this filter applies to.\nnamespace\n    The dot-joined namespace path this filter applies to.\ntable\n    The table this filter applies to.\nexpression\n    The restricted-subset predicate, in the table's current column names.\ncreated_by\n    The principal who created this filter.\ncreated_at\n    When this filter was created.\nbound\n    `true` when the policy follows its columns by field id (a raw table's, by name). `false`\n    right after an upgrade, while the worker binds earlier policies over the next passes (see\n    the upgrade notes); only a policy that stays `false` after that needs creating again."
+        "description": "Response body for a row filter.\n\nParameters\n----------\nid\n    The row filter's id.\nprincipal_id\n    The principal this filter applies to, or `None` if it applies to a\n    group.\ngroup_id\n    The group this filter applies to, or `None` if it applies to a\n    principal.\nprincipal\n    Who the principal is by name: its id, name and type (`user` or `service`), or `None` when\n    the filter applies to a group, or when a server read the name just as the principal was\n    deleted.\ngroup\n    The name of the group, or `None` when the filter applies to a principal.\nenvironment\n    The environment this filter applies to.\nnamespace\n    The dot-joined namespace path this filter applies to.\ntable\n    The table this filter applies to.\nexpression\n    The restricted-subset predicate, in the table's current column names.\ncreated_by\n    The principal who created this filter.\ncreated_at\n    When this filter was created.\nbound\n    `true` when the policy follows its columns by field id (a raw table's, by name). `false`\n    right after an upgrade, while the worker binds earlier policies over the next passes (see\n    the upgrade notes); only a policy that stays `false` after that needs creating again."
       },
       "RunAsIn": {
         "properties": {
@@ -32333,6 +32419,35 @@
         ],
         "title": "StorageConfigIn",
         "description": "Storage configuration as accepted from a client.\n\nParameters\n----------\nscheme\n    Storage backend.\nroot\n    Root URI for the environment.\noptions\n    Backend-specific options."
+      },
+      "SubjectPrincipalOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "principal_type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "service"
+            ],
+            "title": "Principal Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "principal_type"
+        ],
+        "title": "SubjectPrincipalOut",
+        "description": "The principal a grant, row filter or column mask is for.\n\nParameters\n----------\nid\n    The principal's id.\nname\n    The principal's name.\nprincipal_type\n    `user` for a person, `service` for a service account."
       },
       "TableCreate": {
         "properties": {

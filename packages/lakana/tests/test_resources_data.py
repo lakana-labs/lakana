@@ -3556,3 +3556,18 @@ def test_a_query_result_counts_the_bytes_it_downloaded() -> None:
     run.result()
 
     assert _usage.bytes_read() == len(file_bytes)
+
+
+def test_sdk_health_sends_readers_false_only_when_asked() -> None:
+    """`health` adds `readers=false` when `readers=False` and nothing otherwise."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={**_HEALTH_BODY, "readers": None})
+
+    tables = Tables(_transport(handler))
+    tables.health("dev", "bronze.sales", readers=True)
+    health = tables.health("dev", "bronze.sales", days=7, readers=False)
+    assert [dict(r.url.params) for r in seen] == [{}, {"days": "7", "readers": "false"}]
+    assert health.readers is None

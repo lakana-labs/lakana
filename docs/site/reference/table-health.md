@@ -24,16 +24,18 @@ more is shown as `null`, not guessed.
 
 ## The health of a table
 
-`GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health?days=N` needs `READ_TABLE`
-on the table, as the other table routes do; a caller without it gets `403`, a table that does not
-exist `404`.
+`GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health?days=N&readers=false` needs
+`READ_TABLE` on the table, as the other table routes do; a caller without it gets `403`, a table
+that does not exist `404`. `readers=false` leaves the readers out (`readers` is `null`, even for an
+administrator): no names are looked up and no `ACTIVITY_VIEWED` event is written. Leave it out of
+the request, or send `readers=true`, for the readers; the parameter exists for the table page's Overview, which does not need them.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `days` | integer | The window `readers` covers. |
 | `last_maintenance` | object or `null` | The last maintenance that changed the table; `null` if there is none. |
 | `checks` | list | The newest result of each check of the table, by check name. Empty if it has none. |
-| `readers` | list or `null` | Who read the table in the window; `null` if you may not see the table's grants. |
+| `readers` | list or `null` | Who read the table in the window; `null` if you may not see the table's grants, or if you asked for `readers=false`. |
 
 ### `last_maintenance`
 
@@ -483,9 +485,10 @@ Without a right to see the grants the command says that the readers are not show
 
 ## SDK
 
-`client.tables.health(environment, "namespace.table", days=None)` returns a `TableHealth` with
-`days`, `last_maintenance` (a `LastMaintenance` or `None`), `checks` (a list of `CheckHealth`) and
-`readers` (a list of `Reader`, or `None`). `Table.last_write_at`, `Table.row_count`,
+`client.tables.health(environment, "namespace.table", days=None, readers=True)` returns a
+`TableHealth` with `days`, `last_maintenance` (a `LastMaintenance` or `None`), `checks` (a list of
+`CheckHealth`) and `readers` (a list of `Reader`, or `None`; `readers=False` asks the server to
+leave them out, and nothing is audited). `Table.last_write_at`, `Table.row_count`,
 `Table.size_bytes` and `Table.file_count` hold the numbers of the snapshot; they are `None` for a
 server that is older than table health. `Table.health` holds the effects that are not `warn` (empty when
 every signal warns, and from an older server), `Table.health_missing` the keys of it that name a

@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.catalog.connection_lineage import CONNECTION_SOURCE
 from lakana_core.catalog.identity import resolve_environment_id, resolve_table_id
+from lakana_core.connections.service import acts_for_a_task
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import Connection, LineageEdge, Namespace, Table
@@ -334,9 +335,10 @@ class LineageService:
         Returns
         -------
         bool
-            Whether `p` holds `READ_ENVIRONMENT` there and does not act with a task token.
+            Whether `p` holds `READ_ENVIRONMENT` there and does not act with a task token
+            (`acts_for_a_task`, the connection routes' rule).
         """
-        return p.task_scope is None and self._authz.permits(
+        return not acts_for_a_task(p) and self._authz.permits(
             p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment)
         )
 
