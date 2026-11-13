@@ -9,6 +9,8 @@ import type {
   GraphNodeOut,
   GraphOut,
   PermissionsOut,
+  TableDefinitionFileOut,
+  TableDefinitionOut,
   TableHealthOut,
   TableOut,
 } from "../api";
@@ -269,9 +271,45 @@ export const DOWN: GraphOut = lineage([node("table", "gold.sales.daily_sales", 1
 /** The path of the table's lineage on the server. */
 export const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
 
+/** Where the fact table is defined: line 1 of a file in `analytics`, on GitHub. */
+export const DEFINITION: TableDefinitionOut = {
+  defined: true,
+  repository: "analytics",
+  path: "models/gold/fact_sales.sql",
+  commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+  line: 1,
+  project_version_id: "7f3e2d1c-0b9a-4876-9543-210fedcba987",
+  deployed_at: "2026-11-12T05:50:00Z",
+  browse_url:
+    "https://github.com/acme/analytics/blob/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/models/gold/fact_sales.sql#L1",
+};
+
+/** The text of the file that defines the fact table. */
+const SOURCE = "/* lakana\ngrain: one row per sale\n*/\nSELECT * FROM silver.sales\n";
+
 /**
- * The routes the table page reads and writes for a person: the table, what they may do, and
- * the record that they opened it. The person may do everything.
+ * The definition with the file's text, with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The answer of `GET .../definition/file`.
+ */
+export function definitionFile(
+  overrides: Partial<TableDefinitionFileOut> = {},
+): TableDefinitionFileOut {
+  return {
+    ...DEFINITION,
+    content: SOURCE,
+    bytes: SOURCE.length,
+    reason: null,
+    message: null,
+    ...overrides,
+  };
+}
+
+/**
+ * The routes the table page reads and writes for a person: the table, what they may do, the
+ * record that they opened it, its health, lineage and where it is defined. The person may do
+ * everything.
  *
  * @param person - The person's principal name.
  * @returns The routes.
@@ -285,6 +323,8 @@ export function tableRoutes(person = "admin"): Record<string, FakeRoute> {
     },
     [`POST /api/v1/principals/${person}/recent`]: { status: 204 },
     [`GET ${TABLE_PATH}/health`]: { status: 200, body: HEALTH },
+    [`GET ${TABLE_PATH}/definition`]: { status: 200, body: DEFINITION },
+    [`GET ${TABLE_PATH}/definition/file`]: { status: 200, body: definitionFile() },
     [`GET ${LINEAGE_PATH}`]: (request) => ({
       status: 200,
       body: request.path.includes("direction=up") ? UP : DOWN,

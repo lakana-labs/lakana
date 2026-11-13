@@ -54,8 +54,11 @@ follow each other.
 - **Facts.** Owner; Rows; Size with the number of data files, such as "3.1 MB in 12 files";
   Last write; Last read with how many people read the table in the last 7 days, such as "2 hours
   ago · 3 readers in the last 7 days" (never who); Created; and Grain, the sentence the table's
-  header gives for what one row is. A figure that does not exist yet says so in words: "Not
-  known", "Never written", "Never read" or "No owner".
+  header gives for what one row is; and Defined in, the file, line and commit in git that define
+  the table, whose path opens the file (see
+  [See where a table is defined](see-where-a-table-is-defined.md#in-the-web-interface)). A figure
+  that does not exist yet says so in words: "Not known", "Never written", "Never read" or "No
+  owner".
 - **Comes from · goes to.** The tables directly upstream, which feed this one, and directly
   downstream, which it feeds, as links, at most five each way and then "and 2 more". "Nothing
   upstream." and "Nothing downstream." mean there is none you may see. Jobs and connections are

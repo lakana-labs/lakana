@@ -535,6 +535,21 @@
       "created": "Created",
       "grain": "Grain"
     },
+    "definedIn": {
+      "term": "Defined in",
+      "show": "Show the file",
+      "line": ", line {{line}}",
+      "openHost": "Open in your git host",
+      "title": "Where {{name}} is defined",
+      "repository": "Repository",
+      "path": "Path",
+      "commit": "Commit",
+      "text": "The file's text",
+      "reading": "Reading the file…",
+      "gone": "No deployed project defines this table any more: its project changed since the page was read. Reload the page to see the table as it is now.",
+      "auditUnavailable": "The file is not shown because reading it could not be recorded in the audit log. Try again in a moment; if it keeps failing, ask an administrator to check the server.",
+      "close": "Close"
+    },
     "healthBlock": {
       "heading": "Health",
       "more": "and {{count}} more",

@@ -82,6 +82,8 @@ export type { SignInSettingsOut } from "./settings";
 export {
   describeColumn,
   describeTable,
+  getDefinition,
+  getDefinitionFile,
   getLineage,
   getTable,
   getTableHealth,
@@ -93,6 +95,8 @@ export type {
   GraphOut,
   ModelReferenceOut,
   PermissionsOut,
+  TableDefinitionFileOut,
+  TableDefinitionOut,
   TableHealthOut,
   TableOut,
   TableRef,

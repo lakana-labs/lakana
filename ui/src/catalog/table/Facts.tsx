@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { OwnerName, RowCount, Unknown, When } from "../cells";
 import { formatBytes } from "../format";
+import { DefinedIn } from "./DefinedIn";
 import { useTableData } from "./TableContext";
 
 /** Properties of {@link Fact}. */
@@ -38,13 +39,13 @@ function Fact({ term, children }: FactProps): JSX.Element {
 /**
  * Renders the facts as a description list. Where something is not known the fact says so in
  * words. Last read shows when and how many people read the table in the last 7 days, never who:
- * the names belong to the Health tab.
+ * the names belong to the Health tab. Defined in comes last, once its own read arrives.
  *
  * @returns The facts.
  */
 export function Facts(): JSX.Element {
   const { t, i18n } = useTranslation();
-  const { table } = useTableData();
+  const { ref, table } = useTableData();
   const size = table.size_bytes;
   const bytes = size === null ? null : formatBytes(size, i18n.language);
   const grain = table.model?.grain ?? null;
@@ -90,6 +91,7 @@ export function Facts(): JSX.Element {
           <When iso={table.created_at} never={t("catalog.notKnown")} />
         </Fact>
         {grain !== null && <Fact term={t("table.facts.grain")}>{grain}</Fact>}
+        <DefinedIn place={ref} />
       </dl>
     </section>
   );

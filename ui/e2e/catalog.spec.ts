@@ -131,6 +131,22 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.getByRole("button", { name: "Edit store_id" })).toBeFocused();
       });
 
+      test("axe finds nothing in the file dialog of Defined in, which marks the bidi character and gives focus back", async ({
+        page,
+      }) => {
+        await page.goto("/catalog/prod/gold.sales/fact_sales");
+        const path = page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ });
+        await path.click();
+        const dialog = page.getByRole("dialog", { name: "Where fact_sales is defined" });
+        const text = dialog.getByRole("region", { name: "The file's text" });
+        await expect(text).toBeVisible();
+        await expect(text.locator(".char-mark")).toHaveText("U+202E");
+        expect(await violations(page), "the file dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(path).toBeFocused();
+      });
+
       test("at least 24 px between the content of every two neighbouring cells", async ({
         page,
       }) => {
@@ -407,6 +423,13 @@ test.describe("the Catalog in real Chromium", () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(withEditor, "the editor open").toBeLessThanOrEqual(0);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ }).click();
+    await expect(page.getByRole("region", { name: "The file's text" })).toBeVisible();
+    const withFile = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(withFile, "the file dialog open").toBeLessThanOrEqual(0);
     const api = requests.filter((url) => url.includes("/api/")).map((url) => new URL(url).pathname);
     expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
     expect(errors).toEqual([]);

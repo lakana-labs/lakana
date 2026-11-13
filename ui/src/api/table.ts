@@ -543,3 +543,65 @@ export function describeColumn(
   );
   return api.request<TableOut>("PUT", path, change);
 }
+
+/**
+ * Where the environment's current deployment defines a table, as `GET .../definition` answers
+ * it. Every field but `defined` is null for a table no current deployment defines.
+ */
+export interface TableDefinitionOut {
+  /** Whether a current deployment defines the table. */
+  readonly defined: boolean;
+  /** The repository's name. */
+  readonly repository: string | null;
+  /** The file's path in the repository. */
+  readonly path: string | null;
+  /** The deployed commit, never the branch head. */
+  readonly commit: string | null;
+  /** The line the file defines the table on. */
+  readonly line: number | null;
+  /** The deployed project version. */
+  readonly project_version_id: string | null;
+  /** When that version was first recorded in the environment. */
+  readonly deployed_at: string | null;
+  /** The server's HTTPS link to the line on the git host, or null when it builds none. */
+  readonly browse_url: string | null;
+}
+
+/**
+ * A table's definition with the file's text, or the reason the text is not returned, as
+ * `GET .../definition/file` answers it.
+ */
+export interface TableDefinitionFileOut extends TableDefinitionOut {
+  /** The file's text (UTF-8, line-feed line endings), or null. */
+  readonly content: string | null;
+  /** The size of the text's UTF-8 encoding, set only with `content`. */
+  readonly bytes: number | null;
+  /** Why `content` is null; null with content and for a table no deployment defines. */
+  readonly reason: "restricted" | "not_recorded" | "too_large" | null;
+  /** The server's sentence for `reason`, naming no table, or null. */
+  readonly message: string | null;
+}
+
+/**
+ * Reads where a table is defined: repository, path, line, commit and the server's link.
+ *
+ * @param ref - The table.
+ * @returns The location, or `defined: false`.
+ * @throws {ApiError} for a refusal; 403 alike for a table the person may not read and one that
+ *   does not exist.
+ */
+export function getDefinition(ref: TableRef): Promise<TableDefinitionOut> {
+  return api.request<TableDefinitionOut>("GET", tableApiPath(ref, "/definition"));
+}
+
+/**
+ * Reads the file that defines a table. The server records each read with a text in the audit
+ * log, so call it only when the person asks to see the file.
+ *
+ * @param ref - The table.
+ * @returns The location with the text, or with the reason the text is not returned.
+ * @throws {ApiError} for a refusal; 503 when the read could not be recorded, and then no text.
+ */
+export function getDefinitionFile(ref: TableRef): Promise<TableDefinitionFileOut> {
+  return api.request<TableDefinitionFileOut>("GET", tableApiPath(ref, "/definition/file"));
+}

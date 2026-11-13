@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { fakeServer } from "../test/server";
-import { DOWN, HEALTH, LINEAGE_PATH, TABLE, TABLE_PATH, UP } from "../test/table";
+import {
+  DEFINITION,
+  definitionFile,
+  DOWN,
+  HEALTH,
+  LINEAGE_PATH,
+  TABLE,
+  TABLE_PATH,
+  UP,
+} from "../test/table";
 import {
   describeColumn,
   describeTable,
+  getDefinition,
+  getDefinitionFile,
   getLineage,
   getTable,
   getTableHealth,
@@ -110,5 +121,21 @@ describe("table", () => {
 
     expect(server.sent[0]?.path).toBe(`${TABLE_PATH}/columns/50%25%20off/description?lang=en`);
     expect(server.sent[0]?.body).toEqual({ description: null });
+  });
+
+  it("reads where a table is defined, and its file only from the file's own path", async () => {
+    const file = definitionFile();
+    const server = fakeServer({
+      [`GET ${TABLE_PATH}/definition`]: { status: 200, body: DEFINITION },
+      [`GET ${TABLE_PATH}/definition/file`]: { status: 200, body: file },
+    });
+
+    expect(await getDefinition(REF)).toEqual(DEFINITION);
+    expect(await getDefinitionFile(REF)).toEqual(file);
+
+    expect(server.sent.map((request) => request.path)).toEqual([
+      `${TABLE_PATH}/definition`,
+      `${TABLE_PATH}/definition/file`,
+    ]);
   });
 });

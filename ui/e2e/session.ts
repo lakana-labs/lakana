@@ -251,6 +251,34 @@ const PERMISSIONS_PATH = "/api/v1/principals/admin/permissions";
 /** The path of the table's health, which Overview reads without the readers. */
 const HEALTH_PATH = `${TABLE_PATH}/health`;
 
+/** The path of where the table is defined, which Overview reads for its Defined in fact. */
+const DEFINITION_PATH = `${TABLE_PATH}/definition`;
+
+/** The path of the file that defines the table, read only when its dialog opens. */
+const DEFINITION_FILE_PATH = `${TABLE_PATH}/definition/file`;
+
+/** Where the table is defined: a file on GitHub, so Defined in has its link. */
+const DEFINITION = {
+  defined: true,
+  repository: "analytics",
+  path: "models/gold/fact_sales.sql",
+  commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+  line: 1,
+  project_version_id: "7f3e2d1c-0b9a-4876-9543-210fedcba987",
+  deployed_at: "2026-11-12T05:50:00Z",
+  browse_url:
+    "https://github.com/acme/analytics/blob/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678/models/gold/fact_sales.sql#L1",
+};
+
+/** The file's text: a header, a line wider than a phone and a right-to-left override to mark. */
+const DEFINITION_FILE = {
+  ...DEFINITION,
+  content: `/* lakana\ngrain: one row per sale\n*/\nSELECT sale_id, store_id, sold_at, amount, customer_email, channel, note FROM silver.sales -- \u202Eevil\n`,
+  bytes: 139,
+  reason: null,
+  message: null,
+};
+
 /** The path of the lineage Overview reads one step each way. */
 const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
 
@@ -429,6 +457,8 @@ export const STUBBED = [
   HEALTH_PATH,
   LINEAGE_PATH,
   PERMISSIONS_PATH,
+  DEFINITION_PATH,
+  DEFINITION_FILE_PATH,
 ];
 
 /**
@@ -481,6 +511,14 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname === HEALTH_PATH,
     (route) => route.fulfill({ json: HEALTH }),
+  );
+  await page.route(
+    (url) => url.pathname === DEFINITION_PATH,
+    (route) => route.fulfill({ json: DEFINITION }),
+  );
+  await page.route(
+    (url) => url.pathname === DEFINITION_FILE_PATH,
+    (route) => route.fulfill({ json: DEFINITION_FILE }),
   );
   await page.route(
     (url) => url.pathname === LINEAGE_PATH,

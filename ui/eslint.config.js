@@ -23,6 +23,17 @@ const NODE_GLOBALS = ["process", "Buffer"].map((name) => ({
     "ui/src/ runs in the browser, which has no Node globals; use import.meta.env or Uint8Array.",
 }));
 
+// Untrusted text (file contents, names, preview values) is rendered as text nodes only
+// (docs/agent/security.md, Preview and Defined in). eslint-plugin-react is not installed, so the
+// HTML sinks are banned by syntax; scripts/lint-ban.test.ts proves each selector fires.
+const TEXT_NODES_ONLY = "Render text nodes only (docs/agent/security.md, Preview and Defined in)";
+const RAW_HTML = [
+  "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+  "Property[key.name='dangerouslySetInnerHTML']",
+  "AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]",
+  "CallExpression[callee.property.name='insertAdjacentHTML']",
+].map((selector) => ({ selector, message: TEXT_NODES_ONLY }));
+
 // The TSDoc tags jsdoc does not know by itself.
 const TSDOC_TAGS = [
   "alpha",
@@ -65,7 +76,16 @@ const requireJsdoc = {
 };
 
 export default defineConfig(
-  { ignores: ["coverage/", "test-results/", "playwright-report/", "node_modules/"] },
+  // scripts/lint-fixtures/ holds the violations scripts/lint-ban.test.ts lints on purpose.
+  {
+    ignores: [
+      "coverage/",
+      "test-results/",
+      "playwright-report/",
+      "node_modules/",
+      "scripts/lint-fixtures/",
+    ],
+  },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   {
@@ -93,6 +113,7 @@ export default defineConfig(
   {
     rules: {
       "no-restricted-globals": ["error", ...NETWORK_GLOBALS],
+      "no-restricted-syntax": ["error", ...RAW_HTML],
       "no-restricted-properties": [
         "error",
         { object: "window", property: "fetch", message: SERVER_ONLY_THROUGH_API },

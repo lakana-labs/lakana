@@ -222,6 +222,50 @@
 
 /* Links in the page's blocks take the accent, not the browser's blue (unreadable on dark). */
 .overview a,
-.columns-table a {
+.columns-table a,
+.source-dialog a {
   color: var(--color-accent);
+}
+
+/* Defined in: the path is a button that opens the file; the file scrolls in its own region. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dialog.source-dialog {
+  width: min(960px, 100%);
+}
+
+.source-text {
+  max-height: 60vh;
+  overflow: auto;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-sunk);
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  line-height: var(--type-code-line);
+}
+
+.source-text mark {
+  background: var(--color-accent-bg);
+  color: inherit;
+}
+
+.line-number {
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: var(--space-2);
+  color: var(--color-text-muted);
+  text-align: end;
+  user-select: none;
 }
