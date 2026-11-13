@@ -2452,7 +2452,7 @@ class DeployService:
         `not_recorded`), a check on the tables its SQL names. Every entry gets
         `content_reason` and `content_message` (both `None` when the SQL is shown); a withheld
         entry loses `sql` and `normalized_sql`. Each file shown is recorded as `SOURCE_VIEWED`
-        first, once per reader, table and commit within the window, and nothing is returned
+        first, once per reader, table, commit and path within the window, and nothing is returned
         when that fails.
 
         Parameters
@@ -2645,9 +2645,10 @@ class DeployService:
             `hidden_references` counts the unreadable names (1 when they cannot be listed);
             name, table, check, path, on_failure and description stay, and a generated check's
             `generated` keeps only its family and columns. A check that fails the content gate
-            on its table and the tables its SQL names, or has no string `path`, loses `sql`
-            (`restricted`). A value that is not a list, and an entry that is not a mapping,
-            show as nothing.
+            on its table and the tables its SQL names (a file read in its SQL, or any of them a
+            view, its own table included: a check does not define its table), or has no string
+            `path`, loses `sql` (`restricted`). A value that is not a list, and an entry that
+            is not a mapping, show as nothing.
         """
         if not isinstance(checks, list):
             return []
@@ -2680,7 +2681,14 @@ class DeployService:
                 and not hidden
                 and isinstance(path, str)
                 and passes_content_gate(
-                    self._session, self._authz, p, environment, table, list(names), False
+                    self._session,
+                    self._authz,
+                    p,
+                    environment,
+                    table,
+                    list(names),
+                    bool(sql_file_references(entry["sql"], names)),
+                    defines=False,
                 )
             )
             _gate_content(entry, None if passes else DefinitionReason.RESTRICTED, shown_files)

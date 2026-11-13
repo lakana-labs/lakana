@@ -424,6 +424,8 @@ def passes_content_gate(
     table: object,
     gate_tables: object,
     gate_raw: object,
+    *,
+    defines: bool = True,
 ) -> bool:
     """Apply the strict content rule to one file: the rule of every route that shows a file.
 
@@ -447,14 +449,18 @@ def passes_content_gate(
         The table names the file uses; untrusted, so anything but a list of strings refuses.
     gate_raw
         Whether the file reads a raw path or a connection; only `False` passes.
+    defines
+        Whether the file defines `table` (an asset file), so that `table` may be a view: its
+        gate set then lists the view body's tables. A check only reads its table, so for it
+        (`False`) every gate table that is a view refuses, its own included.
 
     Returns
     -------
     bool
         Whether the reader holds READ_ENVIRONMENT; the file reads no raw path or connection;
-        `table` and every gate name are table names the reader may read; no gate table other
-        than `table` is a view; and no row filter or column mask (or an unreadable one) applies
-        to the reader on any gate table that exists.
+        `table` and every gate name are table names the reader may read; no gate table is a
+        view, except `table` itself when `defines`; and no row filter or column mask (or an
+        unreadable one) applies to the reader on any gate table that exists.
     """
     if not authorization.permits(
         p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment)
@@ -477,7 +483,7 @@ def passes_content_gate(
         live = _live_table(session, table_ref)
         if live is None:
             continue
-        if live.table_type is TableType.VIEW and name != dotted:
+        if live.table_type is TableType.VIEW and (not defines or name != dotted):
             return False
         try:
             policy = resolver.resolve(p, table_ref, table_id=live.id)

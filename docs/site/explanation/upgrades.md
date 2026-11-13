@@ -181,12 +181,14 @@ in the repository. `export-ignore` still leaves a file out of a deploy, as befor
 `lakana project-version show` (`GET /api/v1/environments/{env}/project-versions/{id}`) now shows
 an asset's or a check's `sql` and `normalized_sql` only to a reader who would be shown the file
 by `lakana table definition --show`: no row filter or column mask on any table the file uses, no
-read of a path or a connection, and a file Lakana recorded at deploy
+read of a path or a connection, no view among those tables (for a check, not even the table it
+checks), and, for an asset, a file Lakana recorded at deploy
 ([Who may read the file](../how-to/see-where-a-table-is-defined.md#who-may-read-the-file)). Each
 asset and check now carries `content_reason` (`restricted`, `not_recorded` or `null`) and
-`content_message`, and each file shown is recorded in the audit log as `SOURCE_VIEWED`. A version
-deployed before you upgrade to this release shows no SQL to anyone (`not_recorded`): deploy a
-new commit, or read the file in your git host. A script that reads `sql` from a project version
+`content_message`, and each file shown is recorded in the audit log as `SOURCE_VIEWED`. In a version
+deployed before you upgrade to this release, no asset's SQL is shown to anyone (`not_recorded`)
+until you deploy a new commit, or read the file in your git host; its checks' SQL follows the rules
+above. A script that reads `sql` from a project version
 should handle its absence and print `content_message`.
 
 ### Project files are recorded at deploy

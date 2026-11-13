@@ -1339,3 +1339,38 @@ def test_a_project_version_withholds_a_check_without_a_usable_table_or_path(
     checks = _version(session, _analyst(session)).manifest["checks"]
     assert [_content_withheld(c, DefinitionReason.RESTRICTED) for c in checks] == [True] * 3
     assert [e.detail["path"] for e in _source_viewed(session)] == [REC.path]
+
+
+def test_a_project_version_records_each_shown_file_of_one_table(session: Session) -> None:
+    # The asset file and a check file both define or check gold.f at one commit.
+    _world(session)
+    _with_sql(session, "SELECT * FROM gold.f WHERE a IS NULL")
+    analyst = _analyst(session)
+    view = _version(session, analyst)
+    assert view.manifest["checks"][0]["sql"] and _asset(view)["sql"]
+    assert sorted(e.detail["path"] for e in _source_viewed(session)) == [REC.path, _CHECK_PATH]
+    _version(session, analyst)
+    _file(session, analyst)
+    assert len(_source_viewed(session)) == 2
+
+
+def test_a_check_on_a_view_is_withheld_under_a_policy_on_a_base_table(session: Session) -> None:
+    _world(session)
+    _tables(session, "silver.v")
+    _retype(session, "silver.v", TableType.VIEW)
+    version = _with_sql(session, "SELECT * FROM silver.v WHERE a = 42")
+    [check] = version.manifest_json["checks"]
+    version.manifest_json = {**version.manifest_json, "checks": [{**check, "table": "silver.v"}]}
+    session.commit()
+    analyst = _analyst(session)
+    _policy(session, "filter", analyst, "silver.a")
+    [shown] = _version(session, analyst).manifest["checks"]
+    assert _content_withheld(shown, DefinitionReason.RESTRICTED)
+
+
+def test_a_check_that_reads_a_file_is_withheld(session: Session) -> None:
+    # A quoted name is a file path, though it looks like the table silver.a.
+    _world(session)
+    _with_sql(session, "SELECT * FROM 'silver.a'")
+    [check] = _version(session, _analyst(session)).manifest["checks"]
+    assert _content_withheld(check, DefinitionReason.RESTRICTED)

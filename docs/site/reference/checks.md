@@ -436,8 +436,8 @@ may read every table the SQL names, read again from the SQL itself. For anyone e
 `name`, `table`, `check`, `path`, `on_failure` and `description`, and `hidden_references` counts
 the tables they may not read (0 when nothing is hidden). The `sql` also needs the rules of a
 table's file ([Who may read the file](../how-to/see-where-a-table-is-defined.md#who-may-read-the-file)):
-no row filter or column mask on the check's table or any table its SQL names, and none of them a
-view other than the check's table. Otherwise the entry has no `sql` and says why in
+no row filter or column mask on the check's table or any table its SQL names, none of them a view
+(the check's own table included), and no file read in its SQL. Otherwise the entry has no `sql` and says why in
 `content_reason` (`restricted`) and `content_message`; both are `null` when the SQL is shown, and
 showing it is recorded as `SOURCE_VIEWED`.
 

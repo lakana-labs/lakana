@@ -193,7 +193,7 @@ person and view per hour, so paging, other filters and a screen that refreshes i
 filter on one person (`--submitter`) is its own view. Looking only at your own activity records nothing.
 If the event cannot be written, the read is refused rather than served unrecorded. Reading the text
 of the file that defines a table writes a `SOURCE_VIEWED` event (the repository, path and commit),
-once per person, table and commit per hour, and is refused too if that event cannot be written. The events and
+once per person, file and commit per hour, and is refused too if that event cannot be written. The events and
 the setting that turns them off are in [the lists reference](../reference/lists.md#audit).
 
 ## How a query is kept inside its limits
