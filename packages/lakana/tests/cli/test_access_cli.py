@@ -15,14 +15,72 @@ _ANALYST_GRANT = "c913f5e7-8bf0-4b21-9630-46de66a0082d"
 _ENGINEER_GRANT = "d2a1b3c4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 _GROUP_GRANT = "e3b2c4d5-6f7a-4b8c-9d0e-1f2a3b4c5d6e"
 
-_PRINCIPALS = [
-    {"name": "admin", "type": "USER", "is_active": True},
-    {"name": "alice", "type": "USER", "is_active": True},
-    {"name": "ci-bot", "type": "SERVICE_ACCOUNT", "is_active": True},
-]
+_LONG_ID = "11111111-2222-4333-8444-555555555555"
+_LONG_OWNER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+_PEOPLE = {
+    _ALICE_ID: {"id": _ALICE_ID, "name": "alice", "principal_type": "user"},
+    _BOT_ID: {"id": _BOT_ID, "name": "ci-bot", "principal_type": "service"},
+    _LONG_OWNER: {
+        "id": _LONG_OWNER,
+        "name": "ci-pipeline-production",
+        "principal_type": "service",
+    },
+}
+_TEAMS = {_GROUP_ID: "analysts"}
 
 
-def _grant(grant_id: str, **more: str | None) -> dict[str, str | None]:
+def _grant(grant_id: str, **more: str | None) -> dict[str, object]:
+    """Build a grant as the server answers it: ids and, for known ids, the names.
+
+    Parameters
+    ----------
+    grant_id
+        The grant's id.
+    **more
+        Fields that replace the defaults.
+
+    Returns
+    -------
+    dict
+        The `GrantOut` body.
+    """
+    body = _bare_grant(grant_id, **more)
+    body["principal"] = _PEOPLE.get(str(body["principal_id"]))
+    body["group"] = _TEAMS.get(str(body["group_id"]))
+    return body
+
+
+def _without_names(grant: dict[str, object]) -> dict[str, object]:
+    """Take the names off a grant, as a server before this release answers.
+
+    Parameters
+    ----------
+    grant
+        A grant body.
+
+    Returns
+    -------
+    dict
+        The same without `principal` and `group`.
+    """
+    return {k: v for k, v in grant.items() if k not in ("principal", "group")}
+
+
+def _bare_grant(grant_id: str, **more: str | None) -> dict[str, object]:
+    """Build a grant body without names.
+
+    Parameters
+    ----------
+    grant_id
+        The grant's id.
+    **more
+        Fields that replace the defaults.
+
+    Returns
+    -------
+    dict
+        The ids-only body.
+    """
     return {
         "id": grant_id,
         "principal_id": _ALICE_ID,
@@ -68,8 +126,6 @@ def _api() -> FakeApi:
         return httpx.Response(200, json=_GRANTS)
 
     api.routes["GET", "/api/v1/grants"] = grants
-    api.on("GET", "/api/v1/principals", json=_PRINCIPALS)
-    api.on("GET", "/api/v1/groups", json=[{"name": "analysts"}])
     return api
 
 
@@ -271,51 +327,29 @@ def test_grant_create_on_a_namespace(tmp_path: Path) -> None:
     )
 
 
-def test_grant_list_stops_looking_once_every_name_is_found(tmp_path: Path) -> None:
-    """With only alice's grant listed, the remaining principals are never asked about."""
+def test_grant_list_shows_names_without_listing_principals(tmp_path: Path) -> None:
+    """The names come from the answer: one request, and no principal or group is asked about."""
     api = _api()
-    api.routes["GET", "/api/v1/grants"] = lambda request: httpx.Response(
-        200,
-        json=[_GRANTS[0]]
-        if "principal_name" not in request.url.params
-        else ([_GRANTS[0]] if request.url.params["principal_name"] == "alice" else []),
-    )
 
     result = invoke(make_state(tmp_path, api), "grant", "list")
 
     assert result.exit_code == 0, result.stderr
     assert "user alice" in result.stdout
-    asked = [
-        r.url.params["principal_name"] for r in api.requests if "principal_name" in r.url.params
-    ]
-    assert asked == ["admin", "alice"]
+    assert "service ci-bot" in result.stdout
+    assert "group analysts" in result.stdout
+    assert [(r.method, r.url.path) for r in api.requests] == [("GET", "/api/v1/grants")]
 
 
-def test_grant_list_stops_looking_through_groups_once_the_name_is_found(tmp_path: Path) -> None:
-    """Groups are asked in order until the grant's group is named; later ones are skipped."""
-    other = "11111111-2222-4333-8444-555555555555"
-
-    def grants(request: httpx.Request) -> httpx.Response:
-        params = request.url.params
-        if "principal_name" in params:
-            return httpx.Response(200, json=[])
-        if params.get("group_name") == "ops":
-            return httpx.Response(200, json=[_grant("g-ops", principal_id=None, group_id=other)])
-        if params.get("group_name") == "analysts":
-            return httpx.Response(200, json=[_GRANTS[2]])
-        return httpx.Response(200, json=[_GRANTS[2]])
-
+def test_grant_list_names_a_group_without_listing_groups(tmp_path: Path) -> None:
+    """A group grant is named from the answer alone, even when no filter is given."""
     api = FakeApi()
-    api.routes["GET", "/api/v1/grants"] = grants
-    api.on("GET", "/api/v1/principals", json=_PRINCIPALS)
-    api.on("GET", "/api/v1/groups", json=[{"name": "ops"}, {"name": "analysts"}, {"name": "late"}])
+    api.on("GET", "/api/v1/grants", json=[_GRANTS[2]])
 
     result = invoke(make_state(tmp_path, api), "grant", "list")
 
     assert result.exit_code == 0, result.stderr
     assert "group analysts" in result.stdout
-    asked = [r.url.params["group_name"] for r in api.requests if "group_name" in r.url.params]
-    assert asked == ["ops", "analysts"]
+    assert [r.url.path for r in api.requests] == ["/api/v1/grants"]
 
 
 def test_grant_list_with_a_group_filter_names_the_group_without_lookups(tmp_path: Path) -> None:
@@ -338,21 +372,20 @@ def test_grant_list_names_who_each_grant_is_for(tmp_path: Path) -> None:
     assert _ALICE_ID not in result.stdout and _GROUP_ID not in result.stdout
 
 
-def test_grant_list_with_a_filter_asks_only_for_the_principal_type(tmp_path: Path) -> None:
-    """The name is known when `--principal` is given; only its type is read."""
+def test_grant_list_with_a_filter_reads_the_type_from_the_answer(tmp_path: Path) -> None:
+    """`--principal` costs one request: the answer already says the principal is a user."""
     api = _api()
-    api.on("GET", "/api/v1/principals/alice", json=_PRINCIPALS[1])
 
     result = invoke(make_state(tmp_path, api), "grant", "list", "--principal", "alice")
 
     assert "user alice" in result.stdout
-    assert [r.url.path for r in api.requests] == ["/api/v1/grants", "/api/v1/principals/alice"]
+    assert [r.url.path for r in api.requests] == ["/api/v1/grants"]
 
 
 def test_grant_list_falls_back_to_ids_when_names_cannot_be_read(tmp_path: Path) -> None:
-    """A caller that may not list principals still sees the grants."""
+    """An older server that sends no names still gets its grants listed, by id."""
     api = FakeApi()
-    api.on("GET", "/api/v1/grants", json=[_GRANTS[0]])
+    api.on("GET", "/api/v1/grants", json=[_without_names(_GRANTS[0])])
 
     result = invoke(make_state(tmp_path, api), "grant", "list")
 
@@ -384,10 +417,8 @@ def test_an_80_column_listing_keeps_what_revoking_needs(tmp_path: Path) -> None:
 
 def test_a_single_grant_gets_the_exact_revoke_command(tmp_path: Path) -> None:
     """With one row the command is complete and can be copied."""
-    api = _api()
-    api.on("GET", "/api/v1/principals/alice", json=_PRINCIPALS[1])
     result = invoke(
-        make_state(tmp_path, api),
+        make_state(tmp_path, _api()),
         "grant",
         "list",
         "--principal",
@@ -407,10 +438,9 @@ def test_an_empty_column_is_left_out(tmp_path: Path) -> None:
     assert "role" in header and "environment" in header
 
 
-_LONG_ID = "11111111-2222-4333-8444-555555555555"
 _LONG = _grant(
     _LONG_ID,
-    principal_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    principal_id=_LONG_OWNER,
     role="DATA_ENGINEER",
 )
 
@@ -443,36 +473,6 @@ def test_long_names_never_push_the_id_out_at_80_columns(tmp_path: Path) -> None:
             _grant(_GROUP_GRANT, principal_id=None, group_id=_GROUP_ID, role="VIEWER"),
         ],
     )
-    api.on(
-        "GET",
-        "/api/v1/principals",
-        json=[
-            {"name": "ci-pipeline-production", "type": "SERVICE_ACCOUNT", "is_active": True},
-            {"name": "alice", "type": "USER", "is_active": True},
-        ],
-    )
-
-    def by_principal(request: httpx.Request) -> httpx.Response:
-        owner = {"ci-pipeline-production": _LONG["principal_id"], "alice": _ALICE_ID}[
-            request.url.params["principal_name"]
-        ]
-        both = [_LONG, _grant(_ANALYST_GRANT)]
-        return httpx.Response(200, json=[g for g in both if g["principal_id"] == owner])
-
-    def grants(request: httpx.Request) -> httpx.Response:
-        if "principal_name" in request.url.params:
-            return by_principal(request)
-        return httpx.Response(
-            200,
-            json=[
-                _LONG,
-                _grant(_ANALYST_GRANT),
-                _grant(_GROUP_GRANT, principal_id=None, group_id=_GROUP_ID, role="VIEWER"),
-            ],
-        )
-
-    api.routes["GET", "/api/v1/grants"] = grants
-    api.on("GET", "/api/v1/groups", json=[])
 
     result = invoke(make_state(tmp_path, api), "grant", "list", env={"COLUMNS": "80"})
 
@@ -485,7 +485,7 @@ def test_long_names_never_push_the_id_out_at_80_columns(tmp_path: Path) -> None:
 def test_unresolved_names_keep_the_id_and_say_why(tmp_path: Path) -> None:
     """The `principal <uuid>` fallback at 80 columns keeps ids whole and explains itself."""
     api = FakeApi()
-    api.on("GET", "/api/v1/grants", json=_GRANTS)
+    api.on("GET", "/api/v1/grants", json=[_without_names(g) for g in _GRANTS])
 
     result = invoke(make_state(tmp_path, api), "grant", "list", env={"COLUMNS": "80"})
 
@@ -493,12 +493,13 @@ def test_unresolved_names_keep_the_id_and_say_why(tmp_path: Path) -> None:
     _assert_ids_whole_with_hint(result.stdout, [_ANALYST_GRANT, _ENGINEER_GRANT, _GROUP_GRANT])
     assert "Names not found" in result.stderr
     assert "lakana principal list" in result.stderr
+    assert "older" in result.stderr
 
 
 def test_resolved_names_print_no_warning_and_json_none(tmp_path: Path) -> None:
     """Nothing is said on stderr when every name is found, or in JSON mode."""
     assert invoke(make_state(tmp_path, _api()), "grant", "list").stderr == ""
     api = FakeApi()
-    api.on("GET", "/api/v1/grants", json=_GRANTS)
+    api.on("GET", "/api/v1/grants", json=[_without_names(g) for g in _GRANTS])
     quiet = invoke(make_state(tmp_path, api), "--output", "json", "grant", "list")
     assert quiet.stderr == ""

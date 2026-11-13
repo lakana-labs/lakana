@@ -330,7 +330,11 @@ shows the schedule changes a deploy would make before you merge them; `--output 
 table sees it counted (`hidden_adopted`), not named; `project-version show` likewise drops the DAG edges into an asset whose SQL is withheld
 and those from a table the reader may not read, which a `references:` target alone can make
 (`hidden_edges`), the target of a generated `ref_` check, and the reference targets of an asset's model that the reader may not read
-(`hidden_model_references`). Redeploying a SHA reuses its project version. Two deploys racing on one environment:
+(`hidden_model_references`). An asset's or check's SQL in `project-version show` follows the rules of a
+table's file ([Who may read the file](see-where-a-table-is-defined.md#who-may-read-the-file)): not
+under a row filter or column mask, not for a file that reads a path or a connection, and not for a
+version deployed before Lakana recorded project files; the `sql` column then says
+`hidden (restricted)` or `not recorded`. Redeploying a SHA reuses its project version. Two deploys racing on one environment:
 one wins, the other fails and can be retried. Two repositories racing to produce the same new
 table are serialised by a per-environment advisory lock at record time (PostgreSQL): the second
 fails with `table ... is produced by repository ...`. On SQLite (local mode, one worker, deploys

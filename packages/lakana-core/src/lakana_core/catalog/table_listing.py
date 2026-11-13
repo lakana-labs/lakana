@@ -29,7 +29,7 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.catalog.health import CheckHealth
 from lakana_core.catalog.health_summary import (
     HealthSummary,
-    failing_reference_checks,
+    reference_checks,
     shown_health,
 )
 from lakana_core.catalog.search import CatalogSearch, SearchHit, _normalized_query
@@ -56,7 +56,6 @@ from lakana_core.pagination import (
     after_sorted,
     decode_sorted_cursor,
     encode_sorted_cursor,
-    escape_like,
     sorted_order,
 )
 from lakana_core.projects.asset_model import require_model_kind
@@ -265,7 +264,7 @@ class TableListPage:
     next_cursor
         The cursor of the next page; `None` on the last.
     capped
-        Whether a search text stopped early, with more readable candidates than one search reads.
+        Whether a search text stopped early while a further readable table matched.
     """
 
     items: list[TableListItem]
@@ -340,7 +339,7 @@ class TableFacts:
     readers_7d
         The distinct principals that read it in `READERS_DAYS` UTC days, today included.
     health_summary
-        Its stored word, worsened by the failing reference checks the reader may see.
+        Its stored word, merged with the reference checks the reader may see (`shown_health`).
     """
 
     owner: TableOwner | None
@@ -359,9 +358,11 @@ def table_facts(
 ) -> dict[uuid.UUID, TableFacts]:
     """Read the owner, the readers and the reader's health word of some tables.
 
-    Three statements for every table at once (owners, readers, failing reference checks), then
-    one `ReferenceCheckFilter` per environment that holds a failing reference check; their work
-    grows with the environments and the runs of those checks, never with the rows.
+    Three statements for every table at once (owners, readers, reference checks), then one
+    `ReferenceCheckFilter` per environment that holds such a check; their work grows with the
+    environments and the runs of those checks, never with the rows. The reference checks are
+    the failing ones, and the passed ones of a managed table whose stored word is
+    ``not_judged``: a reader who may see one is shown ``healthy``.
 
     Parameters
     ----------
@@ -402,9 +403,15 @@ def table_facts(
         )
     }
     environment_of = {row.id: environment for environment, row in rows}
+    # Only a managed table is judged, so only its passed checks can be the evidence it lacks.
+    unjudged = [
+        row.id
+        for _, row in rows
+        if row.health_item == "not_judged" and table_kind(row.table_type) == "TABLE"
+    ]
     filters: dict[str, ReferenceCheckFilter] = {}
     visible: dict[uuid.UUID, list[CheckHealth]] = {}
-    for table_id, checks in failing_reference_checks(session, ids).items():
+    for table_id, checks in reference_checks(session, ids, passed_for=unjudged).items():
         environment = environment_of[table_id]
         if environment not in filters:
             filters[environment] = ReferenceCheckFilter(session, authz, p, environment)
@@ -438,10 +445,13 @@ def _under(namespace: str) -> ColumnElement[bool]:
     Returns
     -------
     ColumnElement
-        The condition on `Namespace.path`; ``%`` and ``_`` are taken literally.
+        The condition on `Namespace.path`. It compares characters, never a pattern, so no
+        character of the filter is special and case counts on SQLite as on PostgreSQL (SQLite's
+        ``LIKE`` ignores the case of ASCII letters).
     """
     dotted = func.replace(Namespace.path, NAMESPACE_SEPARATOR, ".")
-    return or_(dotted == namespace, dotted.like(escape_like(namespace) + ".%", escape="\\"))
+    prefix = namespace + "."
+    return or_(dotted == namespace, func.substr(dotted, 1, len(prefix)) == prefix)
 
 
 def _is_under(path: str, namespace: str) -> bool:

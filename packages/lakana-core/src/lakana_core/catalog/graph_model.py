@@ -3,9 +3,10 @@
 A node id is stable, and clients may store it and link to it (#374, spec §2): ``table:<uuid>``,
 ``column:<uuid>/<name>``, ``asset:<repository>/<name>``, ``reference:<uuid>``,
 ``measure:<uuid>``, ``term:<uuid>``, ``check:<uuid>/<name>``, ``row_filter:<uuid>``,
-``column_mask:<uuid>`` and ``job:<repository>/<name>``. A caller may also name a node by name
-(`parse_node`: a bare dotted table, ``table:gold.dim_store``, ``column:gold.dim_store/store_id``,
-``check:gold.fact_sales/ref_store_id``, ``term:net_revenue``); answers always carry the ids.
+``column_mask:<uuid>``, ``job:<repository>/<name>`` and ``connection:<name>``. A caller may also
+name a node by name (`parse_node`: a bare dotted table, ``table:gold.dim_store``,
+``column:gold.dim_store/store_id``, ``check:gold.fact_sales/ref_store_id``,
+``term:net_revenue``); answers always carry the ids.
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ class NodeKind(enum.StrEnum):
     ROW_FILTER = "row_filter"
     COLUMN_MASK = "column_mask"
     JOB = "job"
+    CONNECTION = "connection"
 
 
 class EdgeKind(enum.StrEnum):
@@ -71,6 +73,7 @@ class EdgeKind(enum.StrEnum):
     READS = "reads"
     REFERENCES = "references"
     RUNS = "runs"
+    USES = "uses"
 
 
 class LineageWay(enum.StrEnum):
@@ -92,13 +95,14 @@ KIND_WORDS: dict[NodeKind, str] = {
     NodeKind.ROW_FILTER: "row filter",
     NodeKind.COLUMN_MASK: "column mask",
     NodeKind.JOB: "job",
+    NodeKind.CONNECTION: "connection",
 }
 """How a refusal names a kind of node."""
 
 BAD_NODE = (
     "`{node}` is not a node id. Give a table's dotted name, such as gold.dim_store, or a node id "
     "from an answer of lakana graph: it starts with table:, column:, asset:, reference:, "
-    "measure:, term:, check:, row_filter:, column_mask: or job:."
+    "measure:, term:, check:, row_filter:, column_mask:, job: or connection:."
 )
 NO_NODE = (
     "There is no node `{node}` in environment `{env}` that you may see. Give a table as "
@@ -115,7 +119,7 @@ BAD_LIMIT = (
 )
 BAD_EDGE_KIND = (
     "`{kind}` is not an edge kind. Use one of: builds, checks, filters, has_column, links, "
-    "masks, measures, reads, references, runs."
+    "masks, measures, reads, references, runs, uses."
 )
 LINEAGE_KINDS = (
     "Lineage starts at a table, a column or an asset, and `{node}` is a {word}. Ask for its "
@@ -348,6 +352,22 @@ def job_node(repository: str, name: str) -> str:
     return f"job:{repository}/{name}"
 
 
+def connection_node(name: str) -> str:
+    """Build a connection's id.
+
+    Parameters
+    ----------
+    name
+        The connection's name, unique in its environment.
+
+    Returns
+    -------
+    str
+        ``connection:<name>``.
+    """
+    return f"connection:{name}"
+
+
 @dataclass(frozen=True)
 class GraphNode:
     """A node as an answer shows it, with the attributes its reader may see.
@@ -383,6 +403,9 @@ class GraphNode:
         Why `impact` lists it.
     may_use
         Whether `impact` lists it because it may use a column, not because it names it.
+    connection_kind
+        A connection's kind (``postgresql``, ...); `None` for a name the manifest declares
+        without a connection of that name in the environment.
     """
 
     id: str
@@ -399,6 +422,7 @@ class GraphNode:
     column_type: str | None = None
     reason: str | None = None
     may_use: bool = False
+    connection_kind: str | None = None
 
 
 @dataclass(frozen=True, order=True)

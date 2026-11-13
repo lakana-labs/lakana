@@ -822,7 +822,43 @@ guard rather than something the current parser reaches.
 
 _READER_PREFIXES = ("read_",)
 _READER_SUFFIXES = ("_scan",)
-_READER_NAMES = frozenset({"glob", "sniff_csv"})
+_READER_NAMES = frozenset(
+    {
+        "glob",
+        "sniff_csv",
+        # Metadata readers: each reads the file or the table at a path (#487).
+        "parquet_metadata",
+        "parquet_schema",
+        "parquet_file_metadata",
+        "parquet_kv_metadata",
+        "parquet_full_metadata",
+        "parquet_bloom_probe",
+        "avro_metadata",
+        "delta_domain_metadata",
+        "delta_get_transaction_version",
+        "delta_list_files",
+        "iceberg_column_stats",
+        "iceberg_files",
+        "iceberg_history",
+        "iceberg_load_table_response",
+        "iceberg_manifests",
+        "iceberg_metadata",
+        "iceberg_partition_specs",
+        "iceberg_partition_stats",
+        "iceberg_refs",
+        "iceberg_snapshots",
+        # Another database: read, run statements in (`_execute`) or attach.
+        "sqlite_attach",
+        "sqlite_query",
+        "postgres_query",
+        "postgres_execute",
+        "mysql_query",
+        "mysql_execute",
+    }
+)
+"""The table functions of DuckDB 2.0.0 that read a file or a URL, or read, run statements in or
+attach another database, by a name the prefix and suffix above miss. Only the refusal's message
+uses it: every table function outside the generator allow-list is refused either way."""
 
 _LOAD_FIRST = (
     'load the data into a table first (see "Load data from a source" in the user '
@@ -852,9 +888,10 @@ def _refused_table_function(function: str) -> str:
     load_first = _LOAD_FIRST[0].upper() + _LOAD_FIRST[1:]
     if known:
         return (
-            f"table function {function} is not allowed: it reads data directly (a file, a URL "
-            "or another database), outside the access rules of the catalog, so only range, "
-            f"generate_series and unnest may be called in FROM. {load_first}"
+            f"table function {function} is not allowed: it reaches data directly (it reads a "
+            "file or a URL, or reads, runs statements in or attaches another database), outside "
+            "the access rules of the catalog, so only range, generate_series and unnest may be "
+            f"called in FROM. {load_first}"
         )
     return (
         f"table function {function} is not allowed: only range, generate_series and unnest "

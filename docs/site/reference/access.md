@@ -148,5 +148,14 @@ answer = client.principals.permissions("alice", environment="dev", namespace="si
 for permission in answer.permissions:
     print(permission.action, permission.allowed, [via.grant_id for via in permission.via])
 for grant in client.grants.iter(action="READ_TABLE"):
-    print(grant.id, grant.principal_id or grant.group_id, grant.role or grant.action)
+    who = grant.principal.name if grant.principal else grant.group
+    print(grant.id, who, grant.role or grant.action)
 ```
+
+A grant, a row filter and a column mask carry the name of who they are for. `principal` is
+`{id, name, principal_type}` (`principal_type` is `user` or `service`) for a principal and `null`
+for a group; `group` is the group's name and `null` for a principal. The ids `principal_id` and
+`group_id` stay. The names are read in one query for the whole answer, and only a caller who may
+list the grants (an administrator) or the row filters and column masks (`MANAGE_POLICY`) sees
+them. A person or group deleted since answers `null`. A server before this release sends none:
+the SDK leaves both `None`.

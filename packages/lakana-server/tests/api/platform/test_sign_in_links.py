@@ -14,8 +14,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from scripts.test_support.webauthn_test_helpers import SoftAuthenticator
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 import lakana_server.ui
+from lakana_core.identity.links import SETUP_LINK_ISSUER_LAPSED
+from lakana_core.models import AuditEvent, AuditEventType
 from lakana_server.app import create_app
 from lakana_server.settings import Settings, UiConfig
 from tests.conftest import AUTH_HEADER, PUBLIC, SettableClock, write_ui_dist
@@ -406,6 +410,42 @@ def test_recovery_of_an_administrator_by_another_admin_is_403(ui_client: TestCli
     r = ui_client.post("/api/v1/principals/admin/recovery-link", headers=_bearer(boss))
     assert r.status_code == 403, r.text
     assert "server operator" in r.json()["detail"]
+
+
+def test_a_setup_link_is_refused_once_the_operators_token_is_revoked(
+    ui_client: TestClient,
+) -> None:
+    """The page gets the cause and the next step; the link is closed and no session starts."""
+    r = ui_client.post("/api/v1/sign-in/setup-link", headers=AUTH_HEADER)
+    assert r.status_code == 200, r.text
+    url = r.json()["url"]
+    [token] = [
+        t
+        for t in ui_client.get("/api/v1/principals/admin/tokens", headers=AUTH_HEADER).json()
+        if t["name"] == "bootstrap"
+    ]
+    revoked = ui_client.delete(
+        f"/api/v1/principals/admin/tokens/{token['key_id']}", headers=AUTH_HEADER
+    )
+    assert revoked.status_code == 204, revoked.text
+    refused = _redeem(ui_client, url)
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["detail"] == SETUP_LINK_ISSUER_LAPSED
+    assert "set-cookie" not in refused.headers
+    public_id, _ = _parts(url)
+    described = ui_client.post("/api/v1/sign-in/links/describe", json={"link_id": public_id})
+    assert described.json()["state"] == "withdrawn"
+    engine = cast(FastAPI, ui_client.app).state.engine
+    with Session(engine) as session:
+        reasons = [
+            e.detail.get("reason")
+            for e in session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.event_type == AuditEventType.SIGN_IN_LINK_WITHDRAWN
+                )
+            )
+        ]
+    assert reasons == ["operator_token_revoked"]
 
 
 def test_local_mode_comes_from_the_setting(ui_client: TestClient) -> None:

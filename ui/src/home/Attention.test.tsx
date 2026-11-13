@@ -42,7 +42,7 @@ describe("Attention", () => {
 
   it.each([
     ["daily_sales", "Run failed", "prod", "/jobs"],
-    ["gold.station_ranking", "Late", "prod", "/catalog"],
+    ["gold.station_ranking", "Late", "prod", "/catalog/prod/gold/station_ranking"],
     ["not_null_station_id", "Check failed", "dev", "/jobs"],
     ["Query 3f9c2a1b", "Query failed", "dev", "/queries"],
     ["sam", "Recovery link open", "Instance", "/access/recovery-links"],

@@ -89,3 +89,21 @@ export async function getInfo(): Promise<InfoOut> {
   const info = await api.request<InfoOut>("GET", "/api/v1/info");
   return { version: info.version };
 }
+
+/**
+ * Records that the person opened an object, so it shows in Recently opened.
+ *
+ * @param person - The person's own principal name.
+ * @param kind - What was opened.
+ * @param environment - Its environment.
+ * @param ref - The object: a dotted table name.
+ * @returns Nothing.
+ */
+export async function recordOpened(
+  person: string,
+  kind: "table",
+  environment: string,
+  ref: string,
+): Promise<void> {
+  await api.request<undefined>("POST", own(person, "recent"), { kind, environment, ref });
+}

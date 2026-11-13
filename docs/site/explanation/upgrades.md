@@ -135,6 +135,30 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### Lineage of tables in deep namespaces
+
+Lineage recorded before this release for a table in a namespace three or more levels deep keeps
+the cut name (`bronze.raw.orders` for `bronze.raw.eu.orders`); only new runs record the full name.
+
+### Indexes for the descending sorts of the table list
+
+Migration `0078` adds six indexes to the `tables` table, one for each sort of the table list by
+rows, size, last write, last read, health or creation, in the descending order with tables that
+have no value last. It runs with the other migrations, and nothing else has to be done. On
+PostgreSQL a descending page then reads an index instead of sorting every table. Going back drops
+them.
+
+### The table list's namespace filter counts letter case on SQLite
+
+`namespace` (`--under` of `lakana table list`) now treats `Gold` and `gold` as different on SQLite
+(local mode) too, as it always did on PostgreSQL. A script that relied on SQLite matching another
+case must use the namespace's exact name.
+
+### Upgrade the CLI together with the server
+
+- An older CLI shows the jobs and connections of a start asset as `start` and other leaves as
+  `join` in the lineage and neighbours output. Upgrade the CLI together with the server.
+
 ### Control characters in asset files are refused (breaking)
 
 A deploy now refuses an asset file that contains a control character (NUL, a C0 control other
@@ -171,11 +195,38 @@ Lakana instead: `lakana deployments` lists it for each repository, and `lakana t
 shows the commit that defines a table. To find such placeholders, run `git grep -n '\$Format:'`
 in the repository. `export-ignore` still leaves a file out of a deploy, as before.
 
+### A project version shows SQL only under the rules of a table's file (breaking)
+
+`lakana project-version show` (`GET /api/v1/environments/{env}/project-versions/{id}`) now shows
+an asset's or a check's `sql` and `normalized_sql` only to a reader who would be shown the file
+by `lakana table definition --show`: no row filter or column mask on any table the file uses, no
+read of a path or a connection, no view among those tables (for a check, not even the table it
+checks), and, for an asset, a file Lakana recorded at deploy
+([Who may read the file](../how-to/see-where-a-table-is-defined.md#who-may-read-the-file)). Each
+asset and check now carries `content_reason` (`restricted`, `not_recorded` or `null`) and
+`content_message`, and each file shown is recorded in the audit log as `SOURCE_VIEWED`. In a version
+deployed before you upgrade to this release, no asset's SQL is shown to anyone (`not_recorded`)
+until you deploy a new commit, or read the file in your git host; its checks' SQL follows the rules
+above. A script that reads `sql` from a project version
+should handle its absence and print `content_message`.
+
 ### Project files are recorded at deploy
 
 Migration `0077` adds two tables, which hold the files of each deployed project version; it runs
 with the other migrations, and nothing else has to be done. A table's "Defined in" answers
 `not_recorded` for a project until its next deploy.
+
+### Azure's WireServer and two more cloud service addresses are never reached
+
+Lakana now refuses `168.63.129.16` (Azure's WireServer, which hands a virtual machine its
+extension settings), `192.0.0.192` (the metadata address of Oracle Compute Classic and Cloud@Customer) and `fd20:ce::254`
+(Google Cloud's metadata service over IPv6), like `169.254.169.254`: in webhooks, even for a
+host in `LAKANA_WEBHOOK__ALLOW_HOSTS`, in the CI OIDC key fetch, in deploys and repository
+checks, and through the `egress` proxy for builds, tasks and connection tests. The proxy and
+the relays now also refuse these addresses and `169.254.169.254` inside a 6to4 or Teredo IPv6
+address, as the rest of Lakana already did. Nothing has to be done: none of them is a valid
+destination, and a webhook or a connection that names one is refused the way one that names
+`169.254.169.254` is.
 
 ### A proxy is trusted for client addresses only when you list it
 
@@ -204,6 +255,9 @@ with the other migrations, and nothing else has to be done. A table's "Defined i
   `lakana server start --local` use the default name and need nothing). Otherwise no token is
   marked: the bootstrap token keeps its administrator rights, but `lakana sign-in setup-link`
   answers that it is not the operator's.
+- A setup link still open when you upgrade stops working: it was issued before links recorded
+  their token, so it is refused as `operator_token_not_recorded`. Run `lakana sign-in setup-link`
+  again with the current token.
 - The mark goes by that name, so a token an administrator issued for that principal with the
   name `bootstrap` before this release is marked too and gets the operator's powers. Check with
   `lakana token list <bootstrap admin>` after upgrading and revoke any `bootstrap` token you do
@@ -229,6 +283,10 @@ with the other migrations, and nothing else has to be done. A table's "Defined i
   on their next sign-in, sees Get started, and gets no update note for this release.
 - `GET /api/v1/whoami` has a new field `may_deploy`: whether you may deploy in at least one
   environment.
+- `GET /api/v1/whoami`'s `admin` and `may_deploy` follow the credential: a task token or a CI
+  token answers `admin: false` even when its principal holds `ADMIN` on the instance, since it
+  can use no administrator route. A script that decides from `admin` whether to offer an
+  administrator's action should ask with a personal token.
 
 ### Profile pictures, repository checks and deploy keys
 
@@ -1248,7 +1306,9 @@ refused at every use: create it again on a plain root.
   clean-up of it fails with `Unsupported storage scheme`, and nothing of it was written. Create a
   new environment under another name on a supported root, and delete the old one with
   `lakana env delete`. The deleted one keeps its name and stays in the database: its storage
-  cannot be reached to purge it, so the clean-up logs that it skipped it on each run.
+  cannot be reached to purge it, so the clean-up logs that it skipped it on each run. A later
+  release adds `lakana env purge NAME --rows-only`, which removes it from the catalog and frees
+  the name (see [Delete and restore an environment](../how-to/drop-and-restore-a-table.md#when-the-storage-of-a-deleted-environment-cannot-be-reached)).
 - **Scripts that create environments** with a root in another scheme fail at that step: send the
   scheme of the root, or a root in the scheme you meant.
 

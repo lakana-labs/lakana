@@ -41,7 +41,7 @@ export interface HealthSummaryOut {
 }
 
 /** Who owns a table. */
-interface OwnerOut {
+export interface OwnerOut {
   /** The principal's name. */
   readonly name: string;
   /** Whether the owner is a person or a service account. */

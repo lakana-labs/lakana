@@ -741,7 +741,32 @@ class CatalogSearch:
                 table_id = uuid.UUID(row.sort_id)
                 if table_id not in hits:
                     hits[table_id] = _hit(row, needle)
-        return TableMatches(hits, bool(cut))
+        return TableMatches(hits, bool(cut) and self._another_table(selects, hits))
+
+    def _another_table(self, selects: Sequence[_Candidates], listed: Collection[uuid.UUID]) -> bool:
+        """Say whether a candidate names a table not yet listed, after a walk was cut.
+
+        The candidates left after the cut may all be further texts of tables already listed
+        (another column, a translation); only a further table means some are not listed.
+
+        Parameters
+        ----------
+        selects
+            The candidate selects the walk ran, already restricted to the readable tables.
+        listed
+            The tables the walk found.
+
+        Returns
+        -------
+        bool
+            Whether any candidate names another table.
+        """
+        others = bindparam("listed", list(listed), expanding=True, literal_execute=True)
+        union = union_all(*(arm.where(Table.id.not_in(others)) for arm in selects)).subquery()
+        return (
+            self._session.execute(select(literal(1)).select_from(union).limit(1)).first()
+            is not None
+        )
 
     def _may_see(
         self,

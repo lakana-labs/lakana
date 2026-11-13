@@ -15,6 +15,7 @@ from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_pa
 from lakana._models import Grant, GrantPage
 from lakana._routes import ROUTES
 from lakana.resources._override import override_params
+from lakana.resources._subject import subject_principal
 
 
 def _grant_from_json(data: dict[str, Any]) -> Grant:
@@ -43,6 +44,8 @@ def _grant_from_json(data: dict[str, Any]) -> Grant:
         granted_by=data["granted_by"],
         granted_at=datetime.fromisoformat(data["granted_at"]),
         note=data.get("note"),
+        principal=subject_principal(data.get("principal")),
+        group=data.get("group"),
     )
 
 

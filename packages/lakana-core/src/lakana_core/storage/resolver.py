@@ -575,6 +575,32 @@ def _parse_scheme(root: str) -> Literal["file", "s3", "abfs"]:
     raise ValidationError(f"Unsupported storage scheme {scheme!r} in root {root!r}.")
 
 
+def root_never_resolves(root: str) -> bool:
+    """Say whether a stored root is one that no Lakana release ever reached.
+
+    True only for a scheme `_parse_scheme` refuses (``local://``, ``memory://``, ``gs://``:
+    older releases stored them, and every release refused to open them), so no file can be
+    behind it. Not for an fsspec chain (``::``, `ROOT_CHAIN_MESSAGE`): releases before 0.18.0
+    opened the part before it and wrote files there. Not for a secret, a key or an option that
+    makes `for_environment` fail either: it can be fixed, and the storage may hold every file.
+
+    Parameters
+    ----------
+    root
+        The environment's stored storage root.
+
+    Returns
+    -------
+    bool
+        Whether no file can be behind the root.
+    """
+    try:
+        _parse_scheme(root)
+    except ValidationError:
+        return True
+    return False
+
+
 @dataclass(frozen=True)
 class ResolvedStorage:
     """An environment's storage, ready to use.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import socket
 import threading
@@ -260,6 +261,47 @@ def test_loopback_link_local_and_metadata_stay_refused_for_a_listed_host(
     with pytest.raises(FetchFailed) as info:
         check(f"https://{NAME}/x", (NAME,), private_hosts=(NAME,))
     assert info.value.reason == https_json.NEVER_REACHABLE
+
+
+PROVIDER_SERVICE_ADDRESSES = [
+    pytest.param("168.63.129.16", id="azure-wireserver"),
+    pytest.param("::ffff:168.63.129.16", id="azure-wireserver-ipv4-mapped"),
+    pytest.param("::168.63.129.16", id="azure-wireserver-ipv4-compatible"),
+    pytest.param("64:ff9b::a83f:8110", id="azure-wireserver-nat64"),
+    pytest.param("64:ff9b:1::a83f:8110", id="azure-wireserver-local-nat64"),
+    pytest.param("2002:a83f:8110::1", id="azure-wireserver-6to4"),
+    pytest.param("192.0.0.192", id="oracle-legacy-metadata"),
+    pytest.param("::ffff:192.0.0.192", id="oracle-legacy-metadata-ipv4-mapped"),
+    pytest.param("fd20:ce::254", id="gcp-ipv6-metadata"),
+]
+"""Cloud service addresses outside link-local that hand out a machine's settings (#543)."""
+
+
+@pytest.mark.parametrize("address", PROVIDER_SERVICE_ADDRESSES)
+def test_a_cloud_service_address_outside_link_local_is_never_reachable(address: str) -> None:
+    parsed = ipaddress.ip_address(address)
+    assert egress.is_never_reachable(parsed)
+    assert egress.is_internal(parsed)
+
+
+@pytest.mark.parametrize("address", PROVIDER_SERVICE_ADDRESSES)
+def test_a_cloud_service_address_stays_refused_for_a_listed_host(
+    monkeypatch: pytest.MonkeyPatch, address: str
+) -> None:
+    resolves_to(monkeypatch, "10.1.2.3", address)
+    with pytest.raises(FetchFailed) as info:
+        check(f"https://{NAME}/x", (NAME,), private_hosts=(NAME,))
+    assert info.value.reason == https_json.NEVER_REACHABLE
+
+
+@pytest.mark.parametrize("address", PROVIDER_SERVICE_ADDRESSES)
+def test_a_cloud_service_address_is_refused_for_an_unlisted_host(
+    monkeypatch: pytest.MonkeyPatch, address: str
+) -> None:
+    resolves_to(monkeypatch, PUBLIC, address)
+    with pytest.raises(FetchFailed) as info:
+        check(f"https://{NAME}/x", (NAME,))
+    assert info.value.reason == https_json.PRIVATE
 
 
 def test_the_private_exemption_is_for_the_listed_host_only(
