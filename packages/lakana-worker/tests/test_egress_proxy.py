@@ -1510,9 +1510,7 @@ def test_an_index_on_another_port_without_a_credential_is_reachable(
     build = parse_request(sent, token="t" * 64, settings=settings(tmp_path))
     assert isinstance(build, BuildRequest) and build.indexes == ()
     token = proxy.token(build_targets(build))
-    with socket.socket() as spare:
-        spare.bind(("127.0.0.1", 0))
-        undeclared = spare.getsockname()[1]
+    undeclared = closed_port()
 
     answer, connection = _connect(proxy.port, f"localhost:{proxy.index}", token)
     connection.sendall(b"ping")

@@ -1770,9 +1770,7 @@ def test_probe_health_ignores_http_proxy_env(
     proxy into a spurious 30 s readiness timeout against a perfectly good
     local server.
     """
-    with socket.socket() as dead:
-        dead.bind(("127.0.0.1", 0))
-        dead_port = dead.getsockname()[1]
+    dead_port = closed_port()
     monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{dead_port}")
 
     with socket.socket() as listener:
@@ -1849,6 +1847,7 @@ def test_reuse_addr_is_set_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_port_free_reflects_a_real_socket(tmp_path: Path) -> None:
     """`port_free` against a real, briefly-bound socket."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        # Not held: the port must be free again once the socket closes.
         sock.bind(("127.0.0.1", 0))
         bound_port = sock.getsockname()[1]
 

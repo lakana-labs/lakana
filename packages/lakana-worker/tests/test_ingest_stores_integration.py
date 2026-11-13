@@ -242,6 +242,7 @@ def fake_gcs(pki: _Pki) -> Iterator[str]:
         Its base URL.
     """
     with socket.socket() as probe:
+        # Not held: the container must be able to publish on this port.
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     container = _container(

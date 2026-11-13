@@ -371,9 +371,7 @@ def test_real_spawn_and_probe() -> None:
 
 def test_real_probe_ignores_http_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """The supervisor's loopback probe bypasses `HTTP_PROXY`."""
-    with socket.socket() as dead:
-        dead.bind(("127.0.0.1", 0))
-        dead_port = dead.getsockname()[1]
+    dead_port = closed_port()
     monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{dead_port}")
 
     with socket.socket() as listener:

@@ -16,7 +16,6 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from scripts.test_support.ports import release_closed_ports
 from sqlalchemy.orm import Session
 from test_projects_dag import make_asset
 from test_projects_deploys import _deployed, _repo
@@ -214,16 +213,3 @@ def run_id(session: Session, tmp_path: Path, principal: PrincipalRef, clock: Clo
     )
     scheduler_tick(session, clock.now, half_jitter)
     return run.id
-
-
-@pytest.fixture(autouse=True)
-def _release_closed_ports() -> Iterator[None]:
-    """Free the ports `closed_port` reserved for the test.
-
-    Yields
-    ------
-    None
-        Control to the test.
-    """
-    yield
-    release_closed_ports()

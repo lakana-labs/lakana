@@ -3,8 +3,8 @@
 A port that was free a moment ago can be taken by a parallel test (`pytest -n`) before the
 code under test connects to it. `closed_port` therefore keeps a socket bound to the port
 and not listening: connects are refused (nothing listens), and no other socket can bind it
-(the port is in use) until `release_closed_ports` runs. The packages' `conftest.py` call that
-after every test.
+(the port is in use) until `release_closed_ports` runs. `packages/conftest.py` calls that after
+every test, in all four packages.
 
 Standard library only, so every package's tests can import it.
 """
@@ -19,8 +19,8 @@ _HELD: list[socket.socket] = []
 def closed_port() -> int:
     """Find a loopback port nothing listens on and nobody else can bind.
 
-    The port stays reserved until `release_closed_ports` runs (the autouse fixture in each
-    `conftest.py` does that after the test).
+    The port stays reserved until `release_closed_ports` runs (the autouse fixture in
+    `packages/conftest.py` does that after the test).
 
     Returns
     -------
