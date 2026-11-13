@@ -19,7 +19,9 @@ A deleted environment is hidden from every lookup by name (`LIVE_ENVIRONMENT`) a
 stays taken. A create that claimed a location before the deletion finds its claim abandoned;
 one that claims after it is refused by `lock_live_environment`, which the publish takes before
 the fence, as an undrop does before it takes a tombstone's lock. The lock order is always the
-environment's row first, then a table's, then a location record's.
+environment's row first, then a table's, then a location record's. The deletion and the last purge
+lock every table they delete at once, in id order (`lock_tables_in_id_order`): the order in which a
+query's completion locks the tables it read, so the two never deadlock.
 
 `restore_environment` undoes the deletion within the undo period, under the environment's lock
 and every one of its tombstones' locks: the same tables with the same ids and metadata, exactly
@@ -41,13 +43,14 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, exists, select, update
+from sqlalchemy import ColumnElement, delete, exists, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import PrincipalRef, Securable
 from lakana_core.catalog.locations import lock_location, own_table_id
 from lakana_core.catalog.retention import lock_row
+from lakana_core.catalog.table_locks import lock_tables_in_id_order
 from lakana_core.catalog.tombstones import (
     drop_row,
     refresh_restored,
@@ -156,6 +159,24 @@ def lock_live_environment(session: Session, environment_id: uuid.UUID) -> bool:
     return found is not None and found[0] is None
 
 
+def _in_environment(environment_id: uuid.UUID) -> ColumnElement[bool]:
+    """Select the tables of an environment, without joining (a lock takes the tables' rows only).
+
+    Parameters
+    ----------
+    environment_id
+        The environment.
+
+    Returns
+    -------
+    ColumnElement
+        ``tables.namespace_id IN (the environment's namespaces)``.
+    """
+    return Table.namespace_id.in_(
+        select(Namespace.id).where(Namespace.environment_id == environment_id)
+    )
+
+
 def _resolve_claims(session: Session, env: Environment, purge_after: datetime) -> None:
     """Resolve every claim of an environment being deleted, each under its record's lock.
 
@@ -221,6 +242,11 @@ def delete_rows(
         ``tables_without_tombstone`` (managed tables whose location had no record of their
         own, only uncatalogued), ``purge_after`` and ``purge``.
     """
+    # Every table it drops, in id order, before anything else: the order a query's completion
+    # locks the tables it read, and table rows before location records (#558).
+    lock_tables_in_id_order(
+        session, _in_environment(env.id), Table.table_type != TableType.ARTIFACT
+    )
     _resolve_claims(session, env, purge_after)
     found = session.execute(
         select(Table.id, Namespace.path)
@@ -484,6 +510,9 @@ def purge_environment(session: Session, environment_id: uuid.UUID, *, now: datet
         )
         if left:
             return False
+        # The row's delete cascades through the namespaces to the tables left (the artifacts)
+        # and their read counts; locked first, in id order, like a query's completion (#558).
+        lock_tables_in_id_order(session, _in_environment(environment_id))
         revoke_attached(session, None, environment_id=environment_id, now=now)
         AuditService(session).record(
             None,

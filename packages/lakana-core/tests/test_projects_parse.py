@@ -459,8 +459,8 @@ def test_a_reading_table_function_is_never_reported_as_an_empty_name() -> None:
 @pytest.mark.parametrize(
     ("sql", "cause"),
     [
-        ("SELECT * FROM read_parquet('x')", "reads data directly"),
-        ("SELECT * FROM read_csv('a.csv') AS c", "reads data directly"),
+        ("SELECT * FROM read_parquet('x')", "reaches data directly"),
+        ("SELECT * FROM read_csv('a.csv') AS c", "reaches data directly"),
         ("SELECT * FROM generate_serie(1, 3) AS g(i)", "check the name"),
         ("SELECT * FROM ROWS FROM (range(3))", "check the name"),
     ],
@@ -471,4 +471,4 @@ def test_the_refusal_of_a_table_function_names_the_right_cause(sql: str, cause: 
     [issue] = caught.value.issues
     assert cause in issue.message
     assert "load the data into a table first" in issue.message.lower()
-    assert ("reads data directly" in issue.message) == (cause == "reads data directly")
+    assert ("reaches data directly" in issue.message) == (cause == "reaches data directly")

@@ -2259,8 +2259,13 @@ connections; a connection opens exactly its endpoints and nothing else.
   through two test hooks that are never settings: `EgressSettings.reachable` and
   `LauncherSettings.relay_reachable` (carried as the relay plan's `reachable`, at most 4 IPv4
   networks, always present and empty in production; `load_settings` refuses a variable of that
-  name). A refused range wins over both (`egress.forbidden`'s `refused`), so the hooks cannot
-  open a gateway or an operator's range.
+  name). A refused range wins over both (`egress.forbidden`'s `refused`), and so do the
+  never-reached addresses (`egress._never`: link-local, the cloud service addresses of `_NEVER`,
+  multicast, unspecified, `240.0.0.0/4`), so the hooks cannot open a gateway, an operator's range
+  or the metadata service; only loopback, where the tests' servers listen, reserved IPv6 that
+  carries no embedded IPv4 address, and the attached networks stay theirs to open. An IPv6 address is also judged by every IPv4 address it carries
+  (`egress._embedded_ipv4`, a copy of core's: mapped, compatible, 6to4, Teredo, NAT64), which a
+  test keeps in agreement with core form by form.
 - **Residuals, accepted:**
   - containers share the kernel (as for every task);
   - the egress token is in the task's environment: any code of the task can use it for the
@@ -2855,7 +2860,17 @@ listing runs after the claims step, drops its table too) or sees the deletion. A
 after the deletion (a create that found the environment earlier) is never published; the sweep
 abandons it once its holder ended or its grace period passed. `undrop_table` takes the same share
 lock before the tombstone's lock; `create_external_table` checks `deleted_at` on the row it locks.
-The lock order is always environment row, then table row, then location record. Pins:
+The lock order is always environment row, then table row, then location record. A delete of
+several tables (the deletion of an environment, and the last purge, whose cascade takes the
+artifacts left) locks all of their rows first, `ORDER BY id FOR UPDATE`
+(`table_locks.lock_tables_in_id_order`). Read recording (`record_table_reads`) takes the same
+lock, one level weaker (`FOR NO KEY UPDATE`: it still conflicts with the deletion's, but not with
+the `FOR KEY SHARE` of a foreign-key insert, so a deploy not yet committed does not block a query's
+completion), on every table a query read before it writes a count, whatever its update of `last_read_at`
+skips (an update a later read already fails locks no row), so the two wait instead of deadlocking
+(#558; `test_table_delete_lock_order_postgres_integration.py`, both sequences, and a pending
+foreign-key insert that read recording does not wait for). An expiry drops one table per
+transaction and needs no such order. Pins:
 `test_environment_deletion.py` (`test_a_create_whose_claim_came_before_the_deletion_is_not_published`,
 `test_a_claim_made_after_the_deletion_is_never_published`,
 `test_an_undrop_while_the_environment_is_deleted_is_refused`).
@@ -6075,7 +6090,8 @@ pins each line.
   disables verification. `LAKANA_WEBHOOK__ALLOW_HOSTS` exempts named hosts from the scheme and
   port rules and from the private-address check, nothing else: a listed host is still refused
   (`NEVER_REACHABLE`) when any of its addresses `is_never_reachable` (loopback, link-local,
-  unspecified, multicast, reserved, `fd00:ec2::254`, `100.100.100.200`, or an IPv6 form that
+  unspecified, multicast, reserved, `fd00:ec2::254`, `fd20:ce::254`, `100.100.100.200`,
+  `192.0.0.192`, Azure's WireServer `168.63.129.16` (#543), or an IPv6 form that
   carries such an IPv4), the rule of `LAKANA_CI_OIDC__ALLOW_HOSTS` (#243). One exception: the
   entry `localhost`, for the URL host `localhost` only, may reach loopback addresses (never the
   rest of the set), so that a receiver on the worker's own machine still works (the get-told
@@ -6229,7 +6245,9 @@ and a fake fetcher; no test reaches the network.
   the keys alike; the issuers' own hosts are not exempt unless listed, and every other host must
   be public. Even a listed host is refused when any of its addresses is loopback, link-local
   (`169.254.0.0/16`, `fe80::/10`, so 169.254.169.254), unspecified, multicast or reserved, a
-  known metadata address inside a private range (`fd00:ec2::254`, `100.100.100.200`), or an
+  known cloud service address outside link-local (`fd00:ec2::254`, `fd20:ce::254`,
+  `100.100.100.200`, `192.0.0.192`, and Azure's WireServer `168.63.129.16`, which sits in a
+  public range and so is refused for unlisted hosts too, #543), or an
   IPv6 form that carries such an IPv4 address (`is_never_reachable`). Since #243
   `LAKANA_WEBHOOK__ALLOW_HOSTS` applies the same rule (with a loopback exception for the entry
   `localhost`), and it still exempts the scheme and the port. Pinning, `https` on 443, no redirects, the 64 KiB cap and the deadlines
