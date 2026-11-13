@@ -933,6 +933,31 @@ def test_an_unquoted_dotted_table_still_resolves(
     )
 
 
+def test_a_reference_into_a_three_level_namespace_resolves_to_its_table(
+    session: Session, env: None, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """`bronze.raw.eu.orders` resolves to that table, never to `bronze.raw.orders`."""
+    deep = NamespacePath.from_parts(["bronze", "raw", "eu"])
+    _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        namespaces=[_BRONZE, NamespacePath.from_parts(["bronze", "raw"]), deep],
+        tables=[TableRef("dev", deep, "orders")],
+    )
+    repo = _repo(session)
+    asset = _file_asset(
+        "silver.f", 'SELECT * FROM "bronze"."raw"."eu"."orders"', "bronze.raw.eu.orders"
+    )
+    service = DeployService(session, AllowAllAuthorization())
+    assert (
+        service.validate_against_environment(
+            principal, "dev", repo.id, [asset], build_graph([asset])
+        )
+        == []
+    )
+
+
 @pytest.mark.parametrize("name", ["nodots", "a/b.csv", "s3://b/x.parquet", ".", "a..b"])
 def test_malformed_external_inputs_are_not_found(
     session: Session, env: None, principal: PrincipalRef, name: str

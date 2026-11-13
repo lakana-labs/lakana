@@ -446,6 +446,25 @@ def test_a_generator_table_function_is_not_a_file_reference() -> None:
         assert sql_file_references(sql, []) == set(), sql
 
 
+def test_a_table_in_a_three_level_namespace_is_not_a_file_reference() -> None:
+    """Every part of `"a"."b"."c"."d"` is a plain name, so it reads a catalog table."""
+    from lakana_core.projects.parse import sql_file_references
+
+    for sql in (
+        'SELECT id FROM "bronze"."raw"."eu"."orders"',
+        "SELECT id FROM bronze.raw.eu.orders AS o",
+    ):
+        assert sql_file_references(sql, ["bronze.raw.eu.orders"]) == set(), sql
+
+
+def test_a_quoted_dotted_part_of_a_deep_name_is_a_file_with_every_part_named() -> None:
+    """A part that holds a dot still makes a file reference, named from all its parts."""
+    from lakana_core.projects.parse import sql_file_references
+
+    found = sql_file_references('SELECT 1 FROM a.b.c."d.csv"', [])
+    assert found == {"a.b.c.d.csv"}
+
+
 def test_a_reading_table_function_is_never_reported_as_an_empty_name() -> None:
     from lakana_core.projects.parse import sql_file_references
 
