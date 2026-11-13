@@ -30,7 +30,7 @@ from lakana_core.catalog.health import record_table_reads
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import DatabaseConfig, StorageConfig
 from lakana_core.db import create_engine
-from lakana_core.models import Base, Namespace, Table, TableRead, TableType
+from lakana_core.models import Base, ColumnDescription, Namespace, Table, TableRead, TableType
 from lakana_core.storage.resolver import StorageResolver
 
 pytestmark = pytest.mark.integration
@@ -277,3 +277,34 @@ def test_a_completion_whose_read_was_already_recorded_later_still_locks_the_tabl
     with Session(engine) as session:
         assert session.scalars(select(Table.id)).all() == []
         assert session.scalars(select(TableRead.id)).all() == []
+
+
+def test_a_read_recording_does_not_wait_for_a_pending_row_that_references_its_table(
+    engine: sqlalchemy.Engine, tmp_path: Path
+) -> None:
+    """A foreign-key insert holds ``FOR KEY SHARE``; ``FOR NO KEY UPDATE`` does not conflict."""
+    with Session(engine) as session:
+        principal = ensure_bootstrap_principal(session, "admin")
+        environment = _catalog(session).create_environment(
+            principal,
+            name="pending",
+            storage=StorageConfig(scheme="file", root=f"file://{tmp_path}", options={}),
+        )
+        low, _ = _two_views(session, principal, environment.id)
+
+    with Session(engine) as pending, Session(engine) as completion:
+        pending.add(ColumnDescription(id=uuid.uuid4(), table_id=low, column="c"))
+        pending.flush()
+        completion.execute(text("SET lock_timeout = '2s'"))
+        try:
+            record_table_reads(
+                completion,
+                environment="pending",
+                principal_id=principal.id,
+                dotted_refs=["gold.zz_first"],
+                now=datetime.now(UTC),
+            )
+            completion.commit()
+        finally:
+            completion.rollback()
+            pending.rollback()

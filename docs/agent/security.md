@@ -2262,8 +2262,8 @@ connections; a connection opens exactly its endpoints and nothing else.
   name). A refused range wins over both (`egress.forbidden`'s `refused`), and so do the
   never-reached addresses (`egress._never`: link-local, the cloud service addresses of `_NEVER`,
   multicast, unspecified, `240.0.0.0/4`), so the hooks cannot open a gateway, an operator's range
-  or the metadata service; only loopback, where the tests' servers listen, and the attached
-  networks stay theirs to open. An IPv6 address is also judged by every IPv4 address it carries
+  or the metadata service; only loopback, where the tests' servers listen, reserved IPv6 that
+  carries no embedded IPv4 address, and the attached networks stay theirs to open. An IPv6 address is also judged by every IPv4 address it carries
   (`egress._embedded_ipv4`, a copy of core's: mapped, compatible, 6to4, Teredo, NAT64), which a
   test keeps in agreement with core form by form.
 - **Residuals, accepted:**
@@ -2864,9 +2864,12 @@ The lock order is always environment row, then table row, then location record. 
 several tables (the deletion of an environment, and the last purge, whose cascade takes the
 artifacts left) locks all of their rows first, `ORDER BY id FOR UPDATE`
 (`table_locks.lock_tables_in_id_order`). Read recording (`record_table_reads`) takes the same
-lock on every table a query read before it writes a count, whatever its update of `last_read_at`
+lock, one level weaker (`FOR NO KEY UPDATE`: it still conflicts with the deletion's, but not with
+the `FOR KEY SHARE` of a foreign-key insert, so a deploy not yet committed does not block a query's
+completion), on every table a query read before it writes a count, whatever its update of `last_read_at`
 skips (an update a later read already fails locks no row), so the two wait instead of deadlocking
-(#558; `test_table_delete_lock_order_postgres_integration.py`, both sequences). An expiry drops one table per
+(#558; `test_table_delete_lock_order_postgres_integration.py`, both sequences, and a pending
+foreign-key insert that read recording does not wait for). An expiry drops one table per
 transaction and needs no such order. Pins:
 `test_environment_deletion.py` (`test_a_create_whose_claim_came_before_the_deletion_is_not_published`,
 `test_a_claim_made_after_the_deletion_is_never_published`,

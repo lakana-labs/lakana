@@ -739,7 +739,7 @@ def test_a_read_locks_every_table_it_read_in_id_order_first_even_one_read_later_
     seen: list[str] = []
 
     def record(state: ORMExecuteState) -> None:
-        """Keep one statement; a select compiled for PostgreSQL, which renders ``FOR UPDATE``.
+        """Keep one statement; a select compiled for PostgreSQL (``FOR NO KEY UPDATE``).
 
         Parameters
         ----------
@@ -766,9 +766,9 @@ def test_a_read_locks_every_table_it_read_in_id_order_first_even_one_read_later_
         for i, sql in enumerate(seen)
         if sql.startswith(("UPDATE tables", "INSERT INTO table_reads"))
     ]
-    locks = [i for i, sql in enumerate(seen) if sql.rstrip().endswith("FOR UPDATE")]
+    locks = [i for i, sql in enumerate(seen) if sql.rstrip().endswith("FOR NO KEY UPDATE")]
     assert len(locks) == 1, seen
-    assert "ORDER BY tables.id FOR UPDATE" in seen[locks[0]]
+    assert "ORDER BY tables.id FOR NO KEY UPDATE" in seen[locks[0]]
     assert writes, seen
     assert all(locks[0] < i for i in writes), seen
 

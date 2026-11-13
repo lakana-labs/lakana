@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session
 from lakana_core.models import Table
 
 
-def lock_tables_in_id_order(session: Session, *criteria: ColumnElement[bool]) -> list[uuid.UUID]:
+def lock_tables_in_id_order(
+    session: Session, *criteria: ColumnElement[bool], no_key: bool = False
+) -> list[uuid.UUID]:
     """Lock every table row that matches, in id order, before anything else touches them.
 
     ``SELECT … ORDER BY id FOR UPDATE``: Postgres takes the locks in the order it returns the
@@ -25,12 +27,19 @@ def lock_tables_in_id_order(session: Session, *criteria: ColumnElement[bool]) ->
     environment's row lock and before any location record's. SQLite has no row locks; its write
     lock orders the two there.
 
+    With `no_key` the lock is ``FOR NO KEY UPDATE``: it still conflicts with the deletion's
+    ``FOR UPDATE``, but not with the ``FOR KEY SHARE`` that an insert into any child table of
+    ``tables`` takes, so a deploy that is not yet committed does not block read recording.
+
     Parameters
     ----------
     session
         Database session; the locks last until the caller commits or rolls back.
     *criteria
         What selects the tables, as for `Select.where`.
+    no_key
+        Lock ``FOR NO KEY UPDATE`` instead of ``FOR UPDATE`` (read recording); a delete keeps
+        the default.
 
     Returns
     -------
@@ -38,5 +47,7 @@ def lock_tables_in_id_order(session: Session, *criteria: ColumnElement[bool]) ->
         The ids of the locked tables, in the order they were locked.
     """
     return list(
-        session.scalars(select(Table.id).where(*criteria).order_by(Table.id).with_for_update())
+        session.scalars(
+            select(Table.id).where(*criteria).order_by(Table.id).with_for_update(key_share=no_key)
+        )
     )

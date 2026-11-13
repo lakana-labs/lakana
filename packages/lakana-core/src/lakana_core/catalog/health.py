@@ -530,7 +530,7 @@ def record_table_reads(
     if not table_ids:
         return
     insert = postgresql_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
-    for table_id in lock_tables_in_id_order(session, Table.id.in_(table_ids)):
+    for table_id in lock_tables_in_id_order(session, Table.id.in_(table_ids), no_key=True):
         # A sort key only: `updated_at` is kept, it is retention's clock and retention reads
         # `table_reads`. The table rows come first, then the counts: the order in which a
         # delete of the tables takes them (their rows, then the counts that cascade).
