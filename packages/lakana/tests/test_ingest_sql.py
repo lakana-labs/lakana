@@ -16,7 +16,7 @@ import warnings
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 import pytest
@@ -34,7 +34,11 @@ from lakana.ingest import (
     _types,
     sql,
 )
+from lakana.ingest._connections import FetchedConnection
 from lakana.ingest._directory import DirectoryError, RootUnavailable
+
+if TYPE_CHECKING:
+    from adbc_driver_manager.dbapi import Connection as AdbcConnection
 
 _PASSWORD = "pa55-word"
 
@@ -1110,6 +1114,47 @@ def test_sqlite_refuses_when_this_process_cannot_list_its_open_files(
 
     with pytest.raises(UsageError, match=r"/dev/fd"):
         sql.read("local-db", "SELECT a FROM t")
+
+
+def test_sqlite_closes_the_database_when_listing_the_open_files_fails_afterwards(
+    lite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure after the driver opened the file must not leave the connection open.
+
+    A closed ADBC connection refuses a cursor with ``INVALID_STATE``.
+    """
+    _sqlite(lite, ["CREATE TABLE t(a)"])
+    opened: list[AdbcConnection] = []
+    real_open = sql._open_sqlite
+    calls = {"n": 0}
+    real_files = sql._open_files
+
+    def tracking(
+        conn: FetchedConnection, module: types.ModuleType, root_dir: str, path: str
+    ) -> AdbcConnection:
+        def connect(uri: str) -> AdbcConnection:
+            opened.append(module.connect(uri))
+            return opened[-1]
+
+        proxy = types.ModuleType("proxy")
+        vars(proxy).update(Error=module.Error, connect=connect)
+        return real_open(conn, proxy, root_dir, path)
+
+    def second_fails() -> dict[int, tuple[int, int]]:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise UsageError("cannot list")
+        return real_files()
+
+    monkeypatch.setattr(sql, "_open_sqlite", tracking)
+    monkeypatch.setattr(sql, "_open_files", second_fails)
+
+    with pytest.raises(UsageError, match="cannot list"):
+        sql.read("local-db", "SELECT a FROM t")
+
+    assert len(opened) == 1
+    with pytest.raises(Exception, match="INVALID_STATE"):
+        opened[0].cursor()
 
 
 def test_only_the_checked_file_counts_as_the_one_sqlite_opened(tmp_path: Path) -> None:
