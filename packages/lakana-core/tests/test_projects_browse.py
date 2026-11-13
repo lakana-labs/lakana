@@ -81,6 +81,7 @@ def test_gitea_and_an_absolute_scp_path_get_a_link() -> None:
         "https://github.com\n/a/b",
         "https://bitbuc\u212aet.org/a/b",
         "git@vs-ssh.visualstudio.com:v3/o/p/r",
+        "git@vs-ssh.visualstudio.com:p/_git/r",
         "https://github.com/acme/.git",
         "https://github.com/-/r",
         "https://github.com/acme/-r",
