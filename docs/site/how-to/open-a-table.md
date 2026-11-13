@@ -40,10 +40,12 @@ Preview shows the first rows of the table. Its address ends in `/preview`.
 The name and the breadcrumb always show, so you know which table the address names. Below them,
 the page says why it cannot show the table and what to do next:
 
-- **"There is no table … that you may read."** The table does not exist, or you may not read it;
-  Lakana gives the same answer for both so that it does not reveal which tables exist. Press
-  **Back to the Catalog**.
-- **"You may not read …"** Ask the table's owner or an administrator for access.
+- **"… is no longer in … ; it may have been dropped or renamed."** You may read that place, but
+  the table is not there now. Press **Back to the Catalog**.
+- **"You may not read …, or there is no table by that name."** Lakana gives the same answer for
+  a table you may not read and for a name that does not exist, so that it does not reveal which
+  tables exist. Check the name in the address, or ask an administrator for access. **Back to
+  the Catalog** leads to the tables you may read.
 - **"The table's storage cannot be reached right now."** Press **Try again** in a moment. If it
   stays, an administrator should look at [Instance health](instance-health.md).
 - **Any other sentence** comes from the server and names the cause. Press **Try again**.

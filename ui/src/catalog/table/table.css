@@ -1,6 +1,6 @@
 /* A table's page: the label and the line under the heading, the quiet blocks shown while the
    table is read, and the sentence and the way on when it cannot be shown. */
-.page-title {
+.table-page .page-title {
   overflow-wrap: anywhere;
 }
 

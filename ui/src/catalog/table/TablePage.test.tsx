@@ -159,29 +159,35 @@ describe("TablePage", () => {
   });
 
   describe("the states", () => {
-    it("says there is no such table and links back to the Catalog", async () => {
-      renderShell(PAGE, {
+    it("says the table is gone and links back to the Catalog, and records nothing", async () => {
+      const { server } = renderShell(PAGE, {
         routes: { [`GET ${TABLE_PATH}`]: { status: 404, body: { detail: "No such table." } } },
       });
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
-        "There is no table gold.sales.fact_sales in prod that you may read.",
+        "gold.sales.fact_sales is no longer in prod; it may have been dropped or renamed.",
       );
       expect(screen.getByRole("link", { name: "Back to the Catalog" })).toHaveAttribute(
         "href",
         "/catalog",
       );
       expect(screen.queryByRole("link", { name: "Columns" })).not.toBeInTheDocument();
+      expect(posted(server)).toEqual([]);
     });
 
-    it("says the person may not read the table and whom to ask", async () => {
-      renderShell(PAGE, {
+    it("says the person may not read the table or it does not exist, and links back, recording nothing", async () => {
+      const { server } = renderShell(PAGE, {
         routes: { [`GET ${TABLE_PATH}`]: { status: 403, body: { detail: "Not allowed." } } },
       });
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
-        "You may not read gold.sales.fact_sales. Ask its owner or an administrator for access.",
+        "You may not read gold.sales.fact_sales, or there is no table by that name. Check the name, or ask an administrator for access.",
       );
+      expect(screen.getByRole("link", { name: "Back to the Catalog" })).toHaveAttribute(
+        "href",
+        "/catalog",
+      );
+      expect(posted(server)).toEqual([]);
     });
 
     it("says the storage cannot be reached and offers Try again, then moves focus to the heading", async () => {

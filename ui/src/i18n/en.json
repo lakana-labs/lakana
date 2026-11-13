@@ -466,8 +466,8 @@
     "loading": "Loading the table…",
     "retry": "Try again",
     "toCatalog": "Back to the Catalog",
-    "notFound": "There is no table {{namespace}}.{{name}} in {{environment}} that you may read.",
-    "forbidden": "You may not read {{namespace}}.{{name}}. Ask its owner or an administrator for access.",
+    "notFound": "{{namespace}}.{{name}} is no longer in {{environment}}; it may have been dropped or renamed.",
+    "forbidden": "You may not read {{namespace}}.{{name}}, or there is no table by that name. Check the name, or ask an administrator for access.",
     "unavailable": "The table's storage cannot be reached right now. Try again in a moment."
   },
   "list": {

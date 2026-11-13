@@ -56,19 +56,21 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   const { environment, namespace, name } = place;
   return (
-    <Page
-      title={name}
-      headingRef={heading}
-      trail={[
-        { to: catalogPath(DEFAULT_VIEW), label: t("areas.catalog.name") },
-        { to: catalogPath({ ...DEFAULT_VIEW, environment }), label: environment },
-        { to: catalogPath({ ...DEFAULT_VIEW, environment, namespace }), label: namespace },
-      ]}
-    >
-      <Suspense fallback={<TableSkeleton />}>
-        <TablePage place={place} tab={tab} headingRef={heading} />
-      </Suspense>
-    </Page>
+    <div className="table-page">
+      <Page
+        title={name}
+        headingRef={heading}
+        trail={[
+          { to: catalogPath(DEFAULT_VIEW), label: t("areas.catalog.name") },
+          { to: catalogPath({ ...DEFAULT_VIEW, environment }), label: environment },
+          { to: catalogPath({ ...DEFAULT_VIEW, environment, namespace }), label: namespace },
+        ]}
+      >
+        <Suspense fallback={<TableSkeleton />}>
+          <TablePage place={place} tab={tab} headingRef={heading} />
+        </Suspense>
+      </Page>
+    </div>
   );
 }
 

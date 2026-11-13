@@ -39,8 +39,8 @@ interface ProblemProps {
 }
 
 /**
- * Says why the table cannot be shown, with the next step: nothing readable under that name
- * (404), no right to read it (403), storage that cannot be reached (503), or the server's own
+ * Says why the table cannot be shown, with the next step: a table that is gone (404), no right
+ * to read it or no table by that name (403, the server's one answer for both), storage that cannot be reached (503), or the server's own
  * sentence for any other failure.
  *
  * @param props - The table, the failed read and the heading.
@@ -57,11 +57,9 @@ function Problem({ place, resource, headingRef }: ProblemProps): JSX.Element {
     return (
       <div className="table-problem">
         <p role="alert">{t(status === 404 ? "table.notFound" : "table.forbidden", words)}</p>
-        {status === 404 && (
-          <Link className="button" to={catalogPath(DEFAULT_VIEW)}>
-            {t("table.toCatalog")}
-          </Link>
-        )}
+        <Link className="button" to={catalogPath(DEFAULT_VIEW)}>
+          {t("table.toCatalog")}
+        </Link>
       </div>
     );
   }
