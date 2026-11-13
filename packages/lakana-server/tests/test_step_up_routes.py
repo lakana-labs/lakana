@@ -311,6 +311,29 @@ def _environment(client: TestClient) -> str:
     return str(body["name"])
 
 
+def _unreachable_deleted(client: TestClient) -> str:
+    """Create an environment, give it a root Lakana cannot read, and delete it.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        The purge-rows path of the deleted environment.
+    """
+    name = _environment(client)
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        row = session.execute(select(Environment).where(Environment.name == name)).scalar_one()
+        row.storage_root = "local:///data"
+        session.commit()
+    _ok(client.delete(f"/api/v1/environments/{name}", headers=AUTH_HEADER), 200)
+    return f"/api/v1/environments/{name}/purge-rows"
+
+
 def _secret(client: TestClient) -> str:
     """Create a secret in `dev`.
 
@@ -711,6 +734,9 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
     ),
     ("PATCH", "/api/v1/environments/{name}"): Case(
         lambda c: (f"/api/v1/environments/{_environment(c)}", {"is_protected": True}), 200
+    ),
+    ("POST", "/api/v1/environments/{name}/purge-rows"): Case(
+        lambda c: (_unreachable_deleted(c), None), 204
     ),
     ("POST", "/api/v1/environments/{environment_name}/secrets"): Case(
         lambda c: (

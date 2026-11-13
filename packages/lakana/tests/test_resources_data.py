@@ -246,6 +246,18 @@ def test_environments_restore_posts_and_list_deleted_asks_for_them() -> None:
     assert listed.purge_after == datetime(2026, 10, 27, 10, tzinfo=UTC)
 
 
+def test_environments_purge_rows_posts_and_returns_nothing() -> None:
+    """`purge_rows` POSTs `/purge-rows`, with no body, and the 204 answer returns `None`."""
+    seen: list[tuple[str, str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, request.read()))
+        return httpx.Response(204)
+
+    assert Environments(_transport(handler)).purge_rows("old") is None
+    assert seen == [("POST", "/api/v1/environments/old/purge-rows", b"")]
+
+
 def test_environments_update_storage_sends_a_patch_with_the_given_fields() -> None:
     """`environments.update_storage` PATCHes `/storage` with options/secret_ref."""
     seen: dict[str, Any] = {}

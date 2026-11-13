@@ -782,6 +782,101 @@
         }
       }
     },
+    "/api/v1/environments/{name}/purge-rows": {
+      "post": {
+        "tags": [
+          "environments"
+        ],
+        "summary": "Remove a deleted environment whose storage cannot be reached, rows only",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nRemoves the environment from the catalog, with its records of dropped tables, and frees its name. Its files, if there are any, are not touched. Only for a deleted environment whose storage root is in a scheme Lakana never supported, which the worker's clean-up skips; a storage secret that cannot be used does not count. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when no environment has the name, and 409 when it is not deleted, its storage can still be reached, or its root contains `::` (releases before 0.18.0 wrote files to the part before it).",
+        "operationId": "purge_environment_rows_api_v1_environments__name__purge_rows_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{name}/usage": {
       "get": {
         "tags": [

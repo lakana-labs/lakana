@@ -51,6 +51,7 @@
 "env list": { class: ui, part: 8 }
 "env orphaned-locations": { class: ui, part: 8 }
 "env protect": { class: ui, part: 8 }
+"env purge": { class: ui, part: 8 }
 "env restore": { class: ui, part: 8 }
 "env retention": { class: ui, part: 8 }
 "env set-storage": { class: ui, part: 8 }
@@ -417,6 +418,7 @@
 "POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5 }
 "POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5 }
 "POST /api/v1/environments/{name}/orphaned-locations/delete": { class: ui, part: 8 }
+"POST /api/v1/environments/{name}/purge-rows": { class: ui, part: 8 }
 "POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }
 "POST /api/v1/grants": { class: ui, part: 7 }
 "POST /api/v1/groups": { class: ui, part: 7 }

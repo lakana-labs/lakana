@@ -335,6 +335,22 @@ Works until the end of the undo period that `lakana env list --deleted` shows, a
 |---|---|---|---|
 | `NAME` | text | required |  |
 
+### `lakana env purge`
+
+Usage: `lakana env purge [OPTIONS] {name}`
+
+Remove the deleted environment NAME from the catalog when its storage cannot be reached.
+
+The worker's clean-up deletes a deleted environment's files and then the environment itself. It skips one whose storage cannot be resolved (a root in a scheme Lakana cannot read, such as `local://` or `memory://`, which older releases accepted), so that environment would keep its name for ever. This removes it from the catalog, with its records of dropped tables, and frees the name. Its files, if any, are not touched: delete them in the storage yourself if you no longer need them.
+
+Refused for an environment that is not deleted (`lakana env delete NAME` first); for one whose root can be reached (`lakana env delete NAME --purge` has the clean-up delete its files and then the environment), and a storage secret that cannot be used does not count, fix it instead; and for a root that contains `::`, because releases before 0.18.0 wrote its files to the part before `::` (look there; give a new environment another name). The question and the answer name the storage root, where any files are. Needs MANAGE_ENVIRONMENT on the instance.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--rows-only` | flag | off | Remove only the environment's rows from the catalog; its files, if any, are not touched. Required. |
+| `--yes` | flag | off | Don't ask for confirmation. |
+
 ### `lakana env set-storage`
 
 Usage: `lakana env set-storage [OPTIONS] {name}`
