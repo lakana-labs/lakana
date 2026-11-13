@@ -95,4 +95,28 @@ describe("catalog tree", () => {
     expect(findNode(root, "staging", null)).toBeNull();
     expect(findNode(root, "prod", "platinum")).toBeNull();
   });
+
+  it("builds 2,000 namespaces across 3 levels in well under a second", () => {
+    const namespaces: { path: string; count: number }[] = [];
+    for (let a = 0; a < 10; a += 1) {
+      namespaces.push({ path: `a${String(a)}`, count: 1 });
+      for (let b = 0; b < 20; b += 1) {
+        namespaces.push({ path: `a${String(a)}.b${String(b)}`, count: 1 });
+        for (let c = 0; c < 9; c += 1) {
+          namespaces.push({ path: `a${String(a)}.b${String(b)}.c${String(c)}`, count: 1 });
+        }
+      }
+    }
+    expect(namespaces).toHaveLength(2010);
+
+    const start = performance.now();
+    const root = buildTree({
+      count: 2010,
+      environments: [{ name: "prod", count: 2010, namespaces }],
+    });
+    const elapsed = performance.now() - start;
+
+    expect(root.children[0]?.children).toHaveLength(10);
+    expect(elapsed).toBeLessThan(200);
+  });
 });

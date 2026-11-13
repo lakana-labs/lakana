@@ -345,7 +345,6 @@ test.describe("the Catalog in real Chromium", () => {
     await openCatalog(page);
     await page.getByRole("searchbox").fill("store_id");
     await expect(page.getByText("Column store_id")).toBeVisible();
-    await page.getByRole("button", { name: "Show more" }).count();
     await openCatalog(page, "/catalog?env=staging", page.getByText(/no environment named staging/));
     await page.waitForLoadState("networkidle");
 
@@ -423,13 +422,30 @@ test.describe("the Catalog in real Chromium", () => {
     expect(box).not.toBeNull();
     const y = (box?.y ?? 0) + (box?.height ?? 0) / 2;
     await page.mouse.move((box?.x ?? 0) + (box?.width ?? 0) - 1, y);
+    const entries = await page.evaluate(() => window.history.length);
     await page.mouse.down();
     // Released left of the text, in the cell's padding: the click then lands on the cell, not on
     // the text, and reaches the row.
     await page.mouse.move((box?.x ?? 0) - 8, y, { steps: 8 });
     await page.mouse.up();
     expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).not.toBe("");
-    await expect(page).toHaveURL(/\/catalog$/);
+    // A navigation would push a history entry and change the address; give the router a few
+    // frames to start one before asserting that none did.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          let frames = 0;
+          const tick = (): void => {
+            if (++frames < 20) {
+              requestAnimationFrame(tick);
+            } else {
+              resolve();
+            }
+          };
+          requestAnimationFrame(tick);
+        }),
+    );
+    expect(await page.evaluate(() => window.history.length)).toBe(entries);
     expect(where(page)).toBe("/catalog");
   });
 

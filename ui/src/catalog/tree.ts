@@ -70,11 +70,20 @@ export function buildTree(tree: TableTreeOut): CatalogNode {
     namespace: null,
     count: tree.count,
     children: environments.map((environment) => {
-      const paths = environment.namespaces.map((entry) => entry.path);
+      const names = new Set(environment.namespaces.map((entry) => entry.path));
+      const below = new Map<string | null, { path: string; count: number }[]>();
+      for (const entry of environment.namespaces) {
+        const parent = nearestParent(entry.path, names);
+        const siblings = below.get(parent);
+        if (siblings === undefined) {
+          below.set(parent, [entry]);
+        } else {
+          siblings.push(entry);
+        }
+      }
       const nest = (parent: string | null): CatalogNode[] =>
-        environment.namespaces
-          .filter((entry) => nearestParent(entry.path, paths) === parent)
-          .sort((a, b) => a.path.localeCompare(b.path))
+        (below.get(parent) ?? [])
+          .toSorted((a, b) => a.path.localeCompare(b.path))
           .map((entry) => ({
             id: nodeId(environment.name, entry.path),
             label: parent === null ? entry.path : entry.path.slice(parent.length + 1),
@@ -95,11 +104,11 @@ export function buildTree(tree: TableTreeOut): CatalogNode {
   };
 }
 
-function nearestParent(path: string, paths: readonly string[]): string | null {
+function nearestParent(path: string, names: ReadonlySet<string>): string | null {
   const parts = path.split(".");
   for (let length = parts.length - 1; length > 0; length -= 1) {
     const candidate = parts.slice(0, length).join(".");
-    if (paths.includes(candidate)) {
+    if (names.has(candidate)) {
       return candidate;
     }
   }
