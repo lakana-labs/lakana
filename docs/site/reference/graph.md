@@ -1,11 +1,11 @@
 # Metadata graph
 
-Lakana holds what your projects declare about your data: which asset reads and builds which
-table, the references between tables, measures, checks, glossary terms, row filters, column masks,
-jobs and the connections Python assets read through. The metadata graph puts these together, so you can ask what feeds a table, what it feeds,
-and what lies next to it. It is computed from the declarations when you ask, in every repository
-deployed to the environment. Runs do not change it; the lineage that runs record is shown
-separately, per table.
+Lakana holds what your projects declare about your data: which asset reads and builds which table,
+the references between tables, measures, checks, glossary terms, row filters, column masks, jobs and
+the connections Python assets read through. The metadata graph puts these together, so you can ask
+what feeds a table, what it feeds, and what lies next to it. It is computed from the declarations
+when you ask, in every repository deployed to the environment. Runs do not change it; the lineage
+that runs record is shown separately, per table.
 
 ## Nodes and edges
 

@@ -3719,7 +3719,7 @@ class GraphEdgeOut(BaseModel):
     ----------
     kind
         `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,
-        `runs` or `has_column`.
+        `runs`, `uses` or `has_column`.
     source
         The node it leaves.
     target

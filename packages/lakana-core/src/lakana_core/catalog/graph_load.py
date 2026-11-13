@@ -62,10 +62,10 @@ from lakana_core.policy.shown import shown_policies
 from lakana_core.projects.checks import read_manifest_checks
 from lakana_core.projects.lookups import current_manifests
 from lakana_core.projects.manifest import (
-    entry_connections,
     entry_inputs,
     manifest_assets,
     manifest_jobs,
+    read_entry_connections,
 )
 from lakana_core.runs.selection import ManifestGraph, Selection, resolve_selection
 
@@ -138,8 +138,9 @@ class AssetRecord:
         columns to, sorted; empty unless the entry lists its columns (a `SELECT` with named
         columns), so only then is it known which columns of a table it reads (#451).
     connections
-        The connections a Python asset declares, as `entry_connections` reads them: empty for
-        any other asset, and for a value that is not a list of distinct valid names.
+        The connections a Python asset declares, as `read_entry_connections` reads them (without
+        the warning a deploy logs): empty for any other asset, and for a value that is not a list
+        of distinct valid names.
     """
 
     id: str
@@ -411,8 +412,26 @@ def _asset(repository: str, name: str, entry: Mapping[str, Any]) -> AssetRecord:
         owner if isinstance(owner, str) else None,
         tuple(sorted(reads - {name})),
         _lineage(entry),
-        entry_connections(entry),
+        _declared_connections(entry),
     )
+
+
+def _declared_connections(entry: Mapping[str, Any]) -> tuple[str, ...]:
+    """Read the connections an asset entry declares, silently.
+
+    Parameters
+    ----------
+    entry
+        One stored manifest asset entry; untrusted.
+
+    Returns
+    -------
+    tuple of str
+        The names; empty when the value is not a list of distinct valid names. A graph request
+        reads every entry, so it does not log the damage the way a deploy does.
+    """
+    read = read_entry_connections(entry)
+    return read.names if read.readable else ()
 
 
 def _lineage(entry: Mapping[str, Any]) -> tuple[tuple[str, str, str], ...]:

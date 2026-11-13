@@ -690,3 +690,15 @@ def test_an_asset_reads_its_connections_as_a_python_asset_declares_them() -> Non
         ("bronze.c", ()),
         ("gold.dim_store", ()),
     ]
+
+
+def test_a_graph_read_stays_silent_about_a_damaged_connections_entry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only a deploy warns about a damaged entry; every graph request would repeat it."""
+    with caplog.at_level("WARNING"):
+        assets = manifest_part(
+            "r", {"assets": [python_entry("bronze.c", ["pg-sales", "../x"])]}
+        ).assets
+    assert [a.connections for a in assets] == [()]
+    assert caplog.records == []

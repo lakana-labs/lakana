@@ -27259,7 +27259,7 @@
           "target"
         ],
         "title": "GraphEdgeOut",
-        "description": "An edge of the metadata graph, from `source` to `target` (both node ids).\n\nParameters\n----------\nkind\n    `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,\n    `runs` or `has_column`.\nsource\n    The node it leaves.\ntarget\n    The node it reaches."
+        "description": "An edge of the metadata graph, from `source` to `target` (both node ids).\n\nParameters\n----------\nkind\n    `reads`, `builds`, `references`, `measures`, `checks`, `filters`, `masks`, `links`,\n    `runs`, `uses` or `has_column`.\nsource\n    The node it leaves.\ntarget\n    The node it reaches."
       },
       "GraphNodeOut": {
         "properties": {

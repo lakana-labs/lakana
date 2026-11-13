@@ -588,3 +588,32 @@ def test_a_connection_node_is_a_valid_start_through_the_route(client: TestClient
         "asset:ingest/bronze.stores_raw",
         "connection:pg-sales",
     ]
+
+
+def test_a_task_token_cannot_tell_a_declared_connection_from_an_undeclared_one(
+    client: TestClient,
+) -> None:
+    _star(client)
+    _ingest(client)
+    minted = client.post(
+        "/api/v1/task-tokens",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "admin",
+            "environment": "dev",
+            "asset_scope": ["bronze.stores_raw"],
+            "ttl_seconds": 300,
+        },
+    )
+    assert minted.status_code == 201, minted.text
+    task = {"Authorization": f"Bearer {minted.json()['token']}"}
+    declared, undeclared = (
+        client.get(f"{_GRAPH}/neighbours", headers=task, params={"node": f"connection:{name}"})
+        for name in ("pg-sales", "nobody-declared")
+    )
+    assert declared.status_code == undeclared.status_code == 404
+    # The answer echoes the name that was asked for; with that one substitution the bodies are
+    # byte for byte equal, so nothing tells a declared connection from an undeclared one.
+    assert declared.content.replace(b"pg-sales", b"NAME") == undeclared.content.replace(
+        b"nobody-declared", b"NAME"
+    )

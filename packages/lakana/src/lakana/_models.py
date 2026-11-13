@@ -2613,7 +2613,7 @@ class GraphEdge:
     ----------
     kind
         ``reads``, ``builds``, ``references``, ``measures``, ``checks``, ``filters``,
-        ``masks``, ``links``, ``runs`` or ``has_column``.
+        ``masks``, ``links``, ``runs``, ``uses`` or ``has_column``.
     source
         The node it leaves.
     target
