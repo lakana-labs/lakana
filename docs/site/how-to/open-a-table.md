@@ -18,8 +18,8 @@ The page has:
 - **The table's name** as the heading, with its label under it when the table has one.
 - **A line under the name** with what the table is and where it lives, such as `Fact · gold.sales`,
   and the environment's label.
-- **Tabs**: Overview, Columns, Preview and Lineage. Every tab has its own address, so a link
-  opens the tab you were looking at. Everyone sees the same tabs.
+- **Tabs**: Overview, Columns, Preview, Lineage, Health and Access. Every tab has its own
+  address, so a link opens the tab you were looking at. Everyone sees the same tabs.
 
 The page has no button beside the name. What you may do is in the tabs.
 
@@ -36,7 +36,8 @@ follow each other.
 - **Columns.** The first five columns with their type, and "Key" or "Measure" when the table's
   header says the column is one. **All columns ›** opens the Columns tab.
 - **Health.** The table's verdict in one word, as in the Catalog's Health column, and under it
-  what is wrong, worst first and at most five lines, then "and 2 more":
+  what is wrong, worst first and at most five lines, then "and 2 more", which opens the Health
+  tab. **Health details ›**, beside the heading, opens it too:
   - A failed check names the check and how many rows broke it, and says what happened to the
     table: "The table was set back to its last good snapshot." or "The table was not
     published." Without a count it reads "Check `unique_sale_id` failed."
@@ -53,7 +54,8 @@ follow each other.
     Overview stays as it is.
 - **Facts.** Owner; Rows; Size with the number of data files, such as "3.1 MB in 12 files";
   Last write; Last read with how many people read the table in the last 7 days, such as "2 hours
-  ago · 3 readers in the last 7 days" (never who); Created; and Grain, the sentence the table's
+  ago · 3 readers in the last 7 days" (never who; an administrator gets **Readers ›**, which opens
+  the names on the Health tab); Created; and Grain, the sentence the table's
   header gives for what one row is; and Defined in, the file, line and commit in git that define
   the table, whose path opens the file (see
   [See where a table is defined](see-where-a-table-is-defined.md#in-the-web-interface)). A figure
@@ -123,6 +125,55 @@ you may not read, are not drawn, and nothing counts them. If you see only the ta
 tab says "Nothing upstream or downstream." A very large lineage shows its first 500 nodes and
 says "Showing the first 500 nodes." If lineage cannot be read, the tab says why and offers
 **Try again**.
+
+## Health
+
+Health shows everything the Overview's health block sums up. Its address ends in `/health`.
+
+- **Checks.** Every check of the table with its latest result (Passed, Failed, Warned or "Could
+  not run" with the reason), the number of rows it found ("Not counted" when the check does not
+  count them) and when it finished. A reference check whose target is a table you may not read is
+  not shown; the tab counts them: "2 reference checks are not shown: their target is a table you
+  may not read." Every earlier result is a command away: the tab shows
+  `lakana check list --env prod --table gold.sales.fact_sales` with **Copy command**.
+- **Signals.** Every signal that watches the table: what it watches (the whole table, or a
+  column), its state, the value it observed, its usual band, its effect (Warns or "Blocks
+  publication") and when it last fired. Under the list, each signal that fired has its sentence,
+  as on Overview. If a column mask or a row filter applies to you, the observed value and the
+  band say "Hidden for you".
+- **Last maintenance.** When the last maintenance that changed the table finished, whether it
+  completed or stopped at a safe point, how many snapshots it expired, how many files it deleted
+  and their size, and how many tags of failed checks it removed.
+- **Readers.** An administrator sees who read the table in the last 7 days, each name a link to
+  the person, with how many reads and when the last one was. Seeing the names is recorded in the
+  audit log; if the record cannot be written, the tab shows no names, says why and offers **Try
+  again**. Everyone else sees only how many people read it, such as "3 people read it in the last
+  7 days." **Readers ›** on Overview opens this part directly.
+
+If health cannot be read, the tab says why and offers **Try again**.
+
+## Access
+
+Access shows what you may do with the table and why. Its address ends in `/access`. It only
+shows; changing access comes with the Access area.
+
+- **What you may do.** Read, Write, Drop and Edit texts, each "Allowed" or "Not allowed". An
+  allowed action says how it reaches you, such as "Through the Analyst role on namespace gold in
+  prod." or "Through the group analysts, which has the Viewer role on table gold.sales.fact_sales
+  in prod." A refused one says why, or "Ask an administrator." You may edit the texts if you own
+  the table or may drop it; otherwise the tab names the owner to ask.
+- **Who has access** (administrators only). The grants on the table, on its namespace and each
+  namespace above it, and on the environment, each level under its own heading: the person or
+  service account (a link to them), or the group, and the role or action with when it was
+  granted. A level shows its first 200 grants and then names the command that lists all, such as
+  `lakana grant list --env prod --ns gold.sales --table fact_sales`. A grant whose person was
+  removed while the list was read says "a removed person or group" with its id.
+- **Row filters** and **Column masks** (administrators only). Who each one is for, the masked
+  column for a mask, and the expression, shown as text.
+
+A part that cannot be read says why and offers **Try again**; the other parts stay. See
+[Why may (or may not) someone do this?](why-may-someone-do-this.md#in-the-web-interface) for the
+same answer from the command line.
 
 ## When the page cannot be shown
 

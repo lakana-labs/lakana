@@ -10,6 +10,12 @@
   overflow-wrap: anywhere;
 }
 
+/* Six tabs do not fit one line at 320 px, so they wrap (WCAG 1.4.10 reflow). */
+.table-page .tabs {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
 .table-label {
   margin: 0 0 var(--space-1);
   font-size: var(--type-section-size);
@@ -437,4 +443,48 @@
   .lineage-graph a .lineage-first {
     fill: LinkText;
   }
+}
+
+/* Health and Access: plain sections under headings, one after the other. */
+.health-tab,
+.access-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.health-tab:focus,
+.access-tab:focus {
+  outline: none;
+}
+
+.health-section > *:last-child,
+.access-section > *:last-child {
+  margin-bottom: 0;
+}
+
+/* A list of facts without a detail page: its rows open nothing, so no hover and no chevron
+   (Still Water: something without a detail page is not a row that opens). */
+.list-static tr:hover {
+  background: none;
+}
+
+.list-static td {
+  overflow-wrap: anywhere;
+}
+
+.glyph-word {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.expression,
+.grants-cut code {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+}
+
+.maintenance .fact dt {
+  flex-basis: 224px;
 }

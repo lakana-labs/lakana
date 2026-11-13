@@ -55,7 +55,7 @@ function sidewaysOverflow(page: Page): Promise<number> {
   );
 }
 
-test("an administrator opens a table from the list and sees Overview, Columns, Preview and Lineage", async ({
+test("an administrator opens a table from the list and sees its six tabs", async ({
   browser,
   request,
 }) => {
@@ -71,6 +71,8 @@ test("an administrator opens a table from the list and sees Overview, Columns, P
     "Columns",
     "Preview",
     "Lineage",
+    "Health",
+    "Access",
   ]);
   await expect(page.getByRole("heading", { level: 2, name: "Facts" })).toBeVisible();
   await expect(page.getByText("No description yet.")).toBeVisible();

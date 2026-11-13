@@ -5,13 +5,16 @@
  * @packageDocumentation
  */
 import type {
+  ColumnMaskOut,
   ColumnOut,
+  GrantOut,
   GraphNodeOut,
   GraphOut,
   PermissionsOut,
   QueryRunStatus,
   QueryStatusOut,
   ResultPageOut,
+  RowFilterOut,
   TableDefinitionFileOut,
   TableDefinitionOut,
   TableHealthOut,
@@ -200,7 +203,7 @@ export function signalResult(overrides: Partial<SignalResult> = {}): SignalResul
     signal: "volume",
     column: null,
     state: "ok",
-    effect: "alert",
+    effect: "warn",
     snapshot_id: 4821,
     observed_at: "2026-11-12T06:06:00Z",
     observed: null,
@@ -219,6 +222,23 @@ export const HEALTH: TableHealthOut = {
   readers: null,
   hidden_checks: 0,
   signals: [signalResult()],
+};
+
+/** Who read the fact table in the last seven days, as an administrator is told. */
+export const READERS: NonNullable<TableHealthOut["readers"]> = [
+  { principal: "kim.schulz", read_count: 4, last_read_at: "2026-11-13T07:30:00Z" },
+  { principal: "ana.nowak", read_count: 1, last_read_at: "2026-11-11T16:00:00Z" },
+];
+
+/** The last maintenance of the fact table: it expired snapshots and deleted orphaned files. */
+export const MAINTENANCE: NonNullable<TableHealthOut["last_maintenance"]> = {
+  run_id: "3c2b1a09-8f7e-4d6c-9b5a-4e3d2c1b0a99",
+  finished_at: "2026-11-12T02:00:00Z",
+  status: "complete",
+  snapshots_expired: 14,
+  files_deleted: 37,
+  bytes_deleted: 48_200_000,
+  tags_removed: 1,
 };
 
 /**
@@ -354,6 +374,118 @@ export const DOWN: GraphOut = lineage(
   [graphEdge("reads", DAILY_ASSET, ROOT), graphEdge("builds", DAILY_ASSET, DAILY_SALES)],
 );
 
+/**
+ * A grant on the fact table, with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The grant.
+ */
+export function grant(overrides: Partial<GrantOut> = {}): GrantOut {
+  return {
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b01",
+    principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+    group_id: null,
+    principal: {
+      id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+      name: "kim.schulz",
+      principal_type: "user",
+    },
+    group: null,
+    role: "ANALYST",
+    action: null,
+    kind: "TABLE",
+    environment: "prod",
+    namespace: "gold.sales",
+    table: "fact_sales",
+    granted_by: "0f0e0d0c-0b0a-4909-8807-060504030201",
+    granted_at: "2026-10-02T09:00:00Z",
+    note: null,
+    ...overrides,
+  };
+}
+
+/**
+ * The grants on the fact table: Kim's Analyst role, the loader service account's single action,
+ * the analysts group's Viewer role, and one whose person was deleted while the list was read.
+ */
+export const GRANTS: readonly GrantOut[] = [
+  grant(),
+  grant({
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b02",
+    principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c02",
+    principal: {
+      id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c02",
+      name: "loader",
+      principal_type: "service",
+    },
+    role: null,
+    action: "WRITE_TABLE",
+  }),
+  grant({
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b03",
+    principal_id: null,
+    group_id: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d01",
+    principal: null,
+    group: "analysts",
+    role: "VIEWER",
+  }),
+  grant({
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b04",
+    principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c09",
+    principal: null,
+    role: "VIEWER",
+  }),
+];
+
+/** The path of the grants listing on the server. */
+export const GRANTS_PATH = "/api/v1/grants";
+
+/**
+ * A row filter on the fact table, with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The row filter.
+ */
+export function rowFilter(overrides: Partial<RowFilterOut> = {}): RowFilterOut {
+  return {
+    id: "7e6d5c4b-3a2f-4e1d-8c0b-9a8f7e6d5c01",
+    principal_id: null,
+    group_id: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d01",
+    principal: null,
+    group: "analysts",
+    environment: "prod",
+    namespace: "gold.sales",
+    table: "fact_sales",
+    expression: "store_id IN (1, 2, 3)",
+    created_by: "0f0e0d0c-0b0a-4909-8807-060504030201",
+    created_at: "2026-10-03T09:00:00Z",
+    bound: true,
+    ...overrides,
+  };
+}
+
+/** The fact table's row filters: the analysts group sees three stores. */
+export const FILTERS: readonly RowFilterOut[] = [rowFilter()];
+
+/** The fact table's column masks: Kim sees a hash of the customer's email. */
+export const MASKS: readonly ColumnMaskOut[] = [
+  {
+    ...rowFilter({
+      id: "8f7e6d5c-4b3a-4f2e-9d1c-0b9a8f7e6d01",
+      principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+      group_id: null,
+      principal: {
+        id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+        name: "kim.schulz",
+        principal_type: "user",
+      },
+      group: null,
+      expression: "sha256(customer_email)",
+    }),
+    column: "customer_email",
+  },
+];
+
 /** The path of the table's lineage on the server. */
 export const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
 
@@ -463,8 +595,9 @@ export const VIEW_RESULT: ResultPageOut = result({
 
 /**
  * The routes the table page reads and writes for a person: the table, what they may do, the
- * record that they opened it, its health, lineage, where it is defined and its preview, which
- * has finished at the first poll. The person may do everything.
+ * record that they opened it, its health (with the readers only when asked for them), lineage,
+ * where it is defined, its preview, which has finished at the first poll, and the grants (on the
+ * table only), row filters and column masks of the Access tab. The person may do everything.
  *
  * @param person - The person's principal name.
  * @returns The routes.
@@ -477,7 +610,18 @@ export function tableRoutes(person = "admin"): Record<string, FakeRoute> {
       body: permissions(person, ["READ_TABLE", "WRITE_TABLE", "DROP_TABLE", "SUBMIT_QUERY"]),
     },
     [`POST /api/v1/principals/${person}/recent`]: { status: 204 },
-    [`GET ${TABLE_PATH}/health`]: { status: 200, body: HEALTH },
+    // As the server: the names only when they are asked for (only an administrator may).
+    [`GET ${TABLE_PATH}/health`]: (request) => ({
+      status: 200,
+      body: request.path.includes("readers=false") ? HEALTH : health({ readers: READERS }),
+    }),
+    // The grants on the table itself; none on its namespaces or the environment.
+    [`GET ${GRANTS_PATH}`]: (request) => ({
+      status: 200,
+      body: request.path.includes("table=") ? GRANTS : [],
+    }),
+    [`GET /api/v1/row-filters`]: { status: 200, body: FILTERS },
+    [`GET /api/v1/column-masks`]: { status: 200, body: MASKS },
     [`GET ${TABLE_PATH}/definition`]: { status: 200, body: DEFINITION },
     [`GET ${TABLE_PATH}/definition/file`]: { status: 200, body: definitionFile() },
     [`GET ${LINEAGE_PATH}`]: (request) => ({

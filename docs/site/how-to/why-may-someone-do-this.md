@@ -81,6 +81,14 @@ An action without a `via` is refused: no grant gives it here. Give one with `lak
 Asking about someone else without the `ADMIN` role on the instance is refused, whether that
 principal exists or not, and the refusal is recorded in the audit log.
 
+## In the web interface
+
+A table's **Access** tab gives the same answer for you and that table: Read, Write, Drop and Edit
+texts, each with the grant, role or group that allows it, or the reason it is refused. An
+administrator also sees there who has access to the table, level by level, and its row filters
+and column masks. The tab only shows; change the answer with the commands below. See
+[Open a table](open-a-table.md#access).
+
 ## Change the answer
 
 - **Allow an action:** grant a role or the action with `grant create`, on the object or on one

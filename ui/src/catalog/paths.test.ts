@@ -34,10 +34,16 @@ describe("catalog paths", () => {
     );
   });
 
-  it("has the Lineage tab after Preview", () => {
-    expect(TABLE_TABS).toEqual(["overview", "columns", "preview", "lineage"]);
+  it("has Lineage, Health and Access after Preview", () => {
+    expect(TABLE_TABS).toEqual(["overview", "columns", "preview", "lineage", "health", "access"]);
     expect(tablePath("prod", "gold.sales", "fact_sales", "lineage")).toBe(
       "/catalog/prod/gold.sales/fact_sales/lineage",
+    );
+    expect(tablePath("prod", "gold.sales", "fact_sales", "health")).toBe(
+      "/catalog/prod/gold.sales/fact_sales/health",
+    );
+    expect(tablePath("prod", "gold.sales", "fact_sales", "access")).toBe(
+      "/catalog/prod/gold.sales/fact_sales/access",
     );
   });
 
