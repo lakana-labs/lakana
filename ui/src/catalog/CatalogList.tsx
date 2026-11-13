@@ -81,15 +81,20 @@ export function CatalogList(): JSX.Element {
   const navigationType = useNavigationType();
   const [params, setParams] = useSearchParams();
   // An empty address opens the place last chosen: when the page opens and when the Catalog is
-  // pressed again in the menu, not on Back or after the search was cleared. The place is known
+  // pressed in the menu (which sends `restore` in the navigation state), nowhere else. The place is known
   // from the first render, so the list is never read for any other.
   const [first] = useState(() => ({
     key: location.key,
     choice: location.search === "" ? readChoice(me.name) : null,
   }));
+  // Only these open the last choice; any other empty address (Show all tables, the tree's root,
+  // Back and Forward) means all tables.
+  const fromMenu =
+    navigationType === NavigationType.Push &&
+    (location.state as { restore?: boolean } | null)?.restore === true;
   let remembered = null;
   if (location.search === "") {
-    remembered = navigationType === NavigationType.Push ? readChoice(me.name) : null;
+    remembered = fromMenu ? readChoice(me.name) : null;
     remembered ??= location.key === first.key ? first.choice : null;
   }
   const restored =

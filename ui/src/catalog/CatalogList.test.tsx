@@ -765,6 +765,68 @@ describe("CatalogList", () => {
       ).toHaveAttribute("aria-current", "page");
     });
 
+    it("shows all tables, and keeps that choice, from Show all tables", async () => {
+      window.localStorage.setItem(KEY, JSON.stringify({ environment: "prod", namespace: "gold" }));
+      const { user, router } = renderShell("/catalog?env=staging");
+
+      await user.click(await screen.findByRole("link", { name: "Show all tables" }));
+
+      await screen.findByRole("treegrid");
+      expect(router.state.location.search).toBe("");
+      await waitFor(() => {
+        expect(JSON.parse(window.localStorage.getItem(KEY) ?? "null")).toEqual({
+          environment: null,
+          namespace: null,
+        });
+      });
+      expect(router.state.location.search).toBe("");
+    });
+
+    it("restores the last choice from the menu's Catalog link on another area", async () => {
+      window.localStorage.setItem(KEY, JSON.stringify({ environment: "prod", namespace: "gold" }));
+      const { user, router } = renderShell("/");
+      await screen.findByRole("heading", { level: 1, name: "Home" });
+
+      await user.click(
+        within(screen.getByRole("navigation")).getByRole("link", { name: "Catalog" }),
+      );
+
+      await waitFor(() => {
+        expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      });
+    });
+
+    it("shows at each history entry what was shown there", async () => {
+      const { user, router } = renderShell("/catalog");
+      await screen.findByRole("treegrid");
+      const link = (name: string): HTMLElement =>
+        within(screen.getByRole("row", { name })).getByRole("link");
+      await user.click(link("prod, 6 tables"));
+      await user.click(link("All tables, 9 tables"));
+      expect(router.state.location.search).toBe("");
+
+      for (const [step, search] of [
+        [-1, "?env=prod"],
+        [-1, ""],
+        [1, "?env=prod"],
+        [1, ""],
+      ] as const) {
+        await router.navigate(step);
+        await waitFor(() => {
+          expect(router.state.location.search).toBe(search);
+        });
+        await waitFor(() => {
+          expect(
+            within(
+              screen.getByRole("row", {
+                name: search === "" ? "All tables, 9 tables" : "prod, 6 tables",
+              }),
+            ).getByRole("link"),
+          ).toHaveAttribute("aria-current", "page");
+        });
+      }
+    });
+
     it("does not restore the last choice on Back to the empty address", async () => {
       const { user, router } = renderShell("/catalog");
       await screen.findByRole("treegrid");

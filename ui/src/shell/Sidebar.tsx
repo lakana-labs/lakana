@@ -122,6 +122,7 @@ export function Sidebar({ areas, onSearch, onShortcuts }: SidebarProps): JSX.Ele
                     className="sidebar-link"
                     data-tour={area.id}
                     href={area.path}
+                    routerOptions={{ state: { restore: true } }}
                     aria-current={isCurrent(area, pathname) ? "page" : false}
                   >
                     {t(`areas.${area.id}.name`)}
