@@ -1,9 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 
-import { signInAsAdmin, STUBBED } from "./session";
+import { signInAsAdmin, STUBBED, violations } from "./session";
 
 const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+const LIVE_ANNOUNCER = "[data-live-announcer]";
 const KEY = "lakana.preferences";
 
 const AREAS = [
@@ -31,25 +32,6 @@ function consoleErrors(page: Page): string[] {
   });
   page.on("pageerror", (error) => errors.push(error.message));
   return errors;
-}
-
-// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
-// names it by the ids of the button's parts, which may be gone by then; it is the library's
-// transient node, not the page.
-const LIVE_ANNOUNCER = "[data-live-announcer]";
-
-/**
- * Runs axe over the page with the WCAG 2.2 AA tags.
- *
- * @param page - The page to check.
- * @returns The violations' ids and targets.
- */
-async function violations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
-  return results.violations.map(
-    (violation) =>
-      `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`,
-  );
 }
 
 for (const theme of ["light", "dark"] as const) {

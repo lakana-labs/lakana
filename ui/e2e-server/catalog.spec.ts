@@ -49,16 +49,28 @@ async function administrator(
 }
 
 /**
- * Dismisses the welcome of a person who has never seen the tour, if it opens.
+ * Waits for the welcome of a person with access who has never seen the tour, and skips it.
  *
  * @param page - The page, on Home.
  */
 async function skipTheWelcome(page: Page): Promise<void> {
   const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
-  if (await welcome.isVisible().catch(() => false)) {
-    await welcome.getByRole("button", { name: "Skip" }).click();
-    await expect(welcome).toBeHidden();
-  }
+  await expect(welcome).toBeVisible();
+  await welcome.getByRole("button", { name: "Skip" }).click();
+  await expect(welcome).toBeHidden();
+}
+
+/**
+ * The tree's link to a place of one environment, found by its address so that no other
+ * environment's namespace of the same name and count can match.
+ *
+ * @param tree - The tree.
+ * @param environment - The environment.
+ * @param namespace - The dotted namespace.
+ * @returns The link.
+ */
+function placeLink(tree: Locator, environment: string, namespace: string): Locator {
+  return tree.locator(`a[href="/catalog?env=${environment}&ns=${namespace}"]`);
 }
 
 /**
@@ -106,15 +118,15 @@ test("an administrator drills down from All tables to gold.sales and back", asyn
   await expect(rowsIn(page, environment)).toHaveCount(2);
   await expect(page.getByRole("status")).toHaveText("2 tables");
 
-  await tree.getByRole("link", { name: "gold, 2 tables" }).click();
+  await placeLink(tree, environment, "gold").click();
   await expect(page).toHaveURL(new RegExp(`\\?env=${environment}&ns=gold$`));
   await expect(rowsIn(page, environment)).toHaveCount(2);
 
   // The namespaces start closed: open gold to reach sales.
-  await expect(tree.getByRole("link", { name: "sales, 1 table" })).toHaveCount(0);
-  await tree.getByRole("link", { name: "gold, 2 tables" }).focus();
+  await expect(placeLink(tree, environment, "gold.sales")).toHaveCount(0);
+  await placeLink(tree, environment, "gold").focus();
   await page.keyboard.press("ArrowRight");
-  await tree.getByRole("link", { name: "sales, 1 table" }).click();
+  await placeLink(tree, environment, "gold.sales").click();
   await expect(page).toHaveURL(new RegExp(`\\?env=${environment}&ns=gold\\.sales$`));
   const only = rowsIn(page, environment);
   await expect(only).toHaveCount(1);
@@ -236,8 +248,6 @@ test("a reader granted one table sees only it, with its owner, and counts only i
 test("a person with no access yet sees no Catalog", async ({ browser, browserName, request }) => {
   test.skip(browserName !== "chromium", "the virtual authenticator is CDP");
   const { page } = await invitedPerson(browser, request, async () => {});
-  await skipTheWelcome(page);
-
   await expect(page.getByText("You have no access yet; ask an administrator.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Catalog", exact: true })).toHaveCount(0);
   await page.goto("/catalog");

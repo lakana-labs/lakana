@@ -433,7 +433,7 @@ test.describe("the Catalog in real Chromium", () => {
     expect(where(page)).toBe("/catalog");
   });
 
-  test("the Catalog opens the stored place from Home, and Show all tables shows all tables", async ({
+  test("the Catalog opens the stored place on its first render, and Show all tables shows all tables", async ({
     page,
   }) => {
     await page.addInitScript(
