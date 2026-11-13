@@ -918,7 +918,8 @@ class Tables:
             default); the server's default window (30) when `None`.
         readers
             `False` asks the server to leave the readers out: no names and no audit entry on
-            the server. `True` by default.
+            the server. `True` by default. A server older than this release ignores the
+            parameter: it still returns the readers and still writes the view audit.
 
         Returns
         -------

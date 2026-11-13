@@ -28,7 +28,7 @@ more is shown as `null`, not guessed.
 `READ_TABLE` on the table, as the other table routes do; a caller without it gets `403`, a table
 that does not exist `404`. `readers=false` leaves the readers out (`readers` is `null`, even for an
 administrator): no names are looked up and no `ACTIVITY_VIEWED` event is written. Leave it out of
-the request, or send `readers=true`, for the readers; the table page's Overview asks without them.
+the request, or send `readers=true`, for the readers; the parameter exists for the table page's Overview, which does not need them.
 
 | Field | Type | Meaning |
 |---|---|---|

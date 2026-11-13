@@ -6,7 +6,15 @@ import dataclasses
 import uuid
 
 import pytest
-from graph_test_helpers import CONNECTION, Grants, StarWorld, add_ingest, point, python_entry
+from graph_test_helpers import (
+    CONNECTION,
+    Grants,
+    StarWorld,
+    add_ingest,
+    point,
+    python_entry,
+    sales_manifest,
+)
 from graph_test_helpers import graph_service_for as _service
 from sqlalchemy import select
 
@@ -165,6 +173,24 @@ def test_jobs_and_connections_cost_no_depth_and_are_not_walked(
     assert {e.target for e in near.edges if e.kind is EdgeKind.RUNS} == {
         asset_node("sales", "gold.fact_sales")
     }
+
+
+def test_a_job_gets_the_distance_of_its_nearest_asset(
+    star: StarWorld, principal: PrincipalRef
+) -> None:
+    """A job running assets at distances 1 and 2 is at 1, though the farther one is added first."""
+    repo = star.session.scalars(select(Repository).where(Repository.name == "sales")).one()
+    manifest = sales_manifest()
+    manifest["jobs"] = {"mixed": {"select": ["silver.sales", "gold.dim_date"]}}
+    point(star.session, star.env_id, repo, manifest)
+    star.session.commit()
+    page = _service(star).lineage(
+        principal, "dev", "bronze.sales_raw", direction=LineageWay.DOWN, depth=2
+    )
+    seen = _seen(page)
+    assert (NodeKind.ASSET, "silver.sales", 1) in seen
+    assert (NodeKind.ASSET, "gold.dim_date", 2) in seen
+    assert (NodeKind.JOB, "sales/mixed", 1) in seen
 
 
 def test_a_reader_without_read_environment_sees_no_job_or_connection(
