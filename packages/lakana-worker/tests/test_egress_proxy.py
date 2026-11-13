@@ -24,6 +24,7 @@ from typing import Any, cast
 import pytest
 from fake_launcher import FakeLauncher
 from launcher_fakes import settings
+from scripts.test_support.ports import closed_port
 
 from lakana_core.projects.package_sources import RegisteredIndex
 from lakana_worker.docker_environments import DockerEnvironments
@@ -1057,10 +1058,7 @@ def test_the_defaults_work_and_the_upstream_credential_stays_out_of_repr() -> No
 
 def test_an_unreachable_destination_is_a_bad_gateway(proxy: Running) -> None:
     """A signed host that refuses the connection, or does not resolve, gets 502 with the cause."""
-    closed = socket.socket()
-    closed.bind(("127.0.0.1", 0))
-    port = closed.getsockname()[1]
-    closed.close()
+    port = closed_port()
 
     assert _status(proxy.port, f"localhost:{port}", proxy.token([("localhost", port)])) == b"502"
     missing = "no-such-host.invalid"
@@ -1069,10 +1067,7 @@ def test_an_unreachable_destination_is_a_bad_gateway(proxy: Running) -> None:
 
 def test_an_unreachable_upstream_is_a_bad_gateway(tmp_path: Path) -> None:
     """The message says the upstream proxy cannot be reached."""
-    closed = socket.socket()
-    closed.bind(("127.0.0.1", 0))
-    port = closed.getsockname()[1]
-    closed.close()
+    port = closed_port()
     server = _proxy(tmp_path, upstream=f"http://127.0.0.1:{port}")
     key = ensure_key(tmp_path / "egress.key")
     try:
@@ -1189,6 +1184,7 @@ def test_main_serves_and_warns_without_a_key(
     """
     monkeypatch.setenv("LAKANA_EGRESS__KEY", str(tmp_path / "none"))
     free = socket.socket()
+    # Not held: the server must be able to listen on this port.
     free.bind(("127.0.0.1", 0))
     monkeypatch.setenv("LAKANA_EGRESS__LISTEN", f"127.0.0.1:{free.getsockname()[1]}")
     free.close()
@@ -1450,6 +1446,7 @@ def test_main_serves_quietly_with_a_key(
     ensure_key(tmp_path / "egress.key")
     monkeypatch.setenv("LAKANA_EGRESS__KEY", str(tmp_path / "egress.key"))
     free = socket.socket()
+    # Not held: the server must be able to listen on this port.
     free.bind(("127.0.0.1", 0))
     monkeypatch.setenv("LAKANA_EGRESS__LISTEN", f"127.0.0.1:{free.getsockname()[1]}")
     free.close()
