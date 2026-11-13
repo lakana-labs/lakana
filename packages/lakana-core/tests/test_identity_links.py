@@ -33,6 +33,7 @@ from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.links import (
     LINK_LIFETIMES,
+    SETUP_LINK_ISSUER_LAPSED,
     IssuedLink,
     LinkService,
     Redeemed,
@@ -1441,6 +1442,71 @@ def test_operators_recovery_link_for_an_administrator_fails_once_the_token_is_re
     world.session.commit()
     with pytest.raises(PermissionDenied, match="lakana recovery create boss"):
         world.redeem(link)
+
+
+def test_setup_link_records_the_operators_token(world: World) -> None:
+    """A setup link remembers the bootstrap token that issued it, as a recovery link does."""
+    link = world.links.issue_setup(world.operator)
+    assert world.session.get_one(SignInLink, link.id).source_pat_id == world.operator.token_id
+
+
+def _lapse_operator_token(world: World, link: IssuedLink, how: str) -> None:
+    """Make the token that issued a setup link unusable.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    link
+        The setup link.
+    how
+        ``revoked``, ``expired``, or ``unrecorded`` (a link issued before links kept it).
+    """
+    assert world.operator.token_id is not None
+    pat = world.session.get_one(PersonalAccessToken, world.operator.token_id)
+    if how == "revoked":
+        pat.revoked_at = START
+    elif how == "expired":
+        pat.expires_at = START - timedelta(minutes=1)
+    else:
+        world.session.get_one(SignInLink, link.id).source_pat_id = None
+    world.session.commit()
+
+
+@pytest.mark.parametrize(
+    ("how", "reason"),
+    [
+        ("revoked", "operator_token_revoked"),
+        ("expired", "operator_token_expired"),
+        ("unrecorded", "operator_token_revoked"),
+    ],
+)
+def test_setup_link_fails_once_the_operators_token_lapsed(
+    world: World, how: str, reason: str
+) -> None:
+    """A setup link stands only while the bootstrap token that issued it does.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    how
+        How the token lapsed.
+    reason
+        The withdrawal's audited reason.
+    """
+    link = world.links.issue_setup(world.operator)
+    _lapse_operator_token(world, link, how)
+    with pytest.raises(PermissionDenied) as refused:
+        world.redeem(link)
+    assert str(refused.value) == SETUP_LINK_ISSUER_LAPSED
+    assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+    assert _withdrawal_reasons(world, link) == [reason]
+    used = world.session.execute(
+        select(AuditEvent).where(AuditEvent.event_type == AuditEventType.SIGN_IN_LINK_USED)
+    ).all()
+    assert used == []
+    assert world.session.execute(select(BrowserSession)).all() == []
 
 
 def test_two_invites_for_one_name_at_the_same_moment_name_the_next_step(

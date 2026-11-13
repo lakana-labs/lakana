@@ -85,7 +85,9 @@ The web interface is off unless you ask for it:
 works once, signs you in and asks you to register a passkey (a fingerprint, a face or a
 security key); every later sign-in is one touch. Only the bootstrap token in the `team`
 profile may ask for it, and only until the first administrator has a passkey; after that it
-answers with `lakana recovery create`.
+answers with `lakana recovery create`. The link works only while the token that printed it is
+valid: once that token is revoked or expired, opening the link says so and asks for a new one,
+so run `lakana sign-in setup-link` again with the current bootstrap token.
 
 Then invite your team with `lakana invite create NAME`, which prints a link to send that
 person yourself (it works once, for 7 days, and creates an account with no rights): confirm

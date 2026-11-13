@@ -466,7 +466,10 @@ Core: `lakana_core.identity.links` (`LinkService`, `is_operator`, `refuse_automa
   an invite fails when its name was taken meanwhile; an invite or recovery link fails when its
   issuer is gone, deactivated or no longer holds instance ADMIN (`_check_issuer`, reasons
   `issuer_gone`, `issuer_deactivated`, `issuer_not_admin`; the operator's links too, and an
-  operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired). Each such link is then withdrawn (audited
+  operator-issued recovery also needs the bootstrap PAT unrevoked and unexpired); a setup link
+  records the operator's bootstrap PAT (`source_pat_id`) at issue and fails once it is revoked,
+  expired or not recorded (`_operator_token_lapse`, reasons `operator_token_revoked`,
+  `operator_token_expired`; 403 naming `lakana sign-in setup-link`, #520). Each such link is then withdrawn (audited
   with the reason, gone from the open lists) and the error names the next step (an
   administrator's recovery: `lakana recovery create NAME`; an invite: `lakana invite create`).
 - **A local link** (`POST /api/v1/sign-in/local-link`) exists only with

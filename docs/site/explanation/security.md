@@ -102,6 +102,8 @@ makes no claim of certification or compliance with any standard.
   kinds of token reach further, and need the same care as the passkeys themselves:
     - **The server operator's bootstrap token** issues the first administrator's setup link and
       recovery links for any person, administrators and its own account included, at any time.
+      Revoking it closes the setup links and administrators' recovery links it issued: they are
+      refused when they are opened.
     - **An administrator's personal token** issues invite and recovery links (for anyone but
       administrators) without a passkey touch, as the command line does, and can grant rights the
       same way. Whoever holds it can therefore sign into a browser as another person, or as a new
