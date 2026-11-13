@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    PrincipalRef,
+    SecurableKind,
+    TaskScope,
+)
+from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.models import Grant, Group, GroupMembership, Principal, PrincipalType
@@ -168,3 +176,17 @@ def test_is_admin_asks_the_instance_admin_rule(session: Session) -> None:
     )
 
     assert service.is_admin(subject) is True
+
+
+def test_is_admin_follows_the_credentials_scope(session: Session) -> None:
+    """An administrator's personal token is admin; a task token of the same principal is not."""
+    subject = _principal(session)
+    _grant(
+        session, subject.id, principal_id=subject.id, kind=SecurableKind.INSTANCE, role=Role.ADMIN
+    )
+    service = GrantService(session, GrantAuthorization(session))
+    task = dataclasses.replace(
+        subject, task_scope=TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4())
+    )
+
+    assert (service.is_admin(subject), service.is_admin(task)) == (True, False)

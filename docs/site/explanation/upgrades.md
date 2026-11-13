@@ -259,6 +259,10 @@ destination, and a webhook or a connection that names one is refused the way one
   on their next sign-in, sees Get started, and gets no update note for this release.
 - `GET /api/v1/whoami` has a new field `may_deploy`: whether you may deploy in at least one
   environment.
+- `GET /api/v1/whoami`'s `admin` and `may_deploy` follow the credential: a task token or a CI
+  token answers `admin: false` even when its principal holds `ADMIN` on the instance, since it
+  can use no administrator route. A script that decides from `admin` whether to offer an
+  administrator's action should ask with a personal token.
 
 ### Profile pictures, repository checks and deploy keys
 
