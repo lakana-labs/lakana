@@ -255,6 +255,9 @@
 /* Links in the page's blocks take the accent, not the browser's blue (unreadable on dark). */
 .overview a,
 .columns-table a,
+.lineage a,
+.health-tab a,
+.access-tab a,
 .source-dialog a {
   color: var(--color-accent);
 }
