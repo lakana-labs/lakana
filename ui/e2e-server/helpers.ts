@@ -4,9 +4,13 @@
  *
  * @packageDocumentation
  */
+import { resolve } from "node:path";
+
+import AxeBuilder from "@axe-core/playwright";
 import {
   type APIRequestContext,
   type APIResponse,
+  type Browser,
   type BrowserContext,
   type CDPSession,
   expect,
@@ -15,6 +19,41 @@ import {
 
 /** The bootstrap administrator's token, as `playwright.server.config.ts` fixes it. */
 const BOOTSTRAP_TOKEN = "lakana_pat_e2ekey_e2esecret";
+
+/** The origin the e2e server answers on, as `playwright.server.config.ts` fixes it. */
+export const ORIGIN = "http://localhost:4174";
+
+const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+
+// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
+// names it by the ids of the button's parts, which may be gone by then; it is the library's
+// transient node, not the page.
+const LIVE_ANNOUNCER = "[data-live-announcer]";
+
+/**
+ * Opens a browser that has never visited the server.
+ *
+ * @param browser - The browser.
+ * @returns A page of a fresh context.
+ */
+export async function freshPage(browser: Browser): Promise<Page> {
+  const context = await browser.newContext({ baseURL: ORIGIN });
+  return context.newPage();
+}
+
+/**
+ * Runs axe over the page with the WCAG 2.2 AA tags.
+ *
+ * @param page - The page to check.
+ * @returns The violations, each with the elements it found.
+ */
+export async function violations(page: Page): Promise<string[]> {
+  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
+  return results.violations.map(
+    (violation) =>
+      `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`,
+  );
+}
 
 /**
  * Throws with the answer's status and body unless it succeeded.
@@ -184,4 +223,132 @@ export async function addAuthenticator(context: BrowserContext, page: Page): Pro
     },
   });
   return cdp;
+}
+
+/**
+ * Posts JSON as the bootstrap administrator and throws unless it succeeded.
+ *
+ * @param request - The request context.
+ * @param path - The API path.
+ * @param body - The JSON body.
+ */
+async function create(request: APIRequestContext, path: string, body: object): Promise<void> {
+  const response = await request.post(path, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+    data: body,
+  });
+  await ensureOk(`POST ${path}`, response);
+}
+
+/**
+ * Creates an environment whose files live under `ui/.e2e-server/`, which the server's start
+ * clears.
+ *
+ * @param request - The request context.
+ * @param name - The environment's name; unique in the run.
+ * @returns Resolves once the server answered.
+ */
+export function createEnvironment(request: APIRequestContext, name: string): Promise<void> {
+  return create(request, "/api/v1/environments", {
+    name,
+    storage: {
+      scheme: "file",
+      root: `file://${resolve(import.meta.dirname, "..", ".e2e-server")}/lake-${name}`,
+      options: {},
+    },
+  });
+}
+
+/**
+ * Creates a namespace; its parent must exist.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param path - The dotted path, such as `gold.sales`.
+ * @returns Resolves once the server answered.
+ */
+export function createNamespace(
+  request: APIRequestContext,
+  environment: string,
+  path: string,
+): Promise<void> {
+  return create(request, `/api/v1/environments/${environment}/namespaces`, { path });
+}
+
+/**
+ * Creates a managed table.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param namespace - The dotted namespace.
+ * @param name - The table's name.
+ * @param columns - The columns' names; each is a nullable string.
+ * @returns Resolves once the server answered.
+ */
+export function createTable(
+  request: APIRequestContext,
+  environment: string,
+  namespace: string,
+  name: string,
+  columns: readonly string[],
+): Promise<void> {
+  return create(request, `/api/v1/environments/${environment}/namespaces/${namespace}/tables`, {
+    name,
+    schema: columns.map((column) => ({ name: column, type: "string", nullable: true })),
+  });
+}
+
+/**
+ * Lets a person read one table.
+ *
+ * @param request - The request context.
+ * @param principal - The person.
+ * @param environment - The environment.
+ * @param namespace - The dotted namespace.
+ * @param table - The table's name.
+ * @returns Resolves once the server answered.
+ */
+export function grantTableRead(
+  request: APIRequestContext,
+  principal: string,
+  environment: string,
+  namespace: string,
+  table: string,
+): Promise<void> {
+  return create(request, "/api/v1/grants", {
+    principal,
+    action: "READ_TABLE",
+    kind: "TABLE",
+    environment,
+    namespace,
+    table,
+  });
+}
+
+/**
+ * Signs a newly invited person in with a passkey and waits for Home (Chromium only). `prepare`
+ * runs once the person exists and before Home reads what they may do, so it is the place to
+ * grant them something.
+ *
+ * @param browser - The browser.
+ * @param request - The request context.
+ * @param prepare - Called with the person's name before the passkey step.
+ * @returns The page, on Home, and the person's name.
+ */
+export async function invitedPerson(
+  browser: Browser,
+  request: APIRequestContext,
+  prepare: (name: string) => Promise<void>,
+): Promise<{ page: Page; name: string }> {
+  const name = uniqueName("ada");
+  const page = await freshPage(browser);
+  await addAuthenticator(page.context(), page);
+  await page.goto(await inviteLink(request, name));
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Add a passkey" })).toBeVisible();
+  // The person exists once the invite is redeemed.
+  await prepare(name);
+  await page.getByRole("button", { name: "Add a passkey" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+  return { page, name };
 }

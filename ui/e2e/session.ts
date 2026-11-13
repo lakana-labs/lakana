@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
 /** The session of a signed-in administrator, as `GET /api/v1/sign-in/session` answers it. */
@@ -102,7 +103,7 @@ const HOME: Record<string, unknown> = {
   "/api/v1/info": { version: "0.23.0" },
 };
 
-/** What the Catalog reads: a tree of two environments and a page of tables in every health. */
+/** What the Catalog reads besides the list: a tree of two environments and an empty namespace. */
 const CATALOG: Record<string, unknown> = {
   "/api/v1/tables/tree": {
     count: 4,
@@ -114,76 +115,132 @@ const CATALOG: Record<string, unknown> = {
         namespaces: [
           { path: "gold", count: 3 },
           { path: "gold.sales", count: 1 },
+          { path: "bronze", count: 0 },
         ],
       },
     ],
   },
-  "/api/v1/tables": {
-    items: [
-      {
-        environment: "prod",
-        namespace: "gold",
-        name: "station_ranking",
-        uuid: "5d0c7a1e-3f51-4a0e-9b0e-2a6f4c1d8e11",
-        kind: "TABLE",
-        model_kind: null,
-        state: "published",
-        owner: { name: "kim.schulz", kind: "USER" },
-        created_at: "2026-10-01T08:00:00Z",
-        row_count: 48210,
-        size_bytes: 3100000,
-        last_write_at: "2026-11-09T06:00:00Z",
-        last_read_at: "2026-11-10T07:30:00Z",
-        readers_7d: 4,
-        health_summary: { state: "healthy", item: "healthy", text: "Healthy", others: 0 },
-        match: null,
-      },
-      {
-        environment: "prod",
-        namespace: "gold.sales",
-        name: "fact_sales",
-        uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
-        kind: "TABLE",
-        model_kind: "fact",
-        state: "published",
-        owner: { name: "ana.nowak", kind: "USER" },
-        created_at: "2026-10-02T08:00:00Z",
-        row_count: 1204000,
-        size_bytes: 98304,
-        last_write_at: "2026-11-10T06:00:00Z",
-        last_read_at: "2026-11-10T07:50:00Z",
-        readers_7d: 2,
-        health_summary: {
-          state: "failing",
-          item: "check_failed",
-          text: "Check failed",
-          others: 2,
-        },
-        match: null,
-      },
-      {
-        environment: "dev",
-        namespace: "gold",
-        name: "dim_store",
-        uuid: "c7e2b5f0-1d34-4e8a-a6b9-3f5d0c8e7a63",
-        kind: "VIEW",
-        model_kind: "dimension",
-        state: "published",
-        owner: { name: "loader", kind: "SERVICE_ACCOUNT" },
-        created_at: "2026-10-03T08:00:00Z",
-        row_count: null,
-        size_bytes: null,
-        last_write_at: null,
-        last_read_at: null,
-        readers_7d: 0,
-        health_summary: { state: "not_judged", item: "not_judged", text: "Not judged", others: 0 },
-        match: null,
-      },
-    ],
-    next_cursor: null,
-    capped: false,
-  },
 };
+
+/** The path of the list, which answers by its query (see {@link tablesAnswer}). */
+const TABLES = "/api/v1/tables";
+
+/**
+ * A row of the list.
+ *
+ * @param row - The fields that differ from a table in prod.gold nobody has judged.
+ * @returns The row as the server sends it.
+ */
+function tableRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    environment: "prod",
+    namespace: "gold",
+    uuid: "5d0c7a1e-3f51-4a0e-9b0e-2a6f4c1d8e11",
+    kind: "TABLE",
+    model_kind: null,
+    state: "published",
+    owner: { name: "kim.schulz", kind: "USER" },
+    created_at: "2026-10-01T08:00:00Z",
+    row_count: 48210,
+    size_bytes: 83900000,
+    last_write_at: "2026-11-09T06:00:00Z",
+    last_read_at: "2026-11-10T07:30:00Z",
+    readers_7d: 4,
+    health_summary: { state: "healthy", item: "healthy", text: "Healthy", others: 0 },
+    match: null,
+    ...row,
+  };
+}
+
+const STATION_RANKING = tableRow({ name: "station_ranking" });
+const FACT_SALES = tableRow({
+  environment: "prod",
+  namespace: "gold.sales",
+  name: "fact_sales",
+  model_kind: "fact",
+  owner: { name: "ana.nowak", kind: "USER" },
+  row_count: 1204000,
+  size_bytes: 98304,
+  last_write_at: "2026-11-10T06:00:00Z",
+  last_read_at: "2026-11-10T07:50:00Z",
+  readers_7d: 2,
+  health_summary: { state: "failing", item: "check_failed", text: "Check failed", others: 2 },
+});
+const DIM_STORE = tableRow({
+  environment: "dev",
+  name: "dim_store",
+  kind: "VIEW",
+  model_kind: "dimension",
+  owner: { name: "loader", kind: "SERVICE_ACCOUNT" },
+  row_count: null,
+  size_bytes: null,
+  last_write_at: null,
+  last_read_at: null,
+  readers_7d: 0,
+  health_summary: { state: "not_judged", item: "not_judged", text: "Not judged", others: 0 },
+});
+const LATE_ARRIVAL = tableRow({
+  name: "late_arrival",
+  health_summary: { state: "warning", item: "late", text: "Late", others: 0 },
+});
+
+/**
+ * What `GET /api/v1/tables` answers for a query: a search finds a column and a description, the
+ * text "nothing" finds nothing, the namespace "bronze" holds no table, an environment "staging"
+ * does not exist, and the first page has a second one behind its cursor.
+ *
+ * @param url - The request's URL.
+ * @returns The status and the body.
+ */
+function tablesAnswer(url: URL): { status: number; json: unknown } {
+  const query = url.searchParams;
+  const page = (items: unknown[], next: string | null): { status: number; json: unknown } => ({
+    status: 200,
+    json: { items, next_cursor: next, capped: false },
+  });
+  const q = query.get("q");
+  if (query.get("environment") === "staging") {
+    return { status: 404, json: { detail: "No environment named staging." } };
+  }
+  if (query.get("namespace") === "bronze" || q === "nothing") {
+    return page([], null);
+  }
+  if (q !== null) {
+    return page(
+      [
+        {
+          ...FACT_SALES,
+          match: {
+            kind: "column",
+            matched: "name",
+            column: "store_id",
+            column_type: "bigint",
+            snippet: null,
+            language: null,
+            translated: false,
+          },
+        },
+        {
+          ...STATION_RANKING,
+          match: {
+            kind: "table",
+            matched: "description",
+            column: null,
+            column_type: null,
+            snippet: `Every ${q} ranked by the trips it served`,
+            language: "en",
+            translated: false,
+          },
+        },
+      ],
+      null,
+    );
+  }
+  if (query.get("cursor") !== null) {
+    return page([LATE_ARRIVAL], null);
+  }
+  return page([STATION_RANKING, FACT_SALES, DIM_STORE], "page-two");
+}
 
 /** The administrator's profile picture: one pixel, a PNG. */
 const PICTURE =
@@ -199,6 +256,7 @@ export const STUBBED = [
   "/api/v1/settings/sign-in",
   ...Object.keys(HOME),
   ...Object.keys(CATALOG),
+  TABLES,
 ];
 
 /**
@@ -244,4 +302,46 @@ export async function signInAsAdmin(page: Page): Promise<void> {
       (route) => route.fulfill({ json }),
     );
   }
+  await page.route(
+    (url) => url.pathname === TABLES,
+    (route) => route.fulfill(tablesAnswer(new URL(route.request().url()))),
+  );
+}
+
+const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+
+// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
+// names it by the ids of the button's parts, which may be gone by then; it is the library's
+// transient node, not the page.
+const LIVE_ANNOUNCER = "[data-live-announcer]";
+
+/**
+ * Runs axe over the page with the WCAG 2.2 AA tags.
+ *
+ * @param page - The page to check.
+ * @returns The violations' ids and targets.
+ */
+export async function violations(page: Page): Promise<string[]> {
+  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
+  return results.violations.map(
+    (violation) =>
+      `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`,
+  );
+}
+
+/**
+ * Collects the console errors and page errors of a page.
+ *
+ * @param page - The page to listen to.
+ * @returns The list, filled as errors arrive.
+ */
+export function consoleErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      errors.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => errors.push(error.message));
+  return errors;
 }
