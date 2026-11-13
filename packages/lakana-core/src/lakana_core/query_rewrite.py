@@ -847,7 +847,7 @@ _READER_NAMES = frozenset(
         "iceberg_partition_stats",
         "iceberg_refs",
         "iceberg_snapshots",
-        # Another database.
+        # Another database: read, run statements in (`_execute`) or attach.
         "sqlite_attach",
         "sqlite_query",
         "postgres_query",
@@ -856,9 +856,9 @@ _READER_NAMES = frozenset(
         "mysql_execute",
     }
 )
-"""The table functions of DuckDB 2.0.0 that read a file, a URL or another database by a name the
-prefix and suffix above miss. Only the refusal's message uses it: every table function outside
-the generator allow-list is refused either way."""
+"""The table functions of DuckDB 2.0.0 that read a file or a URL, or read, run statements in or
+attach another database, by a name the prefix and suffix above miss. Only the refusal's message
+uses it: every table function outside the generator allow-list is refused either way."""
 
 _LOAD_FIRST = (
     'load the data into a table first (see "Load data from a source" in the user '
@@ -888,9 +888,10 @@ def _refused_table_function(function: str) -> str:
     load_first = _LOAD_FIRST[0].upper() + _LOAD_FIRST[1:]
     if known:
         return (
-            f"table function {function} is not allowed: it reads data directly (a file, a URL "
-            "or another database), outside the access rules of the catalog, so only range, "
-            f"generate_series and unnest may be called in FROM. {load_first}"
+            f"table function {function} is not allowed: it reaches data directly (it reads a "
+            "file or a URL, or reads, runs statements in or attaches another database), outside "
+            "the access rules of the catalog, so only range, generate_series and unnest may be "
+            f"called in FROM. {load_first}"
         )
     return (
         f"table function {function} is not allowed: only range, generate_series and unnest "

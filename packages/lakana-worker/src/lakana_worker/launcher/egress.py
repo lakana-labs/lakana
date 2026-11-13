@@ -117,8 +117,8 @@ _NEVER = (
     ipaddress.ip_network("fd20:ce::254/128"),
 )
 """Beyond loopback, link-local, multicast, unspecified and reserved: "this network" and the
-cloud service addresses outside link-local (Alibaba Cloud, Azure's WireServer, Oracle Cloud's
-older metadata address, AWS and Google Cloud over IPv6). A copy of
+cloud service addresses outside link-local (Alibaba Cloud, Azure's WireServer, Oracle Compute
+Classic and Cloud@Customer's metadata address, AWS and Google Cloud over IPv6). A copy of
 `lakana_core.net.egress._NEVER_NETWORKS`, which the launcher cannot import; a test keeps the two
 in sync."""
 

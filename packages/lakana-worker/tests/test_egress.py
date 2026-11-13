@@ -300,7 +300,7 @@ NEVER_REACHABLE = [
     "::168.63.129.16",
     "64:ff9b::a83f:8110",
     "2002:a83f:8110::1",
-    "192.0.0.192",  # Oracle Cloud's older metadata address
+    "192.0.0.192",  # Oracle Compute Classic and Cloud@Customer metadata
     "::ffff:192.0.0.192",
     "fd20:ce::254",  # Google Cloud's IPv6 metadata address
 ]

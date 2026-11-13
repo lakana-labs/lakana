@@ -180,7 +180,7 @@ with the other migrations, and nothing else has to be done. A table's "Defined i
 ### Azure's WireServer and two more cloud service addresses are never reached
 
 Lakana now refuses `168.63.129.16` (Azure's WireServer, which hands a virtual machine its
-extension settings), `192.0.0.192` (Oracle Cloud's older metadata address) and `fd20:ce::254`
+extension settings), `192.0.0.192` (the metadata address of Oracle Compute Classic and Cloud@Customer) and `fd20:ce::254`
 (Google Cloud's metadata service over IPv6), like `169.254.169.254`: in webhooks, even for a
 host in `LAKANA_WEBHOOK__ALLOW_HOSTS`, in the CI OIDC key fetch, in deploys and repository
 checks, and through the `egress` proxy for builds, tasks and connection tests. The proxy and

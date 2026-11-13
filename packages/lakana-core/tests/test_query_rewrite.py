@@ -1778,8 +1778,22 @@ def test_a_reader_by_another_name_is_refused_as_a_reader(function: str) -> None:
     """
     with pytest.raises(ValidationError, match=f"table function {function} is not allowed") as info:
         check_blacklist(f"SELECT * FROM {function}('x')")
-    assert "it reads data directly" in str(info.value)
+    assert "it reaches data directly" in str(info.value)
     assert "check the name" not in str(info.value)
+
+
+@pytest.mark.parametrize("function", ["postgres_execute", "mysql_execute", "sqlite_attach"])
+def test_a_function_that_runs_statements_or_attaches_is_described_as_such(function: str) -> None:
+    """``postgres_execute`` runs a statement and ``sqlite_attach`` attaches: neither only reads.
+
+    Parameters
+    ----------
+    function
+        The table function the query calls.
+    """
+    with pytest.raises(ValidationError) as info:
+        check_blacklist(f"SELECT * FROM {function}('x')")
+    assert "runs statements in or attaches another database" in str(info.value)
 
 
 @pytest.mark.parametrize("function", ["parquet_metadat", "iceberg_snapshot", "mystery"])

@@ -274,7 +274,8 @@ _NEVER_NETWORKS = tuple(
         # Azure's WireServer (VM extension settings, sometimes protected ones), in a public
         # range, so nothing else here or in `is_internal` would catch it (#543).
         "168.63.129.16/32",
-        # Oracle Cloud's older metadata address, inside the IETF protocol range 192.0.0.0/24.
+        # The metadata address of Oracle Compute Classic and Cloud@Customer (not OCI, which uses
+        # 169.254.169.254), inside the IETF protocol range 192.0.0.0/24.
         "192.0.0.192/32",
         "::/128",
         "::1/128",
