@@ -414,6 +414,60 @@ def _refusal(url: str) -> str | None:
     return None
 
 
+_STRONG_HASH = re.compile(r"\A(?:sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128})\Z")
+"""A file hash the worker accepts in a lock: what `uv lock` writes for a file of an index."""
+_HTTP_URL = re.compile(r"\Ahttps?://[^/?#]", re.IGNORECASE)
+
+
+def _file_entries(package: dict[str, object]) -> list[object]:
+    """List a package's file entries: each wheel, and the sdist.
+
+    Parameters
+    ----------
+    package
+        One ``[[package]]`` table.
+
+    Returns
+    -------
+    list
+        The entries as written; an entry that is not a table is kept for the caller to judge.
+    """
+    wheels, sdist = package.get("wheels"), package.get("sdist")
+    entries: list[object] = list(wheels) if isinstance(wheels, list) else []
+    if sdist is not None:
+        entries.append(sdist)
+    return entries
+
+
+def _index_file_problems(package: dict[str, object]) -> tuple[bool, bool]:
+    """Judge the files of a package that comes from a package index.
+
+    Parameters
+    ----------
+    package
+        One ``[[package]]`` table whose source is an index URL.
+
+    Returns
+    -------
+    tuple of bool
+        Whether a file names something other than an absolute ``http``/``https`` URL (a
+        ``file:`` URL, another scheme, a path), and whether a file lacks a SHA-256, SHA-384 or
+        SHA-512 hash.
+    """
+    not_http = unhashed = False
+    for entry in _file_entries(package):
+        if not isinstance(entry, dict):
+            unhashed = True
+            continue
+        url = entry.get("url")
+        if "path" in entry or not isinstance(url, str) or not _HTTP_URL.match(url):
+            not_http = True
+        digest = entry.get("hash")
+        if not isinstance(digest, str) or not _STRONG_HASH.match(digest):
+            unhashed = True
+    return not_http, unhashed
+
+
 def _outside_wheelhouse(package: dict[str, object]) -> bool:
     """Say whether a package of the folder `wheelhouse` names a file outside it.
 
@@ -425,13 +479,16 @@ def _outside_wheelhouse(package: dict[str, object]) -> bool:
     Returns
     -------
     bool
-        `True` if a wheel's or the sdist's ``path`` is not a string, is empty, starts with
-        ``/``, holds a backslash or has a ``..`` segment.
+        `True` if a wheel or the sdist names a ``url`` (`uv lock` names a file of the folder by
+        its path), or its ``path`` is not a string, is empty, starts with ``/``, holds a
+        backslash or has a ``..`` segment.
     """
-    wheels, sdist = package.get("wheels"), package.get("sdist")
-    entries = [*(wheels if isinstance(wheels, list) else []), sdist]
-    for entry in entries:
-        if not isinstance(entry, dict) or "path" not in entry:
+    for entry in _file_entries(package):
+        if not isinstance(entry, dict):
+            continue
+        if "url" in entry:
+            return True
+        if "path" not in entry:
             continue
         path = entry["path"]
         if not isinstance(path, str) or not path or path.startswith("/") or "\\" in path:
@@ -472,12 +529,16 @@ def _source_issues(lock: dict[str, object], sources: KnownSources) -> list[Proje
     -------
     list of ProjectIssue
         One issue per unknown index URL, one per local folder other than
-        `wheelhouse`, one for git sources and one for direct URLs.
+        `wheelhouse`, one for git sources and one for direct URLs, one for files of an
+        index that are not ``http``/``https`` URLs and one for files of an index without a
+        strong hash.
     """
     unknown: dict[str, list[str]] = {}
     refused: dict[tuple[str, str], list[str]] = {}
     folders: dict[str, list[str]] = {}
     outside: list[str] = []
+    not_http: list[str] = []
+    unhashed: list[str] = []
     git: list[str] = []
     direct: list[str] = []
     for package in _package_tables(lock):
@@ -495,12 +556,19 @@ def _source_issues(lock: dict[str, object], sources: KnownSources) -> list[Proje
         registry = source["registry"]
         if not isinstance(registry, str):
             refused.setdefault(("?", "it is not a URL"), []).append(name)
-        elif "://" not in registry:
+            continue
+        if "://" not in registry:
             if registry.removeprefix("./").rstrip("/") != WHEELHOUSE:
                 folders.setdefault(_shown_folder(registry), []).append(name)
             elif _outside_wheelhouse(package):
                 outside.append(name)
-        elif not sources.is_known(registry):
+            continue
+        bad_url, no_hash = _index_file_problems(package)
+        if bad_url:
+            not_http.append(name)
+        if no_hash:
+            unhashed.append(name)
+        if not sources.is_known(registry):
             reason = _refusal(registry)
             if reason is None:
                 unknown.setdefault(normalize_index_url(registry, credential=False), []).append(name)
@@ -546,6 +614,28 @@ def _source_issues(lock: dict[str, object], sources: KnownSources) -> list[Proje
                 f"packages in `{WHEELHOUSE}` must be files inside that folder. Put the file into "
                 f"`{WHEELHOUSE}` (not a path with `..`, a backslash or a leading slash), then "
                 "run `uv lock`",
+            )
+        )
+    if not_http:
+        issues.append(
+            ProjectIssue(
+                LOCK_FILE,
+                None,
+                f"takes {_listed(not_http)} from a file that is not an http or https URL; a lock "
+                "may name only the files of a package index, or files inside the folder "
+                f"`{WHEELHOUSE}` by their path. Run `uv lock`, commit the lock as it writes it, "
+                "then deploy again",
+            )
+        )
+    if unhashed:
+        issues.append(
+            ProjectIssue(
+                LOCK_FILE,
+                None,
+                f"has no SHA-256 (or SHA-384, SHA-512) hash for a file of {_listed(unhashed)}; "
+                "`uv lock` writes one for every file of a package index, and the worker builds "
+                "only what the lock pins. Run `uv lock`, commit the lock as it writes it, then "
+                "deploy again",
             )
         )
     for names, what in ((git, "a git repository"), (direct, "a direct URL")):

@@ -1789,9 +1789,13 @@ code in this area has to know.
   rule names indexes, not download hosts: each package's `source.registry` must be PyPI, the
   project's `wheelhouse` folder, the operator's `LAKANA_RUN__INDEX_URL` or a registered package
   index, and another index, a git source and a direct URL are refused at deploy and before every
-  execution (`lockfile_issues`, `source_issues`). A wheel's or sdist's own URL in the lock is not
-  checked: it may point at another host, uv downloads from it, and no credential is sent there
-  (a credential is bound to its index's scheme, host and port). A URL the strict
+  execution (`lockfile_issues`, `source_issues`). A wheel's or sdist's own URL in the lock is
+  checked only for its scheme (#77): an index's file must be an absolute `http`/`https` URL (no
+  `file:`, no path) with a `sha256`/`sha384`/`sha512` hash, and a `wheelhouse` package's file must
+  be a `path` inside the folder (no `url`); `wheelhouse` files carry no hash, since `uv lock`
+  writes none for a folder. The host is not checked: it may be another host, uv downloads from
+  it, and no credential is sent there (a credential is bound to its index's scheme, host and
+  port). A URL the strict
   `comparable_index_url` rule refuses is not a registered index; the operator's index has its own
   lenient comparison (`KnownSources.is_known`). Local path and workspace dependencies are refused at deploy
   (`lockfile_issues`) and again before the build. Detached child processes of user code are not
