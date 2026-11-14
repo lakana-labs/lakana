@@ -578,4 +578,24 @@ describe("PreviewTab", () => {
     ]);
     expect(rowText(table, 2)).toEqual(["2", "****", "null", "null", "null"]);
   });
+
+  it("marks SQL NULL and binary as value markers, never like the text null", async () => {
+    renderShell(PREVIEW, {
+      routes: {
+        [RESULT_ROUTE]: {
+          status: 200,
+          body: result({ rows: [["1", "null", null, { binary: 12 }, null]] }),
+        },
+      },
+    });
+    const table = await grid();
+    const row = within(table).getAllByRole("row")[1] as HTMLElement;
+    const cells = Array.from(row.querySelectorAll("td, th")).slice(1);
+
+    // The string "null" is text; SQL NULL and binary's size are markers, still read as words.
+    expect(cells[1]?.querySelector(".value-marker")).toBeNull();
+    expect(cells[1]).toHaveTextContent("null");
+    expect(cells[2]?.querySelector(".value-marker")).toHaveTextContent(/^null$/);
+    expect(cells[3]?.querySelector(".value-marker")).toHaveTextContent("binary, 12 bytes");
+  });
 });

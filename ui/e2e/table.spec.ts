@@ -503,9 +503,22 @@ test.describe("the table page in real Chromium", () => {
     expect(tops.scrolled).toBeGreaterThan(0);
     expect(Math.abs(tops.head - tops.region)).toBeLessThan(1);
 
-    // The row numbers: a muted gutter, the row header, and never part of copied cells.
+    // The row numbers: a muted gutter as narrow as its widest number, the row header, and never
+    // part of copied cells.
     const gutter = grid.getByRole("rowheader").first();
     await expect(gutter).toHaveText("1");
+    const narrow = await grid.evaluate((node) => {
+      const cell = node.querySelector("tbody tr:last-child .row-number");
+      const probe = document.createElement("span");
+      probe.textContent = "00";
+      cell?.append(probe);
+      const digits = probe.getBoundingClientRect().width;
+      probe.remove();
+      return { width: cell?.getBoundingClientRect().width ?? 0, digits };
+    });
+    expect(narrow.width, `${String(narrow.width)} px`).toBeLessThanOrEqual(
+      narrow.digits + 2 * 8 + 2,
+    );
     expect(await gutter.evaluate((node) => getComputedStyle(node).userSelect)).toBe("none");
     const copied = await grid.evaluate((node) => {
       const body = node.querySelector("tbody");
@@ -521,6 +534,21 @@ test.describe("the table page in real Chromium", () => {
     expect(copied).toContain("note 0");
     expect(copied).toContain("7");
     expect(copied.split("\n")[0]?.trim().startsWith("7")).toBe(true);
+    // SQL NULL is a marker that does not look like text, and still reads "null".
+    const marker = grid.locator("tbody tr").first().locator(".value-marker");
+    await expect(marker).toHaveText("null");
+    const looks2 = await grid.evaluate((node) => {
+      const row = node.querySelector("tbody tr");
+      const text = row?.children[3];
+      const nullMark = row?.querySelector(".value-marker");
+      const style = (one: Element | null | undefined): string[] => {
+        const css = one === null || one === undefined ? null : getComputedStyle(one);
+        return [css?.fontStyle ?? "", css?.backgroundColor ?? "", css?.color ?? ""];
+      };
+      return { text: style(text), marker: style(nullMark) };
+    });
+    expect(looks2.marker).not.toEqual(looks2.text);
+    expect(looks2.marker[0]).toBe("italic");
     expect(await violations(page), "the dense grid, dark, compact").toEqual([]);
   });
 
@@ -591,6 +619,18 @@ test.describe("the table page in real Chromium", () => {
       }
       expect(observed).toContain("54 minutes since the last write");
       expect(observed).toContain("0 of 3 values empty");
+      // The band in words too, never a raw number of seconds or microseconds.
+      const bands = await signals.locator("tbody tr td:nth-child(5)").allTextContents();
+      expect(bands).toContain("up to 24 hours");
+      expect(bands).toContain("up to 5 % empty");
+      for (const text of bands) {
+        expect(text).not.toMatch(/\d{7,}|null|high |low /);
+      }
+      // Every effect is one of the interface's words.
+      const effects = await signals.locator("tbody tr td:nth-child(6)").allTextContents();
+      for (const effect of effects) {
+        expect(["Warns", "Blocks publication", "Off"]).toContain(effect);
+      }
     });
   }
 

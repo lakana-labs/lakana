@@ -132,8 +132,9 @@ interface CellTextProps {
 }
 
 /**
- * One cell's text: the value with its invisible characters marked, or the muted words for null
- * and binary, and the mark of a cut value.
+ * One cell's text: the value with its invisible characters marked, or a value marker for SQL NULL
+ * and binary (words that stand for the value, styled so the text "null" never looks like it),
+ * and the mark of a cut value.
  *
  * @param props - The cell.
  * @param props.cell - The cell as text.
@@ -144,7 +145,7 @@ function CellText({ cell }: CellTextProps): JSX.Element {
   return (
     <>
       {cell.muted ? (
-        <span className="preview-muted">{cell.text}</span>
+        <span className="value-marker">{cell.text}</span>
       ) : (
         <VisibleText text={cell.text} />
       )}
