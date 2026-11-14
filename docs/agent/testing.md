@@ -102,14 +102,20 @@ whole suite with coverage the way the 3.14 shards do together, run it **one pack
 and combine the data, as CI combines its shards:
 
 ```bash
+failed=
 for target in packages/lakana-core packages/lakana packages/lakana-server \
     packages/lakana-worker scripts; do
   COVERAGE_FILE=".coverage.local-$(basename "$target")" \
     systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 timeout 3600 \
-    uv run pytest "$target" -n 2 --dist loadfile --cov --cov-report= -q -p no:cacheprovider || break
+    uv run pytest "$target" -n 2 --dist loadfile --cov --cov-report= -q -p no:cacheprovider \
+    || { failed="$target"; break; }
 done
-uv run coverage combine .coverage.local-* && uv run coverage json
-uv run python scripts/coverage_ratchet.py
+if [ -n "$failed" ]; then
+  echo "Stopped at $failed: fix it first; coverage of a partial run would read as a drop."
+else
+  uv run coverage combine .coverage.local-* && uv run coverage json \
+    && uv run python scripts/coverage_ratchet.py
+fi
 ```
 
 One run over the whole repository no longer fits (#488): it grew to 7.0 GB by about 99 % (in
