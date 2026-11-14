@@ -1076,3 +1076,11 @@ def test_an_object_with_a_name_of_up_to_255_bytes_can_be_written(
     writer.commit()
     assert storage.read(f"logs/{name}") == b"1"
     assert sorted(storage.list("logs")) == sorted([f"logs/{name}", f"logs/b{name[1:]}"])
+
+
+def test_an_object_whose_name_holds_a_lone_surrogate_can_be_written(config: StorageConfig) -> None:
+    """A name the file system takes but strict UTF-8 cannot encode still writes (review of #616)."""
+    name = "a\udcff.log"
+    storage = build_storage(config)
+    storage.write(f"logs/{name}", b"1")
+    assert storage.read(f"logs/{name}") == b"1"

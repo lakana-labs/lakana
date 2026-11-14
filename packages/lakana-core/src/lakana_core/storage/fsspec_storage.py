@@ -115,7 +115,7 @@ class _LocalStreamWriter:
         self._final = final
         # At most 100 bytes of the name, so that the temporary name fits a 255-byte limit too;
         # the leading dot and the suffix are what a sweep recognises it by.
-        kept = name.encode()[:_TEMP_NAME_BYTES].decode(errors="ignore")
+        kept = os.fsdecode(os.fsencode(name)[:_TEMP_NAME_BYTES])
         self._temp = os.path.join(directory, f".{kept}.{secrets.token_hex(8)}{PART_SUFFIX}")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         # 0666 less the process umask, like every other file the backend writes: the operator
