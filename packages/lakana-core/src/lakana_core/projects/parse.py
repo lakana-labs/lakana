@@ -122,6 +122,43 @@ def file_references(asset: ParsedAsset) -> set[str]:
     return sql_file_references(asset.sql, asset.references)
 
 
+_DATABASE_PREFIXES = ("postgres_", "mysql_", "sqlite_")
+"""Table functions whose first argument is a connection or a database, never reported as a path:
+a connection string may hold a password."""
+
+
+def _path_arguments(item: exp.Table | exp.Lateral, function: str) -> set[str]:
+    """Read the paths a reader's first argument names, as `FROM 'path'` would name them.
+
+    Parameters
+    ----------
+    item
+        The `FROM` item that calls the function.
+    function
+        Its lowercase name (`_from_item_function_name`).
+
+    Returns
+    -------
+    set of str
+        Each string literal of the first positional argument, alone or in a list; empty for
+        a database function (`_DATABASE_PREFIXES`) and when that argument is no literal.
+    """
+    if function.startswith(_DATABASE_PREFIXES):
+        return set()
+    call = item.this
+    while isinstance(call, exp.Dot):
+        call = call.expression
+    while isinstance(call, exp.Anonymous) and call.name.lower() == "table" and call.expressions:
+        call = call.expressions[0]
+    if not isinstance(call, exp.Func):
+        return set()
+    first = call.this if isinstance(call.this, (exp.Literal, exp.Array)) else None
+    if first is None and call.expressions:
+        first = call.expressions[0]
+    items = first.expressions if isinstance(first, exp.Array) else [first]
+    return {i.this for i in items if isinstance(i, exp.Literal) and i.is_string and i.this}
+
+
 def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
     """Find the references of a query that read a file, not a catalog table.
 
@@ -144,10 +181,12 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
     Returns
     -------
     set of str
-        The references that are not catalog tables: a quoted path as written, and a table
-        function by its lowercase name (``read_parquet``), never its arguments, which may hold
-        a connection string. If the SQL cannot be parsed again, every reference is treated
-        that way.
+        The references that are not catalog tables: a quoted path as written; for a table
+        function the path literals of its first argument (`_path_arguments`), so that a path
+        that looks like a table name never passes as one, or its lowercase name
+        (``read_parquet``) when it has none. A database function's arguments are never
+        reported. If the SQL cannot be
+        parsed again, every reference is treated that way.
     """
     try:
         tree = sqlglot.parse_one(sql, dialect="duckdb")
@@ -159,7 +198,7 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
         if function in _ALLOWED_TABLE_FUNCTIONS:
             continue  # a generator reads no table and no file
         if function is not None:
-            found.add(function)
+            found |= _path_arguments(item, function) or {function}
         elif isinstance(item, exp.Table) and any(
             not isinstance(part, exp.Identifier) or "." in part.name for part in item.parts
         ):

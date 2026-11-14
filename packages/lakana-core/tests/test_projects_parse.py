@@ -476,43 +476,62 @@ def test_a_reading_table_function_is_never_reported_as_an_empty_name() -> None:
 
 
 _READER_FORMS = [
-    ("SELECT * FROM read_parquet('a/b.parquet')", "read_parquet"),
-    ("SELECT * FROM read_parquet(['x', 'y'])", "read_parquet"),
-    ("SELECT * FROM read_parquet('s3://bucket/x.parquet', union_by_name = true)", "read_parquet"),
-    ("SELECT * FROM read_csv('x.csv')", "read_csv"),
-    ("SELECT * FROM read_csv(['a.csv'], header = true)", "read_csv"),
-    ("SELECT * FROM read_csv_auto('a.csv')", "read_csv_auto"),
-    ("SELECT * FROM read_json('a.json')", "read_json"),
-    ("SELECT * FROM read_json_auto('a.json')", "read_json_auto"),
-    ("SELECT * FROM read_ndjson('a.json')", "read_ndjson"),
-    ("SELECT * FROM read_text('a.txt')", "read_text"),
-    ("SELECT * FROM read_blob('a')", "read_blob"),
-    ("SELECT * FROM read_xlsx('a.xlsx')", "read_xlsx"),
-    ("SELECT * FROM parquet_scan('a.parquet')", "parquet_scan"),
-    ("SELECT * FROM iceberg_scan('s3://b/t')", "iceberg_scan"),
-    ("SELECT * FROM delta_scan('s3://b/t')", "delta_scan"),
-    ("SELECT * FROM sqlite_scan('a.db', 't')", "sqlite_scan"),
-    ("SELECT * FROM postgres_scan('host=h password=secret', 's', 't')", "postgres_scan"),
-    ("SELECT * FROM read_parquet(x)", "read_parquet"),
-    ("SELECT * FROM LATERAL read_parquet('x.parquet')", "read_parquet"),
-    ("SELECT * FROM TABLE(read_parquet('x.parquet'))", "read_parquet"),
-    ("SELECT (SELECT count(*) FROM read_parquet('y.parquet'))", "read_parquet"),
-    ("SELECT * FROM gold.t JOIN read_parquet('z.parquet') ON true", "read_parquet"),
-    ("SELECT * FROM some_function_duckdb_adds_later('p')", "some_function_duckdb_adds_later"),
+    "SELECT * FROM read_parquet('a/b.parquet')",
+    "SELECT * FROM read_parquet(['x', 'y'])",
+    "SELECT * FROM read_parquet('s3://bucket/x.parquet', union_by_name = true)",
+    "SELECT * FROM read_csv('x.csv')",
+    "SELECT * FROM read_csv(['a.csv'], header = true)",
+    "SELECT * FROM read_csv_auto('a.csv')",
+    "SELECT * FROM read_json('a.json')",
+    "SELECT * FROM read_json_auto('a.json')",
+    "SELECT * FROM read_ndjson('a.json')",
+    "SELECT * FROM read_text('a.txt')",
+    "SELECT * FROM read_blob('a')",
+    "SELECT * FROM read_xlsx('a.xlsx')",
+    "SELECT * FROM parquet_scan('a.parquet')",
+    "SELECT * FROM iceberg_scan('s3://b/t')",
+    "SELECT * FROM delta_scan('s3://b/t')",
+    "SELECT * FROM sqlite_scan('a.db', 't')",
+    "SELECT * FROM postgres_scan('host=h password=secret', 's', 't')",
+    "SELECT * FROM read_parquet(x)",
+    "SELECT * FROM LATERAL read_parquet('x.parquet')",
+    "SELECT * FROM TABLE(read_parquet('x.parquet'))",
+    "SELECT (SELECT count(*) FROM read_parquet('y.parquet'))",
+    "SELECT * FROM gold.t JOIN read_parquet('z.parquet') ON true",
+    "SELECT * FROM some_function_duckdb_adds_later('p')",
 ]
 
 
-@pytest.mark.parametrize(("sql", "function"), _READER_FORMS)
-def test_every_table_function_that_reads_is_a_file_reference_by_its_name(
-    sql: str, function: str
-) -> None:
-    """The content gate and the deploy see a reader in any `FROM` position (#591).
-
-    The function is named, never its arguments: a connection string may hold a password.
-    """
+@pytest.mark.parametrize("sql", _READER_FORMS)
+def test_every_table_function_that_reads_is_a_file_reference(sql: str) -> None:
+    """The content gate and the deploy see a reader in any `FROM` position (#591)."""
     from lakana_core.projects.parse import sql_file_references
 
-    assert sql_file_references(sql, ["gold.t"]) == {function}
+    found = sql_file_references(sql, ["gold.t"])
+    assert found
+    assert "gold.t" not in found
+    assert not any("secret" in name for name in found)
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT * FROM read_parquet('a/b.parquet')", {"a/b.parquet"}),
+        ("SELECT * FROM read_parquet(['x', 'y'])", {"x", "y"}),
+        ("SELECT * FROM read_csv('bronze.csv', header = true)", {"bronze.csv"}),
+        ("SELECT * FROM TABLE(read_parquet('t.parquet'))", {"t.parquet"}),
+        ("SELECT * FROM read_parquet(x)", {"read_parquet"}),
+        ("SELECT * FROM postgres_scan('host=h password=secret', 's', 't')", {"postgres_scan"}),
+        ("SELECT * FROM sqlite_scan('a.db', 't')", {"sqlite_scan"}),
+    ],
+)
+def test_a_readers_path_is_reported_so_it_never_passes_as_a_table(
+    sql: str, expected: set[str]
+) -> None:
+    """A path that looks like a table name is a file; a database's connection is never named."""
+    from lakana_core.projects.parse import sql_file_references
+
+    assert sql_file_references(sql, []) == expected
 
 
 def test_the_file_form_of_from_is_a_file_reference_by_its_path() -> None:
@@ -534,7 +553,8 @@ def test_every_reader_the_query_guard_knows_is_a_file_reference() -> None:
         *(f"anything{suffix}" for suffix in _READER_SUFFIXES),
     }
     for name in sorted(names):
-        assert sql_file_references(f"SELECT * FROM {name}('p')", []) == {name}, name
+        assert sql_file_references(f"SELECT * FROM {name}(x)", []) == {name}, name
+        assert sql_file_references(f"SELECT * FROM {name}('p')", []), name
 
 
 @pytest.mark.parametrize(
