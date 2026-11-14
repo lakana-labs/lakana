@@ -4,13 +4,27 @@ import { describe, expect, it } from "vitest";
 
 import type { GraphNodeOut, GraphOut } from "../../api";
 import { assetNode, DOWN, graphEdge, graphNode, lineage, ROOT, UP } from "../../test/table";
-import { layout } from "./layout";
+import i18next from "i18next";
+
+import { boxWidth, estimateWidth } from "./boxText";
+import { BOX_W, BOX_W_MAX, layout } from "./layout";
 import { LineageGraph } from "./LineageGraph";
 
 /** Every character the display rule marks, as a pattern; written with escapes only. */
 // Matching control characters is the point of this pattern.
 // eslint-disable-next-line no-control-regex
 const RAW = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}]/u;
+
+/**
+ * Lays out two lineage answers with each box as wide as its text, estimated as in a test's DOM.
+ *
+ * @param up - What feeds the table.
+ * @param down - What the table feeds.
+ * @returns The layout.
+ */
+function measured(up: GraphOut, down: GraphOut): ReturnType<typeof layout> {
+  return layout(up, down, (box) => boxWidth(i18next.t.bind(i18next), box, estimateWidth));
+}
 
 /**
  * Draws two lineage answers inside a router.
@@ -21,7 +35,12 @@ const RAW = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}]/u;
  */
 function draw(up: GraphOut, down: GraphOut = lineage([])): SVGSVGElement {
   const router = createMemoryRouter(
-    [{ path: "*", element: <LineageGraph layout={layout(up, down)} environment="prod" /> }],
+    [
+      {
+        path: "*",
+        element: <LineageGraph layout={measured(up, down)} environment="prod" />,
+      },
+    ],
     { initialEntries: ["/catalog/prod/gold.sales/fact_sales/lineage"] },
   );
   const { container } = render(<RouterProvider router={router} />);
@@ -264,6 +283,50 @@ describe("LineageGraph", () => {
     );
   });
 
+  it("grows a box to its longest line up to 320 px, then ends the line in an ellipsis", () => {
+    const t = i18next.t.bind(i18next);
+    const asset = assetNode(
+      "gold.station_ranking_by_region_and_month",
+      1,
+      "analytics-platform-weather-stations",
+    );
+    const mid = graphNode("table", "staging.stg_sales_by_region_and_store_type", 2);
+    const up = lineage(
+      [asset, mid],
+      [graphEdge("builds", asset, ROOT), graphEdge("reads", asset, mid)],
+    );
+    const drawn = layout(up, lineage([]), (one) => boxWidth(t, one, estimateWidth));
+    const router = createMemoryRouter(
+      [
+        {
+          path: "*",
+          element: <LineageGraph layout={drawn} environment="prod" measure={estimateWidth} />,
+        },
+      ],
+      { initialEntries: ["/catalog/prod/gold.sales/fact_sales/lineage"] },
+    );
+    const { container } = render(<RouterProvider router={router} />);
+    const drawing = container.querySelector("svg") as SVGSVGElement;
+    const boxOf = (id: string): Element =>
+      drawing.querySelector(`[data-node="${CSS.escape(id)}"]`) as Element;
+
+    // The asset's second line is too long even for 320 px: cut, with the whole text in its title.
+    expect(boxOf(asset.id)).toHaveAttribute("width", String(BOX_W_MAX));
+    const [, second] = lines(drawing, asset.id);
+    expect(second?.endsWith("…")).toBe(true);
+    expect(estimateWidth(second ?? "")).toBeLessThanOrEqual(BOX_W_MAX - 20);
+    expect(boxOf(asset.id).querySelector("title")?.textContent).toBe(
+      "Run by no job\ngold.station_ranking_by_region_and_month · analytics-platform-weather-stations",
+    );
+    // The table's name fits a wider box whole; the root stays at the smallest width.
+    const width = Number(boxOf(mid.id).getAttribute("width"));
+    expect(width).toBeGreaterThan(BOX_W);
+    expect(width).toBeLessThan(BOX_W_MAX);
+    expect(lines(drawing, mid.id)).toEqual(["stg_sales_by_region_and_store_type", "staging"]);
+    expect(boxOf(ROOT.id)).toHaveAttribute("width", String(BOX_W));
+    expect(boxOf(ROOT.id).querySelector("rect")).toHaveAttribute("width", String(BOX_W - 1));
+  });
+
   it("keeps the drawing out of the tab order and the accessibility tree", () => {
     const drawing = draw(UP, DOWN);
 
@@ -276,7 +339,7 @@ describe("LineageGraph", () => {
 
   it("draws one line per edge between boxes, at the drawing's own size", () => {
     const drawing = draw(UP, DOWN);
-    const drawn = layout(UP, DOWN);
+    const drawn = measured(UP, DOWN);
 
     expect(drawing.querySelectorAll("line")).toHaveLength(drawn.edges.length);
     expect(drawing).toHaveAttribute("width", String(drawn.width));

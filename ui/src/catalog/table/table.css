@@ -422,13 +422,42 @@
   stroke: var(--color-edge);
 }
 
-/* The full-screen view: the drawing at its natural size, scrolling in its region. */
+/* The full-screen view fills the window but a small margin (inside the safe area of a phone with
+   a notch): the heading, then the drawing at its natural size scrolling in its region, which takes
+   the room left, then Close, always in view. */
+.lineage-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  box-sizing: border-box;
+  padding: max(var(--space-4), env(safe-area-inset-top))
+    max(var(--space-4), env(safe-area-inset-right)) max(var(--space-4), env(safe-area-inset-bottom))
+    max(var(--space-4), env(safe-area-inset-left));
+  background: var(--color-scrim);
+}
+
 .dialog.lineage-dialog {
-  width: 100%;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.lineage-dialog .palette-dialog {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .lineage-full-region {
-  max-height: 75vh;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
   margin-bottom: var(--space-4);
 }
 

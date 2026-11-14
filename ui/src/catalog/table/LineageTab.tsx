@@ -15,6 +15,7 @@ import { PendingButton } from "../../shell/PendingButton";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { useResource } from "../../shell/useResource";
 import { ReadFailed } from "../cells";
+import { boxWidth, useTextMeasure } from "./boxText";
 import { depthQuery, layout, mergeGraphs, MOST_STEPS, readDepths } from "./layout";
 import { LineageGraph } from "./LineageGraph";
 import { LineageList } from "./LineageList";
@@ -87,8 +88,13 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
   const region = useRef<HTMLDivElement>(null);
   const pressed = useRef<Way | null>(null);
   // Laid out and merged once per pair of answers, not on every render: a step press or an
-  // answer re-renders the tab, and a large lineage costs time to lay out.
-  const drawn = useMemo(() => layout(up.graph, down.graph), [up.graph, down.graph]);
+  // answer re-renders the tab, and a large lineage costs time to lay out. Each box grows to its
+  // longest line, measured in the drawing's font.
+  const measure = useTextMeasure();
+  const drawn = useMemo(
+    () => layout(up.graph, down.graph, (box) => boxWidth(t, box, measure)),
+    [up.graph, down.graph, measure, t],
+  );
   const edges = useMemo(() => mergeGraphs(up.graph, down.graph).edges, [up.graph, down.graph]);
   const steps: Record<Way, Step> = { up: stepOf(up, depths.up), down: stepOf(down, depths.down) };
   useEffect(() => {
@@ -129,7 +135,7 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
         )}
         <DialogTrigger>
           <Button className="button">{t("table.lineage.fullScreen")}</Button>
-          <ModalOverlay className="palette-overlay" isDismissable>
+          <ModalOverlay className="lineage-overlay" isDismissable>
             <Modal className="float dialog lineage-dialog">
               <Dialog className="palette-dialog">
                 {({ close }) => (
@@ -151,6 +157,7 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
                         layout={drawn}
                         environment={ref.environment}
                         className="lineage-graph lineage-full"
+                        measure={measure}
                       />
                     </div>
                     <div className="step-actions">
@@ -178,7 +185,7 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
       >
-        <LineageGraph layout={drawn} environment={ref.environment} />
+        <LineageGraph layout={drawn} environment={ref.environment} measure={measure} />
       </div>
       <section className="lineage-list-section flat-panel">
         <h2 className="block-heading">{t("table.lineage.listHeading")}</h2>

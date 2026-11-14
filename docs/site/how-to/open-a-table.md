@@ -112,10 +112,11 @@ keeps the width of the other tabs.
   way. The steps are kept in the address, such as `/lineage?up=2`, so **Back** returns to fewer
   steps and a link opens the same view.
 - **Opening a table.** Press a table's box to open its page, or a table's link in the list
-  below. Jobs and connections are not links yet. A box cuts a long name at its edge; hold the
-  pointer over the box to read its names whole.
-- **Full screen.** **Full screen** shows the same drawing at its natural size in a region that
-  scrolls (press <kbd>Tab</kbd> to focus it, then the arrow keys). **Close** or <kbd>Esc</kbd>
+  below. Jobs and connections are not links yet. A box grows to fit its longest line, up to
+  about 320 px; a longer line ends in "…". Hold the pointer over the box to read its names
+  whole, or read them in the list below.
+- **Full screen.** **Full screen** fills the window with the same drawing at its natural size,
+  in a region that scrolls (press <kbd>Tab</kbd> to focus it, then the arrow keys). **Close** or <kbd>Esc</kbd>
   returns to the tab.
 - **As a list.** Under the drawing, the same tables, assets, jobs and connections are listed in
   words, with each table a link. A large drawing scrolls in its own region: press <kbd>Tab</kbd>

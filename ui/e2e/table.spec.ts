@@ -826,6 +826,116 @@ test.describe("the table page in real Chromium", () => {
     expect(await violations(page), "the full-screen region").toEqual([]);
   });
 
+  for (const [width, height] of [
+    [1920, 1080],
+    [1280, 800],
+  ] as const) {
+    test(`at ${String(width)} × ${String(height)} lineage boxes fit their text and the full screen fills the window`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      // A long asset name and a long project, upstream of the table.
+      const root = {
+        id: "table:9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+        kind: "table",
+        name: "gold.sales.fact_sales",
+        distance: 0,
+      };
+      const asset = {
+        id: "asset:analytics-platform-weather-stations/gold.station_ranking_by_region_and_month",
+        kind: "asset",
+        name: "gold.station_ranking_by_region_and_month",
+        distance: 1,
+        repository: "analytics-platform-weather-stations",
+      };
+      await page.route(
+        (url) =>
+          url.pathname === "/api/v1/environments/prod/graph/lineage" &&
+          url.searchParams.get("direction") === "up",
+        (route) =>
+          route.fulfill({
+            json: {
+              nodes: [root, asset],
+              edges: [{ kind: "builds", source: asset.id, target: root.id }],
+              next_cursor: null,
+            },
+          }),
+      );
+      await openNewTab(page, NEW_TABS[0]);
+
+      /**
+       * Reads every box of a drawing: its width, its lines and how far each line reaches.
+       *
+       * @param scope - The drawing's region.
+       * @returns One entry per box.
+       */
+      const boxes = (
+        scope: Locator,
+      ): Promise<{ width: number; title: string; lines: [string, number][] }[]> =>
+        scope.evaluate((node) =>
+          [...node.querySelectorAll<SVGSVGElement>("svg.lineage-box")].map((box) => ({
+            width: Number(box.getAttribute("width")),
+            title: box.querySelector("title")?.textContent ?? "",
+            lines: [...box.querySelectorAll<SVGTextElement>("text")].map(
+              (text) =>
+                [
+                  text.textContent,
+                  (text.x.baseVal[0]?.value ?? 0) + text.getComputedTextLength(),
+                ] as [string, number],
+            ),
+          })),
+        );
+      const check = async (scope: Locator, where: string): Promise<void> => {
+        const drawn = await boxes(scope);
+        expect(drawn.length, where).toBeGreaterThan(2);
+        for (const box of drawn) {
+          expect(box.width, `${where}: ${box.title}`).toBeGreaterThanOrEqual(200);
+          expect(box.width, `${where}: ${box.title}`).toBeLessThanOrEqual(320);
+          for (const [text, reach] of box.lines) {
+            // No line runs past its box's right edge less the text's own margin.
+            expect(reach, `${where}: "${text}"`).toBeLessThanOrEqual(box.width - 10 + 0.5);
+          }
+        }
+        const long = drawn.find((box) => box.title.includes("station_ranking"));
+        expect(long?.width, where).toBe(320);
+        expect(long?.lines[1]?.[0].endsWith("…"), where).toBe(true);
+        expect(long?.title, where).toContain(
+          "gold.station_ranking_by_region_and_month · analytics-platform-weather-stations",
+        );
+        // A name that fits a wider box is whole: the asset that builds daily_sales.
+        const whole = drawn.find((box) => box.title.includes("gold.sales.daily_sales · analytics"));
+        expect(whole?.lines[1]?.[0], where).toBe("asset gold.sales.daily_sales · analytics");
+      };
+      await check(
+        page.getByRole("region", { name: "Lineage of fact_sales", exact: true }),
+        "the tab",
+      );
+
+      await page.getByRole("button", { name: "Full screen" }).click();
+      const dialog = page.getByRole("dialog", { name: "Lineage of fact_sales" });
+      const full = dialog.getByRole("region", { name: "Lineage of fact_sales, full screen" });
+      await expect(full).toBeVisible();
+      await check(full, "full screen");
+      // The dialog covers the window, inside it, with a small margin; Close stays in view.
+      const modal = await page.locator(".lineage-dialog").boundingBox();
+      expect(modal).not.toBeNull();
+      const box = modal ?? { x: 0, y: 0, width: 0, height: 0 };
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x).toBeLessThanOrEqual(24);
+      expect(box.y).toBeLessThanOrEqual(24);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(box.y + box.height).toBeLessThanOrEqual(height);
+      expect(box.x + box.width).toBeGreaterThanOrEqual(width - 24);
+      expect(box.y + box.height).toBeGreaterThanOrEqual(height - 24);
+      const close = await dialog.getByRole("button", { name: "Close" }).boundingBox();
+      expect((close?.y ?? height) + (close?.height ?? 0)).toBeLessThanOrEqual(height);
+      expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+    });
+  }
+
   test("Back and Forward move between tabs and lineage depths", async ({ page }) => {
     await openNewTab(page, NEW_TABS[0]);
     await page.getByRole("button", { name: "One step up" }).click();
