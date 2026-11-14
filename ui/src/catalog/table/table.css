@@ -409,16 +409,18 @@
   stroke: var(--color-edge);
 }
 
-/* The full-screen view: the same drawing, scaled to the window. */
+/* The full-screen view: the drawing at its natural size, scrolling in its region. */
 .dialog.lineage-dialog {
   width: 100%;
 }
 
-.lineage-graph.lineage-full {
-  width: 100%;
-  height: auto;
+.lineage-full-region {
   max-height: 75vh;
   margin-bottom: var(--space-4);
+}
+
+.lineage-graph.lineage-full {
+  max-width: none;
 }
 
 .lineage-list ul {

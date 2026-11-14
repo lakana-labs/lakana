@@ -113,8 +113,9 @@ Lineage shows where the table's data comes from and where it goes. Its address e
 - **Opening a table.** Press a table's box to open its page, or a table's link in the list
   below. Jobs and connections are not links yet. A box cuts a long name at its edge; hold the
   pointer over the box to read its names whole.
-- **Full screen.** **Full screen** shows the same drawing scaled to the window. **Close** or
-  <kbd>Esc</kbd> returns to the tab.
+- **Full screen.** **Full screen** shows the same drawing at its natural size in a region that
+  scrolls (press <kbd>Tab</kbd> to focus it, then the arrow keys). **Close** or <kbd>Esc</kbd>
+  returns to the tab.
 - **As a list.** Under the drawing, the same tables, assets, jobs and connections are listed in
   words, with each table a link. A large drawing scrolls in its own region: press <kbd>Tab</kbd>
   to focus it and use the arrow keys.
@@ -122,9 +123,9 @@ Lineage shows where the table's data comes from and where it goes. Its address e
 Lineage looks the same to everyone who may read the table, except that what you may not see is
 simply absent: a table you may not read, and the assets, jobs and connections of an environment
 you may not read, are not drawn, and nothing counts them. If you see only the table itself, the
-tab says "Nothing upstream or downstream." A very large lineage shows its first 500 nodes and
-says "Showing the first 500 nodes." If lineage cannot be read, the tab says why and offers
-**Try again**.
+tab says "Nothing upstream or downstream." A very large lineage shows its first 500 nodes each way
+and says "Showing the first 500 nodes each way." If lineage cannot be read, the tab says why and
+offers **Try again**.
 
 ## Health
 
@@ -149,8 +150,8 @@ Health shows everything the Overview's health block sums up. Its address ends in
   audit log. If that record cannot be written, the tab still shows everything else, shows the
   count instead of the names and says "Who read the table cannot be shown: seeing it could not be
   recorded in the audit log." Open the tab again in a moment; if it keeps failing, ask an
-  administrator to check the server. Everyone else sees only how many people read it, such as "3 people read it in the last
-  7 days." **Readers ›** on Overview opens this part directly.
+  administrator to check the server. Everyone else sees only how many people read it, such as "3
+  people read it in the last 7 days." **Readers ›** on Overview opens this part directly.
 
 If health cannot be read, the tab says why and offers **Try again**.
 

@@ -443,6 +443,32 @@ test.describe("the table page in real Chromium", () => {
     await expect(open).toBeFocused();
   });
 
+  test("the full-screen lineage keeps the drawing's natural size and scrolls", async ({ page }) => {
+    await page.setViewportSize({ width: 600, height: 700 });
+    await openTable(page, "/lineage?up=3&down=3");
+    await expect(
+      page.getByRole("region", { name: "Lineage of fact_sales", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Full screen" }).click();
+    const dialog = page.getByRole("dialog", { name: "Lineage of fact_sales" });
+    const region = dialog.getByRole("region", { name: "Lineage of fact_sales, full screen" });
+    await expect(region).toHaveAttribute("tabindex", "0");
+    const sizes = await region.evaluate((node) => {
+      const svg = node.querySelector("svg.lineage-full");
+      const wanted = Number(svg?.getAttribute("width"));
+      return {
+        rendered: svg?.getBoundingClientRect().width ?? 0,
+        wanted,
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+      };
+    });
+    expect(sizes.wanted).toBeGreaterThan(600);
+    expect(sizes.rendered).toBeGreaterThanOrEqual(sizes.wanted);
+    expect(sizes.scrollWidth).toBeGreaterThan(sizes.clientWidth);
+    expect(await violations(page), "the full-screen region").toEqual([]);
+  });
+
   test("Back and Forward move between tabs and lineage depths", async ({ page }) => {
     await openNewTab(page, NEW_TABS[0]);
     await page.getByRole("button", { name: "One step up" }).click();

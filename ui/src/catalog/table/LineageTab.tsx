@@ -137,11 +137,22 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
                     <Heading slot="title" level={2}>
                       {title}
                     </Heading>
-                    <LineageGraph
-                      layout={drawn}
-                      environment={ref.environment}
-                      className="lineage-graph lineage-full"
-                    />
+                    <p className="visually-hidden">{t("table.lineage.fullHint")}</p>
+                    <div
+                      className="lineage-region lineage-full-region"
+                      role="region"
+                      aria-label={t("table.lineage.fullRegion", { name: table.name })}
+                      // Scrolls both ways at the drawing's natural size, so it takes a tab stop
+                      // (WCAG 2.1.1), like the region on the tab.
+                      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+                      tabIndex={0}
+                    >
+                      <LineageGraph
+                        layout={drawn}
+                        environment={ref.environment}
+                        className="lineage-graph lineage-full"
+                      />
+                    </div>
                     <div className="step-actions">
                       <Button className="button" onPress={close}>
                         {t("table.lineage.close")}

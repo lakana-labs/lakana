@@ -270,6 +270,16 @@ describe("LineageTab", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Lineage of fact_sales" });
     expect(dialog.querySelector("svg")).not.toBeNull();
+    // The drawing keeps its natural size in a labelled, focusable region that scrolls, and a line
+    // for screen readers points to the list.
+    const scrolling = within(dialog).getByRole("region", {
+      name: "Lineage of fact_sales, full screen",
+    });
+    expect(scrolling).toHaveAttribute("tabindex", "0");
+    expect(scrolling.querySelector("svg")).not.toBeNull();
+    expect(
+      within(dialog).getByText("The same lineage is in the list on the tab, below the drawing."),
+    ).toHaveClass("visually-hidden");
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -366,13 +376,13 @@ describe("LineageTab", () => {
     ).toBeNull();
   });
 
-  it("says when only the first 500 nodes are shown", async () => {
+  it("says when only the first 500 nodes each way are shown", async () => {
     renderShell(TAB, {
       routes: { [ROUTE]: answering({ up1: { ...UP, next_cursor: "next" } }) },
     });
     await region();
 
-    expect(screen.getByText("Showing the first 500 nodes.")).toBeVisible();
+    expect(screen.getByText("Showing the first 500 nodes each way.")).toBeVisible();
   });
 
   it("names the cause and offers Try again when lineage cannot be read", async () => {
