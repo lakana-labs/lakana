@@ -972,7 +972,7 @@ def test_taking_and_losing_the_role_is_logged_once_each(
         assert loop.step() is False
 
     roles = [
-        (r.levelno, r.event)  # ty: ignore[unresolved-attribute]
+        (r.levelno, r.event)  # ty: ignore[missing-attribute]
         for r in caplog.records
         if getattr(r, "event", "").startswith("scheduler_role")
     ]

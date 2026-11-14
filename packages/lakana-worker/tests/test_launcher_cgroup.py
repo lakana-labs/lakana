@@ -98,6 +98,13 @@ def test_only_a_full_lower_case_hex_id_builds_a_path(tmp_path: Path, container_i
     assert sampler.stop() == CgroupReading(None, None)
 
 
+def _join(sampler: CgroupSampler) -> None:
+    """Wait for a started sampler's thread to end."""
+    thread = sampler._thread
+    assert thread is not None
+    thread.join(5)
+
+
 def _sampler(root: Path, sleeps: list[float], on_sleep: Callable[[int], bool]) -> CgroupSampler:
     """Build a sampler whose sleep runs `on_sleep(n)` and returns without waiting.
 
@@ -144,7 +151,7 @@ def test_the_peak_is_the_maximum_and_survives_the_cgroup_vanishing(tmp_path: Pat
 
     sampler = _sampler(tmp_path, sleeps, on_sleep)
     sampler.start()
-    sampler._thread.join(5)  # ty: ignore[unresolved-attribute]
+    _join(sampler)
     assert sampler.stop() == CgroupReading(300, 2.0)
     assert sleeps[0] == pytest.approx(1.0)
 
@@ -198,7 +205,7 @@ def test_a_sampler_never_raises_into_the_launcher(
     sampler = _sampler(tmp_path, [], lambda count: count >= 3)
     with caplog.at_level("DEBUG", logger="lakana_worker.launcher"):
         sampler.start()
-        sampler._thread.join(5)  # ty: ignore[unresolved-attribute]
+        _join(sampler)
         assert sampler.stop() == CgroupReading(None, None)
     assert len([r for r in caplog.records if "cgroup" in r.getMessage()]) == 1
 
@@ -223,7 +230,7 @@ def test_the_first_read_comes_before_the_first_sleep(tmp_path: Path) -> None:
     _tree(tmp_path / f"docker/{ID}")
     sampler = CgroupSampler(ID, root=tmp_path, sleep=lambda seconds: True)
     sampler.start()
-    sampler._thread.join(5)  # ty: ignore[unresolved-attribute]
+    _join(sampler)
     (tmp_path / f"docker/{ID}/memory.peak").unlink()
     (tmp_path / f"docker/{ID}/cpu.stat").unlink()
     (tmp_path / f"docker/{ID}").rmdir()

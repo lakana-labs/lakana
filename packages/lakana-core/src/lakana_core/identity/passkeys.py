@@ -572,7 +572,7 @@ class PasskeyService:
             .where(Passkey.id == row.id, Passkey.sign_count == stored_count)
             .values(sign_count=new_count, last_used_at=self._clock())
             .execution_options(synchronize_session=False)
-        ).rowcount  # ty: ignore[unresolved-attribute]
+        ).rowcount  # ty: ignore[missing-attribute]
         if recorded != 1:
             self._session.rollback()
             raise error(

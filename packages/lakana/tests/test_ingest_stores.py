@@ -634,7 +634,7 @@ def test_the_http_tls_floor_is_1_2(authority: Authority) -> None:
     with _http.client_for(conn) as client:
         transport = client._transport
         assert isinstance(transport, _http.OwnOrigin)
-        context = transport._inner._pool._ssl_context  # ty: ignore[unresolved-attribute]
+        context = transport._inner._pool._ssl_context  # ty: ignore[missing-attribute]
         assert isinstance(context, ssl.SSLContext)
         assert context.minimum_version == ssl.TLSVersion.TLSv1_2
 
@@ -950,7 +950,7 @@ def test_an_object_that_grows_while_it_is_read_stops_at_the_cap(
         """A result whose stream is longer than its reported size."""
 
         def __init__(self, result: object) -> None:
-            self.meta = result.meta  # ty: ignore[unresolved-attribute]
+            self.meta = result.meta  # ty: ignore[missing-attribute]
 
         def stream(self) -> Iterator[bytes]:
             """Give more bytes than the size said.

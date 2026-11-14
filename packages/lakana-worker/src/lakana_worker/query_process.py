@@ -371,8 +371,8 @@ class QueryChild:
         except (OSError, ValueError) as exc:
             self.close()
             reason = getattr(exc, "strerror", None) or str(exc)
-            if getattr(exc, "filename", None):
-                reason = f"{reason}: {exc.filename}"  # ty: ignore[unresolved-attribute]
+            if isinstance(exc, OSError) and exc.filename:
+                reason = f"{reason}: {exc.filename}"
             raise ChildFailed(detail=f"could not start the query process: {reason}") from exc
         except BaseException:
             self.close()

@@ -149,7 +149,7 @@ class _LakanaGroup(TyperGroup):
     # the type checker's eyes, since typer always passes a `typer.Context`
     # here in practice; `typer.Context` is also the only public spelling
     # allowed for this parameter.
-    def invoke(  # ty: ignore[invalid-method-override]
+    def invoke(  # ty: ignore[incompatible-method-override]
         self, ctx: typer.Context
     ) -> Any:  # ruff: ignore[any-type]
         """Run the selected command, reporting failures.

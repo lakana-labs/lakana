@@ -375,10 +375,10 @@ class _FailingRead:
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        self._real.close()  # ty: ignore[unresolved-attribute]
+        self._real.close()  # ty: ignore[missing-attribute]
 
     def fileno(self) -> int:
-        return self._real.fileno()  # ty: ignore[unresolved-attribute]
+        return self._real.fileno()  # ty: ignore[missing-attribute]
 
     def read(self, _size: int) -> bytes:
         raise OSError(5, "Input/output error")

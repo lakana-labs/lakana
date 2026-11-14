@@ -68,7 +68,7 @@ def test_the_line_ends_with_the_code_and_the_record_carries_it(captured: _Captur
         .endswith("lakana_test.events: Ended 2 runs. event=worker_lost")
     )
     (record,) = records
-    assert record.event == "worker_lost"  # ty: ignore[unresolved-attribute]
+    assert record.event == "worker_lost"  # ty: ignore[missing-attribute]
     assert record.getMessage() == "Ended 2 runs."
 
 

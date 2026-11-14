@@ -20,6 +20,7 @@ from core_test_helpers import (
 )
 from pyiceberg.io.pyarrow import PyArrowFileIO
 from pyiceberg.schema import Schema
+from pyiceberg.table.metadata import TableMetadataV2, TableMetadataV3
 from pyiceberg.table.refs import SnapshotRefType
 from pyiceberg.table.snapshots import Operation, Snapshot, Summary
 from pyiceberg.table.update import (
@@ -96,6 +97,28 @@ def _prepared_ref(catalog: CatalogService, principal: PrincipalRef, tmp_path: Pa
     ns = NamespacePath.from_parts(["gold"])
     catalog.create_environment(principal, name="dev", storage=_config(tmp_path))
     return TableRef(environment="dev", namespace=ns, name="sales")
+
+
+def _last_sequence(catalog: CatalogService, principal: PrincipalRef, ref: TableRef) -> int:
+    """Return the table's last sequence number, which only format v2 and later tables carry.
+
+    Parameters
+    ----------
+    catalog
+        The catalog service.
+    principal
+        The caller.
+    ref
+        The table.
+
+    Returns
+    -------
+    int
+        The last sequence number.
+    """
+    metadata = catalog.load_table(principal, ref).metadata
+    assert isinstance(metadata, TableMetadataV2 | TableMetadataV3)
+    return metadata.last_sequence_number
 
 
 def _metadata_dir(loaded: LoadedTable) -> Path:
@@ -1499,11 +1522,11 @@ def test_commit_refuses_a_sequence_number_beyond_one_per_added_snapshot(
     ref = _prepared_ref(catalog, principal, tmp_path)
     catalog.create_table(principal, ref, schema=_schema())
     catalog.append(principal, ref, _rows([1]))
-    last = catalog.load_table(principal, ref).metadata.last_sequence_number  # ty: ignore[unresolved-attribute]
+    last = _last_sequence(catalog, principal, ref)
     claimed = jump if jump > 2 else last + jump
     with pytest.raises(ValidationError, match=r"must be at most .*; load the table again"):
         _readd_current(catalog, principal, ref, claimed)
-    assert catalog.load_table(principal, ref).metadata.last_sequence_number == last  # ty: ignore[unresolved-attribute]
+    assert _last_sequence(catalog, principal, ref) == last
 
 
 def test_commit_refuses_a_v2_snapshot_without_a_sequence_number(
@@ -1526,11 +1549,11 @@ def test_commit_refuses_a_v2_snapshot_without_a_sequence_number(
     ref = _prepared_ref(catalog, principal, tmp_path)
     catalog.create_table(principal, ref, schema=_schema())
     catalog.append(principal, ref, _rows([1]))
-    last = catalog.load_table(principal, ref).metadata.last_sequence_number  # ty: ignore[unresolved-attribute]
+    last = _last_sequence(catalog, principal, ref)
     with pytest.raises(ValidationError, match=r"format v2 or later table needs a sequence number"):
         _readd_current(catalog, principal, ref, None)
     catalog.append(principal, ref, _rows([2]))
-    assert catalog.load_table(principal, ref).metadata.last_sequence_number == last + 1  # ty: ignore[unresolved-attribute]
+    assert _last_sequence(catalog, principal, ref) == last + 1
 
 
 def test_a_commit_of_two_snapshots_takes_the_next_two_sequence_numbers(
@@ -1550,10 +1573,10 @@ def test_a_commit_of_two_snapshots_takes_the_next_two_sequence_numbers(
     ref = _prepared_ref(catalog, principal, tmp_path)
     catalog.create_table(principal, ref, schema=_schema())
     catalog.append(principal, ref, _rows([1]))
-    last = catalog.load_table(principal, ref).metadata.last_sequence_number  # ty: ignore[unresolved-attribute]
+    last = _last_sequence(catalog, principal, ref)
     _readd_current(catalog, principal, ref, last + 1, last + 2)
     catalog.append(principal, ref, _rows([2]))
-    assert catalog.load_table(principal, ref).metadata.last_sequence_number == last + 3  # ty: ignore[unresolved-attribute]
+    assert _last_sequence(catalog, principal, ref) == last + 3
 
 
 def test_a_format_v1_table_records_health_at_sequence_zero_whatever_the_client_says(

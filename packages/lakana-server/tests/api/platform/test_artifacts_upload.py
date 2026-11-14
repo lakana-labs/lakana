@@ -1290,10 +1290,10 @@ def _normalised(response: object, names: tuple[str, ...]) -> tuple[int, str]:
     tuple
         Status and normalised text.
     """
-    text = response.text  # ty: ignore[unresolved-attribute]
+    text = response.text  # ty: ignore[missing-attribute]
     for name in names:
         text = text.replace(name, "NAME")
-    return response.status_code, text  # ty: ignore[unresolved-attribute]
+    return response.status_code, text  # ty: ignore[missing-attribute]
 
 
 @pytest.mark.parametrize("role", [None, "ANALYST"], ids=["no grant", "read only"])

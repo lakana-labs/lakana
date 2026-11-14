@@ -2628,7 +2628,7 @@ def test_the_docker_runner_and_its_builds_get_the_workers_bundle(
     )
     runtime = _python_runtime(settings, PythonSupport(server_url="http://s", uv="/bin/uv"))
     assert runtime.environments is not None and isinstance(runtime.environments.trust, bytes)
-    assert runtime.runner._trust == runtime.environments.trust  # ty: ignore[unresolved-attribute]
+    assert runtime.runner._trust == runtime.environments.trust  # ty: ignore[missing-attribute]
     assert runtime.environments.trust.endswith(operator.read_bytes())
 
 

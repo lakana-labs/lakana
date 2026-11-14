@@ -294,7 +294,7 @@ class LauncherServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer)
     daemon_threads = True
     request_queue_size = 64
 
-    def process_request(  # ty: ignore[invalid-method-override]
+    def process_request(  # ty: ignore[incompatible-method-override]
         self, request: socket.socket, client_address: object
     ) -> None:
         """Hand a connection to a thread, or refuse it at once when every slot is taken.
@@ -333,7 +333,7 @@ class LauncherServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer)
             )
         self.shutdown_request(request)
 
-    def process_request_thread(  # ty: ignore[invalid-method-override]
+    def process_request_thread(  # ty: ignore[incompatible-method-override]
         self, request: socket.socket, client_address: object
     ) -> None:
         """Serve a connection in its thread, then give its slot back.
