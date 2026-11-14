@@ -70,6 +70,11 @@ describe("boxLines", () => {
     expect(boxLines(t, { node: bare, jobs: [] })).toEqual(["Run by no job", "asset xU+202Ey"]);
   });
 
+  it("keeps a name that holds the text of a placeholder as it is", () => {
+    const asset = assetNode("x<repository/>y", 1, "r<name/>s");
+    expect(boxLines(t, { node: asset, jobs: [] })[1]).toBe("asset x<repository/>y · r<name/>s");
+  });
+
   it("writes a connection as its name and its kind", () => {
     const known = graphNode("connection", "pg-sales", 1, { connection_kind: "postgresql" });
     const odd = graphNode("connection", "odd", 1, { connection_kind: "new‮kind" });

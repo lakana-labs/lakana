@@ -173,14 +173,14 @@ export function boxLines(t: TFunction, box: BoxContent): [string, string | null]
             .map((job) => markedText(jobLabel(job).job))
             .join(", ")}`;
     const repository = node.repository ?? null;
-    const named = t(repository === null ? "table.lineage.asset" : "table.lineage.assetIn").replace(
-      "<name/>",
-      () => markedText(node.name),
+    // One pass, so a name holding the text "<repository/>" stays as it is, as Trans draws it.
+    const name = markedText(node.name);
+    const where = markedText(repository ?? "");
+    const second = t(repository === null ? "table.lineage.asset" : "table.lineage.assetIn").replace(
+      /<name\/>|<repository\/>/g,
+      (placeholder) => (placeholder === "<name/>" ? name : where),
     );
-    return [
-      first,
-      repository === null ? named : named.replace("<repository/>", () => markedText(repository)),
-    ];
+    return [first, second];
   }
   if (node.kind === "connection") {
     const kind = kindName(t, node.connection_kind);

@@ -161,7 +161,7 @@ function duration(seconds: number, t: TFunction, number: Intl.NumberFormat): str
 }
 
 /**
- * A share as a percentage, clipped to 0 to 100 % and with at most one decimal, like the server's
+ * A share as a percentage, clipped to 0 to 100 % and with one decimal, like the server's
  * `_percent`.
  *
  * @param share - The share, 0 to 1.
@@ -169,9 +169,10 @@ function duration(seconds: number, t: TFunction, number: Intl.NumberFormat): str
  * @returns The number, without the sign.
  */
 function percent(share: number, language: string): string {
-  return new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(
-    Math.min(Math.max(share, 0), 1) * 100,
-  );
+  return new Intl.NumberFormat(language, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(Math.min(Math.max(share, 0), 1) * 100);
 }
 
 /**
@@ -186,18 +187,24 @@ function rows(value: number, number: Intl.NumberFormat): string {
 }
 
 /**
- * A number with six significant digits, like Python's `,.6g`: grouped digits, or the exponent
- * form for a number that needs one.
+ * A number exactly as Python's `,.6g` writes it in the server's sentences: six significant
+ * digits without trailing zeros, the exponent form (`2.14748e+09`, two exponent digits at least)
+ * when the rounded exponent is below -4 or 6 and above, else grouped digits.
  *
  * @param value - The number.
- * @param language - The person's language.
+ * @param language - The person's language, for the grouped digits.
  * @returns The text.
  */
 function general(value: number, language: string): string {
-  const exact = value.toPrecision(6);
-  return exact.includes("e")
-    ? exact.replace(/\.?0+e/, "e")
-    : new Intl.NumberFormat(language, { maximumSignificantDigits: 6 }).format(value);
+  // `toExponential` always writes a mantissa and an exponent.
+  const [mantissa, power] = value.toExponential(5).split("e") as [string, string];
+  const exponent = Number(power);
+  if (value !== 0 && (exponent < -4 || exponent >= 6)) {
+    const digits = mantissa.replace(/\.?0+$/, "");
+    const sign = exponent < 0 ? "-" : "+";
+    return `${digits}e${sign}${String(Math.abs(exponent)).padStart(2, "0")}`;
+  }
+  return new Intl.NumberFormat(language, { maximumSignificantDigits: 6 }).format(value);
 }
 
 /**
@@ -215,9 +222,16 @@ function bound(kind: unknown, value: number, language: string): string {
   if (kind === "integer") {
     return new Intl.NumberFormat(language).format(Math.trunc(value));
   }
+  // Days are whole, as Python's timedelta(days=int(value)) takes them.
   const ms =
-    kind === "date" ? value * 86_400_000 : kind === "timestamp" ? Math.floor(value / 1_000) : null;
-  if (ms !== null && Number.isFinite(new Date(ms).getTime())) {
+    kind === "date"
+      ? Math.trunc(value) * 86_400_000
+      : kind === "timestamp"
+        ? Math.floor(value / 1_000)
+        : null;
+  // Python's dates and times hold years 1 to 9999; outside, the server writes the number.
+  const year = ms === null ? Number.NaN : new Date(ms).getUTCFullYear();
+  if (ms !== null && year >= 1 && year <= 9_999) {
     const time = new Intl.DateTimeFormat(
       language,
       kind === "date"

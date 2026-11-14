@@ -283,8 +283,10 @@ describe("bandWords", () => {
   });
 
   it("says the usual share of empty values", () => {
-    expect(words("null_rate", { low: 0, high: 0.05, median: 0 })).toBe("up to 5 % empty");
-    expect(words("null_rate", { low: 0.012, high: 0.2, median: 0.1 })).toBe("1.2 % to 20 % empty");
+    expect(words("null_rate", { low: 0, high: 0.05, median: 0 })).toBe("up to 5.0 % empty");
+    expect(words("null_rate", { low: 0.012, high: 0.2, median: 0.1 })).toBe(
+      "1.2 % to 20.0 % empty",
+    );
   });
 
   it("says a range's band in the column's own kind, dates as dates", () => {
@@ -361,9 +363,11 @@ describe("the server's shapes", () => {
 
   it("clips a null-rate band to 0 to 100 %, as learn_band's floor makes it pass both ends", () => {
     // A column that is never null: median 0, half-width NULL_RATE_FLOOR 0.02.
-    expect(band("null_rate", { low: -0.02, high: 0.02, median: 0 })).toBe("up to 2 % empty");
+    expect(band("null_rate", { low: -0.02, high: 0.02, median: 0 })).toBe("up to 2.0 % empty");
     // A column that is almost always null.
-    expect(band("null_rate", { low: 0.97, high: 1.01, median: 0.99 })).toBe("97 % to 100 % empty");
+    expect(band("null_rate", { low: 0.97, high: 1.01, median: 0.99 })).toBe(
+      "97.0 % to 100.0 % empty",
+    );
   });
 
   it("rounds a volume band and never goes below zero, as _count does", () => {
@@ -395,7 +399,43 @@ describe("the server's shapes", () => {
       "from Jan 1, 1970, 12:00 AM UTC to 9.22337e+18",
     );
     expect(seen("range", { lower: 0, upper: 2_147_483_647, kind: "date" })).toBe(
-      "from Jan 1, 1970 to 2.14748e+9",
+      "from Jan 1, 1970 to 2.14748e+09",
+    );
+  });
+
+  it("writes a number like Python's ,.6g, as the server's sentences do", () => {
+    const cases: [number, string][] = [
+      [2_147_483_647, "2.14748e+09"],
+      [2 ** 63, "9.22337e+18"],
+      [1_234_567, "1.23457e+06"],
+      [123_456, "123,456"],
+      [100_000, "100,000"],
+      [999_999.5, "1e+06"],
+      [0.0001, "0.0001"],
+      [0.000_012_34, "1.234e-05"],
+      [0.000_01, "1e-05"],
+      [1_234.567_891_2, "1,234.57"],
+      [0, "0"],
+      [-2.5, "-2.5"],
+    ];
+    for (const [value, python] of cases) {
+      expect(seen("range", { lower: value, upper: 0, kind: "number" }), String(value)).toBe(
+        `from ${python} to 0`,
+      );
+    }
+  });
+
+  it("falls back to the number for a date outside years 1 to 9999, as Python's date does", () => {
+    // Days since 1970: 0001-01-01 is -719162, 9999-12-31 is 2932896.
+    expect(seen("range", { lower: -719_162, upper: 2_932_896, kind: "date" })).toBe(
+      "from Jan 1, 1 to Dec 31, 9999",
+    );
+    expect(seen("range", { lower: -719_163, upper: 2_932_897, kind: "date" })).toBe(
+      "from -719,163 to 2.9329e+06",
+    );
+    // Microseconds: the first moment of year 10000 is out of range too.
+    expect(seen("range", { lower: 253_402_300_800_000_000, upper: 0, kind: "timestamp" })).toBe(
+      "from 2.53402e+17 to Jan 1, 1970, 12:00 AM UTC",
     );
   });
 
