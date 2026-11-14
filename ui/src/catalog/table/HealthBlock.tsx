@@ -5,6 +5,7 @@
  */
 import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
 import type { HealthSummaryOut, TableHealthOut } from "../../api";
 import { useFocusAfter } from "../../shell/useFocusAfter";
@@ -12,7 +13,9 @@ import type { Resource } from "../../shell/useResource";
 import { StatusGlyph } from "../../status/StatusGlyph";
 import { ReadFailed } from "../cells";
 import { HealthWord } from "../HealthWord";
+import { tablePath } from "../paths";
 import { firedLines, judged } from "./health";
+import { useTableData } from "./TableContext";
 
 /** The most lines the block shows before it counts the rest. */
 const MOST_LINES = 5;
@@ -34,13 +37,21 @@ export interface HealthBlockProps {
 
 /**
  * The sentences under the headline: what is wrong, worst first and at most five, else one
- * sentence that says the table is healthy or has not been judged.
+ * sentence that says the table is healthy or has not been judged. The count of the rest links to
+ * the Health tab.
  *
- * @param props - The health.
+ * @param props - The health and the Health tab's address.
  * @param props.health - The health the server answered.
+ * @param props.more - The Health tab's address, which "and 2 more" opens.
  * @returns The lines or the sentence.
  */
-function Lines({ health }: { readonly health: TableHealthOut }): JSX.Element {
+function Lines({
+  health,
+  more,
+}: {
+  readonly health: TableHealthOut;
+  readonly more: string;
+}): JSX.Element {
   const { t } = useTranslation();
   const lines = firedLines(health, t);
   if (lines.length === 0) {
@@ -63,7 +74,7 @@ function Lines({ health }: { readonly health: TableHealthOut }): JSX.Element {
       </ul>
       {lines.length > MOST_LINES && (
         <p className="second">
-          {t("table.healthBlock.more", { count: lines.length - MOST_LINES })}
+          <Link to={more}>{t("table.healthBlock.more", { count: lines.length - MOST_LINES })}</Link>
         </p>
       )}
     </>
@@ -71,9 +82,10 @@ function Lines({ health }: { readonly health: TableHealthOut }): JSX.Element {
 }
 
 /**
- * Renders the heading, the verdict's word from the table itself, and the lines from the health
- * read. A read that fails says why beside Try again and leaves the rest of the page as it is;
- * once it succeeds the focus goes to the heading, because the button is gone.
+ * Renders the heading with Health details › beside it, the verdict's word from the table itself,
+ * and the lines from the health read. A read that fails says why beside Try again and leaves the
+ * rest of the page as it is; once it succeeds the focus goes to the heading, because the button
+ * is gone.
  *
  * @param props - The verdict and the read.
  * @param props.summary - The table's own verdict.
@@ -82,12 +94,18 @@ function Lines({ health }: { readonly health: TableHealthOut }): JSX.Element {
  */
 export function HealthBlock({ summary, resource }: HealthBlockProps): JSX.Element {
   const { t } = useTranslation();
+  const { ref } = useTableData();
   const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(resource.data);
+  const details = tablePath(ref.environment, ref.namespace, ref.name, "health");
   return (
     <section className="health-block">
-      <h2 className="block-heading" tabIndex={-1} ref={headingRef}>
-        {t("table.healthBlock.heading")}
-      </h2>
+      {/* Health details › sits beside the heading, so Overview keeps fitting one screen. */}
+      <div className="block-head">
+        <h2 className="block-heading" tabIndex={-1} ref={headingRef}>
+          {t("table.healthBlock.heading")}
+        </h2>
+        <Link to={details}>{t("table.healthBlock.details")}</Link>
+      </div>
       <p className="health-headline">
         <HealthWord summary={summary ?? NOT_JUDGED} />
       </p>
@@ -100,7 +118,7 @@ export function HealthBlock({ summary, resource }: HealthBlockProps): JSX.Elemen
           }}
         />
       ) : (
-        resource.data !== undefined && <Lines health={resource.data} />
+        resource.data !== undefined && <Lines health={resource.data} more={details} />
       )}
     </section>
   );

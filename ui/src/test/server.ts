@@ -32,6 +32,8 @@ interface FakeAnswer {
   readonly body?: unknown;
   /** A file to answer instead of JSON, such as a picture. */
   readonly blob?: Blob;
+  /** Response headers, such as `X-Next-Cursor`. */
+  readonly headers?: Record<string, string>;
 }
 
 /** A route's answer, fixed or computed from the request. */
@@ -140,7 +142,7 @@ export function fakeServer(routes: Record<string, FakeRoute> = {}): FakeServer {
     }
     return new Response(JSON.stringify(answer.body ?? null), {
       status: answer.status,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...answer.headers },
     });
   });
   vi.stubGlobal("fetch", fetchStub);

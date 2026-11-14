@@ -62,8 +62,8 @@
 "grant revoke": { class: ui, part: 7 }
 "graph impact": { class: ui, part: 3 }
 "graph join-path": { class: ui, part: 3 }
-"graph lineage": { class: read, part: 3 }
-"graph neighbours": { class: read, part: 3 }
+"graph lineage": { class: read, part: 3, done: true }
+"graph neighbours": { class: read, part: 3, note: "the Lineage tab does not use it" }
 "group add-member": { class: ui, part: 7 }
 "group create": { class: ui, part: 7 }
 "group delete": { class: ui, part: 7 }
@@ -166,9 +166,9 @@
 "table describe": { class: ui, part: 3, done: true }
 "table expiring": { class: ui, part: 3 }
 "table get": { class: read, part: 3, done: true }
-"table health": { class: read, part: 3 }
-"table lineage": { class: read, part: 3 }
-"table list": { class: ui, part: 3 }
+"table health": { class: read, part: 3, done: true }
+"table lineage": { class: read, part: 3, note: "run lineage is not shown on the table page" }
+"table list": { class: ui, part: 3, done: true }
 "table maintain": { class: ui, part: 3 }
 "table merge":
   {
@@ -233,7 +233,8 @@
 "GET /api/v1/audit-events": { class: ui, part: 8 }
 "GET /api/v1/ci-trust-rules": { class: ui, part: 7 }
 "GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
-"GET /api/v1/column-masks": { class: ui, part: 7 }
+"GET /api/v1/column-masks":
+  { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
 "GET /api/v1/environments": { class: ui, part: 8 }
 "GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}": { class: ui, part: 6 }
@@ -249,8 +250,9 @@
 "GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/graph/impact": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/graph/join-path": { class: ui, part: 3 }
-"GET /api/v1/environments/{env}/graph/lineage": { class: read, part: 3 }
-"GET /api/v1/environments/{env}/graph/neighbours": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/graph/lineage": { class: read, part: 3, done: true }
+"GET /api/v1/environments/{env}/graph/neighbours":
+  { class: read, part: 3, note: "the Lineage tab does not use it" }
 "GET /api/v1/environments/{env}/jobs": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/jobs/{job}": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/jobs/{job}/tasks/{task}/attempts": { class: read, part: 5 }
@@ -270,10 +272,16 @@
   { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition/file":
   { class: read, part: 3, done: true }
-"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health":
+  { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals":
-  { class: read, part: 3 }
-"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage": { class: read, part: 3 }
+  {
+    class: read,
+    part: 3,
+    note: "the Health tab shows the current signals from /health; the signal history comes with part 5",
+  }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage":
+  { class: read, part: 3, note: "run lineage is not shown on the table page" }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }
@@ -292,7 +300,8 @@
 "GET /api/v1/environments/{name}": { class: ui, part: 8 }
 "GET /api/v1/environments/{name}/orphaned-locations": { class: ui, part: 8 }
 "GET /api/v1/environments/{name}/usage": { class: ui, part: 8 }
-"GET /api/v1/grants": { class: ui, part: 7 }
+"GET /api/v1/grants":
+  { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
 "GET /api/v1/groups": { class: ui, part: 7 }
 "GET /api/v1/groups/{name}/members": { class: ui, part: 7 }
 "GET /api/v1/home/attention": { class: read, part: 2 }
@@ -313,7 +322,11 @@
 "GET /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions":
-  { class: ui, part: 7, note: "1b asks it whether a person is an administrator (recovery links)" }
+  {
+    class: ui,
+    part: 7,
+    note: "1b asks it whether a person is an administrator (recovery links); the table page's Access tab shows its answer read-only",
+  }
 "GET /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/recent": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
@@ -322,15 +335,16 @@
 "GET /api/v1/repositories": { class: ui, part: 8 }
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
 "GET /api/v1/repository-probes/{probe_id}": { class: ui, part: 2 }
-"GET /api/v1/row-filters": { class: ui, part: 7 }
+"GET /api/v1/row-filters":
+  { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
 "GET /api/v1/settings/sign-in":
   { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }
 "GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/status": { class: read, part: 2 }
-"GET /api/v1/tables": { class: read, part: 3 }
-"GET /api/v1/tables/tree": { class: read, part: 3 }
+"GET /api/v1/tables": { class: read, part: 3, done: true }
+"GET /api/v1/tables/tree": { class: read, part: 3, done: true }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
 "GET /api/v1/whoami": { class: read, part: 1 }

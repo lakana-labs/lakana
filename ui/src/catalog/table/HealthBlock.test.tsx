@@ -14,7 +14,7 @@ const HEALTH_ROUTE = `GET ${TABLE_PATH}/health`;
  */
 async function block(): Promise<HTMLElement> {
   const heading = await screen.findByRole("heading", { level: 2, name: "Health" });
-  return heading.parentElement as HTMLElement;
+  return heading.closest("section") as HTMLElement;
 }
 
 describe("HealthBlock", () => {
@@ -205,7 +205,10 @@ describe("HealthBlock", () => {
 
     const health_ = await block();
     expect(await within(health_).findAllByRole("listitem")).toHaveLength(5);
-    expect(within(health_).getByText("and 2 more")).toBeVisible();
+    expect(within(health_).getByRole("link", { name: "and 2 more" })).toHaveAttribute(
+      "href",
+      `${PAGE}/health`,
+    );
   });
 
   it("says Healthy in a sentence", async () => {
@@ -262,6 +265,15 @@ describe("HealthBlock", () => {
     expect(
       await within(await block()).findByText("Not judged yet: the table has no checks or signals."),
     ).toBeVisible();
+  });
+
+  it("links Health details › to the Health tab", async () => {
+    renderShell(PAGE);
+
+    expect(within(await block()).getByRole("link", { name: "Health details ›" })).toHaveAttribute(
+      "href",
+      `${PAGE}/health`,
+    );
   });
 
   it("names the cause and offers Try again when health cannot be read, with the rest of Overview in place", async () => {

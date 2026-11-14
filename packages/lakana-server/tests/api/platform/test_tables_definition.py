@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
 import uuid
@@ -32,6 +33,7 @@ from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment, create_table, deploy_file, person
 
 DEF_PATH = "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition"
+OPENAPI_DOCUMENT = Path(__file__).resolve().parents[5] / "docs/site/reference/openapi.json"
 """The location route as OpenAPI spells it; the file route adds ``/file``."""
 
 LOCATION_KEYS = (
@@ -320,9 +322,12 @@ def test_the_audit_hook_leaves_out_only_the_watchdog_itself(
     assert ("open", "/proc/self/status") in [(e, str(a)) for e, a in opened]
 
 
-def test_definition_has_no_path_commit_or_version_parameter(defs: TestClient) -> None:
+def test_definition_has_no_path_commit_or_version_parameter() -> None:
+    # The published document, kept equal to the app's by `generate_reference --check`; reading it
+    # spares this test a deployed project and an OpenAPI build (it was over the 2 s line on CI).
+    openapi = json.loads(OPENAPI_DOCUMENT.read_text(encoding="utf-8"))
     for route in (DEF_PATH, DEF_PATH + "/file"):
-        op = defs.app.openapi()["paths"][route]["get"]
+        op = openapi["paths"][route]["get"]
         assert "requestBody" not in op
         assert {(p["name"], p["in"]) for p in op["parameters"]} == {
             ("env", "path"),
