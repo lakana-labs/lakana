@@ -12,13 +12,17 @@ import hashlib
 import uuid
 from datetime import UTC, datetime
 
+import pytest
 from core_test_helpers import ensure_table
 from sqlalchemy import update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from test_projects_definition import _analyst, _person, _policy, _source_viewed, _tables
 
+from lakana_core.audit.service import AuditService
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.service import CatalogService, TableDescription
+from lakana_core.errors import AuditUnavailableError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import RowFilter, Table, TableType
@@ -250,3 +254,34 @@ def test_the_gate_takes_a_table_ref_and_judges_its_own_policy(session: Session) 
     session.commit()
 
     assert not passes_content_gate(session, authz, analyst, "dev", legacy, [], False)
+
+
+def test_a_failed_audit_write_returns_no_sql(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SQL is recorded before it is returned; a failed write refuses the whole read."""
+    _view(session)
+    analyst = _analyst(session)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        """Fail as a full disk would.
+
+        Parameters
+        ----------
+        *args
+            Ignored.
+        **kwargs
+            Ignored.
+
+        Raises
+        ------
+        OperationalError
+            Always.
+        """
+        raise OperationalError("x", {}, Exception())
+
+    monkeypatch.setattr(AuditService, "record", refuse)
+    with pytest.raises(AuditUnavailableError, match="a read of a view's SQL is always recorded"):
+        _get(session, analyst)
+    monkeypatch.undo()
+    assert _source_viewed(session) == []

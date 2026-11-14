@@ -159,7 +159,7 @@ case must use the namespace's exact name.
 - An older CLI shows the jobs and connections of a start asset as `start` and other leaves as
   `join` in the lineage and neighbours output. Upgrade the CLI together with the server.
 
-### Invisible characters in new table, namespace and column names are refused
+### Invisible characters in new table, namespace and column names are refused (breaking)
 
 A new namespace, table, view, artifact or column name may no longer hold a control character, a format
 character (Unicode category `Cf`: a bidirectional control such as U+202E, a zero-width space, a
@@ -170,6 +170,13 @@ rename or undrop target, a deploy or load that creates a table or adds a column,
 table, whose column names come from its files (`lakana table create-external`). The refusal
 names the character and its position, for example `Table name 'orders\u202e' holds U+202E at
 character 7, … Choose a name without it`.
+
+Earlier releases accepted such names, so a client, script, project or load that still creates one
+now fails where it worked before (422 from the REST API, a refused commit from an Iceberg client, a
+failed task for a deploy or load whose query returns such a column name). To migrate, choose a name
+without the character: retype it with visible characters (letters, digits, `_`), rename the column
+in the query that produces it with an alias (`… AS order_id`), or clean the header of the file an external
+table reads.
 
 Existing names are not touched: they stay readable and writable, a schema change or redeploy may
 keep a column it already has, and an Iceberg client's rename (`rename_table`) moves a table to a
