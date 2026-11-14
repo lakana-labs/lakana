@@ -7,13 +7,16 @@ route asks it for every file of a version, at a cost that grows by at most one s
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, or_, select, update
 from sqlalchemy.orm import Session
 from test_projects_definition import (
     _analyst,
+    _file,
     _person,
     _policy,
     _rec,
@@ -27,11 +30,18 @@ from test_projects_definition import (
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
-from lakana_core.identifiers import TableRef
-from lakana_core.models import TableType
-from lakana_core.policy.field_binding import UnreadablePolicyError
-from lakana_core.policy.resolver import PolicyResolver
-from lakana_core.projects.definition import ContentGate, _live_table, passes_content_gate
+from lakana_core.identifiers import NAMESPACE_SEPARATOR, TableRef
+from lakana_core.models import (
+    ColumnMask,
+    Environment,
+    Group,
+    GroupMembership,
+    Namespace,
+    RowFilter,
+    Table,
+    TableType,
+)
+from lakana_core.projects.definition import ContentGate, passes_content_gate
 
 
 def _reference_ref(environment: str, entry: object) -> TableRef | None:
@@ -57,6 +67,40 @@ def _reference_ref(environment: str, entry: object) -> TableRef | None:
         return TableRef.from_dotted(environment, entry)
     except ValidationError:
         return None
+
+
+def _reference_policy_applies(session: Session, p: PrincipalRef, table_id: object) -> bool:
+    """Say whether an active row filter or column mask applies to `p` on a table, in plain SQL.
+
+    Without a schema, every applicable row either is a filter or mask of the reader or cannot
+    be read; the gate refuses on both, so any active row of the reader or its groups refuses.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    p
+        The reader.
+    table_id
+        The table.
+
+    Returns
+    -------
+    bool
+        Whether such a row exists.
+    """
+    groups = select(GroupMembership.group_id).where(GroupMembership.principal_id == p.id)
+    for model in (RowFilter, ColumnMask):
+        found = session.execute(
+            select(model.id).where(
+                model.table_id == table_id,
+                model.revoked_at.is_(None),
+                or_(model.principal_id == p.id, model.group_id.in_(groups)),
+            )
+        ).first()
+        if found is not None:
+            return True
+    return False
 
 
 def _reference_gate(
@@ -111,18 +155,23 @@ def _reference_gate(
         scope = Securable.table_scope(environment, ref.namespace, ref.name)
         if not authorization.permits(p, Action.READ_TABLE, scope):
             return False
-    resolver = PolicyResolver(session)
     for ref in gate.values():
-        live = _live_table(session, ref)
+        live = session.execute(
+            select(Table.id, Table.table_type)
+            .join(Namespace, Table.namespace_id == Namespace.id)
+            .join(Environment, Namespace.environment_id == Environment.id)
+            .where(
+                Environment.name == environment,
+                Environment.deleted_at.is_(None),
+                Namespace.path == NAMESPACE_SEPARATOR.join(ref.namespace.parts),
+                Table.name == ref.name,
+            )
+        ).one_or_none()
         if live is None:
             continue
         if live.table_type is TableType.VIEW and (not defines or ref != own):
             return False
-        try:
-            policy = resolver.resolve(p, ref, table_id=live.id)
-        except UnreadablePolicyError:
-            return False
-        if policy.row_filters or policy.column_masks:
+        if _reference_policy_applies(session, p, live.id):
             return False
     return True
 
@@ -143,6 +192,8 @@ _FILES: list[tuple[object, object, object, bool]] = [
     ("gold.f", ["gold.f", "silver.filtered"], False, True),
     ("gold.f", ["gold.f", "silver.bogus"], False, True),
     ("gold.f", ["gold.f", "silver.other"], False, True),
+    ("gold.f", ["gold.f", "silver.grouped"], False, True),
+    ("gold.f", ["gold.f", "silver.revoked"], False, True),
     ("gold.f", ["gold.f", "silver.a"], False, False),
     (TableRef.from_dotted("dev", "gold.f"), [TableRef.from_dotted("dev", "silver.a")], False, True),
     (TableRef.from_dotted("prod", "gold.f"), ["silver.a"], False, True),
@@ -165,7 +216,16 @@ def _readers(session: Session) -> dict[str, PrincipalRef]:
         Readers by role.
     """
     _world(session)
-    _tables(session, "gold.v", "silver.masked", "silver.filtered", "silver.bogus", "silver.other")
+    _tables(
+        session,
+        "gold.v",
+        "silver.masked",
+        "silver.filtered",
+        "silver.bogus",
+        "silver.other",
+        "silver.grouped",
+        "silver.revoked",
+    )
     _retype(session, "gold.v", TableType.VIEW)
     viewer = _analyst(session, "viewer")
     other = _analyst(session, "other")
@@ -174,6 +234,24 @@ def _readers(session: Session) -> dict[str, PrincipalRef]:
         _policy(session, "filter", reader, "silver.filtered")
         _policy(session, "mask", reader, "silver.bogus", binding="bogus")
     _policy(session, "mask", other, "silver.a")
+    # A mask through a group (on `silver.grouped`), for the viewer only, and a revoked filter
+    # (on `silver.revoked`), which applies to nobody.
+    group = Group(id=uuid.uuid4(), name="analysts")
+    session.add(group)
+    session.add(GroupMembership(group_id=group.id, principal_id=viewer.id))
+    session.commit()
+    _policy(session, "mask", other, "silver.grouped")
+    session.execute(
+        update(ColumnMask)
+        .where(ColumnMask.table == "grouped")
+        .values(principal_id=None, group_id=group.id)
+    )
+    _policy(session, "filter", viewer, "silver.revoked")
+    _policy(session, "filter", other, "silver.revoked")
+    session.execute(
+        update(RowFilter).where(RowFilter.table == "revoked").values(revoked_at=datetime.now(UTC))
+    )
+    session.commit()
     return {
         "viewer": viewer,
         "under-a-mask": other,
@@ -204,6 +282,12 @@ def test_the_batched_gate_decides_every_file_as_the_gate_did_before(session: Ses
         assert single == expected, name
         assert batched == expected, name
         answers.add(tuple(expected))
+    viewer = readers["viewer"]
+    grouped = ("gold.f", ["gold.f", "silver.grouped"], False)
+    revoked = ("gold.f", ["gold.f", "silver.revoked"], False)
+    assert not passes_content_gate(session, authz, viewer, "dev", *grouped)
+    assert passes_content_gate(session, authz, readers["under-a-mask"], "dev", *grouped)
+    assert passes_content_gate(session, authz, viewer, "dev", *revoked)
     # The cases tell the readers apart, and some files pass.
     assert len(answers) >= 3
     assert any(any(each) for each in answers)
@@ -276,3 +360,37 @@ def test_a_project_version_costs_a_fixed_number_of_statements_plus_one_per_file(
     assert shown <= _FIXED_STATEMENTS + files
     assert again <= _FIXED_STATEMENTS
     assert withheld <= _FIXED_STATEMENTS
+
+
+_DEFINED_IN_STATEMENTS = 20
+"""What one "Defined in" call costs once its read is recorded, whatever the environment holds."""
+
+
+def test_defined_in_reads_only_the_tables_its_file_uses(session: Session) -> None:
+    _world(session)
+    analyst = _analyst(session)
+    statements: list[str] = []
+    engine = session.get_bind()
+
+    def seen(_conn: object, _cur: object, statement: str, *_: object) -> None:
+        statements.append(statement)
+
+    def count() -> int:
+        statements.clear()
+        event.listen(engine, "before_cursor_execute", seen)
+        try:
+            assert _file(session, analyst).content is not None
+        finally:
+            event.remove(engine, "before_cursor_execute", seen)
+        return len(statements)
+
+    count()  # writes the SOURCE_VIEWED row; the calls below find it within the window
+    few = count()
+    _tables(session, *(f"silver.extra{i}" for i in range(60)))
+    many = count()
+
+    assert few == many <= _DEFINED_IN_STATEMENTS
+    live = [
+        s for s in statements if s.startswith("SELECT tables.id, tables.table_type, namespaces")
+    ]
+    assert live and all(" IN " in s for s in live)

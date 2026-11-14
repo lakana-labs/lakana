@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Row, select
+from sqlalchemy import Row, select, tuple_
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.views import record_source_view
@@ -493,7 +493,7 @@ class ContentGate:
 
     Every file is judged exactly as `passes_content_gate` judges it. What the rule reads is
     read once per request and kept: the reader's `READ_ENVIRONMENT` and `READ_TABLE` answers
-    (one `permits_each` batch), the environment's live tables (one statement) and the policies
+    (one `permits_each` batch), the live tables the files name (one statement) and the policies
     that apply to the reader on them (`PolicyResolver.resolve_each`). `prepare` reads them for
     every file to come, so judging a version's files costs a fixed number of statements; a
     table `prepare` did not see is read when a file names it.
@@ -523,7 +523,7 @@ class ContentGate:
         self._environment = environment
         self._reads_environment: bool | None = None
         self._reads: dict[tuple[tuple[str, ...], str], bool] = {}
-        self._live: dict[tuple[str, str], _LiveTable] | None = None
+        self._live: dict[tuple[str, str], _LiveTable | None] = {}
         self._policies: dict[uuid.UUID, bool] = {}
 
     def prepare(self, files: Iterable[tuple[object, object]]) -> None:
@@ -543,7 +543,7 @@ class ContentGate:
                 if ref is not None:
                     refs.setdefault((ref.namespace.parts, ref.name), ref)
         self._permit([ref for key, ref in refs.items() if key not in self._reads])
-        live = self._live_tables()
+        live = self._live_tables(refs.values())
         ids = [
             found.id
             for ref in refs.values()
@@ -585,7 +585,7 @@ class ContentGate:
         self._permit([ref for key, ref in gate.items() if key not in self._reads])
         if not all(self._reads[key] for key in gate):
             return False
-        live = self._live_tables()
+        live = self._live_tables(gate.values())
         for ref in gate.values():
             found = live.get((ref.namespace.joined(), ref.name))
             if found is None:
@@ -636,26 +636,45 @@ class ContentGate:
         for ref, answer in zip(refs, answers, strict=True):
             self._reads[ref.namespace.parts, ref.name] = answer
 
-    def _live_tables(self) -> dict[tuple[str, str], _LiveTable]:
-        """Read the environment's live tables, once.
+    def _live_tables(self, refs: Iterable[TableRef]) -> dict[tuple[str, str], _LiveTable | None]:
+        """Read the tables of the live environment that `refs` name and were not read yet.
+
+        One statement for all of them, filtered to their ``(namespace path, name)`` pairs, so
+        the cost does not grow with the environment's other tables.
+
+        Parameters
+        ----------
+        refs
+            The tables wanted.
 
         Returns
         -------
         dict
-            ``(namespace in storage form, name)`` to the table; empty for an environment
-            that is missing or deleted.
+            ``(namespace in storage form, name)`` to the table, or `None` for a name that is no
+            table of a live environment; every pair read so far.
         """
-        if self._live is None:
+        wanted = {
+            (ref.namespace.joined(), ref.name)
+            for ref in refs
+            if (ref.namespace.joined(), ref.name) not in self._live
+        }
+        if wanted:
             rows = self._session.execute(
                 select(Table.id, Table.table_type, Namespace.path, Table.name)
                 .join(Namespace, Table.namespace_id == Namespace.id)
                 .join(Environment, Namespace.environment_id == Environment.id)
-                .where(Environment.name == self._environment, LIVE_ENVIRONMENT)
+                .where(
+                    Environment.name == self._environment,
+                    LIVE_ENVIRONMENT,
+                    tuple_(Namespace.path, Table.name).in_(sorted(wanted)),
+                )
             )
-            self._live = {
+            found = {
                 (path, name): _LiveTable(table_id, table_type)
                 for table_id, table_type, path, name in rows
             }
+            for pair in wanted:
+                self._live[pair] = found.get(pair)
         return self._live
 
     def _resolve(self, table_ids: list[uuid.UUID]) -> None:
