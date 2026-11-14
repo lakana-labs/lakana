@@ -1,11 +1,12 @@
-import i18next from "i18next";
-import { describe, expect, it } from "vitest";
-
-import { checkResult, health, signalResult } from "../../test/table";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { bandWords, effectWord, firedLines, judged, observedWords } from "./health";
+import i18next from "i18next";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { checkResult, health, signalResult } from "../../test/table";
+
+import { bandWords, effectWord, firedLines, judged, observedWords, reasonWord } from "./health";
 
 const t = i18next.t.bind(i18next);
 
@@ -247,8 +248,8 @@ describe("observedWords", () => {
     expect(words("freshness", { seconds: null, source: null })).toBe("None");
     expect(words("volume", { rows: 120, note: null })).toBe("rows 120");
     expect(words("range", { lower: 1, upper: null })).toBe("lower 1");
-    expect(words("skew", { reason: "paused", job: null, list: ["a"] })).toBe(
-      'reason paused, list ["a"]',
+    expect(words("skew", { note: "paused", job: null, list: ["a"] })).toBe(
+      'note paused, list ["a"]',
     );
   });
 });
@@ -291,7 +292,12 @@ describe("bandWords", () => {
     expect(
       words(
         "range",
-        { min: 0, max: 1, low: 1_762_041_600_000_000, high: 1_763_208_000_000_000 },
+        {
+          min: 1_762_041_600_000_000,
+          max: 1_763_208_000_000_000,
+          low: 1_761_000_000_000_000,
+          high: 1_764_000_000_000_000,
+        },
         observed,
       ),
     ).toBe("from Nov 2, 2025, 12:00 AM UTC to Nov 15, 2025, 12:00 PM UTC");
@@ -330,5 +336,108 @@ describe("effectWord", () => {
 
   it("has no word for a value the server never sends", () => {
     expect(effectWord("alert", t)).toBeNull();
+  });
+});
+
+/** The server's source of the health signals and of how they are recorded. */
+const SERVER = resolve(
+  import.meta.dirname,
+  "../../../../packages/lakana-core/src/lakana_core/catalog",
+);
+
+describe("the server's shapes", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const band = (
+    signal: string,
+    values: Record<string, unknown>,
+    observed = null as Record<string, unknown> | null,
+  ): string => bandWords(signal, values, observed, t, "en");
+  const seen = (signal: string, values: Record<string, unknown>): string =>
+    observedWords(signal, values, t, "en");
+
+  it("clips a null-rate band to 0 to 100 %, as learn_band's floor makes it pass both ends", () => {
+    // A column that is never null: median 0, half-width NULL_RATE_FLOOR 0.02.
+    expect(band("null_rate", { low: -0.02, high: 0.02, median: 0 })).toBe("up to 2 % empty");
+    // A column that is almost always null.
+    expect(band("null_rate", { low: 0.97, high: 1.01, median: 0.99 })).toBe("97 % to 100 % empty");
+  });
+
+  it("rounds a volume band and never goes below zero, as _count does", () => {
+    // Median 3 rows, half-width VOLUME_FLOOR_ROWS 10.
+    expect(band("volume", { low: -7, high: 13, median: 3 })).toBe("0 to 13 rows added");
+    expect(band("volume", { low: 900.45, high: 1_100.55, median: 1_000.5 })).toBe(
+      "900 to 1,101 rows added",
+    );
+  });
+
+  it("says a range's usual values from min to max, integers whole, as the sentence does", () => {
+    expect(
+      band(
+        "range",
+        { min: 3, max: 17, low: 0.25, high: 19.75 },
+        { lower: 3, upper: 17, kind: "integer" },
+      ),
+    ).toBe("from 3 to 17");
+    expect(band("range", { low: 0.25, high: 19.75 }, { kind: "integer" })).toBe("from 0 to 19");
+    expect(seen("range", { lower: 1234.5678912, upper: 2, kind: "number" })).toBe(
+      "from 1,234.57 to 2",
+    );
+  });
+
+  it("falls back to the number for a date or time out of range, as _bound_text does", () => {
+    // int64 max microseconds, which a float holds as 2 ** 63.
+    const max = 2 ** 63;
+    expect(seen("range", { lower: 0, upper: max, kind: "timestamp" })).toBe(
+      "from Jan 1, 1970, 12:00 AM UTC to 9.22337e+18",
+    );
+    expect(seen("range", { lower: 0, upper: 2_147_483_647, kind: "date" })).toBe(
+      "from Jan 1, 1970 to 2.14748e+9",
+    );
+  });
+
+  it("never lets one value break the cell: a formatter that throws reads as the pairs", () => {
+    vi.spyOn(Intl, "NumberFormat").mockImplementation(() => {
+      throw new RangeError("broken");
+    });
+    expect(seen("volume", { added: 3, total: 3 })).toBe("added 3, total 3");
+    expect(band("volume", { low: 1, high: 2 })).toBe("low 1, high 2");
+  });
+
+  it("says a load of no rows in words", () => {
+    expect(seen("volume", { added: 0, loaded: false, total: 12 })).toBe(
+      "Nothing loaded, 12 in total",
+    );
+    expect(seen("volume", { added: 0, loaded: false, total: null })).toBe("Nothing loaded");
+    expect(seen("volume", { added: 4, total: null })).toBe("4 rows added");
+  });
+
+  it("has words for every reason the server records, and none for one it never sends", () => {
+    const sources = ["health_signals.py", "health_record.py"].map((file) =>
+      readFileSync(resolve(SERVER, file), "utf8"),
+    );
+    const reasons = [
+      ...new Set(
+        sources.flatMap((source) =>
+          [...source.matchAll(/\{"reason": "([a-z_]+)"\}/g)].map((match) => match[1] as string),
+        ),
+      ),
+    ].sort();
+    expect(reasons).toEqual([
+      "error",
+      "no_rows",
+      "not_finite",
+      "not_recorded",
+      "paused",
+      "unreadable",
+    ]);
+    for (const reason of reasons) {
+      expect(reasonWord(reason, t), reason).not.toBeNull();
+      expect(seen("range", { reason }), reason).toBe(reasonWord(reason, t));
+    }
+    expect(reasonWord("tired", t)).toBeNull();
+    expect(seen("freshness", { reason: "tired" })).toBe("reason tired");
   });
 });

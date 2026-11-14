@@ -133,6 +133,7 @@
   "preview": {
     "region": "Preview of {{name}}",
     "grid": "The first rows of {{name}}",
+    "sqlNull": "SQL null",
     "first": "First {{count}} rows · read as you",
     "rows_one": "{{count}} row · read as you",
     "rows_other": "{{count}} rows · read as you",
@@ -214,8 +215,10 @@
       },
       "observedWords": {
         "freshness": "{{duration}} since the last write",
-        "volume_one": "{{added}} row added, {{total}} in total",
-        "volume_other": "{{added}} rows added, {{total}} in total",
+        "rowsAdded_one": "{{added}} row added",
+        "rowsAdded_other": "{{added}} rows added",
+        "nothingLoaded": "Nothing loaded",
+        "withTotal": "{{first}}, {{total}} in total",
         "nullRate_one": "{{nulls}} of {{values}} value empty",
         "nullRate_other": "{{nulls}} of {{values}} values empty",
         "range": "from {{lower}} to {{upper}}",
@@ -253,6 +256,14 @@
         "warn": "Warns",
         "block": "Blocks publication",
         "off": "Off"
+      },
+      "reasons": {
+        "error": "Could not be worked out for this snapshot",
+        "no_rows": "No rows to judge",
+        "not_finite": "Values too large to judge",
+        "not_recorded": "No figures recorded for this snapshot",
+        "paused": "Paused",
+        "unreadable": "The snapshot could not be read"
       }
     },
     "maintenance": {

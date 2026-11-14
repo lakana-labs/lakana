@@ -143,7 +143,8 @@ Health shows everything the Overview's health block sums up. Its address ends in
   reach with <kbd>Tab</kbd> and scroll with the arrow keys.
 - **Signals.** Every signal that watches the table: what it watches (the whole table, or a
   column), its state, the value it observed, in words such as "54 minutes since the last
-  write", "3 rows added, 3 in total" or "0 of 3 values empty", its usual band in the same
+  write", "3 rows added, 3 in total", "Nothing loaded" or "0 of 3 values empty", or why there
+  is no value, such as "Paused" or "No figures recorded for this snapshot", its usual band in the same
   words (such as "up to 24 hours", "900 to 1,100 rows added" or "up to 5 % empty", and a range's
   dates as dates), its effect (Warns, "Blocks publication" or Off) and when it last fired. Words are never broken across lines; when
   the window is too narrow for the list, it scrolls sideways in its own area. Under the list, each signal that fired has its sentence,

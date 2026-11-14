@@ -137,9 +137,12 @@ function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+/** The words of the observed values and bands, under the Health tab's strings. */
+const SIGNAL_WORDS = "table.healthTab.signals";
+
 /**
- * A length of time in the plainest unit, rounded down like the server's sentences: minutes under
- * two hours, hours under two days, else days.
+ * A length of time in the plainest unit, rounded down like the server's `_duration`: minutes
+ * under two hours, hours under two days, else days.
  *
  * @param seconds - The time.
  * @param t - The translation function.
@@ -154,50 +157,81 @@ function duration(seconds: number, t: TFunction, number: Intl.NumberFormat): str
       : whole < 172_800
         ? [Math.floor(whole / 3_600), "hours"]
         : [Math.floor(whole / 86_400), "days"];
-  return t(`table.healthTab.signals.duration.${unit}`, { count, shown: number.format(count) });
+  return t(`${SIGNAL_WORDS}.duration.${unit}`, { count, shown: number.format(count) });
 }
 
 /**
- * A share from 0 to 1 as a percentage number, at most one decimal.
+ * A share as a percentage, clipped to 0 to 100 % and with at most one decimal, like the server's
+ * `_percent`.
  *
- * @param share - The share.
+ * @param share - The share, 0 to 1.
  * @param language - The person's language.
  * @returns The number, without the sign.
  */
 function percent(share: number, language: string): string {
-  return new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(share * 100);
+  return new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(
+    Math.min(Math.max(share, 0), 1) * 100,
+  );
 }
 
 /**
- * A range bound as the person reads it, in their language: a date for days since 1970, a time
- * in UTC for microseconds since 1970, else the number. Dates are written in words, which break
- * only between words.
+ * A row count, rounded and never below zero, like the server's `_count`.
  *
- * @param kind - The range's kind: `date`, `timestamp`, `integer` or `number`.
+ * @param value - The count.
+ * @param number - The person's number format.
+ * @returns The count.
+ */
+function rows(value: number, number: Intl.NumberFormat): string {
+  return number.format(Math.round(Math.max(value, 0)));
+}
+
+/**
+ * A number with six significant digits, like Python's `,.6g`: grouped digits, or the exponent
+ * form for a number that needs one.
+ *
+ * @param value - The number.
+ * @param language - The person's language.
+ * @returns The text.
+ */
+function general(value: number, language: string): string {
+  const exact = value.toPrecision(6);
+  return exact.includes("e")
+    ? exact.replace(/\.?0+e/, "e")
+    : new Intl.NumberFormat(language, { maximumSignificantDigits: 6 }).format(value);
+}
+
+/**
+ * A range bound as the person reads it, like the server's `_bound_text`: an integer whole, a date
+ * for days since 1970 and a time in UTC for microseconds since 1970, in words in the person's
+ * language, else six significant digits. A date or time out of the range a browser can show (an
+ * `infinity` timestamp, say) falls back to the number, as on the server.
+ *
+ * @param kind - The range's kind: `integer`, `number`, `date` or `timestamp`.
  * @param value - The bound.
  * @param language - The person's language.
  * @returns The text.
  */
 function bound(kind: unknown, value: number, language: string): string {
-  if (kind === "date") {
-    return new Intl.DateTimeFormat(language, { dateStyle: "medium", timeZone: "UTC" }).format(
-      value * 86_400_000,
-    );
+  if (kind === "integer") {
+    return new Intl.NumberFormat(language).format(Math.trunc(value));
   }
-  if (kind === "timestamp") {
-    const time = new Intl.DateTimeFormat(language, {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone: "UTC",
-    }).format(Math.floor(value / 1_000));
-    return `${time} UTC`;
+  const ms =
+    kind === "date" ? value * 86_400_000 : kind === "timestamp" ? Math.floor(value / 1_000) : null;
+  if (ms !== null && Number.isFinite(new Date(ms).getTime())) {
+    const time = new Intl.DateTimeFormat(
+      language,
+      kind === "date"
+        ? { dateStyle: "medium", timeZone: "UTC" }
+        : { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" },
+    ).format(ms);
+    return kind === "date" ? time : `${time} UTC`;
   }
-  return new Intl.NumberFormat(language).format(value);
+  return general(value, language);
 }
 
 /**
  * An observed value or a band as `key value` pairs, each value as the server sent it, leaving
- * out the absent ones: for a band, and a signal or shape the interface has no words for.
+ * out the absent ones: for a signal or shape the interface has no words for.
  *
  * @param values - The object.
  * @param t - The translation function.
@@ -207,29 +241,73 @@ function valuePairs(values: Readonly<Record<string, unknown>>, t: TFunction): st
   const shown = Object.entries(values)
     .filter(([, value]) => value !== null && value !== undefined)
     .map(([key, value]) => `${key} ${typeof value === "string" ? value : JSON.stringify(value)}`);
-  return shown.length === 0 ? t("table.healthTab.signals.nothing") : shown.join(", ");
+  return shown.length === 0 ? t(`${SIGNAL_WORDS}.nothing`) : shown.join(", ");
 }
 
 /**
- * What a signal observed, in words: freshness as the time since the last write, volume as the
- * rows added and in total, empty values as how many of how many, a range from its lowest to its
- * highest value and the columns by how many there are and what changed. Any other signal or shape
- * reads as the server's pairs without the absent ones; "null" is never shown.
+ * Words for one cell that can never break the page: a formatter that throws (a value no browser
+ * can format) gives the server's pairs instead, for that cell alone.
+ *
+ * @param words - Makes the words.
+ * @param values - The values, for the pairs.
+ * @param t - The translation function.
+ * @returns The words, or the pairs.
+ */
+function safely(
+  words: () => string,
+  values: Readonly<Record<string, unknown>>,
+  t: TFunction,
+): string {
+  try {
+    return words();
+  } catch {
+    return valuePairs(values, t);
+  }
+}
+
+/** Every reason the server records instead of values (`{"reason": …}` in lakana-core). */
+const REASONS: ReadonlySet<string> = new Set([
+  "error",
+  "no_rows",
+  "not_finite",
+  "not_recorded",
+  "paused",
+  "unreadable",
+]);
+
+/**
+ * The words for a reason the server records instead of values.
+ *
+ * @param reason - The reason.
+ * @param t - The translation function.
+ * @returns The words, or null for a reason the server never sends.
+ */
+export function reasonWord(reason: string, t: TFunction): string | null {
+  return REASONS.has(reason) ? t(`${SIGNAL_WORDS}.reasons.${reason}`) : null;
+}
+
+/**
+ * What a signal observed, in words, without a guard.
  *
  * @param signal - The signal's kind.
  * @param observed - What it observed.
  * @param t - The translation function.
- * @param language - The person's language, for numbers.
+ * @param language - The person's language.
  * @returns The words.
  */
-export function observedWords(
+function observedText(
   signal: string,
   observed: Readonly<Record<string, unknown>>,
   t: TFunction,
   language: string,
 ): string {
   const number = new Intl.NumberFormat(language);
-  const words = "table.healthTab.signals.observedWords";
+  const words = `${SIGNAL_WORDS}.observedWords`;
+  const reason = observed["reason"];
+  const known = typeof reason === "string" ? reasonWord(reason, t) : null;
+  if (known !== null) {
+    return known;
+  }
   if (signal === "freshness") {
     const seconds = finite(observed["seconds"]);
     if (seconds !== null) {
@@ -239,12 +317,14 @@ export function observedWords(
   if (signal === "volume") {
     const added = finite(observed["added"]);
     const total = finite(observed["total"]);
-    if (added !== null && total !== null) {
-      return t(`${words}.volume`, {
-        count: added,
-        added: number.format(added),
-        total: number.format(total),
-      });
+    if (added !== null) {
+      const first =
+        observed["loaded"] === false
+          ? t(`${words}.nothingLoaded`)
+          : t(`${words}.rowsAdded`, { count: added, added: rows(added, number) });
+      return total === null
+        ? first
+        : t(`${words}.withTotal`, { first, total: rows(total, number) });
     }
   }
   if (signal === "null_rate") {
@@ -288,10 +368,88 @@ export function observedWords(
 }
 
 /**
- * A signal's usual band in words, matching {@link observedWords}: freshness as the longest
- * time between writes, volume as the rows usually added, empty values as their usual share, and a
- * range from its lowest to its highest bound in the column's own kind (from what it observed).
- * Any other signal or shape reads as the server's pairs without the absent ones.
+ * What a signal observed, in words, mirroring the server's sentences: freshness as the time
+ * since the last write, volume as the rows added (or nothing loaded) and in total, empty values
+ * as how many of how many, a range from its lowest to its highest value, the columns by how many
+ * there are and what changed, and a reason recorded instead of values in words. Any other signal
+ * or shape reads as the server's pairs without the absent ones; "null" is never shown, and a
+ * value no browser can format falls back to the pairs.
+ *
+ * @param signal - The signal's kind.
+ * @param observed - What it observed.
+ * @param t - The translation function.
+ * @param language - The person's language, for numbers and dates.
+ * @returns The words.
+ */
+export function observedWords(
+  signal: string,
+  observed: Readonly<Record<string, unknown>>,
+  t: TFunction,
+  language: string,
+): string {
+  return safely(() => observedText(signal, observed, t, language), observed, t);
+}
+
+/**
+ * A signal's usual band in words, without a guard.
+ *
+ * @param signal - The signal's kind.
+ * @param band - The usual band.
+ * @param observed - What the signal observed, for a range's kind; null when unknown.
+ * @param t - The translation function.
+ * @param language - The person's language.
+ * @returns The words.
+ */
+function bandText(
+  signal: string,
+  band: Readonly<Record<string, unknown>>,
+  observed: Readonly<Record<string, unknown>> | null,
+  t: TFunction,
+  language: string,
+): string {
+  const number = new Intl.NumberFormat(language);
+  const words = `${SIGNAL_WORDS}.bandWords`;
+  const low = finite(band["low"]);
+  const high = finite(band["high"]);
+  if (signal === "freshness" && high !== null) {
+    return t(`${words}.freshness`, { duration: duration(high, t, number) });
+  }
+  if (signal === "range") {
+    // The server's sentence says the usual values from min to max; the band's low and high add
+    // its tolerance.
+    const lower = finite(band["min"]) ?? low;
+    const upper = finite(band["max"]) ?? high;
+    if (lower !== null && upper !== null) {
+      const kind = observed?.["kind"];
+      return t(`${SIGNAL_WORDS}.observedWords.range`, {
+        lower: bound(kind, lower, language),
+        upper: bound(kind, upper, language),
+      });
+    }
+  }
+  if (low !== null && high !== null) {
+    if (signal === "volume") {
+      return t(`${words}.volume`, {
+        count: Math.round(Math.max(high, 0)),
+        low: rows(low, number),
+        high: rows(high, number),
+      });
+    }
+    if (signal === "null_rate") {
+      return low <= 0
+        ? t(`${words}.nullRateUpTo`, { high: percent(high, language) })
+        : t(`${words}.nullRate`, { low: percent(low, language), high: percent(high, language) });
+    }
+  }
+  return valuePairs(band, t);
+}
+
+/**
+ * A signal's usual band in words, matching {@link observedWords} and the server's sentences:
+ * freshness as the longest time between writes, volume as the rows usually added (rounded, never
+ * below zero), empty values as their usual share (clipped to 0 to 100 %), and a range from its
+ * usual lowest to highest value in the column's own kind. Any other signal or shape reads as the
+ * server's pairs without the absent ones, and a value no browser can format falls back to them.
  *
  * @param signal - The signal's kind.
  * @param band - The usual band.
@@ -307,42 +465,14 @@ export function bandWords(
   t: TFunction,
   language: string,
 ): string {
-  const number = new Intl.NumberFormat(language);
-  const words = "table.healthTab.signals.bandWords";
-  const low = finite(band["low"]);
-  const high = finite(band["high"]);
-  if (signal === "freshness" && high !== null) {
-    return t(`${words}.freshness`, { duration: duration(high, t, number) });
-  }
-  if (low !== null && high !== null) {
-    if (signal === "volume") {
-      return t(`${words}.volume`, {
-        count: high,
-        low: number.format(low),
-        high: number.format(high),
-      });
-    }
-    if (signal === "null_rate") {
-      return low === 0
-        ? t(`${words}.nullRateUpTo`, { high: percent(high, language) })
-        : t(`${words}.nullRate`, { low: percent(low, language), high: percent(high, language) });
-    }
-    if (signal === "range") {
-      const kind = observed?.["kind"];
-      return t("table.healthTab.signals.observedWords.range", {
-        lower: bound(kind, low, language),
-        upper: bound(kind, high, language),
-      });
-    }
-  }
-  return valuePairs(band, t);
+  return safely(() => bandText(signal, band, observed, t, language), band, t);
 }
 
 /** The word for each effect the server sends (`EFFECTS` in lakana-core's health_signals.py). */
 const EFFECT_WORDS: Readonly<Record<string, string>> = {
-  warn: "table.healthTab.signals.effects.warn",
-  block: "table.healthTab.signals.effects.block",
-  off: "table.healthTab.signals.effects.off",
+  warn: `${SIGNAL_WORDS}.effects.warn`,
+  block: `${SIGNAL_WORDS}.effects.block`,
+  off: `${SIGNAL_WORDS}.effects.off`,
 };
 
 /**
