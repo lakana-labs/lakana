@@ -1,3 +1,5 @@
+import { availableParallelism } from "node:os";
+
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
@@ -6,6 +8,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["src/test/setup.ts"],
+    // Vitest's default, one worker per CPU but one, at most 8: 19 workers on a 20-thread machine
+    // needed more than 4 GB for the coverage run (#586). CI's runners keep the default.
+    maxWorkers: Math.min(8, Math.max(availableParallelism() - 1, 1)),
     // Only unit tests: Playwright owns e2e/*.spec.ts. scripts/ holds the lint ban's test.
     include: ["src/**/*.test.{ts,tsx}", "build/**/*.test.ts", "scripts/**/*.test.ts"],
     coverage: {
