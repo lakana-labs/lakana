@@ -519,10 +519,26 @@
   overflow-wrap: anywhere;
 }
 
-/* The checks scroll in their own region on a narrow screen rather than break a check's name into
-   letters; four short columns need less room than the Catalog's seven. */
+/* The checks and signals scroll in their own region on a narrow screen rather than break a word
+   into pieces: no word breaks inside, an identifier only after "_", "." or "/" (VisibleText's
+   breakable), and the headers and the short columns (a signal's kind, its effect and when it last
+   fired) stay on one line. Four short columns need less room than the Catalog's seven; the
+   signals' seven need more. */
+.health-list td {
+  overflow-wrap: normal;
+}
+
+.health-list th,
+.health-list .one-line {
+  white-space: nowrap;
+}
+
 .list-scroll.checks-scroll .list {
   min-width: 480px;
+}
+
+.list-scroll.signals-scroll .list {
+  min-width: 760px;
 }
 
 /* A status word with its glyph never breaks: "Failed" in three pieces cannot be read. */

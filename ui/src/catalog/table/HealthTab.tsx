@@ -25,7 +25,7 @@ import { StatusGlyph } from "../../status/StatusGlyph";
 import type { StatusKind } from "../../status/status";
 import { ReadFailed, When } from "../cells";
 import { formatBytes } from "../format";
-import { firedLines, judged } from "./health";
+import { firedLines, judged, observedWords, valuePairs } from "./health";
 import { useTableData } from "./TableContext";
 
 type Check = TableHealthOut["checks"][number];
@@ -58,18 +58,6 @@ function wordOr(
   word: (value: string) => string,
 ): ReactNode {
   return known.includes(value) ? word(value) : <VisibleText text={value} />;
-}
-
-/**
- * An observed value or a band as `key value` pairs, each value as the server sent it.
- *
- * @param values - The object.
- * @returns The pairs, separated by commas.
- */
-function pairs(values: Readonly<Record<string, unknown>>): string {
-  return Object.entries(values)
-    .map(([key, value]) => `${key} ${typeof value === "string" ? value : JSON.stringify(value)}`)
-    .join(", ");
 }
 
 /** Properties of the tab's sections. */
@@ -134,7 +122,7 @@ function Checks({ health }: HealthProps): JSX.Element {
           // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
           tabIndex={0}
         >
-          <table className="list list-static">
+          <table className="list list-static health-list">
             <thead>
               <tr>
                 <th scope="col">{t("table.healthTab.checks.name")}</th>
@@ -172,19 +160,19 @@ function Checks({ health }: HealthProps): JSX.Element {
  * @returns The row.
  */
 function SignalRow({ signal }: { readonly signal: Signal }): JSX.Element {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const hidden = t("table.healthTab.signals.hidden");
   const fired = signal.state === "fired";
   return (
     <tr>
-      <td>
+      <td className="one-line">
         {wordOr(SIGNAL_NAMES, signal.signal, (name) => t(`table.healthTab.signals.names.${name}`))}
       </td>
       <td>
         {signal.column === null ? (
           t("table.healthTab.signals.wholeTable")
         ) : (
-          <VisibleText text={signal.column} />
+          <VisibleText text={signal.column} breakable />
         )}
       </td>
       <td>
@@ -202,7 +190,7 @@ function SignalRow({ signal }: { readonly signal: Signal }): JSX.Element {
         ) : signal.observed === null ? (
           t("table.healthTab.signals.nothing")
         ) : (
-          <VisibleText text={pairs(signal.observed)} />
+          <VisibleText text={observedWords(signal.signal, signal.observed, t, i18n.language)} />
         )}
       </td>
       <td>
@@ -211,15 +199,15 @@ function SignalRow({ signal }: { readonly signal: Signal }): JSX.Element {
         ) : signal.band === null ? (
           t("table.healthTab.signals.noBand")
         ) : (
-          <VisibleText text={pairs(signal.band)} />
+          <VisibleText text={valuePairs(signal.band, t)} />
         )}
       </td>
-      <td>
+      <td className="one-line">
         {wordOr(SIGNAL_EFFECTS, signal.effect, (effect) =>
           t(`table.healthTab.signals.effects.${effect}`),
         )}
       </td>
-      <td>
+      <td className="one-line">
         <When iso={signal.last_fired_at ?? null} never={t("table.healthTab.signals.neverFired")} />
       </td>
     </tr>
@@ -246,14 +234,14 @@ function Signals({ health }: HealthProps): JSX.Element {
       ) : (
         <>
           <div
-            className="list-scroll"
+            className="list-scroll signals-scroll"
             role="region"
             aria-label={t("table.healthTab.signals.region")}
             // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
             // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
             tabIndex={0}
           >
-            <table className="list list-static">
+            <table className="list list-static health-list">
               <thead>
                 <tr>
                   {columns.map((column) => (

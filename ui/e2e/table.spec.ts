@@ -524,6 +524,87 @@ test.describe("the table page in real Chromium", () => {
     expect(await violations(page), "the dense grid, dark, compact").toEqual([]);
   });
 
+  for (const width of [1280, 1920]) {
+    test(`at ${String(width)} px no word in Health's tables breaks inside, and nothing says null`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await openNewTab(page, NEW_TABS[1]);
+      const signals = page.getByRole("region", { name: "Health signals" });
+      await expect(signals).toBeVisible();
+      const broken = await page.evaluate(() => {
+        const found: string[] = [];
+        const lines = (node: Node, start: number, end: number): number => {
+          const range = document.createRange();
+          range.setStart(node, start);
+          range.setEnd(node, end);
+          const tops = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+          return tops.size;
+        };
+        // Text for screen readers only is not on any line.
+        const shown = (cell: Element): Text[] => {
+          const texts: Text[] = [];
+          const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+          for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+            if (text.parentElement?.closest(".visually-hidden") === null) {
+              texts.push(text as Text);
+            }
+          }
+          return texts;
+        };
+        const signalTable = document.querySelector("[aria-label='Health signals'] table");
+        // In the signals: a signal's kind, its effect and when it last fired.
+        const short = new Set([0, 5, 6]);
+        for (const cell of document.querySelectorAll(".health-tab th, .health-tab td")) {
+          // Headers and the short columns stay on one line.
+          const whole =
+            cell.tagName === "TH" ||
+            (cell.closest("table") === signalTable &&
+              short.has((cell as HTMLTableCellElement).cellIndex));
+          const texts = shown(cell);
+          const tops = new Set(
+            texts.flatMap((text) => {
+              const range = document.createRange();
+              range.selectNodeContents(text);
+              return [...range.getClientRects()].map((rect) => Math.round(rect.top));
+            }),
+          );
+          if (whole && tops.size > 1) {
+            found.push(`on two lines: ${cell.textContent}`);
+          }
+          for (const text of texts) {
+            const value = text.textContent;
+            for (const word of value.matchAll(/\S+/g)) {
+              if (lines(text, word.index, word.index + word[0].length) > 1) {
+                found.push(`broken: ${word[0]}`);
+              }
+            }
+          }
+        }
+        return found;
+      });
+      expect(broken).toEqual([]);
+      const observed = await signals.locator("tbody tr td:nth-child(4)").allTextContents();
+      expect(observed.length).toBeGreaterThan(1);
+      for (const text of observed) {
+        expect(text).not.toMatch(/null/i);
+      }
+      expect(observed).toContain("54 minutes since the last write");
+      expect(observed).toContain("0 of 3 values empty");
+    });
+  }
+
+  test("at 320 px Health's signals scroll in their own focusable region", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await openNewTab(page, NEW_TABS[1]);
+    const signals = page.getByRole("region", { name: "Health signals" });
+    await expect(signals).toHaveAttribute("tabindex", "0");
+    const sizes = await signals.evaluate((node) => [node.scrollWidth, node.clientWidth]);
+    expect(sizes[0]).toBeGreaterThan(sizes[1] ?? 0);
+    expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+    expect(await violations(page), "Health at 320 px").toEqual([]);
+  });
+
   test("compact rows of Columns, Health and Access are lower than roomy rows", async ({ page }) => {
     const heights: Record<string, number[]> = {};
     /**

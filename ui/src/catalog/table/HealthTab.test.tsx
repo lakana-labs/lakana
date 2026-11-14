@@ -239,7 +239,7 @@ describe("HealthTab", () => {
         "Freshness",
         "Whole table",
         "Not judged yet: too little history",
-        "source history, seconds 90000",
+        "25 hours since the last write",
         "No usual band yet",
         "Off",
       ],

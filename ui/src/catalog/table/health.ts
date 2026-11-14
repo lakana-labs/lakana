@@ -126,3 +126,139 @@ export function judged(health: TableHealthOut): boolean {
     health.signals.some((signal) => signal.state === "ok" || signal.state === "fired")
   );
 }
+
+/**
+ * A value as a finite number, or null for anything else.
+ *
+ * @param value - The value.
+ * @returns The number, or null.
+ */
+function finite(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * A range bound as the person reads it, in their language: a date for days since 1970, a time
+ * in UTC for microseconds since 1970, else the number. Dates are written in words, which break
+ * only between words.
+ *
+ * @param kind - The range's kind: `date`, `timestamp`, `integer` or `number`.
+ * @param value - The bound.
+ * @param language - The person's language.
+ * @returns The text.
+ */
+function bound(kind: unknown, value: number, language: string): string {
+  if (kind === "date") {
+    return new Intl.DateTimeFormat(language, { dateStyle: "medium", timeZone: "UTC" }).format(
+      value * 86_400_000,
+    );
+  }
+  if (kind === "timestamp") {
+    const time = new Intl.DateTimeFormat(language, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "UTC",
+    }).format(Math.floor(value / 1_000));
+    return `${time} UTC`;
+  }
+  return new Intl.NumberFormat(language).format(value);
+}
+
+/**
+ * An observed value or a band as `key value` pairs, each value as the server sent it, leaving
+ * out the absent ones: for a band, and a signal or shape the interface has no words for.
+ *
+ * @param values - The object.
+ * @param t - The translation function.
+ * @returns The pairs, or "None" when every value is absent.
+ */
+export function valuePairs(values: Readonly<Record<string, unknown>>, t: TFunction): string {
+  const shown = Object.entries(values)
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(([key, value]) => `${key} ${typeof value === "string" ? value : JSON.stringify(value)}`);
+  return shown.length === 0 ? t("table.healthTab.signals.nothing") : shown.join(", ");
+}
+
+/**
+ * What a signal observed, in words: freshness as the time since the last write, volume as the
+ * rows added and in total, empty values as how many of how many, a range from its lowest to its
+ * highest value and the columns by how many there are and what changed. Any other signal or shape
+ * reads as the server's pairs without the absent ones; "null" is never shown.
+ *
+ * @param signal - The signal's kind.
+ * @param observed - What it observed.
+ * @param t - The translation function.
+ * @param language - The person's language, for numbers.
+ * @returns The words.
+ */
+export function observedWords(
+  signal: string,
+  observed: Readonly<Record<string, unknown>>,
+  t: TFunction,
+  language: string,
+): string {
+  const number = new Intl.NumberFormat(language);
+  const words = "table.healthTab.signals.observedWords";
+  if (signal === "freshness") {
+    const seconds = finite(observed["seconds"]);
+    if (seconds !== null) {
+      const whole = Math.max(Math.floor(seconds), 0);
+      const [count, unit] =
+        whole < 7_200
+          ? [Math.floor(whole / 60), "minutes"]
+          : whole < 172_800
+            ? [Math.floor(whole / 3_600), "hours"]
+            : [Math.floor(whole / 86_400), "days"];
+      return t(`${words}.freshness.${unit}`, { count, shown: number.format(count) });
+    }
+  }
+  if (signal === "volume") {
+    const added = finite(observed["added"]);
+    const total = finite(observed["total"]);
+    if (added !== null && total !== null) {
+      return t(`${words}.volume`, {
+        count: added,
+        added: number.format(added),
+        total: number.format(total),
+      });
+    }
+  }
+  if (signal === "null_rate") {
+    const nulls = finite(observed["nulls"]);
+    const values = finite(observed["values"]);
+    if (nulls !== null && values !== null) {
+      return t(`${words}.nullRate`, {
+        count: values,
+        nulls: number.format(nulls),
+        values: number.format(values),
+      });
+    }
+  }
+  if (signal === "range") {
+    const lower = finite(observed["lower"]);
+    const upper = finite(observed["upper"]);
+    if (lower !== null && upper !== null) {
+      const kind = observed["kind"];
+      return t(`${words}.range`, {
+        lower: bound(kind, lower, language),
+        upper: bound(kind, upper, language),
+      });
+    }
+  }
+  if (signal === "schema" && Array.isArray(observed["columns"])) {
+    const columns = t(`${words}.columns`, {
+      count: observed["columns"].length,
+      shown: number.format(observed["columns"].length),
+    });
+    const changes = (["added", "dropped", "retyped"] as const)
+      .map((change) => {
+        const list = observed[change];
+        return Array.isArray(list) && list.length > 0
+          ? t(`${words}.${change}`, { count: list.length, shown: number.format(list.length) })
+          : null;
+      })
+      .filter((change) => change !== null);
+    return changes.length === 0 ? columns : `${columns}: ${changes.join(", ")}`;
+  }
+  return valuePairs(observed, t);
+}

@@ -2,7 +2,7 @@ import i18next from "i18next";
 import { describe, expect, it } from "vitest";
 
 import { checkResult, health, signalResult } from "../../test/table";
-import { firedLines, judged } from "./health";
+import { firedLines, judged, observedWords } from "./health";
 
 const t = i18next.t.bind(i18next);
 
@@ -179,5 +179,72 @@ describe("judged", () => {
     expect(judged(health({}))).toBe(true);
     expect(judged(health({ checks: [], signals: [signalResult({ state: "fired" })] }))).toBe(true);
     expect(judged(health({ checks: [], signals: [], hidden_checks: 1 }))).toBe(true);
+  });
+});
+
+describe("observedWords", () => {
+  /**
+   * The words for one observed value, in English.
+   *
+   * @param signal - The signal's kind.
+   * @param observed - What it observed.
+   * @returns The words.
+   */
+  const words = (signal: string, observed: Record<string, unknown>): string =>
+    observedWords(signal, observed, t, "en");
+
+  it("says how long ago the last write was, in the plainest unit", () => {
+    const at = "2026-11-14T11:57:50+00:00";
+    const fresh = { last_commit_at: at, source: null, job: null };
+    expect(words("freshness", { ...fresh, seconds: 3285 })).toBe("54 minutes since the last write");
+    expect(words("freshness", { ...fresh, seconds: 60 })).toBe("1 minute since the last write");
+    expect(words("freshness", { ...fresh, seconds: 90_000 })).toBe("25 hours since the last write");
+    expect(words("freshness", { ...fresh, seconds: 400_000 })).toBe("4 days since the last write");
+  });
+
+  it("says how many rows were added and how many there are", () => {
+    expect(words("volume", { added: 3, total: 3 })).toBe("3 rows added, 3 in total");
+    expect(words("volume", { added: 1, total: 12_000 })).toBe("1 row added, 12,000 in total");
+  });
+
+  it("says how many values are empty", () => {
+    expect(words("null_rate", { nulls: 0, values: 3, rate: 0 })).toBe("0 of 3 values empty");
+    expect(words("null_rate", { nulls: 1, values: 1, rate: 1 })).toBe("1 of 1 value empty");
+  });
+
+  it("says a range from its lowest to its highest value, dates and times as such", () => {
+    expect(words("range", { lower: -3.5, upper: 41.25, kind: "number" })).toBe(
+      "from -3.5 to 41.25",
+    );
+    expect(words("range", { lower: 0, upper: 20_406, kind: "date" })).toBe(
+      "from Jan 1, 1970 to Nov 14, 2025",
+    );
+    expect(words("range", { lower: 0, upper: 1_763_121_600_000_000, kind: "timestamp" })).toBe(
+      "from Jan 1, 1970, 12:00 AM UTC to Nov 14, 2025, 12:00 PM UTC",
+    );
+  });
+
+  it("says how many columns there are and what changed", () => {
+    const columns = [
+      ["a", "int"],
+      ["b", "text"],
+    ];
+    expect(words("schema", { columns, added: [], dropped: [], retyped: [] })).toBe("2 columns");
+    expect(
+      words("schema", {
+        columns,
+        added: [["b", "text"]],
+        dropped: ["c"],
+        retyped: [["a", "x", "int"]],
+      }),
+    ).toBe("2 columns: 1 added, 1 dropped, 1 changed type");
+  });
+
+  it("falls back to the server's pairs without the absent ones, and never says null", () => {
+    expect(words("freshness", { seconds: null, source: null })).toBe("None");
+    expect(words("volume", { rows: 120, note: null })).toBe("rows 120");
+    expect(words("skew", { reason: "paused", job: null, list: ["a"] })).toBe(
+      'reason paused, list ["a"]',
+    );
   });
 });
