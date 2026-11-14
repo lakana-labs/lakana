@@ -45,6 +45,13 @@ about 1.5 seconds per million such rows for a full batch (5,000 rows into 5 mill
 12 seconds), so the cap bounds the batch, not the whole cost.
 """
 
+UUID_KEY_MESSAGE = (
+    "key column `{column}` is a uuid, which a {write} key cannot be; cast it in the SELECT, for "
+    "example `CAST({column} AS VARCHAR)`."
+)
+"""A uuid key column of a merge or a history write (`{write}`): pyarrow can neither group nor
+filter on it (the spec's tag `u` is unused)."""
+
 
 @dataclass(frozen=True)
 class MergeAdvice:
@@ -224,6 +231,7 @@ def check_merge_batch(
     table_name: str,
     advice: MergeAdvice = SDK_ADVICE,
     composite_cap: bool = True,
+    write: str = "merge",
 ) -> None:
     """Refuse a batch a merge cannot apply, naming counts and never values.
 
@@ -242,12 +250,14 @@ def check_merge_batch(
     composite_cap
         Refuse a key of several columns with more than `COMPOSITE_KEY_MAX_ROWS` rows. A history
         write passes `False`: it joins such a key in pyarrow, with no term per row.
+    write
+        What the key is for, in the message of a uuid key: ``"merge"`` or ``"history"``.
 
     Raises
     ------
     ValidationError
         For an empty key, a column named twice in it, a key column missing from the table or
-        the data, a key column of a nested type, a key of several columns with more than
+        the data, a key column of a nested type or a uuid, a key of several columns with more than
         `COMPOSITE_KEY_MAX_ROWS` rows (unless `composite_cap` is off), a null key, or a key that
         repeats within the batch.
     """
@@ -269,6 +279,8 @@ def check_merge_batch(
                 f"key column `{column}` has type {kind}; a key column must hold single values "
                 "(a number, a string, a date or a timestamp)"
             )
+        if kind == pa.uuid():
+            raise ValidationError(UUID_KEY_MESSAGE.format(column=column, write=write))
     if composite_cap and len(key) > 1 and data.num_rows > COMPOSITE_KEY_MAX_ROWS:
         raise ValidationError(
             advice.too_many.format(cap=f"{COMPOSITE_KEY_MAX_ROWS:,}", rows=f"{data.num_rows:,}")

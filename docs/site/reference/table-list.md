@@ -18,7 +18,7 @@ Both need a signed-in caller (`401` otherwise) and take no environment in the pa
 | Parameter | Default | Meaning |
 |---|---|---|
 | `environment` | every environment you may read | Only this environment. If it does not exist: a `404` when you may read environments (`READ_ENVIRONMENT`), otherwise an empty page, as for one that exists. |
-| `namespace` | every namespace | Only this namespace and the ones beneath it, dotted: `gold` lists `gold` and `gold.sales`, not `golden`. |
+| `namespace` | every namespace | Only this namespace and the ones beneath it, dotted: `gold` lists `gold` and `gold.sales`, not `golden`. Letter case counts, on SQLite as on PostgreSQL: `gold` does not list `Gold`. Every character means itself. |
 | `q` | no search | Only tables whose name, label, description or grain, or a column's name, label, description or measure, contains this text, in any letter case. 1 to 200 characters after trimming. `%`, `_` and `\` match themselves. The rules are those of [Search](search.md). |
 | `model_kind` | any | Only tables whose asset header declares this kind: `fact`, `dimension`, `wide` or `staging`. |
 | `sort` | `name` | What to sort by: `name`, `owner`, `health`, `rows`, `size`, `last_write`, `last_read` or `created`. |
@@ -73,8 +73,9 @@ A table with no value for the key comes last, in either order. Ties are broken i
 
 The `health` sort uses the word stored with each table, which leaves out the checks a model
 table generates for its references to other tables. The word shown in `health_summary` is always
-yours: it adds the failing reference checks you may see. So a table whose shown word is worse
-because of such a check can sit among tables with a better word.
+yours: it adds the failing reference checks you may see, and a table whose stored word is "Not
+judged" is "Healthy" for you when a reference check you may see passed. So a table whose shown
+word differs because of such a check can sit among tables with another word.
 
 ## Paging
 
@@ -91,7 +92,8 @@ again without `cursor`.
 
 `capped` is `true` when the search text stopped early: it reads at most 5,000 candidates (a
 table, and each of its columns that matches, is one candidate), counting only tables you may
-read, and more were left. Narrow the text, or add `namespace` or `environment`.
+read, and a further table you may read matched. Candidates left that are only more texts of tables
+already listed do not set it. Narrow the text, or add `namespace` or `environment`.
 
 ## The tree
 

@@ -335,6 +335,22 @@ Works until the end of the undo period that `lakana env list --deleted` shows, a
 |---|---|---|---|
 | `NAME` | text | required |  |
 
+### `lakana env purge`
+
+Usage: `lakana env purge [OPTIONS] {name}`
+
+Remove the deleted environment NAME from the catalog when its storage cannot be reached.
+
+The worker's clean-up deletes a deleted environment's files and then the environment itself. It skips one whose storage cannot be resolved (a root in a scheme Lakana cannot read, such as `local://` or `memory://`, which older releases accepted), so that environment would keep its name for ever. This removes it from the catalog, with its records of dropped tables, and frees the name. Its files, if any, are not touched: delete them in the storage yourself if you no longer need them.
+
+Refused for an environment that is not deleted (`lakana env delete NAME` first); for one whose root can be reached (`lakana env delete NAME --purge` has the clean-up delete its files and then the environment), and a storage secret that cannot be used does not count, fix it instead; and for a root that contains `::`, because releases before 0.18.0 wrote its files to the part before `::` (look there; give a new environment another name). The question and the answer name the storage root, where any files are. Needs MANAGE_ENVIRONMENT on the instance.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--rows-only` | flag | off | Remove only the environment's rows from the catalog; its files, if any, are not touched. Required. |
+| `--yes` | flag | off | Don't ask for confirmation. |
+
 ### `lakana env set-storage`
 
 Usage: `lakana env set-storage [OPTIONS] {name}`
@@ -1401,7 +1417,7 @@ List active grants, newest first; without a filter, every grant.
 
 Filters combine. `--principal` and `--group` list the grants made to them (not those a principal has through its groups: `lakana access explain` says that). `--action` lists the grants that give an action, by itself or through a role. `--env`, with `--ns` and `--table`, lists the grants on exactly that object. A long list prints a "More results" line with the command that shows the next page.
 
-The table names who each grant is for in `subject` (`user alice`, `service ci-bot`, `group analysts`); the API sends ids only, so the names cost one request per principal and group until all are found, and a caller that may not list them sees the ids. A column with nothing in it is left out. When the terminal is too narrow the table leaves out `kind`, `namespace`, `table`, `environment` and `action`, in that order, and folds a long `subject` onto more lines, so that the `id` that `grant revoke` needs always stays whole, and a line under the table shows the revoke command; `--output json` always has every field.
+The table names who each grant is for in `subject` (`user alice`, `service ci-bot`, `group analysts`); the API answers with the names, so listing costs one request. Only an answer without a name shows the id and a notice (a server older than this CLI, or a person or group deleted a moment ago). A column with nothing in it is left out. When the terminal is too narrow the table leaves out `kind`, `namespace`, `table`, `environment` and `action`, in that order, and folds a long `subject` onto more lines, so that the `id` that `grant revoke` needs always stays whole, and a line under the table shows the revoke command; `--output json` always has every field.
 
 A grant of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN` as a single action has the marker `no effect` in a `note` column, which never drops (a narrow terminal leaves out `table` after the others, so that the `id` and the marker stay whole), and a line under the table explains it, followed by the command that revokes each such grant with its whole id (the first five; `--output json` has all of them and carries the full sentence). Revoke such a grant, and give the `ADMIN` role to whoever should keep the ability.
 

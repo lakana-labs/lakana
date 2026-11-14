@@ -42,7 +42,7 @@ describe("appRoutes", () => {
   });
 
   it("an unknown path shows the not-found state inside the shell", async () => {
-    const { user, router } = renderShell("/catalog/does/not/exist");
+    const { user, router } = renderShell("/catalog/a/b/c/d");
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "This page does not exist" }),

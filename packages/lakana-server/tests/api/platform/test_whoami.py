@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 
 from tests.conftest import AUTH_HEADER
-from tests.server_test_helpers import create_environment
+from tests.server_test_helpers import create_environment, session_headers, signed_in
 
 
 def test_whoami_describes_a_pat_caller(client: TestClient) -> None:
@@ -49,7 +49,7 @@ def test_whoami_describes_a_task_token_callers_scope(client: TestClient) -> None
         "task_token": {"environment": "dev", "asset_scope": ["gold.sales"]},
         "ci_token": None,
         "language": None,
-        "admin": True,
+        "admin": False,
         "has_access": True,
         "may_deploy": False,
         "picture": None,
@@ -168,3 +168,37 @@ def test_whoami_counts_a_grant_below_the_instance(client: TestClient) -> None:
     body = client.get("/api/v1/whoami", headers=header).json()
 
     assert (body["admin"], body["has_access"]) == (False, True)
+
+
+def _flags(client: TestClient, headers: dict[str, str]) -> tuple[bool, bool]:
+    """Ask whoami for `admin` and `may_deploy`.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    headers
+        The credential's headers.
+
+    Returns
+    -------
+    tuple of (bool, bool)
+        `admin` and `may_deploy`.
+    """
+    response = client.get("/api/v1/whoami", headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()["admin"], response.json()["may_deploy"]
+
+
+def test_an_administrators_personal_token_and_session_are_admin(ui_client: TestClient) -> None:
+    """A personal token and a browser session act as their person: both flags hold."""
+    create_environment(ui_client, "dev")
+    assert _flags(ui_client, AUTH_HEADER) == (True, True)
+    name, value, csrf = signed_in(ui_client, "admin")
+    assert _flags(ui_client, session_headers(name, value, csrf)) == (True, True)
+
+
+def test_an_administrators_task_token_is_not_admin(client: TestClient) -> None:
+    """A task token may use no administrator route and may not deploy, whoever its principal."""
+    create_environment(client, "dev")
+    assert _flags(client, _task_token_header(client)) == (False, False)

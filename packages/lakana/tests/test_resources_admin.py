@@ -28,6 +28,7 @@ from lakana._models import (
     RowFilter,
     Secret,
     SecretCreate,
+    SubjectPrincipal,
     Token,
 )
 from lakana.client import Client
@@ -894,3 +895,63 @@ def test_secrets_create_with_a_use_sends_it_and_reads_it_back() -> None:
     assert "use" not in json.loads(bodies[1])
     assert (bound.use, bound.use_target) == ("package_index", "corp")
     assert bound.use_target_url == "https://corp.example.org/simple"
+
+
+def test_sdk_reads_the_subject_and_tolerates_an_older_server() -> None:
+    """The three models read `principal` and `group`; an older answer leaves them `None`."""
+    who = {"id": "p1", "name": "kim.schulz", "principal_type": "user"}
+    grant = {
+        "id": "g1",
+        "principal_id": "p1",
+        "group_id": None,
+        "role": "VIEWER",
+        "action": None,
+        "kind": "ENVIRONMENT",
+        "environment": "dev",
+        "namespace": None,
+        "table": None,
+        "granted_by": "a1",
+        "granted_at": "2024-01-01T00:00:00+00:00",
+    }
+    policy = {
+        "principal_id": None,
+        "group_id": "g9",
+        "environment": "dev",
+        "namespace": "gold",
+        "table": "customers",
+        "expression": "id > 1",
+        "created_by": "a1",
+        "created_at": "2024-01-01T00:00:00+00:00",
+    }
+    named = [
+        {**grant, "principal": who, "group": None},
+        {**policy, "id": "rf1", "principal": None, "group": "analysts"},
+        {**policy, "id": "cm1", "column": "ssn", "principal": None, "group": "analysts"},
+    ]
+    older = [grant, {**policy, "id": "rf1"}, {**policy, "id": "cm1", "column": "ssn"}]
+
+    def read(answers: list[dict[str, Any]]) -> tuple[Grant, RowFilter, ColumnMask]:
+        def handler(request: httpx.Request) -> httpx.Response:
+            index = {"grants": 0, "row-filters": 1, "column-masks": 2}[
+                request.url.path.split("/")[-1]
+            ]
+            return httpx.Response(200, json=[answers[index]])
+
+        transport = _transport(handler)
+        return (
+            Grants(transport).list()[0],
+            RowFilters(transport).list(environment="dev", namespace="gold", table="customers")[0],
+            ColumnMasks(transport).list(environment="dev", namespace="gold", table="customers")[0],
+        )
+
+    grant_read, filter_read, mask_read = read(named)
+    assert grant_read.principal == SubjectPrincipal(
+        id="p1", name="kim.schulz", principal_type="user"
+    )
+    assert grant_read.group is None
+    assert (filter_read.principal, filter_read.group) == (None, "analysts")
+    assert (mask_read.principal, mask_read.group) == (None, "analysts")
+    assert all((item.principal, item.group) == (None, None) for item in read(older))
+    team = {**grant, "principal_id": None, "group_id": "g9", "principal": None, "group": "analysts"}
+    team_read = read([team, *named[1:]])[0]
+    assert (team_read.principal, team_read.group) == (None, "analysts")

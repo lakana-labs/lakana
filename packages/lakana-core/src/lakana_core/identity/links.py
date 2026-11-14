@@ -20,7 +20,8 @@ Rules (the spec's "Decided rules", and the security reviews S3, S4, S9, N4 to N8
   (`refuse_automation`).
 - The setup link and recovering an administrator are the server operator's: the holder of the
   bootstrap PAT `bootstrap_if_needed` minted (`is_operator`), never any other token, even one
-  named ``bootstrap`` for the bootstrap principal.
+  named ``bootstrap`` for the bootstrap principal. A setup link records that token and stands
+  only while it does (`LinkService._operator_token_lapse`), as the operator's recovery links do.
 - An open invite reserves its name, compared in any letter case (`name_unavailable`), so no
   principal and no second invite can take it meanwhile; using it fails if the name was taken
   anyway.
@@ -103,6 +104,20 @@ AUTOMATION_MESSAGE = (
 
 NOT_OPERATOR_SETUP = "Only the server operator's bootstrap token issues the setup link."
 """The refusal of a setup link to anyone but the operator."""
+
+SETUP_LINK_ISSUER_LAPSED = (
+    "The server operator's bootstrap token that issued this setup link has been revoked or has "
+    "expired, so the link was closed. Issue a new setup link with the current bootstrap token: "
+    "run `lakana sign-in setup-link` where the server runs."
+)
+"""The refusal of a setup link whose issuing bootstrap token no longer stands."""
+
+SETUP_LINK_NOT_RECORDED = (
+    "This setup link was issued before the server was upgraded, so it does not record the "
+    "bootstrap token that issued it, and it was closed. Issue a new setup link with the current "
+    "bootstrap token: run `lakana sign-in setup-link` where the server runs."
+)
+"""The refusal of a setup link issued before links recorded the operator's token."""
 
 
 def not_operator_recovery(name: str) -> str:
@@ -804,7 +819,8 @@ class LinkService:
         if has_passkey(self._session, p.id, usable=False):
             raise ConflictError(already_set_up(self._bootstrap_name))
         self._withdraw_open(p.id, "setup", p)
-        return self._issue(p, "setup", principal_id=p.id, name=p.name)
+        # The operator's token is recorded: the link stands only while that token does.
+        return self._issue(p, "setup", principal_id=p.id, name=p.name, source_pat_id=p.token_id)
 
     def issue_local(self, p: PrincipalRef) -> IssuedLink:
         """Issue a local sign-in link for the caller themself.
@@ -1179,6 +1195,32 @@ class LinkService:
         """
         return principal.held_admin or principal.id in active_instance_admin_ids(self._session)
 
+    def _operator_token_lapse(self, row: SignInLink) -> str | None:
+        """Say why the operator's bootstrap token that issued a link no longer stands, if so.
+
+        Parameters
+        ----------
+        row
+            The link: a setup link, or a recovery link the operator issued.
+
+        Returns
+        -------
+        str or None
+            `None` when `source_pat_id` names a bootstrap PAT that is still unrevoked and
+            unexpired, as `is_operator` asks at issue; ``operator_token_not_recorded`` when
+            the link records none (a setup link issued before links recorded it);
+            ``operator_token_expired`` for an expired one; ``operator_token_revoked``
+            otherwise (revoked, gone, or not a bootstrap PAT).
+        """
+        if row.source_pat_id is None:
+            return "operator_token_not_recorded"
+        pat = self._session.get(PersonalAccessToken, row.source_pat_id)
+        if pat is None or not pat.bootstrap or pat.revoked_at is not None:
+            return "operator_token_revoked"
+        if pat.expires_at is not None and pat.expires_at <= self._clock():
+            return "operator_token_expired"
+        return None
+
     def _issued_by_operator(self, row: SignInLink) -> bool:
         """Say whether a recovery link was issued with the operator's bootstrap token.
 
@@ -1190,15 +1232,10 @@ class LinkService:
         Returns
         -------
         bool
-            Whether `source_pat_id` names a bootstrap PAT that is still unrevoked and
-            unexpired, as `is_operator` asks at issue.
+            Whether `source_pat_id` names a bootstrap PAT that still stands
+            (`_operator_token_lapse`).
         """
-        if row.source_pat_id is None:
-            return False
-        pat = self._session.get(PersonalAccessToken, row.source_pat_id)
-        if pat is None or not pat.bootstrap or pat.revoked_at is not None:
-            return False
-        return pat.expires_at is None or pat.expires_at > self._clock()
+        return self._operator_token_lapse(row) is None
 
     def _check_issuer(self, row: SignInLink) -> None:
         """Refuse an invite or recovery link whose issuer no longer stands behind it.
@@ -1266,7 +1303,8 @@ class LinkService:
         _CloseLink
             When a rule checked at issue no longer holds: the issuer of an invite or recovery
             link lost the right to issue it (`_check_issuer`), an invite's name was taken meanwhile,
-            a local link is used on a server no longer in local mode, the bootstrap account of a
+            a local link is used on a server no longer in local mode, the bootstrap token that
+            issued a setup link was revoked or expired, the bootstrap account of a
             setup link has a passkey now, or the person of a recovery
             link holds or has held ADMIN (`Principal.held_admin`) and the link was not the
             operator's. The caller withdraws the link and raises the carried error.
@@ -1290,6 +1328,13 @@ class LinkService:
                 ),
                 "not_local",
             )
+        if kind == "setup" and (lapse := self._operator_token_lapse(row)) is not None:
+            refusal = (
+                SETUP_LINK_NOT_RECORDED
+                if lapse == "operator_token_not_recorded"
+                else SETUP_LINK_ISSUER_LAPSED
+            )
+            raise _CloseLink(PermissionDenied(refusal), lapse)
         if kind == "setup" and has_passkey(self._session, principal_id, usable=False):
             raise _CloseLink(ConflictError(already_set_up(self._bootstrap_name)), "already_set_up")
         if (

@@ -8,7 +8,7 @@ from __future__ import annotations
 import dataclasses
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.models import DeployKind
@@ -353,11 +353,12 @@ def undeploy(
 @router.get(
     "/project-versions/{project_version_id}",
     response_model=ProjectVersionOut,
-    responses=errors(403, 404),
+    responses=errors(403, 404, 503),
 )
 def get_project_version(
     env: str,
     project_version_id: uuid.UUID,
+    request: Request,
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
 ) -> ProjectVersionOut:
@@ -366,12 +367,22 @@ def get_project_version(
     Shows the version's manifest, limited to what the caller may see. Needs
     `READ_ENVIRONMENT`. Answers 404 when the environment has no such project version.
 
+    An asset's or check's SQL is the text of a project file, so it is shown only under the
+    rule of a table's "Defined in" file: to a reader of every table the file uses, with no
+    row filter or column mask on any of them, for a file that reads no raw path or connection
+    and that Lakana recorded at deploy. Every asset and check carries `content_reason` and
+    `content_message`: both `null` when its SQL is shown, otherwise `restricted` or
+    `not_recorded` and the sentence that says what to do. Each file shown is recorded in the
+    audit log (`SOURCE_VIEWED`); when that fails, the answer is 503 and shows nothing.
+
     Parameters
     ----------
     env
         Environment name.
     project_version_id
         The project version's id.
+    request
+        The request; its app holds the audit window.
     principal
         The authenticated caller.
     service
@@ -382,7 +393,12 @@ def get_project_version(
     ProjectVersionOut
         The project version.
     """
-    view = service.job_version(principal, env, project_version_id)
+    view = service.job_version(
+        principal,
+        env,
+        project_version_id,
+        window_minutes=request.app.state.settings.view_audit.window_minutes,
+    )
     return ProjectVersionOut(
         id=view.id,
         environment=view.environment,

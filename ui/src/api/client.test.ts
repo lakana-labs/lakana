@@ -121,6 +121,17 @@ describe("send", () => {
     expect(server.sent[1]?.headers).not.toHaveProperty("x-lakana-background");
   });
 
+  it("keeps a request alive past the page's end only when asked", async () => {
+    const server = fakeServer({ "POST /api/v1/things/1/cancel": { status: 204 } });
+
+    await send("POST", "/api/v1/things/1/cancel", undefined, { background: true, keepalive: true });
+    await send("POST", "/api/v1/things/1/cancel");
+
+    expect(server.sent[0]?.keepalive).toBe(true);
+    expect(server.sent[0]?.headers["x-lakana-background"]).toBe("1");
+    expect(server.sent[1]?.keepalive).toBeUndefined();
+  });
+
   it("sends JSON with the browser's own cookie, never a token", async () => {
     const fetchStub = vi.fn(() => Promise.resolve(Response.json({ ok: true })));
     vi.stubGlobal("fetch", fetchStub);

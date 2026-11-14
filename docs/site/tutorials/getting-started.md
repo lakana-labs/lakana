@@ -5,9 +5,9 @@ loaded from a file, three tables built by a sample project you deployed, and one
 from those tables. You do not need
 Docker or a database server.
 
-Lakana is pre-beta: the API and the data layout may change between 0.x releases, so do not put
+Lakana is pre-1.0: the API and the data layout may change between 0.x releases, so do not put
 production data in it yet. Everything in this tutorial is done in a terminal with the CLI;
-the web interface is planned before the public beta. A first preview of it, which signs you in
+the web interface is under way. A first preview of it, which signs you in
 but shows no data yet, is off by default: set `LAKANA_UI__ENABLED` to `true` in the environment
 you start the instance from, and the start opens it in your browser, signed in (see the
 [settings reference](../reference/settings.md)).
@@ -16,7 +16,7 @@ You need Python 3.11 or newer (on macOS: Python 3.13 or newer) and git. With an 
 
 ## Install
 
-Lakana is one Python package, published on PyPI as a pre-beta (0.x). The `server` extra adds what
+Lakana is one Python package, published on PyPI as 0.x releases, before v1.0.0. The `server` extra adds what
 a local instance needs:
 
 <!-- not tested: installs from PyPI -->

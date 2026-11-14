@@ -3674,3 +3674,33 @@ def test_0077_on_postgres() -> None:
             sqlalchemy.inspect(engine).get_table_names()
         )
         engine.dispose()
+
+
+def test_0078_on_postgres() -> None:
+    """0078 adds a `key DESC NULLS LAST, id DESC` index per sort key; downgrade drops them."""
+    revision_0077 = "b9f4e2a7c058"
+    revision_0078 = "ada48b713c93"
+    keys = ("row_count", "size_bytes", "last_write_at", "last_read_at", "health_rank", "created_at")
+    definitions = sqlalchemy.text(
+        "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'tables' "
+        "AND indexname LIKE '%\\_id\\_desc'"
+    )
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0078)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0078
+        with engine.connect() as conn:
+            found = dict(conn.execute(definitions).tuples().all())
+        assert found == {
+            f"ix_tables_{key}_id_desc": (
+                f"CREATE INDEX ix_tables_{key}_id_desc ON public.tables USING btree "
+                f"({key} DESC NULLS LAST, id DESC)"
+            )
+            for key in keys
+        }
+        migrate.downgrade(url, revision_0077)
+        assert _alembic_version(engine) == revision_0077
+        with engine.connect() as conn:
+            assert conn.execute(definitions).all() == []
+        engine.dispose()

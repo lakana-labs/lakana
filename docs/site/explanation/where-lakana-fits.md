@@ -46,7 +46,7 @@ does. What it adds is the part that keeps several people, and production, safe:
   v1.0.0 ([Roadmap](roadmap.md#after-v100)).
 - **No hosted service.** You run Lakana yourself, on a laptop, a server or a cloud account.
 - **No web interface yet.** You work through the command line, the SDK or the REST API; the
-  interface is planned before the public beta.
+  interface is under way.
 - **One machine per query.** Each query runs on DuckDB on one worker, and a worker runs one query
   at a time. You scale by adding workers; spreading one query across machines is out of scope by
   decision ([Scope](scope.md#out-of-scope-by-decision)). There is no streaming either.
@@ -55,7 +55,7 @@ does. What it adds is the part that keeps several people, and production, safe:
   host's kernel: it is no sandbox for hostile code. Local mode runs tasks as processes of the
   worker, so there whoever may deploy Python code can read what the worker reads
   ([why](python-assets.md#isolation-one-instance-is-one-trust-domain)).
-- **Not ready for production data.** Lakana is pre-beta: the API and the data layout may still
+- **Not ready for production data.** Lakana is pre-1.0: the API and the data layout may still
   change between releases ([Upgrade policy](upgrades.md)).
 
 ## Why Apache Iceberg
@@ -104,4 +104,4 @@ What that choice costs:
 - **Your project relies on SQL templating, macros or shared packages.** Lakana has nothing for
   them; you would write each file out as plain SQL.
 - **You need streaming, or a hosted service.** Lakana works on batches, and you run it yourself.
-- **You need a platform for production data today.** Lakana is pre-beta.
+- **You need a platform for production data today.** Lakana is pre-1.0.

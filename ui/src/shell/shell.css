@@ -483,3 +483,14 @@
   line-height: var(--type-label-line);
   vertical-align: 1px;
 }
+
+/* A character of untrusted text that would be invisible or reorder what is read (bidi, zero-width,
+   control), shown as its code point instead (VisibleText; docs/agent/security.md). */
+.char-mark {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--color-warn-bg);
+  color: var(--color-warn);
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}

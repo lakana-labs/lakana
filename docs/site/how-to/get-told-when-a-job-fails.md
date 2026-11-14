@@ -323,7 +323,8 @@ These are for the person who runs the instance; a user sees only the reasons abo
   inside your network, set `LAKANA_WEBHOOK__ALLOW_HOSTS` on the workers to its name, for example
   `chat.corp.example,*.hooks.corp.example`. An allowed name may use `http`, any port and a
   private address, but never a loopback, link-local or cloud metadata address (`127.0.0.1`,
-  `169.254.169.254`, `fd00:ec2::254`, also written inside an IPv6 address): the worker refuses
+  `169.254.169.254`, `fd00:ec2::254`, Azure's WireServer `168.63.129.16`, also written inside an
+  IPv6 address): the worker refuses
   those with `the webhook host is a loopback, link-local or cloud metadata address, which is
   refused even for a host in LAKANA_WEBHOOK__ALLOW_HOSTS …`. Only the entry `localhost` itself
   may reach loopback, for a receiver on the worker's own machine. Write **fully qualified**

@@ -1,0 +1,325 @@
+/* A table's page: the label and the line under the heading, the quiet blocks shown while the
+   table is read, and the sentence and the way on when it cannot be shown. */
+
+/* Wider than other pages, so that Overview's facts sit on one line each and it fits 1280 × 800. */
+.table-page .page {
+  max-width: 1040px;
+}
+
+.table-page .page-title {
+  overflow-wrap: anywhere;
+}
+
+.table-label {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+}
+
+.table-line {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.table-problem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.table-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.table-skeleton-block {
+  border-radius: var(--radius-control);
+  background: var(--color-sunk);
+}
+
+.table-skeleton-line {
+  width: 40%;
+  height: var(--space-4);
+}
+
+.table-skeleton-tabs {
+  height: var(--space-6);
+}
+
+.table-skeleton-body {
+  height: 160px;
+}
+
+/* Overview: description, columns and health on the left, facts and lineage on the right from
+   1024 px; one column below. Blocks sit under plain headings and hairlines, never cards. */
+.overview {
+  display: grid;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .overview {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+.overview-main,
+.overview-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.overview section > *:last-child {
+  margin-bottom: 0;
+}
+
+/* The first columns are a glance, not a work surface: lower rows than the full list, so that
+   Overview fits a 1280 × 800 window in either density. */
+.first-columns .list td {
+  height: 28px;
+}
+
+.block-heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.block-heading:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.block-subheading {
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  font-weight: var(--type-label-weight);
+}
+
+.description-text {
+  margin: 0 0 var(--space-1);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.text-actions,
+.text-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.text-editor {
+  max-width: 640px;
+}
+
+.text-editor .field input,
+.text-editor .field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.text-editor .field [slot="errorMessage"] {
+  padding-left: var(--space-2);
+  border-left: 3px solid var(--color-bad);
+  color: var(--color-text);
+}
+
+.column-actions {
+  white-space: nowrap;
+}
+
+.column-label {
+  overflow-wrap: anywhere;
+}
+
+.columns-table {
+  margin-bottom: var(--space-2);
+}
+
+.column-name,
+.column-description,
+.column-type {
+  overflow-wrap: anywhere;
+}
+
+.column-type {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+.column-join {
+  display: block;
+}
+
+.facts dl {
+  margin: 0;
+}
+
+.fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.fact dt {
+  flex: 0 0 96px;
+  color: var(--color-text-muted);
+}
+
+.fact dd {
+  flex: 1 1 160px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.health-headline {
+  margin: 0 0 var(--space-2);
+}
+
+.health-lines,
+.plain-list {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.health-lines li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.health-lines .status-glyph {
+  flex: none;
+  align-self: center;
+}
+
+.plain-list li {
+  padding: var(--space-1) 0;
+  overflow-wrap: anywhere;
+}
+
+.read-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.read-failed p {
+  margin: 0;
+}
+
+/* Links in the page's blocks take the accent, not the browser's blue (unreadable on dark). */
+.overview a,
+.columns-table a,
+.source-dialog a {
+  color: var(--color-accent);
+}
+
+/* Defined in: the path is a button that opens the file; the file scrolls in its own region. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dialog.source-dialog {
+  width: min(960px, 100%);
+}
+
+.source-text {
+  max-height: 60vh;
+  overflow: auto;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--color-sunk);
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  line-height: var(--type-code-line);
+}
+
+.source-text mark {
+  background: var(--color-accent-bg);
+  color: inherit;
+}
+
+.line-number {
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: var(--space-2);
+  color: var(--color-text-muted);
+  text-align: end;
+  user-select: none;
+}
+
+/* The Preview tab: the line and Refresh, then the rows cut to one line each, scrolling in their
+   own region; the Value panel shows the focused or clicked cell whole. */
+.preview-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.preview-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.preview-grid td,
+.preview-grid th {
+  max-width: 20rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inside the cell, so the cell's own cut and the region's edge never hide the ring. */
+.preview-grid :focus-visible {
+  outline-offset: calc(0px - var(--focus-offset));
+}
+
+.preview-muted {
+  color: var(--color-text-muted);
+}
+
+.preview-whole {
+  max-height: 30vh;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -203,6 +203,26 @@ def _changed(part: str, before: Mapping[str, Any], after: Mapping[str, Any]) -> 
 _TASK_REFUSED = "a task token cannot list or show connections; read them with your own token"
 
 
+def acts_for_a_task(p: PrincipalRef) -> bool:
+    """Say whether a principal acts with a task token, bound to a run or not.
+
+    The one rule for who may not see the environment's connections although it holds
+    `READ_ENVIRONMENT`: `_refuse_task` refuses on it, and both lineage views
+    (`catalog.lineage_graph`, `catalog.graph_service`) leave connection nodes out on it.
+
+    Parameters
+    ----------
+    p
+        The acting principal.
+
+    Returns
+    -------
+    bool
+        Whether `p` carries a task scope.
+    """
+    return p.task_scope is not None
+
+
 def _refuse_task(p: PrincipalRef) -> None:
     """Refuse a principal acting with a task token, bound to a run or not.
 
@@ -221,7 +241,7 @@ def _refuse_task(p: PrincipalRef) -> None:
     PermissionDenied
         If `p` acts with a task token.
     """
-    if p.task_scope is not None:
+    if acts_for_a_task(p):
         raise PermissionDenied(_TASK_REFUSED)
 
 

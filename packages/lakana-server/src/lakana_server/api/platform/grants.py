@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Query, Response
+from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, PrincipalRef, Securable
 from lakana_core.grants.admin import ineffective_note
@@ -27,9 +28,15 @@ from lakana_server.api.platform.schemas import (
     ScopeOut,
     ViaOut,
 )
+from lakana_server.api.platform.subjects import SubjectNames, subject_names
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_grant_service, get_managed_write_principal, get_principal
+from lakana_server.deps import (
+    get_grant_service,
+    get_managed_write_principal,
+    get_principal,
+    get_session,
+)
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -75,13 +82,15 @@ def _joined_to_dotted(namespace: str | None) -> str | None:
     return ".".join(NamespacePath.parse(namespace).parts)
 
 
-def _to_out(grant: Grant) -> GrantOut:
+def _to_out(grant: Grant, names: SubjectNames) -> GrantOut:
     """Build a response body from a Grant row.
 
     Parameters
     ----------
     grant
         The row to convert.
+    names
+        The names of the grant's principal or group.
 
     Returns
     -------
@@ -101,6 +110,8 @@ def _to_out(grant: Grant) -> GrantOut:
         granted_by=grant.granted_by,
         granted_at=grant.granted_at,
         note=ineffective_note(grant.action),
+        principal=names.principal(grant.principal_id),
+        group=names.group(grant.group_id),
     )
 
 
@@ -109,6 +120,7 @@ def create_grant(
     body: GrantCreate,
     principal: PrincipalRef = Depends(get_managed_write_principal),
     service: GrantService = Depends(get_grant_service),
+    session: Session = Depends(get_session),
 ) -> GrantOut:
     """Grant a role or an action.
 
@@ -131,6 +143,8 @@ def create_grant(
         The authenticated caller.
     service
         The grant service for this request.
+    session
+        The request's database session, to name the people and groups the answer is for.
 
     Returns
     -------
@@ -155,7 +169,7 @@ def create_grant(
         namespace=_dotted_to_joined(body.namespace),
         table=body.table,
     )
-    return _to_out(created)
+    return _to_out(created, subject_names(session, [created]))
 
 
 @router.get("", response_model=list[GrantOut], responses=errors(403, 404))
@@ -171,6 +185,7 @@ def list_grants(
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: GrantService = Depends(get_grant_service),
+    session: Session = Depends(get_session),
 ) -> list[GrantOut]:
     """List grants.
 
@@ -207,6 +222,8 @@ def list_grants(
         The authenticated caller.
     service
         The grant service for this request.
+    session
+        The request's database session, to name the people and groups the answer is for.
 
     Returns
     -------
@@ -224,7 +241,8 @@ def list_grants(
         cursor=cursor,
     )
     set_next_cursor(response, page.next_cursor)
-    return [_to_out(row) for row in page.items]
+    names = subject_names(session, page.items)
+    return [_to_out(row, names) for row in page.items]
 
 
 def scope_out(securable: Securable) -> ScopeOut:

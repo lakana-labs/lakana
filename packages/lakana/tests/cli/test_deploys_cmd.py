@@ -552,6 +552,81 @@ def test_project_version_show_names_the_package_indexes(
         assert shown_lines[start + 1 : start + 1 + len(lines)] == lines
 
 
+def test_project_version_show_says_why_an_assets_sql_is_withheld(tmp_path: Path) -> None:
+    """Each reason shows in the table, and its sentence once below it."""
+    restricted = "The file is shown only to people who may read ... or ask an administrator."
+    not_recorded = "Lakana has not recorded this file ... Deploy a new commit to record the file."
+
+    def asset(table: str, hidden: int, reason: str | None, message: str | None) -> dict:
+        """Build an asset entry.
+
+        Parameters
+        ----------
+        table
+            The table.
+        hidden
+            Its `hidden_references`.
+        reason
+            Its `content_reason`.
+        message
+            Its `content_message`.
+
+        Returns
+        -------
+        dict
+            The entry.
+        """
+        return {
+            "table": table,
+            "materialize": "table",
+            "metadata": {"owner": None},
+            "hidden_references": hidden,
+            "content_reason": reason,
+            "content_message": message,
+        }
+
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/environments/dev/project-versions/jv1",
+        json={
+            "id": "jv1",
+            "environment": "dev",
+            "repository": "analytics",
+            "commit_sha": _SHA,
+            "code_uri": "s3://b/x.tar.gz",
+            "code_sha256": "0" * 64,
+            "deployed_by": None,
+            "created_at": "2026-10-01T12:00:00+00:00",
+            "manifest": {
+                "version": 3,
+                "assets": [
+                    asset("gold.a", 0, None, None),
+                    asset("gold.b", 0, "restricted", restricted),
+                    asset("gold.c", 0, "not_recorded", not_recorded),
+                    asset("gold.d", 2, "restricted", restricted),
+                    asset("gold.e", 0, "restricted", restricted),
+                ],
+                "edges": [],
+            },
+        },
+    )
+    shown = invoke(
+        make_state(tmp_path, api), "project-version", "show", "jv1", "--env", "dev", env=_CI
+    )
+    assert shown.exit_code == 0
+    cells = [line.split("│") for line in shown.stdout.splitlines() if "│" in line]
+    rows = {cell[1].strip(): cell[4].strip() for cell in cells}
+    assert rows == {
+        "gold.a": "shown",
+        "gold.b": "hidden (restricted)",
+        "gold.c": "not recorded",
+        "gold.d": "hidden (2 references)",
+        "gold.e": "hidden (restricted)",
+    }
+    assert shown.stdout.count(restricted) == 1 and shown.stdout.count(not_recorded) == 1
+
+
 def test_project_version_show_prints_index_names_one_per_line_and_escaped(tmp_path: Path) -> None:
     """A name may hold a comma, an escape sequence and a line break."""
     api = FakeApi()

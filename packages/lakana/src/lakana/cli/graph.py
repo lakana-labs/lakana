@@ -30,9 +30,12 @@ _NODE = Annotated[
 ]
 _COLUMNS = ["distance", "kind", "name", "label", "repository"]
 _LINEAGE_COLUMNS = ["distance", "side", "kind", "name", "label", "repository"]
+_LEAVES = frozenset({"job", "connection"})
+"""The node kinds lineage attaches to an asset after its walk."""
 _SIDE_NOTE = (
     "side: up feeds the start, down is fed by it, both is on a loop through it, join is "
-    "joined to a column start by a reference."
+    "joined to a column start by a reference. A job or connection takes the side of the "
+    "nearest asset it runs or serves, and is join when its assets lie up and down."
 )
 
 _IMPACT_COLUMNS = ["distance", "kind", "name", "reason", "may_use", "repository"]
@@ -117,10 +120,12 @@ def _sides(graph: Graph) -> dict[str, str]:
     -------
     dict
         Node id → ``start``, ``up``, ``down``, ``both`` or ``join`` (reached through a
-        reference from a column start).
+        reference from a column start). A job or connection gets its assets' side
+        (`_leaf_side`).
     """
     downstream: defaultdict[str, list[str]] = defaultdict(list)
     upstream: defaultdict[str, list[str]] = defaultdict(list)
+    attached: defaultdict[str, list[str]] = defaultdict(list)
     for edge in graph.edges:
         if edge.kind == "builds":
             downstream[edge.source].append(edge.target)
@@ -128,10 +133,17 @@ def _sides(graph: Graph) -> dict[str, str]:
         elif edge.kind == "reads":
             downstream[edge.target].append(edge.source)
             upstream[edge.source].append(edge.target)
-    starts = {n.id for n in graph.nodes if n.distance == 0}
+        elif edge.kind == "runs":
+            attached[edge.source].append(edge.target)
+        elif edge.kind == "uses":
+            attached[edge.target].append(edge.source)
+    leaves = {n.id for n in graph.nodes if n.kind in _LEAVES}
+    starts = {n.id for n in graph.nodes if n.distance == 0 and n.id not in leaves}
     up, down = _reached(starts, upstream), _reached(starts, downstream)
     sides: dict[str, str] = {}
     for node in graph.nodes:
+        if node.id in leaves:
+            continue
         if node.id in starts:
             sides[node.id] = "start"
         elif node.id in up and node.id in down:
@@ -140,7 +152,36 @@ def _sides(graph: Graph) -> dict[str, str]:
             sides[node.id] = "up" if node.id in up else "down"
         else:
             sides[node.id] = "join"
+    distances = {n.id: n.distance for n in graph.nodes}
+    for leaf in leaves:
+        sides[leaf] = _leaf_side([a for a in attached[leaf] if a in sides], sides, distances)
     return sides
+
+
+def _leaf_side(assets: list[str], sides: Mapping[str, str], distances: Mapping[str, int]) -> str:
+    """Say on which side a job or connection is: the side of the assets it is attached to.
+
+    A start asset counts as upstream: what runs it or what it reads through feeds the start.
+
+    Parameters
+    ----------
+    assets
+        The answer's assets it runs (a job) or that read through it (a connection).
+    sides
+        The assets' sides.
+    distances
+        Node id → distance.
+
+    Returns
+    -------
+    str
+        ``join`` when its assets lie both up and down (or it has none); otherwise the side of
+        its nearest asset.
+    """
+    shown = {a: "up" if sides[a] == "start" else sides[a] for a in assets}
+    if not shown or {"up", "down"} <= set(shown.values()):
+        return "join"
+    return shown[min(shown, key=lambda a: (distances[a], a))]
 
 
 def _show(

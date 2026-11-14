@@ -65,6 +65,41 @@ the table; without that right the section is left out.
 To see what depends on a table or one of its columns, and how it joins other tables, see
 [Find what a change breaks](find-what-a-change-breaks.md).
 
+## In the web interface
+
+On the table's page, **Edit** beside the description on the Overview tab, and **Edit** on a column's
+row on the Columns tab, open the same fields as the command: a **Label** and a **Description**, each
+with Save and Cancel. One column's editor is open at a time: while it is, the other columns' Edit
+buttons wait, and the open one keeps your text until you save or cancel.
+
+- **Who sees Edit.** The table's owner and anyone who holds `DROP_TABLE` on it. Everyone else sees
+  no Edit button at all. If the server refuses a save for that reason, it says so next to the field.
+  The page then reads again what you may do; if you may no longer edit, Edit goes away once you
+  press Cancel.
+- **The limits.** A description has at most 4,000 characters and a label at most 100, on one line.
+  A count such as "3,812 of 4,000" appears when you are close to the limit; it counts the text
+  without the blanks around it, as the server does. A blank text is refused
+  before it is sent, and so is one over the limit, with the number of characters it has. When the
+  server refuses a text, your words stay in the field next to the reason, so nothing is lost.
+- **Save, Cancel and Escape.** Save sends only the field you changed, and does nothing when you
+  changed none. Cancel and Escape close the fields without a request. Afterwards focus is back on
+  **Edit**, so a keyboard works without searching for its place.
+- **Back to the text from Git.** Once a text was edited here, the page says "Edited here" and
+  shows **Back to the text from Git**. It removes your edits, so that the project's text shows
+  again, as `--reset` does.
+- **A deploy keeps an edit.** The page says so beside an edited text: a deploy never replaces a
+  text edited here. Only **Back to the text from Git**, or `--reset`, brings the project's text
+  back.
+- **The language.** An edit is written in the language of the text the page shows. When the table
+  has texts in more than one language, the fields name it, such as "Description (German)", and
+  **Back to the text from Git** removes the edit in that language only. When the table has no text
+  in your language yet, the page shows and edits the table's main language and tells those who may
+  edit. A label and a description are saved in the same language, the description's; the REST API
+  takes one `lang` for both.
+- **Two people at once.** Whoever saves last wins: the page does not warn that someone saved
+  before you did, and after your save it shows what the server holds. Look at the text again before
+  you save a long edit someone else may be changing.
+
 ## Go back to the project's text
 
 `--reset` removes your edits of the description and the label, so the project's texts show again. A

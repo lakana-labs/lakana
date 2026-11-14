@@ -32,7 +32,48 @@ const NAMED_LIMITS = [
   // the Sort by and Order menus, paging and states, 2026-11-13, 13.44 kB; and the tree of places
   // with React Aria's NavigationTree, the search field and the match line, +15.64 kB, almost all
   // of it React Aria's Tree) + 10 %.
-  { name: "Catalog", prefix: "CatalogScreen-", limit: "32 kB" },
+  // Raised from 32 kB: measured 29.64 kB with the route of a table's page (the heading and the
+  // breadcrumb from the address, so the focus the shell puts on the heading survives the page's
+  // own chunk and its read), 2026-11-13, + 10 %.
+  { name: "Catalog", prefix: "CatalogScreen-", limit: "32.6 kB" },
+  // Measured 1.49 kB (a table's page: the read, the record of it as opened, the header with its
+  // tabs and the states, 2026-11-13) + 10 %. It loads on /catalog/{environment}/{namespace}/{table}.
+  // Raised to the measured 4.07 kB (2026-11-13) + 10 % with the Overview (description, first
+  // columns, health in sentences, facts, comes from and goes to) and the Columns tab.
+  // Raised to the measured 5.92 kB (2026-11-13) + 10 % with the editor of labels and descriptions
+  // (the fields with their counts and refusals, the reset to the text from Git, the language of
+  // an edit, and the rows that open under a column).
+  // Raised to the measured 7.11 kB (2026-11-13) + 10 % with Defined in: the location, the server's
+  // link, the file's dialog with its numbered lines, the marked defining line and the visible marks
+  // of invisible characters. React Aria's dialog itself stays in the first load.
+  // Raised to the measured 7.78 kB (2026-11-13) + 10 % with the Preview tab loaded on demand from
+  // the page: its import, the loading line and the code the bundler moved here with it.
+  // Raised to the measured 9.97 kB (2026-11-13) + 10 % with the page's strings, which moved out of
+  // the first load (about 1.8 kB gzipped less there) into this chunk, registered when it loads.
+  { name: "a table's page", prefix: "TablePage-", limit: "10.97 kB" },
+  // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
+  // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
+  // the cells as text and the Value panel. It loads only when the Preview tab is opened.
+  { name: "the Preview tab", prefix: "PreviewTab-", limit: "24.17 kB" },
+  // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
+  // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
+  { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },
+  // Measured 789 B (React Aria's text field, shared by the Catalog's search and the screens with
+  // a text field; a chunk of its own since the table page's route, 2026-11-13) + 10 %.
+  { name: "the text field", prefix: "TextField-", limit: "0.87 kB" },
+  // Measured 180 B (a date and time in the person's language; the Catalog's list and the table
+  // page share it, 2026-11-13) + 10 %.
+  { name: "dates and times", prefix: "useWhen-", limit: "0.2 kB" },
+  // Measured 239 B (focus after a control removes itself; the Access screens and the table page
+  // share it, 2026-11-13) + 10 %.
+  { name: "focus after a change", prefix: "useFocusAfter-", limit: "0.27 kB" },
+  // Measured 357 B (reading and reading again, now with the typed failure, 2026-11-13) + 10 %.
+  { name: "reading for a screen", prefix: "useResource-", limit: "0.39 kB" },
+  // Measured 219 B (the row of tabs; the router's link code it shared moved into the first load,
+  // 2026-11-13) + 10 %.
+  // Raised to the measured 1.11 kB (2026-11-13) + 10 %: React Aria's text area and the form
+  // parts the table page's editor shares with the text field moved into this chunk.
+  { name: "the tabs", prefix: "SectionTabs-", limit: "1.22 kB" },
 ];
 
 /**
@@ -86,6 +127,9 @@ function onDemandChunks(initial) {
 const INITIAL = firstLoad();
 
 export default [
+  // The table page's strings load with its chunk (src/catalog/table/tableStrings.ts), which took the
+  // first load from 209.3 to 207.5 kB (2026-11-13); the limit stays at 212 kB so that the
+  // strings of Lineage, Health and Access, which load there too, do not use it up.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -97,11 +141,13 @@ export default [
     limit: "212 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
+  // Raised from 6.62 kB: measured 6.55 kB with the Overview's layout, facts, health lines and
+  // columns table (2026-11-13) + 10 %.
   // Measured 6.02 kB (the Catalog's rules: the tree, the search, the bar, the scrolling table
   // region, the sorting headers, the health word and the skeleton rows, 2026-11-13) + 10 %.
   // Raised from 5.13 kB (4.66 kB measured with the profile pictures' circle, file field and
   // People cell, 2026-11-11, + 10 %: the circle is drawn on the first paint, so its rules cannot
   // wait for the dialog that loads on demand).
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "6.62 kB" },
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "7.21 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

@@ -3,6 +3,7 @@
 # scripts/tests/test_ui_parity.py (CI's generate_reference.py --check keeps that file equal to the app).
 # Key: CLI command path ("table undrop") or "METHOD /api/v1/path" as OpenAPI spells it.
 # class ui|read: part 1-8 of the interface (read = shown, not changed). class git|exception: reason.
+# done: true (ui and read only) = the interface already shows it; set by the PR that builds it.
 # Rule: docs/agent/conventions.md, "The ui/ project".
 
 "access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }
@@ -50,6 +51,7 @@
 "env list": { class: ui, part: 8 }
 "env orphaned-locations": { class: ui, part: 8 }
 "env protect": { class: ui, part: 8 }
+"env purge": { class: ui, part: 8 }
 "env restore": { class: ui, part: 8 }
 "env retention": { class: ui, part: 8 }
 "env set-storage": { class: ui, part: 8 }
@@ -159,11 +161,11 @@
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
 "table create-external": { class: ui, part: 3 }
-"table definition": { class: read, part: 3 }
+"table definition": { class: read, part: 3, done: true }
 "table delete": { class: ui, part: 3 }
-"table describe": { class: ui, part: 3 }
+"table describe": { class: ui, part: 3, done: true }
 "table expiring": { class: ui, part: 3 }
-"table get": { class: read, part: 3 }
+"table get": { class: read, part: 3, done: true }
 "table health": { class: read, part: 3 }
 "table lineage": { class: read, part: 3 }
 "table list": { class: ui, part: 3 }
@@ -173,7 +175,7 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
-"table preview": { class: read, part: 3 }
+"table preview": { class: read, part: 3, done: true }
 "table references": { class: ui, part: 3 }
 "table replace":
   {
@@ -262,11 +264,12 @@
   { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables": { class: read, part: 3 }
-"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
+  { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition":
-  { class: read, part: 3 }
+  { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition/file":
-  { class: read, part: 3 }
+  { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals":
   { class: read, part: 3 }
@@ -336,7 +339,8 @@
 "PATCH /api/v1/environments/{environment_name}/connections/{connection_name}":
   { class: ui, part: 6 }
 "PATCH /api/v1/environments/{environment_name}/secrets/{secret_name}": { class: ui, part: 7 }
-"PATCH /api/v1/environments/{env}/namespaces/{path}/tables/{name}": { class: ui, part: 3 }
+"PATCH /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
+  { class: ui, part: 3, done: true }
 "PATCH /api/v1/environments/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8 }
 "PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
@@ -404,7 +408,8 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
-"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview": { class: read, part: 3 }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview":
+  { class: read, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop": { class: ui, part: 3 }
 "POST /api/v1/environments/{env}/queries": { class: ui, part: 4 }
 "POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4 }
@@ -413,6 +418,7 @@
 "POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5 }
 "POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5 }
 "POST /api/v1/environments/{name}/orphaned-locations/delete": { class: ui, part: 8 }
+"POST /api/v1/environments/{name}/purge-rows": { class: ui, part: 8 }
 "POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }
 "POST /api/v1/grants": { class: ui, part: 7 }
 "POST /api/v1/groups": { class: ui, part: 7 }
@@ -422,7 +428,7 @@
 "POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/recent":
-  { class: ui, part: 2, note: "called by the detail pages from part 3" }
+  { class: ui, part: 2, note: "called by the detail pages from part 3", done: true }
 "POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
 "POST /api/v1/repositories": { class: ui, part: 8 }
@@ -446,7 +452,7 @@
 "PUT /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}/blobs/{sha256}":
   { class: git, reason: "artifact upload" }
 "PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/columns/{column}/description":
-  { class: ui, part: 3 }
+  { class: ui, part: 3, done: true }
 "PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/data":
   {
     class: git,
