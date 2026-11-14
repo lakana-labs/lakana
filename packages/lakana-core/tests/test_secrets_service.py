@@ -97,11 +97,17 @@ def test_create_encrypts_the_values_and_returns_only_metadata(session: Session) 
     assert b"AKIA123" not in created.ciphertext
 
 
-@pytest.mark.parametrize("name", ["s3\x00creds", "s3\ud800creds", ""])
+@pytest.mark.parametrize(
+    "name", ["s3\x00creds", "s3\ud800creds", "", "two words", "a:b", "s3\u202ecreds", "x" * 256]
+)
 def test_a_name_the_database_cannot_store_is_refused_not_a_server_error(
     session: Session, name: str
 ) -> None:
-    """A NUL or a lone surrogate reaches PostgreSQL as a server error otherwise (#79)."""
+    """A name `is_secret_name` refuses is refused before any query (#79).
+
+    A NUL or a lone surrogate would reach PostgreSQL as a server error, and a name no index,
+    repository or deploy key could name would be of no use.
+    """
     admin = _add_principal(session, "admin")
     _add_environment(session, "dev")
     service = SecretService(session, AllowAllAuthorization(), _key_provider())

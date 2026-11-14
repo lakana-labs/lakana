@@ -25,7 +25,7 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.connections.endpoints import endpoint_hosts
 from lakana_core.db import refuse_concurrent_change
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, ValidationError
-from lakana_core.identifiers import shown
+from lakana_core.identifiers import is_secret_name, shown
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -53,15 +53,14 @@ from lakana_core.secrets.uses import (
     used_by_its_environment,
 )
 
-_NAME_MAX = 255
-"""The longest secret name the catalog stores (`Secret.name`)."""
-
 
 def require_storable_name(name: str) -> None:
-    """Refuse a secret name the database cannot store, before any query sees it.
+    """Refuse a name a new secret may not have, before any query sees it.
 
-    PostgreSQL refuses a NUL character and a lone surrogate in a text parameter with an
-    error that would reach the caller as a server error.
+    The rule is `is_secret_name`, the one every index, repository and deploy key applies to the
+    secret it names, so a new secret never has a name nothing could name. It also keeps out
+    what PostgreSQL refuses in a text parameter (a NUL, a lone surrogate), which would otherwise
+    reach the caller as a server error. A secret created before the rule keeps its name.
 
     Parameters
     ----------
@@ -71,17 +70,12 @@ def require_storable_name(name: str) -> None:
     Raises
     ------
     ValidationError
-        If it is empty, longer than 255 characters, or holds a NUL or a lone surrogate.
+        If `is_secret_name` refuses it.
     """
-    if (
-        not name
-        or len(name) > _NAME_MAX
-        or "\x00" in name
-        or any("\ud800" <= char <= "\udfff" for char in name)
-    ):
+    if not is_secret_name(name):
         raise ValidationError(
-            f"A secret name must be 1-{_NAME_MAX} characters with no NUL character and no lone "
-            "surrogate; give the secret another name."
+            "A secret name must be 1-255 characters with no space, control character, ':', "
+            "lone surrogate or bidirectional control character; give the secret another name."
         )
 
 

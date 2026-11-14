@@ -56,8 +56,6 @@ from lakana_core.secrets.uses import (
     used_by_its_environment,
 )
 
-"""What a repository may name as its credential (`credential_secret`), and so a key's secret."""
-
 REPLACED_NOTE = "The old key for {environment} stops working: replace it at your git host now."
 """What a call says for each environment whose key it replaced."""
 

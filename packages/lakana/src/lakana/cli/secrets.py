@@ -179,6 +179,9 @@ def create(
 ) -> None:
     """Create secret NAME; its values can never be read back.
 
+    NAME is 1 to 255 characters with no space, control character, `:` or bidirectional control
+    character, so that an index, a repository or a deploy key can name it.
+
     Name its use with `--index`, `--repository`, `--connection` or `--own-env` to bind it as it
     is created; that needs the right to manage secrets, as `secret bind` does. A connection's
     own secret is usually created with the connection (`lakana connection create ...
