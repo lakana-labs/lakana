@@ -1063,8 +1063,11 @@ _STORAGE_FAILED = "the table's metadata could not be read or written: {error}"
 CHANGED_BY_ANOTHER_REASON = "another writer changed it during this run"
 """`Rollback.reason` of `changed_since` when the task run has no write of its own to set back."""
 
-_DROPPED = "the table was dropped while the rollback was prepared"
-"""`Rollback.reason` of `changed_since` when the table is gone."""
+_DROPPED = "the table was dropped, renamed or replaced while the rollback was prepared"
+"""`Rollback.reason` of `changed_since` when the table is no longer there under its name.
+
+`commit_table` says `NotFoundError` for a table that is gone, has no metadata yet, or is an
+artifact: the last two only when another table took the name after the rollback read it."""
 
 _LANDED_OUTCOMES = frozenset(
     o.value for o in (RollbackOutcome.ROLLED_BACK, RollbackOutcome.UNPUBLISHED)
@@ -5834,9 +5837,15 @@ class CatalogService:
             p, ref.environment, WriteOperation.COMMIT, table_target(ref), rollback=True
         )
         self._require_own_task(p, ref, task_run_id)
-        claim = self._session.execute(
-            select(TaskRun.claim_count).where(TaskRun.id == task_run_id)
-        ).scalar_one_or_none()
+        # The claim this attempt holds: a bound caller's own (the guard has just checked it is
+        # the task's), so the landed check after a lost acknowledgement looks for this
+        # attempt's row; read from the task run only for a caller without one.
+        context = p.run_context
+        claim = context.claim if context is not None else None
+        if claim is None:
+            claim = self._session.execute(
+                select(TaskRun.claim_count).where(TaskRun.id == task_run_id)
+            ).scalar_one_or_none()
         detail: dict[str, object] = {
             "task_run_id": str(task_run_id),
             "claim": claim,
@@ -6005,21 +6014,20 @@ class CatalogService:
             self._session.execute(
                 select(Table.id).where(Table.id == table_id).with_for_update(read=True)
             ).first()
-            details = self._session.execute(
-                select(AuditEvent.detail).where(
+            stored_claim = AuditEvent.detail["claim"].as_integer()
+            outcome = self._session.execute(
+                select(AuditEvent.detail["outcome"].as_string())
+                .where(
                     AuditEvent.event_type == AuditEventType.TABLE_ROLLED_BACK,
                     AuditEvent.securable_environment == ref.environment,
                     AuditEvent.securable_table == ref.name,
+                    AuditEvent.detail["task_run_id"].as_string() == str(task_run_id),
+                    stored_claim.is_(None) if claim is None else stored_claim == claim,
+                    AuditEvent.detail["outcome"].as_string().in_(sorted(_LANDED_OUTCOMES)),
                 )
-            ).scalars()
-            for detail in details:
-                if (
-                    detail.get("task_run_id") == str(task_run_id)
-                    and detail.get("claim") == claim
-                    and detail.get("outcome") in _LANDED_OUTCOMES
-                ):
-                    return RollbackOutcome(detail["outcome"])
-            return None
+                .limit(1)
+            ).scalar_one_or_none()
+            return None if outcome is None else RollbackOutcome(outcome)
         finally:
             self._session.rollback()
 

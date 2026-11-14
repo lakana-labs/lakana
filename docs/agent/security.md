@@ -3155,8 +3155,10 @@ anywhere in the server. The rollback decides by what it finds under the requirem
 table's current snapshot still be the one the run wrote (its tip, for a Python asset), so it can
 never discard another writer's commit: that is `changed_since`, and the table is left as it is.
 A database error never leaves the operation undecided: whether it landed is read back from its own
-audit row (`TABLE_ROLLED_BACK`, for this task run and this claim) and from nothing a later writer
-can change. Bookkeeping (the marker, the stamp, the audit row, the results' rollback outcome)
+audit row (`TABLE_ROLLED_BACK`, for this task run and this claim, matched in SQL on the row's
+detail) and from nothing a later writer can change. "This claim" is the caller's own run context's
+(`RunContext.claim`, which the guard has just checked against the task run), read from the task run
+only for a caller without one (#100): a stale caller is never told about a newer claim's row. Bookkeeping (the marker, the stamp, the audit row, the results' rollback outcome)
 follows the pointer swap, in the swap's transaction; a rollback locks the table's row and then the
 task run's, like a write, and holds no row lock across an upload.
 

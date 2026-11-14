@@ -1719,7 +1719,7 @@ def test_a_worker_that_lost_its_claim_notes_no_failed_rollback(
     assert row.rollback_outcome is None
 
 
-_DROPPED_REASON = "the table was dropped while the rollback was prepared"
+_DROPPED_REASON = "the table was dropped, renamed or replaced while the rollback was prepared"
 
 
 @pytest.mark.parametrize(

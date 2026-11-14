@@ -1867,7 +1867,8 @@ def test_a_table_dropped_during_the_rollback_is_changed_since(
     result = _roll_back(catalog, principal, task, written)
 
     assert result == Rollback(
-        RollbackOutcome.CHANGED_SINCE, "the table was dropped while the rollback was prepared"
+        RollbackOutcome.CHANGED_SINCE,
+        "the table was dropped, renamed or replaced while the rollback was prepared",
     )
     assert [e.detail["outcome"] for e in _events(session)] == ["changed_since"]
 
@@ -2929,3 +2930,67 @@ def test_a_set_back_to_data_the_verdict_already_describes_changes_nothing(
     assert (row.kept_run_id, row.kept_unknown, row.kept_earlier) == (None, False, stack)
     (event,) = _events(session)
     assert not {"kept_restored", "kept_not_restored", "kept_unknown"} & set(event.detail)
+
+
+def _statements(session: Session) -> list[tuple[str, object]]:
+    """Collect every statement the session's engine runs from now on.
+
+    Parameters
+    ----------
+    session
+        The session whose bind is listened to for the rest of the test.
+
+    Returns
+    -------
+    list
+        ``(statement, parameters)`` pairs, appended to as statements run.
+    """
+    seen: list[tuple[str, object]] = []
+
+    @event.listens_for(session.get_bind(), "before_cursor_execute")
+    def _seen(_conn: object, _cur: object, statement: str, parameters: object, *_: object) -> None:
+        seen.append((statement, parameters))
+
+    return seen
+
+
+def test_a_bound_rollback_takes_its_claim_from_the_run_context(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The claim recorded (and asked for after a lost acknowledgement) is the caller's own."""
+    catalog = _catalog(session, principal, tmp_path)
+    written = _arrange_rolled_back(catalog, session, principal)
+    task = _task(session, principal)
+    seen = _statements(session)
+
+    result = _roll_back(catalog, _bound(principal, task, claim=1), task, written)
+
+    assert result.outcome is RollbackOutcome.ROLLED_BACK
+    assert [e.detail["claim"] for e in _events(session)] == [1]
+    assert not [s for s, _ in seen if s.startswith("SELECT task_runs.claim_count \nFROM task_runs")]
+
+
+def test_the_landed_check_filters_the_audit_rows_in_the_database(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    catalog = _catalog(session, principal, tmp_path)
+    written = _arrange_unpublished(catalog, session, principal)
+    task = _task(session, principal)
+    audit = AuditService(session)
+    for claim in range(5):
+        audit.record(
+            principal.id,
+            AuditEventType.TABLE_ROLLED_BACK,
+            securable=_SEC,
+            detail={"task_run_id": str(uuid.uuid4()), "claim": claim, "outcome": "rolled_back"},
+        )
+    session.commit()
+    seen = _statements(session)
+
+    assert catalog._rollback_landed(_ref(), task.id, 1, written.table_id) is None
+
+    reads = [(s, p) for s, p in seen if "FROM audit_events" in s]
+    assert len(reads) == 1
+    statement, parameters = reads[0]
+    assert "LIMIT" in statement
+    assert str(task.id) in str(parameters)
