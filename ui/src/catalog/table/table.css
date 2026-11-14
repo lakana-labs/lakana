@@ -6,6 +6,11 @@
   max-width: 1040px;
 }
 
+/* Preview shows data, not text to read: it takes the whole window. */
+.table-page-wide .page {
+  max-width: none;
+}
+
 .table-page .page-title {
   overflow-wrap: anywhere;
 }
@@ -316,8 +321,8 @@
   user-select: none;
 }
 
-/* The Preview tab: the line and Refresh, then the rows cut to one line each, scrolling in their
-   own region; the Value panel shows the focused or clicked cell whole. */
+/* The Preview tab: the line and Refresh, then the rows in the data grid (shell/data-grid.css);
+   the Value panel shows the focused or clicked cell whole. */
 .preview-bar {
   display: flex;
   flex-wrap: wrap;
@@ -330,19 +335,6 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.preview-grid td,
-.preview-grid th {
-  max-width: 20rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Inside the cell, so the cell's own cut and the region's edge never hide the ring. */
-.preview-grid :focus-visible {
-  outline-offset: calc(0px - var(--focus-offset));
 }
 
 .preview-muted {

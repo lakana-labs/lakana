@@ -1,7 +1,7 @@
 import i18next from "i18next";
 import { describe, expect, it } from "vitest";
 
-import { previewValue } from "./previewValue";
+import { isNumberType, previewValue } from "./previewValue";
 
 const t = i18next.t.bind(i18next);
 
@@ -107,5 +107,49 @@ describe("previewValue", () => {
     expect(previewValue({ cut: true, text: "a", more: 1 }, "string", false, t).cut).toBe(false);
     expect(previewValue({ binary: "12" }, "binary", false, t).text).toBe('{"binary":"12"}');
     expect(previewValue({ binary: 12, x: 1 }, "binary", false, t).text).toBe('{"binary":12,"x":1}');
+  });
+});
+
+describe("isNumberType", () => {
+  it("knows the number types by their Arrow and SQL names", () => {
+    for (const type of [
+      "int8",
+      "int64",
+      "uint32",
+      "halffloat",
+      "float",
+      "double",
+      "decimal128(18, 2)",
+      "decimal256(40, 0)",
+      "INTEGER",
+      "BIGINT",
+      "HUGEINT",
+      "UBIGINT",
+      "SMALLINT",
+      "TINYINT",
+      "REAL",
+      "DOUBLE",
+      "DECIMAL(18,3)",
+      "NUMERIC",
+    ]) {
+      expect(isNumberType(type), type).toBe(true);
+    }
+  });
+
+  it("leaves text, times, nested and binary values on the left", () => {
+    for (const type of [
+      "string",
+      "timestamp[us, tz=UTC]",
+      "date32[day]",
+      "bool",
+      "binary",
+      "list<item: int32>",
+      "struct<a: int32>",
+      "interval",
+      "VARCHAR",
+      "INTEGER[]",
+    ]) {
+      expect(isNumberType(type), type).toBe(false);
+    }
   });
 });

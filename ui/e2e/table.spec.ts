@@ -346,6 +346,8 @@ test.describe("the table page in real Chromium", () => {
     await expect(inside).toHaveCount(1);
     const first = await inside.textContent();
     await page.keyboard.press("ArrowDown");
+    // The row's number, then its first value.
+    await page.keyboard.press("ArrowRight");
     await page.keyboard.press("ArrowRight");
     await expect(inside).toHaveCount(1);
     expect(await inside.textContent()).not.toBe(first);
@@ -385,6 +387,135 @@ test.describe("the table page in real Chromium", () => {
     expect(look.lastIsCounter).toBe(true);
     expect(look.counterHeight).toBeLessThanOrEqual(1);
     expect(Math.abs(look.space - look.margin), `${String(look.space)} px`).toBeLessThanOrEqual(1);
+  });
+
+  test("Preview and Lineage use the whole window; the other tabs keep the reading width", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const widths: Record<string, number> = {};
+    for (const tab of ["", "/columns"]) {
+      await openTable(page, tab);
+      widths[tab || "/"] = (await page.locator(".page").boundingBox())?.width ?? 0;
+    }
+    await openNewTab(page, NEW_TABS[1]);
+    widths["/health"] = (await page.locator(".page").boundingBox())?.width ?? 0;
+    for (const width of Object.values(widths)) {
+      expect(width).toBeLessThanOrEqual(1040);
+    }
+    await openTable(page, "/preview");
+    await previewGrid(page);
+    const preview = page.getByRole("region", { name: "Preview of fact_sales" });
+    const main = (await page.locator(".shell-main").boundingBox())?.width ?? 0;
+    // The window less the sidebar and the main area's own padding on both sides.
+    expect((await preview.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 32 - 2);
+  });
+
+  test("the preview grid is dense, aligns numbers, keeps its header in view and numbers its rows", async ({
+    page,
+  }) => {
+    // A page of 60 rows, so the grid scrolls under its header.
+    const rows = Array.from({ length: 60 }, (_, index) => [
+      String(index * 1000 + 7),
+      "****",
+      `note ${String(index)}`,
+      null,
+    ]);
+    await page.route(
+      (url) => url.pathname === `${RUN}/result`,
+      (route) =>
+        route.fulfill({
+          json: {
+            columns: [
+              { name: "sale_id", type: "int64" },
+              { name: "customer_email", type: "string" },
+              { name: "note", type: "string" },
+              { name: "receipt", type: "binary" },
+            ],
+            columns_cut: 0,
+            masked_columns: [],
+            masked_columns_cut: 0,
+            rows,
+            row_cut: [],
+            row_count: 60,
+            next_offset: null,
+            duration_ms: 800,
+            preview: { table: "gold.sales.fact_sales" },
+          },
+        }),
+    );
+    const heights: Record<string, number> = {};
+    await openTable(page);
+    for (const density of ["roomy", "compact"] as const) {
+      await page.evaluate(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme: "dark", density, language: "en" })],
+      );
+      await openTable(page, "/preview");
+      await expect(page.locator("html")).toHaveAttribute("data-density", density);
+      const grid = await previewGrid(page);
+      await expect(grid.getByRole("rowheader")).toHaveCount(60);
+      heights[density] = (await grid.locator("tbody tr").first().boundingBox())?.height ?? 0;
+    }
+    expect(Math.abs((heights.roomy ?? 0) - 32), `roomy ${String(heights.roomy)}`).toBeLessThan(1.5);
+    expect(
+      Math.abs((heights.compact ?? 0) - 26),
+      `compact ${String(heights.compact)}`,
+    ).toBeLessThan(1.5);
+
+    const grid = await previewGrid(page);
+    // Numbers: right-aligned in tabular figures, the header too; text stays on the left.
+    const looks = await grid.evaluate((node) => {
+      const look = (cell: Element | null | undefined): string[] => {
+        const style = cell === null || cell === undefined ? null : getComputedStyle(cell);
+        return [style?.textAlign ?? "", style?.fontVariantNumeric ?? ""];
+      };
+      const row = node.querySelector("tbody tr");
+      return {
+        numberHead: look(node.querySelectorAll("thead th")[1]),
+        numberCell: look(row?.children[1]),
+        textCell: look(row?.children[2]),
+      };
+    });
+    expect(looks.numberHead).toEqual(["right", "tabular-nums"]);
+    expect(looks.numberCell).toEqual(["right", "tabular-nums"]);
+    expect(looks.textCell[0]).not.toBe("right");
+
+    // The header row stays at the top of the region while the rows scroll under it.
+    const region = page.getByRole("region", { name: "Preview of fact_sales" });
+    const tops = await region.evaluate((node) => {
+      node.scrollTop = 400;
+      const head = node.querySelector("thead th");
+      return {
+        scrolled: node.scrollTop,
+        region: node.getBoundingClientRect().top + node.clientTop,
+        head: head?.getBoundingClientRect().top ?? 0,
+      };
+    });
+    expect(tops.scrolled).toBeGreaterThan(0);
+    expect(Math.abs(tops.head - tops.region)).toBeLessThan(1);
+
+    // The row numbers: a muted gutter, the row header, and never part of copied cells.
+    const gutter = grid.getByRole("rowheader").first();
+    await expect(gutter).toHaveText("1");
+    expect(await gutter.evaluate((node) => getComputedStyle(node).userSelect)).toBe("none");
+    const copied = await grid.evaluate((node) => {
+      const body = node.querySelector("tbody");
+      const range = document.createRange();
+      if (body !== null) {
+        range.selectNodeContents(body);
+      }
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return selection?.toString() ?? "";
+    });
+    expect(copied).toContain("note 0");
+    expect(copied).toContain("7");
+    expect(copied.split("\n")[0]?.trim().startsWith("7")).toBe(true);
+    expect(await violations(page), "the dense grid, dark, compact").toEqual([]);
   });
 
   test("compact rows of Columns, Health and Access are lower than roomy rows", async ({ page }) => {
@@ -522,6 +653,7 @@ test.describe("the table page in real Chromium", () => {
     await expect(page.getByRole("status")).toContainText("2 rows · read as you");
     await expect(page.getByText("Masked for you: customer_email")).toBeVisible();
     await expect(grid.getByRole("columnheader")).toHaveText([
+      "#",
       "sale_id",
       "customer_email",
       "note",

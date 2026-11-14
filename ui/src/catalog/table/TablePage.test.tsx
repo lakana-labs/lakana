@@ -365,6 +365,24 @@ describe("TablePage", () => {
   });
 });
 
+describe("the page's width", () => {
+  it.each([
+    ["", false],
+    ["/columns", false],
+    ["/preview", true],
+    ["/lineage", false],
+    ["/health", false],
+    ["/access", false],
+  ])("uses the whole window for %s: %s", async (tab, wide) => {
+    renderShell(`${PAGE}${tab}`);
+    await tabs();
+
+    const page = document.querySelector(".table-page");
+    expect(page).not.toBeNull();
+    expect(page?.classList.contains("table-page-wide")).toBe(wide);
+  });
+});
+
 /**
  * The tables recorded as opened, in order.
  *

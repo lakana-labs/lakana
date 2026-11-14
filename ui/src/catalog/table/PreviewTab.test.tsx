@@ -64,7 +64,7 @@ async function line(): Promise<HTMLElement> {
 }
 
 /**
- * The cells of one row of the grid.
+ * The data cells of one row of the grid, without the row number's gutter.
  *
  * @param table - The grid.
  * @param index - The row, 1 for the first row of data.
@@ -72,7 +72,9 @@ async function line(): Promise<HTMLElement> {
  */
 function rowText(table: HTMLElement, index: number): (string | null)[] {
   const row = within(table).getAllByRole("row")[index] as HTMLElement;
-  return Array.from(row.querySelectorAll("td, th"), (cell) => cell.textContent);
+  return Array.from(row.querySelectorAll("td, th"), (cell) => cell)
+    .filter((cell) => !cell.classList.contains("row-number"))
+    .map((cell) => cell.textContent);
 }
 
 /** A fake server's answer: a status and a JSON body. */
@@ -428,6 +430,47 @@ describe("PreviewTab", () => {
     expect(panel).toHaveTextContent(long);
   });
 
+  it("draws the rows as the shared data grid with numbers aligned to the right", async () => {
+    renderShell(PREVIEW);
+    const table = await grid();
+
+    expect(table).toHaveClass("data-grid");
+    const headers = within(table).getAllByRole("columnheader");
+    // The first header is the row numbers' gutter; sale_id (int64) is a number, the rest not.
+    expect(headers.map((header) => header.classList.contains("number"))).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    const first = within(table).getAllByRole("row")[1] as HTMLElement;
+    const cells = Array.from(first.querySelectorAll("td, th"));
+    expect(cells[1]).toHaveClass("number");
+    expect(cells[2]).not.toHaveClass("number");
+  });
+
+  it("numbers the rows in a gutter that is the row header and not a value", async () => {
+    const { user } = renderShell(PREVIEW);
+    const table = await grid();
+
+    const gutter = within(table).getAllByRole("columnheader")[0] as HTMLElement;
+    expect(gutter).toHaveClass("row-number");
+    expect(gutter).toHaveTextContent("#");
+    const rowHeaders = within(table).getAllByRole("rowheader");
+    expect(rowHeaders.map((cell) => cell.textContent)).toEqual(["1", "2"]);
+    expect(rowHeaders.every((cell) => cell.classList.contains("row-number"))).toBe(true);
+    // No other column is a row header any more.
+    expect(within(table).getAllByRole("rowheader")).toHaveLength(2);
+
+    // A click on a row number shows no value; a click on a cell shows its own column.
+    await user.click(rowHeaders[0] as HTMLElement);
+    expect(screen.queryByRole("region", { name: /, row 1$/ })).not.toBeInTheDocument();
+    await user.click(within(table).getAllByText("****")[0] as HTMLElement);
+    expect(screen.getByRole("region", { name: "customer_email, row 1" })).toBeVisible();
+  });
+
   it("is one tab stop and moves between cells with the arrow keys", async () => {
     const { user } = renderShell(PREVIEW);
     const table = await grid();
@@ -435,6 +478,8 @@ describe("PreviewTab", () => {
 
     await user.tab();
     expect(table.contains(document.activeElement)).toBe(true);
+    // The row, its number, then the cells.
+    await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowRight}");
     await user.keyboard("{ArrowRight}");
     expect(screen.getByRole("region", { name: /^customer_email, row 1$/ })).toBeVisible();
@@ -464,7 +509,7 @@ describe("PreviewTab", () => {
     const table = await grid();
 
     expect(rowText(table, 1)).toEqual(["xU+202Ey"]);
-    expect(within(table).getAllByRole("columnheader")[0]).toHaveTextContent("nU+202Eote");
+    expect(within(table).getAllByRole("columnheader")[1]).toHaveTextContent("nU+202Eote");
     expect(RAW.test(table.textContent)).toBe(false);
   });
 

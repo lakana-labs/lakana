@@ -108,7 +108,11 @@ tabs never start one.
   preview is left waiting for a worker. A
   preview that has finished is not touched. When your browser brings the page back from its
   back-forward cache, the preview runs again.
-- **The rows.** Each value is cut to one line. Move to a cell with Tab and the arrow keys, or click
+- **The rows.** The rows take the whole width of the window, in rows lower than a list's so more
+  of them fit, and scroll in their own area with the column names staying at the top. Numbers
+  are aligned to the right, digit under digit. A muted gutter on the left numbers the rows; the
+  numbers are not part of the data, so cells you select and copy leave them out. Each value is
+  cut to one line. Move to a cell with Tab and the arrow keys, or click
   it, and the **Value** panel below the rows shows it whole. The rows are one stop for Tab: Tab
   enters them and Tab again leaves them, and the arrow keys move between the cells. A value with a
   character you could not see, such as U+202E (right-to-left override), shows that character as a
