@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from pyiceberg.partitioning import UNPARTITIONED_PARTITION_SPEC
 from pyiceberg.schema import Schema
@@ -27,7 +28,7 @@ from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.metadata import apply_updates, build_table_metadata
 from lakana_core.catalog.service import CatalogService
-from lakana_core.errors import ValidationError
+from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef, refuse_hidden_characters
 from lakana_core.models import Table, WriteMode
 from lakana_core.projects.project_config import unsafe_identifier
@@ -261,3 +262,20 @@ def test_a_view_refuses_a_new_hidden_column_and_keeps_a_stored_one(
         references=[],
         columns=[ColumnSpec(name=f"x{_RLO}", type="int", nullable=True)],
     )
+
+
+def test_an_external_table_refuses_a_hidden_character_in_a_column_of_its_files(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The column names come from the caller's own files: they are new names too."""
+    catalog.create_namespace(principal, "dev", NamespacePath.from_parts(["raw"]))
+    (tmp_path / "raw" / "events").mkdir(parents=True)
+    pq.write_table(pa.table({f"id{_RLO}": [1]}), tmp_path / "raw" / "events" / "part-0.parquet")
+    events = TableRef.from_dotted("dev", "raw.events")
+
+    with pytest.raises(ValidationError, match=r"Column name 'id\\u202e' .*U\+202E"):
+        catalog.create_external_table(
+            principal, events, location_pattern="raw/events/*.parquet", format="parquet"
+        )
+    with pytest.raises(NotFoundError):
+        catalog.load_table(principal, events)

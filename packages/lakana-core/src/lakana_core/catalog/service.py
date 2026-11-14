@@ -3140,8 +3140,9 @@ class CatalogService:
             If `ref.name` contains a ``.``, if `location_pattern` is not
             shaped `"raw/<dir...>/<basename-glob>"`, if its claim overlaps another
             active external table's claim in this environment, if it
-            escapes the environment's storage root, or if `format` is
-            unsupported.
+            escapes the environment's storage root, if `format` is
+            unsupported, or if a column name of the sample file holds an invisible or
+            line-breaking character (`refuse_hidden_characters`).
         ConflictError
             If the insert fails for a reason other than a name collision —
             for instance, the namespace was dropped between the checks above
@@ -3182,6 +3183,9 @@ class CatalogService:
             raise NotFoundError(f"No file matches {location_pattern!r}.")
         sample_bytes = resolved.storage.read(matches[0])
         schema = infer_schema(sample_bytes, format)
+        # The column names come from the caller's own files: new names, under the same rule.
+        for column in schema:
+            refuse_hidden_characters(column, what="Column name")
         # The lock is taken as late as possible, around only the claim
         # re-check and the insert: everything above only reads storage and
         # never touches the environment row, so holding the lock around a

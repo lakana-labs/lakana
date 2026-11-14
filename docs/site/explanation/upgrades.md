@@ -166,7 +166,8 @@ character (Unicode category `Cf`: a bidirectional control such as U+202E, a zero
 soft hyphen) or the line or paragraph separator (U+2028, U+2029). Such a character is invisible
 or reorders the text around it, so the name could look like another table's. The rule applies
 wherever a name is created: `lakana table create`, the REST API, an Iceberg client, a view, a
-rename or undrop target, and a deploy or load that creates a table or adds a column. The refusal
+rename or undrop target, a deploy or load that creates a table or adds a column, and an external
+table, whose column names come from its files (`lakana table create-external`). The refusal
 names the character and its position, for example `Table name 'orders\u202e' holds U+202E at
 character 7, … Choose a name without it`.
 

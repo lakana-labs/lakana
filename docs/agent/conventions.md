@@ -495,8 +495,9 @@ name is created (`create_namespace` for each new component, `ResolvedStorage.tab
 name), never in parsing, discovery, matching or a lookup, and never for job, check, repository,
 package-index or artifact names. A new column name meets `refuse_hidden_characters` too: in
 `catalog.metadata` (`build_table_metadata` for a new table, `apply_updates` for each added schema,
-which skips a name one of the table's schemas already holds) and in `create_or_replace_view` (which
-skips a column the replaced view already had). The `.`
+which skips a name one of the table's schemas already holds), in `create_or_replace_view` (which
+skips a column the replaced view already had) and in `create_external_table` (the names inferred
+from the caller's sample file). The `.`
 rule keeps the dotted display form (`gold.sales`) unambiguous: `["a.b"]` and
 `["a", "b"]` would otherwise render identically.
 
