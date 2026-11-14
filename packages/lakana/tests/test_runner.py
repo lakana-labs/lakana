@@ -28,6 +28,7 @@ import pytest
 from descriptor_watch import watch_opened_descriptors
 
 from lakana import _artifact_harness, _usage, assets, runner
+from lakana._artifact_harness import InvalidResult, WorkspaceError
 from lakana._artifact_manifest import (
     ManifestError,
     StoredManifestDamaged,
@@ -1690,7 +1691,12 @@ class _Artifacts:
             The configured version.
         """
         self.given.append(str(path))
-        self.working_directories.append(os.getcwd())
+        try:
+            self.working_directories.append(os.getcwd())
+        except PermissionError:
+            # macOS cannot name a working directory the code made unsearchable (Linux can); the
+            # upload itself never needs it, which is what the tests of it check.
+            self.working_directories.append("<unsearchable>")
         info = os.fstat(dir_fd)
         self.directories.append((info.st_dev, info.st_ino))
         if self.before_scan is not None:
@@ -4871,3 +4877,44 @@ def test_every_record_carries_the_tasks_own_peak_memory_on_linux(world: _World) 
     world.result_path.parent.mkdir(exist_ok=True)
     assert world.run() == 0
     assert world.raw_record()["peak_memory_bytes"] > 0
+
+
+def test_a_held_copy_refuses_a_missing_closed_or_reused_inputs_descriptor(
+    tmp_path: Path,
+) -> None:
+    """The inputs descriptor is judged as the output one: never trusted by its number (#67)."""
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "other").mkdir()
+    pinned = os.open(tmp_path / "inputs", os.O_RDONLY | os.O_DIRECTORY)
+    info = os.fstat(pinned)
+    identity = (info.st_dev, info.st_ino)
+    try:
+        copy = _artifact_harness._held_copy(pinned, identity)
+        os.close(copy)
+        with pytest.raises(WorkspaceError, match="closed a file descriptor"):
+            _artifact_harness._held_copy(None, identity)
+        other = os.open(tmp_path / "other", os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with pytest.raises(WorkspaceError, match="closed a file descriptor"):
+                _artifact_harness._held_copy(other, identity)
+        finally:
+            os.close(other)
+    finally:
+        os.close(pinned)
+    with pytest.raises(WorkspaceError, match="closed a file descriptor"):
+        _artifact_harness._held_copy(pinned, identity)
+
+
+def test_a_returned_type_whose_name_cannot_be_read_is_named_unknown() -> None:
+    """The type is the user's: reading its module or name may raise anything."""
+
+    class Lying(type):
+        @property
+        def __module__(cls) -> str:  # ty: ignore[incompatible-property-override]
+            raise RuntimeError("no module")
+
+    class Odd(metaclass=Lying):
+        pass
+
+    with pytest.raises(InvalidResult, match="got an unknown type"):
+        _artifact_harness._returned_text(Odd())

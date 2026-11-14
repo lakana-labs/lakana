@@ -4,6 +4,7 @@ import errno
 import logging
 import os
 import stat
+import sys
 import tracemalloc
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -1079,8 +1080,90 @@ def test_an_object_with_a_name_of_up_to_255_bytes_can_be_written(
 
 
 def test_an_object_whose_name_holds_a_lone_surrogate_can_be_written(config: StorageConfig) -> None:
-    """A name the file system takes but strict UTF-8 cannot encode still writes (review of #616)."""
+    """A name the file system takes but strict UTF-8 cannot encode still writes (review of #616).
+
+    The name is the byte 0xff, which is not UTF-8. Linux file systems take any bytes; APFS on
+    macOS refuses a name that is not UTF-8 with `EILSEQ`, which reaches the caller as it is.
+    """
     name = "a\udcff.log"
     storage = build_storage(config)
+    if sys.platform == "darwin":
+        with pytest.raises(OSError) as refused:
+            storage.write(f"logs/{name}", b"1")
+        assert refused.value.errno == errno.EILSEQ
+        return
     storage.write(f"logs/{name}", b"1")
     assert storage.read(f"logs/{name}") == b"1"
+
+
+def test_an_object_store_reads_writes_and_lists_through_its_own_calls() -> None:
+    """The local-only paths leave every other backend to fsspec as before (#70)."""
+    storage = FsspecStorage("memory://plain-lake", {})
+    storage.write("a", b"1")
+    storage.write("d/x", b"2")
+    assert storage.read("d/x") == b"2"
+    with pytest.raises(NotFoundError):
+        storage.read("d/missing")
+    with pytest.raises(ConflictError, match="a segment of the path is already a file"):
+        storage.write("a/b", b"3")
+    with pytest.raises(ConflictError, match="already exists as a directory"):
+        storage.write("d", b"3")
+    assert list(storage.list("d")) == ["d/x"]
+    assert list(storage.list("none")) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file without read permission")
+def test_a_local_object_the_process_may_not_read_is_a_permission_error(
+    config: StorageConfig,
+) -> None:
+    """Not `NotFoundError`: the file is there, the operator must fix its mode."""
+    storage = build_storage(config)
+    storage.write("locked", b"1")
+    target = Path(config.root.removeprefix("file://")) / "locked"
+    target.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            storage.read("locked")
+    finally:
+        target.chmod(0o600)
+
+
+def test_a_write_that_fails_midway_leaves_neither_the_object_nor_a_temporary_file(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = Path(config.root.removeprefix("file://"))
+
+    def broken(self: object, data: bytes) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("lakana_core.storage.fsspec_storage._LocalStreamWriter.write", broken)
+    with pytest.raises(OSError, match="No space left"):
+        build_storage(config).write("d/x", b"1")
+    assert os.listdir(root / "d") == []
+
+
+def test_a_directory_another_writer_made_meanwhile_is_used(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two writers making the same new directory: the second one's mkdir fails and it goes on."""
+    real = os.mkdir
+
+    def racing(path: str, mode: int = 0o777, **kwargs: object) -> None:
+        real(path, mode)
+        raise FileExistsError(17, "File exists", path)
+
+    monkeypatch.setattr(os, "mkdir", racing)
+    storage = build_storage(config)
+    storage.write("d/x", b"1")
+    monkeypatch.undo()
+    assert storage.read("d/x") == b"1"
+
+
+def test_a_local_prefix_that_is_one_object_lists_itself_and_a_linked_one_nothing(
+    tmp_path: Path,
+) -> None:
+    """As fsspec's `find` did for a prefix that names one file (#70)."""
+    storage, _ = _linked_root(tmp_path)
+    assert list(storage.list("real/kept")) == ["real/kept"]
+    assert storage.exists("link/x") is False
+    assert list(storage.list("link/x")) == []

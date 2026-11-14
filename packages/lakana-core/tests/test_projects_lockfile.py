@@ -1152,3 +1152,23 @@ def test_files_inside_the_wheelhouse_need_no_hash() -> None:
         'wheels = [{ path = "zzpkg-1-py3-none-any.whl" }]',
     )
     assert _messages(_PYPROJECT, lock, sources=_SOURCES) == []
+
+
+def test_a_file_entry_that_is_not_a_table_counts_as_unpinned() -> None:
+    """A hand-edited `wheels = ["x"]` has no hash to check (#77)."""
+    lock = _with_files("https://pypi.org/simple", 'wheels = ["zzpkg.whl"]')
+    (message,) = [issue.render() for issue in pinning_issues(lock)]
+    assert message.startswith("uv.lock: has no SHA-256")
+
+
+def test_odd_wheelhouse_entries_are_judged_by_their_paths_only() -> None:
+    """An entry that is not a table, or names neither a path nor a URL, is left to uv (#77)."""
+    lock = _with_files("wheelhouse", 'wheels = ["zzpkg.whl", { size = 3 }]')
+    assert _messages(_PYPROJECT, lock, sources=_SOURCES) == []
+
+
+@pytest.mark.parametrize("lock", [None, b"\xff\xfe not utf-8", b"not = [toml"])
+def test_pinning_issues_of_a_lock_that_cannot_be_read_are_left_to_lockfile_issues(
+    lock: bytes | None,
+) -> None:
+    assert pinning_issues(lock) == []

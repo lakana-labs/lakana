@@ -717,3 +717,11 @@ def test_a_scan_by_descriptor_refuses_a_link_at_the_name(tmp_path: Path) -> None
             scan(Path("link"), dir_fd=descriptor)
     finally:
         os.close(descriptor)
+
+
+def test_a_scan_by_descriptor_needs_a_platform_that_opens_by_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(artifact_manifest, "BY_DESCRIPTOR", False)
+    with pytest.raises(ValueError, match="Linux or macOS"):
+        scan(Path("."), dir_fd=0)
