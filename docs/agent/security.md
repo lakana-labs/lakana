@@ -1793,8 +1793,10 @@ code in this area has to know.
   checked only for its scheme (#77): an index's file must be an absolute `http`/`https` URL (no
   `file:`, no path) with a `sha256`/`sha384`/`sha512` hash, and a `wheelhouse` package's file must
   be a `path` inside the folder (no `url`); `wheelhouse` files carry no hash, since `uv lock`
-  writes none for a folder. The host is not checked: it may be another host, uv downloads from
-  it, and no credential is sent there (a credential is bound to its index's scheme, host and
+  writes none for a folder. The host is not checked, by decision (#77): the strong hash pins the
+  bytes, so another host cannot change what is installed, and which hosts a build may reach is a
+  question for the egress rules of task isolation, not for the lock check. uv downloads from that
+  host, and no credential is sent there (a credential is bound to its index's scheme, host and
   port). A URL the strict
   `comparable_index_url` rule refuses is not a registered index; the operator's index has its own
   lenient comparison (`KnownSources.is_known`). Local path and workspace dependencies are refused at deploy

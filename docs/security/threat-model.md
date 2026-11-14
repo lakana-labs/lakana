@@ -310,7 +310,9 @@ What the credential of a registered package index does not protect against. Each
    fresh. Lakana checks the lock and that the secret exists; it does not ask the index who may
    read a package.
 3. **The index's files must be on the index's own host and port.** A lock names indexes, not
-   download hosts: a file served from another host is fetched without the credential. An index
+   download hosts (by decision, #77: each file's SHA-256 or stronger hash pins its bytes, and the
+   hosts a build may reach belong to the egress rules): a file served from another host is fetched
+   without the credential. An index
    that serves its files from another host and asks for the credential there is not supported:
    the build fails (uv exits with status 1) and is retried, with no advice in the message.
 4. **An author who locks a public package by mistake still ships it,** as with any dependency.
