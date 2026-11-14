@@ -150,7 +150,7 @@ export function VisibleText({ text, breakable = false }: VisibleTextProps): JSX.
  * @param props.text - The text, as the server sent it.
  * @returns The text and its marks, as SVG text content.
  */
-export function VisibleTspan({ text }: VisibleTextProps): JSX.Element {
+export function VisibleTspan({ text }: Omit<VisibleTextProps, "breakable">): JSX.Element {
   const shown: ReactNode[] = markInvisible(text).map((part, index) =>
     typeof part === "string" ? (
       part

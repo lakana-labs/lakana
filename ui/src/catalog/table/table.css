@@ -480,7 +480,7 @@
 
 /* The checks scroll in their own region on a narrow screen rather than break a check's name into
    letters; four short columns need less room than the Catalog's seven. */
-.checks-scroll .list {
+.list-scroll.checks-scroll .list {
   min-width: 480px;
 }
 

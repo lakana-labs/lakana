@@ -422,6 +422,11 @@ test.describe("the table page in real Chromium", () => {
       );
       expect(outside, entry[0]).toEqual([]);
     }
+    // The checks keep their own, narrower minimum, whichever stylesheet loaded first.
+    await openNewTab(page, NEW_TABS[1]);
+    const checks = page.locator(".checks-scroll .list");
+    await expect(checks).toBeVisible();
+    expect(await checks.evaluate((node) => getComputedStyle(node).minWidth)).toBe("480px");
   });
 
   test("no horizontal scroll at 320 px on every tab; wide tables scroll in their own focusable region", async ({
