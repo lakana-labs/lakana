@@ -125,11 +125,14 @@ def file_references(asset: ParsedAsset) -> set[str]:
 def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
     """Find the references of a query that read a file, not a catalog table.
 
-    ``FROM 'file.csv'``, ``FROM "a.b"`` (one quoted component containing a
-    dot) and ``read_csv('x')`` all reach the parser's reference list as a
-    dotted-looking name; only the AST tells them from ``file.csv`` the table. A generator
-    (``range(3)``) is not a reference at all, and a reader without a path in its arguments
-    gives no name.
+    ``FROM 'file.csv'`` and ``FROM "a.b"`` (one quoted component containing a dot) reach the
+    parser's reference list as a dotted-looking name; only the AST tells them from
+    ``file.csv`` the table. A table function in a `FROM` item (``read_parquet('a/b.parquet')``,
+    ``read_csv(['x', 'y'])``, ``LATERAL``/``TABLE(...)`` forms included) counts as a file
+    reference unless it is one of the query guard's generators (`_ALLOWED_TABLE_FUNCTIONS`:
+    ``range``, ``generate_series``, ``unnest``), which read nothing. So every reader the guard
+    knows (`_READER_NAMES` and the ``read_``/``_scan`` families) and any function DuckDB adds
+    later are reported, and this list cannot drift from the guard's.
 
     Parameters
     ----------
@@ -141,21 +144,28 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
     Returns
     -------
     set of str
-        The references that are not catalog tables. If the SQL cannot be
-        parsed again, every reference is treated that way.
+        The references that are not catalog tables: a quoted path as written, and a table
+        function by its lowercase name (``read_parquet``), never its arguments, which may hold
+        a connection string. If the SQL cannot be parsed again, every reference is treated
+        that way.
     """
     try:
         tree = sqlglot.parse_one(sql, dialect="duckdb")
     except sqlglot.errors.SqlglotError:
         return set(references)
     found: set[str] = set()
-    for table in tree.find_all(exp.Table):
-        if _from_item_function_name(table) in _ALLOWED_TABLE_FUNCTIONS:
+    for item in [*tree.find_all(exp.Table), *tree.find_all(exp.Lateral)]:
+        function = _from_item_function_name(item)
+        if function in _ALLOWED_TABLE_FUNCTIONS:
             continue  # a generator reads no table and no file
-        if any(not isinstance(part, exp.Identifier) or "." in part.name for part in table.parts):
-            name = _dotted_table_name(table)
-            if name:  # a reader with no path in its arguments has no name to report
-                found.add(name)
+        if function is not None:
+            found.add(function)
+        elif isinstance(item, exp.Table) and any(
+            not isinstance(part, exp.Identifier) or "." in part.name for part in item.parts
+        ):
+            dotted = _dotted_table_name(item)
+            if dotted:
+                found.add(dotted)
     return found
 
 
