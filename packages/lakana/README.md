@@ -14,7 +14,9 @@ same REST surface any other client would use.
 pip install lakana
 ```
 
-The only runtime dependencies are `httpx` and `pyarrow`.
+The runtime dependencies are `httpx`, `pyarrow`, `pyyaml`, `rich` and `typer` (the CLI), as
+`packages/lakana/pyproject.toml` lists them. `typer` 0.29 brings `pydantic` with it, so an SDK
+install includes `pydantic` too.
 
 ## Credentials
 
@@ -64,7 +66,7 @@ does not cancel when your code is interrupted.
 ### DataFrames: polars by default
 
 Arrow is the contract underneath, and **polars** is Lakana's default DataFrame tool. The SDK
-itself only depends on pyarrow (`pip install polars` separately); results convert
+itself only needs pyarrow for data (`pip install polars` separately); results convert
 zero-copy, and `create`/`append` accept polars schemas and DataFrames directly:
 
 ```python
