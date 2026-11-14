@@ -1061,3 +1061,18 @@ def test_write_is_atomic_and_durable_like_a_stream(
     # the root (for `a`), `a` (for `b`), the file, then `b` after the rename
     assert synced == ["dir", "dir", "file", "dir"]
     assert [name for name in os.listdir(root / "a" / "b") if name != "x"] == []
+
+
+@pytest.mark.parametrize("length", [232, 233, 255])
+def test_an_object_with_a_name_of_up_to_255_bytes_can_be_written(
+    config: StorageConfig, length: int
+) -> None:
+    """The temporary name stays under the file system's limit too (re-review of #70)."""
+    name = "t" * (length - 4) + ".log"
+    storage = build_storage(config)
+    storage.write(f"logs/{name}", b"1")
+    writer = storage.open_write(f"logs/b{name[1:]}")
+    writer.write(b"2")
+    writer.commit()
+    assert storage.read(f"logs/{name}") == b"1"
+    assert sorted(storage.list("logs")) == sorted([f"logs/{name}", f"logs/b{name[1:]}"])

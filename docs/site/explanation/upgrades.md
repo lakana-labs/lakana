@@ -139,10 +139,12 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 A deploy, and every run of a deployed version, now refuses a `uv.lock` in which a file of a package
 index has no SHA-256, SHA-384 or SHA-512 hash, or is named by a `file:` URL, another scheme or a
-path, and one in which a package of the folder `wheelhouse` names a URL. A lock as `uv lock` writes
-it passes; only a lock edited by hand is refused. A task of a version deployed with such a lock
-fails until you deploy again: run `uv lock`, commit the lock unchanged and deploy. The message says
-what to do when an index serves no SHA-256 hash ([Python assets](../reference/python-assets.md)).
+path, and one in which a package of the folder `wheelhouse` names a URL. `uv lock` writes a hash
+for every file of an index that serves one, so a lock it wrote passes unless an index serves only
+MD5 or no hash at all; a lock edited by hand may fail too. A task of a version deployed with such a
+lock fails until you deploy again: run `uv lock`, commit the lock unchanged and deploy. For an index
+that serves no SHA-256 hash, the message says what to do ([Python
+assets](../reference/python-assets.md)).
 
 ### Files on a local storage root follow the umask
 

@@ -97,6 +97,10 @@ def _sync_directory(directory: str) -> None:
         os.close(descriptor)
 
 
+_TEMP_NAME_BYTES = 100
+"""Bytes of an object's name kept in its temporary name (file systems allow 255 per name)."""
+
+
 class _LocalStreamWriter:
     """Write to a temporary name next to the target and rename on commit.
 
@@ -109,7 +113,10 @@ class _LocalStreamWriter:
     def __init__(self, final: str) -> None:
         directory, name = os.path.split(final)
         self._final = final
-        self._temp = os.path.join(directory, f".{name}.{secrets.token_hex(8)}{PART_SUFFIX}")
+        # At most 100 bytes of the name, so that the temporary name fits a 255-byte limit too;
+        # the leading dot and the suffix are what a sweep recognises it by.
+        kept = name.encode()[:_TEMP_NAME_BYTES].decode(errors="ignore")
+        self._temp = os.path.join(directory, f".{kept}.{secrets.token_hex(8)}{PART_SUFFIX}")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         # 0666 less the process umask, like every other file the backend writes: the operator
         # decides who else may read objects (a worker in the server's group, with umask 027).
