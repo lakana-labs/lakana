@@ -409,6 +409,12 @@ test.describe("the table page in real Chromium", () => {
     const main = (await page.locator(".shell-main").boundingBox())?.width ?? 0;
     // The window less the sidebar and the main area's own padding on both sides.
     expect((await preview.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 32 - 2);
+    await openNewTab(page, NEW_TABS[0]);
+    const drawing = page.getByRole("region", { name: "Lineage of fact_sales", exact: true });
+    expect((await drawing.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 32 - 2);
+    // The list under the drawing keeps the reading width.
+    const list = page.locator(".lineage-list-section");
+    expect((await list.boundingBox())?.width ?? 0).toBeLessThanOrEqual(1040);
   });
 
   test("the preview grid is dense, aligns numbers, keeps its header in view and numbers its rows", async ({

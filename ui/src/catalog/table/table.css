@@ -6,9 +6,15 @@
   max-width: 1040px;
 }
 
-/* Preview shows data, not text to read: it takes the whole window. */
+/* Preview and Lineage show data and a drawing, not text to read: they take the whole window. The
+   lineage list under the drawing keeps the reading width. */
 .table-page-wide .page {
   max-width: none;
+}
+
+.table-page-wide .lineage-list-section {
+  box-sizing: border-box;
+  max-width: 1040px;
 }
 
 .table-page .page-title {

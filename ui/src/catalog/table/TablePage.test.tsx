@@ -370,7 +370,7 @@ describe("the page's width", () => {
     ["", false],
     ["/columns", false],
     ["/preview", true],
-    ["/lineage", false],
+    ["/lineage", true],
     ["/health", false],
     ["/access", false],
   ])("uses the whole window for %s: %s", async (tab, wide) => {

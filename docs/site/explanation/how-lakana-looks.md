@@ -124,7 +124,7 @@ Rows of data, such as a table's Preview, are scanned rather than read, so they g
 of their own: 32 px rows in roomy and 26 px in compact, less space in each cell, numbers aligned
 right in figures of one width, the column names staying in view while the rows scroll, and the
 row numbers in a muted gutter that is not part of the data. A tab that shows data or a drawing,
-such as Preview, takes the whole width of the window; text to read keeps
+such as Preview and the Lineage drawing, takes the whole width of the window; text to read keeps
 a narrower width that is easier on the eye. Menus and lists keep their rows.
 
 ## One pattern for every area

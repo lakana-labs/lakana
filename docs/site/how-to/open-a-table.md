@@ -98,7 +98,8 @@ line that says so and what to ask for. See
 ## Lineage
 
 Lineage shows where the table's data comes from and where it goes. Its address ends in
-`/lineage`.
+`/lineage`. Like Preview, the drawing takes the whole width of the window; the list under it
+keeps the width of the other tabs.
 
 - **What is drawn.** The tables upstream to the left, the tables downstream to the right, and
   between them the assets that build them, each box naming the job that runs the asset, such as

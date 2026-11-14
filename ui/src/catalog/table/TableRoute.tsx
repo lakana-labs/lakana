@@ -35,7 +35,7 @@ function tabOf(segment: string | undefined): TableTab | null {
 }
 
 /** The tabs that show data or a drawing and take the whole window; the others keep the reading width. */
-const WIDE_TABS: ReadonlySet<TableTab> = new Set<TableTab>(["preview"]);
+const WIDE_TABS: ReadonlySet<TableTab> = new Set<TableTab>(["preview", "lineage"]);
 
 /** Properties of {@link TableView}. */
 interface TableViewProps {
