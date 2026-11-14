@@ -7,8 +7,10 @@
 import type { GraphNodeOut, GraphOut } from "../../api";
 import { rootOf } from "./lineage";
 
-/** A box's width, in pixels. */
+/** A box's smallest width, in pixels; a box grows to its longest line. */
 export const BOX_W = 200;
+/** A box's largest width, in pixels; a longer line ends in "…". */
+export const BOX_W_MAX = 320;
 /** A box's height, in pixels. */
 export const BOX_H = 48;
 /** The space between two columns, in pixels. */
@@ -31,6 +33,8 @@ export interface LineageBox {
   readonly x: number;
   /** Its top side. */
   readonly y: number;
+  /** Its width: its column's, from {@link BOX_W} to {@link BOX_W_MAX}. */
+  readonly width: number;
   /** The jobs that run an asset, by name; empty for every other box. */
   readonly jobs: readonly GraphNodeOut[];
 }
@@ -133,13 +137,21 @@ function walk(edges: readonly Edge[], root: string, way: -1 | 1): Map<string, nu
  * nearer (upstream when as near). A connection is a box one column further from the table than
  * the nearest asset that uses it; a job is not a box but a name on the asset it runs. Each node
  * in a column has its own row (tables, then assets, then connections, each by name), and a
- * column shorter than the tallest sits in its middle. A node no edge reaches is left out.
+ * column shorter than the tallest sits in its middle. A node no edge reaches is left out. Every box
+ * of a column has the column's width: that of its widest box, from {@link BOX_W} to
+ * {@link BOX_W_MAX}.
  *
  * @param up - What feeds the table.
  * @param down - What the table feeds.
+ * @param wanted - How wide a box would be to show its text whole; {@link BOX_W} for every box
+ *   when left out.
  * @returns The boxes, the lines and the size.
  */
-export function layout(up: GraphOut, down: GraphOut): LineageLayout {
+export function layout(
+  up: GraphOut,
+  down: GraphOut,
+  wanted: (box: { node: GraphNodeOut; jobs: readonly GraphNodeOut[] }) => number = () => BOX_W,
+): LineageLayout {
   const merged = mergeGraphs(up, down);
   const root = rootOf(merged);
   if (root === null) {
@@ -190,6 +202,21 @@ export function layout(up: GraphOut, down: GraphOut): LineageLayout {
   }
   const tallest = Math.max(...counts.values());
   const rowStep = BOX_H + ROW_GAP;
+  const ranJobs = (node: GraphNodeOut): GraphNodeOut[] =>
+    [...(jobs.get(node.id) ?? [])].sort((a, b) => compare(a.name, b.name));
+  const widths = new Map<number, number>();
+  for (const { node, column } of drawn) {
+    const width = Math.min(BOX_W_MAX, Math.max(BOX_W, wanted({ node, jobs: ranJobs(node) })));
+    widths.set(column, Math.max(widths.get(column) ?? 0, width));
+  }
+  const lefts = new Map<number, number>();
+  let across = 0;
+  for (let column = first; column <= last; column += 1) {
+    lefts.set(column, across);
+    // A cycle through the table can leave a column between others with no box: it keeps the
+    // smallest width, as an empty gap.
+    across += (widths.get(column) ?? BOX_W) + COL_GAP;
+  }
   const rows = new Map<number, number>();
   const nodes: LineageBox[] = drawn.map(({ node, column }) => {
     const row = rows.get(column) ?? 0;
@@ -199,9 +226,10 @@ export function layout(up: GraphOut, down: GraphOut): LineageLayout {
       node,
       column,
       row,
-      x: (column - first) * (BOX_W + COL_GAP),
+      x: lefts.get(column) as number,
       y: offset + row * rowStep,
-      jobs: [...(jobs.get(node.id) ?? [])].sort((a, b) => compare(a.name, b.name)),
+      width: widths.get(column) as number,
+      jobs: ranJobs(node),
     };
   });
 
@@ -213,18 +241,17 @@ export function layout(up: GraphOut, down: GraphOut): LineageLayout {
     if (source !== undefined && target !== undefined) {
       const [left, right] = source.x <= target.x ? [source, target] : [target, source];
       edges.push({
-        x1: left.x + BOX_W,
+        x1: left.x + left.width,
         y1: left.y + BOX_H / 2,
         x2: right.x,
         y2: right.y + BOX_H / 2,
       });
     }
   }
-  const across = last - first + 1;
   return {
     nodes,
     edges,
-    width: across * BOX_W + (across - 1) * COL_GAP,
+    width: across - COL_GAP,
     height: tallest * BOX_H + (tallest - 1) * ROW_GAP,
   };
 }

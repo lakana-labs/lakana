@@ -12,7 +12,8 @@ import { Link } from "react-router";
 import type { GraphNodeOut } from "../../api";
 import { markedText, VisibleTspan } from "../../shell/VisibleText";
 import { splitDotted, tablePath } from "../paths";
-import { BOX_H, BOX_W, jobLabel, type LineageBox, type LineageLayout } from "./layout";
+import { boxLines, estimateWidth, fitText, type Measure, TEXT_X } from "./boxText";
+import { BOX_H, jobLabel, type LineageBox, type LineageLayout } from "./layout";
 import { kindName } from "./lineageStrings";
 
 /** Properties of {@link LineageGraph}. */
@@ -23,32 +24,39 @@ export interface LineageGraphProps {
   readonly environment: string;
   /** A class for the drawing, such as the full-screen view's. */
   readonly className?: string;
+  /** How wide a line of text is, to cut one longer than its box; estimated when left out. */
+  readonly measure?: Measure;
 }
 
 /** Where a box's first line of text sits, down from its top. */
 const FIRST_LINE = 20;
 /** Where a box's second line of text sits. */
 const SECOND_LINE = 38;
-/** The space between a box's left side and its text. */
-const TEXT_X = 10;
-
 /** Properties of {@link BoxText}. */
 interface BoxTextProps {
   /** The box. */
   readonly box: LineageBox;
+  /** How wide a line of text is. */
+  readonly measure: Measure;
 }
 
 /**
  * The two lines of a box. A table: its name, then its namespace. An asset: the jobs that run
- * it, then "asset {name} · {repository}". A connection: its name, then its kind.
+ * it, then "asset {name} · {repository}". A connection: its name, then its kind. A line longer
+ * than the box ends in "…" (the box's title has it whole), with its invisible characters as
+ * plain marks.
  *
- * @param props - The box.
+ * @param props - The box and the measure.
  * @param props.box - The box.
+ * @param props.measure - How wide a line of text is.
  * @returns The lines, as SVG text.
  */
-function BoxText({ box }: BoxTextProps): JSX.Element {
+function BoxText({ box, measure }: BoxTextProps): JSX.Element {
   const { t } = useTranslation();
   const { node } = box;
+  const room = box.width - 2 * TEXT_X;
+  const plain = boxLines(t, box);
+  const fitted = plain.map((line) => (line === null ? null : fitText(line, room, measure)));
   let first: JSX.Element;
   let second: JSX.Element | null;
   if (node.kind === "asset") {
@@ -86,14 +94,15 @@ function BoxText({ box }: BoxTextProps): JSX.Element {
     first = <VisibleTspan text={place === null ? node.name : place.name} />;
     second = place === null ? null : <VisibleTspan text={place.namespace} />;
   }
+  const [firstFit, secondFit] = fitted;
   return (
     <>
       <text x={TEXT_X} y={FIRST_LINE} className="lineage-first">
-        {first}
+        {firstFit === plain[0] ? first : firstFit}
       </text>
       {second !== null && (
         <text x={TEXT_X} y={SECOND_LINE} className="lineage-second">
-          {second}
+          {secondFit === plain[1] ? second : secondFit}
         </text>
       )}
     </>
@@ -149,19 +158,22 @@ function boxPath(node: GraphNodeOut, environment: string): string | null {
  * tab order: the list beside it carries the same nodes and edges. A table's box is a link to its
  * page: a plain click opens it in place through the router, and a click with a modifier key, a
  * middle click or "copy link" are the browser's. Jobs and connections are not links. Every name
- * is text, with invisible characters marked; each box has a title with its whole names, so a name
- * cut at the box's edge can be read on hover.
+ * is text, with invisible characters marked. A box is as wide as its column, which grows to its
+ * longest line up to 320 px; a longer line ends in "…", and each box has a title with its whole
+ * names, so a cut name can be read on hover.
  *
  * @param props - The layout and the environment.
  * @param props.layout - Where each box goes.
  * @param props.environment - The environment.
  * @param props.className - A class for the drawing.
+ * @param props.measure - How wide a line of text is.
  * @returns The drawing.
  */
 export function LineageGraph({
   layout,
   environment,
   className = "lineage-graph",
+  measure = estimateWidth,
 }: LineageGraphProps): JSX.Element {
   const { t } = useTranslation();
   return (
@@ -187,14 +199,14 @@ export function LineageGraph({
           <svg
             x={box.x}
             y={box.y}
-            width={BOX_W}
+            width={box.width}
             height={BOX_H}
             data-node={box.node.id}
             className={`lineage-box lineage-${box.node.kind}${root ? " lineage-root" : ""}`}
           >
             <title>{boxTitle(t, box)}</title>
-            <rect x={0.5} y={0.5} width={BOX_W - 1} height={BOX_H - 1} rx={4} />
-            <BoxText box={box} />
+            <rect x={0.5} y={0.5} width={box.width - 1} height={BOX_H - 1} rx={4} />
+            <BoxText box={box} measure={measure} />
           </svg>
         );
         const path = boxPath(box.node, environment);

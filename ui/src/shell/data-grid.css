@@ -1,0 +1,103 @@
+/* The data grid: rows of a table's data (a table's Preview, later query results). Denser than a
+   list, because people scan it rather than read it: 32 px rows in roomy, 26 px in compact,
+   smaller cell padding, every value on one line and cut with an ellipsis (the Value panel shows
+   it whole). Numbers sit on the right in tabular figures. The header row and the gutter of row
+   numbers stay in view while the grid scrolls both ways inside its own region, so the page never
+   scrolls sideways (WCAG 1.4.10). */
+/* The scroll padding keeps a cell the arrow keys move to clear of the sticky header row and the
+   sticky gutter (WCAG 2.4.11): React Aria scrolls it into view inside that padding. */
+.data-grid-scroll {
+  max-height: 70vh;
+  overflow: auto;
+  scroll-padding-top: var(--grid-row-height);
+  scroll-padding-left: calc(6ch + 2 * var(--space-2));
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+}
+
+.data-grid-scroll:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.data-grid {
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--type-data-size);
+  line-height: var(--type-data-line);
+}
+
+.data-grid th,
+.data-grid td {
+  box-sizing: border-box;
+  height: var(--grid-row-height);
+  max-width: 20rem;
+  overflow: hidden;
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--color-line);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The header row stays at the top of the region; it needs its own ground to cover the rows. */
+.data-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  font-weight: var(--type-label-weight);
+}
+
+.data-grid tbody tr:last-child td,
+.data-grid tbody tr:last-child th {
+  border-bottom: 0;
+}
+
+.data-grid .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The row numbers: a muted gutter that stays on the left, the row's header for a screen reader,
+   and never selected, so copied cells hold only the data. */
+/* As narrow as its widest number: 1 % with no wrapping lets the table give the extra width to
+   the data columns. */
+.data-grid .row-number {
+  width: 1%;
+  padding: 0 var(--space-2);
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  border-right: 1px solid var(--color-line);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-weight: normal;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.data-grid thead .row-number {
+  z-index: 2;
+}
+
+/* Words that stand for a value, such as SQL NULL or binary's size: muted, italic, on a quiet
+   ground, so they never look like the text "null"; a screen reader reads the words. */
+/* Positioned, so its text for screen readers stays inside the grid's region. */
+.value-marker {
+  position: relative;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--color-sunk);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Inside the cell, so the cell's own cut and the region's edge never hide the ring. */
+.data-grid :focus-visible {
+  outline-offset: calc(0px - var(--focus-offset));
+}

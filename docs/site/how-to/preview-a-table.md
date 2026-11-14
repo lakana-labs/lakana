@@ -108,12 +108,18 @@ tabs never start one.
   preview is left waiting for a worker. A
   preview that has finished is not touched. When your browser brings the page back from its
   back-forward cache, the preview runs again.
-- **The rows.** Each value is cut to one line. Move to a cell with Tab and the arrow keys, or click
+- **The rows.** The rows take the whole width of the window, in rows lower than a list's so more
+  of them fit, and scroll in their own area with the column names staying at the top. Numbers
+  are aligned to the right, digit under digit. A muted gutter on the left numbers the rows; the
+  numbers are not part of the data, so cells you select and copy leave them out. Each value is
+  cut to one line. Move to a cell with Tab and the arrow keys, or click
   it, and the **Value** panel below the rows shows it whole. The rows are one stop for Tab: Tab
   enters them and Tab again leaves them, and the arrow keys move between the cells. A value with a
   character you could not see, such as U+202E (right-to-left override), shows that character as a
   small mark with its code, as in [Characters you could not see](see-where-a-table-is-defined.md#in-the-web-interface).
-  Binary data reads as its size, such as "binary, 12 bytes", and a value too large to send is
+  An empty value (SQL NULL) shows as *null* in muted italics on a quiet ground, so it never looks
+  like the text "null"; a screen reader reads it as "SQL null". Binary data reads as its size in the
+  same style, such as "binary, 12 bytes", and a value too large to send is
   marked "(cut)", with a note over the rows.
 - **It counts as a read and a query.** A preview is a query you ran: it is recorded in the audit
   log like any preview, and it counts as a read of the table in **Last read** on Overview.

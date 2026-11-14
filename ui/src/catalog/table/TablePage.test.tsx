@@ -196,7 +196,7 @@ describe("TablePage", () => {
       });
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
-        "gold.sales.fact_sales is no longer in prod; it may have been dropped or renamed.",
+        "There is no table fact_sales in prod › gold.sales. Check the name in the address; if it existed, it may have been dropped or renamed.",
       );
       expect(screen.getByRole("link", { name: "Back to the Catalog" })).toHaveAttribute(
         "href",
@@ -362,6 +362,24 @@ describe("TablePage", () => {
       ]);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("the page's width", () => {
+  it.each([
+    ["", false],
+    ["/columns", false],
+    ["/preview", true],
+    ["/lineage", true],
+    ["/health", false],
+    ["/access", false],
+  ])("uses the whole window for %s: %s", async (tab, wide) => {
+    renderShell(`${PAGE}${tab}`);
+    await tabs();
+
+    const page = document.querySelector(".table-page");
+    expect(page).not.toBeNull();
+    expect(page?.classList.contains("table-page-wide")).toBe(wide);
   });
 });
 

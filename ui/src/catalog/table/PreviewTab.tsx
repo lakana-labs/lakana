@@ -11,8 +11,9 @@ import { useTranslation } from "react-i18next";
 
 import type { MaskedColumnOut, QueryRunStatus, ResultPageOut } from "../../api";
 import { VisibleText } from "../../shell/VisibleText";
+import "../../shell/data-grid.css";
 import { StatusGlyph } from "../../status/StatusGlyph";
-import { type PreviewText, previewValue } from "./previewValue";
+import { isNumberType, type PreviewText, previewValue } from "./previewValue";
 import { useTableData } from "./TableContext";
 import { statusGlyph, usePreview } from "./usePreview";
 
@@ -131,8 +132,9 @@ interface CellTextProps {
 }
 
 /**
- * One cell's text: the value with its invisible characters marked, or the muted words for null
- * and binary, and the mark of a cut value.
+ * One cell's text: the value with its invisible characters marked, or a value marker for SQL NULL
+ * and binary (words that stand for the value, styled so the text "null" never looks like it),
+ * and the mark of a cut value.
  *
  * @param props - The cell.
  * @param props.cell - The cell as text.
@@ -143,7 +145,17 @@ function CellText({ cell }: CellTextProps): JSX.Element {
   return (
     <>
       {cell.muted ? (
-        <span className="preview-muted">{cell.text}</span>
+        <span className="value-marker">
+          {cell.text === t("table.preview.null") ? (
+            // Read as "SQL null", so a screen reader tells it from the text "null" too.
+            <>
+              <span aria-hidden="true">{cell.text}</span>
+              <span className="visually-hidden">{t("table.preview.sqlNull")}</span>
+            </>
+          ) : (
+            cell.text
+          )}
+        </span>
       ) : (
         <VisibleText text={cell.text} />
       )}
@@ -182,8 +194,9 @@ interface PreviewGridProps {
 }
 
 /**
- * The rows as a grid with one tab stop and the arrow keys inside, and the Value panel that shows
- * the focused or clicked cell whole.
+ * The rows as a data grid with one tab stop and the arrow keys inside, and the Value panel that
+ * shows the focused or clicked cell whole. A muted gutter numbers the rows: it is each row's
+ * header for a screen reader, and neither a value nor part of copied cells.
  *
  * @param props - The page, its cells and the table's name.
  * @param props.page - The page.
@@ -208,9 +221,14 @@ function PreviewGrid({ page, cells, name }: PreviewGridProps): JSX.Element {
     const follow = (event: Event): void => {
       // Focus and clicks inside the region always come from an element.
       const target = (event.target as Element).closest("td, th");
-      if (target instanceof HTMLTableCellElement && target.closest("tbody") !== null) {
+      // The gutter, cell 0, is the row's number and not a value.
+      if (
+        target instanceof HTMLTableCellElement &&
+        target.closest("tbody") !== null &&
+        target.cellIndex > 0
+      ) {
         const row = target.parentElement as HTMLTableRowElement;
-        setChosen({ row: row.sectionRowIndex, column: target.cellIndex });
+        setChosen({ row: row.sectionRowIndex, column: target.cellIndex - 1 });
       }
     };
     element.addEventListener("focusin", follow);
@@ -222,22 +240,26 @@ function PreviewGrid({ page, cells, name }: PreviewGridProps): JSX.Element {
   }, []);
   const whole = chosen === null ? undefined : cells[chosen.row]?.[chosen.column];
   const column = chosen === null ? undefined : page.columns[chosen.column];
+  const numbers = page.columns.map((one) => (isNumberType(one.type) ? "number" : undefined));
   return (
     <>
       <div
         ref={region}
-        className="list-scroll preview-scroll"
+        className="data-grid-scroll"
         role="region"
         aria-label={t("table.preview.region", { name })}
       >
-        <Table aria-label={t("table.preview.grid", { name })} className="list preview-grid">
+        <Table aria-label={t("table.preview.grid", { name })} className="data-grid">
           <TableHeader>
+            <Column id="row-number" isRowHeader className="row-number" textValue="#">
+              #
+            </Column>
             {page.columns.map((one, at) => (
               <Column
                 key={at}
                 id={`column-${String(at)}`}
-                isRowHeader={at === 0}
                 textValue={one.name}
+                {...(numbers[at] === undefined ? {} : { className: numbers[at] })}
               >
                 <VisibleText text={one.name} />
               </Column>
@@ -246,8 +268,15 @@ function PreviewGrid({ page, cells, name }: PreviewGridProps): JSX.Element {
           <TableBody>
             {cells.map((row, index) => (
               <Row key={index} id={`row-${String(index)}`}>
+                <Cell className="row-number" textValue={String(index + 1)}>
+                  {index + 1}
+                </Cell>
                 {row.map((cell, at) => (
-                  <Cell key={`${String(index)}-${String(at)}`} textValue={cell.text}>
+                  <Cell
+                    key={`${String(index)}-${String(at)}`}
+                    textValue={cell.text}
+                    {...(numbers[at] === undefined ? {} : { className: numbers[at] })}
+                  >
                     <CellText cell={cell} />
                   </Cell>
                 ))}

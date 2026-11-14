@@ -346,6 +346,8 @@ test.describe("the table page in real Chromium", () => {
     await expect(inside).toHaveCount(1);
     const first = await inside.textContent();
     await page.keyboard.press("ArrowDown");
+    // The row's number, then its first value.
+    await page.keyboard.press("ArrowRight");
     await page.keyboard.press("ArrowRight");
     await expect(inside).toHaveCount(1);
     expect(await inside.textContent()).not.toBe(first);
@@ -353,6 +355,316 @@ test.describe("the table page in real Chromium", () => {
     await expect(stops).toHaveCount(1);
     await page.keyboard.press("Tab");
     expect(await grid.evaluate((node) => node.contains(document.activeElement))).toBe(false);
+  });
+
+  test("the editor keeps the normal field spacing; an empty counter takes no room", async ({
+    page,
+  }) => {
+    await openTable(page);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
+    const look = await page.evaluate(() => {
+      const fields = [...document.querySelectorAll(".text-editor .field")];
+      const first = fields[0];
+      const second = fields[1];
+      const counter = first?.querySelector("[role='status']");
+      const last = first?.lastElementChild;
+      const visible = [...(first?.children ?? [])].filter(
+        (child) => getComputedStyle(child).position !== "absolute",
+      );
+      const end = visible.at(-1)?.getBoundingClientRect().bottom ?? 0;
+      return {
+        counter: counter?.textContent ?? null,
+        counterHeight: counter?.getBoundingClientRect().height ?? -1,
+        lastIsCounter: last === counter,
+        space: (second?.getBoundingClientRect().top ?? 0) - end,
+        margin: parseFloat(first === undefined ? "0" : getComputedStyle(first).marginBottom),
+      };
+    });
+    // The counter is still there for screen readers, empty, and the next field follows after
+    // the field's own margin, nothing more.
+    expect(look.counter).toBe("");
+    expect(look.lastIsCounter).toBe(true);
+    expect(look.counterHeight).toBeLessThanOrEqual(1);
+    expect(Math.abs(look.space - look.margin), `${String(look.space)} px`).toBeLessThanOrEqual(1);
+  });
+
+  test("Preview and Lineage use the whole window; the other tabs keep the reading width", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const widths: Record<string, number> = {};
+    for (const tab of ["", "/columns"]) {
+      await openTable(page, tab);
+      widths[tab || "/"] = (await page.locator(".page").boundingBox())?.width ?? 0;
+    }
+    await openNewTab(page, NEW_TABS[1]);
+    widths["/health"] = (await page.locator(".page").boundingBox())?.width ?? 0;
+    for (const width of Object.values(widths)) {
+      expect(width).toBeLessThanOrEqual(1040);
+    }
+    await openTable(page, "/preview");
+    await previewGrid(page);
+    const preview = page.getByRole("region", { name: "Preview of fact_sales" });
+    const main = (await page.locator(".shell-main").boundingBox())?.width ?? 0;
+    // The window less the sidebar and the main area's own padding on both sides.
+    expect((await preview.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 32 - 2);
+    await openNewTab(page, NEW_TABS[0]);
+    const drawing = page.getByRole("region", { name: "Lineage of fact_sales", exact: true });
+    expect((await drawing.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 32 - 2);
+    // The list under the drawing keeps the reading width.
+    const list = page.locator(".lineage-list-section");
+    expect((await list.boundingBox())?.width ?? 0).toBeLessThanOrEqual(1040);
+  });
+
+  test("the preview grid is dense, aligns numbers, keeps its header in view and numbers its rows", async ({
+    page,
+  }) => {
+    // A page of 60 rows, so the grid scrolls under its header.
+    const rows = Array.from({ length: 60 }, (_, index) => [
+      String(index * 1000 + 7),
+      "****",
+      `note ${String(index)}`,
+      null,
+    ]);
+    await page.route(
+      (url) => url.pathname === `${RUN}/result`,
+      (route) =>
+        route.fulfill({
+          json: {
+            columns: [
+              { name: "sale_id", type: "int64" },
+              { name: "customer_email", type: "string" },
+              { name: "note", type: "string" },
+              { name: "receipt", type: "binary" },
+            ],
+            columns_cut: 0,
+            masked_columns: [],
+            masked_columns_cut: 0,
+            rows,
+            row_cut: [],
+            row_count: 60,
+            next_offset: null,
+            duration_ms: 800,
+            preview: { table: "gold.sales.fact_sales" },
+          },
+        }),
+    );
+    const heights: Record<string, number> = {};
+    await openTable(page);
+    for (const density of ["roomy", "compact"] as const) {
+      await page.evaluate(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme: "dark", density, language: "en" })],
+      );
+      await openTable(page, "/preview");
+      await expect(page.locator("html")).toHaveAttribute("data-density", density);
+      const grid = await previewGrid(page);
+      await expect(grid.getByRole("rowheader")).toHaveCount(60);
+      heights[density] = (await grid.locator("tbody tr").first().boundingBox())?.height ?? 0;
+    }
+    expect(Math.abs((heights.roomy ?? 0) - 32), `roomy ${String(heights.roomy)}`).toBeLessThan(1.5);
+    expect(
+      Math.abs((heights.compact ?? 0) - 26),
+      `compact ${String(heights.compact)}`,
+    ).toBeLessThan(1.5);
+
+    const grid = await previewGrid(page);
+    // Numbers: right-aligned in tabular figures, the header too; text stays on the left.
+    const looks = await grid.evaluate((node) => {
+      const look = (cell: Element | null | undefined): string[] => {
+        const style = cell === null || cell === undefined ? null : getComputedStyle(cell);
+        return [style?.textAlign ?? "", style?.fontVariantNumeric ?? ""];
+      };
+      const row = node.querySelector("tbody tr");
+      return {
+        numberHead: look(node.querySelectorAll("thead th")[1]),
+        numberCell: look(row?.children[1]),
+        textCell: look(row?.children[2]),
+      };
+    });
+    expect(looks.numberHead).toEqual(["right", "tabular-nums"]);
+    expect(looks.numberCell).toEqual(["right", "tabular-nums"]);
+    expect(looks.textCell[0]).not.toBe("right");
+
+    // The header row stays at the top of the region while the rows scroll under it.
+    const region = page.getByRole("region", { name: "Preview of fact_sales" });
+    const tops = await region.evaluate((node) => {
+      node.scrollTop = 400;
+      const head = node.querySelector("thead th");
+      return {
+        scrolled: node.scrollTop,
+        region: node.getBoundingClientRect().top + node.clientTop,
+        head: head?.getBoundingClientRect().top ?? 0,
+      };
+    });
+    expect(tops.scrolled).toBeGreaterThan(0);
+    expect(Math.abs(tops.head - tops.region)).toBeLessThan(1);
+
+    // The row numbers: a muted gutter as narrow as its widest number, the row header, and never
+    // part of copied cells.
+    const gutter = grid.getByRole("rowheader").first();
+    await expect(gutter).toHaveText("1");
+    const narrow = await grid.evaluate((node) => {
+      const cell = node.querySelector("tbody tr:last-child .row-number");
+      const probe = document.createElement("span");
+      probe.textContent = "00";
+      cell?.append(probe);
+      const digits = probe.getBoundingClientRect().width;
+      probe.remove();
+      return { width: cell?.getBoundingClientRect().width ?? 0, digits };
+    });
+    expect(narrow.width, `${String(narrow.width)} px`).toBeLessThanOrEqual(
+      narrow.digits + 2 * 8 + 2,
+    );
+    expect(await gutter.evaluate((node) => getComputedStyle(node).userSelect)).toBe("none");
+    const copied = await grid.evaluate((node) => {
+      const body = node.querySelector("tbody");
+      const range = document.createRange();
+      if (body !== null) {
+        range.selectNodeContents(body);
+      }
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return selection?.toString() ?? "";
+    });
+    expect(copied).toContain("note 0");
+    expect(copied).toContain("7");
+    expect(copied.split("\n")[0]?.trim().startsWith("7")).toBe(true);
+    // A cell the arrow keys move to is never hidden under the sticky header (WCAG 2.4.11): put
+    // row 20 right under the header, so row 19 hides behind it, then press ArrowUp.
+    await grid.getByText("note 19", { exact: true }).click();
+    await region.evaluate((node) => {
+      const head = node.querySelector("thead th")?.getBoundingClientRect().height ?? 0;
+      const row = [...node.querySelectorAll("tbody tr")][19];
+      const top = row?.getBoundingClientRect().top ?? 0;
+      node.scrollTop += top - (node.getBoundingClientRect().top + node.clientTop) - head;
+    });
+    await page.keyboard.press("ArrowUp");
+    await expect(grid.locator(":focus")).toHaveText("note 18");
+    const shown = await region.evaluate((node) => {
+      const head = node.querySelector("thead th")?.getBoundingClientRect().bottom ?? 0;
+      const focused = document.activeElement?.getBoundingClientRect().top ?? 0;
+      return { head, focused };
+    });
+    expect(
+      shown.focused,
+      `${String(shown.focused)} under ${String(shown.head)}`,
+    ).toBeGreaterThanOrEqual(shown.head - 0.5);
+
+    // SQL NULL is a marker that does not look like text, and reads "SQL null".
+    const marker = grid.locator("tbody tr").first().locator(".value-marker");
+    await expect(marker.locator("[aria-hidden='true']")).toHaveText("null");
+    await expect(grid.getByRole("gridcell", { name: "SQL null" }).first()).toBeVisible();
+    const looks2 = await grid.evaluate((node) => {
+      const row = node.querySelector("tbody tr");
+      const text = row?.children[3];
+      const nullMark = row?.querySelector(".value-marker");
+      const style = (one: Element | null | undefined): string[] => {
+        const css = one === null || one === undefined ? null : getComputedStyle(one);
+        return [css?.fontStyle ?? "", css?.backgroundColor ?? "", css?.color ?? ""];
+      };
+      return { text: style(text), marker: style(nullMark) };
+    });
+    expect(looks2.marker).not.toEqual(looks2.text);
+    expect(looks2.marker[0]).toBe("italic");
+    expect(await violations(page), "the dense grid, dark, compact").toEqual([]);
+  });
+
+  for (const width of [1280, 1920]) {
+    test(`at ${String(width)} px no word in Health's tables breaks inside, and nothing says null`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await openNewTab(page, NEW_TABS[1]);
+      const signals = page.getByRole("region", { name: "Health signals" });
+      await expect(signals).toBeVisible();
+      const broken = await page.evaluate(() => {
+        const found: string[] = [];
+        const lines = (node: Node, start: number, end: number): number => {
+          const range = document.createRange();
+          range.setStart(node, start);
+          range.setEnd(node, end);
+          const tops = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+          return tops.size;
+        };
+        // Text for screen readers only is not on any line.
+        const shown = (cell: Element): Text[] => {
+          const texts: Text[] = [];
+          const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+          for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+            if (text.parentElement?.closest(".visually-hidden") === null) {
+              texts.push(text as Text);
+            }
+          }
+          return texts;
+        };
+        const signalTable = document.querySelector("[aria-label='Health signals'] table");
+        // In the signals: a signal's kind, its effect and when it last fired.
+        const short = new Set([0, 5, 6]);
+        for (const cell of document.querySelectorAll(".health-tab th, .health-tab td")) {
+          // Headers and the short columns stay on one line.
+          const whole =
+            cell.tagName === "TH" ||
+            (cell.closest("table") === signalTable &&
+              short.has((cell as HTMLTableCellElement).cellIndex));
+          const texts = shown(cell);
+          const tops = new Set(
+            texts.flatMap((text) => {
+              const range = document.createRange();
+              range.selectNodeContents(text);
+              return [...range.getClientRects()].map((rect) => Math.round(rect.top));
+            }),
+          );
+          if (whole && tops.size > 1) {
+            found.push(`on two lines: ${cell.textContent}`);
+          }
+          for (const text of texts) {
+            const value = text.textContent;
+            for (const word of value.matchAll(/\S+/g)) {
+              if (lines(text, word.index, word.index + word[0].length) > 1) {
+                found.push(`broken: ${word[0]}`);
+              }
+            }
+          }
+        }
+        return found;
+      });
+      expect(broken).toEqual([]);
+      const observed = await signals.locator("tbody tr td:nth-child(4)").allTextContents();
+      expect(observed.length).toBeGreaterThan(1);
+      for (const text of observed) {
+        expect(text).not.toMatch(/null/i);
+      }
+      expect(observed).toContain("54 minutes since the last write");
+      expect(observed).toContain("0 of 3 values empty");
+      // The band in words too, never a raw number of seconds or microseconds.
+      const bands = await signals.locator("tbody tr td:nth-child(5)").allTextContents();
+      expect(bands).toContain("up to 24 hours");
+      expect(bands).toContain("up to 2.0 % empty");
+      for (const text of bands) {
+        expect(text).not.toMatch(/\d{7,}|null|high |low /);
+      }
+      // Every effect is one of the interface's words.
+      const effects = await signals.locator("tbody tr td:nth-child(6)").allTextContents();
+      for (const effect of effects) {
+        expect(["Warns", "Blocks publication", "Off"]).toContain(effect);
+      }
+    });
+  }
+
+  test("at 320 px Health's signals scroll in their own focusable region", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await openNewTab(page, NEW_TABS[1]);
+    const signals = page.getByRole("region", { name: "Health signals" });
+    await expect(signals).toHaveAttribute("tabindex", "0");
+    const sizes = await signals.evaluate((node) => [node.scrollWidth, node.clientWidth]);
+    expect(sizes[0]).toBeGreaterThan(sizes[1] ?? 0);
+    expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+    expect(await violations(page), "Health at 320 px").toEqual([]);
   });
 
   test("compact rows of Columns, Health and Access are lower than roomy rows", async ({ page }) => {
@@ -490,6 +802,7 @@ test.describe("the table page in real Chromium", () => {
     await expect(page.getByRole("status")).toContainText("2 rows · read as you");
     await expect(page.getByText("Masked for you: customer_email")).toBeVisible();
     await expect(grid.getByRole("columnheader")).toHaveText([
+      "#",
       "sale_id",
       "customer_email",
       "note",
@@ -655,6 +968,116 @@ test.describe("the table page in real Chromium", () => {
     expect(sizes.scrollWidth).toBeGreaterThan(sizes.clientWidth);
     expect(await violations(page), "the full-screen region").toEqual([]);
   });
+
+  for (const [width, height] of [
+    [1920, 1080],
+    [1280, 800],
+  ] as const) {
+    test(`at ${String(width)} × ${String(height)} lineage boxes fit their text and the full screen fills the window`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      // A long asset name and a long project, upstream of the table.
+      const root = {
+        id: "table:9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+        kind: "table",
+        name: "gold.sales.fact_sales",
+        distance: 0,
+      };
+      const asset = {
+        id: "asset:analytics-platform-weather-stations/gold.station_ranking_by_region_and_month",
+        kind: "asset",
+        name: "gold.station_ranking_by_region_and_month",
+        distance: 1,
+        repository: "analytics-platform-weather-stations",
+      };
+      await page.route(
+        (url) =>
+          url.pathname === "/api/v1/environments/prod/graph/lineage" &&
+          url.searchParams.get("direction") === "up",
+        (route) =>
+          route.fulfill({
+            json: {
+              nodes: [root, asset],
+              edges: [{ kind: "builds", source: asset.id, target: root.id }],
+              next_cursor: null,
+            },
+          }),
+      );
+      await openNewTab(page, NEW_TABS[0]);
+
+      /**
+       * Reads every box of a drawing: its width, its lines and how far each line reaches.
+       *
+       * @param scope - The drawing's region.
+       * @returns One entry per box.
+       */
+      const boxes = (
+        scope: Locator,
+      ): Promise<{ width: number; title: string; lines: [string, number][] }[]> =>
+        scope.evaluate((node) =>
+          [...node.querySelectorAll<SVGSVGElement>("svg.lineage-box")].map((box) => ({
+            width: Number(box.getAttribute("width")),
+            title: box.querySelector("title")?.textContent ?? "",
+            lines: [...box.querySelectorAll<SVGTextElement>("text")].map(
+              (text) =>
+                [
+                  text.textContent,
+                  (text.x.baseVal[0]?.value ?? 0) + text.getComputedTextLength(),
+                ] as [string, number],
+            ),
+          })),
+        );
+      const check = async (scope: Locator, where: string): Promise<void> => {
+        const drawn = await boxes(scope);
+        expect(drawn.length, where).toBeGreaterThan(2);
+        for (const box of drawn) {
+          expect(box.width, `${where}: ${box.title}`).toBeGreaterThanOrEqual(200);
+          expect(box.width, `${where}: ${box.title}`).toBeLessThanOrEqual(320);
+          for (const [text, reach] of box.lines) {
+            // No line runs past its box's right edge less the text's own margin.
+            expect(reach, `${where}: "${text}"`).toBeLessThanOrEqual(box.width - 10 + 0.5);
+          }
+        }
+        const long = drawn.find((box) => box.title.includes("station_ranking"));
+        expect(long?.width, where).toBe(320);
+        expect(long?.lines[1]?.[0].endsWith("…"), where).toBe(true);
+        expect(long?.title, where).toContain(
+          "gold.station_ranking_by_region_and_month · analytics-platform-weather-stations",
+        );
+        // A name that fits a wider box is whole: the asset that builds daily_sales.
+        const whole = drawn.find((box) => box.title.includes("gold.sales.daily_sales · analytics"));
+        expect(whole?.lines[1]?.[0], where).toBe("asset gold.sales.daily_sales · analytics");
+      };
+      await check(
+        page.getByRole("region", { name: "Lineage of fact_sales", exact: true }),
+        "the tab",
+      );
+
+      await page.getByRole("button", { name: "Full screen" }).click();
+      const dialog = page.getByRole("dialog", { name: "Lineage of fact_sales" });
+      const full = dialog.getByRole("region", { name: "Lineage of fact_sales, full screen" });
+      await expect(full).toBeVisible();
+      await check(full, "full screen");
+      // The dialog covers the window, inside it, with a small margin; Close stays in view.
+      const modal = await page.locator(".lineage-dialog").boundingBox();
+      expect(modal).not.toBeNull();
+      const box = modal ?? { x: 0, y: 0, width: 0, height: 0 };
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x).toBeLessThanOrEqual(24);
+      expect(box.y).toBeLessThanOrEqual(24);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(box.y + box.height).toBeLessThanOrEqual(height);
+      expect(box.x + box.width).toBeGreaterThanOrEqual(width - 24);
+      expect(box.y + box.height).toBeGreaterThanOrEqual(height - 24);
+      const close = await dialog.getByRole("button", { name: "Close" }).boundingBox();
+      expect((close?.y ?? height) + (close?.height ?? 0)).toBeLessThanOrEqual(height);
+      expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+    });
+  }
 
   test("Back and Forward move between tabs and lineage depths", async ({ page }) => {
     await openNewTab(page, NEW_TABS[0]);

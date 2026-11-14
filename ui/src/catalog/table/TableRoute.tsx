@@ -34,6 +34,9 @@ function tabOf(segment: string | undefined): TableTab | null {
   return TABLE_TABS.find((tab) => tab !== "overview" && tab === segment) ?? null;
 }
 
+/** The tabs that show data or a drawing and take the whole window; the others keep the reading width. */
+const WIDE_TABS: ReadonlySet<TableTab> = new Set<TableTab>(["preview", "lineage"]);
+
 /** Properties of {@link TableView}. */
 interface TableViewProps {
   /** The table the address names. */
@@ -57,7 +60,7 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
   const [waiting, setWaiting] = useState(true);
   const { environment, namespace, name } = place;
   return (
-    <div className="table-page">
+    <div className={WIDE_TABS.has(tab) ? "table-page table-page-wide" : "table-page"}>
       <Page
         title={name}
         headingRef={heading}

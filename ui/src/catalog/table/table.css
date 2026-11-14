@@ -1,9 +1,25 @@
 /* A table's page: the label and the line under the heading, the quiet blocks shown while the
    table is read, and the sentence and the way on when it cannot be shown. */
 
-/* Wider than other pages, so that Overview's facts sit on one line each. */
+/* The page's reading width: wider than other pages, so that Overview's facts sit on one line
+   each. */
+.table-page {
+  --table-reading-width: 1040px;
+}
+
 .table-page .page {
-  max-width: 1040px;
+  max-width: var(--table-reading-width);
+}
+
+/* Preview and Lineage show data and a drawing, not text to read: they take the whole window. The
+   lineage list under the drawing keeps the reading width. */
+.table-page-wide .page {
+  max-width: none;
+}
+
+.table-page-wide .lineage-list-section {
+  box-sizing: border-box;
+  max-width: var(--table-reading-width);
 }
 
 .table-page .page-title {
@@ -151,6 +167,20 @@
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
+}
+
+/* The counter under a field: a live region that speaks only near the limit. Empty, it takes no
+   room at all (no margin, out of the flex flow) but stays in the page, so it can still speak. */
+.text-editor .field > [role="status"] {
+  margin: 0;
+}
+
+.text-editor .field > [role="status"]:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
 .text-editor .field [slot="errorMessage"] {
@@ -302,8 +332,8 @@
   user-select: none;
 }
 
-/* The Preview tab: the line and Refresh, then the rows cut to one line each, scrolling in their
-   own region; the Value panel shows the focused or clicked cell whole. */
+/* The Preview tab: the line and Refresh, then the rows in the data grid (shell/data-grid.css);
+   the Value panel shows the focused or clicked cell whole. */
 .preview-bar {
   display: flex;
   flex-wrap: wrap;
@@ -316,19 +346,6 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.preview-grid td,
-.preview-grid th {
-  max-width: 20rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Inside the cell, so the cell's own cut and the region's edge never hide the ring. */
-.preview-grid :focus-visible {
-  outline-offset: calc(0px - var(--focus-offset));
 }
 
 .preview-muted {
@@ -410,13 +427,42 @@
   stroke: var(--color-edge);
 }
 
-/* The full-screen view: the drawing at its natural size, scrolling in its region. */
+/* The full-screen view fills the window but a small margin (inside the safe area of a phone with
+   a notch): the heading, then the drawing at its natural size scrolling in its region, which takes
+   the room left, then Close, always in view. */
+.lineage-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  box-sizing: border-box;
+  padding: max(var(--space-4), env(safe-area-inset-top))
+    max(var(--space-4), env(safe-area-inset-right)) max(var(--space-4), env(safe-area-inset-bottom))
+    max(var(--space-4), env(safe-area-inset-left));
+  background: var(--color-scrim);
+}
+
 .dialog.lineage-dialog {
-  width: 100%;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.lineage-dialog .palette-dialog {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .lineage-full-region {
-  max-height: 75vh;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
   margin-bottom: var(--space-4);
 }
 
@@ -478,10 +524,26 @@
   overflow-wrap: anywhere;
 }
 
-/* The checks scroll in their own region on a narrow screen rather than break a check's name into
-   letters; four short columns need less room than the Catalog's seven. */
+/* The checks and signals scroll in their own region on a narrow screen rather than break a word
+   into pieces: no word breaks inside, an identifier only after "_", "." or "/" (VisibleText's
+   breakable), and the headers and the short columns (a signal's kind, its effect and when it last
+   fired) stay on one line. Four short columns need less room than the Catalog's seven; the
+   signals' seven need more. */
+.health-list td {
+  overflow-wrap: normal;
+}
+
+.health-list th,
+.health-list .one-line {
+  white-space: nowrap;
+}
+
 .list-scroll.checks-scroll .list {
   min-width: 480px;
+}
+
+.list-scroll.signals-scroll .list {
+  min-width: 760px;
 }
 
 /* A status word with its glyph never breaks: "Failed" in three pieces cannot be read. */

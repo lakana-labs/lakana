@@ -27,6 +27,24 @@ const BINARY_TYPE =
 /** The string types, whose cut cells keep a prefix: `{"cut": true, "text": <prefix>}`. */
 const STRING_TYPE = /^(?:string|large_string|string_view|utf8|large_utf8|varchar|text)$/i;
 
+/**
+ * The number types, whose cells a data grid aligns to the right: Arrow's names (`int64`,
+ * `double`, `decimal128(18, 2)`) and the SQL names (`BIGINT`, `DECIMAL(18,3)`), in any case.
+ */
+const NUMBER_TYPE =
+  /^(?:u?int(?:8|16|32|64)|halffloat|float|double|decimal(?:32|64|128|256)?(?:\(.*\))?|u?(?:tiny|small|big|huge)?int(?:eger)?|real|numeric(?:\(.*\))?)$/i;
+
+/**
+ * Whether a column holds numbers, so a data grid aligns its cells to the right in tabular
+ * figures.
+ *
+ * @param columnType - The column's type name.
+ * @returns Whether it is a number type.
+ */
+export function isNumberType(columnType: string): boolean {
+  return NUMBER_TYPE.test(columnType);
+}
+
 /** A union's cell is its member's value, which may be any object, `{"cut": true}` included. */
 const UNION_TYPE = /^(?:sparse_|dense_)?union</i;
 

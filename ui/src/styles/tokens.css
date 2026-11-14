@@ -64,6 +64,8 @@
   --space-8: 64px;
 
   --row-height: 44px;
+  /* A data grid's rows (shell/data-grid.css): denser than a list's, for scanning data. */
+  --grid-row-height: 32px;
   /* The line height in a list's cells: a cell with a second line grows past --row-height, and
      the tighter compact line keeps such a row lower than a roomy one too. */
   --cell-line: var(--type-body-line);
@@ -138,6 +140,7 @@
 /* The compact density is a preference; roomy is the default. */
 :root[data-density="compact"] {
   --row-height: 36px;
+  --grid-row-height: 26px;
   --cell-line: var(--type-dense-line);
 }
 

@@ -98,7 +98,8 @@ line that says so and what to ask for. See
 ## Lineage
 
 Lineage shows where the table's data comes from and where it goes. Its address ends in
-`/lineage`.
+`/lineage`. Like Preview, the drawing takes the whole width of the window; the list under it
+keeps the width of the other tabs.
 
 - **What is drawn.** The tables upstream to the left, the tables downstream to the right, and
   between them the assets that build them, each box naming the job that runs the asset, such as
@@ -111,10 +112,11 @@ Lineage shows where the table's data comes from and where it goes. Its address e
   way. The steps are kept in the address, such as `/lineage?up=2`, so **Back** returns to fewer
   steps and a link opens the same view.
 - **Opening a table.** Press a table's box to open its page, or a table's link in the list
-  below. Jobs and connections are not links yet. A box cuts a long name at its edge; hold the
-  pointer over the box to read its names whole.
-- **Full screen.** **Full screen** shows the same drawing at its natural size in a region that
-  scrolls (press <kbd>Tab</kbd> to focus it, then the arrow keys). **Close** or <kbd>Esc</kbd>
+  below. Jobs and connections are not links yet. A box grows to fit its longest line, up to
+  about 320 px; a longer line ends in "…". Hold the pointer over the box to read its names
+  whole, or read them in the list below.
+- **Full screen.** **Full screen** fills the window with the same drawing at its natural size,
+  in a region that scrolls (press <kbd>Tab</kbd> to focus it, then the arrow keys). **Close** or <kbd>Esc</kbd>
   returns to the tab.
 - **As a list.** Under the drawing, the same tables, assets, jobs and connections are listed in
   words, with each table a link. A large drawing scrolls in its own region: press <kbd>Tab</kbd>
@@ -140,8 +142,12 @@ Health shows everything the Overview's health block sums up. Its address ends in
   narrow screen the checks, like the signals, scroll sideways in their own area, which you can
   reach with <kbd>Tab</kbd> and scroll with the arrow keys.
 - **Signals.** Every signal that watches the table: what it watches (the whole table, or a
-  column), its state, the value it observed, its usual band, its effect (Warns or "Blocks
-  publication") and when it last fired. Under the list, each signal that fired has its sentence,
+  column), its state, the value it observed, in words such as "54 minutes since the last
+  write", "3 rows added, 3 in total", "Nothing loaded" or "0 of 3 values empty", or why there
+  is no value, such as "Paused" or "No figures recorded for this snapshot", its usual band in the same
+  words (such as "up to 24 hours", "900 to 1,100 rows added" or "up to 5.0 % empty", and a range's
+  dates as dates), its effect (Warns, "Blocks publication" or Off) and when it last fired. Words are never broken across lines; when
+  the window is too narrow for the list, it scrolls sideways in its own area. Under the list, each signal that fired has its sentence,
   as on Overview. If a column mask or a row filter applies to you, the observed value and the
   band say "Hidden for you".
 - **Last maintenance.** When the last maintenance that changed the table finished, whether it
@@ -187,8 +193,10 @@ same answer from the command line.
 The name and the breadcrumb always show, so you know which table the address names. Below them,
 the page says why it cannot show the table and what to do next:
 
-- **"… is no longer in … ; it may have been dropped or renamed."** You may read that place, but
-  the table is not there now. Press **Back to the Catalog**.
+- **"There is no table … in … › …. Check the name in the address; if it existed, it may have
+  been dropped or renamed."** You may read that place, but it has no table by that name: the
+  name in the address is misspelt, or the table was dropped or renamed. Lakana gives the same
+  answer for both. Correct the name in the address, or press **Back to the Catalog**.
 - **"You may not read …, or there is no table by that name."** Lakana gives the same answer for
   a table you may not read and for a name that does not exist, so that it does not reveal which
   tables exist. Check the name in the address, or ask an administrator for access. **Back to

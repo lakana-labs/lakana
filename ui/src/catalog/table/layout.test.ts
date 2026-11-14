@@ -5,6 +5,7 @@ import { assetNode, DOWN, graphEdge, graphNode, lineage, ROOT, UP, UP2 } from ".
 import {
   BOX_H,
   BOX_W,
+  BOX_W_MAX,
   COL_GAP,
   depthQuery,
   jobLabel,
@@ -205,6 +206,64 @@ describe("layout", () => {
         y2: asset.y + BOX_H / 2,
       },
     ]);
+  });
+
+  it("makes a column as wide as its widest box, from 200 px up to 320 px", () => {
+    const wanted: Record<string, number> = {
+      "asset:analytics/gold.sales.fact_sales": 260,
+      "table:staging.stg_sales": 500,
+      "connection:pg-sales": 120,
+    };
+    const drawn = layout(UP, ALONE, (one) => wanted[one.node.id] ?? 0);
+    const asset = box(drawn, "asset:analytics/gold.sales.fact_sales");
+    const table = box(drawn, "table:staging.stg_sales");
+    const connection = box(drawn, "connection:pg-sales");
+    const root = box(drawn, ROOT.id);
+
+    // The table and the connection share a column: the wider one, cut at the most.
+    expect(table.width).toBe(BOX_W_MAX);
+    expect(connection.width).toBe(BOX_W_MAX);
+    expect(asset.width).toBe(260);
+    expect(root.width).toBe(BOX_W);
+    expect(table.x).toBe(0);
+    expect(asset.x).toBe(BOX_W_MAX + COL_GAP);
+    expect(root.x).toBe(BOX_W_MAX + COL_GAP + 260 + COL_GAP);
+    expect(drawn.width).toBe(BOX_W_MAX + 260 + BOX_W + 2 * COL_GAP);
+    expect(drawn.edges[0]).toEqual({
+      x1: asset.x + 260,
+      y1: asset.y + BOX_H / 2,
+      x2: root.x,
+      y2: root.y + BOX_H / 2,
+    });
+  });
+
+  it("leaves room for a column no box ended up in, rather than breaking the drawing", () => {
+    // Asset A builds the table and reads U; asset B reads the table and V, and builds U. B is
+    // three steps up but one step down, so it is drawn downstream; V stays four steps up, and
+    // the column three steps up is empty.
+    const a = assetNode("a", 1);
+    const b = assetNode("b", 1);
+    const u = graphNode("table", "s.u", 1);
+    const v = graphNode("table", "s.v", 1);
+    const up = lineage(
+      [a, b, u, v],
+      [
+        graphEdge("builds", a, ROOT),
+        graphEdge("reads", a, u),
+        graphEdge("builds", b, u),
+        graphEdge("reads", b, v),
+        graphEdge("reads", b, ROOT),
+      ],
+    );
+    const drawn = layout(up, ALONE);
+
+    expect(columns(drawn)).toMatchObject({ [v.id]: -4, [b.id]: 1 });
+    expect(drawn.nodes.some((one) => one.column === -3)).toBe(false);
+    expect(Number.isFinite(drawn.width)).toBe(true);
+    for (const one of drawn.nodes) {
+      expect(Number.isFinite(one.x), one.node.id).toBe(true);
+    }
+    expect(box(drawn, ROOT.id).x).toBe(4 * (BOX_W + COL_GAP));
   });
 
   it("draws the table alone when nothing is upstream or downstream", () => {

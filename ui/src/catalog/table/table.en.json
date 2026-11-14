@@ -9,7 +9,7 @@
     "access": "Access"
   },
   "toCatalog": "Back to the Catalog",
-  "notFound": "{{namespace}}.{{name}} is no longer in {{environment}}; it may have been dropped or renamed.",
+  "notFound": "There is no table {{name}} in {{environment}} › {{namespace}}. Check the name in the address; if it existed, it may have been dropped or renamed.",
   "forbidden": "You may not read {{namespace}}.{{name}}, or there is no table by that name. Check the name, or ask an administrator for access.",
   "unavailable": "The table's storage cannot be reached right now. Try again in a moment.",
   "description": {
@@ -133,6 +133,7 @@
   "preview": {
     "region": "Preview of {{name}}",
     "grid": "The first rows of {{name}}",
+    "sqlNull": "SQL null",
     "first": "First {{count}} rows · read as you",
     "rows_one": "{{count}} row · read as you",
     "rows_other": "{{count}} rows · read as you",
@@ -204,6 +205,39 @@
       "nothing": "None",
       "noBand": "No usual band yet",
       "neverFired": "Never",
+      "duration": {
+        "minutes_one": "{{shown}} minute",
+        "minutes_other": "{{shown}} minutes",
+        "hours_one": "{{shown}} hour",
+        "hours_other": "{{shown}} hours",
+        "days_one": "{{shown}} day",
+        "days_other": "{{shown}} days"
+      },
+      "observedWords": {
+        "freshness": "{{duration}} since the last write",
+        "rowsAdded_one": "{{added}} row added",
+        "rowsAdded_other": "{{added}} rows added",
+        "nothingLoaded": "Nothing loaded",
+        "withTotal": "{{first}}, {{total}} in total",
+        "nullRate_one": "{{nulls}} of {{values}} value empty",
+        "nullRate_other": "{{nulls}} of {{values}} values empty",
+        "range": "from {{lower}} to {{upper}}",
+        "columns_one": "{{shown}} column",
+        "columns_other": "{{shown}} columns",
+        "added_one": "{{shown}} added",
+        "added_other": "{{shown}} added",
+        "dropped_one": "{{shown}} dropped",
+        "dropped_other": "{{shown}} dropped",
+        "retyped_one": "{{shown}} changed type",
+        "retyped_other": "{{shown}} changed type"
+      },
+      "bandWords": {
+        "freshness": "up to {{duration}}",
+        "volume_one": "{{low}} to {{high}} row added",
+        "volume_other": "{{low}} to {{high}} rows added",
+        "nullRateUpTo": "up to {{high}} % empty",
+        "nullRate": "{{low}} % to {{high}} % empty"
+      },
       "names": {
         "freshness": "Freshness",
         "volume": "Volume",
@@ -222,6 +256,14 @@
         "warn": "Warns",
         "block": "Blocks publication",
         "off": "Off"
+      },
+      "reasons": {
+        "error": "Could not be worked out for this snapshot",
+        "no_rows": "No rows to judge",
+        "not_finite": "Values too large to judge",
+        "not_recorded": "No figures recorded for this snapshot",
+        "paused": "Paused",
+        "unreadable": "The snapshot could not be read"
       }
     },
     "maintenance": {

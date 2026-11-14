@@ -3,7 +3,7 @@
 //
 // It copies ui/ (without node_modules and reports) and the built interface into a scratch root
 // that mirrors the repository ($GATE_PROBE_DIR, default ~/.cache/lakana-ui-gate-probe), links
-// node_modules, and for each gate writes one violation, runs the gate, and requires a non-zero
+// node_modules and the server sources Vitest reads (SERVER_SOURCES), and for each gate writes one violation, runs the gate, and requires a non-zero
 // exit and the expected text. The ESLint probes share one run (ESLint takes 15-25 s a run): every
 // violation is written at once and each probe's rules must be reported for its own files, under
 // `--max-warnings 0`, so each one alone fails the run. The repository itself is never written to.
@@ -28,6 +28,12 @@ import { sectionsByFile, verdict } from "./gate-verdict.mjs";
 const UI = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = resolve(UI, "..");
 const DIST = "packages/lakana-server/src/lakana_server/ui_dist";
+// Server sources Vitest reads to check that the interface has words for every value the server
+// can send (src/catalog/table/health.test.ts): linked into the mirror, read only.
+const SERVER_SOURCES = [
+  "packages/lakana-core/src/lakana_core/catalog/health_signals.py",
+  "packages/lakana-core/src/lakana_core/catalog/health_record.py",
+];
 const SCRATCH = resolve(
   process.env.GATE_PROBE_DIR ?? join(homedir(), ".cache", "lakana-ui-gate-probe"),
 );
@@ -306,7 +312,12 @@ function prepareScratch() {
     );
     process.exit(1);
   }
-  for (const made of [PROBE_UI, join(SCRATCH, DIST), JSCPD_REPORT]) {
+  for (const made of [
+    PROBE_UI,
+    join(SCRATCH, DIST),
+    join(SCRATCH, "packages/lakana-core"),
+    JSCPD_REPORT,
+  ]) {
     rmSync(made, { recursive: true, force: true });
   }
   mkdirSync(SCRATCH, { recursive: true });
@@ -317,6 +328,10 @@ function prepareScratch() {
   });
   cpSync(join(REPO, DIST), join(SCRATCH, DIST), { recursive: true });
   symlinkSync(join(UI, "node_modules"), join(PROBE_UI, "node_modules"), "dir");
+  for (const source of SERVER_SOURCES) {
+    mkdirSync(dirname(join(SCRATCH, source)), { recursive: true });
+    symlinkSync(join(REPO, source), join(SCRATCH, source), "file");
+  }
 }
 
 /**
