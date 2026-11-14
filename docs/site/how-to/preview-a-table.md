@@ -118,7 +118,7 @@ tabs never start one.
   character you could not see, such as U+202E (right-to-left override), shows that character as a
   small mark with its code, as in [Characters you could not see](see-where-a-table-is-defined.md#in-the-web-interface).
   An empty value (SQL NULL) shows as *null* in muted italics on a quiet ground, so it never looks
-  like the text "null"; a screen reader reads it as "null". Binary data reads as its size in the
+  like the text "null"; a screen reader reads it as "SQL null". Binary data reads as its size in the
   same style, such as "binary, 12 bytes", and a value too large to send is
   marked "(cut)", with a note over the rows.
 - **It counts as a read and a query.** A preview is a query you ran: it is recorded in the audit

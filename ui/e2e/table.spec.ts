@@ -534,9 +534,31 @@ test.describe("the table page in real Chromium", () => {
     expect(copied).toContain("note 0");
     expect(copied).toContain("7");
     expect(copied.split("\n")[0]?.trim().startsWith("7")).toBe(true);
-    // SQL NULL is a marker that does not look like text, and still reads "null".
+    // A cell the arrow keys move to is never hidden under the sticky header (WCAG 2.4.11): put
+    // row 20 right under the header, so row 19 hides behind it, then press ArrowUp.
+    await grid.getByText("note 19", { exact: true }).click();
+    await region.evaluate((node) => {
+      const head = node.querySelector("thead th")?.getBoundingClientRect().height ?? 0;
+      const row = [...node.querySelectorAll("tbody tr")][19];
+      const top = row?.getBoundingClientRect().top ?? 0;
+      node.scrollTop += top - (node.getBoundingClientRect().top + node.clientTop) - head;
+    });
+    await page.keyboard.press("ArrowUp");
+    await expect(grid.locator(":focus")).toHaveText("note 18");
+    const shown = await region.evaluate((node) => {
+      const head = node.querySelector("thead th")?.getBoundingClientRect().bottom ?? 0;
+      const focused = document.activeElement?.getBoundingClientRect().top ?? 0;
+      return { head, focused };
+    });
+    expect(
+      shown.focused,
+      `${String(shown.focused)} under ${String(shown.head)}`,
+    ).toBeGreaterThanOrEqual(shown.head - 0.5);
+
+    // SQL NULL is a marker that does not look like text, and reads "SQL null".
     const marker = grid.locator("tbody tr").first().locator(".value-marker");
-    await expect(marker).toHaveText("null");
+    await expect(marker.locator("[aria-hidden='true']")).toHaveText("null");
+    await expect(grid.getByRole("gridcell", { name: "SQL null" }).first()).toBeVisible();
     const looks2 = await grid.evaluate((node) => {
       const row = node.querySelector("tbody tr");
       const text = row?.children[3];

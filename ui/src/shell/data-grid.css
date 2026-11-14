@@ -4,9 +4,13 @@
    it whole). Numbers sit on the right in tabular figures. The header row and the gutter of row
    numbers stay in view while the grid scrolls both ways inside its own region, so the page never
    scrolls sideways (WCAG 1.4.10). */
+/* The scroll padding keeps a cell the arrow keys move to clear of the sticky header row and the
+   sticky gutter (WCAG 2.4.11): React Aria scrolls it into view inside that padding. */
 .data-grid-scroll {
   max-height: 70vh;
   overflow: auto;
+  scroll-padding-top: var(--grid-row-height);
+  scroll-padding-left: calc(6ch + 2 * var(--space-2));
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
 }
@@ -83,7 +87,9 @@
 
 /* Words that stand for a value, such as SQL NULL or binary's size: muted, italic, on a quiet
    ground, so they never look like the text "null"; a screen reader reads the words. */
+/* Positioned, so its text for screen readers stays inside the grid's region. */
 .value-marker {
+  position: relative;
   padding: 0 var(--space-1);
   border-radius: var(--radius-control);
   background: var(--color-sunk);

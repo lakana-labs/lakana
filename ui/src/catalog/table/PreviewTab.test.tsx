@@ -72,9 +72,16 @@ async function line(): Promise<HTMLElement> {
  */
 function rowText(table: HTMLElement, index: number): (string | null)[] {
   const row = within(table).getAllByRole("row")[index] as HTMLElement;
+  // What a screen reader reads: text hidden from it is left out.
   return Array.from(row.querySelectorAll("td, th"), (cell) => cell)
     .filter((cell) => !cell.classList.contains("row-number"))
-    .map((cell) => cell.textContent);
+    .map((cell) => {
+      const copy = cell.cloneNode(true) as Element;
+      for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+        hidden.remove();
+      }
+      return copy.textContent;
+    });
 }
 
 /** A fake server's answer: a status and a JSON body. */
@@ -538,7 +545,7 @@ describe("PreviewTab", () => {
     });
     const table = await grid();
 
-    expect(rowText(table, 1)).toEqual(["1", "****", "a", "null", "… (cut)"]);
+    expect(rowText(table, 1)).toEqual(["1", "****", "a", "SQL null", "… (cut)"]);
     expect(
       screen.getByText("Some values were too large to send and are marked cut."),
     ).toBeVisible();
@@ -576,7 +583,7 @@ describe("PreviewTab", () => {
       "binary, 12 bytes",
       '{"binary":3,"cut":true}',
     ]);
-    expect(rowText(table, 2)).toEqual(["2", "****", "null", "null", "null"]);
+    expect(rowText(table, 2)).toEqual(["2", "****", "SQL null", "SQL null", "SQL null"]);
   });
 
   it("marks SQL NULL and binary as value markers, never like the text null", async () => {
@@ -595,7 +602,15 @@ describe("PreviewTab", () => {
     // The string "null" is text; SQL NULL and binary's size are markers, still read as words.
     expect(cells[1]?.querySelector(".value-marker")).toBeNull();
     expect(cells[1]).toHaveTextContent("null");
-    expect(cells[2]?.querySelector(".value-marker")).toHaveTextContent(/^null$/);
+    expect(cells[2]?.querySelector(".value-marker [aria-hidden='true']")).toHaveTextContent(
+      /^null$/,
+    );
+    // A screen reader tells SQL NULL from the text: the cells' names differ.
+    expect(within(row).getAllByRole("gridcell", { name: "SQL null" })).toEqual([
+      cells[2],
+      cells[4],
+    ]);
+    expect(within(row).getByRole("gridcell", { name: "null" })).toBe(cells[1]);
     expect(cells[3]?.querySelector(".value-marker")).toHaveTextContent("binary, 12 bytes");
   });
 });

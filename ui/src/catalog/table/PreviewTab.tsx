@@ -145,7 +145,17 @@ function CellText({ cell }: CellTextProps): JSX.Element {
   return (
     <>
       {cell.muted ? (
-        <span className="value-marker">{cell.text}</span>
+        <span className="value-marker">
+          {cell.text === t("table.preview.null") ? (
+            // Read as "SQL null", so a screen reader tells it from the text "null" too.
+            <>
+              <span aria-hidden="true">{cell.text}</span>
+              <span className="visually-hidden">{t("table.preview.sqlNull")}</span>
+            </>
+          ) : (
+            cell.text
+          )}
+        </span>
       ) : (
         <VisibleText text={cell.text} />
       )}
