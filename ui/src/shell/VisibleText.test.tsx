@@ -126,3 +126,22 @@ describe("markedText", () => {
     expect(markedText("")).toBe("");
   });
 });
+
+describe("VisibleText, breakable", () => {
+  it("offers a line break after an underscore, a dot, a comma, a slash and an opening bracket", () => {
+    const { container } = render(<VisibleText text="md5(customer_email.a,b/c)" breakable />);
+
+    expect(container.querySelectorAll("wbr")).toHaveLength(5);
+    expect(container.textContent).toBe("md5(customer_email.a,b/c)");
+    expect(container.innerHTML).toBe("md5(<wbr>customer_<wbr>email.<wbr>a,<wbr>b/<wbr>c)");
+  });
+
+  it("offers none without the flag, and keeps the marks", () => {
+    const { container } = render(<VisibleText text={"a_b‮c"} />);
+    expect(container.querySelector("wbr")).toBeNull();
+
+    const marked = render(<VisibleText text={"a_b‮c"} breakable />).container;
+    expect(marked.querySelectorAll("wbr")).toHaveLength(1);
+    expect(marked.querySelector(".char-mark")?.textContent).toBe("U+202E");
+  });
+});

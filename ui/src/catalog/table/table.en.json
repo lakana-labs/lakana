@@ -170,6 +170,7 @@
     "notJudged": "Not judged yet: the table has no checks or signals.",
     "checks": {
       "heading": "Checks",
+      "region": "Health checks",
       "name": "Check",
       "result": "Result",
       "failingRows": "Failing rows",

@@ -41,7 +41,7 @@ function DescriptionBlock(): JSX.Element {
     returned();
   };
   return (
-    <section className="description">
+    <section className="description flat-panel">
       <h2 className="block-heading" tabIndex={-1} ref={heading}>
         {t("table.description.heading")}
       </h2>
@@ -125,7 +125,7 @@ export function Overview(): JSX.Element {
       <div className="overview-main">
         <DescriptionBlock />
         {table.schema.length > 0 && (
-          <section className="first-columns">
+          <section className="first-columns flat-panel">
             <h2 className="block-heading">{t("table.columns.heading")}</h2>
             <ColumnsTable columns={table.schema.slice(0, FIRST_COLUMNS)} full={false} />
             <Link to={tablePath(environment, namespace, name, "columns")}>

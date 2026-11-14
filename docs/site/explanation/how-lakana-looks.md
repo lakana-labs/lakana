@@ -17,10 +17,12 @@ canoe) travels on:
 
 - a cool, pale ground and ink-navy text, never pure white or pure black;
 - one lake-blue accent, for what you can act on: links, the current place, the primary button;
-- hairlines instead of boxes and shadows (in dark, a floating surface is lighter instead of
-  shadowed);
+- hairlines instead of shadows (in dark, a floating surface is lighter instead of shadowed);
+  where a page has several blocks, each is a flat panel: the surface tint and a hairline, never
+  a shadow;
 - colour kept for state: green for succeeded, red for failed, amber for a warning;
-- light and dark as equals: each is designed and tested, neither is derived from the other;
+- light and dark as equals: each is designed and tested, neither is derived from the other,
+  and the browser's own parts, such as the scrollbars, follow the theme you see;
 - IBM Plex Sans for text and IBM Plex Mono for code and data, served by Lakana itself, so the
   interface makes no request to another site.
 
@@ -44,7 +46,7 @@ control edges 3:1.
 
 | Step | Size and line | Weight | Used for |
 |---|---|---|---|
-| Title | 20 / 28 px | 500 | the page heading |
+| Title | 20 / 28 px | 500 | the page heading, a panel's heading |
 | Section | 15 / 22 px | 500 | a section heading, the product name |
 | Body | 14 / 22 px | 400 | running text |
 | Dense | 13 / 18 px | 400 | secondary lines |
@@ -112,9 +114,11 @@ logo (see `docs/legal/TRADEMARK.md` in the repository).
 ## Density
 
 Roomy is the default: 44 px rows, few columns, and the kind and last change of an object as a
-quiet second line under its name. Compact, with 36 px rows, is a personal setting in the menu
-under your name. Roomy is the default because the interface is for people who do not live in
-it all day; someone who does can choose compact for themselves.
+quiet second line under its name. Compact, with 36 px rows and tighter lines (so a row with a
+second line is lower too), is a personal setting in the menu under your name; it applies to
+every list, the Catalog's and those on a table's page included. Roomy is the default because
+the interface is for people who do not live in it all day; someone who does can choose compact
+for themselves.
 
 ## One pattern for every area
 
@@ -129,7 +133,9 @@ Every area has the same four parts in the same places:
 
 Every object has the same detail page: its name, one row of tabs, Overview first. There are
 at most two levels, the area and then the object with its tabs. Once you know one area, you
-know them all.
+know them all. A tab with several blocks, such as a table's Overview, Lineage list, Health and
+Access, shows each block as a flat panel under its own heading, with more space between the
+panels than inside them; a tab that is one list, such as Columns or Preview, has no panel.
 
 **Rows open their object.** Every row of every list opens its object, and something without a
 detail page is not shown as a row. You can see this before you point at it: the name is in the

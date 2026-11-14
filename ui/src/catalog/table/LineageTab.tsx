@@ -180,8 +180,10 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
       >
         <LineageGraph layout={drawn} environment={ref.environment} />
       </div>
-      <h2 className="block-heading">{t("table.lineage.listHeading")}</h2>
-      <LineageList layout={drawn} edges={edges} environment={ref.environment} />
+      <section className="lineage-list-section flat-panel">
+        <h2 className="block-heading">{t("table.lineage.listHeading")}</h2>
+        <LineageList layout={drawn} edges={edges} environment={ref.environment} />
+      </section>
     </>
   );
 }

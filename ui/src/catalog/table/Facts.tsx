@@ -55,7 +55,7 @@ export function Facts(): JSX.Element {
   const bytes = size === null ? null : formatBytes(size, i18n.language);
   const grain = table.model?.grain ?? null;
   return (
-    <section className="facts">
+    <section className="facts flat-panel">
       <h2 className="block-heading">{t("table.facts.heading")}</h2>
       <dl>
         <Fact term={t("table.facts.owner")}>

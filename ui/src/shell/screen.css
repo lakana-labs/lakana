@@ -79,6 +79,7 @@
 .list td {
   height: var(--row-height);
   padding: var(--space-1) var(--space-3);
+  line-height: var(--cell-line);
   border-bottom: 1px solid var(--color-line);
 }
 
@@ -183,4 +184,38 @@ tr:hover .chevron {
 .field [slot="errorMessage"] {
   color: var(--color-text-muted);
   font-size: var(--type-dense-size);
+}
+
+/* A flat panel: a section set apart by the surface tint and a hairline, never by a shadow
+   (shadows are for floating surfaces only). Panels stand apart by more space than the space
+   inside them; the area that holds them sets the gap. */
+.flat-panel {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+}
+
+/* Inside a panel a list sits closer to what follows it than panels sit to each other. */
+.flat-panel .list {
+  margin-bottom: var(--space-3);
+}
+
+/* After the rule above, so a list that ends a panel has no margin either. */
+.flat-panel > *:last-child {
+  margin-bottom: 0;
+}
+
+/* An empty copy hint keeps no room at the end of a panel; it stays in the page as the live
+   region that says "Select the command" when copying fails. */
+.flat-panel .copy-hint:empty {
+  min-height: 0;
+}
+
+/* Narrow screens: less padding, so a table inside keeps its words whole. */
+@media (max-width: 639.98px) {
+  .flat-panel {
+    padding: var(--space-3);
+  }
 }

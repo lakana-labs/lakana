@@ -74,6 +74,65 @@ function sidewaysOverflow(page: Page): Promise<number> {
   );
 }
 
+/** How a section under an h2 looks: the box around the heading and the room around it. */
+interface PanelLook {
+  readonly heading: string;
+  readonly background: string;
+  readonly ground: string;
+  readonly border: string;
+  readonly shadow: string;
+  readonly headingSize: number;
+  readonly bodySize: number;
+  /** The space to the next section's box; null for the last one. */
+  readonly gapAfter: number | null;
+  /** The largest space between two neighbouring children inside the box. */
+  readonly innerGap: number;
+}
+
+/**
+ * Reads how each section under an h2 in the tab's content looks.
+ *
+ * @param page - The page, showing a tab of the table.
+ * @returns One entry per h2 in the tab.
+ */
+function panelLooks(page: Page): Promise<PanelLook[]> {
+  return page.evaluate(() => {
+    const ground = getComputedStyle(document.body).backgroundColor;
+    const bodySize = parseFloat(getComputedStyle(document.body).fontSize);
+    const tab = document.querySelector(".table-tab");
+    const boxes = [...(tab?.querySelectorAll("h2") ?? [])].map(
+      (heading) => heading.closest("section") ?? heading.parentElement ?? heading,
+    );
+    return boxes.map((box, index) => {
+      const style = getComputedStyle(box);
+      const heading = box.querySelector("h2");
+      const rect = box.getBoundingClientRect();
+      const next = boxes[index + 1]?.getBoundingClientRect();
+      const children = [...box.children].map((child) => child.getBoundingClientRect());
+      let innerGap = 0;
+      for (let i = 0; i + 1 < children.length; i += 1) {
+        const here = children[i];
+        const after = children[i + 1];
+        if (here && after && after.top >= here.bottom) {
+          innerGap = Math.max(innerGap, after.top - here.bottom);
+        }
+      }
+      return {
+        heading: heading?.textContent ?? "",
+        background: style.backgroundColor,
+        ground,
+        border: `${style.borderTopWidth} ${style.borderTopStyle}`,
+        shadow: style.boxShadow,
+        headingSize: heading === null ? 0 : parseFloat(getComputedStyle(heading).fontSize),
+        bodySize,
+        gapAfter:
+          next !== undefined && Math.abs(next.left - rect.left) < 1 ? next.top - rect.bottom : null,
+        innerGap,
+      };
+    });
+  });
+}
+
 for (const theme of ["light", "dark"] as const) {
   for (const density of ["roomy", "compact"] as const) {
     test.describe(`the table page, ${theme}, ${density}`, () => {
@@ -152,8 +211,62 @@ for (const theme of ["light", "dark"] as const) {
         }
       });
 
-      test("Overview fits 1280 × 800 without scrolling for the typical table", async ({ page }) => {
-        await page.setViewportSize({ width: 1280, height: 800 });
+      test("the sections of Overview, Lineage, Health and Access are flat panels; Columns has none", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1920, height: 1080 });
+        await openTable(page);
+        await expect(page.getByText("Check unique_sale_id failed")).toBeVisible();
+        const looks = [...(await panelLooks(page))];
+        for (const entry of NEW_TABS) {
+          await openNewTab(page, entry);
+          const found = await panelLooks(page);
+          expect(found.length, entry[0]).toBeGreaterThan(0);
+          looks.push(...found);
+          if (entry[0] === "/health") {
+            // The Checks panel ends with a command and its empty copy hint: no more room below
+            // the command than the panel's padding and the command line's own margin.
+            const below = await page.evaluate(() => {
+              const panel = document.querySelector(".health-section");
+              const line = panel?.querySelector(".copy-line");
+              const pad = panel === null ? 0 : parseFloat(getComputedStyle(panel).paddingBottom);
+              return {
+                gap:
+                  (panel?.getBoundingClientRect().bottom ?? 0) -
+                  (line?.getBoundingClientRect().bottom ?? 0),
+                allowed: pad + 1 + 12,
+              };
+            });
+            expect(below.gap, JSON.stringify(below)).toBeLessThanOrEqual(below.allowed);
+          }
+        }
+        expect(looks.length).toBeGreaterThanOrEqual(9);
+        for (const look of looks) {
+          const said = JSON.stringify(look);
+          expect(look.background, said).not.toBe(look.ground);
+          expect(look.background, said).not.toBe("rgba(0, 0, 0, 0)");
+          expect(look.border, said).toBe("1px solid");
+          expect(look.shadow, said).toBe("none");
+          expect(look.headingSize - look.bodySize, said).toBeGreaterThanOrEqual(4);
+          if (look.gapAfter !== null) {
+            expect(look.gapAfter, said).toBeGreaterThan(look.innerGap);
+            expect(look.gapAfter, said).toBeGreaterThanOrEqual(24);
+          }
+        }
+
+        await openTable(page, "/columns");
+        const list = page.locator(".table-tab .list").first();
+        await expect(list).toBeVisible();
+        const framed = await list.evaluate((node) => node.closest(".flat-panel") !== null);
+        expect(framed).toBe(false);
+      });
+
+      // Since the flat panels (decided 2026-11-14) Overview needs about 130 px more than 800, and a
+      // 1280 × 800 window may scroll it; it must still fit a 1920 × 1080 window.
+      test("Overview fits 1920 × 1080 without scrolling for the typical table", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1920, height: 1080 });
         await openTable(page);
         await expect(
           page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ }),
@@ -240,6 +353,80 @@ test.describe("the table page in real Chromium", () => {
     await expect(stops).toHaveCount(1);
     await page.keyboard.press("Tab");
     expect(await grid.evaluate((node) => node.contains(document.activeElement))).toBe(false);
+  });
+
+  test("compact rows of Columns, Health and Access are lower than roomy rows", async ({ page }) => {
+    const heights: Record<string, number[]> = {};
+    /**
+     * Records the height of the first row of the tab's first list.
+     *
+     * @param name - The tab's name.
+     */
+    const measure = async (name: string): Promise<void> => {
+      const box = await page.locator(".list tbody tr").first().boundingBox();
+      (heights[name] ??= []).push(box?.height ?? 0);
+    };
+    await openTable(page);
+    for (const density of ["roomy", "compact"] as const) {
+      await page.evaluate(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme: "light", density, language: "en" })],
+      );
+      await openTable(page, "/columns");
+      await expect(page.locator("html")).toHaveAttribute("data-density", density);
+      await measure("Columns");
+      for (const entry of NEW_TABS.slice(1)) {
+        await openNewTab(page, entry);
+        await measure(entry[0]);
+      }
+    }
+    expect(Object.keys(heights)).toHaveLength(3);
+    for (const [name, [roomy, compact]] of Object.entries(heights)) {
+      expect(compact, `${name}: ${String(compact)} against ${String(roomy)}`).toBeLessThan(
+        roomy ?? 0,
+      );
+    }
+  });
+
+  test("at 320 px a status word in Health and Access stays on one line", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    for (const entry of NEW_TABS.slice(1)) {
+      await openNewTab(page, entry);
+      const words = page.locator(".table-tab .glyph-word");
+      await expect(words.first()).toBeVisible();
+      const heights = await words.evaluateAll((nodes) =>
+        nodes.map((node) => [
+          node.textContent,
+          node.getBoundingClientRect().height,
+          parseFloat(getComputedStyle(node).lineHeight),
+        ]),
+      );
+      expect(heights.length, entry[0]).toBeGreaterThan(0);
+      for (const [word, height, line] of heights) {
+        expect(height, `${entry[0]} ${String(word)}`).toBeLessThanOrEqual(Number(line) + 1);
+      }
+      // A list that does not scroll in its own region stays inside its panel.
+      const outside = await page.evaluate(() =>
+        [...document.querySelectorAll(".flat-panel .list")]
+          .filter((list) => list.closest(".list-scroll") === null)
+          .map((list) => {
+            const panel = list.closest(".flat-panel");
+            const right =
+              (panel?.getBoundingClientRect().right ?? 0) -
+              parseFloat(panel === null ? "0" : getComputedStyle(panel).paddingRight);
+            return list.getBoundingClientRect().right - right;
+          })
+          .filter((over) => over > 0.5),
+      );
+      expect(outside, entry[0]).toEqual([]);
+    }
+    // The checks keep their own, narrower minimum, whichever stylesheet loaded first.
+    await openNewTab(page, NEW_TABS[1]);
+    const checks = page.locator(".checks-scroll .list");
+    await expect(checks).toBeVisible();
+    expect(await checks.evaluate((node) => getComputedStyle(node).minWidth)).toBe("480px");
   });
 
   test("no horizontal scroll at 320 px on every tab; wide tables scroll in their own focusable region", async ({

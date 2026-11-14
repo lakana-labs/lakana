@@ -99,7 +99,7 @@ export function ComesFrom({ up, down }: ComesFromProps): JSX.Element {
   const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(answers);
   const failed = up.error ?? down.error;
   return (
-    <section className="comes-from">
+    <section className="comes-from flat-panel">
       {/* Lineage › sits beside the heading, so Overview keeps fitting one screen. */}
       <div className="block-head">
         <h2 className="block-heading" tabIndex={-1} ref={headingRef}>

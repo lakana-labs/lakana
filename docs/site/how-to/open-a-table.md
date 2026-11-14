@@ -136,7 +136,9 @@ Health shows everything the Overview's health block sums up. Its address ends in
   count them) and when it finished. A reference check whose target is a table you may not read is
   not shown; the tab counts them: "2 reference checks are not shown: their target is a table you
   may not read." Every earlier result is a command away: the tab shows
-  `lakana check list --env 'prod' --table 'gold.sales.fact_sales'` with **Copy command**.
+  `lakana check list --env 'prod' --table 'gold.sales.fact_sales'` with **Copy command**. On a
+  narrow screen the checks, like the signals, scroll sideways in their own area, which you can
+  reach with <kbd>Tab</kbd> and scroll with the arrow keys.
 - **Signals.** Every signal that watches the table: what it watches (the whole table, or a
   column), its state, the value it observed, its usual band, its effect (Warns or "Blocks
   publication") and when it last fired. Under the list, each signal that fired has its sentence,

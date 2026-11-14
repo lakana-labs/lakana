@@ -252,123 +252,125 @@ export function CatalogList(): JSX.Element {
   }
 
   return (
-    <Page title={t("areas.catalog.name")}>
-      <div className="catalog">
-        {tree.error !== null && root === null && (
-          <aside className="catalog-side" aria-label={t("catalog.tree")}>
-            <p className="step-error" role={listAlert ? undefined : "alert"}>
-              {tree.error}
-            </p>
-            <Button
-              className="button"
-              onPress={() => {
-                focusAfter.current = "tree";
-                tree.reload();
-              }}
-            >
-              {t("catalog.tryAgain")}
-            </Button>
-          </aside>
-        )}
-        {root !== null && !readsNothing && (
-          <aside className="catalog-side" ref={side}>
-            <CatalogTree root={root} view={view} />
-          </aside>
-        )}
-        <section className="catalog-main" ref={main}>
-          {notice}
-          {notice === null && (
-            <>
-              <CatalogSearch view={view} onSearch={search} />
-              <div className="catalog-bar">
-                <div className="catalog-result-line">
-                  <p className="catalog-result" role="status" tabIndex={-1} ref={resultLine}>
-                    {result}
-                  </p>
-                  {settled && items !== undefined && items.length > 0 && widenButton}
-                </div>
-                <SortControl view={view} onChange={go} />
-              </div>
-              {listAlert && (
-                <>
-                  <p className="step-error" role="alert">
-                    {error}
-                  </p>
-                  <Button className="button" onPress={reload} ref={retry}>
-                    {t("catalog.tryAgain")}
-                  </Button>
-                </>
-              )}
-              {loading && (
-                <div className="skeleton" aria-hidden="true">
-                  {Array.from({ length: SKELETON_ROWS }, (_row, index) => (
-                    <div className="skeleton-row" key={index} />
-                  ))}
-                </div>
-              )}
-              {settled && items !== undefined && items.length === 0 && !busy && view.q !== "" && (
-                <div className="empty">
-                  <p>{t("catalog.noHits", { place, q: view.q })}</p>
-                  {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
-                </div>
-              )}
-              {settled && items !== undefined && items.length === 0 && !busy && view.q === "" && (
-                <div className="empty">
-                  <p>
-                    {t("catalog.empty.text", {
-                      place: view.namespace ?? view.environment ?? t("catalog.place.all"),
-                    })}
-                  </p>
-                  <CopyLine
-                    text={`lakana deploy --env ${view.environment ?? "dev"}`}
-                    copyLabel={t("catalog.empty.copy")}
-                  />
-                  <p>
-                    <a href={TUTORIAL_URL} target="_blank" rel="noreferrer">
-                      {t("catalog.empty.tutorial")}
-                      <span className="visually-hidden"> {t("home.newTab")}</span>
-                    </a>
-                  </p>
-                </div>
-              )}
-              {settled && items !== undefined && items.length > 0 && (
-                <>
-                  <TableList
-                    items={items}
-                    view={view}
-                    busy={busy && !hasMore}
-                    onSort={(sort) => {
-                      go(sortedBy(view, sort));
-                    }}
-                  />
-                  {capped && (
-                    <p className="page-purpose">
-                      {t("catalog.result.capped", { count: SEARCH_CAP })}
+    <div className="catalog-page">
+      <Page title={t("areas.catalog.name")}>
+        <div className="catalog">
+          {tree.error !== null && root === null && (
+            <aside className="catalog-side" aria-label={t("catalog.tree")}>
+              <p className="step-error" role={listAlert ? undefined : "alert"}>
+                {tree.error}
+              </p>
+              <Button
+                className="button"
+                onPress={() => {
+                  focusAfter.current = "tree";
+                  tree.reload();
+                }}
+              >
+                {t("catalog.tryAgain")}
+              </Button>
+            </aside>
+          )}
+          {root !== null && !readsNothing && (
+            <aside className="catalog-side" ref={side}>
+              <CatalogTree root={root} view={view} />
+            </aside>
+          )}
+          <section className="catalog-main" ref={main}>
+            {notice}
+            {notice === null && (
+              <>
+                <CatalogSearch view={view} onSearch={search} />
+                <div className="catalog-bar">
+                  <div className="catalog-result-line">
+                    <p className="catalog-result" role="status" tabIndex={-1} ref={resultLine}>
+                      {result}
                     </p>
-                  )}
-                  {error !== null && (
+                    {settled && items !== undefined && items.length > 0 && widenButton}
+                  </div>
+                  <SortControl view={view} onChange={go} />
+                </div>
+                {listAlert && (
+                  <>
                     <p className="step-error" role="alert">
                       {error}
                     </p>
-                  )}
-                  {hasMore && (
-                    <PendingButton
-                      className="button"
-                      pending={busy}
-                      onPress={() => {
-                        focusFrom.current = items.length;
-                        void loadMore();
+                    <Button className="button" onPress={reload} ref={retry}>
+                      {t("catalog.tryAgain")}
+                    </Button>
+                  </>
+                )}
+                {loading && (
+                  <div className="skeleton" aria-hidden="true">
+                    {Array.from({ length: SKELETON_ROWS }, (_row, index) => (
+                      <div className="skeleton-row" key={index} />
+                    ))}
+                  </div>
+                )}
+                {settled && items !== undefined && items.length === 0 && !busy && view.q !== "" && (
+                  <div className="empty">
+                    <p>{t("catalog.noHits", { place, q: view.q })}</p>
+                    {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
+                  </div>
+                )}
+                {settled && items !== undefined && items.length === 0 && !busy && view.q === "" && (
+                  <div className="empty">
+                    <p>
+                      {t("catalog.empty.text", {
+                        place: view.namespace ?? view.environment ?? t("catalog.place.all"),
+                      })}
+                    </p>
+                    <CopyLine
+                      text={`lakana deploy --env ${view.environment ?? "dev"}`}
+                      copyLabel={t("catalog.empty.copy")}
+                    />
+                    <p>
+                      <a href={TUTORIAL_URL} target="_blank" rel="noreferrer">
+                        {t("catalog.empty.tutorial")}
+                        <span className="visually-hidden"> {t("home.newTab")}</span>
+                      </a>
+                    </p>
+                  </div>
+                )}
+                {settled && items !== undefined && items.length > 0 && (
+                  <>
+                    <TableList
+                      items={items}
+                      view={view}
+                      busy={busy && !hasMore}
+                      onSort={(sort) => {
+                        go(sortedBy(view, sort));
                       }}
-                    >
-                      {t("catalog.showMore")}
-                    </PendingButton>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </section>
-      </div>
-    </Page>
+                    />
+                    {capped && (
+                      <p className="page-purpose">
+                        {t("catalog.result.capped", { count: SEARCH_CAP })}
+                      </p>
+                    )}
+                    {error !== null && (
+                      <p className="step-error" role="alert">
+                        {error}
+                      </p>
+                    )}
+                    {hasMore && (
+                      <PendingButton
+                        className="button"
+                        pending={busy}
+                        onPress={() => {
+                          focusFrom.current = items.length;
+                          void loadMore();
+                        }}
+                      >
+                        {t("catalog.showMore")}
+                      </PendingButton>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      </Page>
+    </div>
   );
 }

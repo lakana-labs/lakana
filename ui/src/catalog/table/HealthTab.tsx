@@ -94,7 +94,7 @@ function Checks({ health }: HealthProps): JSX.Element {
     return (
       <tr key={check.name}>
         <td>
-          <VisibleText text={check.name} />
+          <VisibleText text={check.name} breakable />
         </td>
         <td>
           <span className="glyph-word">
@@ -121,24 +121,33 @@ function Checks({ health }: HealthProps): JSX.Element {
     );
   };
   return (
-    <section className="health-section">
+    <section className="health-section flat-panel">
       <h2 className="block-heading">{t("table.healthTab.checks.heading")}</h2>
       {health.checks.length === 0 ? (
         <p className="second">{t("table.healthTab.checks.none")}</p>
       ) : (
-        <table className="list list-static">
-          <thead>
-            <tr>
-              <th scope="col">{t("table.healthTab.checks.name")}</th>
-              <th scope="col">{t("table.healthTab.checks.result")}</th>
-              <th scope="col" className="number">
-                {t("table.healthTab.checks.failingRows")}
-              </th>
-              <th scope="col">{t("table.healthTab.checks.finished")}</th>
-            </tr>
-          </thead>
-          <tbody>{health.checks.map(row)}</tbody>
-        </table>
+        <div
+          className="list-scroll checks-scroll"
+          role="region"
+          aria-label={t("table.healthTab.checks.region")}
+          // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+          tabIndex={0}
+        >
+          <table className="list list-static">
+            <thead>
+              <tr>
+                <th scope="col">{t("table.healthTab.checks.name")}</th>
+                <th scope="col">{t("table.healthTab.checks.result")}</th>
+                <th scope="col" className="number">
+                  {t("table.healthTab.checks.failingRows")}
+                </th>
+                <th scope="col">{t("table.healthTab.checks.finished")}</th>
+              </tr>
+            </thead>
+            <tbody>{health.checks.map(row)}</tbody>
+          </table>
+        </div>
       )}
       {health.hidden_checks > 0 && (
         <p className="second">
@@ -230,7 +239,7 @@ function Signals({ health }: HealthProps): JSX.Element {
   const lines = firedLines({ ...health, checks: [] }, t);
   const columns = ["signal", "column", "state", "observed", "band", "effect", "lastFired"];
   return (
-    <section className="health-section">
+    <section className="health-section flat-panel">
       <h2 className="block-heading">{t("table.healthTab.signals.heading")}</h2>
       {health.signals.length === 0 ? (
         <p className="second">{t("table.healthTab.signals.none")}</p>
@@ -294,7 +303,7 @@ function Maintenance({ health }: HealthProps): JSX.Element {
     </div>
   );
   return (
-    <section className="health-section">
+    <section className="health-section flat-panel">
       <h2 className="block-heading">{t("table.healthTab.maintenance.heading")}</h2>
       {last === null ? (
         <p className="second">{t("table.healthTab.maintenance.none")}</p>
@@ -388,7 +397,7 @@ function Readers({ health, refused }: HealthProps & { readonly refused: boolean 
     );
   }
   return (
-    <section className="health-section" id="readers">
+    <section className="health-section flat-panel" id="readers">
       <h2 className="block-heading" tabIndex={-1} ref={heading}>
         {t("table.healthTab.readers.heading")}
       </h2>

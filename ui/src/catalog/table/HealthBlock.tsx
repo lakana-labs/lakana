@@ -98,7 +98,7 @@ export function HealthBlock({ summary, resource }: HealthBlockProps): JSX.Elemen
   const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(resource.data);
   const details = tablePath(ref.environment, ref.namespace, ref.name, "health");
   return (
-    <section className="health-block">
+    <section className="health-block flat-panel">
       {/* Health details › sits beside the heading, so Overview keeps fitting one screen. */}
       <div className="block-head">
         <h2 className="block-heading" tabIndex={-1} ref={headingRef}>

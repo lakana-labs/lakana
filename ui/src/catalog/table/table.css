@@ -1,7 +1,7 @@
 /* A table's page: the label and the line under the heading, the quiet blocks shown while the
    table is read, and the sentence and the way on when it cannot be shown. */
 
-/* Wider than other pages, so that Overview's facts sit on one line each and it fits 1280 × 800. */
+/* Wider than other pages, so that Overview's facts sit on one line each. */
 .table-page .page {
   max-width: 1040px;
 }
@@ -59,7 +59,7 @@
 }
 
 /* Overview: description, columns and health on the left, facts and lineage on the right from
-   1024 px; one column below. Blocks sit under plain headings and hairlines, never cards. */
+   1024 px; one column below. Each block is a flat panel (screen.css), 24 px apart. */
 .overview {
   display: grid;
   gap: var(--space-6);
@@ -76,25 +76,22 @@
 .overview-side {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
   min-width: 0;
 }
 
-.overview section > *:last-child {
-  margin-bottom: 0;
-}
-
 /* The first columns are a glance, not a work surface: lower rows than the full list, so that
-   Overview fits a 1280 × 800 window in either density. */
+   Overview stays short. */
 .first-columns .list td {
   height: 28px;
 }
 
+/* A panel's heading: the title step, so it stands clearly above the text inside. */
 .block-heading {
   margin: 0 0 var(--space-2);
-  font-size: var(--type-section-size);
-  line-height: var(--type-section-line);
-  font-weight: var(--type-section-weight);
+  font-size: var(--type-title-size);
+  line-height: var(--type-title-line);
+  font-weight: var(--type-title-weight);
 }
 
 /* A block's heading with a link to more beside it. */
@@ -365,6 +362,10 @@
   border-radius: var(--radius-panel);
 }
 
+.lineage-list-section {
+  margin-top: var(--space-5);
+}
+
 .lineage-region:focus-visible,
 .lineage:focus-visible {
   outline: var(--focus-ring);
@@ -450,7 +451,7 @@
   }
 }
 
-/* Health and Access: plain sections under headings, one after the other. */
+/* Health and Access: flat panels (screen.css), one after the other, 24 px apart. */
 .health-tab,
 .access-tab {
   display: flex;
@@ -463,7 +464,6 @@
   outline: none;
 }
 
-.health-section > *:last-child,
 .access-section > *:last-child {
   margin-bottom: 0;
 }
@@ -478,10 +478,18 @@
   overflow-wrap: anywhere;
 }
 
+/* The checks scroll in their own region on a narrow screen rather than break a check's name into
+   letters; four short columns need less room than the Catalog's seven. */
+.list-scroll.checks-scroll .list {
+  min-width: 480px;
+}
+
+/* A status word with its glyph never breaks: "Failed" in three pieces cannot be read. */
 .glyph-word {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  white-space: nowrap;
 }
 
 .expression,

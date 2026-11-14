@@ -21,7 +21,12 @@ From `ui/src/styles/tokens.css`, always as `var(--…)`:
   dense, data, code, label), never below 12 px; `--font-sans` (IBM Plex Sans) and `--font-mono`.
   A literal `font-weight` may be 400 or 500, the two weights bundled.
 - **Spacing.** Padding, margin and gaps between elements from `--space-1`…`--space-8`
-  (4–64 px). Row height `--row-height` (44 px roomy, 36 px compact).
+  (4–64 px). Row height `--row-height` (44 px roomy, 36 px compact) and a list cell's line `--cell-line`
+  (the body line roomy, the dense line compact).
+- **Flat panels.** A block among several on a page is `.flat-panel` (`ui/src/shell/screen.css`):
+  `--color-surface`, a `--color-line` hairline, `--radius-panel`, `--space-4` padding, no
+  shadow; its heading is the title step; the page sets 24 px between panels. Reuse the class,
+  never a copy of it.
 - **Radii** `--radius-control` (4 px), `--radius-panel` (6 px) and `--radius-round` (a person's
   circle: picture or initials); **shadow** only
   `--shadow-float`, only on floating surfaces (menus, the palette, dialogs).

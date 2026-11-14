@@ -302,6 +302,46 @@ test.describe("the Catalog in real Chromium", () => {
       .toEqual(["/catalog?env=prod&q=store&sort=rows", "store", "prod, 3 tables", "Rows▾"]);
   });
 
+  test("at 1280 × 800 every column of the list is visible without scrolling the list", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openCatalog(page);
+    const region = page.getByRole("region", { name: "Tables" });
+    await expect(page.locator("tbody tr")).not.toHaveCount(0);
+
+    const sizes = await region.evaluate((node) => [node.scrollWidth, node.clientWidth]);
+    expect(sizes[0], "the list's width against its region's").toBeLessThanOrEqual(sizes[1] ?? 0);
+    const box = await region.boundingBox();
+    const headers = page.getByRole("columnheader");
+    await expect(headers).toHaveCount(8);
+    for (const header of await headers.all()) {
+      const cell = await header.boundingBox();
+      expect(cell, await header.innerText()).not.toBeNull();
+      expect((cell?.x ?? 0) + (cell?.width ?? 0), await header.innerText()).toBeLessThanOrEqual(
+        (box?.x ?? 0) + (box?.width ?? 0) + 0.5,
+      );
+    }
+  });
+
+  test("compact rows are lower than roomy rows", async ({ page }) => {
+    const heights: number[] = [];
+    await openCatalog(page);
+    for (const density of ["roomy", "compact"] as const) {
+      await page.evaluate(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme: "light", density, language: "en" })],
+      );
+      await openCatalog(page);
+      await expect(page.locator("html")).toHaveAttribute("data-density", density);
+      const row = await page.locator("tbody tr").first().boundingBox();
+      heights.push(row?.height ?? 0);
+    }
+    expect(heights[1], heights.join(" against ")).toBeLessThan(heights[0] ?? 0);
+  });
+
   test("no horizontal scroll at 320 px; the list scrolls in its own focusable region", async ({
     page,
   }) => {

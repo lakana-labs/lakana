@@ -5,6 +5,8 @@
  */
 
 :root {
+  /* The browser's own parts (scrollbars, a control's popup) follow the theme too. */
+  color-scheme: light;
   --color-ground: #e8eef1;
   --color-surface: #f2f6f8;
   --color-sunk: #dde5e9;
@@ -62,6 +64,9 @@
   --space-8: 64px;
 
   --row-height: 44px;
+  /* The line height in a list's cells: a cell with a second line grows past --row-height, and
+     the tighter compact line keeps such a row lower than a roomy one too. */
+  --cell-line: var(--type-body-line);
   --radius-control: 4px;
   --radius-panel: 6px;
   --radius-round: 50%;
@@ -78,6 +83,7 @@
 /* Dark follows the system unless the user chose light; data-theme="dark" forces it. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --color-ground: #0f171c;
     --color-surface: #151f26;
     --color-sunk: #0b1216;
@@ -104,6 +110,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --color-ground: #0f171c;
   --color-surface: #151f26;
   --color-sunk: #0b1216;
@@ -131,6 +138,7 @@
 /* The compact density is a preference; roomy is the default. */
 :root[data-density="compact"] {
   --row-height: 36px;
+  --cell-line: var(--type-dense-line);
 }
 
 @media (prefers-reduced-motion: reduce) {
