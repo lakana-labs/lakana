@@ -2,17 +2,17 @@
    line and the sort, the table that scrolls on its own, the health word and the skeleton shown
    while the first page loads. */
 /* Wider than other pages, so the list takes the width beside the tree: its seven columns fit
-   without scrolling from a 1280 px window on, and from about 1600 px each cell stays on one line.
-   Wider than a table's page (1040 px), whose facts read as one block; past 1280 px the columns
-   would only drift apart. */
+   without scrolling from a 1280 px window on, where only a long name or owner wraps. Wider than a
+   table's page (1040 px), whose facts read as one block; past 1280 px the columns would only
+   drift apart. */
 .catalog-page .page {
   max-width: 1280px;
 }
 
 .catalog {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: var(--space-6);
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-5);
   align-items: start;
 }
 
@@ -177,10 +177,10 @@
   outline-offset: var(--focus-offset);
 }
 
-/* No narrower than this, so names and times do not break into pieces on a narrow screen; still
-   below the 729 px the list has beside the tree in a 1280 px window with a classic scrollbar. */
+/* No narrower than this, so names do not break into pieces on a narrow screen; still below the
+   777 px the list has beside the tree in a 1280 px window with a classic scrollbar. */
 .list-scroll .list {
-  min-width: 720px;
+  min-width: 760px;
 }
 
 .list-scroll .row-name {
@@ -258,4 +258,12 @@ th[aria-sort] .sort-head {
 .empty p a:hover {
   color: var(--color-accent-hover);
   text-decoration: underline;
+}
+
+/* A time, a size, a count and a health word are short: each stays on one line, and a long name
+   wraps instead. */
+.catalog-list .number,
+.catalog-list time,
+.catalog-list .health-text {
+  white-space: nowrap;
 }
