@@ -96,6 +96,7 @@ from lakana_core.projects.checks import CheckSpec
 from lakana_core.query_rewrite import TableSource, rewrite_query
 from lakana_core.runs.check_rows import submit_check_rows
 from lakana_core.runs.checks import (
+    CHECK_RESULT_REMOVED,
     CHECK_ROWS_SQL_REFUSED,
     check_rows_query_failed_message,
     check_rows_sql_text,
@@ -1277,6 +1278,31 @@ def test_a_mask_that_differs_from_a_shown_column_only_in_case_is_not_skipped(
     assert sources["gold.orders"].column_masks == {"EMAIL": "'***'"}
     with pytest.raises(ValidationError, match="unknown column 'EMAIL'"):
         rewrite_query("SELECT * FROM gold.orders", sources)
+
+
+def test_a_result_gone_after_the_query_started_fails_the_read_before_any_table(
+    session: Session, admin: PrincipalRef
+) -> None:
+    """The worker reads the result again with the tables: a result gone meanwhile is refused.
+
+    The query run's start already read the check's SQL by the result (`check_rows_sql`); a new
+    attempt of the check's task can remove the result before the tables are resolved.
+    """
+    result = _failed_run(session, admin)
+    ana = reader(session, admin, "ana", "orders")
+    session.execute(delete(CheckResult).where(CheckResult.id == result.id))
+    session.commit()
+
+    with pytest.raises(CheckResultGoneError) as gone:
+        _resolve_sources(
+            session,
+            "dev",
+            ana,
+            ["gold.orders"],
+            GrantAuthorization(session),
+            check_result_id=result.id,
+        )
+    assert str(gone.value) == CHECK_RESULT_REMOVED
 
 
 _BINDER = (

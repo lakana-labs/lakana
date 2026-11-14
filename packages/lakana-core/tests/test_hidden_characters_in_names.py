@@ -279,3 +279,25 @@ def test_an_external_table_refuses_a_hidden_character_in_a_column_of_its_files(
         )
     with pytest.raises(NotFoundError):
         catalog.load_table(principal, events)
+
+
+def test_a_map_columns_key_and_value_names_are_checked() -> None:
+    """Every nested field is walked: struct, list element, map key and value."""
+    from pyiceberg.types import MapType
+
+    schema = Schema(
+        NestedField(
+            1,
+            "tags",
+            MapType(2, StringType(), 3, StructType(NestedField(4, f"v{_RLO}", LongType()))),
+            required=False,
+        )
+    )
+    with pytest.raises(ValidationError, match=r"Column name 'v\\u202e'"):
+        build_table_metadata(
+            schema=schema,
+            location="file:///x",
+            partition_spec=None,
+            sort_order=None,
+            properties={},
+        )

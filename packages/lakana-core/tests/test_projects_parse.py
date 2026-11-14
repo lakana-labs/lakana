@@ -534,6 +534,22 @@ def test_a_readers_path_is_reported_so_it_never_passes_as_a_table(
     assert sql_file_references(sql, []) == expected
 
 
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT * FROM LATERAL main.read_csv('a.csv')", {"a.csv"}),
+        ("SELECT * FROM t, LATERAL x", {"lateral"}),
+        ("SELECT * FROM ROWS FROM (read_csv('a.csv'))", {"rows from", "a.csv"}),
+        ('SELECT * FROM ""', set()),
+    ],
+)
+def test_odd_from_items_are_reported_by_what_they_call(sql: str, expected: set[str]) -> None:
+    """A schema-qualified `LATERAL` call, a `LATERAL` without a call and `ROWS FROM`."""
+    from lakana_core.projects.parse import sql_file_references
+
+    assert sql_file_references(sql, []) == expected
+
+
 def test_the_file_form_of_from_is_a_file_reference_by_its_path() -> None:
     """``FROM 'file.parquet'`` passes the guard and is reported as written, as before."""
     from lakana_core.projects.parse import sql_file_references

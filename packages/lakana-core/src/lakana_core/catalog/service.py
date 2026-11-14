@@ -4336,15 +4336,16 @@ class CatalogService:
             return replace(described, sql=None)
         # Each reference by its id, as a `TableRef`: its dotted name read again would split a
         # namespace part that holds a "." and miss the table and its policies.
+        # `_describe_row` gave the SQL only after it found every reference by its id in this
+        # session, so each lookup finds its row (`one`: a row gone meanwhile fails the request).
         current_refs: list[object] = []
         for reference_id, _ in described.references:
-            current = self._session.get(Table, uuid.UUID(reference_id))
-            if current is None:
-                return self._restricted_view_sql(described)
-            path = self._session.execute(
-                select(Namespace.path).where(Namespace.id == current.namespace_id)
-            ).scalar_one()
-            current_refs.append(TableRef(ref.environment, NamespacePath.parse(path), current.name))
+            name, path = self._session.execute(
+                select(Table.name, Namespace.path)
+                .join(Namespace, Namespace.id == Table.namespace_id)
+                .where(Table.id == uuid.UUID(reference_id))
+            ).one()
+            current_refs.append(TableRef(ref.environment, NamespacePath.parse(path), name))
         stored = [name for _, name in described.references]
         if not passes_content_gate(
             self._session,

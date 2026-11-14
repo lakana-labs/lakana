@@ -202,9 +202,10 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
         elif isinstance(item, exp.Table) and any(
             not isinstance(part, exp.Identifier) or "." in part.name for part in item.parts
         ):
-            dotted = _dotted_table_name(item)
-            if dotted:
-                found.add(dotted)
+            found.add(_dotted_table_name(item))
+    # A part outside an `Identifier` comes from a function call, which the branch above takes,
+    # so a name reached here holds a "." and is never empty; an empty one is never reported.
+    found.discard("")
     return found
 
 
