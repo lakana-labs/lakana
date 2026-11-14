@@ -44,8 +44,13 @@ function sent(server: FakeServer, method: string, part: string): string[] {
  *
  * @returns The grid.
  */
-function grid(): Promise<HTMLElement> {
-  return screen.findByRole("grid", { name: "The first rows of fact_sales" });
+async function grid(): Promise<HTMLElement> {
+  const table = await screen.findByRole("grid", { name: "The first rows of fact_sales" });
+  // The grid can arrive a render before its rows do; under load a test read it in between.
+  await waitFor(() => {
+    expect(within(table).getAllByRole("row").length).toBeGreaterThan(0);
+  });
+  return table;
 }
 
 /**
