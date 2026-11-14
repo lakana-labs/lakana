@@ -3,7 +3,10 @@
   "tabs": {
     "overview": "Overview",
     "columns": "Columns",
-    "preview": "Preview"
+    "preview": "Preview",
+    "lineage": "Lineage",
+    "health": "Health",
+    "access": "Access"
   },
   "toCatalog": "Back to the Catalog",
   "notFound": "{{namespace}}.{{name}} is no longer in {{environment}}; it may have been dropped or renamed.",
@@ -73,7 +76,8 @@
     "readers_one": "{{count}} reader in the last 7 days",
     "readers_other": "{{count}} readers in the last 7 days",
     "created": "Created",
-    "grain": "Grain"
+    "grain": "Grain",
+    "readersLink": "Readers ›"
   },
   "definedIn": {
     "term": "Defined in",
@@ -114,7 +118,8 @@
       "range": "Values in {{column}} are outside their usual band.",
       "schema": "The table's columns changed.",
       "unknown": "The {{signal}} signal fired."
-    }
+    },
+    "details": "Health details ›"
   },
   "comes": {
     "heading": "Comes from · goes to",
@@ -122,7 +127,8 @@
     "to": "Goes to",
     "nothingUp": "Nothing upstream.",
     "nothingDown": "Nothing downstream.",
-    "more": "and {{count}} more"
+    "more": "and {{count}} more",
+    "lineage": "Lineage ›"
   },
   "preview": {
     "region": "Preview of {{name}}",
@@ -158,5 +164,165 @@
     "value": "Value",
     "valueOf": "{{column}}, row {{row}}",
     "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here."
-  }
+  },
+  "healthTab": {
+    "reading": "Reading the health…",
+    "notJudged": "Not judged yet: the table has no checks or signals.",
+    "checks": {
+      "heading": "Checks",
+      "name": "Check",
+      "result": "Result",
+      "failingRows": "Failing rows",
+      "finished": "Finished",
+      "none": "No check has run on this table yet.",
+      "notCounted": "Not counted",
+      "hidden_one": "{{count}} reference check is not shown: its target is a table you may not read.",
+      "hidden_other": "{{count}} reference checks are not shown: their target is a table you may not read.",
+      "history": "Every result of every check, in a terminal:",
+      "copy": "Copy command",
+      "outcome": {
+        "passed": "Passed",
+        "failed": "Failed",
+        "warned": "Warned",
+        "errored": "Could not run"
+      }
+    },
+    "signals": {
+      "heading": "Signals",
+      "region": "Health signals",
+      "signal": "Signal",
+      "column": "Column",
+      "state": "State",
+      "observed": "Observed",
+      "band": "Usual band",
+      "effect": "Effect",
+      "lastFired": "Last fired",
+      "none": "No signal watches this table yet.",
+      "wholeTable": "Whole table",
+      "hidden": "Hidden for you",
+      "nothing": "None",
+      "noBand": "No usual band yet",
+      "neverFired": "Never",
+      "names": {
+        "freshness": "Freshness",
+        "volume": "Volume",
+        "null_rate": "Empty values",
+        "range": "Range",
+        "schema": "Columns"
+      },
+      "states": {
+        "ok": "Within its band",
+        "fired": "Fired",
+        "no_history": "Not judged yet: too little history",
+        "no_metrics": "Not judged: no figures recorded",
+        "off": "Off"
+      },
+      "effects": {
+        "warn": "Warns",
+        "block": "Blocks publication",
+        "off": "Off"
+      }
+    },
+    "maintenance": {
+      "heading": "Last maintenance",
+      "none": "No maintenance has changed this table yet.",
+      "finished": "Finished",
+      "status": "Status",
+      "snapshots": "Snapshots expired",
+      "files": "Files deleted",
+      "filesSize": "{{count}} ({{size}})",
+      "tags": "Tags of failed checks removed",
+      "statuses": {
+        "complete": "Complete",
+        "stopped": "Stopped at a safe point"
+      }
+    },
+    "readers": {
+      "heading": "Readers",
+      "person": "Person",
+      "reads": "Reads",
+      "lastRead": "Last read",
+      "readCount_one": "{{count}} read",
+      "readCount_other": "{{count}} reads",
+      "none": "Nobody read the table in the last 7 days.",
+      "count_one": "{{count}} person read it in the last 7 days.",
+      "count_other": "{{count}} people read it in the last 7 days.",
+      "audited": "Seeing who read the table is recorded in the audit log.",
+      "unavailable": "Who read the table cannot be shown: seeing it could not be recorded in the audit log. Open the tab again in a moment; if it keeps failing, ask an administrator to check the server."
+    }
+  },
+  "access": {
+    "mine": {
+      "heading": "What you may do",
+      "action": "Action",
+      "answer": "Answer",
+      "why": "Why",
+      "reading": "Reading what you may do…"
+    },
+    "actions": {
+      "READ_TABLE": "Read",
+      "WRITE_TABLE": "Write",
+      "DROP_TABLE": "Drop",
+      "editTexts": "Edit texts"
+    },
+    "allowed": "Allowed",
+    "refused": "Not allowed",
+    "askAdmin": "Ask an administrator.",
+    "allowedPlain": "Allowed for you.",
+    "via": {
+      "role": "Through the {{role}} role on {{scope}}.",
+      "grant": "Through a grant of {{action}} on {{scope}}.",
+      "groupRole": "Through the group {{group}}, which has the {{role}} role on {{scope}}.",
+      "groupGrant": "Through the group {{group}}, which has a grant of {{action}} on {{scope}}."
+    },
+    "scope": {
+      "INSTANCE": "the whole instance",
+      "ENVIRONMENT": "environment {{environment}}",
+      "NAMESPACE": "namespace {{namespace}} in {{environment}}",
+      "TABLE": "table {{namespace}}.{{table}} in {{environment}}"
+    },
+    "roles": {
+      "VIEWER": "Viewer",
+      "ANALYST": "Analyst",
+      "DATA_SCIENTIST": "Data scientist",
+      "DATA_ENGINEER": "Data engineer",
+      "ADMIN": "Admin"
+    },
+    "owner": "You own the table.",
+    "byDrop": "You may drop the table, so you may edit its texts.",
+    "editRefused": "Only the owner ({{owner}}) or someone who may drop the table may edit its texts. Ask the owner.",
+    "editRefusedNoOwner": "Only someone who may drop the table may edit its texts, and the table has no owner. Ask an administrator.",
+    "who": {
+      "heading": "Who has access",
+      "table": "On this table",
+      "namespace": "On namespace <name/>",
+      "environment": "On environment <name/>",
+      "subject": "Person or group",
+      "grant": "Grant",
+      "since": "Since",
+      "none": "No grants at this level.",
+      "reading": "Reading the grants…",
+      "cut": "The first 200 at this level; <code>{{command}}</code> lists all.",
+      "role": "{{role}} role",
+      "instance": "Grants on the whole instance, such as the Admin role, are not listed here; <code>lakana grant list</code> shows every grant."
+    },
+    "group": "group <name/>",
+    "removed": "a removed person or group",
+    "serviceAccount": "service account",
+    "filters": {
+      "heading": "Row filters",
+      "none": "No row filters on this table.",
+      "expression": "Rows shown",
+      "reading": "Reading the row filters…"
+    },
+    "masks": {
+      "heading": "Column masks",
+      "none": "No column masks on this table.",
+      "column": "Column",
+      "expression": "Shown instead",
+      "reading": "Reading the column masks…"
+    },
+    "later": "Changing access comes with the Access area."
+  },
+  "loadingTab": "Loading the tab…"
 }

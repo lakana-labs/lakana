@@ -18,6 +18,38 @@ async function openTable(page: Page, tab = ""): Promise<void> {
   await expect(page.getByRole("navigation", { name: "Sections of the table" })).toBeVisible();
 }
 
+/** The tabs after Preview, with what shows once each has read its data. */
+const NEW_TABS = [
+  ["/lineage", "region", "Lineage of fact_sales"],
+  ["/health", "heading", "Checks"],
+  ["/access", "heading", "Column masks"],
+] as const;
+
+/**
+ * The tab's link name: "Lineage" for `/lineage`.
+ *
+ * @param entry - The tab.
+ * @returns The name.
+ */
+function tabName(entry: (typeof NEW_TABS)[number]): string {
+  return entry[0].charAt(1).toUpperCase() + entry[0].slice(2);
+}
+
+/**
+ * Opens one of the Lineage, Health and Access tabs and waits until it shows what it read.
+ *
+ * @param page - The page.
+ * @param entry - The tab, the role of what to wait for and its name.
+ */
+async function openNewTab(page: Page, entry: (typeof NEW_TABS)[number]): Promise<void> {
+  const [tab, role, name] = entry;
+  await openTable(page, tab);
+  await expect(page.getByRole(role, { name, exact: true })).toBeVisible();
+  if (tab === "/access") {
+    await expect(page.getByRole("cell", { name: "md5(customer_email)" })).toBeVisible();
+  }
+}
+
 /**
  * The preview's grid, once the rows have been read.
  *
@@ -71,6 +103,11 @@ for (const theme of ["light", "dark"] as const) {
           expect(await violations(page), `the table page${tab}`).toEqual([]);
         }
 
+        for (const entry of NEW_TABS) {
+          await openNewTab(page, entry);
+          expect(await violations(page), `the table page${entry[0]}`).toEqual([]);
+        }
+
         await openTable(page);
         await page.getByRole("button", { name: "Edit", exact: true }).click();
         await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
@@ -94,6 +131,25 @@ for (const theme of ["light", "dark"] as const) {
         await page.keyboard.press("Escape");
         await expect(dialog).toBeHidden();
         await expect(path).toBeFocused();
+      });
+
+      test("the six tabs wrap at 320 px and every tab fits and passes axe", async ({ page }) => {
+        await page.setViewportSize({ width: 320, height: 640 });
+        await openTable(page);
+        const tabs = page.getByRole("navigation", { name: "Sections of the table" });
+        const boxes = await tabs
+          .getByRole("link")
+          .evaluateAll((links) => links.map((link) => link.getBoundingClientRect()));
+        expect(boxes).toHaveLength(6);
+        // Wrapped: more than one line, and every tab inside the window.
+        expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBeGreaterThan(1);
+        expect(Math.max(...boxes.map((box) => box.right))).toBeLessThanOrEqual(320);
+        expect(Math.min(...boxes.map((box) => box.left))).toBeGreaterThanOrEqual(0);
+        for (const entry of NEW_TABS) {
+          await openNewTab(page, entry);
+          expect(await sidewaysOverflow(page), `${entry[0]} sideways`).toBeLessThanOrEqual(0);
+          expect(await violations(page), `${entry[0]} at 320 px`).toEqual([]);
+        }
       });
 
       test("Overview fits 1280 × 800 without scrolling for the typical table", async ({ page }) => {
@@ -197,6 +253,16 @@ test.describe("the table page in real Chromium", () => {
       }
       expect(await sidewaysOverflow(page), `the page${tab}`).toBeLessThanOrEqual(0);
     }
+    for (const entry of NEW_TABS) {
+      await openNewTab(page, entry);
+      expect(await sidewaysOverflow(page), `the page${entry[0]}`).toBeLessThanOrEqual(0);
+    }
+    // The drawing is wider than 320 px; it scrolls in its own focusable region.
+    await openNewTab(page, NEW_TABS[0]);
+    const drawing = page.getByRole("region", { name: "Lineage of fact_sales", exact: true });
+    await expect(drawing).toHaveAttribute("tabindex", "0");
+    const drawn = await drawing.evaluate((node) => [node.scrollWidth, node.clientWidth]);
+    expect(drawn[0], "the lineage drawing").toBeGreaterThan(drawn[1] ?? 0);
     for (const [tab, name] of [
       ["/columns", "Table columns"],
       ["/preview", "Preview of fact_sales"],
@@ -313,11 +379,164 @@ test.describe("the table page in real Chromium", () => {
     await expect(page.getByRole("region", { name: "Table columns" })).toBeVisible();
     await page.getByRole("link", { name: "Preview", exact: true }).click();
     await previewGrid(page);
+    for (const entry of NEW_TABS) {
+      await page.getByRole("link", { name: tabName(entry), exact: true }).click();
+      await expect(page.getByRole(entry[1], { name: entry[2], exact: true })).toBeVisible();
+    }
     await page.waitForLoadState("networkidle");
 
     const api = requests.filter((url) => url.includes("/api/")).map((url) => new URL(url).pathname);
     expect(api.length).toBeGreaterThan(0);
     expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
     expect(errors).toEqual([]);
+  });
+  test("Lineage, Health and Access work by keyboard alone; focus lands on the named targets", async ({
+    page,
+  }) => {
+    await openTable(page);
+    const tabs = page.getByRole("navigation", { name: "Sections of the table" });
+    await tabTo(page, tabs.getByRole("link", { name: "Lineage", exact: true }));
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/fact_sales\/lineage$/);
+    const region = page.getByRole("region", { name: "Lineage of fact_sales", exact: true });
+    await expect(region).toBeVisible();
+
+    // The step button goes when nothing is further up: the focus goes to the drawing's region.
+    await tabTo(page, page.getByRole("button", { name: "One step up" }));
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/lineage\?up=2$/);
+    await expect(page.getByRole("button", { name: "One step up" })).toHaveCount(0);
+    await expect(region).toBeFocused();
+    // The list names a table the drawing's links skip, and Tab reaches it.
+    const list = page.getByRole("list", { name: "Lineage as a list" });
+    await tabTo(page, list.getByRole("link", { name: "gold.sales.daily_sales" }));
+
+    await tabTo(page, tabs.getByRole("link", { name: "Health", exact: true }));
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/fact_sales\/health$/);
+    await expect(page.getByRole("heading", { level: 2, name: "Checks" })).toBeVisible();
+    await tabTo(page, page.getByRole("button", { name: "Copy command" }));
+
+    await tabTo(page, tabs.getByRole("link", { name: "Access", exact: true }));
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/fact_sales\/access$/);
+    await expect(page.getByRole("heading", { level: 2, name: "Column masks" })).toBeVisible();
+    await tabTo(page, page.getByRole("link", { name: "kim.schulz" }).first());
+  });
+
+  test("the full-screen lineage opens, passes axe and returns focus", async ({ page }) => {
+    await openNewTab(page, NEW_TABS[0]);
+    const open = page.getByRole("button", { name: "Full screen" });
+    await open.click();
+    const dialog = page.getByRole("dialog", { name: "Lineage of fact_sales" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("svg.lineage-full")).toBeVisible();
+    expect(await violations(page), "the full-screen lineage").toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(open).toBeFocused();
+
+    // The Close button does the same.
+    await open.click();
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(open).toBeFocused();
+  });
+
+  test("the full-screen lineage keeps the drawing's natural size and scrolls", async ({ page }) => {
+    await page.setViewportSize({ width: 600, height: 700 });
+    await openTable(page, "/lineage?up=3&down=3");
+    await expect(
+      page.getByRole("region", { name: "Lineage of fact_sales", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Full screen" }).click();
+    const dialog = page.getByRole("dialog", { name: "Lineage of fact_sales" });
+    const region = dialog.getByRole("region", { name: "Lineage of fact_sales, full screen" });
+    await expect(region).toHaveAttribute("tabindex", "0");
+    const sizes = await region.evaluate((node) => {
+      const svg = node.querySelector("svg.lineage-full");
+      const wanted = Number(svg?.getAttribute("width"));
+      return {
+        rendered: svg?.getBoundingClientRect().width ?? 0,
+        wanted,
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+      };
+    });
+    expect(sizes.wanted).toBeGreaterThan(600);
+    expect(sizes.rendered).toBeGreaterThanOrEqual(sizes.wanted);
+    expect(sizes.scrollWidth).toBeGreaterThan(sizes.clientWidth);
+    expect(await violations(page), "the full-screen region").toEqual([]);
+  });
+
+  test("Back and Forward move between tabs and lineage depths", async ({ page }) => {
+    await openNewTab(page, NEW_TABS[0]);
+    await page.getByRole("button", { name: "One step up" }).click();
+    await expect(page).toHaveURL(/\/lineage\?up=2$/);
+    await expect(page.getByRole("button", { name: "One step up" })).toHaveCount(0);
+    await page.getByRole("link", { name: "Health", exact: true }).click();
+    await expect(page).toHaveURL(/\/fact_sales\/health$/);
+    await expect(page.getByRole("heading", { level: 2, name: "Checks" })).toBeVisible();
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/lineage\?up=2$/);
+    await expect(page.getByRole("region", { name: "Lineage of fact_sales" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "One step up" })).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/lineage$/);
+    await expect(page.getByRole("button", { name: "One step up" })).toBeVisible();
+    await page.goForward();
+    await expect(page).toHaveURL(/\/lineage\?up=2$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/\/fact_sales\/health$/);
+  });
+
+  test("a click on a table in the drawing opens its page without a page load", async ({ page }) => {
+    // The table's page is not stubbed: the frame is what shows that the router took the click.
+    await page.route(
+      (url) => url.pathname.endsWith("/namespaces/gold.sales/tables/daily_sales"),
+      (route) => route.fulfill({ status: 404, json: { detail: "No such table." } }),
+    );
+    await openNewTab(page, NEW_TABS[0]);
+    await page.evaluate(() => {
+      (window as unknown as { loadMarker: number }).loadMarker = 1;
+    });
+    const box = page.locator(
+      'svg.lineage-graph a[href="/catalog/prod/gold.sales/daily_sales"] svg.lineage-box',
+    );
+    await expect(box).toHaveCount(1);
+    // Jobs and connections are not links.
+    await expect(
+      page.locator(
+        "svg.lineage-graph a svg.lineage-job, svg.lineage-graph a svg.lineage-connection",
+      ),
+    ).toHaveCount(0);
+    await box.click();
+    await expect(page).toHaveURL(/\/catalog\/prod\/gold\.sales\/daily_sales$/);
+    await expect(page.getByRole("heading", { level: 1, name: "daily_sales" })).toBeVisible();
+    expect(
+      await page.evaluate(() => (window as unknown as { loadMarker?: number }).loadMarker),
+    ).toBe(1);
+  });
+
+  test("Readers › opens Health at its readers", async ({ page }) => {
+    await openTable(page);
+    await page.getByRole("link", { name: "Readers ›" }).click();
+    await expect(page).toHaveURL(/\/fact_sales\/health#readers$/);
+    const heading = page.getByRole("heading", { level: 2, name: "Readers" });
+    await expect(heading).toBeFocused();
+    await expect(page.getByRole("link", { name: "kim.schulz" })).toBeVisible();
+    await expect(page.getByText("12 reads")).toBeVisible();
+  });
+
+  test("Health details › and Lineage › open their tabs", async ({ page }) => {
+    await openTable(page);
+    await page.getByRole("link", { name: "Health details ›" }).click();
+    await expect(page).toHaveURL(/\/fact_sales\/health$/);
+    await expect(page.getByRole("heading", { level: 2, name: "Checks" })).toBeVisible();
+    await page.goBack();
+    await page.getByRole("link", { name: "Lineage ›" }).click();
+    await expect(page).toHaveURL(/\/fact_sales\/lineage$/);
+    await expect(page.getByRole("region", { name: "Lineage of fact_sales" })).toBeVisible();
   });
 });

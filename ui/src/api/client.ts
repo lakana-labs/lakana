@@ -383,6 +383,25 @@ export const api = {
   },
 
   /**
+   * Reads one page of a list whose route names the next page in `X-Next-Cursor`. A read of a
+   * list never asks for a passkey touch, so there is no step-up retry.
+   *
+   * @param path - The path under the server, with its query.
+   * @returns The parsed page, for the caller to type, and the cursor of the next one, null on
+   *   the last.
+   * @throws {ApiError} for a refusal or an unreachable server.
+   */
+  async page(
+    path: string,
+  ): Promise<{ readonly body: unknown; readonly nextCursor: string | null }> {
+    const response = await exchangeWith("GET", path, { accept: "application/json" }, {});
+    return {
+      body: await json<unknown>(response),
+      nextCursor: response.headers.get("X-Next-Cursor"),
+    };
+  },
+
+  /**
    * Sends a file as the body, such as a profile picture; no route that takes one asks for a
    * passkey touch, so there is no step-up retry.
    *

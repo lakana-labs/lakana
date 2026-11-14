@@ -13,7 +13,7 @@ const PAGE = "/catalog/prod/gold.sales/fact_sales";
  */
 async function section(): Promise<HTMLElement> {
   const heading = await screen.findByRole("heading", { level: 2, name: "Comes from · goes to" });
-  return heading.parentElement as HTMLElement;
+  return heading.closest("section") as HTMLElement;
 }
 
 /**
@@ -53,8 +53,11 @@ describe("ComesFrom", () => {
       "href",
       "/catalog/prod/gold.sales/daily_sales",
     );
-    expect(within(box).queryByText(/load_sales|shop_db/)).not.toBeInTheDocument();
-    expect(within(box).getAllByRole("link")).toHaveLength(2);
+    expect(
+      within(box).queryByText(/analytics\/daily_sales|pg-sales|PostgreSQL/),
+    ).not.toBeInTheDocument();
+    // The two tables and Lineage ›.
+    expect(within(box).getAllByRole("link")).toHaveLength(3);
   });
 
   it("shows at most five each way and counts the rest", async () => {
@@ -72,7 +75,8 @@ describe("ComesFrom", () => {
     const box = await section();
 
     expect(await within(box).findByText("and 2 more")).toBeVisible();
-    expect(within(box).getAllByRole("link")).toHaveLength(6);
+    // Five tables and Lineage ›.
+    expect(within(box).getAllByRole("link")).toHaveLength(6 + 1);
   });
 
   it("names a table whose reference cannot be split in plain text, with no link", async () => {
@@ -158,5 +162,17 @@ describe("ComesFrom", () => {
     await within(box).findByRole("link", { name: "staging.stg_sales" });
     const down = server.sent.filter((request) => request.path.includes("direction=down"));
     expect(down).toHaveLength(1);
+  });
+
+  it("links Lineage › from Overview", async () => {
+    const { user, router } = renderShell(PAGE);
+    const box = await section();
+
+    const link = within(box).getByRole("link", { name: "Lineage ›" });
+    expect(link).toHaveAttribute("href", `${PAGE}/lineage`);
+
+    await user.click(link);
+
+    expect(router.state.location.pathname).toBe(`${PAGE}/lineage`);
   });
 });

@@ -369,25 +369,166 @@ const HEALTH = {
   ],
 };
 
+/** Who read the table in the last 7 days, as an administrator's Health tab asks for it. */
+const READERS = [
+  { principal: "kim.schulz", read_count: 12, last_read_at: "2026-11-10T07:50:00Z" },
+  { principal: "loader", read_count: 3, last_read_at: "2026-11-09T21:00:00Z" },
+];
+
+/** The table's own node, as its lineage answers start from it. */
+const LINEAGE_ROOT = {
+  id: "table:9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+  kind: "table",
+  name: "gold.sales.fact_sales",
+  distance: 0,
+};
+
+/** What feeds the table, as the server answers it: the asset that builds it, a table that asset reads, its job and its connection. */
+const LINEAGE_UP = {
+  nodes: [
+    LINEAGE_ROOT,
+    {
+      id: "asset:analytics/gold.sales.fact_sales",
+      kind: "asset",
+      name: "gold.sales.fact_sales",
+      distance: 1,
+      repository: "analytics",
+    },
+    { id: "table:aaaa", kind: "table", name: "staging.stg_sales", distance: 1 },
+    { id: "job:analytics/daily_sales", kind: "job", name: "analytics/daily_sales", distance: 1 },
+    {
+      id: "connection:pg-sales",
+      kind: "connection",
+      name: "pg-sales",
+      distance: 1,
+      connection_kind: "postgresql",
+    },
+  ],
+  edges: [
+    { kind: "builds", source: "asset:analytics/gold.sales.fact_sales", target: LINEAGE_ROOT.id },
+    { kind: "reads", source: "asset:analytics/gold.sales.fact_sales", target: "table:aaaa" },
+    {
+      kind: "runs",
+      source: "job:analytics/daily_sales",
+      target: "asset:analytics/gold.sales.fact_sales",
+    },
+    {
+      kind: "uses",
+      source: "asset:analytics/gold.sales.fact_sales",
+      target: "connection:pg-sales",
+    },
+  ],
+  next_cursor: null,
+};
+
+/** What the table feeds: an asset that reads it and the table that asset builds. */
+const LINEAGE_DOWN = {
+  nodes: [
+    LINEAGE_ROOT,
+    {
+      id: "asset:analytics/gold.sales.daily_sales",
+      kind: "asset",
+      name: "gold.sales.daily_sales",
+      distance: 1,
+      repository: "analytics",
+    },
+    { id: "table:bbbb", kind: "table", name: "gold.sales.daily_sales", distance: 1 },
+  ],
+  edges: [
+    { kind: "reads", source: "asset:analytics/gold.sales.daily_sales", target: LINEAGE_ROOT.id },
+    { kind: "builds", source: "asset:analytics/gold.sales.daily_sales", target: "table:bbbb" },
+  ],
+  next_cursor: null,
+};
+
 /**
- * What a lineage question answers: the table itself and one table on the asked side.
+ * What a lineage question answers.
  *
  * @param direction - `up` or `down`.
  * @returns The answer.
  */
 function lineageAnswer(direction: string | null): unknown {
-  const root = {
-    id: "table:9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
-    kind: "table",
-    name: "gold.sales.fact_sales",
-    distance: 0,
-  };
-  const other =
-    direction === "up"
-      ? { id: "table:aaaa", kind: "table", name: "bronze.sales_raw", distance: 1 }
-      : { id: "table:bbbb", kind: "table", name: "gold.sales.daily_sales", distance: 1 };
-  return { nodes: [root, other], edges: [], next_cursor: null };
+  return direction === "up" ? LINEAGE_UP : LINEAGE_DOWN;
 }
+
+/** The subject of a grant, row filter or mask: a person, a service account or a group. */
+const KIM = {
+  principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+  group_id: null,
+  principal: {
+    id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+    name: "kim.schulz",
+    principal_type: "user",
+  },
+  group: null,
+};
+const ANALYSTS = {
+  principal_id: null,
+  group_id: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d01",
+  principal: null,
+  group: "analysts",
+};
+
+/** The grants on the table itself: Kim's Analyst role, and the analysts group's single action. */
+const GRANTS = [
+  {
+    ...KIM,
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b01",
+    role: "ANALYST",
+    action: null,
+    kind: "TABLE",
+    environment: "prod",
+    namespace: "gold.sales",
+    table: "fact_sales",
+    granted_by: "0f0e0d0c-0b0a-4909-8807-060504030201",
+    granted_at: "2026-10-02T09:00:00Z",
+    note: null,
+  },
+  {
+    ...ANALYSTS,
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b02",
+    role: null,
+    action: "READ_TABLE",
+    kind: "TABLE",
+    environment: "prod",
+    namespace: "gold.sales",
+    table: "fact_sales",
+    granted_by: "0f0e0d0c-0b0a-4909-8807-060504030201",
+    granted_at: "2026-10-03T09:00:00Z",
+    note: null,
+  },
+];
+
+/** What a policy of the table shares. */
+const POLICY = {
+  environment: "prod",
+  namespace: "gold.sales",
+  table: "fact_sales",
+  created_by: "0f0e0d0c-0b0a-4909-8807-060504030201",
+  created_at: "2026-10-03T09:00:00Z",
+  bound: true,
+};
+
+/** The analysts group sees three stores. */
+const ROW_FILTERS = [
+  {
+    ...POLICY,
+    ...ANALYSTS,
+    id: "7e6d5c4b-3a2f-4e1d-8c0b-9a8f7e6d5c01",
+    expression: "store_id IN (1, 2, 3)",
+  },
+];
+
+/** Kim sees a hash of the customer's email. */
+const COLUMN_MASKS = [
+  {
+    ...POLICY,
+    ...KIM,
+    id: "8f7e6d5c-4b3a-4f2e-9d1c-0b9a8f7e6d01",
+    column: "customer_email",
+    expression: "md5(customer_email)",
+  },
+];
 
 /** The table `fact_sales` as its page reads it. */
 const TABLE_DETAIL = {
@@ -468,7 +609,15 @@ const PERMISSIONS = {
   permissions: ["READ_TABLE", "WRITE_TABLE", "DROP_TABLE", "SUBMIT_QUERY"].map((action) => ({
     action,
     allowed: true,
-    via: [],
+    via: [
+      {
+        kind: "role",
+        grant_id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b99",
+        group: null,
+        role: "ADMIN",
+        scope: { kind: "INSTANCE", environment: null, namespace: null, table: null },
+      },
+    ],
     reason: null,
   })),
   note: null,
@@ -493,6 +642,9 @@ export const STUBBED = [
   HEALTH_PATH,
   LINEAGE_PATH,
   PERMISSIONS_PATH,
+  "/api/v1/grants",
+  "/api/v1/row-filters",
+  "/api/v1/column-masks",
   DEFINITION_PATH,
   DEFINITION_FILE_PATH,
   PREVIEW_PATH,
@@ -550,7 +702,14 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   );
   await page.route(
     (url) => url.pathname === HEALTH_PATH,
-    (route) => route.fulfill({ json: HEALTH }),
+    (route) =>
+      // The Health tab asks for the readers' names as an administrator; Overview does not.
+      route.fulfill({
+        json:
+          new URL(route.request().url()).searchParams.get("readers") === "false"
+            ? HEALTH
+            : { ...HEALTH, readers: READERS },
+      }),
   );
   await page.route(
     (url) => url.pathname === DEFINITION_PATH,
@@ -570,6 +729,22 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname === PERMISSIONS_PATH,
     (route) => route.fulfill({ json: PERMISSIONS }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/v1/grants",
+    (route) =>
+      // Only the table's own level has grants; the namespaces and the environment have none.
+      route.fulfill({
+        json: new URL(route.request().url()).searchParams.has("table") ? GRANTS : [],
+      }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/v1/row-filters",
+    (route) => route.fulfill({ json: ROW_FILTERS }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/v1/column-masks",
+    (route) => route.fulfill({ json: COLUMN_MASKS }),
   );
   await page.route(
     (url) => url.pathname === PREVIEW_PATH,

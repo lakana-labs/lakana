@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { INVISIBLE, VisibleText } from "./VisibleText";
+import { INVISIBLE, markedText, markInvisible, VisibleText, VisibleTspan } from "./VisibleText";
 
 /** C0 without tab and line feed, DEL and C1. */
 const CONTROLS = [
@@ -86,5 +86,43 @@ describe("VisibleText", () => {
     expect("a\u202Eb\u0007".match(INVISIBLE)).toEqual(["\u202E", "\u0007"]);
     expect("a\u202Eb\u0007".match(INVISIBLE)).toEqual(["\u202E", "\u0007"]);
     expect("\t\n".match(INVISIBLE)).toBeNull();
+  });
+});
+
+describe("markInvisible", () => {
+  it("splits text into plain parts and marks, a run of one character as one mark", () => {
+    expect(markInvisible("a\u202E\u202Eb\u0007")).toEqual([
+      "a",
+      { mark: "U+202E \u00D72" },
+      "b",
+      { mark: "U+0007" },
+    ]);
+    expect(markInvisible("")).toEqual([]);
+  });
+});
+
+describe("VisibleTspan", () => {
+  it("marks a bidi and a control character in an SVG name", () => {
+    const { container } = render(
+      <svg>
+        <text>
+          <VisibleTspan text={"a\u202Eb\u0007c<b>x</b>"} />
+        </text>
+      </svg>,
+    );
+
+    const marks = [...container.querySelectorAll("tspan.char-mark")];
+    expect(marks.map((mark) => mark.textContent)).toEqual(["U+202E", "U+0007"]);
+    expect(marks.every((mark) => mark.namespaceURI === "http://www.w3.org/2000/svg")).toBe(true);
+    const shown = container.querySelector("text")?.textContent;
+    expect(shown).toBe("aU+202EbU+0007c<b>x</b>");
+    expect(container.querySelector("text b")).toBeNull();
+  });
+});
+
+describe("markedText", () => {
+  it("puts the marks in place of the characters, as plain text", () => {
+    expect(markedText("a\u202E\u202Eb\u0007<b>")).toBe("aU+202E \u00D72bU+0007<b>");
+    expect(markedText("")).toBe("");
   });
 });

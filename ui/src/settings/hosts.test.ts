@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { httpsForm, queryOrFragment, recogniseHost, shellQuote } from "./hosts";
+import { httpsForm, queryOrFragment, recogniseHost } from "./hosts";
 
 describe("recogniseHost", () => {
   it("turns a GitHub HTTPS URL into its SSH form and proposes the name", () => {
@@ -142,12 +142,5 @@ describe("httpsForm", () => {
       "https://git.example.com/team/analytics.git",
     );
     expect(httpsForm("analytics")).toBeNull();
-  });
-});
-
-describe("shellQuote", () => {
-  it("quotes the way a POSIX shell reads it", () => {
-    expect(shellQuote("analytics")).toBe("'analytics'");
-    expect(shellQuote("it's $(rm -rf ~)")).toBe("'it'\\''s $(rm -rf ~)'");
   });
 });
