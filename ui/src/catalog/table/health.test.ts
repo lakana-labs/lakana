@@ -243,6 +243,7 @@ describe("observedWords", () => {
   it("falls back to the server's pairs without the absent ones, and never says null", () => {
     expect(words("freshness", { seconds: null, source: null })).toBe("None");
     expect(words("volume", { rows: 120, note: null })).toBe("rows 120");
+    expect(words("range", { lower: 1, upper: null })).toBe("lower 1");
     expect(words("skew", { reason: "paused", job: null, list: ["a"] })).toBe(
       'reason paused, list ["a"]',
     );

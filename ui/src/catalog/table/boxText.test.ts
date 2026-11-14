@@ -68,6 +68,8 @@ describe("boxWidth", () => {
   it("is the longest line and the space on both sides", () => {
     const node = graphNode("table", "gold.sales.fact_sales", 1);
     expect(boxWidth(t, { node, jobs: [] }, tens)).toBe(10 * 10 + 2 * TEXT_X);
+    const loose = graphNode("table", "loose", 1);
+    expect(boxWidth(t, { node: loose, jobs: [] }, tens)).toBe(5 * 10 + 2 * TEXT_X);
   });
 });
 

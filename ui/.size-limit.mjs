@@ -60,7 +60,10 @@ const NAMED_LIMITS = [
   // boxes' titles, the list beside it, the steps kept in the address, the full-screen view and
   // its own strings. It loads only when the Lineage tab is opened; the table's page stays at
   // 10.24 kB with the tab's lazy import, inside its limit.
-  { name: "the Lineage tab", prefix: "LineageTab-", limit: "4.72 kB" },
+  // Raised to the measured 5 kB (2026-11-14) + 10 %: boxes that grow to their text, measured in
+  // the drawing's font with a canvas, lines cut with an ellipsis, and the full screen that fills
+  // the window.
+  { name: "the Lineage tab", prefix: "LineageTab-", limit: "5.5 kB" },
   // Measured 2.4 kB (2026-11-13, with the read again without names when the audit fails) + 10 %:
   // the Health tab, its checks, signals, last maintenance
   // and readers (the names for an administrator, the count for everyone else) and the focus on
@@ -187,6 +190,9 @@ export default [
   // Raised from 5.13 kB (4.66 kB measured with the profile pictures' circle, file field and
   // People cell, 2026-11-11, + 10 %: the circle is drawn on the first paint, so its rules cannot
   // wait for the dialog that loads on demand).
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "8.16 kB" },
+  // Raised from 8.16 kB: measured 8.26 kB with the shared data grid (dense rows, sticky header and
+  // row-number gutter), the full-screen lineage that fills the window and Health's no-break rules
+  // (2026-11-14) + 10 %.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "9.09 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

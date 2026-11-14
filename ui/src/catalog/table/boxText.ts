@@ -132,10 +132,14 @@ export function boxLines(t: TFunction, box: BoxContent): [string, string | null]
             .map((job) => markedText(jobLabel(job).job))
             .join(", ")}`;
     const repository = node.repository ?? null;
-    const second = t(repository === null ? "table.lineage.asset" : "table.lineage.assetIn")
-      .replace("<name/>", () => markedText(node.name))
-      .replace("<repository/>", () => markedText(repository ?? ""));
-    return [first, second];
+    const named = t(repository === null ? "table.lineage.asset" : "table.lineage.assetIn").replace(
+      "<name/>",
+      () => markedText(node.name),
+    );
+    return [
+      first,
+      repository === null ? named : named.replace("<repository/>", () => markedText(repository)),
+    ];
   }
   if (node.kind === "connection") {
     const kind = kindName(t, node.connection_kind);
