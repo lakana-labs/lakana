@@ -1933,7 +1933,7 @@ project version the run used.
 def check_rows_sql_text(check: str) -> str:
     """Word the text a query that shows the rows of a check stores in place of the check's SQL.
 
-    The query's text reaches its caller through the query's status and their own
+    The query's text reaches its caller through their own
     `QUERY_COMPLETED` events, and a check's SQL is shown only under the content gate of the
     check's file (#588), so the query stores this line and the worker reads the SQL by the
     check result's id (`runs.check_rows.check_rows_sql`).

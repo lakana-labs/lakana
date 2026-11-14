@@ -809,7 +809,7 @@ def test_the_query_run_is_the_callers_own_and_carries_the_check(
     """Queued, submitted by the caller, without a task run, with a placeholder and the result.
 
     The check's SQL is never the query's text (#588): the text reaches the caller through their
-    own audit events and the query's status; the worker reads the SQL by the result's id.
+    own audit events; the worker reads the SQL by the result's id.
     """
     result = _checked(session, principal)
 

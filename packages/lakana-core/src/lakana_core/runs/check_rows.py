@@ -7,7 +7,7 @@ one table the result names at the checked snapshot and every other table as it i
 the caller's own grants, row filters and column masks.
 
 The query's stored text is a placeholder (`check_rows_sql_text`), never the check's SQL: the
-text reaches the caller through the query's status and their own audit events, and the SQL is
+text reaches the caller through their own audit events (`QUERY_COMPLETED`), and the SQL is
 shown only under the content gate of the check's file (#588). The worker reads the SQL by the
 result's id (`check_rows_sql`).
 

@@ -454,8 +454,8 @@ still: it shows a check's SQL only under the rules of a table's file, so not whi
 column mask applies to you on one of its tables ([Who may read the
 file](see-where-a-table-is-defined.md#who-may-read-the-file)).
 
-The query you get never holds the check's SQL as its text: `lakana query status`, the query list and
-your audit events show `-- The rows of check NAME. Its SQL is read by the worker and not shown
+The query you get never holds the check's SQL as its text: its `QUERY_COMPLETED` event in your
+audit log shows `-- The rows of check NAME. Its SQL is read by the worker and not shown
 here.` The worker reads the SQL itself. When the database refuses the check's SQL, the message
 says that it failed and which kind of failure, not the database's text, which could quote the SQL.
 To see the SQL, read the check's file in your git host, or `lakana project-version show` under the

@@ -3421,8 +3421,8 @@ found through a query run of their own that is bound to the check result
   as no entry at all. The worker authorizes the read of every table again, as for every query.
   The query run is `QUEUED`, submitted by the caller, has no task run, and its `sql_text` is
   `check_rows_sql_text` (a comment line naming the check), **never the check's SQL** (#588): the
-  text reaches the caller through the query's status, the query list and their own
-  `QUERY_COMPLETED` events. The worker reads the SQL by the run's `check_result_id`
+  text reaches the caller through their own `QUERY_COMPLETED` events (no route returns a
+  query's text). The worker reads the SQL by the run's `check_result_id`
   (`runs.check_rows.check_rows_sql`: the result in the run's environment, its run's project
   version, the same manifest entry the submit authorized; gone results and entries give
   `CHECK_RESULT_REMOVED` and `check_sql_gone_message`), in `pipeline._statement_of`, through the

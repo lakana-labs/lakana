@@ -403,7 +403,7 @@ A result holds a count and never a row. `lakana check rows` makes the rows from 
 taken from the project version the run used. The query is tied to the check's result. Its stored
 text is not the SQL but the line `-- The rows of check NAME. Its SQL is read by the worker and not
 shown here.`: the worker reads the SQL by the check's result. So the SQL never reaches you through
-the query's status, the query list or your audit events, and a failure of the database is
+your audit events (`QUERY_COMPLETED`) or an error message, and a failure of the database is
 reported without its text, which could quote the SQL (see the messages below). When it
 runs, the worker reads the checked table at the snapshot the check read, and every other table
 the SQL names as it is now, under your own grants, row filters and column masks. Nothing in the
