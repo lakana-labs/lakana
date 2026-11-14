@@ -153,6 +153,20 @@
   font: inherit;
 }
 
+/* The counter under a field: a live region that speaks only near the limit. Empty, it takes no
+   room at all (no margin, out of the flex flow) but stays in the page, so it can still speak. */
+.text-editor .field > [role="status"] {
+  margin: 0;
+}
+
+.text-editor .field > [role="status"]:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
 .text-editor .field [slot="errorMessage"] {
   padding-left: var(--space-2);
   border-left: 3px solid var(--color-bad);

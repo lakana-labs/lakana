@@ -355,6 +355,38 @@ test.describe("the table page in real Chromium", () => {
     expect(await grid.evaluate((node) => node.contains(document.activeElement))).toBe(false);
   });
 
+  test("the editor keeps the normal field spacing; an empty counter takes no room", async ({
+    page,
+  }) => {
+    await openTable(page);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
+    const look = await page.evaluate(() => {
+      const fields = [...document.querySelectorAll(".text-editor .field")];
+      const first = fields[0];
+      const second = fields[1];
+      const counter = first?.querySelector("[role='status']");
+      const last = first?.lastElementChild;
+      const visible = [...(first?.children ?? [])].filter(
+        (child) => getComputedStyle(child).position !== "absolute",
+      );
+      const end = visible.at(-1)?.getBoundingClientRect().bottom ?? 0;
+      return {
+        counter: counter?.textContent ?? null,
+        counterHeight: counter?.getBoundingClientRect().height ?? -1,
+        lastIsCounter: last === counter,
+        space: (second?.getBoundingClientRect().top ?? 0) - end,
+        margin: parseFloat(first === undefined ? "0" : getComputedStyle(first).marginBottom),
+      };
+    });
+    // The counter is still there for screen readers, empty, and the next field follows after
+    // the field's own margin, nothing more.
+    expect(look.counter).toBe("");
+    expect(look.lastIsCounter).toBe(true);
+    expect(look.counterHeight).toBeLessThanOrEqual(1);
+    expect(Math.abs(look.space - look.margin), `${String(look.space)} px`).toBeLessThanOrEqual(1);
+  });
+
   test("compact rows of Columns, Health and Access are lower than roomy rows", async ({ page }) => {
     const heights: Record<string, number[]> = {};
     /**
