@@ -394,7 +394,8 @@ const HEALTH = {
       snapshot_id: 4821,
       observed_at: "2026-11-10T06:06:00Z",
       observed: { nulls: 0, values: 3, rate: 0 },
-      band: { low: 0, high: 0.05, median: 0 },
+      // As learn_band makes it for a column that is never null: median 0, half-width 0.02.
+      band: { low: -0.02, high: 0.02, median: 0 },
       alert: null,
       values_hidden: false,
     },
@@ -407,7 +408,12 @@ const HEALTH = {
       snapshot_id: 4821,
       observed_at: "2026-11-10T06:06:00Z",
       observed: { lower: 1762732800000000, upper: 1763121600000000, kind: "timestamp" },
-      band: { low: 1762041600000000, high: 1763208000000000, median: 1762732800000000 },
+      band: {
+        min: 1762128000000000,
+        max: 1763121600000000,
+        low: 1762041600000000,
+        high: 1763208000000000,
+      },
       alert: null,
       values_hidden: false,
     },

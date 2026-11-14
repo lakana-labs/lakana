@@ -644,7 +644,7 @@ test.describe("the table page in real Chromium", () => {
       // The band in words too, never a raw number of seconds or microseconds.
       const bands = await signals.locator("tbody tr td:nth-child(5)").allTextContents();
       expect(bands).toContain("up to 24 hours");
-      expect(bands).toContain("up to 5 % empty");
+      expect(bands).toContain("up to 2 % empty");
       for (const text of bands) {
         expect(text).not.toMatch(/\d{7,}|null|high |low /);
       }
