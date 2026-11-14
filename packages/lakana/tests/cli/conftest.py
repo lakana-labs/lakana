@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import functools
 import os
-from collections.abc import Callable
+import shutil
+import tempfile
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
 import httpx
+import pytest
 import typer
 import typer.main
 import typer.testing
@@ -116,6 +119,26 @@ class FakeApi:
         """
         http = httpx.Client(transport=httpx.MockTransport(self.handle), base_url=url)
         return lakana.Client(url=url, token=token, http_client=http)
+
+
+@pytest.fixture
+def short_tmp_path() -> Iterator[Path]:
+    """Give a test a temporary directory with a short path, to find in a CLI message.
+
+    The CLI shortens and wraps a long path in its messages, so a test that looks for one fails
+    when pytest's own `tmp_path` is long (a `--basetemp` of 140 characters or more, #597). This
+    directory sits in the system's temporary directory instead and is removed afterwards.
+
+    Yields
+    ------
+    Path
+        The directory, resolved.
+    """
+    path = Path(tempfile.mkdtemp(prefix="lakana-cli-test-")).resolve()
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def make_state(tmp_path: Path, api: FakeApi, *, interactive: bool = False) -> CliState:

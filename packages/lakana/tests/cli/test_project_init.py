@@ -1244,9 +1244,11 @@ def _workspace(root: Path, table: str = 'members = ["packages/*"]') -> bytes:
     return (root / "uv.lock").read_bytes()
 
 
-def test_a_lock_that_lands_elsewhere_fails_naming_the_workspace(tmp_path: Path, uv: _Uv) -> None:
+def test_a_lock_that_lands_elsewhere_fails_naming_the_workspace(
+    tmp_path: Path, short_tmp_path: Path, uv: _Uv
+) -> None:
     """The lock succeeded, yet no uv.lock is in the project: exit 1, workspace named."""
-    mono = tmp_path / "mono"
+    mono = short_tmp_path / "mono"  # a short path, so the message names it whole (#597)
     before = _workspace(mono)
     uv.stderr = ""
 
@@ -1375,11 +1377,11 @@ _REAL_UV = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on th
 
 @_REAL_UV
 def test_a_workspace_whose_members_include_the_project_is_refused_with_a_real_uv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, short_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Nothing is written, the next step is named, and the monorepo still locks afterwards."""
     env = _offline_template(monkeypatch, tmp_path)
-    mono = tmp_path / "mono"
+    mono = short_tmp_path / "mono"  # a short path, so the message names it whole (#597)
     _workspace(mono, 'members = ["*"]')
     (mono / "uv.lock").unlink()
     assert _uv_lock(mono, env).returncode == 0
