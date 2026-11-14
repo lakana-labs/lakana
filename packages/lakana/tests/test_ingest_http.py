@@ -420,8 +420,8 @@ def test_the_client_ignores_proxy_variables(
         _http.client_for(_conn("https://api.test", authority, {}, None, proxy)) as proxied,
     ):
         assert direct._mounts == {} and proxied._mounts == {}
-        assert type(direct._transport._inner._pool).__name__ == "ConnectionPool"  # ty: ignore[unresolved-attribute]
-        assert type(proxied._transport._inner._pool).__name__ == "HTTPProxy"  # ty: ignore[unresolved-attribute]
+        assert type(direct._transport._inner._pool).__name__ == "ConnectionPool"  # ty: ignore[missing-attribute]
+        assert type(proxied._transport._inner._pool).__name__ == "HTTPProxy"  # ty: ignore[missing-attribute]
 
 
 # --- OAuth2 client credentials -----------------------------------------------------------------

@@ -518,7 +518,7 @@ def _remeasured(seconds: dict[str, float]) -> Callable[[list[TestTime]], dict[st
         asked.append([t.nodeid for t in tests])
         return seconds
 
-    again.asked = asked  # ty: ignore[unresolved-attribute]
+    again.asked = asked  # ty: ignore[missing-attribute]
     return again
 
 
@@ -532,7 +532,7 @@ def test_a_test_that_is_fast_on_its_own_is_noise() -> None:
     again = _remeasured({"a.py::noisy": 0.6})
     errors, notes = check_slow_tests(tests, threshold=2.0, baseline=1, remeasure=again)
     assert errors == []
-    assert again.asked == [["a.py::noisy"]]  # ty: ignore[unresolved-attribute]
+    assert again.asked == [["a.py::noisy"]]  # ty: ignore[missing-attribute]
     assert any("a.py::noisy took 2.4 s in its shard but 0.6 s on its own" in n for n in notes)
 
 
@@ -597,7 +597,7 @@ def test_nothing_is_run_again_when_nothing_is_over() -> None:
         baseline=0,
         remeasure=again,
     )
-    assert again.asked == []  # ty: ignore[unresolved-attribute]
+    assert again.asked == []  # ty: ignore[missing-attribute]
 
 
 def _rerun(

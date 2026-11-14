@@ -358,7 +358,7 @@ def test_a_row_another_transaction_holds_is_passed_by_not_waited_for(
         record
             Unused.
         """
-        cursor = connection.cursor()  # ty: ignore[unresolved-attribute]
+        cursor = connection.cursor()  # ty: ignore[missing-attribute]
         cursor.execute("SET lock_timeout = '2s'")
         cursor.close()
 

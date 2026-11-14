@@ -166,7 +166,7 @@ def _set_cookie(response: object) -> str:
     str
         The header's value.
     """
-    headers = response.headers  # ty: ignore[unresolved-attribute]
+    headers = response.headers  # ty: ignore[missing-attribute]
     values = headers.get_list("set-cookie") if hasattr(headers, "get_list") else None
     if values is None:
         values = [v for k, v in headers.items() if k.lower() == "set-cookie"]

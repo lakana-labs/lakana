@@ -1404,7 +1404,7 @@ class _SwappedInput(InputFile):
         """
         return True
 
-    def open(self, seekable: bool = True) -> _EndlessStream:  # ty: ignore[invalid-method-override]
+    def open(self, seekable: bool = True) -> _EndlessStream:  # ty: ignore[incompatible-method-override]
         """Open the endless stream.
 
         Parameters

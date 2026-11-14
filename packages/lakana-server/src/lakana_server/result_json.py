@@ -172,7 +172,7 @@ def _cut_array(arr: pa.Array, original: pa.DataType | None = None) -> pa.Array:
     if pa.types.is_string_view(arr.type):
         arr = arr.cast(pa.large_string())
     if pa.types.is_string(arr.type) or pa.types.is_large_string(arr.type):
-        return pc.utf8_slice_codeunits(arr, 0, MAX_STRING_CHARS + 1)  # ty: ignore[unresolved-attribute]
+        return pc.utf8_slice_codeunits(arr, 0, MAX_STRING_CHARS + 1)  # ty: ignore[missing-attribute]
     if pa.types.is_binary_view(arr.type):
         arr = arr.cast(pa.large_binary())
     if (
@@ -180,7 +180,7 @@ def _cut_array(arr: pa.Array, original: pa.DataType | None = None) -> pa.Array:
         or pa.types.is_large_binary(arr.type)
         or pa.types.is_fixed_size_binary(arr.type)
     ):
-        return pc.binary_length(arr)  # ty: ignore[unresolved-attribute]
+        return pc.binary_length(arr)  # ty: ignore[missing-attribute]
     if pa.types.is_list_view(arr.type) or pa.types.is_large_list_view(arr.type):
         arr = _list_of_view(arr)
     if (
@@ -262,8 +262,8 @@ def _list_of_view(arr: pa.Array) -> pa.Array:
     pyarrow.Array
         A list or large list array over the flattened elements.
     """
-    lengths = pc.fill_null(pc.list_value_length(arr), 0)  # ty: ignore[unresolved-attribute]
-    offsets = pa.concat_arrays([pa.array([0], lengths.type), pc.cumulative_sum(lengths)])  # ty: ignore[unresolved-attribute]
+    lengths = pc.fill_null(pc.list_value_length(arr), 0)  # ty: ignore[missing-attribute]
+    offsets = pa.concat_arrays([pa.array([0], lengths.type), pc.cumulative_sum(lengths)])  # ty: ignore[missing-attribute]
     make = pa.LargeListArray if pa.types.is_large_list_view(arr.type) else pa.ListArray
     return make.from_arrays(offsets, arr.flatten(), mask=arr.is_null())
 
@@ -290,9 +290,9 @@ def _cut_list(arr: pa.Array, original: pa.DataType) -> pa.Array:
         )
     elif pa.types.is_fixed_size_list(arr.type):
         arr = arr.cast(pa.list_(arr.type.value_field))
-    arr = pc.list_slice(arr, 0, MAX_LIST_ITEMS + 1)  # ty: ignore[unresolved-attribute]
-    lengths = pc.fill_null(pc.list_value_length(arr), 0)  # ty: ignore[unresolved-attribute]
-    offsets = pa.concat_arrays([pa.array([0], lengths.type), pc.cumulative_sum(lengths)])  # ty: ignore[unresolved-attribute]
+    arr = pc.list_slice(arr, 0, MAX_LIST_ITEMS + 1)  # ty: ignore[missing-attribute]
+    lengths = pc.fill_null(pc.list_value_length(arr), 0)  # ty: ignore[missing-attribute]
+    offsets = pa.concat_arrays([pa.array([0], lengths.type), pc.cumulative_sum(lengths)])  # ty: ignore[missing-attribute]
     values = _cut_array(arr.flatten(), _item_original(original))
     return type(arr).from_arrays(offsets, values, mask=arr.is_null())
 

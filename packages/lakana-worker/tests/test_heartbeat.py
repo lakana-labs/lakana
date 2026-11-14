@@ -229,8 +229,8 @@ def test_turning_stale_and_fresh_again_is_logged_once_each(
         clock.now += 60.0
         assert heartbeat.stale()
     assert len(stale_lines) == 1
-    assert caplog.records[0].event == "heartbeat_missed"  # ty: ignore[unresolved-attribute]
-    assert caplog.records[1].event == "heartbeat_recovered"  # ty: ignore[unresolved-attribute]
+    assert caplog.records[0].event == "heartbeat_missed"  # ty: ignore[missing-attribute]
+    assert caplog.records[1].event == "heartbeat_recovered"  # ty: ignore[missing-attribute]
     assert "claims nothing and stops the query it runs" in stale_lines[0]
     assert "60 s" in stale_lines[0]
     messages = [r.getMessage() for r in caplog.records]

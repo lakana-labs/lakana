@@ -730,7 +730,7 @@ def test_a_full_disk_exits_with_the_reason_and_not_as_an_unexpected_error(
             return self
 
         def __exit__(self, *exc: object) -> None:
-            self.inner.close()  # ty: ignore[unresolved-attribute]
+            self.inner.close()  # ty: ignore[missing-attribute]
 
         def write(self, data: bytes) -> None:
             raise OSError(errno.ENOSPC, "No space left on device")

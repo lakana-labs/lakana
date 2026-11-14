@@ -76,7 +76,7 @@ def test_the_iceberg_rest_commit_asks_for_the_session_release() -> None:
 
     assert len(calls) == 1
     assert [
-        k.value.value  # ty: ignore[unresolved-attribute]
+        k.value.value  # ty: ignore[missing-attribute]
         for k in calls[0].keywords
         if k.arg == "release_session"
     ] == [True]

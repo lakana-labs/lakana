@@ -41,7 +41,7 @@ class _LoopbackSocket(socket.socket):
     ports and the limits still run on the plan's addresses.
     """
 
-    def bind(self, address: tuple[str, int], /) -> None:  # ty: ignore[invalid-method-override]
+    def bind(self, address: tuple[str, int], /) -> None:  # ty: ignore[incompatible-method-override]
         """Bind 127.0.0.1 on a free port instead, and remember which.
 
         Parameters

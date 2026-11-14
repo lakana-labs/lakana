@@ -200,8 +200,8 @@ def nested_deeper(data: bytes, limit: int = MAX_NESTING) -> bool:
         return False
     steps = _JSON_STRING.sub(b"", data).translate(_STEPS, _NOT_BRACKET)
     signed = pa.Array.from_buffers(pa.int8(), len(steps), [None, pa.py_buffer(steps)])
-    depths = pc.cumulative_sum(signed.cast(pa.int64()))  # ty: ignore[unresolved-attribute]
-    deepest = pc.max(depths).as_py()  # ty: ignore[unresolved-attribute]
+    depths = pc.cumulative_sum(signed.cast(pa.int64()))  # ty: ignore[missing-attribute]
+    deepest = pc.max(depths).as_py()  # ty: ignore[missing-attribute]
     return deepest is not None and deepest > limit
 
 

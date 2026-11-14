@@ -181,7 +181,7 @@ def _resolver(*accesses: IndexAccess) -> Callable[[], list[IndexAccess]]:
         calls.append(1)
         return list(accesses)
 
-    resolve.calls = calls  # ty: ignore[unresolved-attribute]
+    resolve.calls = calls  # ty: ignore[missing-attribute]
     return resolve
 
 
@@ -199,7 +199,7 @@ def test_a_built_environment_is_used_without_a_build_or_a_secret(tmp_path: Path)
         None,
     )
     assert [r["op"] for r in launcher.requests] == ["status"]
-    assert resolve.calls == []  # ty: ignore[unresolved-attribute]
+    assert resolve.calls == []  # ty: ignore[missing-attribute]
 
 
 def test_two_projects_with_the_same_lock_never_share_an_environment(tmp_path: Path) -> None:

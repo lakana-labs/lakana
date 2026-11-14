@@ -314,7 +314,7 @@ def _first_offender(source: pa.ChunkedArray, mask: pa.ChunkedArray) -> object:
     object
         The first matching value.
     """
-    return pc.filter(source, mask).to_pylist()[0]  # ty: ignore[unresolved-attribute]
+    return pc.filter(source, mask).to_pylist()[0]  # ty: ignore[missing-attribute]
 
 
 def _check_decimal_exact(source: pa.ChunkedArray, target: pa.DataType) -> None:
@@ -355,9 +355,9 @@ def _check_decimal_exact(source: pa.ChunkedArray, target: pa.DataType) -> None:
         If any non-null value would round under `target`'s scale, naming
         the first such value and `target`.
     """
-    rounded = pc.round(source, ndigits=target.scale)  # ty: ignore[unresolved-attribute]
-    mismatch = pc.not_equal(rounded, source)  # ty: ignore[unresolved-attribute]
-    if pc.any(mismatch, min_count=0).as_py():  # ty: ignore[unresolved-attribute]
+    rounded = pc.round(source, ndigits=target.scale)  # ty: ignore[missing-attribute]
+    mismatch = pc.not_equal(rounded, source)  # ty: ignore[missing-attribute]
+    if pc.any(mismatch, min_count=0).as_py():  # ty: ignore[missing-attribute]
         bad = _first_offender(source, mismatch)
         raise ValueError(f"{bad!r} has more precision or scale than {target} allows")
 
@@ -389,11 +389,11 @@ def _check_no_new_overflow(
         already being infinite in `source`, naming the first such value
         and `target`.
     """
-    became_inf = pc.is_inf(cast_result)  # ty: ignore[unresolved-attribute]
+    became_inf = pc.is_inf(cast_result)  # ty: ignore[missing-attribute]
     if pa.types.is_floating(source.type):
-        is_source_inf = pc.is_inf(source)  # ty: ignore[unresolved-attribute]
-        became_inf = pc.and_(became_inf, pc.invert(is_source_inf))  # ty: ignore[unresolved-attribute]
-    if pc.any(became_inf, min_count=0).as_py():  # ty: ignore[unresolved-attribute]
+        is_source_inf = pc.is_inf(source)  # ty: ignore[missing-attribute]
+        became_inf = pc.and_(became_inf, pc.invert(is_source_inf))  # ty: ignore[missing-attribute]
+    if pc.any(became_inf, min_count=0).as_py():  # ty: ignore[missing-attribute]
         bad = _first_offender(source, became_inf)
         raise ValueError(f"{bad!r} overflows {target}")
 
@@ -417,8 +417,8 @@ def _check_boolean_digits(source: pa.ChunkedArray) -> None:
     """
     zero = pa.scalar(0, source.type)
     one = pa.scalar(1, source.type)
-    other = pc.and_(pc.not_equal(source, zero), pc.not_equal(source, one))  # ty: ignore[unresolved-attribute]
-    if pc.any(other, min_count=0).as_py():  # ty: ignore[unresolved-attribute]
+    other = pc.and_(pc.not_equal(source, zero), pc.not_equal(source, one))  # ty: ignore[missing-attribute]
+    if pc.any(other, min_count=0).as_py():  # ty: ignore[missing-attribute]
         bad = _first_offender(source, other)
         raise ValueError(f"{bad!r} isn't a boolean; only 0 and 1 are accepted")
 
@@ -463,7 +463,7 @@ def _cast(source: pa.ChunkedArray, target: pa.DataType) -> pa.ChunkedArray:
         and pa.types.is_timestamp(source.type)
         and source.type.tz is None
     ):
-        source = pc.assume_timezone(source, target.tz)  # ty: ignore[unresolved-attribute]
+        source = pc.assume_timezone(source, target.tz)  # ty: ignore[missing-attribute]
     if pa.types.is_boolean(target) and (
         pa.types.is_integer(source.type) or pa.types.is_floating(source.type)
     ):

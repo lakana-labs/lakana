@@ -104,7 +104,7 @@ def test_an_unreachable_storage_names_the_environment_and_the_next_step(
     assert "'dev'" in message and "Try again" in message and "operator" in message
     assert str(tmp_path) not in message and "AWS" not in message
     (line,) = caplog.records
-    assert line.event == "storage_unreachable"  # ty: ignore[unresolved-attribute]
+    assert line.event == "storage_unreachable"  # ty: ignore[missing-attribute]
     assert "AWS" not in line.getMessage() and "OSError" in line.getMessage()
 
 

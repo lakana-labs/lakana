@@ -2759,7 +2759,7 @@ def test_a_consumer_receives_a_path_and_records_the_version_it_read(world: _Worl
     }
     assert artifacts.parent_modes == [0o700]
     (call,) = world.client.tables.calls
-    assert call["data"].column("score").to_pylist() == [3, 6]  # ty: ignore[unresolved-attribute]
+    assert call["data"].column("score").to_pylist() == [3, 6]  # ty: ignore[missing-attribute]
     assert call["sources"] == ["models.churn", "silver.weather"]
     assert call["source_versions"] == {"models.churn": 4}
     assert world.record()["status"] == "succeeded"
@@ -2893,7 +2893,7 @@ def test_a_consumer_whose_close_fails_still_succeeds(
     assert world.record()["status"] == "succeeded"
     assert closed == ["inputs"]
     (call,) = world.client.tables.calls
-    assert call["data"].column("score").to_pylist() == [3, 6]  # ty: ignore[unresolved-attribute]
+    assert call["data"].column("score").to_pylist() == [3, 6]  # ty: ignore[missing-attribute]
 
 
 @pytest.mark.skipif(not Path("/proc/self/fd").exists(), reason="needs /proc/self/fd")
@@ -4723,7 +4723,7 @@ def test_a_fetched_password_in_an_exception_is_masked_in_the_record_and_the_trac
     world: _World, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The harness masks what it writes; what the asset prints itself is the worker's to mask."""
-    world.client.task_connections = _FetchedConnections()  # ty: ignore[unresolved-attribute]
+    world.client.task_connections = _FetchedConnections()  # ty: ignore[missing-attribute]
     record = _failing(
         world,
         "from lakana.ingest import connections\n"
@@ -4741,7 +4741,7 @@ def test_a_fetched_password_in_an_exception_is_masked_in_the_record_and_the_trac
 
 
 def test_a_fetched_password_in_the_name_of_an_exception_type_is_masked(world: _World) -> None:
-    world.client.task_connections = _FetchedConnections()  # ty: ignore[unresolved-attribute]
+    world.client.task_connections = _FetchedConnections()  # ty: ignore[missing-attribute]
     record = _failing(
         world,
         "from lakana.ingest import connections\n"
@@ -4758,7 +4758,7 @@ def test_the_fetched_connections_are_forgotten_when_the_attempt_ends(world: _Wor
     from lakana.ingest import _connections
 
     fake = _FetchedConnections()
-    world.client.task_connections = fake  # ty: ignore[unresolved-attribute]
+    world.client.task_connections = fake  # ty: ignore[missing-attribute]
     _write_asset(
         world,
         "from lakana.ingest import connections\n"
