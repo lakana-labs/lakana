@@ -51,6 +51,7 @@ def _fixture_app(*, extra: bool = False) -> typer.Typer:
         ceiling: int = typer.Option(3, max=9),
         many: Annotated[list[str] | None, typer.Option(help="Repeat me.")] = None,
         rate: float = typer.Option(1.5, help="A number."),
+        upload: typer.FileText | None = typer.Option(None, help="A file to read."),
     ) -> None:
         """Greet someone.
 
@@ -145,6 +146,7 @@ def test_the_cli_page_lists_commands_options_and_help_in_order() -> None:
     assert "whole number, 9 or less" in page
     assert "Repeat me." in page
     assert "| `--many` | text, repeatable | none |" in page
+    assert "| `--upload` | file |" in page
     assert "`HELLO" not in page
 
 
