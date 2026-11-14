@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from scripts.pytest_memory_limit import open_descriptors
+from descriptor_watch import watch_opened_descriptors
 
 from lakana import _artifact_manifest as artifact_manifest
 from lakana._artifact_manifest import (
@@ -534,7 +534,7 @@ def test_a_path_that_runs_through_a_file_is_reported_as_missing(tmp_path: Path) 
 def test_both_walks_refuse_and_find_the_same_things(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by_descriptor: bool
 ) -> None:
-    monkeypatch.setattr(artifact_manifest, "_BY_DESCRIPTOR", by_descriptor)
+    monkeypatch.setattr(artifact_manifest, "BY_DESCRIPTOR", by_descriptor)
     out = tmp_path / "out"
     (out / "sub").mkdir(parents=True)
     (out / "sub" / "w.bin").write_bytes(b"w")
@@ -584,7 +584,7 @@ class _Listing:
 def test_an_entry_that_vanishes_during_the_walk_is_named(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by_descriptor: bool
 ) -> None:
-    monkeypatch.setattr(artifact_manifest, "_BY_DESCRIPTOR", by_descriptor)
+    monkeypatch.setattr(artifact_manifest, "BY_DESCRIPTOR", by_descriptor)
     monkeypatch.setattr(artifact_manifest.os, "scandir", lambda _path: _Listing([_Entry()]))
     with pytest.raises(ManifestError) as caught:
         scan(tmp_path)
@@ -598,7 +598,7 @@ def test_an_entry_that_vanishes_during_the_walk_is_named(
 def test_a_directory_that_cannot_be_listed_is_reported_with_its_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by_descriptor: bool
 ) -> None:
-    monkeypatch.setattr(artifact_manifest, "_BY_DESCRIPTOR", by_descriptor)
+    monkeypatch.setattr(artifact_manifest, "BY_DESCRIPTOR", by_descriptor)
 
     def refuse(_path: object) -> object:
         raise PermissionError(13, "Permission denied")
@@ -634,28 +634,26 @@ def test_a_root_directory_that_is_swapped_or_locked_when_it_is_opened_is_reporte
             locked.chmod(0o700)
 
 
-@pytest.mark.skipif(
-    not Path("/proc/self/fd").is_dir(), reason="open descriptors are counted in /proc"
-)
-def test_a_scan_leaves_no_descriptor_open_whether_it_succeeds_or_fails(tmp_path: Path) -> None:
+def test_a_scan_leaves_no_descriptor_open_whether_it_succeeds_or_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     tree = tmp_path / "tree"
     (tree / "a" / "b").mkdir(parents=True)
     (tree / "c").mkdir()
     (tree / "a" / "b" / "f.bin").write_bytes(b"f")
     (tree / "c" / "g.bin").write_bytes(b"g")
-    scan(tree)  # warm-up: anything the first call opens for good is not a leak of the scan
-    before = open_descriptors()
+    opened = watch_opened_descriptors(monkeypatch)
     assert len(scan(tree).files) == 2
-    assert open_descriptors() == before
+    assert opened.ever  # the walk and the hashing opened descriptors of their own
     (tree / "c" / "link").symlink_to(tree / "a")
     with pytest.raises(ManifestError):
         scan(tree)
-    assert open_descriptors() == before
+    assert opened.leaked() == []
 
 
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 _NEEDS_DIR_FD = pytest.mark.skipif(
-    not artifact_manifest._BY_DESCRIPTOR, reason="needs files opened relative to a directory"
+    not artifact_manifest.BY_DESCRIPTOR, reason="needs files opened relative to a directory"
 )
 
 

@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from lakana_core.bounds import MAX_INT32
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import shown
 from lakana_core.projects.history_columns import added_columns, valid_from_key_message
@@ -16,7 +17,7 @@ from lakana_core.projects.vocabulary import MODEL_KINDS, WRITE_CHOICES
 if TYPE_CHECKING:
     from lakana_core.projects.frontmatter import AssetMetadata
 
-MAX_KEEP_VERSIONS = 2**31 - 1
+MAX_KEEP_VERSIONS = MAX_INT32
 """The largest `keep_versions` read from a manifest; a larger value reads as "keep all".
 
 Public so that the deploy check of a later task refuses the same values. Defined here,

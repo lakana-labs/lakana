@@ -28,6 +28,9 @@ from sqlalchemy.sql.compiler import DDLCompiler
 
 from lakana_core.models.base import Base, TimestampMixin, UTCDateTime
 
+TABLE_NAME_MAX = 255
+"""The longest `Table.name` the catalog stores, in characters."""
+
 
 class TableType(enum.StrEnum):
     """How a table's data is managed.
@@ -136,7 +139,7 @@ class Table(Base, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     namespace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("namespaces.id", ondelete="CASCADE"))
-    name: Mapped[str] = mapped_column(String(255))
+    name: Mapped[str] = mapped_column(String(TABLE_NAME_MAX))
     table_type: Mapped[TableType] = mapped_column(Enum(TableType, native_enum=False))
     metadata_location: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     previous_metadata_location: Mapped[str | None] = mapped_column(String(1024), nullable=True)

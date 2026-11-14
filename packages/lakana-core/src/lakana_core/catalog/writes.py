@@ -31,10 +31,13 @@ from pyiceberg.table.snapshots import Snapshot
 from pyiceberg.table.update import AddSnapshotUpdate, TableRequirement, TableUpdate
 from pyiceberg.utils.properties import property_as_int
 
+from lakana_core.bounds import MAX_INT32
 from lakana_core.catalog.append import root_relative_path
 from lakana_core.catalog.schema_compat import SchemaDiff
 from lakana_core.errors import NotFoundError, UnsupportedTableError, ValidationError
 from lakana_core.identifiers import TableRef
+from lakana_core.models.namespace import NAMESPACE_PATH_MAX
+from lakana_core.models.table import TABLE_NAME_MAX
 from lakana_core.storage.resolver import ResolvedStorage
 
 logger = logging.getLogger(__name__)
@@ -113,8 +116,8 @@ ExpectedSnapshot = int | Literal["none"]
 _SNAPSHOT_ID = re.compile(r"\A(?:0|[1-9][0-9]{0,18})\Z")
 _MAX_SNAPSHOT_ID = 2**63 - 1
 
-_MAX_SOURCE_VERSION = 2**31 - 1
-MAX_SOURCE_NAME = 1024 + 1 + 255
+MAX_SOURCE_VERSION = MAX_INT32
+MAX_SOURCE_NAME = NAMESPACE_PATH_MAX + 1 + TABLE_NAME_MAX
 """Longest legal dotted name: `Namespace.path` (1024) + a dot + `Table.name` (255).
 
 No narrower limit exists in the code; a longer name cannot name any table."""
@@ -215,7 +218,7 @@ def parse_source_versions(values: Sequence[str]) -> dict[str, int]:
             or any(unicodedata.category(char)[0] in "CZ" for char in raw_name)
         ):
             raise ValidationError(_SOURCE_VERSION_MESSAGE)
-        if head.startswith("0") or len(head) > 10 or int(head) > _MAX_SOURCE_VERSION:
+        if head.startswith("0") or len(head) > 10 or int(head) > MAX_SOURCE_VERSION:
             raise ValidationError(_SOURCE_VERSION_MESSAGE + _SOURCE_VERSION_NUMBER_HINT)
         try:
             name = TableRef.from_dotted("-", raw_name).dotted()

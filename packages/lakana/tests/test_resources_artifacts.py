@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 import pytest
-from scripts.pytest_memory_limit import open_descriptors
+from descriptor_watch import watch_opened_descriptors
 
 from lakana import _http
 from lakana._artifact_manifest import (
@@ -480,6 +480,15 @@ def test_a_retry_after_of_five_thousand_digits_is_the_cap_and_does_not_raise() -
     """Python refuses `int()` of a string past 4,300 digits; the wait never gets that far."""
     exc = LakanaError("busy", status=503, retry_after="9" * 5000)
     assert _http.retry_wait(exc) == pytest.approx(10.0)
+
+
+@pytest.mark.parametrize(("header", "waited"), [("0" * 12, 0.0), ("0" * 4999 + "3", 3.0)])
+def test_a_long_retry_after_of_leading_zeros_is_read_as_its_value(
+    header: str, waited: float
+) -> None:
+    """Only the significant digits count: ten zeros are no wait, not the cap (#71)."""
+    exc = LakanaError("busy", status=503, retry_after=header)
+    assert _http.retry_wait(exc) == pytest.approx(waited)
 
 
 @pytest.mark.parametrize(
@@ -2058,33 +2067,36 @@ def test_a_read_only_copy_of_many_directories_fits_a_small_descriptor_limit(
     assert (done.returncode, done.stdout.strip()) == (0, "ok"), done.stderr[-2000:]
 
 
-@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc/self/fd")
-def test_a_download_leaves_no_descriptor_open(tmp_path: Path) -> None:
+def test_a_download_leaves_no_descriptor_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     files = [{"path": f"d{i}/f", "size": 3, "sha256": _FILE_SHA} for i in range(5)] + [
         {"path": "top", "size": 3, "sha256": _FILE_SHA}
     ]
     artifacts, _ = _download_api(_served(files, is_directory=True))
     (tmp_path / "plain").mkdir()
     (tmp_path / "sealed").mkdir()
-    before = open_descriptors()
+    opened = watch_opened_descriptors(monkeypatch)
     artifacts.download("dev", "models.churn", tmp_path / "plain")
     artifacts.download("dev", "models.churn", tmp_path / "sealed", read_only=True)
     artifacts.download("dev", "models.churn", tmp_path / "new", read_only=True)
-    after = open_descriptors()
+    leaked = opened.leaked()
     for directory, _names, _files in os.walk(tmp_path):
         os.chmod(directory, 0o700)
-    assert after == before
+    assert opened.ever
+    assert leaked == []
 
 
-@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc/self/fd")
-def test_a_refused_or_failed_download_leaves_no_descriptor_open(tmp_path: Path) -> None:
+def test_a_refused_or_failed_download_leaves_no_descriptor_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     files = [{"path": "a", "size": 3, "sha256": _FILE_SHA}]
     artifacts, _ = _download_api(_served(files, is_directory=True))
     wrong, _ = _download_api(_served(files, is_directory=True), b"abcdefgh")
     (tmp_path / "full").mkdir()
     (tmp_path / "full" / "keep").write_text("x")
     (tmp_path / "empty").mkdir()
-    before = open_descriptors()
+    opened = watch_opened_descriptors(monkeypatch)
     for _ in range(3):
         with pytest.raises(LakanaError):
             artifacts.download("dev", "models.churn", tmp_path / "full")
@@ -2092,8 +2104,8 @@ def test_a_refused_or_failed_download_leaves_no_descriptor_open(tmp_path: Path) 
             wrong.download("dev", "models.churn", tmp_path / "empty")
         with pytest.raises(ArtifactCorrupt):
             wrong.download("dev", "models.churn", tmp_path / "missing")
-    after = open_descriptors()
-    assert after == before
+    assert opened.ever
+    assert opened.leaked() == []
 
 
 # --- deleting a version, dropping an artifact, aborting an upload ------------------------------
@@ -2594,3 +2606,21 @@ def test_a_download_by_descriptor_takes_one_new_name(tmp_path: Path, given: str)
     finally:
         os.close(descriptor)
     assert paths == []
+
+
+@_NEEDS_DIR_FD
+def test_a_download_by_descriptor_names_only_the_target_in_its_messages(tmp_path: Path) -> None:
+    """A task's error must not show the worker's attempt directory (#71, item 1)."""
+    (tmp_path / "model").mkdir()
+    (tmp_path / "model" / "x").write_bytes(b"x")
+    artifacts, _ = _download_api(_tree_version())
+    descriptor = os.open(tmp_path, _PIN_FLAGS)
+    try:
+        with pytest.raises(ManifestError) as caught:
+            artifacts.download("dev", "models.churn", "model", dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+    assert str(caught.value) == (
+        "model already exists and is not an empty directory; give a new or an empty directory."
+    )
+    assert str(tmp_path) not in str(caught.value)

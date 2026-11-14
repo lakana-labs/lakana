@@ -1829,8 +1829,8 @@ code in this area has to know.
   task run can commit, `record_pending`), the child's output (redacted, control characters replaced, 1 MiB per
   attempt in all), uv's output (redacted of proxy and index credentials).
 - **The artifact harness works by directory descriptor (#67):** the scan and the upload run below
-  the descriptor `_pin` returns (`client.artifacts.upload(..., dir_fd=...)`), and each input is
-  downloaded below the descriptor `_workspace` holds on `inputs` (`download(..., dir_fd=...)`);
+  the descriptor `lakana._artifact_harness.pin` returns (`client.artifacts.upload(..., dir_fd=...)`), and each input is
+  downloaded below the descriptor `make_workspace` holds on `inputs` (`download(..., dir_fd=...)`);
   the process's working directory is never changed or used. Details under "The artifact store
   (M5c2b)", "Residuals of the harness".
 - **Review checklist for changes here:** a new exit path must still revoke the token, release
@@ -2595,11 +2595,11 @@ accident or believes it closed:
   ignores `Range`.
 
 **Residuals of the harness (#67, closed by descriptors).** The harness passes the descriptor it
-pinned (`_pin`) to `client.artifacts.upload(..., dir_fd=...)`: the scan opens `.` or one name below
+pinned (`lakana._artifact_harness.pin`) to `client.artifacts.upload(..., dir_fd=...)`: the scan opens `.` or one name below
 it, and the upload opens each file again from it (`LocalFile.dir_fd`), so neither `os.chdir` by a
 thread of the asset's code nor a directory moved or replaced by a link redirects what is stored. A
 download goes into `download(..., dir_fd=...)` below a copy (`_held_copy`, judged by device and
-inode like `_pin`'s) of the descriptor `_workspace` opened on `inputs`; the path check before it
+inode like `pin`'s) of the descriptor `make_workspace` opened on `inputs`; the path check before it
 stays, to fail a visible swap with a clear message. Left: the consumer receives `inputs/<name>` as a
 path, which the task's own code can make lead elsewhere after the download, and files changed during
 the upload can fail it. Neither adds anything to what in-process code can do with the task's own

@@ -3704,3 +3704,28 @@ def test_0078_on_postgres() -> None:
         with engine.connect() as conn:
             assert conn.execute(definitions).all() == []
         engine.dispose()
+
+
+def test_0079_on_postgres() -> None:
+    """0079 indexes the artifact rows other rows point at; downgrade drops the six indexes."""
+    revision_0078 = "ada48b713c93"
+    revision_0079 = "c4e8a1f2d937"
+    definitions = sqlalchemy.text(
+        "SELECT indexname FROM pg_indexes WHERE tablename IN "
+        "('artifact_versions', 'artifact_uploads') AND indexname IN ("
+        "'ix_artifact_versions_task_run_id', 'ix_artifact_versions_job_version_id', "
+        "'ix_artifact_versions_created_by', 'ix_artifact_versions_deleted_by', "
+        "'ix_artifact_uploads_task_run_id', 'ix_artifact_uploads_principal_id_expires_at')"
+    )
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0079)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0079
+        with engine.connect() as conn:
+            assert len(conn.execute(definitions).all()) == 6
+        migrate.downgrade(url, revision_0078)
+        assert _alembic_version(engine) == revision_0078
+        with engine.connect() as conn:
+            assert conn.execute(definitions).all() == []
+        engine.dispose()

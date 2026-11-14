@@ -7,6 +7,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base
 
+NAMESPACE_PATH_MAX = 1024
+"""The longest `Namespace.path` the catalog stores, in characters."""
+
 
 class Namespace(Base):
     """A multi-level namespace within an environment.
@@ -25,7 +28,7 @@ class Namespace(Base):
     environment_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("environments.id", ondelete="CASCADE")
     )
-    path: Mapped[str] = mapped_column(String(1024))
+    path: Mapped[str] = mapped_column(String(NAMESPACE_PATH_MAX))
     properties: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("principals.id", ondelete="SET NULL"), nullable=True

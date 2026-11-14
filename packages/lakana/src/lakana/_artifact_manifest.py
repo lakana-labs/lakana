@@ -73,9 +73,9 @@ READ_BYTES = 1024 * 1024
 """Bytes read from a local file at a time."""
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
 _FILE_FLAGS = os.O_RDONLY | _NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
-_BY_DESCRIPTOR = (
+BY_DESCRIPTOR = (
     hasattr(os, "O_DIRECTORY")
     and _NOFOLLOW != 0
     and os.open in os.supports_dir_fd
@@ -428,10 +428,10 @@ def _below(root: str, parts: list[str], dir_fd: int | None = None) -> int:
     OSError
         If a component cannot be opened; `ELOOP` and `ENOTDIR` mean it was swapped.
     """
-    directory = os.open(root, _DIR_FLAGS, dir_fd=dir_fd)
+    directory = os.open(root, DIR_FLAGS, dir_fd=dir_fd)
     try:
         for part in parts[:-1]:
-            child = os.open(part, _DIR_FLAGS, dir_fd=directory)
+            child = os.open(part, DIR_FLAGS, dir_fd=directory)
             os.close(directory)
             directory = child
         return os.open(parts[-1], _FILE_FLAGS, dir_fd=directory)
@@ -450,7 +450,7 @@ def open_regular(source: str, path: str, root: str | None = None, dir_fd: int | 
         Its path inside the artifact, for messages.
     root
         The directory it was found below; when given and the platform allows, every directory
-        on the way is opened by descriptor without following a link (`_BY_DESCRIPTOR`).
+        on the way is opened by descriptor without following a link (`BY_DESCRIPTOR`).
     dir_fd
         A directory `root`, or `source` when `root` is `None`, is relative to; `None` for the
         working directory.
@@ -467,7 +467,7 @@ def open_regular(source: str, path: str, root: str | None = None, dir_fd: int | 
         opened.
     """
     try:
-        if root is not None and _BY_DESCRIPTOR:
+        if root is not None and BY_DESCRIPTOR:
             descriptor = _below(root, path.split("/"), dir_fd)
         else:
             descriptor = os.open(source, _FILE_FLAGS, dir_fd=dir_fd)
@@ -724,7 +724,7 @@ def _walk_by_descriptor(
                     raise ManifestError(_LINK.format(path=shown(name)))
                 if stat.S_ISDIR(info.st_mode):
                     try:
-                        child = os.open(entry.name, _DIR_FLAGS, dir_fd=directory)
+                        child = os.open(entry.name, DIR_FLAGS, dir_fd=directory)
                     except OSError as exc:
                         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
                             raise ManifestError(_SWAPPED.format(path=shown(name))) from exc
@@ -785,7 +785,7 @@ def _walk(
 
     Links are neither followed nor accepted, entries are visited as they are listed (a directory
     of millions of names is never read whole), and the walk stops at the first entry beyond the
-    limits. Where the platform allows (`_BY_DESCRIPTOR`) every directory is opened relative to its
+    limits. Where the platform allows (`BY_DESCRIPTOR`) every directory is opened relative to its
     parent with `O_NOFOLLOW`, so one swapped for a link while the walk runs is refused.
 
     Parameters
@@ -809,11 +809,11 @@ def _walk(
         For a link, a device, socket or pipe, an unreadable directory, or a limit passed.
     """
     collector = _Collector(limits)
-    if not _BY_DESCRIPTOR:
+    if not BY_DESCRIPTOR:
         _walk_by_path(collector, root)
         return collector.found
     try:
-        top = os.open(root, _DIR_FLAGS, dir_fd=dir_fd)
+        top = os.open(root, DIR_FLAGS, dir_fd=dir_fd)
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
             raise ManifestError(_SWAPPED.format(path=root_label(root))) from exc
@@ -937,7 +937,7 @@ def _check_relative_name(path: Path) -> None:
         If it is absolute, has more than one component or is ``..``, or the platform cannot
         open files relative to a directory without following a link.
     """
-    if not _BY_DESCRIPTOR:
+    if not BY_DESCRIPTOR:
         raise ValueError(
             "a path with dir_fd needs a platform that opens files relative to a directory "
             "without following links (Linux or macOS)"

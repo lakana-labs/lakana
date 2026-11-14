@@ -380,7 +380,10 @@ class TreeWriter:
         self.target = target
         self.staging = staging
         self._at = root_label(target)
-        self._at_parent = root_label(target.parent)
+        # A target given relative to a descriptor has no path worth showing above it.
+        self._at_parent = (
+            root_label(target.parent) if target.is_absolute() else "the directory it goes in"
+        )
         self._parent_fd = parent_fd
         self._root_fd = root_fd
         self._inside = inside

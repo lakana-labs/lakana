@@ -14,7 +14,6 @@ import stat
 import subprocess
 import sys
 import textwrap
-import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -26,8 +25,9 @@ from typing import Any
 import polars as pl
 import pyarrow as pa
 import pytest
+from descriptor_watch import watch_opened_descriptors
 
-from lakana import _usage, assets, runner
+from lakana import _artifact_harness, _usage, assets, runner
 from lakana._artifact_manifest import (
     ManifestError,
     StoredManifestDamaged,
@@ -2143,85 +2143,12 @@ def test_a_descriptor_number_the_code_reuses_is_not_taken_for_the_harness_s_dire
     assert world.client.artifacts.uploads == []
 
 
-@dataclass
-class _Opened:
-    """The descriptors `_watch_opened_descriptors` saw opened, with the file each named."""
-
-    ever: list[tuple[int, tuple[int, int]]] = field(default_factory=list)
-
-    @property
-    def numbers(self) -> list[int]:
-        """The numbers of every descriptor opened.
-
-        Returns
-        -------
-        list[int]
-            In the order they were opened.
-        """
-        return [number for number, _ in self.ever]
-
-    def leaked(self) -> list[int]:
-        """Return the descriptors opened that still name the file they were opened on.
-
-        Closing may happen through `os.close` or a file object, so this asks the system:
-        a number that is closed, or names another file now, is not a leak.
-
-        Returns
-        -------
-        list[int]
-            The numbers still open on the same device and inode.
-        """
-        found = []
-        for number, identity in self.ever:
-            try:
-                info = os.fstat(number)
-            except OSError:
-                continue
-            if (info.st_dev, info.st_ino) == identity:
-                found.append(number)
-        return found
-
-
-def _watch_opened_descriptors(monkeypatch: pytest.MonkeyPatch) -> _Opened:
-    """Watch the descriptors the calling thread opens with `os.open`.
-
-    Other threads and finalizers also open and close descriptors, so comparing every
-    descriptor of the process before and after is flaky. This sees only what the
-    code under test opens, in the thread that calls it.
-
-    Parameters
-    ----------
-    monkeypatch
-        Wraps `os.open` until the test ends.
-
-    Returns
-    -------
-    _Opened
-        Every descriptor the calling thread opened; it fills as the test goes on.
-    """
-    mine = threading.get_ident()
-    seen = _Opened()
-    real_open, real_fstat = os.open, os.fstat
-
-    def watching_open(
-        path: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
-    ) -> int:
-        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
-        if threading.get_ident() == mine:
-            info = real_fstat(descriptor)
-            seen.ever.append((descriptor, (info.st_dev, info.st_ino)))
-        return descriptor
-
-    monkeypatch.setattr(os, "open", watching_open)
-    return seen
-
-
 def test_a_failing_fstat_after_opening_the_output_directory_leaks_no_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The harness closes a directory it opened but could not identify."""
     description: Any = SimpleNamespace(work_dir=tmp_path, input_kinds={}, output="artifact")
-    opened = _watch_opened_descriptors(monkeypatch)
+    opened = watch_opened_descriptors(monkeypatch)
     real = os.fstat
     identified: list[int] = []
 
@@ -2232,7 +2159,10 @@ def test_a_failing_fstat_after_opening_the_output_directory_leaks_no_descriptor(
         raise OSError(errno.EIO, "Input/output error")
 
     monkeypatch.setattr(runner.os, "fstat", failing)
-    with pytest.raises(OSError, match="Input/output error"), runner._workspace(description):
+    with (
+        pytest.raises(OSError, match="Input/output error"),
+        _artifact_harness.make_workspace(description),
+    ):
         pass  # pragma: no cover - the workspace raises before it yields
     assert len(identified) == 1
     assert opened.leaked() == []
@@ -2247,12 +2177,12 @@ def test_the_workspace_closes_only_a_descriptor_that_is_still_its_directory(
     elsewhere.mkdir()
     stranger = None
     try:
-        with runner._workspace(description) as workspace:
+        with _artifact_harness.make_workspace(description) as workspace:
             assert workspace.output is not None
             number = workspace.output.descriptor
-            assert runner._is_held(number, workspace.output.identity)
+            assert _artifact_harness.is_held(number, workspace.output.identity)
             os.close(number)
-            assert not runner._is_held(number, workspace.output.identity)
+            assert not _artifact_harness.is_held(number, workspace.output.identity)
             # Another file takes the number: forced, so that nothing else in the process
             # can take it first.
             source = os.open(elsewhere, os.O_RDONLY | os.O_DIRECTORY)
@@ -2262,7 +2192,7 @@ def test_the_workspace_closes_only_a_descriptor_that_is_still_its_directory(
                 if source != number:
                     os.close(source)
             assert stranger == number
-            assert not runner._is_held(number, workspace.output.identity)
+            assert not _artifact_harness.is_held(number, workspace.output.identity)
         try:
             os.fstat(stranger)
         except OSError:  # pragma: no cover - the failure this test exists to name
@@ -2624,7 +2554,7 @@ def test_a_platform_without_descriptor_access_refuses_an_artifact_asset(
     world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     overrides = _artifact_world(world, _PRODUCER)
-    monkeypatch.setattr(runner, "_BY_DESCRIPTOR", False)
+    monkeypatch.setattr(_artifact_harness, "BY_DESCRIPTOR", False)
     assert world.run(**overrides) == 1
     record = world.record()
     assert (record["phase"], record["retryable"]) == ("load", False)
@@ -2638,7 +2568,7 @@ def test_a_platform_without_descriptor_access_refuses_a_consumer_with_the_same_t
     """The check comes before the inputs directory is pinned, so a consumer gets the clear text."""
     (world.root / "assets" / "gold" / "scores.py").write_text(_CONSUMER)
     world.client.artifacts = _Artifacts(files={"model": b'{"factor": 3}'})
-    monkeypatch.setattr(runner, "_BY_DESCRIPTOR", False)
+    monkeypatch.setattr(_artifact_harness, "BY_DESCRIPTOR", False)
     real_open = os.open
     opened: list[object] = []
 
@@ -2905,7 +2835,7 @@ def _failing_closes(world: _World, monkeypatch: pytest.MonkeyPatch) -> list[str]
         real(fd)
         # Only the close of the workspace itself: the harness also closes duplicates of the
         # output descriptor while it stores the artifact.
-        if sys._getframe(1).f_code.co_name == "_workspace" and target in (
+        if sys._getframe(1).f_code.co_name == "make_workspace" and target in (
             f"{work}/inputs",
             f"{work}/output",
         ):
@@ -3065,7 +2995,7 @@ def test_a_404_on_a_table_read_stays_permanent_beside_an_artifact_input(world: _
 def test_the_output_directory_is_unset_and_the_descriptor_closed_after_every_outcome(
     world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    opened = _watch_opened_descriptors(monkeypatch)
+    opened = watch_opened_descriptors(monkeypatch)
     outcomes = []
     for source, error in (
         (_PRODUCER, _STORED),
