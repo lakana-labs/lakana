@@ -187,8 +187,10 @@ same answer from the command line.
 The name and the breadcrumb always show, so you know which table the address names. Below them,
 the page says why it cannot show the table and what to do next:
 
-- **"… is no longer in … ; it may have been dropped or renamed."** You may read that place, but
-  the table is not there now. Press **Back to the Catalog**.
+- **"There is no table … in … › …. Check the name in the address; if it existed, it may have
+  been dropped or renamed."** You may read that place, but it has no table by that name: the
+  name in the address is misspelt, or the table was dropped or renamed. Lakana gives the same
+  answer for both. Correct the name in the address, or press **Back to the Catalog**.
 - **"You may not read …, or there is no table by that name."** Lakana gives the same answer for
   a table you may not read and for a name that does not exist, so that it does not reveal which
   tables exist. Check the name in the address, or ask an administrator for access. **Back to

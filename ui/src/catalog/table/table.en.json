@@ -9,7 +9,7 @@
     "access": "Access"
   },
   "toCatalog": "Back to the Catalog",
-  "notFound": "{{namespace}}.{{name}} is no longer in {{environment}}; it may have been dropped or renamed.",
+  "notFound": "There is no table {{name}} in {{environment}} › {{namespace}}. Check the name in the address; if it existed, it may have been dropped or renamed.",
   "forbidden": "You may not read {{namespace}}.{{name}}, or there is no table by that name. Check the name, or ask an administrator for access.",
   "unavailable": "The table's storage cannot be reached right now. Try again in a moment.",
   "description": {

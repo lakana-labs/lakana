@@ -57,7 +57,8 @@ interface ProblemProps {
 }
 
 /**
- * Says why the table cannot be shown, with the next step: a table that is gone (404), no right
+ * Says why the table cannot be shown, with the next step: no table by that name, whether it never
+ * existed or was dropped or renamed (404, one answer for both), no right
  * to read it or no table by that name (403, the server's one answer for both), storage that cannot be reached (503), or the server's own
  * sentence for any other failure.
  *

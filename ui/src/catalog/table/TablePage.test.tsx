@@ -196,7 +196,7 @@ describe("TablePage", () => {
       });
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
-        "gold.sales.fact_sales is no longer in prod; it may have been dropped or renamed.",
+        "There is no table fact_sales in prod › gold.sales. Check the name in the address; if it existed, it may have been dropped or renamed.",
       );
       expect(screen.getByRole("link", { name: "Back to the Catalog" })).toHaveAttribute(
         "href",
