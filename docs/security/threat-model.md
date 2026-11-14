@@ -280,9 +280,12 @@ accepted for M5c2b.
 - **No disk quota on the attempt directory** beyond what any task already can write. The trusted code
   of a deployer can fill the worker's disk with its output. A consumer's download checks the free
   space before it writes a byte.
-- **The harness's working directory and `inputs` check are by name** (#67): a thread of the
-  asset's own code can redirect the upload by calling `os.chdir`, or swap `inputs` between the check
-  and the download. It adds nothing to what that code can already do with the task's rights.
+- **The harness works by directory descriptor** (#67, closed): it scans and uploads below the
+  descriptor it pinned on the output directory and downloads below the one it holds on `inputs`, so
+  neither `os.chdir` nor a directory moved or replaced by a link redirects them. What remains: the
+  path the consumer function receives is `inputs/<name>`, which the asset's own code can make lead
+  elsewhere after the download, and files it changes during the upload can fail the upload. Neither
+  gives that code anything it cannot already do with the task's rights.
 - **An environment delete leaves the artifact bytes in storage**, as it leaves table data, and a drop
   that crashes leaves empty directories. Nothing deletes them but the operator. A backup holds a
   deleted version's bytes as long as the backup lives.

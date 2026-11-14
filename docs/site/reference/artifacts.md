@@ -75,10 +75,11 @@ Returning anything else fails the task for good, without a retry. The messages s
 | `The directory has no files; an artifact must contain at least one file.` | The directory is empty. Empty subdirectories are never stored. | Write at least one file. |
 
 The same rules as for `lakana artifact upload` apply to what is stored: see "What a path may be".
-Do not leave a thread or process of your own running that changes the output directory, or calls
-`os.chdir`, while the function returns: the upload can fail or store something else than you
-expect. The harness checks that the directory it stores is the one it was given, but the check
-is by name and your own code can defeat it (a known limit, tracked as #67).
+Do not leave a thread or process of your own running that changes the output directory while the
+function returns: the upload can fail or store something else than you expect. The harness opens
+the output directory when it makes it and reads what it stores below that open directory, so a
+directory moved or replaced by a link, or a call of `os.chdir`, does not redirect the upload; files
+your code changes during the upload still can make it fail.
 
 ### What a consuming asset receives
 
@@ -541,6 +542,7 @@ class Artifacts:
         sources: Mapping[str, int | None] | None = None,
         break_glass_reason: str | None = None,
         limits: ScanLimits | None = None,
+        dir_fd: int | None = None,
     ) -> ArtifactVersion: ...
 
     def list(self, environment: str, namespace: str | None = None) -> list[Artifact]: ...
@@ -561,6 +563,7 @@ class Artifacts:
         *,
         version: int | None = None,
         read_only: bool = False,
+        dir_fd: int | None = None,
     ) -> ArtifactDownload: ...
 
     def delete_version(
@@ -598,6 +601,13 @@ class Artifacts:
   The result's `path` is the directory, or for a one-file artifact the file.
 - `upload(...)` returns the new version with `files_sent` and `files_reused` set, and
   `deleted_versions` listing what `keep_versions` removed.
+- `dir_fd` (upload and download, Linux and macOS) is an open descriptor of a directory, as for
+  Python's own `os` functions. For `upload`, `path` is then `"."` (that directory) or one name in
+  it; for `download`, `directory` is one new or empty name in it, and the result's `path` is
+  relative to it. Nothing is looked up by path above that directory, so a thread that changes the
+  working directory, or a directory moved or replaced by a link, does not redirect the call. You
+  keep the descriptor open until the call returns and close it yourself. Any other path given with
+  `dir_fd` is a `ValueError`. Most code does not need it; the task harness uses it.
 - `list_uploads(...)` returns one page of your own open uploads, newest first: `items` (each an
   `ArtifactUpload` with `upload_id`, `artifact`, `created_at`, `expires_at`) and `next_cursor`;
   `iter_uploads(...)` yields them all. Withdraw one with `abort_upload`.

@@ -144,9 +144,6 @@ COMPOSITE_KEY_MAX_ROWS = 5_000
 harness says so first, in words a Python asset can act on."""
 MAX_INPUT_VERSION = 2**31 - 1
 """The largest artifact version a description may name (the catalog stores a 32-bit integer)."""
-_SAVE_FLAGS = _DIR_FLAGS | getattr(os, "O_PATH", 0)
-"""How the working directory is saved: by ``O_PATH`` where there is one, which needs no read
-permission on the directory, so code that took that away cannot make the upload fail."""
 _PARAMETER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
 """A parameter name that may become a directory name: an ASCII identifier."""
 _KINDS = ("table", "artifact")
@@ -1195,12 +1192,16 @@ class _Workspace:
     inputs_identity
         Its device and inode when it was made; a descriptor held on it for the
         attempt keeps the inode from being reused.
+    inputs_descriptor
+        That descriptor: every download goes into the directory it names, never
+        into whatever the path names by then.
     output
         The output directory of an artifact asset.
     """
 
     inputs: Path | None = None
     inputs_identity: tuple[int, int] | None = None
+    inputs_descriptor: int | None = None
     output: _Output | None = None
 
 
@@ -1308,7 +1309,7 @@ def _workspace(description: TaskDescription) -> Generator[_Workspace]:
     """
     held: list[tuple[int, tuple[int, int]]] = []
     try:
-        inputs = identity = output = None
+        inputs = identity = pinned = output = None
         work = Path(os.path.realpath(description.work_dir))
         if not _BY_DESCRIPTOR and (
             "artifact" in description.input_kinds.values() or description.output == "artifact"
@@ -1331,7 +1332,7 @@ def _workspace(description: TaskDescription) -> Generator[_Workspace]:
             descriptor = os.open(path, _DIR_FLAGS)
             output = _Output(path, descriptor, _identity_of(descriptor, held))
             assets._set_output_dir(path)
-        yield _Workspace(inputs, identity, output)
+        yield _Workspace(inputs, identity, pinned, output)
     finally:
         assets._set_output_dir(None)
         # Code of the asset may have closed these (a library calling `os.closerange`), and the
@@ -1354,12 +1355,12 @@ def _fetch_artifact(
     """Download one artifact input into the attempt's directory.
 
     The copy is placed by one rename into a target that does not exist yet, so
-    its root is sealed read-only too. Before the download the ``inputs``
-    directory is checked, by path, to be the one the harness made. That is a
-    check, not a guarantee: the asset's module is already imported, so code of
-    the task that swaps the directory between this check and the download is
-    not stopped. It gives the code nothing it could not do itself; closing it
-    needs the download to work by directory descriptor, which is issue #67.
+    its root is sealed read-only too. The download writes below the descriptor
+    the harness opened on ``inputs`` when it made it, never by path, so a
+    directory the asset's code moves or replaces by a link meanwhile does not
+    redirect it. The path is checked first as well, so that such a swap fails
+    the attempt with a clear message instead of handing the function a path
+    that no longer leads to the copy.
 
     Parameters
     ----------
@@ -1384,7 +1385,7 @@ def _fetch_artifact(
     ------
     WorkspaceError
         If the ``inputs`` directory is, by a check of its path, no longer the one
-        the harness made.
+        the harness made, or the asset's code closed the harness's descriptor of it.
     ArtifactInputError
         If the download is refused, fails or does not match its manifest (an
         `InputError`).
@@ -1397,16 +1398,64 @@ def _fetch_artifact(
             "was downloaded into it; make sure the asset's code (including its threads and "
             "processes) does not change the attempt's directory, then run the task again"
         )
+    directory = _held_copy(workspace.inputs_descriptor, workspace.inputs_identity)
     try:
         got = client.artifacts.download(
-            description.environment, name, inputs / parameter, version=version, read_only=True
+            description.environment,
+            name,
+            parameter,
+            version=version,
+            read_only=True,
+            dir_fd=directory,
         )
     except (LakanaError, OSError) as exc:
         reason = str(exc) or type(exc).__name__
         raise ArtifactInputError(
             f"reading input {parameter!r} ({name}, version {version}) failed: {reason}"
         ) from exc
-    return Path(got.path)
+    finally:
+        os.close(directory)
+    return inputs / got.path
+
+
+def _held_copy(descriptor: int | None, identity: tuple[int, int] | None) -> int:
+    """Copy a descriptor the harness holds, refusing one the asset's code closed or reused.
+
+    The copy is judged, not the number: from here on it is one open file, so a later close or
+    reuse of the number by another thread of the asset's code changes nothing.
+
+    Parameters
+    ----------
+    descriptor
+        The number the harness holds.
+    identity
+        The device and inode of the directory it was opened on.
+
+    Returns
+    -------
+    int
+        A new descriptor of the same directory; the caller closes it.
+
+    Raises
+    ------
+    WorkspaceError
+        If the number is closed or names anything else now.
+    """
+    closed = WorkspaceError(
+        "the asset's code closed a file descriptor the task needs, so no input was downloaded; "
+        "do not close descriptors you did not open (for example with os.closerange), then run "
+        "the task again"
+    )
+    if descriptor is None or identity is None:
+        raise closed
+    try:
+        copy = os.dup(descriptor)
+    except OSError as exc:
+        raise closed from exc
+    if not _is_held(copy, identity):
+        os.close(copy)
+        raise closed
+    return copy
 
 
 def _is_directory(path: Path, identity: tuple[int, int] | None) -> bool:
@@ -1874,19 +1923,12 @@ def _refuse_unopenable(text: str, exc: OSError) -> NoReturn:
 def _upload_pinned(
     client: Client, description: TaskDescription, directory: int, entry: str
 ) -> ArtifactVersion:
-    """Upload ``entry`` of a pinned directory, working inside it.
+    """Upload ``entry`` of a pinned directory, by its descriptor.
 
-    The upload scans and re-opens what it stores by name relative to the current
-    directory, which is made the pinned directory for the call and restored
-    after it. A directory the task's code swaps for a link by name meanwhile is
-    therefore not followed by name. This is not a guarantee against code of the
-    task that runs at the same time: the working directory belongs to the whole
-    process, so a thread of the asset's code that calls ``os.chdir`` during the
-    upload redirects the scan. That gives the code nothing it could not do itself
-    (it runs with the task's own rights); scanning, uploading and downloading by
-    directory descriptor would close it and is issue #67. If the saved directory
-    cannot be restored afterwards, the process stays where it is and the upload's
-    own outcome is what is recorded: the result record's path is absolute.
+    The upload scans, and re-opens what it stores, relative to the descriptor
+    (`dir_fd`), never relative to the working directory: a thread of the
+    asset's code that changes the working directory, or swaps a directory for
+    a link by name, during the upload does not redirect it.
 
     Parameters
     ----------
@@ -1907,42 +1949,26 @@ def _upload_pinned(
     Raises
     ------
     InvalidResult
-        If the directory cannot be entered, or the directory the process was in
-        cannot be reopened to be restored (the code changed their permissions or
-        its working directory); another attempt would meet the same.
+        If the directory cannot be entered (the asset's code removed its
+        permissions); another attempt would meet the same.
     """
     try:
         try:
-            saved = os.open(".", _SAVE_FLAGS)
+            os.close(os.open(".", _DIR_FLAGS, dir_fd=directory))
         except OSError as exc:
             raise InvalidResult(
-                "the asset's code left the working directory in a place the harness cannot "
-                "reopen (for example a directory without read permission), so nothing was "
-                "uploaded; do not change the working directory in the asset, or change it back "
-                "before the function returns, then run the task again"
+                "the directory the asset returned (or lakana.output_dir() itself) is one the "
+                "harness cannot enter, so nothing was uploaded; do not remove the "
+                "permissions of the output directory in the asset's code, then run the "
+                "task again"
             ) from exc
-        try:
-            try:
-                os.fchdir(directory)
-            except OSError as exc:
-                raise InvalidResult(
-                    "the directory the asset returned (or lakana.output_dir() itself) is one the "
-                    "harness cannot enter, so nothing was uploaded; do not remove the "
-                    "permissions of the output directory in the asset's code, then run the "
-                    "task again"
-                ) from exc
-            try:
-                return client.artifacts.upload(
-                    description.environment,
-                    description.table,
-                    Path(entry),
-                    sources=_sources(description),
-                )
-            finally:
-                with contextlib.suppress(OSError):
-                    os.fchdir(saved)
-        finally:
-            os.close(saved)
+        return client.artifacts.upload(
+            description.environment,
+            description.table,
+            Path(entry),
+            sources=_sources(description),
+            dir_fd=directory,
+        )
     finally:
         os.close(directory)
 

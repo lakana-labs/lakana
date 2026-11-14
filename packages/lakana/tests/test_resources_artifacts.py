@@ -2521,3 +2521,76 @@ def test_an_interrupt_during_the_commit_does_not_withdraw_the_upload(tmp_path: P
     with pytest.raises(KeyboardInterrupt):
         api.artifacts().upload("dev", "models.churn", tmp_path)
     assert api.aborts == []
+
+
+_PIN_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+_NEEDS_DIR_FD = pytest.mark.skipif(
+    not hasattr(os, "O_DIRECTORY") or os.open not in os.supports_dir_fd,
+    reason="needs files opened relative to a directory",
+)
+
+
+@_NEEDS_DIR_FD
+def test_an_upload_by_descriptor_stores_the_pinned_directory_wherever_the_process_stands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A thread that changes the working directory before the scan cannot redirect it (#67)."""
+    pinned = tmp_path / "pinned"
+    pinned.mkdir()
+    (pinned / "big.bin").write_bytes(b"0123456789")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "big.bin").write_bytes(b"stolen....")
+    api = _Api()
+    descriptor = os.open(pinned, _PIN_FLAGS)
+    try:
+        monkeypatch.chdir(outside)
+        api.artifacts().upload("dev", "models.churn", Path("."), dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+    digest = hashlib.sha256(b"0123456789").hexdigest()
+    assert api.bodies[0]["files"] == [{"path": "big.bin", "size": 10, "sha256": digest}]
+    assert api.calls[1] == ("PUT", f"{_BASE}/uploads/u-1/blobs/{digest}")
+
+
+@_NEEDS_DIR_FD
+def test_a_download_by_descriptor_lands_in_the_pinned_parent_even_when_its_name_is_a_link(
+    tmp_path: Path,
+) -> None:
+    """The parent's path was replaced by a link: the copy still goes into the pinned one (#67)."""
+    parent = tmp_path / "inputs"
+    parent.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    descriptor = os.open(parent, _PIN_FLAGS)
+    try:
+        os.rename(parent, tmp_path / "inputs.orig")
+        os.symlink(outside, parent)
+        artifacts, _ = _download_api(_tree_version())
+        got = artifacts.download("dev", "models.churn", "model", dir_fd=descriptor)
+        single, _ = _download_api(
+            _served([{"path": "m.json", "size": 3, "sha256": _FILE_SHA}], is_directory=False)
+        )
+        one = single.download("dev", "models.churn", "one", dir_fd=descriptor, read_only=True)
+    finally:
+        os.close(descriptor)
+    assert got.path == "model"
+    assert one.path == os.path.join("one", "m.json")
+    assert os.listdir(outside) == []
+    landed = tmp_path / "inputs.orig"
+    assert sorted(os.listdir(landed)) == ["model", "one"]
+    assert (landed / "model" / "a" / "b" / "w.bin").read_bytes() == _FILE
+    assert _mode(landed / "one") == 0o500
+
+
+@_NEEDS_DIR_FD
+@pytest.mark.parametrize("given", ["/abs", "a/b", "..", "."])
+def test_a_download_by_descriptor_takes_one_new_name(tmp_path: Path, given: str) -> None:
+    artifacts, paths = _download_api(_tree_version())
+    descriptor = os.open(tmp_path, _PIN_FLAGS)
+    try:
+        with pytest.raises(ValueError, match="with dir_fd"):
+            artifacts.download("dev", "models.churn", given, dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+    assert paths == []

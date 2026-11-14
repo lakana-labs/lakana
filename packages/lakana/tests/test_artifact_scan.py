@@ -615,7 +615,7 @@ def test_a_root_directory_that_is_swapped_or_locked_when_it_is_opened_is_reporte
     real = os.open
 
     def swapped(path: object, flags: int, *args: object, **kwargs: object) -> int:
-        if path == str(tmp_path) and "dir_fd" not in kwargs:
+        if path == str(tmp_path) and kwargs.get("dir_fd") is None:
             raise OSError(errno.ELOOP, "Too many levels of symbolic links")
         return real(path, flags, *args, **kwargs)  # ty: ignore[invalid-argument-type]
 
@@ -651,3 +651,71 @@ def test_a_scan_leaves_no_descriptor_open_whether_it_succeeds_or_fails(tmp_path:
     with pytest.raises(ManifestError):
         scan(tree)
     assert open_descriptors() == before
+
+
+_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+_NEEDS_DIR_FD = pytest.mark.skipif(
+    not artifact_manifest._BY_DESCRIPTOR, reason="needs files opened relative to a directory"
+)
+
+
+@_NEEDS_DIR_FD
+def test_a_scan_by_descriptor_ignores_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A thread that changes the working directory during the scan cannot redirect it (#67)."""
+    pinned = tmp_path / "pinned"
+    (pinned / "sub").mkdir(parents=True)
+    (pinned / "sub" / "w.bin").write_bytes(b"inside")
+    (pinned / "model.json").write_bytes(b"{}")
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (outside / "sub" / "w.bin").write_bytes(b"stolen")
+    (outside / "model.json").write_bytes(b"stolen")
+    descriptor = os.open(pinned, _DIR_FLAGS)
+    try:
+        monkeypatch.chdir(outside)
+        tree = scan(Path("."), dir_fd=descriptor)
+        single = scan(Path("model.json"), dir_fd=descriptor)
+        # The pinned directory is moved away by name: the files are still read through it.
+        os.rename(pinned, tmp_path / "moved")
+        os.symlink(outside, pinned)
+        for file in (*tree.files, *single.files):
+            handle = artifact_manifest.open_regular(file.source, file.path, file.root, file.dir_fd)
+            with os.fdopen(handle, "rb") as opened:
+                assert opened.read() != b"stolen"
+    finally:
+        os.close(descriptor)
+    assert [(f.path, f.sha256) for f in tree.files] == [
+        ("model.json", hashlib.sha256(b"{}").hexdigest()),
+        ("sub/w.bin", hashlib.sha256(b"inside").hexdigest()),
+    ]
+    assert tree.is_directory is True
+    assert [(f.path, f.size) for f in single.files] == [("model.json", 2)]
+    assert single.is_directory is False
+
+
+@_NEEDS_DIR_FD
+@pytest.mark.parametrize("given", ["/abs", "a/b", ".."])
+def test_a_scan_by_descriptor_takes_only_the_directory_itself_or_one_name_in_it(
+    tmp_path: Path, given: str
+) -> None:
+    descriptor = os.open(tmp_path, _DIR_FLAGS)
+    try:
+        with pytest.raises(ValueError, match="with dir_fd"):
+            scan(Path(given), dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@_NEEDS_DIR_FD
+def test_a_scan_by_descriptor_refuses_a_link_at_the_name(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "a").write_bytes(b"a")
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    descriptor = os.open(tmp_path, _DIR_FLAGS)
+    try:
+        with pytest.raises(ManifestError, match="link"):
+            scan(Path("link"), dir_fd=descriptor)
+    finally:
+        os.close(descriptor)

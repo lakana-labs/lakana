@@ -1655,11 +1655,19 @@ class _Artifacts:
         self.downloads: list[dict[str, object]] = []
         self.given: list[str] = []
         self.working_directories: list[str] = []
+        self.directories: list[tuple[int, int]] = []
         self.before_scan: Callable[[], None] | None = None
+        self.before_download: Callable[[], None] | None = None
         self.parent_modes: list[int] = []
 
     def upload(
-        self, environment: str, qualified_name: str, path: Path, **options: object
+        self,
+        environment: str,
+        qualified_name: str,
+        path: Path,
+        *,
+        dir_fd: int,
+        **options: object,
     ) -> object:
         """Record the upload and the tree it was given.
 
@@ -1670,7 +1678,9 @@ class _Artifacts:
         qualified_name
             The artifact.
         path
-            The local path.
+            ``"."`` or a name in the directory `dir_fd` names.
+        dir_fd
+            The pinned directory.
         **options
             `sources`.
 
@@ -1681,14 +1691,16 @@ class _Artifacts:
         """
         self.given.append(str(path))
         self.working_directories.append(os.getcwd())
+        info = os.fstat(dir_fd)
+        self.directories.append((info.st_dev, info.st_ino))
         if self.before_scan is not None:
             self.before_scan()
-        local = scan(Path(path))
+        local = scan(Path(path), dir_fd=dir_fd)
         self.uploads.append(
             {
                 "environment": environment,
                 "artifact": qualified_name,
-                "path": Path(os.path.abspath(path)),
+                "path": str(path),
                 "is_directory": local.is_directory,
                 "files": [f.path for f in local.files],
                 **options,
@@ -1702,10 +1714,11 @@ class _Artifacts:
         self,
         environment: str,
         qualified_name: str,
-        directory: Path,
+        directory: str,
         *,
         version: int,
         read_only: bool = False,
+        dir_fd: int,
     ) -> ArtifactDownload:
         """Write one small file as the downloaded artifact.
 
@@ -1716,33 +1729,46 @@ class _Artifacts:
         qualified_name
             The artifact.
         directory
-            Where to write; it must not exist yet.
+            The name to write in `dir_fd`; it must not exist yet.
         version
             The version asked for.
         read_only
             Whether the copy is to be sealed.
+        dir_fd
+            The pinned parent directory.
 
         Returns
         -------
         ArtifactDownload
-            Pointing at the written file.
+            Pointing at the written file, relative to `dir_fd`.
         """
         self.downloads.append(
             {
                 "environment": environment,
                 "artifact": qualified_name,
-                "directory": Path(directory),
+                "directory": directory,
                 "version": version,
                 "read_only": read_only,
             }
         )
-        self.parent_modes.append(stat.S_IMODE(os.stat(Path(directory).parent).st_mode))
+        if self.before_download is not None:
+            self.before_download()
+        parent = os.fstat(dir_fd)
+        self.parent_modes.append(stat.S_IMODE(parent.st_mode))
+        self.directories.append((parent.st_dev, parent.st_ino))
         if isinstance(self.outcome, Exception):
             raise self.outcome
-        Path(directory).mkdir()
-        target = Path(directory) / "model.json"
-        target.write_bytes(self.files[Path(directory).name])
-        return ArtifactDownload(str(target), version, "a" * 64, target.stat().st_size, 1)
+        os.mkdir(directory, 0o700, dir_fd=dir_fd)
+        content = self.files[directory]
+        made = os.open(directory, os.O_RDONLY | os.O_DIRECTORY, dir_fd=dir_fd)
+        try:
+            handle = os.open("model.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=made)
+            with os.fdopen(handle, "wb") as written:
+                written.write(content)
+        finally:
+            os.close(made)
+        target = os.path.join(directory, "model.json")
+        return ArtifactDownload(target, version, "a" * 64, len(content), 1)
 
 
 _STORED = ArtifactVersion(
@@ -1856,7 +1882,7 @@ def test_a_producer_writes_into_the_output_directory_and_uploads_what_it_returne
     assert upload == {
         "environment": "dev",
         "artifact": "models.churn",
-        "path": output / "model.json",
+        "path": "model.json",
         "is_directory": False,
         "files": ["model.json"],
         "sources": {"silver.weather": None},
@@ -1869,20 +1895,58 @@ def test_a_producer_writes_into_the_output_directory_and_uploads_what_it_returne
         assets.output_dir()
 
 
-def test_the_upload_runs_with_the_returned_directory_as_the_working_directory(
+def _identity(path: Path) -> tuple[int, int]:
+    """Read a directory's device and inode.
+
+    Parameters
+    ----------
+    path
+        The directory.
+
+    Returns
+    -------
+    tuple[int, int]
+        Its device and inode.
+    """
+    info = os.lstat(path)
+    return info.st_dev, info.st_ino
+
+
+def test_the_upload_is_given_the_returned_directory_by_descriptor_and_the_cwd_stays(
     world: _World,
 ) -> None:
-    """The scan opens '.' and a bare name, so a swapped path cannot redirect it."""
+    """The scan opens '.' or a bare name below the pinned descriptor, never by path (#67)."""
     overrides = _artifact_world(world, _PRODUCER)
     assert world.run(**overrides) == 0
     artifacts = world.client.artifacts
     assert artifacts.given == ["model.json"]
-    assert artifacts.working_directories == [str(_output(world))]
+    assert artifacts.directories == [_identity(_output(world))]
+    assert artifacts.working_directories == [str(world.root)]
     overrides = _artifact_world(world, _TREE.replace("RETURNED", 'lakana.output_dir() / "m"'))
     shutil.rmtree(_output(world))
     assert world.run(**overrides) == 0
     assert world.client.artifacts.given == ["."]
-    assert world.client.artifacts.working_directories == [str(_output(world) / "m")]
+    assert world.client.artifacts.directories == [_identity(_output(world) / "m")]
+    assert world.client.artifacts.working_directories == [str(world.root)]
+
+
+def test_a_thread_that_changes_the_working_directory_during_the_upload_cannot_redirect_it(
+    world: _World, tmp_path: Path
+) -> None:
+    """Before #67 the scan opened '.' of the process, which any thread can move."""
+    outside = tmp_path / "outside"
+    (outside / "m" / "w").mkdir(parents=True)
+    (outside / "m" / "w" / "a.bin").write_bytes(b"stolen")
+    (outside / "m" / "stolen.txt").write_bytes(b"stolen")
+    overrides = _artifact_world(world, _TREE.replace("RETURNED", 'lakana.output_dir() / "m"'))
+    artifacts = world.client.artifacts
+    artifacts.before_scan = lambda: os.chdir(outside / "m")
+    try:
+        assert world.run(**overrides) == 0, world.record()
+    finally:
+        os.chdir(world.root)
+    (upload,) = artifacts.uploads
+    assert upload["files"] == ["w/a.bin"]
 
 
 @pytest.mark.parametrize(
@@ -2279,43 +2343,20 @@ def test_an_output_directory_the_code_made_unenterable_fails_for_good(world: _Wo
 
 
 @_NEEDS_PERMISSION_BITS
-def test_a_working_directory_the_harness_cannot_reopen_fails_for_good(world: _World) -> None:
-    """The code chdirs into a directory and removes every permission of ``.`` itself."""
+@pytest.mark.parametrize("mode", [0, 0o300])
+def test_the_working_directory_the_code_left_does_not_matter_to_the_upload(
+    world: _World, mode: int
+) -> None:
+    """The code chdirs into a directory and removes permissions of ``.``.
+
+    The upload works by descriptor, so it neither enters nor restores a working directory.
+    """
     source = _PRODUCER.replace(
         "    return out\n",
         "    import os\n"
         "    os.mkdir(lakana.output_dir() / 'cwd')\n"
         "    os.chdir(lakana.output_dir() / 'cwd')\n"
-        "    os.chmod('.', 0)\n"
-        "    return out\n",
-    )
-    overrides = _artifact_world(world, source)
-    try:
-        assert world.run(**overrides) == 1
-    finally:
-        os.chdir(world.root)
-        (_output(world) / "cwd").chmod(0o700)
-    record = world.record()
-    assert (record["phase"], record["retryable"], record["error_type"]) == (
-        "upload",
-        False,
-        "InvalidResult",
-    )
-    assert "cannot reopen" in record["message"]
-    assert "Errno" not in record["message"]
-    assert world.client.artifacts.uploads == []
-
-
-@_NEEDS_PERMISSION_BITS
-@pytest.mark.skipif(not hasattr(os, "O_PATH"), reason="needs O_PATH")
-def test_a_working_directory_without_read_permission_is_still_restored_and_stored(
-    world: _World,
-) -> None:
-    source = _PRODUCER.replace(
-        "    return out\n",
-        "    import os\n"
-        "    os.mkdir(lakana.output_dir() / 'cwd', 0o300)\n"
-        "    os.chdir(lakana.output_dir() / 'cwd')\n"
+        f"    os.chmod('.', {mode})\n"
         "    return out\n",
     )
     overrides = _artifact_world(world, source)
@@ -2325,36 +2366,6 @@ def test_a_working_directory_without_read_permission_is_still_restored_and_store
         os.chdir(world.root)
         (_output(world) / "cwd").chmod(0o700)
     assert world.client.artifacts.uploads[0]["files"] == ["model.json"]
-
-
-@pytest.mark.parametrize("upload_fails", [False, True])
-def test_a_failure_to_restore_the_working_directory_does_not_replace_the_uploads_outcome(
-    world: _World, monkeypatch: pytest.MonkeyPatch, upload_fails: bool
-) -> None:
-    """The record's path is absolute, so the process may simply stay where it is."""
-    real = os.fchdir
-    calls: list[int] = []
-
-    def fail_the_second(descriptor: int) -> None:
-        calls.append(descriptor)
-        if len(calls) == 2:
-            raise PermissionError(13, "Permission denied")
-        real(descriptor)
-
-    outcome = ValidationError("refused", status=422) if upload_fails else _STORED
-    overrides = _artifact_world(world, _PRODUCER, outcome)
-    try:
-        with monkeypatch.context() as patch:
-            patch.setattr(os, "fchdir", fail_the_second)
-            assert world.run(**overrides) == (1 if upload_fails else 0)
-    finally:
-        os.chdir(world.root)
-    assert len(calls) == 2
-    record = world.record()
-    if upload_fails:
-        assert (record["phase"], record["error_type"]) == ("upload", "UploadRefused")
-    else:
-        assert (record["status"], record["version"]) == ("succeeded", 7)
 
 
 _LIAR = '''\
@@ -2587,7 +2598,7 @@ def test_the_output_directory_moved_or_replaced_by_a_link_is_never_looked_up_aga
     overrides = _artifact_world(world, source)
     assert world.run(**overrides) == 0, world.record()
     artifacts = world.client.artifacts
-    assert artifacts.working_directories == [str(_output(world).with_name("output.orig"))]
+    assert artifacts.directories == [_identity(_output(world).with_name("output.orig"))]
     assert artifacts.uploads[0]["files"] == ["model.json"]
     assert (outside / "model.json").read_text() == "stolen"
 
@@ -2753,11 +2764,12 @@ def test_a_consumer_receives_a_path_and_records_the_version_it_read(world: _Worl
     assert download == {
         "environment": "dev",
         "artifact": "models.churn",
-        "directory": world.result_path.parent / "inputs" / "model",
+        "directory": "model",
         "version": 4,
         "read_only": True,
     }
     assert artifacts.parent_modes == [0o700]
+    assert artifacts.directories == [_identity(world.result_path.parent / "inputs")]
     (call,) = world.client.tables.calls
     assert call["data"].column("score").to_pylist() == [3, 6]  # ty: ignore[missing-attribute]
     assert call["sources"] == ["models.churn", "silver.weather"]
@@ -2765,6 +2777,34 @@ def test_a_consumer_receives_a_path_and_records_the_version_it_read(world: _Worl
     assert world.record()["status"] == "succeeded"
     assert "output" not in world.record()
     assert world.client.queries.submitted == [(_SELECT, "dev")]
+
+
+def test_an_inputs_directory_swapped_for_a_link_after_the_check_does_not_redirect_the_download(
+    world: _World, tmp_path: Path
+) -> None:
+    """The download writes below the descriptor the harness pinned, never by path (#67)."""
+    (world.root / "assets" / "gold" / "scores.py").write_text(_CONSUMER)
+    artifacts = _Artifacts(files={"model": b'{"factor": 3}'})
+    world.client.artifacts = artifacts
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    inputs = world.result_path.parent / "inputs"
+
+    def swap() -> None:
+        os.rename(inputs, inputs.with_name("inputs.orig"))
+        os.symlink(outside, inputs)
+
+    artifacts.before_download = swap
+    overrides = {
+        "inputs": {"model": "models.churn", "obs": "silver.weather"},
+        "input_kinds": {"model": "artifact", "obs": "table"},
+        "input_versions": {"model": 4},
+    }
+    world.run(**overrides)
+    assert os.listdir(outside) == []
+    assert (inputs.with_name("inputs.orig") / "model" / "model.json").read_bytes() == (
+        b'{"factor": 3}'
+    )
 
 
 def test_an_artifact_asset_may_consume_an_artifact(world: _World) -> None:
