@@ -1,6 +1,14 @@
 /* The Catalog: the tree of places beside the list, the search above it, the bar with the result
    line and the sort, the table that scrolls on its own, the health word and the skeleton shown
    while the first page loads. */
+/* Wider than other pages, so the list takes the width beside the tree: its seven columns fit
+   without scrolling from a 1280 px window on, and from about 1600 px each cell stays on one line.
+   Wider than a table's page (1040 px), whose facts read as one block; past 1280 px the columns
+   would only drift apart. */
+.catalog-page .page {
+  max-width: 1280px;
+}
+
 .catalog {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
@@ -169,8 +177,10 @@
   outline-offset: var(--focus-offset);
 }
 
+/* No narrower than this, so names and times do not break into pieces on a narrow screen; still
+   below the 729 px the list has beside the tree in a 1280 px window with a classic scrollbar. */
 .list-scroll .list {
-  min-width: 896px;
+  min-width: 720px;
 }
 
 .list-scroll .row-name {
