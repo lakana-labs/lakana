@@ -102,9 +102,10 @@ whole suite with coverage the way the 3.14 shards do together, run it **one pack
 and combine the data, as CI combines its shards:
 
 ```bash
-for target in packages/lakana-core packages/lakana packages/lakana-server packages/lakana-worker scripts; do
+for target in packages/lakana-core packages/lakana packages/lakana-server \
+    packages/lakana-worker scripts; do
   COVERAGE_FILE=".coverage.local-$(basename "$target")" \
-    systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 timeout 2400 \
+    systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 timeout 3600 \
     uv run pytest "$target" -n 2 --dist loadfile --cov --cov-report= -q -p no:cacheprovider || break
 done
 uv run coverage combine .coverage.local-* && uv run coverage json
@@ -1169,24 +1170,25 @@ first failure; CI's `ui` job runs them one step each.
   --update`; never lower the baseline or add a coverage exclusion to fit.
 - **`prove-gates`** (`ui/scripts/prove-gates.mjs`) copies `ui/` and the build into a scratch
   directory (`$GATE_PROBE_DIR`, default `~/.cache/lakana-ui-gate-probe`; CI uses
-  `$RUNNER_TEMP/gate-probe`), writes one violation per gate (an unsafe `any`, a conditional hook,
-  an image without alt text, an undocumented export, a `fetch`, `window.fetch`,
-  `navigator.sendBeacon` or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type errors, an import out of `src/api/` and a cycle, an unused file, an
-  untested branch, a size limit of 1 B, an 80-token copy), runs the gate and requires it to fail
-  with the expected message; one probe checks the other way round, that a `fetch` inside
-  `src/api/` is accepted. The nine ESLint probes share one ESLint run (one run takes 15 s locally,
-  about 23 s in CI; nine runs made the proofs take 290 s of the `ui` job, #586): all their files
-  are written at once and each probe must find its rules in the lines ESLint prints about its own
-  files. ESLint runs with `--max-warnings 0`, so each of those lines alone fails the run; the
-  allowed file passes when ESLint says nothing about it. The verdicts live in
-  `ui/scripts/gate-verdict.mjs`, tested by Vitest (`gate-verdict.test.ts`). When a step before a
-  gate fails (the coverage probe's `test:coverage`, say), the probe's message ends with that
-  step's exit status and the end of its output. It prints one line per probe and fails naming
-  every gate that got its probe wrong: fix the gate, not the probe. It refuses a `$GATE_PROBE_DIR` that is not empty and
-  lacks its marker file `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm --prefix ui run build`)
-  and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof is the smoke test's
-  positive control (an image without alt text must be found); the audits prove themselves in
-  `security.yml` on a lock generated at run time with `lodash@4.17.20`.
+  `$RUNNER_TEMP/gate-probe`), writes one violation per gate (an unsafe `any`, a conditional hook, an
+  image without alt text, an undocumented export, a `fetch`, `window.fetch`, `navigator.sendBeacon`
+  or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type
+  errors, an import out of `src/api/` and a cycle, an unused file, an untested branch, a size limit
+  of 1 B, an 80-token copy), runs the gate and requires it to fail with the expected message; one
+  probe checks the other way round, that a `fetch` inside `src/api/` is accepted. The nine ESLint
+  probes share one ESLint run (one run takes 15 s locally, about 23 s in CI; nine runs made the
+  proofs take 290 s of the `ui` job, #586): all their files are written at once and each probe must
+  find its rules in the lines ESLint prints about its own files. ESLint runs with `--max-warnings
+  0`, so each of those lines alone fails the run; the allowed file passes when ESLint says nothing
+  about it. The verdicts live in `ui/scripts/gate-verdict.mjs`, tested by Vitest
+  (`gate-verdict.test.ts`). When a step before a gate fails (the coverage probe's `test:coverage`,
+  say), the probe's message ends with that step's exit status and the end of its output. It prints
+  one line per probe and fails naming every gate that got its probe wrong: fix the gate, not the
+  probe. It refuses a `$GATE_PROBE_DIR` that is not empty and lacks its marker file
+  `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm
+  --prefix ui run build`) and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof
+  is the smoke test's positive control (an image without alt text must be found); the audits prove
+  themselves in `security.yml` on a lock generated at run time with `lodash@4.17.20`.
 - **Playwright.** Pull requests that touch `ui/` run the smoke test on Chromium; the full
   three-browser suite (`npm --prefix ui run e2e:all`) runs on release. The tests run against
   `vite preview` of the production build, which sends the content security policy of
