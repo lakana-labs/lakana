@@ -20,7 +20,8 @@ canoe) travels on:
 - hairlines instead of boxes and shadows (in dark, a floating surface is lighter instead of
   shadowed);
 - colour kept for state: green for succeeded, red for failed, amber for a warning;
-- light and dark as equals: each is designed and tested, neither is derived from the other;
+- light and dark as equals: each is designed and tested, neither is derived from the other,
+  and the browser's own parts, such as the scrollbars, follow the theme you see;
 - IBM Plex Sans for text and IBM Plex Mono for code and data, served by Lakana itself, so the
   interface makes no request to another site.
 

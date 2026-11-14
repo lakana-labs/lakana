@@ -522,6 +522,36 @@ test("the narrow top bar keeps its height and the content starts right below it"
   expect(new Set(heights).size, heights.join(", ")).toBe(1);
 });
 
+// The browser's own parts (the scrollbars, a form control's popup) follow `color-scheme`, so it
+// must match the theme on the page, including a light choice under a dark system.
+for (const [system, theme, expected] of [
+  ["dark", "system", "dark"],
+  ["light", "system", "light"],
+  ["light", "dark", "dark"],
+  ["dark", "light", "light"],
+] as const) {
+  test(`the browser's own parts are ${expected} with the ${theme} theme under a ${system} system`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: system });
+    await signInAsAdmin(page);
+    await page.addInitScript(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme, density: "roomy", language: "en" })],
+    );
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+
+    const scheme = await page.evaluate(
+      () => getComputedStyle(document.documentElement).colorScheme,
+    );
+
+    expect(scheme).toBe(expected);
+  });
+}
+
 test("axe catches a missing alt text", async ({ page }) => {
   // The positive control: the checks above would pass vacuously if axe found nothing at all.
   await page.setContent('<img src="x.png">');
