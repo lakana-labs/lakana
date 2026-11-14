@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from lakana_core.audit.service import AuditService
-from lakana_core.audit.views import record_source_view, sessions_like
+from lakana_core.audit.views import record_source_views, sessions_like
 from lakana_core.auth import (
     Action,
     AuthorizationService,
@@ -90,7 +90,7 @@ from lakana_core.pagination import decode_cursor, encode_cursor
 from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference, key_columns
 from lakana_core.projects.checks import ParsedCheck, check_sql_references, may_read_every
 from lakana_core.projects.dag import ProjectGraph
-from lakana_core.projects.definition import REASON_MESSAGES, DefinitionReason, passes_content_gate
+from lakana_core.projects.definition import REASON_MESSAGES, ContentGate, DefinitionReason
 from lakana_core.projects.deploy_jobs import (
     OUTCOME_PENDING,
     DeployJobStart,
@@ -473,6 +473,250 @@ def _gate_content(
             entry.pop(key, None)
     entry["content_reason"] = None if reason is None else reason.value
     entry["content_message"] = None if reason is None else REASON_MESSAGES[reason]
+
+
+class _ReadableNames:
+    """Answer whether a reader may read dotted table names, from one batch per request.
+
+    Each name is judged as `may_read_every` judges it alone: a name that is not a table name is
+    not readable, any other by the `READ_TABLE` grants that cover it, existing or not.
+
+    Parameters
+    ----------
+    authorization
+        Authorization service.
+    p
+        The reader.
+    environment
+        Environment name.
+    """
+
+    def __init__(
+        self, authorization: AuthorizationService, p: PrincipalRef, environment: str
+    ) -> None:
+        self._authorization = authorization
+        self._p = p
+        self._environment = environment
+        self._known: dict[str, bool] = {}
+
+    def prefetch(self, names: Iterable[object]) -> None:
+        """Answer every name not answered yet, in one `permits_each` batch.
+
+        Parameters
+        ----------
+        names
+            Candidate names; anything that is not a string is skipped.
+        """
+        asked: dict[str, Securable] = {}
+        for name in names:
+            if not isinstance(name, str) or name in self._known or name in asked:
+                continue
+            try:
+                ref = TableRef.from_dotted(self._environment, name)
+            except ValidationError:
+                self._known[name] = False
+                continue
+            asked[name] = Securable.table_scope(self._environment, ref.namespace, ref.name)
+        if not asked:
+            return
+        answers = permits_each(
+            self._authorization,
+            self._p,
+            [(Action.READ_TABLE, securable) for securable in asked.values()],
+        )
+        self._known.update(zip(asked, answers, strict=True))
+
+    def __call__(self, dotted: str) -> bool:
+        """Answer one name.
+
+        Parameters
+        ----------
+        dotted
+            Dotted table name.
+
+        Returns
+        -------
+        bool
+            Whether a READ_TABLE grant covers it.
+        """
+        if dotted not in self._known:
+            self.prefetch([dotted])
+        return self._known.get(dotted, False)
+
+
+def _manifest_names(manifest: Mapping[str, Any]) -> list[object]:
+    """List every table name a project version's view asks about, to answer them at once.
+
+    Parameters
+    ----------
+    manifest
+        The stored manifest; untrusted.
+
+    Returns
+    -------
+    list
+        The names, as stored: assets' references and model reference targets, edges' ends,
+        external inputs and the tables each check's SQL names.
+    """
+    names: list[object] = []
+    for entry in _listed(manifest.get("assets")):
+        if isinstance(entry, Mapping):
+            names.extend(_listed(entry.get("references")))
+            model = entry.get("model")
+            if isinstance(model, Mapping):
+                names.extend(
+                    item.get("target")
+                    for item in _listed(model.get("references"))
+                    if isinstance(item, Mapping)
+                )
+    for edge in _listed(manifest.get("edges")):
+        if isinstance(edge, (list, tuple)) and edge:
+            names.append(edge[0])
+    names.extend(_listed(manifest.get("external_inputs")))
+    for _, found in _check_gate_tables(manifest):
+        names.extend(found)
+    return names
+
+
+def _check_gate_tables(manifest: Mapping[str, Any]) -> list[tuple[object, tuple[str, ...]]]:
+    """List each check's table and the tables its SQL names, where they can be listed.
+
+    Parameters
+    ----------
+    manifest
+        The stored manifest; untrusted.
+
+    Returns
+    -------
+    list of tuple
+        ``(table, names)`` per check entry whose SQL names its tables.
+    """
+    found: list[tuple[object, tuple[str, ...]]] = []
+    for entry in _listed(manifest.get("checks")):
+        if isinstance(entry, Mapping):
+            names = check_sql_references(entry.get("sql"))
+            if names is not None:
+                found.append((entry.get("table"), tuple(names)))
+    return found
+
+
+def _listed(value: object) -> list[Any]:
+    """Give a stored value as a list, or nothing when it is not one.
+
+    Parameters
+    ----------
+    value
+        The value; untrusted.
+
+    Returns
+    -------
+    list
+        The value itself when it is a list, else an empty list.
+    """
+    return value if isinstance(value, list) else []
+
+
+def _visible_model(
+    may_read: Callable[[str], bool], model: Mapping[str, Any]
+) -> tuple[dict[str, Any], int]:
+    """Withhold the reference targets of an asset's model that the reader may not read.
+
+    Parameters
+    ----------
+    may_read
+        Whether the reader may read a dotted name (`_ReadableNames`).
+    model
+        The entry's `model`; untrusted, like a stored manifest.
+
+    Returns
+    -------
+    tuple
+        The model with only the references whose target the reader may read, and how many
+        were removed; an item that is not a mapping with a string `target` is removed too.
+    """
+    items = model.get("references")
+    listed = items if isinstance(items, list) else []
+    visible = [
+        item
+        for item in listed
+        if isinstance(item, Mapping)
+        and isinstance(item.get("target"), str)
+        and may_read(item["target"])
+    ]
+    return {**model, "references": visible}, len(listed) - len(visible)
+
+
+def _visible_checks(
+    may_read: Callable[[str], bool],
+    gate: ContentGate,
+    checks: object,
+    shown_files: set[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    """Withhold the SQL of every check the reader may not see.
+
+    The tables are read again from each check's SQL, never taken from the stored
+    `references`.
+
+    Parameters
+    ----------
+    may_read
+        Whether the reader may read a dotted name (`_ReadableNames`).
+    gate
+        The content gate of the reader in the version's environment.
+    checks
+        The manifest's `checks`; untrusted.
+    shown_files
+        The `(table, path)` of each file whose text is shown; a check shown is added.
+
+    Returns
+    -------
+    list of dict
+        One copy per check entry. A check whose SQL names a table the reader may not read, or
+        whose tables cannot be listed, loses `sql` and `references`, and
+        `hidden_references` counts the unreadable names (1 when they cannot be listed);
+        name, table, check, path, on_failure and description stay, and a generated check's
+        `generated` keeps only its family and columns. A check that fails the content gate
+        on its table and the tables its SQL names (a file read in its SQL, or any of them a
+        view, its own table included: a check does not define its table), or has no string
+        `path`, loses `sql` (`restricted`). A value that is not a list, and an entry that
+        is not a mapping, show as nothing.
+    """
+    if not isinstance(checks, list):
+        return []
+    visible: list[dict[str, Any]] = []
+    for raw in checks:
+        if not isinstance(raw, Mapping):
+            continue
+        entry = dict(raw)
+        names = check_sql_references(entry.get("sql"))
+        hidden = 1 if names is None else sum(not may_read(name) for name in names)
+        if names is None or hidden:
+            entry.pop("sql", None)
+            entry.pop("references", None)
+            generated = entry.get("generated")
+            if isinstance(generated, Mapping):
+                # A reference check's source names its target, as its SQL does.
+                entry["generated"] = {
+                    key: generated[key] for key in ("family", "columns") if key in generated
+                }
+        else:
+            entry["references"] = list(names)
+        entry["hidden_references"] = hidden
+        table, path = entry.get("table"), entry.get("path")
+        passes = (
+            names is not None
+            and not hidden
+            and isinstance(path, str)
+            and gate.passes(
+                table,
+                list(names),
+                bool(sql_file_references(entry["sql"], names)),
+                defines=False,
+            )
+        )
+        _gate_content(entry, None if passes else DefinitionReason.RESTRICTED, shown_files)
+        visible.append(entry)
+    return visible
 
 
 def _artifact_parameter_issues(
@@ -2506,13 +2750,22 @@ class DeployService:
         }
         shown_files: set[tuple[str, str]] = set()
         manifest = dict(version.manifest_json)
+        may_read = _ReadableNames(self._authz, p, environment)
+        may_read.prefetch(_manifest_names(manifest))
+        gate = ContentGate(self._session, self._authz, p, environment)
+        gate.prepare(
+            [
+                (file.table_name, file.gate_tables)
+                for file in files.values()
+                if file.gate_version == GATE_VERSION
+            ]
+            + [(table, list(names)) for table, names in _check_gate_tables(manifest)]
+        )
         assets = []
         hidden_assets: set[str] = set()
         for entry in manifest.get("assets", []):
             entry = dict(entry)
-            unreadable = [
-                r for r in entry.get("references", []) if not self._may_read(p, environment, r)
-            ]
+            unreadable = [r for r in entry.get("references", []) if not may_read(r)]
             if unreadable:
                 for key in _HIDDEN_KEYS:
                     entry.pop(key, None)
@@ -2521,8 +2774,8 @@ class DeployService:
             else:
                 entry["hidden_references"] = 0
             if isinstance(entry.get("model"), Mapping):
-                entry["model"], entry["hidden_model_references"] = self._visible_model(
-                    p, environment, entry["model"]
+                entry["model"], entry["hidden_model_references"] = _visible_model(
+                    may_read, entry["model"]
                 )
             table, path = entry.get("table"), entry.get("path")
             file = (
@@ -2532,9 +2785,7 @@ class DeployService:
             )
             if file is None or file.gate_version != GATE_VERSION:
                 reason: DefinitionReason | None = DefinitionReason.NOT_RECORDED
-            elif unreadable or not passes_content_gate(
-                self._session, self._authz, p, environment, table, file.gate_tables, file.gate_raw
-            ):
+            elif unreadable or not gate.passes(table, file.gate_tables, file.gate_raw):
                 reason = DefinitionReason.RESTRICTED
             else:
                 reason = None
@@ -2542,35 +2793,32 @@ class DeployService:
             assets.append(entry)
         manifest["assets"] = assets
         if "checks" in manifest:
-            manifest["checks"] = self._visible_checks(
-                p, environment, manifest["checks"], shown_files
-            )
+            manifest["checks"] = _visible_checks(may_read, gate, manifest["checks"], shown_files)
         edges = manifest.get("edges", [])
         # An edge into a hidden asset reveals what its SQL reads; an edge from a table the
         # reader may not read can come from `references:` alone, and reveals the target that
         # `_visible_model` withholds.
         manifest["edges"] = [
-            edge
-            for edge in edges
-            if edge[1] not in hidden_assets and self._may_read(p, environment, edge[0])
+            edge for edge in edges if edge[1] not in hidden_assets and may_read(edge[0])
         ]
         manifest["hidden_edges"] = len(edges) - len(manifest["edges"])
         inputs = manifest.get("external_inputs", [])
-        visible = [name for name in inputs if self._may_read(p, environment, name)]
+        visible = [name for name in inputs if may_read(name)]
         manifest["external_inputs"] = visible
         manifest["hidden_external_inputs"] = len(inputs) - len(visible)
         factory = session_factory if session_factory is not None else sessions_like(self._session)
+        shown = []
         for table, path in sorted(shown_files):
             ref = TableRef.from_dotted(environment, table)
-            record_source_view(
-                factory,
-                p,
-                Securable.table_scope(environment, ref.namespace, ref.name),
-                repository=repository_name,
-                path=path,
-                commit=version.commit_sha,
-                window_minutes=window_minutes,
-            )
+            shown.append((Securable.table_scope(environment, ref.namespace, ref.name), path))
+        record_source_views(
+            factory,
+            p,
+            shown,
+            repository=repository_name,
+            commit=version.commit_sha,
+            window_minutes=window_minutes,
+        )
         return JobVersionView(
             id=version.id,
             environment=environment,
@@ -2582,118 +2830,6 @@ class DeployService:
             created_at=version.created_at,
             manifest=manifest,
         )
-
-    def _visible_model(
-        self, p: PrincipalRef, environment: str, model: Mapping[str, Any]
-    ) -> tuple[dict[str, Any], int]:
-        """Withhold the reference targets of an asset's model that the reader may not read.
-
-        Parameters
-        ----------
-        p
-            The reader.
-        environment
-            Environment name.
-        model
-            The entry's `model`; untrusted, like a stored manifest.
-
-        Returns
-        -------
-        tuple
-            The model with only the references whose target `p` may read, and how many were
-            removed; an item that is not a mapping with a string `target` is removed too.
-        """
-        items = model.get("references")
-        listed = items if isinstance(items, list) else []
-        visible = [
-            item
-            for item in listed
-            if isinstance(item, Mapping)
-            and isinstance(item.get("target"), str)
-            and self._may_read(p, environment, item["target"])
-        ]
-        return {**model, "references": visible}, len(listed) - len(visible)
-
-    def _visible_checks(
-        self,
-        p: PrincipalRef,
-        environment: str,
-        checks: object,
-        shown_files: set[tuple[str, str]],
-    ) -> list[dict[str, Any]]:
-        """Withhold the SQL of every check the reader may not see.
-
-        The tables are read again from each check's SQL, never taken from the stored
-        `references`.
-
-        Parameters
-        ----------
-        p
-            The reader.
-        environment
-            Environment name.
-        checks
-            The manifest's `checks`; untrusted.
-        shown_files
-            The `(table, path)` of each file whose text is shown; a check shown is added.
-
-        Returns
-        -------
-        list of dict
-            One copy per check entry. A check whose SQL names a table `p` may not read, or
-            whose tables cannot be listed, loses `sql` and `references`, and
-            `hidden_references` counts the unreadable names (1 when they cannot be listed);
-            name, table, check, path, on_failure and description stay, and a generated check's
-            `generated` keeps only its family and columns. A check that fails the content gate
-            on its table and the tables its SQL names (a file read in its SQL, or any of them a
-            view, its own table included: a check does not define its table), or has no string
-            `path`, loses `sql` (`restricted`). A value that is not a list, and an entry that
-            is not a mapping, show as nothing.
-        """
-        if not isinstance(checks, list):
-            return []
-        visible: list[dict[str, Any]] = []
-        for raw in checks:
-            if not isinstance(raw, Mapping):
-                continue
-            entry = dict(raw)
-            names = check_sql_references(entry.get("sql"))
-            hidden = (
-                1
-                if names is None
-                else sum(not self._may_read(p, environment, name) for name in names)
-            )
-            if names is None or hidden:
-                entry.pop("sql", None)
-                entry.pop("references", None)
-                generated = entry.get("generated")
-                if isinstance(generated, Mapping):
-                    # A reference check's source names its target, as its SQL does.
-                    entry["generated"] = {
-                        key: generated[key] for key in ("family", "columns") if key in generated
-                    }
-            else:
-                entry["references"] = list(names)
-            entry["hidden_references"] = hidden
-            table, path = entry.get("table"), entry.get("path")
-            passes = (
-                names is not None
-                and not hidden
-                and isinstance(path, str)
-                and passes_content_gate(
-                    self._session,
-                    self._authz,
-                    p,
-                    environment,
-                    table,
-                    list(names),
-                    bool(sql_file_references(entry["sql"], names)),
-                    defines=False,
-                )
-            )
-            _gate_content(entry, None if passes else DefinitionReason.RESTRICTED, shown_files)
-            visible.append(entry)
-        return visible
 
     def orphans(self, p: PrincipalRef, environment: str) -> OrphanReport:
         """Compute tables earlier project versions produced that no current one does.

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import enum
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -308,6 +308,120 @@ def record_source_view(
         ),
         refused="a read of a project file",
     )
+
+
+def record_source_views(
+    session_factory: Callable[[], Session],
+    principal: PrincipalRef,
+    files: Sequence[tuple[Securable, str]],
+    *,
+    repository: str,
+    commit: str,
+    window_minutes: int,
+) -> int:
+    """Record many file reads of one commit as `record_source_view` records each, at once.
+
+    One lookup of the reader's recent `SOURCE_VIEWED` rows in the files' environments, one row
+    per file not yet recorded within the window, one commit: the rows are written together or
+    not at all.
+
+    Parameters
+    ----------
+    session_factory
+        Opens the session the lookup and the rows use (`sessions_like`).
+    principal
+        The reader.
+    files
+        The table each file defines (or checks) and the file's path.
+    repository
+        The repository's name.
+    commit
+        The deployed commit.
+    window_minutes
+        `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`.
+
+    Returns
+    -------
+    int
+        How many rows were written.
+
+    Raises
+    ------
+    AuditUnavailableError
+        If the lookup or the write failed; the caller must not return any of the files.
+    """
+    if not files:
+        return 0
+
+    def key(scope: Securable, path: str) -> tuple[object, ...]:
+        """Identify one read for the window.
+
+        Parameters
+        ----------
+        scope
+            The table.
+        path
+            The file's path.
+
+        Returns
+        -------
+        tuple
+            The scope's columns and the path.
+        """
+        namespace = scope.namespace.joined() if scope.namespace is not None else None
+        return (scope.kind, scope.environment, namespace, scope.table, path)
+
+    try:
+        with session_factory() as session:
+            since = datetime.now(UTC) - timedelta(minutes=window_minutes)
+            environments = sorted({scope.environment for scope, _ in files if scope.environment})
+            stored = session.execute(
+                select(
+                    AuditEvent.securable_kind,
+                    AuditEvent.securable_environment,
+                    AuditEvent.securable_namespace,
+                    AuditEvent.securable_table,
+                    AuditEvent.detail,
+                ).where(
+                    AuditEvent.event_type == AuditEventType.SOURCE_VIEWED,
+                    AuditEvent.principal_id == principal.id,
+                    AuditEvent.occurred_at >= since,
+                    AuditEvent.securable_environment.in_(environments),
+                )
+            ).all()
+            seen: set[tuple[object, ...]] = {
+                (kind, environment, namespace, table, detail.get("path"))
+                for kind, environment, namespace, table, detail in stored
+                if isinstance(detail, dict) and detail.get("commit") == commit
+            }
+            audit = AuditService(session)
+            written = 0
+            for scope, path in files:
+                if key(scope, path) in seen:
+                    continue
+                seen.add(key(scope, path))
+                audit.record(
+                    principal.id,
+                    AuditEventType.SOURCE_VIEWED,
+                    securable=scope,
+                    detail={"repository": repository, "path": path, "commit": commit},
+                )
+                written += 1
+            session.commit()
+    except Exception as exc:
+        cause = type(exc).__name__
+        logger.warning(
+            "A read of a project file was refused: its %s audit row could not be written (%s).",
+            AuditEventType.SOURCE_VIEWED.value,
+            cause,
+        )
+        raise AuditUnavailableError(
+            f"This read was refused because it could not be recorded in the audit log ({cause}): "
+            "a read of a project file is always recorded. Try again in a moment; if it "
+            "keeps failing, ask the operator to check the server's database (the server log "
+            "names the error)."
+        ) from exc
+    return written
 
 
 def record_view_sql_view(

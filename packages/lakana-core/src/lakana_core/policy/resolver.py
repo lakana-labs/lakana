@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 import sqlglot
@@ -290,6 +291,72 @@ class PolicyResolver:
             )
         if table_id is None:
             return ResolvedPolicy()
+        group_ids, member_group_names = self._groups_of(principal)
+        filter_rows, mask_rows = self._policy_rows(principal, group_ids, [table_id])
+        return _resolved(principal, filter_rows, mask_rows, member_group_names, schema)
+
+    def resolve_each(
+        self, principal: PrincipalRef, table_ids: Iterable[uuid.UUID]
+    ) -> dict[uuid.UUID, ResolvedPolicy | UnreadablePolicyError]:
+        """Resolve the policies of many tables for one principal, as `resolve` would, at once.
+
+        Four statements however many tables: the principal's groups, their names, and the row
+        filters and column masks of every table. Each table is then resolved exactly as
+        `resolve` resolves it without a schema.
+
+        Parameters
+        ----------
+        principal
+            The requesting principal.
+        table_ids
+            The tables' ids.
+
+        Returns
+        -------
+        dict
+            Each table's id to what `resolve(principal, ref, table_id=...)` returns, or to the
+            `UnreadablePolicyError` it raises.
+        """
+        wanted = list(dict.fromkeys(table_ids))
+        if not wanted:
+            return {}
+        group_ids, member_group_names = self._groups_of(principal)
+        filter_rows, mask_rows = self._policy_rows(principal, group_ids, wanted)
+        filters_of: dict[uuid.UUID, list[RowFilter]] = {table_id: [] for table_id in wanted}
+        masks_of: dict[uuid.UUID, list[ColumnMask]] = {table_id: [] for table_id in wanted}
+        for row in filter_rows:
+            if row.table_id is not None:  # matched by `table_id IN …`, so never `None`
+                filters_of[row.table_id].append(row)
+        for row in mask_rows:
+            if row.table_id is not None:
+                masks_of[row.table_id].append(row)
+        resolved: dict[uuid.UUID, ResolvedPolicy | UnreadablePolicyError] = {}
+        for table_id in wanted:
+            try:
+                resolved[table_id] = _resolved(
+                    principal,
+                    filters_of[table_id],
+                    masks_of[table_id],
+                    member_group_names,
+                    None,
+                )
+            except UnreadablePolicyError as exc:
+                resolved[table_id] = exc
+        return resolved
+
+    def _groups_of(self, principal: PrincipalRef) -> tuple[list[uuid.UUID], set[str]]:
+        """Read the principal's groups.
+
+        Parameters
+        ----------
+        principal
+            The requesting principal.
+
+        Returns
+        -------
+        tuple
+            The ids of its groups and their names.
+        """
         group_ids = list(
             self._session.execute(
                 select(GroupMembership.group_id).where(GroupMembership.principal_id == principal.id)
@@ -306,17 +373,36 @@ class PolicyResolver:
             if group_ids
             else set()
         )
+        return group_ids, member_group_names
 
+    def _policy_rows(
+        self, principal: PrincipalRef, group_ids: list[uuid.UUID], table_ids: list[uuid.UUID]
+    ) -> tuple[Sequence[RowFilter], Sequence[ColumnMask]]:
+        """Read the active row filters and column masks of some tables that apply to a principal.
+
+        Parameters
+        ----------
+        principal
+            The requesting principal.
+        group_ids
+            Its groups.
+        table_ids
+            The tables.
+
+        Returns
+        -------
+        tuple
+            The row filters and the column masks, directly or through a group.
+        """
         row_filter_filter = RowFilter.principal_id == principal.id
         column_mask_filter = ColumnMask.principal_id == principal.id
         if group_ids:
             row_filter_filter = or_(row_filter_filter, RowFilter.group_id.in_(group_ids))
             column_mask_filter = or_(column_mask_filter, ColumnMask.group_id.in_(group_ids))
-
         filter_rows = (
             self._session.execute(
                 select(RowFilter).where(
-                    RowFilter.table_id == table_id,
+                    RowFilter.table_id.in_(table_ids),
                     RowFilter.revoked_at.is_(None),
                     row_filter_filter,
                 )
@@ -327,7 +413,7 @@ class PolicyResolver:
         mask_rows = (
             self._session.execute(
                 select(ColumnMask).where(
-                    ColumnMask.table_id == table_id,
+                    ColumnMask.table_id.in_(table_ids),
                     ColumnMask.revoked_at.is_(None),
                     column_mask_filter,
                 )
@@ -335,64 +421,99 @@ class PolicyResolver:
             .scalars()
             .all()
         )
-        gone: list[str] = []
-        row_filters: list[str] = []
-        for row in filter_rows:
-            text, _, row_gone = _resolved_text(row, schema)
-            gone.extend(row_gone)
-            if not row_gone:
-                row_filters.append(
-                    _substitute_context_functions(
-                        text, principal_name=principal.name, member_group_names=member_group_names
-                    )
-                )
-        # Masks are grouped by their column without regard to case, as the database matches
-        # it: a bound mask and a legacy one on the same column, spelled two ways, are two masks
-        # on it. The first row's spelling (by id, so it never changes) is the key.
-        by_column: dict[str, tuple[str, list[tuple[ColumnMask, str]]]] = {}
-        for row in sorted(mask_rows, key=lambda each: str(each.id)):
-            text, key, row_gone = _resolved_text(row, schema)
-            gone.extend(row_gone)
-            if not row_gone and key is not None:
-                by_column.setdefault(key.lower(), (key, []))[1].append((row, text))
-        column_masks = {
-            key: (
+        return filter_rows, mask_rows
+
+
+def _resolved(
+    principal: PrincipalRef,
+    filter_rows: Sequence[RowFilter],
+    mask_rows: Sequence[ColumnMask],
+    member_group_names: set[str],
+    schema: PolicySchema | None,
+) -> ResolvedPolicy:
+    """Resolve one table's policy rows for a principal.
+
+    Parameters
+    ----------
+    principal
+        The requesting principal.
+    filter_rows
+        The table's row filters that apply to the principal.
+    mask_rows
+        Its column masks that apply to the principal.
+    member_group_names
+        The names of the principal's groups.
+    schema
+        As `PolicyResolver.resolve` takes it.
+
+    Returns
+    -------
+    ResolvedPolicy
+        As `PolicyResolver.resolve` returns it.
+
+    Raises
+    ------
+    UnreadablePolicyError
+        If a stored policy, its binding or its binding state cannot be read.
+    """
+    gone: list[str] = []
+    row_filters: list[str] = []
+    for row in filter_rows:
+        text, _, row_gone = _resolved_text(row, schema)
+        gone.extend(row_gone)
+        if not row_gone:
+            row_filters.append(
                 _substitute_context_functions(
-                    rows[0][1],
-                    principal_name=principal.name,
-                    member_group_names=member_group_names,
+                    text, principal_name=principal.name, member_group_names=member_group_names
                 )
-                if len(rows) == 1
-                else "NULL"
             )
-            for key, rows in by_column.values()
-        }
-        policies = [
-            PolicyColumns(frozenset(columns_of(row.expression)), row.schema_id)
-            for row in filter_rows
-            if row.binding != FIELD_IDS
-        ] + [
-            PolicyColumns(frozenset({row.column, *columns_of(row.expression)}), row.schema_id)
-            for row in mask_rows
-            if row.binding != FIELD_IDS
-        ]
-        typed_masks = frozenset(
-            key for key, rows in by_column.values() if all(row.type_checked for row, _ in rows)
+    # Masks are grouped by their column without regard to case, as the database matches
+    # it: a bound mask and a legacy one on the same column, spelled two ways, are two masks
+    # on it. The first row's spelling (by id, so it never changes) is the key.
+    by_column: dict[str, tuple[str, list[tuple[ColumnMask, str]]]] = {}
+    for row in sorted(mask_rows, key=lambda each: str(each.id)):
+        text, key, row_gone = _resolved_text(row, schema)
+        gone.extend(row_gone)
+        if not row_gone and key is not None:
+            by_column.setdefault(key.lower(), (key, []))[1].append((row, text))
+    column_masks = {
+        key: (
+            _substitute_context_functions(
+                rows[0][1],
+                principal_name=principal.name,
+                member_group_names=member_group_names,
+            )
+            if len(rows) == 1
+            else "NULL"
         )
-        masked_field_ids = frozenset(
-            row.column_field_id
-            for row in mask_rows
-            if row.binding == FIELD_IDS and row.column_field_id is not None
-        )
-        legacy_masked = frozenset(
-            row.column.casefold() for row in mask_rows if row.binding != FIELD_IDS
-        )
-        return ResolvedPolicy(
-            row_filters=row_filters,
-            column_masks=column_masks,
-            policies=policies,
-            typed_masks=typed_masks,
-            gone=min(gone, key=_by_case) if gone else None,
-            masked_field_ids=masked_field_ids,
-            legacy_masked=legacy_masked,
-        )
+        for key, rows in by_column.values()
+    }
+    policies = [
+        PolicyColumns(frozenset(columns_of(row.expression)), row.schema_id)
+        for row in filter_rows
+        if row.binding != FIELD_IDS
+    ] + [
+        PolicyColumns(frozenset({row.column, *columns_of(row.expression)}), row.schema_id)
+        for row in mask_rows
+        if row.binding != FIELD_IDS
+    ]
+    typed_masks = frozenset(
+        key for key, rows in by_column.values() if all(row.type_checked for row, _ in rows)
+    )
+    masked_field_ids = frozenset(
+        row.column_field_id
+        for row in mask_rows
+        if row.binding == FIELD_IDS and row.column_field_id is not None
+    )
+    legacy_masked = frozenset(
+        row.column.casefold() for row in mask_rows if row.binding != FIELD_IDS
+    )
+    return ResolvedPolicy(
+        row_filters=row_filters,
+        column_masks=column_masks,
+        policies=policies,
+        typed_masks=typed_masks,
+        gone=min(gone, key=_by_case) if gone else None,
+        masked_field_ids=masked_field_ids,
+        legacy_masked=legacy_masked,
+    )
