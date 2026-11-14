@@ -137,7 +137,7 @@ def test_describe_table_covers_every_kind(
     )
 
     managed = catalog.describe_table(principal, orders)
-    described_view = catalog.describe_table(principal, view)
+    described_view = catalog.describe_table(principal, view, view_sql_window_minutes=60)
     described_external = catalog.describe_table(principal, external)
 
     assert (managed.kind, managed.sql, managed.references) == ("TABLE", None, ())

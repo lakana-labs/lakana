@@ -428,6 +428,7 @@ def test_every_content_field_is_a_field_no_other_list_shows() -> None:
     assert {event: dict(fields) for event, fields in CONTENT_FIELDS.items()} == {
         AuditEventType.QUERY_COMPLETED: {"sql_text": Hiding.FINGERPRINT},
         AuditEventType.TABLE_WRITE: {"watermark": Hiding.WITHHELD},
+        AuditEventType.SOURCE_VIEWED: {"view_sql_sha256": Hiding.WITHHELD},
     }
 
 
