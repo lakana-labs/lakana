@@ -197,6 +197,11 @@ _FILES: list[tuple[object, object, object, bool]] = [
     ("gold.f", ["gold.f", "silver.bogus"], False, True),
     ("gold.f", ["gold.f", "silver.other"], False, True),
     ("gold.f", ["gold.f", "silver.grouped"], False, True),
+    ("gold.fin.sales", ["gold.fin.sales", "silver.a"], False, True),
+    ("gold.f", ["gold.f", "gold.fin.sales"], False, True),
+    (TableRef.from_dotted("dev", "gold.fin.sales"), ["silver.Mixed"], False, True),
+    ("gold.f", ["gold.f", "silver.Mixed"], False, True),
+    ("gold.f", ["gold.f", "silver.mixed"], False, True),
     ("gold.f", ["gold.f", "silver.revoked"], False, True),
     ("gold.f", ["gold.f", "silver.a"], False, False),
     (TableRef.from_dotted("dev", "gold.f"), [TableRef.from_dotted("dev", "silver.a")], False, True),
@@ -229,6 +234,8 @@ def _readers(session: Session) -> dict[str, PrincipalRef]:
         "silver.other",
         "silver.grouped",
         "silver.revoked",
+        "gold.fin.sales",
+        "silver.Mixed",
     )
     _retype(session, "gold.v", TableType.VIEW)
     viewer = _analyst(session, "viewer")
@@ -238,6 +245,10 @@ def _readers(session: Session) -> dict[str, PrincipalRef]:
         _policy(session, "filter", reader, "silver.filtered")
         _policy(session, "mask", reader, "silver.bogus", binding="bogus")
     _policy(session, "mask", other, "silver.a")
+    # A namespace of three levels and a name in mixed case: the mask on `silver.Mixed` applies
+    # to the viewer; `silver.mixed` is another name, of no table.
+    _policy(session, "filter", other, "gold.fin.sales")
+    _policy(session, "mask", viewer, "silver.Mixed")
     # A mask through a group (on `silver.grouped`), for the viewer only, and a revoked filter
     # (on `silver.revoked`), which applies to nobody.
     group = Group(id=uuid.uuid4(), name="analysts")
@@ -292,6 +303,13 @@ def test_the_batched_gate_decides_every_file_as_the_gate_did_before(session: Ses
     assert not passes_content_gate(session, authz, viewer, "dev", *grouped)
     assert passes_content_gate(session, authz, readers["under-a-mask"], "dev", *grouped)
     assert passes_content_gate(session, authz, viewer, "dev", *revoked)
+    assert not passes_content_gate(session, authz, viewer, "dev", "gold.f", ["silver.Mixed"], False)
+    assert passes_content_gate(session, authz, viewer, "dev", "gold.f", ["silver.mixed"], False)
+    assert passes_content_gate(session, authz, viewer, "dev", "gold.fin.sales", ["silver.a"], False)
+    other = readers["under-a-mask"]
+    assert not passes_content_gate(
+        session, authz, other, "dev", "gold.f", ["gold.fin.sales"], False
+    )
     # The cases tell the readers apart, and some files pass.
     assert len(answers) >= 3
     assert any(any(each) for each in answers)
@@ -398,6 +416,14 @@ def test_defined_in_reads_only_the_tables_its_file_uses(session: Session) -> Non
         s for s in statements if s.startswith("SELECT tables.id, tables.table_type, namespaces")
     ]
     assert live and all(" IN " in s for s in live)
+    # No statement reads the environment's tables without naming the ones it wants, so the
+    # rows read do not grow with the environment either.
+    unfiltered = [
+        s
+        for s in statements
+        if "FROM tables" in s and "tables.name = " not in s and "tables.name) IN" not in s
+    ]
+    assert unfiltered == []
 
 
 @pytest.mark.parametrize("failing", ["write", "commit"])
@@ -447,3 +473,26 @@ def test_a_project_version_whose_audit_write_fails_after_the_lookup_records_and_
     monkeypatch.undo()
     session.expire_all()
     assert _source_viewed(session) == []
+
+
+def test_a_reference_that_is_not_a_string_is_hidden_never_an_error(session: Session) -> None:
+    """A stored reference, edge end or input that is a dict or a list reads as unreadable."""
+    _world(session)
+    version = _with_sql(session)
+    [asset] = version.manifest_json["assets"]
+    version.manifest_json = {
+        **version.manifest_json,
+        "assets": [{**asset, "references": ["silver.a", {"t": 1}, ["silver.a"]]}],
+        "edges": [[{"t": 1}, "gold.f"], [["silver.a"], "gold.f"], ["silver.a", "gold.f"]],
+        "external_inputs": [{"t": 1}, ["silver.a"], "silver.a"],
+    }
+    session.commit()
+
+    view = _version(session, _analyst(session))
+
+    [entry] = view.manifest["assets"]
+    assert entry["hidden_references"] == 2 and "sql" not in entry
+    assert view.manifest["edges"] == []  # an edge into a hidden asset is dropped, as before
+    assert view.manifest["hidden_edges"] == 3
+    assert view.manifest["external_inputs"] == ["silver.a"]
+    assert view.manifest["hidden_external_inputs"] == 2

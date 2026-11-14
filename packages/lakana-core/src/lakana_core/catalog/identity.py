@@ -21,10 +21,10 @@ even though there is no id for `GrantAuthorization` to later match on.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from typing import Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, select, tuple_
 from sqlalchemy.orm import Session
 
 from lakana_core.errors import ValidationError
@@ -149,10 +149,16 @@ def environment_ids_in(session: Session, names: Iterable[str]) -> dict[str, uuid
     }
 
 
-def table_ids_in(session: Session, environment: str) -> dict[tuple[str, str], uuid.UUID]:
-    """Resolve every table of an environment to its id, in one statement.
+NAMED_TABLES_LIMIT = 500
+"""Most tables `table_ids_in` names in its filter; asked about more, it reads the environment."""
 
-    The same joins and conditions as `resolve_table_id`, for every table at once: a caller that
+
+def table_ids_in(
+    session: Session, environment: str, names: Collection[tuple[str, str]] | None = None
+) -> dict[tuple[str, str], uuid.UUID]:
+    """Resolve the tables of an environment to their ids, in one statement.
+
+    The same joins and conditions as `resolve_table_id`, for many tables at once: a caller that
     asks about many tables of one environment pays one statement, not one per table.
 
     Parameters
@@ -161,19 +167,28 @@ def table_ids_in(session: Session, environment: str) -> dict[tuple[str, str], uu
         Database session.
     environment
         The environment's name.
+    names
+        The ``(namespace in storage form, table name)`` pairs wanted: up to
+        `NAMED_TABLES_LIMIT` of them, the statement reads only those rows, so its cost does not
+        grow with the environment. `None`, or more pairs, reads every table.
 
     Returns
     -------
     dict
-        ``(namespace in storage form, table name)`` → the table's id; empty when no
-        environment has that name.
+        ``(namespace in storage form, table name)`` → the table's id, for every table read (at
+        least each of `names` that exists); empty when no environment has that name.
     """
-    rows = session.execute(
+    statement = (
         select(Table.id, Namespace.path, Table.name)
         .join(Namespace, Table.namespace_id == Namespace.id)
         .join(Environment, Namespace.environment_id == Environment.id)
         .where(Environment.name == environment, LIVE_ENVIRONMENT)
     )
+    if names is not None and len(names) <= NAMED_TABLES_LIMIT:
+        if not names:
+            return {}
+        statement = statement.where(tuple_(Namespace.path, Table.name).in_(sorted(names)))
+    rows = session.execute(statement)
     return {(path, name): table_id for table_id, path, name in rows}
 
 

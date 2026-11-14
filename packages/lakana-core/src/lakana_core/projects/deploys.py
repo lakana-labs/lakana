@@ -526,19 +526,22 @@ class _ReadableNames:
         )
         self._known.update(zip(asked, answers, strict=True))
 
-    def __call__(self, dotted: str) -> bool:
+    def __call__(self, dotted: object) -> bool:
         """Answer one name.
 
         Parameters
         ----------
         dotted
-            Dotted table name.
+            Dotted table name; a stored value, untrusted.
 
         Returns
         -------
         bool
-            Whether a READ_TABLE grant covers it.
+            Whether a READ_TABLE grant covers it; `False` for anything that is not a string (a
+            dict or list in a stored manifest is hidden, never an error).
         """
+        if not isinstance(dotted, str):
+            return False
         if dotted not in self._known:
             self.prefetch([dotted])
         return self._known.get(dotted, False)

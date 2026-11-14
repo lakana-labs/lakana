@@ -296,9 +296,9 @@ class GrantAuthorization:
         """Answer many questions as `permits` would, at a cost that does not grow with them.
 
         The same decision as `explain`, question by question, from one read of the principal's
-        group memberships and grants, one read of each environment's tables (`table_ids_in`)
-        and one of the environments' ids: four statements for questions about one environment,
-        however many tables they name.
+        group memberships and grants, one read of the named tables of each environment
+        (`table_ids_in`) and one of the environments' ids: four statements for questions about
+        one environment, however many tables they name.
 
         Parameters
         ----------
@@ -365,7 +365,7 @@ class GrantAuthorization:
             if (securable.environment, *names) not in self._table_id_cache:
                 wanted[securable.environment].add(names)
         for environment, names in wanted.items():
-            found = table_ids_in(self._session, environment)
+            found = table_ids_in(self._session, environment, names)
             for namespace_joined, table in names:
                 key = (environment, namespace_joined, table)
                 self._table_id_cache[key] = found.get((namespace_joined, table))
