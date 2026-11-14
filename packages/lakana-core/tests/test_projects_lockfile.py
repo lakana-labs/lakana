@@ -1060,10 +1060,13 @@ def _with_files(registry: str, *entries: str) -> bytes:
         The lock file.
     """
     body = "".join(entry + "\n" for entry in entries)
-    return _GOOD + (
-        f'\n[[package]]\nname = "zzpkg"\nversion = "1"\nsource = {{ registry = "{registry}" }}\n'
-        + body
-    ).encode()
+    return (
+        _GOOD
+        + (
+            '\n[[package]]\nname = "zzpkg"\nversion = "1"\n'
+            f'source = {{ registry = "{registry}" }}\n' + body
+        ).encode()
+    )
 
 
 def test_files_of_an_index_with_a_hash_on_its_own_or_another_host_pass() -> None:
