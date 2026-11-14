@@ -235,7 +235,7 @@ export interface TableOut {
 }
 
 /** The object a permission is on. */
-interface ScopeOut {
+export interface ScopeOut {
   /** `INSTANCE`, `ENVIRONMENT`, `NAMESPACE` or `TABLE`. */
   readonly kind: "INSTANCE" | "ENVIRONMENT" | "NAMESPACE" | "TABLE";
   /** The environment. */
@@ -247,7 +247,7 @@ interface ScopeOut {
 }
 
 /** One grant that gives a permission, and how it reaches the person. */
-interface ViaOut {
+export interface ViaOut {
   /** `grant`, `role` or `group`. */
   readonly kind: "grant" | "role" | "group";
   /** The grant's id. */
@@ -261,7 +261,7 @@ interface ViaOut {
 }
 
 /** Whether a person may do one action on the object, and why. */
-interface PermissionOut {
+export interface PermissionOut {
   /** The action, such as `DROP_TABLE` or `SUBMIT_QUERY`. */
   readonly action: string;
   /** The answer. */
@@ -337,6 +337,160 @@ export function myPermissions(
     "GET",
     `/api/v1/principals/${encodeURIComponent(person)}/permissions?${query.toString()}`,
   );
+}
+
+/** The person or service account a grant, row filter or column mask is for. */
+interface SubjectPrincipalOut {
+  /** The principal's id. */
+  readonly id: string;
+  /** The principal's name. */
+  readonly name: string;
+  /** `user` for a person, `service` for a service account. */
+  readonly principal_type: "user" | "service";
+}
+
+/** Who a grant, row filter or column mask is for, as the server names them. */
+interface SubjectOut {
+  /** The principal's id; null for a group's. */
+  readonly principal_id: string | null;
+  /** The group's id; null for a principal's. */
+  readonly group_id: string | null;
+  /** The principal by name; null for a group's, or for a principal deleted while it was read. */
+  readonly principal: SubjectPrincipalOut | null;
+  /** The group's name; null for a principal's. */
+  readonly group: string | null;
+}
+
+/** A grant, as `GET /api/v1/grants` answers it. */
+export interface GrantOut extends SubjectOut {
+  /** The grant's id. */
+  readonly id: string;
+  /** The role granted, or null for a single action. */
+  readonly role: ViaOut["role"];
+  /** The single action granted, or null for a role. */
+  readonly action: string | null;
+  /** The level the grant is on. */
+  readonly kind: ScopeOut["kind"];
+  /** The environment it is on, if any. */
+  readonly environment: string | null;
+  /** The dotted namespace it is on, if any. */
+  readonly namespace: string | null;
+  /** The table it is on, if any. */
+  readonly table: string | null;
+  /** The id of the principal who granted it. */
+  readonly granted_by: string;
+  /** When it was granted. */
+  readonly granted_at: string;
+  /** Why a single action has no effect, or null. */
+  readonly note: string | null;
+}
+
+/** What a row filter and a column mask share, as the server answers them. */
+interface PolicyOut extends SubjectOut {
+  /** The policy's id. */
+  readonly id: string;
+  /** The environment of its table. */
+  readonly environment: string;
+  /** The dotted namespace of its table. */
+  readonly namespace: string;
+  /** Its table. */
+  readonly table: string;
+  /** The SQL expression, in the table's current column names. */
+  readonly expression: string;
+  /** The id of the principal who created it. */
+  readonly created_by: string;
+  /** When it was created. */
+  readonly created_at: string;
+  /** Whether it follows its columns by field id; not shown. */
+  readonly bound: boolean;
+}
+
+/** A row filter, as `GET /api/v1/row-filters` answers it: the rows its subject may see. */
+export type RowFilterOut = PolicyOut;
+
+/** A column mask, as `GET /api/v1/column-masks` answers it: what its subject sees instead. */
+export interface ColumnMaskOut extends PolicyOut {
+  /** The masked column, as the table names it now. */
+  readonly column: string;
+}
+
+/** The most grants one level of the Access tab reads; the server's largest page. */
+const MOST_GRANTS = 200;
+
+/** One level of the object hierarchy, matched exactly by the grants listing. */
+export interface GrantLevel {
+  /** The environment. */
+  readonly environment: string;
+  /** The dotted namespace; null for the environment itself. */
+  readonly namespace: string | null;
+  /** The table; null for a namespace or the environment. */
+  readonly table: string | null;
+}
+
+/** The first page of the grants on one level. */
+interface GrantPage {
+  /** The grants, newest first. */
+  readonly grants: readonly GrantOut[];
+  /** Whether the level has more than this page. */
+  readonly more: boolean;
+}
+
+/**
+ * Lists the grants on exactly one object: a table, a namespace or an environment. Only an
+ * administrator may list grants.
+ *
+ * @param level - The object.
+ * @returns The first {@link MOST_GRANTS} grants on it, newest first, and whether the server has
+ *   more (it names a next page).
+ * @throws {ApiError} for a refusal.
+ */
+export async function listGrantsAt(level: GrantLevel): Promise<GrantPage> {
+  const query = new URLSearchParams({ environment: level.environment });
+  if (level.namespace !== null) {
+    query.set("namespace", level.namespace);
+    if (level.table !== null) {
+      query.set("table", level.table);
+    }
+  }
+  query.set("limit", String(MOST_GRANTS));
+  const page = await api.page(`/api/v1/grants?${query.toString()}`);
+  return { grants: page.body as readonly GrantOut[], more: page.nextCursor !== null };
+}
+
+/**
+ * The query that names one table to the policy listings.
+ *
+ * @param ref - The table.
+ * @returns The query, without its `?`.
+ */
+function tableQuery(ref: TableRef): string {
+  return new URLSearchParams({
+    environment: ref.environment,
+    namespace: ref.namespace,
+    table: ref.name,
+  }).toString();
+}
+
+/**
+ * Lists a table's row filters. Needs the right to manage policies on the instance.
+ *
+ * @param ref - The table.
+ * @returns The row filters.
+ * @throws {ApiError} for a refusal.
+ */
+export function listRowFilters(ref: TableRef): Promise<readonly RowFilterOut[]> {
+  return api.request<readonly RowFilterOut[]>("GET", `/api/v1/row-filters?${tableQuery(ref)}`);
+}
+
+/**
+ * Lists a table's column masks. Needs the right to manage policies on the instance.
+ *
+ * @param ref - The table.
+ * @returns The column masks.
+ * @throws {ApiError} for a refusal.
+ */
+export function listColumnMasks(ref: TableRef): Promise<readonly ColumnMaskOut[]> {
+  return api.request<readonly ColumnMaskOut[]>("GET", `/api/v1/column-masks?${tableQuery(ref)}`);
 }
 
 /** One health signal of a table, as the caller may see it. */
@@ -449,6 +603,8 @@ export interface GraphNodeOut {
   readonly label?: string | null;
   /** A connection's kind. */
   readonly connection_kind?: string | null;
+  /** The repository that declares an asset or a job, or builds a table. */
+  readonly repository?: string | null;
 }
 
 /** An edge of the metadata graph, from `source` to `target`. */
