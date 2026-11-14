@@ -40,7 +40,10 @@ from lakana_core.projects.python_assets import PYTHON_SOURCE_PREFIX
 logger = logging.getLogger(__name__)
 
 GATE_VERSION: int = 1
-"""The version of the gate extraction; raised whenever `source_map_records` changes it."""
+"""The version of the gate extraction; raised whenever `source_map_records` changes it for an
+asset the deploy accepts. #591 made `sql_file_references` report every table function in a
+`FROM` item; the query guard refuses each of them at deploy, so no recorded row changed and the
+version stayed."""
 SOURCE_FILE_MAX_BYTES: int = 1024 * 1024
 """The largest text the read side shows (the deploy's own limit for an asset file)."""
 SOURCE_LINE: int = 1

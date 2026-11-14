@@ -10,6 +10,7 @@ component that itself contains a dot.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
@@ -234,9 +235,87 @@ def refuse_percent_in_new_name(component: str, *, what: str) -> None:
     if "%" in component:
         raise ValidationError(
             f"{what} '{shown(component)}' must not contain '%': a storage may read '%41' as 'A', "
-            "so two names would share one directory. Every other character is allowed except "
-            "'.', '/', the unit separator and a NUL byte."
+            "so two names would share one directory. Every other visible character is allowed "
+            "except '.' and '/'."
         )
+
+
+HIDDEN_CHARACTER_CATEGORIES: Final[frozenset[str]] = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+"""Unicode categories a new name may not hold: control, format and surrogate characters and the
+line and paragraph separators. Each is invisible or breaks a line, so a name holding one can look
+like another. A repository file's identifiers (`projects.project_config.unsafe_identifier`)
+refuse the same ones."""
+
+
+def hidden_character(name: str) -> tuple[int, str] | None:
+    """Find the first character of `HIDDEN_CHARACTER_CATEGORIES` in a name.
+
+    Parameters
+    ----------
+    name
+        The name.
+
+    Returns
+    -------
+    tuple of (int, str) or None
+        The character's 1-based position and the character; `None` when there is none.
+    """
+    for position, character in enumerate(name, start=1):
+        if unicodedata.category(character) in HIDDEN_CHARACTER_CATEGORIES:
+            return position, character
+    return None
+
+
+def refuse_hidden_characters(name: str, *, what: str) -> None:
+    """Refuse a new name that holds an invisible or line-breaking character.
+
+    Only the places that create a namespace, table, view or column name call this (through
+    `check_new_name` for namespaces and tables, and the column checks of
+    `catalog.metadata` and `CatalogService.create_or_replace_view`). Names stored by an older
+    release are never judged: they are loaded, matched and renamed away as before.
+
+    Parameters
+    ----------
+    name
+        The new name.
+    what
+        Noun describing it, such as ``"Table name"`` or ``"Column name"``.
+
+    Raises
+    ------
+    ValidationError
+        If `hidden_character` finds one; the message names it as ``U+XXXX`` with its
+        position and says what to do.
+    """
+    found = hidden_character(name)
+    if found is None:
+        return
+    position, character = found
+    raise ValidationError(
+        f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, a "
+        "control, format or line-separator character that is invisible or breaks the line, so "
+        "the name could look like another one. Choose a name without it: retype the name with "
+        "visible characters only, such as letters, digits and '_'."
+    )
+
+
+def check_new_name(component: str, *, what: str) -> None:
+    """Apply the rules only a namespace or table name that is being created must meet.
+
+    Parameters
+    ----------
+    component
+        The new name, already checked by `validate_path_component`.
+    what
+        Noun describing the component, as for `validate_path_component`.
+
+    Raises
+    ------
+    ValidationError
+        From `refuse_percent_in_new_name` or `refuse_hidden_characters`.
+    """
+    refuse_percent_in_new_name(component, what=what)
+    refuse_hidden_characters(component, what=what)
 
 
 @dataclass(frozen=True)

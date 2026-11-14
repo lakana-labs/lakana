@@ -820,6 +820,8 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
                 state,
                 f"SQL hidden: {table.hidden_references} referenced table(s) you can't read",
             )
+        elif table.content_reason is not None:
+            _output.emit(state, f"SQL hidden: {table.content_message or table.content_reason}")
         else:
             _output.emit(state, table.sql or "")
         _output.emit(state, table.references)

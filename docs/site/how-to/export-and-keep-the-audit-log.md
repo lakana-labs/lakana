@@ -27,7 +27,7 @@ in the `AuditEventType` of `lakana_core.models`; in groups:
 | Queries | `QUERY_COMPLETED` (also for a query that failed: `detail.status` says), `QUERY_CANCELLED` |
 | Artifacts | `ARTIFACT_*` |
 | Reading the log and other people's activity | `ACTIVITY_VIEWED` |
-| Reading the file that defines a table | `SOURCE_VIEWED` (repository, path and commit; once per person, file and commit per hour) |
+| Reading the file that defines a table, or a view's SQL | `SOURCE_VIEWED` (repository, path and commit; once per person, file and commit per hour. For a view's SQL, `view_sql_sha256` instead, once per person and text per hour, withheld from readers without `READ_QUERY_TEXT`) |
 
 What the log does **not** record:
 

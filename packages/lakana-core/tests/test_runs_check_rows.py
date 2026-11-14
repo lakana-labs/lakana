@@ -31,6 +31,7 @@ from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
 from lakana_core.errors import (
     CheckNotInRunError,
+    CheckResultGoneError,
     CheckSqlGoneError,
     ConflictError,
     NoCheckedSnapshotError,
@@ -50,7 +51,7 @@ from lakana_core.models import (
 )
 from lakana_core.projects.checks import CheckSpec
 from lakana_core.runs import pools
-from lakana_core.runs.check_rows import submit_check_rows
+from lakana_core.runs.check_rows import check_rows_sql, submit_check_rows
 from lakana_core.runs.checks import (
     CHECK_RESULT_REMOVED,
     CHECK_ROWS_NOT_EVERY_TABLE,
@@ -58,6 +59,7 @@ from lakana_core.runs.checks import (
     COLUMN_NOT_SHOWN,
     NO_COLUMN_LEFT,
     POLICY_NEEDS_A_COLUMN,
+    check_rows_sql_text,
     column_not_shown_message,
     no_column_left_message,
     policy_needs_a_column_message,
@@ -775,7 +777,9 @@ def test_a_caller_who_may_read_every_table_of_the_check_gets_the_query(
         check=_CHECK,
     )
 
-    assert run.sql_text == _JOINED
+    assert run.sql_text == check_rows_sql_text(_CHECK)
+    assert run.check_result_id is not None
+    assert check_rows_sql(session, run.check_result_id, run.environment_id) == _JOINED
 
 
 def test_sql_whose_tables_cannot_be_listed_is_not_known(
@@ -802,7 +806,11 @@ def test_sql_whose_tables_cannot_be_listed_is_not_known(
 def test_the_query_run_is_the_callers_own_and_carries_the_check(
     session: Session, principal: PrincipalRef, dev: uuid.UUID
 ) -> None:
-    """Queued, submitted by the caller, without a task run, with the check's SQL and result."""
+    """Queued, submitted by the caller, without a task run, with a placeholder and the result.
+
+    The check's SQL is never the query's text (#588): the text reaches the caller through their
+    own audit events; the worker reads the SQL by the result's id.
+    """
     result = _checked(session, principal)
 
     run = _submit(session, principal, result)
@@ -814,10 +822,48 @@ def test_the_query_run_is_the_callers_own_and_carries_the_check(
     assert stored.status is QueryRunStatus.QUEUED
     assert stored.environment_id == dev
     assert stored.principal_id == principal.id
-    assert stored.sql_text == _SQL
+    assert stored.sql_text == check_rows_sql_text(_CHECK)
+    assert _SQL not in stored.sql_text and "GROUP BY" not in stored.sql_text
     assert stored.check_result_id == result.id
     assert (stored.task_run_id, stored.task_token_id) == (None, None)
     assert (stored.write_mode, stored.target_name, stored.worker_id) == (None, None, None)
+
+
+def test_the_placeholder_names_the_check_and_escapes_it() -> None:
+    assert check_rows_sql_text("gold.orders/unique_id") == (
+        "-- The rows of check gold.orders/unique_id. Its SQL is read by the worker and not "
+        "shown here."
+    )
+    assert "\n" not in check_rows_sql_text("gold.orders/a\nDROP")
+
+
+def test_the_worker_reads_the_sql_by_the_result_and_its_environment(
+    session: Session, principal: PrincipalRef, dev: uuid.UUID
+) -> None:
+    result = _checked(session, principal)
+    assert check_rows_sql(session, result.id, dev) == _SQL
+    with pytest.raises(CheckResultGoneError) as gone:
+        check_rows_sql(session, result.id, uuid.uuid4())
+    assert str(gone.value) == CHECK_RESULT_REMOVED
+    with pytest.raises(CheckResultGoneError):
+        check_rows_sql(session, uuid.uuid4(), dev)
+
+
+def test_a_manifest_that_lost_the_check_is_sql_gone_for_the_worker(
+    session: Session, principal: PrincipalRef, dev: uuid.UUID
+) -> None:
+    result = _checked(session, principal)
+    version_id = session.execute(
+        select(Run.job_version_id).where(Run.id == result.run_id)
+    ).scalar_one()
+    version = session.get(JobVersion, version_id)
+    assert version is not None
+    version.manifest_json = {**version.manifest_json, "checks": []}
+    session.commit()
+
+    with pytest.raises(CheckSqlGoneError) as gone:
+        check_rows_sql(session, result.id, dev)
+    assert "SELECT" not in str(gone.value)
 
 
 def test_a_passed_check_is_allowed_and_queues_its_query(

@@ -421,7 +421,10 @@ Sent 1 file; none were already stored.
 
 The command never deletes older versions: only a run prunes, with the asset's `keep_versions` (see
 [Limit how many versions are kept](../how-to/limit-artifact-versions.md)). The namespace must
-exist; otherwise the command fails with `Namespace models not found in 'dev'.`
+exist; otherwise the command fails with `Namespace models not found in 'dev'.` A new artifact's
+name may not hold a control character, a format character (such as U+202E or a zero-width space)
+or a line or paragraph separator, as for a table: the refusal names the character as `U+XXXX`. An
+artifact that already has such a name keeps working.
 
 If the upload fails, or the server refuses the commit, the command withdraws its upload, so it does
 not keep one of the artifact's 16 places. If the server's answer to the last request is lost,

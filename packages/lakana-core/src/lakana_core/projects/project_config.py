@@ -20,7 +20,13 @@ from pydantic import (
 )
 
 from lakana_core.errors import ValidationError
-from lakana_core.identifiers import NOTIFY_FORMATS, is_secret_name, shown, validate_path_component
+from lakana_core.identifiers import (
+    HIDDEN_CHARACTER_CATEGORIES,
+    NOTIFY_FORMATS,
+    is_secret_name,
+    shown,
+    validate_path_component,
+)
 from lakana_core.jobs.cron import validate_cron_can_fire, validate_cron_syntax
 from lakana_core.jobs.tz import load_zone
 from lakana_core.languages import language_problem
@@ -95,7 +101,6 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-_IDENTIFIER_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
 _FREE_TEXT_ALLOWED_CONTROLS = ("\n", "\t")
 _BIDI_CONTROLS = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e") | frozenset(
     chr(code) for code in range(0x2066, 0x206A)
@@ -122,7 +127,7 @@ def unsafe_identifier(text: str) -> bool:
         True if it has a control, format or surrogate character or a line or
         paragraph separator, which could forge lines in rendered issues.
     """
-    return any(unicodedata.category(char) in _IDENTIFIER_CATEGORIES for char in text)
+    return any(unicodedata.category(char) in HIDDEN_CHARACTER_CATEGORIES for char in text)
 
 
 def checked_text(

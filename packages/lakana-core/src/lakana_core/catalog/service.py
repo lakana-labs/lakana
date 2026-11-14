@@ -7,6 +7,7 @@ to this same class.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import uuid
@@ -53,7 +54,13 @@ from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
 from lakana_core.artifacts.store import current_version, version_row
 from lakana_core.audit.service import AuditService
-from lakana_core.audit.views import View, ViewDetail, record_view, sessions_like
+from lakana_core.audit.views import (
+    View,
+    ViewDetail,
+    record_view,
+    record_view_sql_view,
+    sessions_like,
+)
 from lakana_core.auth import (
     Action,
     AuthorizationService,
@@ -312,7 +319,8 @@ from lakana_core.identifiers import (
     NamespacePath,
     TableRef,
     check_environment_name,
-    refuse_percent_in_new_name,
+    check_new_name,
+    refuse_hidden_characters,
     shown,
     validate_path_component,
 )
@@ -353,7 +361,13 @@ from lakana_core.policy.schema_change import (
     broken_policies,
     changed_columns,
 )
+from lakana_core.projects.definition import (
+    REASON_MESSAGES,
+    DefinitionReason,
+    passes_content_gate,
+)
 from lakana_core.projects.layers import LAYERS
+from lakana_core.projects.parse import sql_file_references
 from lakana_core.projects.translations import MAX_LANGUAGES
 from lakana_core.query_rewrite import ViewDefinition
 from lakana_core.runs.checks import (
@@ -697,8 +711,9 @@ class TableDescription:
         Its columns: the Iceberg schema, an external table's inferred
         schema, or a view's planned output.
     sql
-        A view's SELECT. `None` if the caller may not read every reference,
-        even if the view itself stores one.
+        A view's SELECT. `None` if the caller may not read every reference, fails the content
+        gate of "Defined in" (`passes_content_gate`), or the caller of `describe_table` did not
+        ask for it, even if the view itself stores one.
     references
         A view's references, as ``(id, dotted name)`` pairs. Empty if the
         caller may not read every reference.
@@ -707,6 +722,11 @@ class TableDescription:
         so cannot see named in `sql` or `references`. `0` for a table, an
         external table, or a view whose every reference the caller may
         read.
+    content_reason
+        ``"restricted"`` when a view's SQL is withheld by the content gate although the caller
+        may read every reference; `None` otherwise.
+    content_message
+        The sentence of `content_reason` (`REASON_MESSAGES`); `None` when it is `None`.
     snapshot_id
         The current snapshot of a managed table; `None` without one, and for
         a view or an external table.
@@ -805,6 +825,8 @@ class TableDescription:
     sql: str | None = None
     references: tuple[tuple[str, str], ...] = ()
     hidden_references: int = 0
+    content_reason: str | None = None
+    content_message: str | None = None
     snapshot_id: int | None = None
     state: Literal["published", "not_published", "kept"] = "published"
     state_message: str | None = None
@@ -2345,7 +2367,7 @@ class CatalogService:
             parent); every newly named component is checked, at any depth.
         """
         validate_path_component(path.parts[-1], what="Namespace component")
-        refuse_percent_in_new_name(path.parts[-1], what="Namespace component")
+        check_new_name(path.parts[-1], what="Namespace component")
         self._authz.authorize(
             p, Action.CREATE_NAMESPACE, Securable.namespace_scope(environment, path)
         )
@@ -2359,7 +2381,7 @@ class CatalogService:
         for depth, part in enumerate(path.parts, start=1):
             if self._lookup_namespace(env, NamespacePath(path.parts[:depth])) is None:
                 validate_path_component(part, what="Namespace component")
-                refuse_percent_in_new_name(part, what="Namespace component")
+                check_new_name(part, what="Namespace component")
         if self._lookup_namespace(env, path) is not None:
             raise AlreadyExistsError(f"Namespace {path} already exists in {environment!r}.")
         ns = Namespace(
@@ -3118,8 +3140,9 @@ class CatalogService:
             If `ref.name` contains a ``.``, if `location_pattern` is not
             shaped `"raw/<dir...>/<basename-glob>"`, if its claim overlaps another
             active external table's claim in this environment, if it
-            escapes the environment's storage root, or if `format` is
-            unsupported.
+            escapes the environment's storage root, if `format` is
+            unsupported, or if a column name of the sample file holds an invisible or
+            line-breaking character (`refuse_hidden_characters`).
         ConflictError
             If the insert fails for a reason other than a name collision —
             for instance, the namespace was dropped between the checks above
@@ -3128,7 +3151,7 @@ class CatalogService:
             If the principal may not create tables here.
         """
         validate_path_component(ref.name, what="Table name")
-        refuse_percent_in_new_name(ref.name, what="Table name")
+        check_new_name(ref.name, what="Table name")
         self._authz.authorize(
             p, Action.CREATE_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
@@ -3160,6 +3183,9 @@ class CatalogService:
             raise NotFoundError(f"No file matches {location_pattern!r}.")
         sample_bytes = resolved.storage.read(matches[0])
         schema = infer_schema(sample_bytes, format)
+        # The column names come from the caller's own files: new names, under the same rule.
+        for column in schema:
+            refuse_hidden_characters(column, what="Column name")
         # The lock is taken as late as possible, around only the claim
         # re-check and the insert: everything above only reads storage and
         # never touches the environment row, so holding the lock around a
@@ -3674,7 +3700,12 @@ class CatalogService:
         return row
 
     def describe_table(
-        self, p: PrincipalRef, ref: TableRef, *, languages: Sequence[str] = ()
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        languages: Sequence[str] = (),
+        view_sql_window_minutes: int | None = None,
     ) -> TableDescription:
         """Describe a table, an external table or a view for the platform API.
 
@@ -3686,6 +3717,10 @@ class CatalogService:
             The table reference.
         languages
             The reader's languages, most wanted first; empty: the main language.
+        view_sql_window_minutes
+            `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`, from a route that shows a view's SQL. `None`
+            (an internal caller that needs only the columns) never returns a view's SQL and
+            records nothing.
 
         Returns
         -------
@@ -3699,9 +3734,18 @@ class CatalogService:
             If it does not exist.
         PermissionDenied
             If `p` may not read it.
+        AuditUnavailableError
+            If a view's SQL passed the content gate but its `SOURCE_VIEWED` row could not be
+            written; nothing is returned.
 
         Notes
         -----
+        A view's SQL is the text of the asset that defines it, so it is shown only under the
+        content gate of "Defined in" (#587): READ_ENVIRONMENT, read on every table it
+        references, none of them a view, no row filter or column mask on any of them, and no
+        file read. A refused reader gets `content_reason` ``"restricted"``; a shown text is
+        recorded as `SOURCE_VIEWED` first (`record_view_sql_view`).
+
         A view's `sql` and `references` name every table it reads, so
         READ_TABLE on the view alone is not enough to show them: a
         principal can hold READ on a view without READ on what it
@@ -3721,7 +3765,9 @@ class CatalogService:
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
         namespace, row = self._find_table(ref)
-        described = self._describe_row(p, ref, row)
+        described = self._gate_view_sql(
+            p, ref, row, self._describe_row(p, ref, row), view_sql_window_minutes
+        )
         chooser = TextChooser(
             row.text_language or self._main_language,
             languages,
@@ -4249,6 +4295,97 @@ class CatalogService:
         """
         self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
         return current_fields(self._session, self._storage, table_id)
+
+    def _gate_view_sql(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        row: Table,
+        described: TableDescription,
+        window_minutes: int | None,
+    ) -> TableDescription:
+        """Keep a view's SQL only for a reader who passes the content gate, and record the read.
+
+        Parameters
+        ----------
+        p
+            The reader, who may read the view.
+        ref
+            The view.
+        row
+            Its row.
+        described
+            What `_describe_row` gave; its `sql` is set only when `p` may read every reference.
+        window_minutes
+            The audit window; `None` withholds the SQL without a reason or an audit row.
+
+        Returns
+        -------
+        TableDescription
+            `described`, with its SQL, or without it and with the reason.
+
+        Raises
+        ------
+        AuditUnavailableError
+            If the `SOURCE_VIEWED` row could not be written.
+        """
+        sql = described.sql
+        if sql is None:
+            return described
+        if window_minutes is None:
+            return replace(described, sql=None)
+        # Each reference by its id, as a `TableRef`: its dotted name read again would split a
+        # namespace part that holds a "." and miss the table and its policies.
+        # `_describe_row` gave the SQL only after it found every reference by its id in this
+        # session, so each lookup finds its row (`one`: a row gone meanwhile fails the request).
+        current_refs: list[object] = []
+        for reference_id, _ in described.references:
+            name, path = self._session.execute(
+                select(Table.name, Namespace.path)
+                .join(Namespace, Namespace.id == Table.namespace_id)
+                .where(Table.id == uuid.UUID(reference_id))
+            ).one()
+            current_refs.append(TableRef(ref.environment, NamespacePath.parse(path), name))
+        stored = [name for _, name in described.references]
+        if not passes_content_gate(
+            self._session,
+            self._authz,
+            p,
+            ref.environment,
+            ref,
+            current_refs,
+            bool(sql_file_references(sql, stored)),
+        ):
+            return self._restricted_view_sql(described)
+        record_view_sql_view(
+            sessions_like(self._session),
+            p,
+            Securable.table_scope(ref.environment, ref.namespace, ref.name),
+            sql_sha256=hashlib.sha256(sql.encode()).hexdigest(),
+            window_minutes=window_minutes,
+        )
+        return described
+
+    @staticmethod
+    def _restricted_view_sql(described: TableDescription) -> TableDescription:
+        """Withhold a view's SQL with the content gate's reason.
+
+        Parameters
+        ----------
+        described
+            The view's description.
+
+        Returns
+        -------
+        TableDescription
+            Without `sql`, with `content_reason` ``"restricted"`` and its sentence.
+        """
+        return replace(
+            described,
+            sql=None,
+            content_reason=DefinitionReason.RESTRICTED.value,
+            content_message=REASON_MESSAGES[DefinitionReason.RESTRICTED],
+        )
 
     def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:
         """Describe a table row by kind, without its descriptions.
@@ -8110,7 +8247,7 @@ class CatalogService:
                 )
         if existing is None:
             validate_path_component(ref.name, what="Table name")
-            refuse_percent_in_new_name(ref.name, what="Table name")
+            check_new_name(ref.name, what="Table name")
         if existing is not None and existing.table_type is TableType.ARTIFACT:
             raise AlreadyExistsError(
                 f"{ref.dotted()} is an artifact; a view can't replace it. Drop it first "
@@ -8118,6 +8255,14 @@ class CatalogService:
             )
         if existing is not None and existing.table_type is not TableType.VIEW:
             raise AlreadyExistsError(f"{ref.dotted()} is a table; a view can't replace it.")
+        stored_columns = (
+            {c.get("name") for c in (existing.view_definition or {}).get("columns", [])}
+            if existing is not None
+            else set()
+        )
+        for column in columns:
+            if column.name not in stored_columns:
+                refuse_hidden_characters(column.name, what="Column name")
         top_level = ref.namespace.parts[0]
         if top_level not in _MEDALLION_TOP_LEVEL_NAMESPACES:
             raise ValidationError(
@@ -9308,7 +9453,7 @@ class CatalogService:
         target = ref if new_name is None else replace(ref, name=new_name)
         if new_name is not None:
             validate_path_component(new_name, what="Table name")
-            refuse_percent_in_new_name(new_name, what="Table name")
+            check_new_name(new_name, what="Table name")
         self._authz.authorize(
             p, Action.DROP_TABLE, Securable.namespace_scope(ref.environment, ref.namespace)
         )
@@ -9552,7 +9697,7 @@ class CatalogService:
             destination.
         """
         validate_path_component(destination.name, what="Table name")
-        refuse_percent_in_new_name(destination.name, what="Table name")
+        check_new_name(destination.name, what="Table name")
         self._authz.authorize(
             p,
             Action.DROP_TABLE,
