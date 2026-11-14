@@ -20,6 +20,12 @@ export const TEXT_X = 10;
 /** The size of a box's text: `--type-data-size`, which the drawing uses. */
 const TEXT_SIZE = "12.5px";
 
+/**
+ * A mark of invisible characters as {@link markedText} writes it, `U+202E` or `U+200B ×350000`;
+ * drawn in the mono font and kept whole when a line is cut.
+ */
+const MARK = /U\+[0-9A-F]{4,6}(?: ×\d+)?/g;
+
 /** The width one character takes on average in the drawing's text, for the estimate. */
 const AVERAGE_CHAR = 6.5;
 
@@ -56,11 +62,44 @@ export function textMeasure(): Measure {
   if (context === null) {
     return estimateWidth;
   }
-  const family =
-    getComputedStyle(document.documentElement).getPropertyValue("--font-sans").trim() ||
-    "sans-serif";
-  context.font = `${TEXT_SIZE} ${family}`;
-  return (text) => context.measureText(text).width;
+  const tokens = getComputedStyle(document.documentElement);
+  const sans = `${TEXT_SIZE} ${tokens.getPropertyValue("--font-sans").trim() || "sans-serif"}`;
+  const mono = `${TEXT_SIZE} ${tokens.getPropertyValue("--font-mono").trim() || "monospace"}`;
+  const width = (text: string, font: string): number => {
+    context.font = font;
+    return context.measureText(text).width;
+  };
+  // Marks are drawn in the mono font (`.char-mark`), the rest in the sans one.
+  return (text) => {
+    let total = 0;
+    let start = 0;
+    for (const match of text.matchAll(MARK)) {
+      total += width(text.slice(start, match.index), sans) + width(match[0], mono);
+      start = match.index + match[0].length;
+    }
+    return total + width(text.slice(start), sans);
+  };
+}
+
+/**
+ * A line's units, which a cut never splits: each mark whole, and each character as the person
+ * sees it (a grapheme: an emoji, a flag, a letter with its accents).
+ *
+ * @param text - The line.
+ * @returns The units, in order.
+ */
+function units(text: string): string[] {
+  const graphemes = (part: string): string[] =>
+    [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(part)].map(
+      (one) => one.segment,
+    );
+  const found: string[] = [];
+  let start = 0;
+  for (const match of text.matchAll(MARK)) {
+    found.push(...graphemes(text.slice(start, match.index)), match[0]);
+    start = match.index + match[0].length;
+  }
+  return [...found, ...graphemes(text.slice(start))];
 }
 
 /**
@@ -99,18 +138,20 @@ export function fitText(text: string, room: number, measure: Measure): string {
   if (measure(text) <= room) {
     return text;
   }
-  // The longest start that fits with the ellipsis, found by halving.
+  // The most whole units that fit with the ellipsis, found by halving.
+  const parts = units(text);
+  const start = (count: number): string => parts.slice(0, count).join("");
   let low = 0;
-  let high = text.length;
+  let high = parts.length;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
-    if (measure(`${text.slice(0, middle)}…`) <= room) {
+    if (measure(`${start(middle)}…`) <= room) {
       low = middle;
     } else {
       high = middle - 1;
     }
   }
-  return `${text.slice(0, low).trimEnd()}…`;
+  return `${start(low).trimEnd()}…`;
 }
 
 /**

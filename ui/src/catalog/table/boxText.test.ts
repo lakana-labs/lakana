@@ -28,6 +28,20 @@ describe("fitText", () => {
     expect(fitText("abcdef", 60, tens)).toBe("abcdef");
   });
 
+  it("cuts between whole characters and never inside a mark", () => {
+    // A rocket is two UTF-16 units, a flag two code points: neither is split.
+    const graphemes = (text: string): number =>
+      [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].length * 10;
+    expect(fitText("ab🚀cd", 45, graphemes)).toBe("ab🚀…");
+    expect(
+      fitText("ab🇩🇪cd", 35, (text) => [...new Intl.Segmenter().segment(text)].length * 10),
+    ).toBe("ab…");
+    // "xU+202Ey": the mark is one unit, kept whole or left out whole.
+    expect(fitText("xU+202Eyz", 50, tens)).toBe("x…");
+    expect(fitText("xU+200B ×3yz", 50, tens)).toBe("x…");
+    expect(fitText("xU+202Eyz", 85, tens)).toBe("xU+202E…");
+  });
+
   it("ends a line that does not fit in an ellipsis, inside the room", () => {
     expect(fitText("abcdef", 45, tens)).toBe("abc…");
     expect(fitText("abcdef", 5, tens)).toBe("…");
@@ -104,6 +118,32 @@ describe("textMeasure", () => {
     document.documentElement.style.setProperty("--font-sans", '"IBM Plex Sans", sans-serif');
     expect(textMeasure()("abcd")).toBe(12);
     expect(fonts).toEqual(['12.5px "IBM Plex Sans", sans-serif']);
+  });
+
+  it("measures a mark in the mono font it is drawn in", () => {
+    const widths: Record<string, number> = { sans: 1, mono: 3 };
+    let font = "";
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext(): unknown {
+          return {
+            set font(value: string) {
+              font = value;
+            },
+            measureText: (text: string) => ({
+              width:
+                text.length * (font.includes("Mono") ? (widths.mono ?? 0) : (widths.sans ?? 0)),
+            }),
+          };
+        }
+      },
+    );
+    document.documentElement.style.setProperty("--font-sans", '"IBM Plex Sans"');
+    document.documentElement.style.setProperty("--font-mono", '"IBM Plex Mono"');
+    // "ab" in sans (2), "U+202E" in mono (6 × 3), "c" in sans (1).
+    expect(textMeasure()("abU+202Ec")).toBe(2 + 18 + 1);
+    document.documentElement.style.removeProperty("--font-mono");
   });
 
   it("measures with a plain sans-serif before the page's tokens are known", () => {

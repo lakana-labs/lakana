@@ -237,6 +237,35 @@ describe("layout", () => {
     });
   });
 
+  it("leaves room for a column no box ended up in, rather than breaking the drawing", () => {
+    // Asset A builds the table and reads U; asset B reads the table and V, and builds U. B is
+    // three steps up but one step down, so it is drawn downstream; V stays four steps up, and
+    // the column three steps up is empty.
+    const a = assetNode("a", 1);
+    const b = assetNode("b", 1);
+    const u = graphNode("table", "s.u", 1);
+    const v = graphNode("table", "s.v", 1);
+    const up = lineage(
+      [a, b, u, v],
+      [
+        graphEdge("builds", a, ROOT),
+        graphEdge("reads", a, u),
+        graphEdge("builds", b, u),
+        graphEdge("reads", b, v),
+        graphEdge("reads", b, ROOT),
+      ],
+    );
+    const drawn = layout(up, ALONE);
+
+    expect(columns(drawn)).toMatchObject({ [v.id]: -4, [b.id]: 1 });
+    expect(drawn.nodes.some((one) => one.column === -3)).toBe(false);
+    expect(Number.isFinite(drawn.width)).toBe(true);
+    for (const one of drawn.nodes) {
+      expect(Number.isFinite(one.x), one.node.id).toBe(true);
+    }
+    expect(box(drawn, ROOT.id).x).toBe(4 * (BOX_W + COL_GAP));
+  });
+
   it("draws the table alone when nothing is upstream or downstream", () => {
     const drawn = layout(ALONE, ALONE);
 

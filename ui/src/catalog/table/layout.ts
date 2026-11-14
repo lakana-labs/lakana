@@ -213,7 +213,9 @@ export function layout(
   let across = 0;
   for (let column = first; column <= last; column += 1) {
     lefts.set(column, across);
-    across += (widths.get(column) as number) + COL_GAP;
+    // A cycle through the table can leave a column between others with no box: it keeps the
+    // smallest width, as an empty gap.
+    across += (widths.get(column) ?? BOX_W) + COL_GAP;
   }
   const rows = new Map<number, number>();
   const nodes: LineageBox[] = drawn.map(({ node, column }) => {
