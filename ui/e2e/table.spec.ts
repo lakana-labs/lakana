@@ -74,6 +74,65 @@ function sidewaysOverflow(page: Page): Promise<number> {
   );
 }
 
+/** How a section under an h2 looks: the box around the heading and the room around it. */
+interface PanelLook {
+  readonly heading: string;
+  readonly background: string;
+  readonly ground: string;
+  readonly border: string;
+  readonly shadow: string;
+  readonly headingSize: number;
+  readonly bodySize: number;
+  /** The space to the next section's box; null for the last one. */
+  readonly gapAfter: number | null;
+  /** The largest space between two neighbouring children inside the box. */
+  readonly innerGap: number;
+}
+
+/**
+ * Reads how each section under an h2 in the tab's content looks.
+ *
+ * @param page - The page, showing a tab of the table.
+ * @returns One entry per h2 in the tab.
+ */
+function panelLooks(page: Page): Promise<PanelLook[]> {
+  return page.evaluate(() => {
+    const ground = getComputedStyle(document.body).backgroundColor;
+    const bodySize = parseFloat(getComputedStyle(document.body).fontSize);
+    const tab = document.querySelector(".table-tab");
+    const boxes = [...(tab?.querySelectorAll("h2") ?? [])].map(
+      (heading) => heading.closest("section") ?? heading.parentElement ?? heading,
+    );
+    return boxes.map((box, index) => {
+      const style = getComputedStyle(box);
+      const heading = box.querySelector("h2");
+      const rect = box.getBoundingClientRect();
+      const next = boxes[index + 1]?.getBoundingClientRect();
+      const children = [...box.children].map((child) => child.getBoundingClientRect());
+      let innerGap = 0;
+      for (let i = 0; i + 1 < children.length; i += 1) {
+        const here = children[i];
+        const after = children[i + 1];
+        if (here && after && after.top >= here.bottom) {
+          innerGap = Math.max(innerGap, after.top - here.bottom);
+        }
+      }
+      return {
+        heading: heading?.textContent ?? "",
+        background: style.backgroundColor,
+        ground,
+        border: `${style.borderTopWidth} ${style.borderTopStyle}`,
+        shadow: style.boxShadow,
+        headingSize: heading === null ? 0 : parseFloat(getComputedStyle(heading).fontSize),
+        bodySize,
+        gapAfter:
+          next !== undefined && Math.abs(next.left - rect.left) < 1 ? next.top - rect.bottom : null,
+        innerGap,
+      };
+    });
+  });
+}
+
 for (const theme of ["light", "dark"] as const) {
   for (const density of ["roomy", "compact"] as const) {
     test.describe(`the table page, ${theme}, ${density}`, () => {
@@ -152,8 +211,43 @@ for (const theme of ["light", "dark"] as const) {
         }
       });
 
-      test("Overview fits 1280 × 800 without scrolling for the typical table", async ({ page }) => {
-        await page.setViewportSize({ width: 1280, height: 800 });
+      test("the sections of Overview, Health and Access are flat panels; Columns has none", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1920, height: 1080 });
+        await openTable(page);
+        await expect(page.getByText("Check unique_sale_id failed")).toBeVisible();
+        const looks = [...(await panelLooks(page))];
+        for (const entry of NEW_TABS.slice(1)) {
+          await openNewTab(page, entry);
+          looks.push(...(await panelLooks(page)));
+        }
+        expect(looks.length).toBeGreaterThanOrEqual(8);
+        for (const look of looks) {
+          const said = JSON.stringify(look);
+          expect(look.background, said).not.toBe(look.ground);
+          expect(look.background, said).not.toBe("rgba(0, 0, 0, 0)");
+          expect(look.border, said).toBe("1px solid");
+          expect(look.shadow, said).toBe("none");
+          expect(look.headingSize - look.bodySize, said).toBeGreaterThanOrEqual(4);
+          if (look.gapAfter !== null) {
+            expect(look.gapAfter, said).toBeGreaterThan(look.innerGap);
+            expect(look.gapAfter, said).toBeGreaterThanOrEqual(24);
+          }
+        }
+
+        await openTable(page, "/columns");
+        const list = page.locator(".table-tab .list").first();
+        await expect(list).toBeVisible();
+        const framed = await list.evaluate((node) => node.closest(".flat-panel") !== null);
+        expect(framed).toBe(false);
+      });
+
+      // The flat panels (2026-11-14) need about 130 px more than 800: a 1280 × 800 window scrolls.
+      test("Overview fits 1920 × 1080 without scrolling for the typical table", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1920, height: 1080 });
         await openTable(page);
         await expect(
           page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ }),

@@ -121,7 +121,7 @@ function Checks({ health }: HealthProps): JSX.Element {
     );
   };
   return (
-    <section className="health-section">
+    <section className="health-section flat-panel">
       <h2 className="block-heading">{t("table.healthTab.checks.heading")}</h2>
       {health.checks.length === 0 ? (
         <p className="second">{t("table.healthTab.checks.none")}</p>
@@ -230,7 +230,7 @@ function Signals({ health }: HealthProps): JSX.Element {
   const lines = firedLines({ ...health, checks: [] }, t);
   const columns = ["signal", "column", "state", "observed", "band", "effect", "lastFired"];
   return (
-    <section className="health-section">
+    <section className="health-section flat-panel">
       <h2 className="block-heading">{t("table.healthTab.signals.heading")}</h2>
       {health.signals.length === 0 ? (
         <p className="second">{t("table.healthTab.signals.none")}</p>
@@ -294,7 +294,7 @@ function Maintenance({ health }: HealthProps): JSX.Element {
     </div>
   );
   return (
-    <section className="health-section">
+    <section className="health-section flat-panel">
       <h2 className="block-heading">{t("table.healthTab.maintenance.heading")}</h2>
       {last === null ? (
         <p className="second">{t("table.healthTab.maintenance.none")}</p>
@@ -388,7 +388,7 @@ function Readers({ health, refused }: HealthProps & { readonly refused: boolean 
     );
   }
   return (
-    <section className="health-section" id="readers">
+    <section className="health-section flat-panel" id="readers">
       <h2 className="block-heading" tabIndex={-1} ref={heading}>
         {t("table.healthTab.readers.heading")}
       </h2>

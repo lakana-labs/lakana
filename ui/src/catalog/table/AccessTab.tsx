@@ -193,7 +193,7 @@ function ListSection<T>({
     shown = children(resource.data);
   }
   return (
-    <section className="access-section">
+    <section className={level === 2 ? "access-section flat-panel" : "access-section"}>
       <Heading
         className={level === 2 ? "block-heading" : "block-subheading"}
         tabIndex={-1}
@@ -320,7 +320,7 @@ function WhoHasAccess(): JSX.Element {
   const { ref } = useTableData();
   const { environment, namespace, name } = ref;
   return (
-    <section className="access-section">
+    <section className="access-section flat-panel">
       <h2 className="block-heading">{t("table.access.who.heading")}</h2>
       <GrantsAt
         level={{ environment, namespace, table: name }}

@@ -185,3 +185,23 @@ tr:hover .chevron {
   color: var(--color-text-muted);
   font-size: var(--type-dense-size);
 }
+
+/* A flat panel: a section set apart by the surface tint and a hairline, never by a shadow
+   (shadows are for floating surfaces only). Panels stand apart by more space than the space
+   inside them; the area that holds them sets the gap. */
+.flat-panel {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+}
+
+.flat-panel > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Inside a panel a list sits closer to what follows it than panels sit to each other. */
+.flat-panel .list {
+  margin-bottom: var(--space-3);
+}
