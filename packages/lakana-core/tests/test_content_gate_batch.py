@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import event, or_, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from test_projects_definition import (
     _analyst,
@@ -21,14 +22,17 @@ from test_projects_definition import (
     _policy,
     _rec,
     _retype,
+    _source_viewed,
     _tables,
     _version,
     _with_sql,
     _world,
 )
 
+from lakana_core.audit.service import AuditService
+from lakana_core.audit.views import sessions_like
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
-from lakana_core.errors import ValidationError
+from lakana_core.errors import AuditUnavailableError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, TableRef
 from lakana_core.models import (
@@ -394,3 +398,52 @@ def test_defined_in_reads_only_the_tables_its_file_uses(session: Session) -> Non
         s for s in statements if s.startswith("SELECT tables.id, tables.table_type, namespaces")
     ]
     assert live and all(" IN " in s for s in live)
+
+
+@pytest.mark.parametrize("failing", ["write", "commit"])
+def test_a_project_version_whose_audit_write_fails_after_the_lookup_records_and_shows_nothing(
+    session: Session, monkeypatch: pytest.MonkeyPatch, failing: str
+) -> None:
+    """The rows of a response land together or not at all, and nothing is returned (#589).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    monkeypatch
+        Makes the second row's write, or the commit, fail.
+    failing
+        Which step fails.
+    """
+    _tables(session, "gold.g")
+    _world(session, _rec("gold.f", "silver.a"), _rec("gold.g", "silver.a"))
+    _with_sql(session)
+    analyst = _analyst(session)
+    opened = sessions_like(session)
+    written: list[object] = []
+    real_record = AuditService.record
+
+    def record(self: AuditService, *args: object, **kwargs: object) -> object:
+        written.append(args)
+        if failing == "write" and len(written) == 2:
+            raise OperationalError("INSERT", {}, Exception("disk full"))
+        return real_record(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    def factory() -> Session:
+        audit_session = opened()
+        if failing == "commit":
+
+            def commit() -> None:
+                raise OperationalError("COMMIT", {}, Exception("connection lost"))
+
+            monkeypatch.setattr(audit_session, "commit", commit)
+        return audit_session
+
+    monkeypatch.setattr(AuditService, "record", record)
+    with pytest.raises(AuditUnavailableError, match="a read of a project file is always recorded"):
+        _version(session, analyst, session_factory=factory)
+
+    assert written  # the lookup ran and at least one row was written before the failure
+    monkeypatch.undo()
+    session.expire_all()
+    assert _source_viewed(session) == []

@@ -458,6 +458,22 @@ def test_commit_applies_an_update(client: TestClient, storage_root: str) -> None
     assert committed.json()["metadata"]["properties"]["owner"] == "chris"
 
 
+def test_a_create_may_not_set_a_lakana_property(client: TestClient, storage_root: str) -> None:
+    """`lakana.*` properties are Lakana's own: an Iceberg client's create gets a 422 (#428)."""
+    _setup(client, storage_root)
+
+    refused = client.post(
+        "/v1/dev/namespaces/gold/tables",
+        headers=AUTH_HEADER,
+        json={"name": "sales", "schema": _SCHEMA, "properties": {"lakana.history-key": '["id"]'}},
+    )
+
+    assert refused.status_code == 422, refused.text
+    assert "lakana.history-key is reserved for Lakana" in refused.text
+    listed = client.get("/v1/dev/namespaces/gold/tables", headers=AUTH_HEADER)
+    assert listed.json()["identifiers"] == []
+
+
 @pytest.mark.parametrize(
     "update",
     [
