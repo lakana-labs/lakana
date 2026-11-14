@@ -3005,7 +3005,8 @@ percent-decoded up to three times, case-folded and NFC, `normpath` and, for `fil
 (symbolic links), object-store keys literal and with `..` resolved, `abfs` reduced to the
 container; a location with no reading (relative or host `file`, no scheme) blocks every deletion on
 its scheme. Roots stored before stay and meet this check. New table and namespace names refuse `%`
-(`refuse_percent_in_new_name`, called only where such a name is created; stored names stay usable). Residual: two paths to one directory
+(`refuse_percent_in_new_name`, through `check_new_name`, called only where such a name is created;
+stored names stay usable). Residual: two paths to one directory
 that only the kernel knows (a bind mount, a network share mounted twice) are not seen; operators
 must not point two roots at one directory that way. A canonical other root makes the directory
 not listed; any other match lists it as kept, with a reason naming the location. Glob characters

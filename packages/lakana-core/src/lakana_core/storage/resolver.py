@@ -18,7 +18,7 @@ from lakana_core.config import StorageConfig
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import (
     NamespacePath,
-    refuse_percent_in_new_name,
+    check_new_name,
     validate_path_component,
 )
 from lakana_core.models import Environment, Secret
@@ -666,11 +666,11 @@ class ResolvedStorage:
         ------
         ValidationError
             If `table` is empty, whitespace-only, ``.``, ``..``, or contains
-            ``.``, ``/`` or the unit separator, or ``%`` (only a new table gets a location:
-            `refuse_percent_in_new_name`).
+            ``.``, ``/`` or the unit separator, or ``%`` or a hidden character (only a new table
+            gets a location: `check_new_name`).
         """
         validate_path_component(table, what="Table name")
-        refuse_percent_in_new_name(table, what="Table name")
+        check_new_name(table, what="Table name")
         parts = "/".join(ns.parts)
         return f"{self.config.root.rstrip('/')}/{MANAGED_PREFIX}/{parts}/{table}-{table_id.hex}"
 

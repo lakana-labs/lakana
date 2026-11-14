@@ -312,7 +312,8 @@ from lakana_core.identifiers import (
     NamespacePath,
     TableRef,
     check_environment_name,
-    refuse_percent_in_new_name,
+    check_new_name,
+    refuse_hidden_characters,
     shown,
     validate_path_component,
 )
@@ -2345,7 +2346,7 @@ class CatalogService:
             parent); every newly named component is checked, at any depth.
         """
         validate_path_component(path.parts[-1], what="Namespace component")
-        refuse_percent_in_new_name(path.parts[-1], what="Namespace component")
+        check_new_name(path.parts[-1], what="Namespace component")
         self._authz.authorize(
             p, Action.CREATE_NAMESPACE, Securable.namespace_scope(environment, path)
         )
@@ -2359,7 +2360,7 @@ class CatalogService:
         for depth, part in enumerate(path.parts, start=1):
             if self._lookup_namespace(env, NamespacePath(path.parts[:depth])) is None:
                 validate_path_component(part, what="Namespace component")
-                refuse_percent_in_new_name(part, what="Namespace component")
+                check_new_name(part, what="Namespace component")
         if self._lookup_namespace(env, path) is not None:
             raise AlreadyExistsError(f"Namespace {path} already exists in {environment!r}.")
         ns = Namespace(
@@ -3128,7 +3129,7 @@ class CatalogService:
             If the principal may not create tables here.
         """
         validate_path_component(ref.name, what="Table name")
-        refuse_percent_in_new_name(ref.name, what="Table name")
+        check_new_name(ref.name, what="Table name")
         self._authz.authorize(
             p, Action.CREATE_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
@@ -8110,7 +8111,7 @@ class CatalogService:
                 )
         if existing is None:
             validate_path_component(ref.name, what="Table name")
-            refuse_percent_in_new_name(ref.name, what="Table name")
+            check_new_name(ref.name, what="Table name")
         if existing is not None and existing.table_type is TableType.ARTIFACT:
             raise AlreadyExistsError(
                 f"{ref.dotted()} is an artifact; a view can't replace it. Drop it first "
@@ -8118,6 +8119,14 @@ class CatalogService:
             )
         if existing is not None and existing.table_type is not TableType.VIEW:
             raise AlreadyExistsError(f"{ref.dotted()} is a table; a view can't replace it.")
+        stored_columns = (
+            {c.get("name") for c in (existing.view_definition or {}).get("columns", [])}
+            if existing is not None
+            else set()
+        )
+        for column in columns:
+            if column.name not in stored_columns:
+                refuse_hidden_characters(column.name, what="Column name")
         top_level = ref.namespace.parts[0]
         if top_level not in _MEDALLION_TOP_LEVEL_NAMESPACES:
             raise ValidationError(
@@ -9308,7 +9317,7 @@ class CatalogService:
         target = ref if new_name is None else replace(ref, name=new_name)
         if new_name is not None:
             validate_path_component(new_name, what="Table name")
-            refuse_percent_in_new_name(new_name, what="Table name")
+            check_new_name(new_name, what="Table name")
         self._authz.authorize(
             p, Action.DROP_TABLE, Securable.namespace_scope(ref.environment, ref.namespace)
         )
@@ -9552,7 +9561,7 @@ class CatalogService:
             destination.
         """
         validate_path_component(destination.name, what="Table name")
-        refuse_percent_in_new_name(destination.name, what="Table name")
+        check_new_name(destination.name, what="Table name")
         self._authz.authorize(
             p,
             Action.DROP_TABLE,

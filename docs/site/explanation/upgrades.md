@@ -159,6 +159,24 @@ case must use the namespace's exact name.
 - An older CLI shows the jobs and connections of a start asset as `start` and other leaves as
   `join` in the lineage and neighbours output. Upgrade the CLI together with the server.
 
+### Invisible characters in new table, namespace and column names are refused
+
+A new namespace, table, view or column name may no longer hold a control character, a format
+character (Unicode category `Cf`: a bidirectional control such as U+202E, a zero-width space, a
+soft hyphen) or the line or paragraph separator (U+2028, U+2029). Such a character is invisible
+or reorders the text around it, so the name could look like another table's. The rule applies
+wherever a name is created: `lakana table create`, the REST API, an Iceberg client, a view, a
+rename or undrop target, and a deploy or load that creates a table or adds a column. The refusal
+names the character and its position, for example `Table name 'orders\u202e' holds U+202E at
+character 7, … Choose a name without it`.
+
+Existing names are not touched: they stay readable and writable, a schema change or redeploy may
+keep a column it already has, and an Iceberg client's rename (`rename_table`) moves a table to a
+plain name. To find them, search the JSON output of `lakana --output json table list` (and of
+`lakana --output json table get NAME` for columns) for these characters, for example with
+`grep -nP '[\x{00AD}\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2028}\x{2029}\x{2060}-\x{206F}\x{FEFF}]|\\u00[0-9a-f]{2}'`
+in a UTF-8 locale.
+
 ### Control characters in asset files are refused (breaking)
 
 A deploy now refuses an asset file that contains a control character (NUL, a C0 control other
