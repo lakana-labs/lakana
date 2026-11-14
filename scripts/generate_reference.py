@@ -97,32 +97,46 @@ def _type_name(param: Parameter) -> str:
     str
         For example ``text``, ``whole number, 1 to 200`` or ``one of a, b``.
     """
-    kind = param.type
+    desc = param.type_descriptor
     if isinstance(param, TyperOption) and param.is_flag:
         return "flag"
-    if kind.__class__.__name__.endswith("Choice"):
-        return "one of " + ", ".join(f"`{choice}`" for choice in getattr(kind, "choices", ()))
-    if kind.__class__.__name__ in ("IntRange", "FloatRange"):
-        base = "whole number" if kind.__class__.__name__ == "IntRange" else "number"
-        low, high = getattr(kind, "min", None), getattr(kind, "max", None)
+    if desc.is_choice:
+        return "one of " + ", ".join(f"`{_choice_text(choice)}`" for choice in desc.choices or ())
+    annotation = desc.annotation
+    if desc.is_list:
+        (annotation,) = get_args(annotation)
+    if desc.is_ranged:
+        base = "whole number" if annotation is int else "number"
+        low, high = desc.parameter_info.min, desc.parameter_info.max
         if low is not None and high is not None:
             return f"{base}, {low:g} to {high:g}"
         if low is not None:
             return f"{base}, {low:g} or more"
         return f"{base}, {high:g} or less"
-    names = {
-        "str": "text",
-        "text": "text",
-        "int": "whole number",
-        "integer": "whole number",
-        "float": "number",
-        "boolean": "true or false",
-        "path": "path",
-        "file": "file",
-        "uuid": "UUID",
-    }
-    base = names.get(kind.name, kind.name)
-    return f"{base}, repeatable" if getattr(param, "multiple", False) else base
+    if desc.is_file:
+        base = "file"
+    elif desc.is_path:
+        base = "path"
+    else:
+        names = {str: "text", int: "whole number", float: "number", bool: "true or false"}
+        base = names.get(annotation) or getattr(annotation, "__name__", str(annotation))
+    return f"{base}, repeatable" if desc.is_list else base
+
+
+def _choice_text(choice: object) -> str:
+    """Spell one allowed value of a choice parameter as it is typed.
+
+    Parameters
+    ----------
+    choice
+        An enum member or a plain value.
+
+    Returns
+    -------
+    str
+        The member's value for an enum, otherwise the value as text.
+    """
+    return str(getattr(choice, "value", choice))
 
 
 def _default(param: Parameter) -> str:
@@ -168,7 +182,7 @@ def _param_name(param: Parameter, ctx: Context) -> str:
         if param.secondary_opts:
             names += " / " + ", ".join(f"`{name}`" for name in param.secondary_opts)
         return names
-    return f"`{(param.make_metavar(ctx) or param.name or '').upper()}`"
+    return f"`{(param.metavar or param.name or '').upper()}`"
 
 
 def _visible(command: Command) -> list[Parameter]:
