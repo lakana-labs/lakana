@@ -222,5 +222,5 @@ Three audit events record the changes. None holds a credential: only the name of
 | Event | When | Detail |
 |---|---|---|
 | `PACKAGE_INDEX_CREATED` | An index is registered. | `name`, `url`, `credential_secret` |
-| `PACKAGE_INDEX_UPDATED` | An index is changed. | `name`, `changed` (the field names), `url` and `credential_secret` after the change, `previous` (the value each changed field had before) |
+| `PACKAGE_INDEX_UPDATED` | An index is changed. An update that gives the values the index already has (a URL in another spelling counts as the same) changes nothing and records no event. | `name`, `changed` (the names of the fields whose value changed), `url` and `credential_secret` after the change, `previous` (the value each changed field had before) |
 | `PACKAGE_INDEX_DELETED` | An index is deleted. | `name`, `url` |

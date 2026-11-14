@@ -529,16 +529,12 @@ def _source_issues(lock: dict[str, object], sources: KnownSources) -> list[Proje
     -------
     list of ProjectIssue
         One issue per unknown index URL, one per local folder other than
-        `wheelhouse`, one for git sources and one for direct URLs, one for files of an
-        index that are not ``http``/``https`` URLs and one for files of an index without a
-        strong hash.
+        `wheelhouse`, one for git sources and one for direct URLs.
     """
     unknown: dict[str, list[str]] = {}
     refused: dict[tuple[str, str], list[str]] = {}
     folders: dict[str, list[str]] = {}
     outside: list[str] = []
-    not_http: list[str] = []
-    unhashed: list[str] = []
     git: list[str] = []
     direct: list[str] = []
     for package in _package_tables(lock):
@@ -563,11 +559,6 @@ def _source_issues(lock: dict[str, object], sources: KnownSources) -> list[Proje
             elif _outside_wheelhouse(package):
                 outside.append(name)
             continue
-        bad_url, no_hash = _index_file_problems(package)
-        if bad_url:
-            not_http.append(name)
-        if no_hash:
-            unhashed.append(name)
         if not sources.is_known(registry):
             reason = _refusal(registry)
             if reason is None:
@@ -616,6 +607,49 @@ def _source_issues(lock: dict[str, object], sources: KnownSources) -> list[Proje
                 "run `uv lock`",
             )
         )
+    for names, what in ((git, "a git repository"), (direct, "a direct URL")):
+        if names:
+            issues.append(
+                ProjectIssue(
+                    LOCK_FILE,
+                    None,
+                    f"takes {_listed(names)} from {what}, which is not supported. Publish the "
+                    "package to a package index, ask an administrator to register that index "
+                    "(`lakana index add`), then run `uv lock`",
+                )
+            )
+    return issues
+
+
+def _pinning_issues(lock: dict[str, object]) -> list[ProjectIssue]:
+    """Refuse files of a package index that the lock does not pin as `uv lock` does.
+
+    Parameters
+    ----------
+    lock
+        The parsed lock.
+
+    Returns
+    -------
+    list of ProjectIssue
+        One issue for files that are not ``http``/``https`` URLs and one for files without a
+        SHA-256, SHA-384 or SHA-512 hash, each naming its packages.
+    """
+    not_http: list[str] = []
+    unhashed: list[str] = []
+    for package in _package_tables(lock):
+        source = package.get("source")
+        registry = source.get("registry") if isinstance(source, dict) else None
+        if not isinstance(registry, str) or "://" not in registry:
+            continue
+        raw = package.get("name")
+        name = _shown(raw) if isinstance(raw, str) else "?"
+        bad_url, no_hash = _index_file_problems(package)
+        if bad_url:
+            not_http.append(name)
+        if no_hash:
+            unhashed.append(name)
+    issues: list[ProjectIssue] = []
     if not_http:
         issues.append(
             ProjectIssue(
@@ -638,18 +672,31 @@ def _source_issues(lock: dict[str, object], sources: KnownSources) -> list[Proje
                 "deploy again",
             )
         )
-    for names, what in ((git, "a git repository"), (direct, "a direct URL")):
-        if names:
-            issues.append(
-                ProjectIssue(
-                    LOCK_FILE,
-                    None,
-                    f"takes {_listed(names)} from {what}, which is not supported. Publish the "
-                    "package to a package index, ask an administrator to register that index "
-                    "(`lakana index add`), then run `uv lock`",
-                )
-            )
     return issues
+
+
+def pinning_issues(lock: bytes | None) -> list[ProjectIssue]:
+    """List the files of a package index that the lock does not pin as `uv lock` does.
+
+    `lockfile_issues` contains these too. The worker asks for them alone before an execution,
+    because their remedy is the author's (`uv lock`, deploy again), not the registry's.
+
+    Parameters
+    ----------
+    lock
+        `uv.lock`'s raw bytes, or `None`.
+
+    Returns
+    -------
+    list of ProjectIssue
+        A file that is not an ``http``/``https`` URL, and a file without a strong hash; empty
+        for a lock that is absent or cannot be parsed (`lockfile_issues` reports that).
+    """
+    try:
+        locked = _loads(lock.decode("utf-8")) if lock is not None else None
+    except UnicodeDecodeError:
+        locked = None
+    return _pinning_issues(locked) if locked is not None else []
 
 
 def _declaration_issues(
@@ -1050,6 +1097,7 @@ def lockfile_issues(
             )
         )
     issues += _source_issues(locked, sources)
+    issues += _pinning_issues(locked)
     if "polars" not in versions:
         issues.append(
             ProjectIssue(

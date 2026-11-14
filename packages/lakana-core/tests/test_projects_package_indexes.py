@@ -213,6 +213,30 @@ def test_update_changes_only_given_fields_and_clears_the_secret_with_none(
     ]
 
 
+def test_an_update_that_changes_nothing_records_no_event_and_lists_only_real_changes(
+    session: Session, service: PackageIndexService, admin: PrincipalRef
+) -> None:
+    """The same URL in another spelling, or the same secret, is not a change (#80)."""
+    service.create(admin, name="team", url=_URL, credential_secret="team-index")
+    row = service.update(
+        admin,
+        "team",
+        {"url": "https://PKGS.example.org/simple/", "credential_secret": "team-index"},
+    )
+    assert (row.url, row.credential_secret) == (_URL, "team-index")
+    assert _events(session, AuditEventType.PACKAGE_INDEX_UPDATED) == []
+    service.update(admin, "team", {"url": _URL, "credential_secret": "other-index"})
+    assert _events(session, AuditEventType.PACKAGE_INDEX_UPDATED) == [
+        {
+            "name": "team",
+            "changed": ["credential_secret"],
+            "url": _URL,
+            "credential_secret": "other-index",
+            "previous": {"credential_secret": "team-index"},
+        }
+    ]
+
+
 def test_an_update_audit_event_holds_the_old_and_the_new_value_of_each_changed_field(
     session: Session, service: PackageIndexService, admin: PrincipalRef
 ) -> None:
@@ -747,7 +771,8 @@ def test_an_update_whose_flush_finds_the_row_gone_is_not_found(
     changes
         The fields to change.
     """
-    service.create(admin, name="team", url=_URL)
+    # With a secret, so that clearing it is a change and reaches the flush.
+    service.create(admin, name="team", url=_URL, credential_secret="team-index")
 
     def _gone(*_: object) -> None:
         """Fail the way SQLite does when a concurrent delete removed the row.

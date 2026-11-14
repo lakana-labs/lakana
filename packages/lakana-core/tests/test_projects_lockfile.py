@@ -14,6 +14,7 @@ from lakana_core.projects.lockfile import (
     PYPROJECT_FILE,
     lock_digest,
     lockfile_issues,
+    pinning_issues,
     python_admitted,
     source_issues,
     task_interpreter,
@@ -1077,7 +1078,7 @@ def test_files_of_an_index_with_a_hash_on_its_own_or_another_host_pass() -> None
         f'wheels = [{{ url = "https://files.pythonhosted.org/z.whl", hash = "{_HASH}" }}]',
     )
     assert _messages(_PYPROJECT, lock, sources=_SOURCES) == []
-    assert source_issues(_PYPROJECT, lock, _SOURCES) == []
+    assert pinning_issues(lock) == []
 
 
 @pytest.mark.parametrize(
@@ -1102,7 +1103,8 @@ def test_a_file_of_an_index_without_a_strong_hash_is_refused(entry: str) -> None
         "lock pins. Run `uv lock`, commit the lock as it writes it, then deploy again"
     ]
     assert _messages(_PYPROJECT, lock, sources=_SOURCES) == expected
-    assert [issue.render() for issue in source_issues(_PYPROJECT, lock, _SOURCES)] == expected
+    assert [issue.render() for issue in pinning_issues(lock)] == expected
+    assert source_issues(_PYPROJECT, lock, _SOURCES) == []
 
 
 @pytest.mark.parametrize(
@@ -1126,7 +1128,8 @@ def test_a_file_of_an_index_that_is_not_an_http_url_is_refused(url: str) -> None
         "path. Run `uv lock`, commit the lock as it writes it, then deploy again"
     ]
     assert _messages(_PYPROJECT, lock, sources=_SOURCES) == expected
-    assert [issue.render() for issue in source_issues(_PYPROJECT, lock, _SOURCES)] == expected
+    assert [issue.render() for issue in pinning_issues(lock)] == expected
+    assert source_issues(_PYPROJECT, lock, _SOURCES) == []
 
 
 def test_a_wheelhouse_package_that_names_a_url_is_outside_the_folder() -> None:

@@ -29,6 +29,7 @@ from lakana_worker.index_credentials import (
     INDEX_NAME_PREFIX,
     IndexAccess,
     IndexCredentialError,
+    credential_not_taken_message,
     encodable,
     invalid_url_message,
     missing_wheel,
@@ -1087,3 +1088,13 @@ def test_a_secret_bound_to_a_repository_reaches_no_index(session: Session) -> No
         resolve_index_access(session, _KEY, dev.id, dev.name, [_TEAM])
 
     assert "bound to a repository that was removed" in str(caught.value)
+
+
+def test_a_hint_for_a_long_index_name_shows_the_whole_command() -> None:
+    """A name of 201 to 255 characters is not cut inside the command (#80)."""
+    name = "i" * 240
+    index = RegisteredIndex(name, "x", "s")
+    assert invalid_url_message(index).endswith(f"with `lakana index update {name} --url URL`")
+    assert credential_not_taken_message(index).endswith(
+        f"with `lakana index update {name} --clear credential_secret`"
+    )

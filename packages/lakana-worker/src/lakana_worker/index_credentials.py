@@ -31,7 +31,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.errors import LakanaError, ValidationError
-from lakana_core.identifiers import shown
 from lakana_core.models import Secret, SecretUseKind
 from lakana_core.projects.package_sources import RegisteredIndex, normalize_index_url
 from lakana_core.secrets.crypto import decrypt_secret_row
@@ -503,7 +502,7 @@ def invalid_url_message(index: RegisteredIndex) -> str:
     return (
         f"the stored URL of the package index {index.name!r} is not valid any more, so no "
         "credential is sent to it. An administrator registers it again with "
-        f"`lakana index update {shlex.quote(shown(index.name))} --url URL`"
+        f"`lakana index update {shlex.quote(plain(index.name))} --url URL`"
     )
 
 
@@ -523,7 +522,7 @@ def credential_not_taken_message(index: RegisteredIndex) -> str:
     return (
         f"the package index {index.name!r} has a credential, but its host takes none, so no "
         "credential is sent to it. An administrator removes it with "
-        f"`lakana index update {shlex.quote(shown(index.name))} --clear credential_secret`"
+        f"`lakana index update {shlex.quote(plain(index.name))} --clear credential_secret`"
     )
 
 

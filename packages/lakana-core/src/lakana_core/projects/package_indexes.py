@@ -494,7 +494,14 @@ class PackageIndexService:
             self._session.rollback()
             record_refusal(self._authz, p, refusal)
             raise
-        previous = {key: getattr(row, key) for key in changes}
+        after = {"url": new_url, "credential_secret": new_secret}
+        changed = sorted(key for key in changes if getattr(row, key) != after[key])
+        if not changed:
+            # The same values (a URL in another spelling counts as the same): nothing is
+            # written and nothing is recorded.
+            self._session.rollback()
+            return row
+        previous = {key: getattr(row, key) for key in changed}
         row.url = new_url
         row.credential_secret = new_secret
         AuditService(self._session).record(
@@ -503,7 +510,7 @@ class PackageIndexService:
             securable=Securable.instance_scope(),
             detail={
                 "name": name,
-                "changed": sorted(changes),
+                "changed": changed,
                 "url": row.url,
                 "credential_secret": row.credential_secret,
                 "previous": previous,
