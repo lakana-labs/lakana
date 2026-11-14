@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from conftest import FakeApi, invoke, make_state
 from typer.testing import Result
 
@@ -223,9 +224,13 @@ def test_plan_refuses_a_file_whose_request_body_exceeds_one_mib(tmp_path: Path) 
     assert api.requests == []
 
 
-def test_plan_names_a_missing_or_unreadable_file(tmp_path: Path) -> None:
+def test_plan_names_a_missing_or_unreadable_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The message names the path and the next step."""
-    result = _invoke(make_state(tmp_path, FakeApi()), "access", "plan", str(tmp_path / "no.yaml"))
+    # A relative name: the message caps a long path, and the test's must not depend on it (#597).
+    monkeypatch.chdir(tmp_path)
+    result = _invoke(make_state(tmp_path, FakeApi()), "access", "plan", "no.yaml")
     assert result.exit_code == 1
     assert "no.yaml" in result.stderr
     assert "lakana access export" in result.stderr
@@ -252,25 +257,25 @@ def test_export_prints_the_text_without_o(tmp_path: Path) -> None:
     assert api.requests[-1].url.query == b"scope=prod&scope=staging"
 
 
-def test_export_writes_the_file_with_o(tmp_path: Path) -> None:
+def test_export_writes_the_file_with_o(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`-o` writes the text and says where."""
     api = FakeApi()
     api.on("GET", "/api/v1/access/export", json={"text": "version: 1\n"})
     target = tmp_path / "out.yaml"
-    result = _invoke(make_state(tmp_path, api), "access", "export", "-o", str(target))
+    monkeypatch.chdir(tmp_path)  # a relative name, as above
+    result = _invoke(make_state(tmp_path, api), "access", "export", "-o", "out.yaml")
     assert result.exit_code == 0, result.stderr
     assert target.read_text(encoding="utf-8") == "version: 1\n"
     assert "out.yaml" in result.stdout
     assert api.requests[-1].url.query == b"scope=instance"
 
 
-def test_export_names_an_unwritable_target(tmp_path: Path) -> None:
+def test_export_names_an_unwritable_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A directory that does not exist is named."""
     api = FakeApi()
     api.on("GET", "/api/v1/access/export", json={"text": "x"})
-    result = _invoke(
-        make_state(tmp_path, api), "access", "export", "-o", str(tmp_path / "no" / "out.yaml")
-    )
+    monkeypatch.chdir(tmp_path)  # a relative name, as above
+    result = _invoke(make_state(tmp_path, api), "access", "export", "-o", "no/out.yaml")
     assert result.exit_code == 1
     assert "out.yaml" in result.stderr
 
