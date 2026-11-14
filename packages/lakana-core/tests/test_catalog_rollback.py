@@ -2994,3 +2994,23 @@ def test_the_landed_check_filters_the_audit_rows_in_the_database(
     statement, parameters = reads[0]
     assert "LIMIT" in statement
     assert str(task.id) in str(parameters)
+
+
+def test_a_claim_that_is_not_a_number_never_matches_and_never_fails_the_landed_check(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The claim is compared as text: no cast of a stored value can fail or match by accident."""
+    catalog = _catalog(session, principal, tmp_path)
+    written = _arrange_unpublished(catalog, session, principal)
+    task = _task(session, principal)
+    AuditService(session).record(
+        principal.id,
+        AuditEventType.TABLE_ROLLED_BACK,
+        securable=_SEC,
+        detail={"task_run_id": str(task.id), "claim": "abc", "outcome": "unpublished"},
+    )
+    session.commit()
+
+    # SQLite casts 'abc' to 0, PostgreSQL refuses the cast: neither may decide the answer.
+    assert catalog._rollback_landed(_ref(), task.id, 0, written.table_id) is None
+    assert catalog._rollback_landed(_ref(), task.id, 1, written.table_id) is None

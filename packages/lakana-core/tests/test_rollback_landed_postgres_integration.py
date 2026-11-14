@@ -85,6 +85,7 @@ def test_the_landed_check_matches_task_run_claim_and_outcome_on_postgres(
         return catalog._rollback_landed(ref, task_run_id, claim, uuid.uuid4())
 
     record(claim=0)
+    record(claim="abc")  # never cast: a text claim neither fails the check nor matches
     record(outcome="failed")
     record(task_run_id=str(uuid.uuid4()))
     assert landed() is None

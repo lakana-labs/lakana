@@ -49,7 +49,7 @@ from pyiceberg.table.update import (
     TableUpdate,
 )
 from pyiceberg.types import NestedField
-from sqlalchemy import delete, event, null, or_, select, text, update
+from sqlalchemy import String, cast, delete, event, null, or_, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
@@ -6022,7 +6022,10 @@ class CatalogService:
             self._session.execute(
                 select(Table.id).where(Table.id == table_id).with_for_update(read=True)
             ).first()
-            stored_claim = AuditEvent.detail["claim"].as_integer()
+            # Compared as text, never cast to a number: a stored claim that is not a number
+            # neither fails the statement (PostgreSQL) nor reads as 0 (SQLite). A stored int
+            # reads as its digits on both (`->>` gives text; SQLite casts the int).
+            stored_claim = cast(AuditEvent.detail["claim"].as_string(), String)
             outcome = self._session.execute(
                 select(AuditEvent.detail["outcome"].as_string())
                 .where(
@@ -6030,7 +6033,7 @@ class CatalogService:
                     AuditEvent.securable_environment == ref.environment,
                     AuditEvent.securable_table == ref.name,
                     AuditEvent.detail["task_run_id"].as_string() == str(task_run_id),
-                    stored_claim.is_(None) if claim is None else stored_claim == claim,
+                    stored_claim.is_(None) if claim is None else stored_claim == str(claim),
                     AuditEvent.detail["outcome"].as_string().in_(sorted(_LANDED_OUTCOMES)),
                 )
                 .limit(1)
