@@ -257,14 +257,16 @@ def test_an_upload_without_a_dotted_name_names_the_form(tmp_path: Path) -> None:
     assert "Expected a dotted 'namespace.table' name" in result.stderr
 
 
-def test_a_missing_path_exits_with_the_path_and_the_next_step(tmp_path: Path) -> None:
+def test_a_missing_path_exits_with_the_path_and_the_next_step(
+    tmp_path: Path, short_tmp_path: Path
+) -> None:
     api = FakeApi()
     result = invoke(
         make_state(tmp_path, api),
         "artifact",
         "upload",
         "models.churn",
-        str(tmp_path / "nope"),
+        str(short_tmp_path / "nope"),  # a short path, so the message names it whole (#597)
         "--env",
         "dev",
     )
@@ -548,7 +550,7 @@ def _readable_version(body: bytes, *, number: int = 2, is_directory: bool = Fals
     }
 
 
-def test_artifact_download_reports_where_it_wrote(tmp_path: Path) -> None:
+def test_artifact_download_reports_where_it_wrote(tmp_path: Path, short_tmp_path: Path) -> None:
     body = b"abc"
     digest = hashlib.sha256(body).hexdigest()
     version = _readable_version(body)
@@ -556,7 +558,7 @@ def test_artifact_download_reports_where_it_wrote(tmp_path: Path) -> None:
     api.on("GET", f"{_BASE}/versions/current", json=version)
     api.on("GET", f"{_BASE}/versions/2", json=version)
     api.on("GET", f"{_BASE}/versions/2/blobs/{digest}", content=body)
-    target = tmp_path / "copy"
+    target = short_tmp_path / "copy"  # the message names it whole only while it is short (#597)
     result = invoke(
         make_state(tmp_path, api),
         "artifact",

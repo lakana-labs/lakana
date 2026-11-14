@@ -511,11 +511,11 @@ def _mountinfo(tmp_path: Path, *mounts: str) -> Path:
 
 
 def test_a_bind_mount_of_the_same_filesystem_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, short_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Same `st_dev`, but mountinfo lists it: a bind mount in the lake stops the reset."""
     monkeypatch.setattr(reset_module.sys, "platform", "linux")  # the table is Linux's
-    root = _instance(tmp_path)
+    root = _instance(short_tmp_path)  # a short path, so the message names it whole (#597)
     (root.lake / "dev" / "mnt").mkdir()
     real = root.root.resolve()
     for mount in (real / "lake", real / "lake" / "dev" / "mnt", real / "master.key"):

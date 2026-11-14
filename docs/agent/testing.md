@@ -98,12 +98,34 @@ budgets").
 `addopts` carries no `-n`, so a plain `uv run pytest` stays serial. The default Python of a
 checkout is 3.14 (`.python-version`; the image runs 3.14 too), so a plain `uv run` is the 3.14
 run. Locally, a pull request runs the tests its change selects (see "Local gates"); to run the
-whole suite the way the 3.14 shards do together, inside the capped scope, use `-n 2`:
+whole suite with coverage the way the 3.14 shards do together, run it **one package at a time**
+and combine the data, as CI combines its shards:
 
 ```bash
-systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 timeout 900 \
-  uv run pytest -n 2 --dist loadfile --cov --cov-report=json -q -p no:cacheprovider
+failed=
+for target in packages/lakana-core packages/lakana packages/lakana-server \
+    packages/lakana-worker scripts; do
+  COVERAGE_FILE=".coverage.local-$(basename "$target")" \
+    systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 timeout 3600 \
+    uv run pytest "$target" -n 2 --dist loadfile --cov --cov-report= -q -p no:cacheprovider \
+    || { failed="$target"; break; }
+done
+if [ -n "$failed" ]; then
+  echo "Stopped at $failed: fix it first; coverage of a partial run would read as a drop."
+else
+  uv run coverage combine .coverage.local-* && uv run coverage json \
+    && uv run python scripts/coverage_ratchet.py
+fi
 ```
+
+One run over the whole repository no longer fits (#488): it grew to 7.0 GB by about 99 % (in
+`scripts/tests/test_workflows.py`) and the memory limit stopped it. Its two workers live through
+all five targets; which part of what they keep grows (coverage data, a cache, imported modules)
+was not isolated, since the per-target runs fit with room to spare. Fresh workers per target
+peak at 2.9 GB (`lakana-core`), 2.3 GB (`lakana-worker`), 2.2 GB (`lakana-server`, `scripts`)
+and 1.3 GB (`lakana`) (2026-11-14, Python 3.14, `-n 2`, `--cov`); the combined report is the
+whole suite's and passed the ratchet at 100.00 %. `lakana-core` took 39 minutes that day on a
+busy machine, `lakana-server` and `lakana-worker` 7 each, `scripts` 3, `lakana` 1.5.
 
 - **Why `loadfile`:** every test of one file runs in one process, in file order. Test-level
   isolation under `--dist load` (module-level state, ports, environment variables,
@@ -1050,12 +1072,8 @@ that fails the ratchet is named by file and line in that job's log. One shard al
 suite: the ratchet only ever reads the combined report.
 
 The ratchet is a CI gate (see "Local gates"); to reproduce a failure locally, run it the
-same way CI does, over the whole suite:
-
-```bash
-uv run pytest --cov --cov-report=json --cov-report=term
-uv run python scripts/coverage_ratchet.py
-```
+same way CI does, over the whole suite: one package at a time, the data combined (the loop in
+"Running the unit suite in parallel"; one run over everything outgrows the memory limit, #488).
 
 **To raise the baseline** after adding tests that increase coverage, pass `--update`:
 
@@ -1158,17 +1176,25 @@ first failure; CI's `ui` job runs them one step each.
   --update`; never lower the baseline or add a coverage exclusion to fit.
 - **`prove-gates`** (`ui/scripts/prove-gates.mjs`) copies `ui/` and the build into a scratch
   directory (`$GATE_PROBE_DIR`, default `~/.cache/lakana-ui-gate-probe`; CI uses
-  `$RUNNER_TEMP/gate-probe`), writes one violation per gate (an unsafe `any`, a conditional hook,
-  an image without alt text, an undocumented export, a `fetch`, `window.fetch`,
-  `navigator.sendBeacon` or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type errors, an import out of `src/api/` and a cycle, an unused file, an
-  untested branch, a size limit of 1 B, an 80-token copy), runs the gate and requires it to fail
-  with the expected message; one probe checks the other way round, that a `fetch` inside
-  `src/api/` is accepted. It prints one line per probe and fails naming every gate that got its
-  probe wrong: fix the gate, not the probe. It refuses a `$GATE_PROBE_DIR` that is not empty and
-  lacks its marker file `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm --prefix ui run build`)
-  and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof is the smoke test's
-  positive control (an image without alt text must be found); the audits prove themselves in
-  `security.yml` on a lock generated at run time with `lodash@4.17.20`.
+  `$RUNNER_TEMP/gate-probe`), writes one violation per gate (an unsafe `any`, a conditional hook, an
+  image without alt text, an undocumented export, a `fetch`, `window.fetch`, `navigator.sendBeacon`
+  or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type
+  errors, an import out of `src/api/` and a cycle, an unused file, an untested branch, a size limit
+  of 1 B, an 80-token copy), runs the gate and requires it to fail with the expected message; one
+  probe checks the other way round, that a `fetch` inside `src/api/` is accepted. The nine ESLint
+  probes share one ESLint run (one run takes 15 s locally, about 23 s in CI; nine runs made the
+  proofs take 290 s of the `ui` job, #586): all their files are written at once and each probe must
+  find its rules in the lines ESLint prints about its own files. ESLint runs with `--max-warnings
+  0`, so each of those lines alone fails the run; the allowed file passes when ESLint says nothing
+  about it. The verdicts live in `ui/scripts/gate-verdict.mjs`, tested by Vitest
+  (`gate-verdict.test.ts`). When a step before a gate fails (the coverage probe's `test:coverage`,
+  say), the probe's message ends with that step's exit status and the end of its output. It prints
+  one line per probe and fails naming every gate that got its probe wrong: fix the gate, not the
+  probe. It refuses a `$GATE_PROBE_DIR` that is not empty and lacks its marker file
+  `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm
+  --prefix ui run build`) and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof
+  is the smoke test's positive control (an image without alt text must be found); the audits prove
+  themselves in `security.yml` on a lock generated at run time with `lodash@4.17.20`.
 - **Playwright.** Pull requests that touch `ui/` run the smoke test on Chromium; the full
   three-browser suite (`npm --prefix ui run e2e:all`) runs on release. The tests run against
   `vite preview` of the production build, which sends the content security policy of
@@ -1184,6 +1210,9 @@ first failure; CI's `ui` job runs them one step each.
 - **When it runs.** The `ui` job runs on drafts too, and skips its steps when a pull request
   provably changes nothing under `ui/`, `tools/jscpd/`, the three ratchet scripts, the UI
   duplication baseline, lakana-server's `ui.py` and `test_ui_real_build.py`, `packages/lakana-server` or `packages/lakana-core` (for `e2e:server`), or `ci.yml`. Its time budget is 10 minutes (`scripts/time-budgets.toml`).
+- **Vitest workers.** `ui/vitest.config.ts` caps Vitest at 8 workers (its default is one per CPU
+  but one): 19 workers on a 20-thread machine needed more than the 4 GB cap for the coverage run.
+  CI's 4-CPU runners keep the default of three.
 - **Locally.** Use Node 26: `~/.local/share/node/current/bin` first on `PATH`, or any Node 26
   (`node --version` must print `v26.*`). Run npm under the memory cap with `TMPDIR` off `/tmp`:
 

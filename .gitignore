@@ -11,6 +11,8 @@ build/
 .mypy_cache/
 .import_linter_cache/
 .coverage
+.coverage.local-*
+.coverage.shard-*
 coverage.json
 mutants/
 htmlcov/

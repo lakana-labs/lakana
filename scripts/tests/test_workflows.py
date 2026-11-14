@@ -155,6 +155,26 @@ def test_dependabot_watches_the_docker_image_pins() -> None:
         assert (ROOT / update["directory"].lstrip("/") / "Dockerfile").is_file()
 
 
+def test_dependabot_refreshes_the_python_base_digests() -> None:
+    """The `python:*-slim` digests get weekly pull requests, one tag per stage kept (#516).
+
+    Dependabot's default three-day cooldown skipped every `python` tag for weeks: Docker Hub
+    re-pushes them every few days, so a weekly run rarely found one older than three days.
+    And `Dockerfile.task` has four `python` stages, which Dependabot treats as one dependency:
+    a minor bump rewrote all four to 3.15 (#575). Python minor upgrades are deliberate.
+    """
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
+    (root,) = [
+        u for u in config["updates"] if u["package-ecosystem"] == "docker" and u["directory"] == "/"
+    ]
+    assert "python" in root["cooldown"]["exclude"]
+    held = {rule["dependency-name"]: rule["update-types"] for rule in root.get("ignore", [])}
+    assert held.get("python") == [
+        "version-update:semver-major",
+        "version-update:semver-minor",
+    ]
+
+
 _BASE_IMAGE = re.compile(r"^FROM (?P<image>[\w./-]+:[\w.-]+)@sha256:[0-9a-f]{64}( AS \w+)?$")
 
 

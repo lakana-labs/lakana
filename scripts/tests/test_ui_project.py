@@ -119,6 +119,17 @@ def test_vite_inlines_no_asset() -> None:
     assert "assetsInlineLimit: 0" in (UI / "vite.config.ts").read_text()
 
 
+def test_vitest_runs_at_most_eight_workers() -> None:
+    """Vitest's default, one worker per CPU but one, ran 19 on a 20-thread machine (#586).
+
+    The coverage run then needed more than 4 GB and was killed; with 8 it passes. A runner with
+    fewer CPUs keeps Vitest's default.
+    """
+    config = (UI / "vitest.config.ts").read_text()
+    assert "maxWorkers: Math.min(8, Math.max(availableParallelism() - 1, 1))" in config
+    assert 'import { availableParallelism } from "node:os";' in config
+
+
 def test_the_ui_sources_are_not_git_ignored() -> None:
     """``build/`` is ignored for Python builds; ``ui/build/`` holds source and must be committed."""
     for path in ("ui/build/targets.ts", "ui/scripts/prove-gates.mjs", "ui/src/App.tsx"):

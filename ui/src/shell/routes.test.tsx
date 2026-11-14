@@ -49,7 +49,10 @@ describe("appRoutes", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Check the address, or start again from Home.")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Areas" })).toBeInTheDocument();
-    expect(document.title).toBe("This page does not exist · Lakana");
+    // The previous test's screen loads on demand; its title effect may land after this render.
+    await waitFor(() => {
+      expect(document.title).toBe("This page does not exist · Lakana");
+    });
 
     await user.click(screen.getByRole("link", { name: "Go to Home" }));
     await waitFor(() => {

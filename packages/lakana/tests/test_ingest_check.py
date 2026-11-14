@@ -2073,8 +2073,11 @@ def test_a_sqlite_file_opens_read_only_or_is_named(tmp_path: Path) -> None:
         ok = _check.check(body, {**routing, "path": "app.db"}, timeout=FAST)
         bad = _check.check(body, {**routing, "path": "notes.db"}, timeout=FAST)
         gc.collect()
-    # A cursor or connection left to the garbage collector is a `ResourceWarning` (#10).
-    assert [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)] == []
+    # A cursor or connection left to the garbage collector is a `ResourceWarning` (#10). Only
+    # the check's own ADBC objects count: another test's socket or sqlite3 connection collected
+    # in this window is that test's leak, not this one's (#468).
+    leaks = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+    assert [m for m in leaks if "adbc_driver_manager.dbapi" in m] == []
 
     assert ok == (
         "ok",

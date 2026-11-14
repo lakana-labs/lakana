@@ -34,6 +34,17 @@ updates:
     groups:
       images:                       # one pull request per week, not one per package
         patterns: ["*"]
+    # Without this, Dependabot's default three-day cooldown skips every python:*-slim tag: Docker
+    # Hub re-pushes them every few days, so the digests went stale for weeks (issue #516).
+    cooldown:
+      default-days: 3               # Dependabot's own default, stated
+      exclude: ["python"]
+    ignore:
+      # Dockerfile.task has four python stages (3.11 to 3.14), which Dependabot treats as one
+      # dependency: a minor bump rewrites all four to the newest (PR 575). Python minor upgrades
+      # are deliberate; Dependabot refreshes each stage's digest on its own tag.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     commit-message:
       prefix: "deps"
 

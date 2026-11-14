@@ -238,13 +238,16 @@ def test_out_of_range_numbers_are_refused(
     assert invoke(state, "bundle", "init", str(tmp_path / "b"), flag, value).exit_code == 2
 
 
-def test_target_path_that_is_a_file_exits_3(tmp_path: Path, released: None) -> None:
+def test_target_path_that_is_a_file_exits_3(
+    tmp_path: Path, short_tmp_path: Path, released: None
+) -> None:
     """Filesystem errors exit 3 and name the path."""
-    (tmp_path / "f").write_text("x")
+    target = short_tmp_path / "f"  # a short path, so the message names it whole (#597)
+    target.write_text("x")
     state = make_state(tmp_path, FakeApi())
-    result = invoke(state, "bundle", "init", str(tmp_path / "f"))
+    result = invoke(state, "bundle", "init", str(target))
     assert result.exit_code == 3
-    assert str(tmp_path / "f") in result.stderr
+    assert str(target) in result.stderr
 
 
 def test_compose_services_wire_dependencies_and_healthchecks(

@@ -326,13 +326,13 @@ def _lock_is_free(root: DataDir) -> bool:
 
 
 def test_a_held_lock_refuses_start_before_migrate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, short_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Another process holding `<data-dir>/lock` makes `start` exit 2 before any child."""
     _stub_environment(monkeypatch)
     fake = FakeSupervisor()
     _install_fake_supervisor(monkeypatch, fake)
-    data_dir_path = tmp_path / "data"
+    data_dir_path = short_tmp_path / "data"  # a short path, so the message names it whole (#597)
     root = prepare_data_dir(data_dir_path)
 
     with try_locked(root.lock_path) as held:
@@ -1258,14 +1258,16 @@ def test_a_write_pidfile_failure_is_reported_as_a_clean_error(
     assert "simulated disk failure" in result.stderr
 
 
-def test_a_pidfile_that_is_a_directory_is_a_clean_error_on_start(tmp_path: Path) -> None:
+def test_a_pidfile_that_is_a_directory_is_a_clean_error_on_start(
+    tmp_path: Path, short_tmp_path: Path
+) -> None:
     """`server.pid` as a directory is a clean `CliError`.
 
     This is deliberately not treated as "no live instance": a directory
     where a pidfile belongs means the data directory is broken, not that
     it's safe to start a second instance against the same database.
     """
-    data_dir_path = tmp_path / "data"
+    data_dir_path = short_tmp_path / "data"  # a short path, so the message names it whole (#597)
     root = prepare_data_dir(data_dir_path)
     root.server_pid.mkdir()
 
@@ -1284,9 +1286,11 @@ def test_a_pidfile_that_is_a_directory_is_a_clean_error_on_start(tmp_path: Path)
     assert str(root.server_pid) in result.stderr
 
 
-def test_a_pidfile_that_is_a_directory_is_a_clean_error_on_status(tmp_path: Path) -> None:
+def test_a_pidfile_that_is_a_directory_is_a_clean_error_on_status(
+    tmp_path: Path, short_tmp_path: Path
+) -> None:
     """Same, for `status`."""
-    data_dir_path = tmp_path / "data"
+    data_dir_path = short_tmp_path / "data"  # a short path, as above
     root = prepare_data_dir(data_dir_path)
     root.server_pid.mkdir()
 

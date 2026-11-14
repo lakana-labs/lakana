@@ -47,6 +47,8 @@ def test_the_postgresql_check_logs_in_and_leaves_nothing_open(
             "endpoints": [{"host": "localhost", "port": port, "role": "service"}],
             "secret": {"password": server.password},
         }
+        # An earlier test's garbage is collected here, so it cannot surface in the block (#468).
+        gc.collect()
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             outcome, message = _check.check(body, {}, timeout=30.0)
