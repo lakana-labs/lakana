@@ -204,15 +204,16 @@
       "nothing": "None",
       "noBand": "No usual band yet",
       "neverFired": "Never",
+      "duration": {
+        "minutes_one": "{{shown}} minute",
+        "minutes_other": "{{shown}} minutes",
+        "hours_one": "{{shown}} hour",
+        "hours_other": "{{shown}} hours",
+        "days_one": "{{shown}} day",
+        "days_other": "{{shown}} days"
+      },
       "observedWords": {
-        "freshness": {
-          "minutes_one": "{{shown}} minute since the last write",
-          "minutes_other": "{{shown}} minutes since the last write",
-          "hours_one": "{{shown}} hour since the last write",
-          "hours_other": "{{shown}} hours since the last write",
-          "days_one": "{{shown}} day since the last write",
-          "days_other": "{{shown}} days since the last write"
-        },
+        "freshness": "{{duration}} since the last write",
         "volume_one": "{{added}} row added, {{total}} in total",
         "volume_other": "{{added}} rows added, {{total}} in total",
         "nullRate_one": "{{nulls}} of {{values}} value empty",
@@ -226,6 +227,13 @@
         "dropped_other": "{{shown}} dropped",
         "retyped_one": "{{shown}} changed type",
         "retyped_other": "{{shown}} changed type"
+      },
+      "bandWords": {
+        "freshness": "up to {{duration}}",
+        "volume_one": "{{low}} to {{high}} row added",
+        "volume_other": "{{low}} to {{high}} rows added",
+        "nullRateUpTo": "up to {{high}} % empty",
+        "nullRate": "{{low}} % to {{high}} % empty"
       },
       "names": {
         "freshness": "Freshness",

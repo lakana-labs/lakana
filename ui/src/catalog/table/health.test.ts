@@ -2,7 +2,10 @@ import i18next from "i18next";
 import { describe, expect, it } from "vitest";
 
 import { checkResult, health, signalResult } from "../../test/table";
-import { firedLines, judged, observedWords } from "./health";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { bandWords, effectWord, firedLines, judged, observedWords } from "./health";
 
 const t = i18next.t.bind(i18next);
 
@@ -247,5 +250,84 @@ describe("observedWords", () => {
     expect(words("skew", { reason: "paused", job: null, list: ["a"] })).toBe(
       'reason paused, list ["a"]',
     );
+  });
+});
+
+describe("bandWords", () => {
+  /**
+   * The words for one band, in English.
+   *
+   * @param signal - The signal's kind.
+   * @param band - The usual band.
+   * @param observed - What the signal observed, for a range's kind.
+   * @returns The words.
+   */
+  const words = (
+    signal: string,
+    band: Record<string, unknown>,
+    observed: Record<string, unknown> | null = null,
+  ): string => bandWords(signal, band, observed, t, "en");
+
+  it("says how long a write may take, like Observed", () => {
+    expect(words("freshness", { high: 86_400 })).toBe("up to 24 hours");
+    expect(words("freshness", { high: 600 })).toBe("up to 10 minutes");
+    expect(words("freshness", { high: 432_000 })).toBe("up to 5 days");
+  });
+
+  it("says the usual rows added", () => {
+    expect(words("volume", { low: 900, high: 1_100, median: 1_000 })).toBe(
+      "900 to 1,100 rows added",
+    );
+    expect(words("volume", { low: 0, high: 1, median: 1 })).toBe("0 to 1 row added");
+  });
+
+  it("says the usual share of empty values", () => {
+    expect(words("null_rate", { low: 0, high: 0.05, median: 0 })).toBe("up to 5 % empty");
+    expect(words("null_rate", { low: 0.012, high: 0.2, median: 0.1 })).toBe("1.2 % to 20 % empty");
+  });
+
+  it("says a range's band in the column's own kind, dates as dates", () => {
+    const observed = { lower: 0, upper: 1, kind: "timestamp" };
+    expect(
+      words(
+        "range",
+        { min: 0, max: 1, low: 1_762_041_600_000_000, high: 1_763_208_000_000_000 },
+        observed,
+      ),
+    ).toBe("from Nov 2, 2025, 12:00 AM UTC to Nov 15, 2025, 12:00 PM UTC");
+    expect(words("range", { low: -2.5, high: 40 }, { kind: "number" })).toBe("from -2.5 to 40");
+    expect(words("range", { low: 1, high: 9 })).toBe("from 1 to 9");
+  });
+
+  it("falls back to the pairs without the absent ones", () => {
+    expect(words("skew", { high: 3, low: null })).toBe("high 3");
+    expect(words("volume", { high: 3 })).toBe("high 3");
+    expect(words("freshness", { low: 1 })).toBe("low 1");
+    expect(words("null_rate", { high: "x" })).toBe("high x");
+  });
+});
+
+describe("effectWord", () => {
+  it("has a word for every effect the server can send", () => {
+    // The server's list, read from its source, so a new effect fails here before it shows raw.
+    const source = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../../../packages/lakana-core/src/lakana_core/catalog/health_signals.py",
+      ),
+      "utf8",
+    );
+    const listed = /^EFFECTS = \(([^)]*)\)/m.exec(source)?.[1] ?? "";
+    const effects = [...listed.matchAll(/"([^"]+)"/g)].map((match) => match[1] as string);
+    expect(effects).toEqual(["warn", "block", "off"]);
+    expect(effects.map((effect) => effectWord(effect, t))).toEqual([
+      "Warns",
+      "Blocks publication",
+      "Off",
+    ]);
+  });
+
+  it("has no word for a value the server never sends", () => {
+    expect(effectWord("alert", t)).toBeNull();
   });
 });

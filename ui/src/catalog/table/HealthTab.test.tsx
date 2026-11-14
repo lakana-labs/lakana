@@ -191,7 +191,7 @@ describe("HealthTab", () => {
         "Whole table",
         "Fired",
         "rows 120",
-        "low 900, high 1100",
+        "900 to 1,100 rows added",
         "Blocks publication",
         "1 day ago",
       ],

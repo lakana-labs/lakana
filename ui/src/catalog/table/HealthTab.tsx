@@ -25,7 +25,7 @@ import { StatusGlyph } from "../../status/StatusGlyph";
 import type { StatusKind } from "../../status/status";
 import { ReadFailed, When } from "../cells";
 import { formatBytes } from "../format";
-import { firedLines, judged, observedWords, valuePairs } from "./health";
+import { bandWords, effectWord, firedLines, judged, observedWords } from "./health";
 import { useTableData } from "./TableContext";
 
 type Check = TableHealthOut["checks"][number];
@@ -41,7 +41,6 @@ const OUTCOME_GLYPHS: Readonly<Record<string, StatusKind>> = {
 
 const SIGNAL_NAMES = ["freshness", "volume", "null_rate", "range", "schema"];
 const SIGNAL_STATES = ["ok", "fired", "no_history", "no_metrics", "off"];
-const SIGNAL_EFFECTS = ["warn", "block", "off"];
 
 /**
  * A word the interface has for a server value, else the server's value with its invisible
@@ -199,13 +198,13 @@ function SignalRow({ signal }: { readonly signal: Signal }): JSX.Element {
         ) : signal.band === null ? (
           t("table.healthTab.signals.noBand")
         ) : (
-          <VisibleText text={valuePairs(signal.band, t)} />
+          <VisibleText
+            text={bandWords(signal.signal, signal.band, signal.observed, t, i18n.language)}
+          />
         )}
       </td>
       <td className="one-line">
-        {wordOr(SIGNAL_EFFECTS, signal.effect, (effect) =>
-          t(`table.healthTab.signals.effects.${effect}`),
-        )}
+        {effectWord(signal.effect, t) ?? <VisibleText text={signal.effect} />}
       </td>
       <td className="one-line">
         <When iso={signal.last_fired_at ?? null} never={t("table.healthTab.signals.neverFired")} />

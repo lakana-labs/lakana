@@ -358,7 +358,7 @@ const HEALTH = {
       signal: "volume",
       column: null,
       state: "fired",
-      effect: "alert",
+      effect: "warn",
       snapshot_id: 4821,
       observed_at: "2026-11-10T06:06:00Z",
       observed: null,
