@@ -4,8 +4,10 @@
 // It copies ui/ (without node_modules and reports) and the built interface into a scratch root
 // that mirrors the repository ($GATE_PROBE_DIR, default ~/.cache/lakana-ui-gate-probe), links
 // node_modules, and for each gate writes one violation, runs the gate, and requires a non-zero
-// exit and the expected text. The repository itself is never written to. Run it after
-// `npm run build`: the size probe measures the build.
+// exit and the expected text. The ESLint probes share one run (ESLint takes 15-25 s a run): every
+// violation is written at once and each probe's rules must be reported for its own files, under
+// `--max-warnings 0`, so each one alone fails the run. The repository itself is never written to.
+// Run it after `npm run build`: the size probe measures the build.
 import { spawnSync } from "node:child_process";
 import {
   cpSync,
@@ -20,6 +22,8 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { sectionsByFile, verdict } from "./gate-verdict.mjs";
 
 const UI = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = resolve(UI, "..");
@@ -65,6 +69,7 @@ export function summarise(values: readonly number[]): { total: number; largest: 
  * @property {Command[]} [before] - commands to run first, whatever their exit
  * @property {Command} run - the gate; it must fail, or pass when `accept` is set
  * @property {boolean} [accept] - the gate must accept this file (an allowed exception)
+ * @property {boolean} [eslint] - an ESLint probe: it runs in the one shared ESLint run
  * @property {string[]} expect - texts its output must contain; a text listed twice must appear twice
  */
 
@@ -87,6 +92,7 @@ const PROBES = [
         '/**\n * Probe.\n *\n * @returns A value.\n */\nexport function probe(): unknown {\n  return (JSON.parse("{}") as any).value;\n}\n',
     },
     run: npmRun("lint"),
+    eslint: true,
     expect: ["no-unsafe-member-access"],
   },
   {
@@ -96,6 +102,7 @@ const PROBES = [
         'import { useState } from "react";\n\n/**\n * Probe.\n *\n * @param props - The props.\n * @param props.on - Whether.\n * @returns A number.\n */\nexport function Probe({ on }: { readonly on: boolean }): number {\n  if (on) {\n    const [n] = useState(0);\n    return n;\n  }\n  return 0;\n}\n',
     },
     run: npmRun("lint"),
+    eslint: true,
     expect: ["react-hooks/rules-of-hooks"],
   },
   {
@@ -105,6 +112,7 @@ const PROBES = [
         'import type { JSX } from "react";\n\n/**\n * Probe.\n *\n * @returns An image.\n */\nexport function Probe(): JSX.Element {\n  return <img src="x.png" />;\n}\n',
     },
     run: npmRun("lint"),
+    eslint: true,
     expect: ["jsx-a11y/alt-text"],
   },
   {
@@ -114,12 +122,14 @@ const PROBES = [
         "export function probe(): number {\n  return 1;\n}\n\n/** The props of a probe. */\nexport interface ProbeProps {\n  readonly value: number;\n}\n",
     },
     run: npmRun("lint"),
+    eslint: true,
     expect: ["jsdoc/require-jsdoc", "jsdoc/require-jsdoc"],
   },
   {
     gate: "ESLint fetch rule",
     files: { "src/shell/probe.ts": 'void fetch("/api/v1/whoami");\n' },
     run: npmRun("lint"),
+    eslint: true,
     expect: ["no-restricted-globals"],
   },
   {
@@ -129,6 +139,7 @@ const PROBES = [
         'navigator.sendBeacon("/v1/audit");\nvoid window.fetch("/api/v1/whoami");\n',
     },
     run: npmRun("lint"),
+    eslint: true,
     expect: ["no-restricted-properties", "no-restricted-properties"],
   },
   {
@@ -138,18 +149,21 @@ const PROBES = [
         'export const mode = process.env["NODE_ENV"];\nexport const bytes = Buffer.from("a");\n',
     },
     run: npmRun("lint"),
+    eslint: true,
     expect: ["no-restricted-globals", "no-restricted-globals"],
   },
   {
     gate: "ESLint HTTP client packages",
     files: { "src/shell/client.ts": 'import axios from "axios";\n\nexport const probe = axios;\n' },
     run: npmRun("lint"),
+    eslint: true,
     expect: ["no-restricted-imports"],
   },
   {
     gate: "ESLint fetch rule (src/api/ exempt)",
     files: { "src/api/whoami.ts": 'void fetch("/api/v1/whoami");\n' },
     run: npmRun("lint"),
+    eslint: true,
     accept: true,
     expect: [],
   },
@@ -272,17 +286,6 @@ function execute(command) {
 }
 
 /**
- * Count the occurrences of a text in another.
- *
- * @param {string} haystack - the text searched
- * @param {string} needle - the text counted
- * @returns {number} how often it occurs
- */
-function occurrences(haystack, needle) {
-  return haystack.split(needle).length - 1;
-}
-
-/**
  * Copy ui/ and the built interface into the scratch root, node_modules linked.
  */
 function prepareScratch() {
@@ -317,12 +320,12 @@ function prepareScratch() {
 }
 
 /**
- * Run one probe in the scratch copy and undo its changes.
+ * Write a probe's violation into the scratch copy.
  *
- * @param {Probe} probe - the violation and the gate
- * @returns {string | null} why the gate let the violation through, or null when it caught it
+ * @param {Probe} probe - the probe
+ * @returns {() => void} what undoes it
  */
-function prove(probe) {
+function plant(probe) {
   /** @type {Record<string, string>} */
   const originals = {};
   for (const [path, edit] of Object.entries(probe.edits ?? {})) {
@@ -334,43 +337,92 @@ function prove(probe) {
     mkdirSync(dirname(join(PROBE_UI, path)), { recursive: true });
     writeFileSync(join(PROBE_UI, path), content);
   }
-  try {
-    for (const command of probe.before ?? []) {
-      execute(command);
-    }
-    const { status, output } = execute(probe.run);
-    if (probe.accept === true) {
-      return status === 0
-        ? null
-        : `it refused an allowed file (exit ${String(status)}): ${output.slice(-600)}`;
-    }
-    if (status === 0) {
-      return "it exited 0";
-    }
-    if (status === null) {
-      return `it did not finish within ${String(TIMEOUT_MS / 1000)} s: ${output.slice(-300)}`;
-    }
-    for (const text of new Set(probe.expect)) {
-      const wanted = occurrences(probe.expect.join("\n"), text);
-      if (occurrences(output, text) < wanted) {
-        return `it failed, but its output lacks "${text}" (${String(wanted)}x): ${output.slice(-600)}`;
-      }
-    }
-    return null;
-  } finally {
+  return () => {
     for (const path of Object.keys(probe.files)) {
       rmSync(join(PROBE_UI, path), { force: true });
     }
     for (const [path, text] of Object.entries(originals)) {
       writeFileSync(join(PROBE_UI, path), text);
     }
+  };
+}
+
+/**
+ * Run the steps before a probe's gate, whatever their exit, and keep those that failed.
+ *
+ * @param {Probe} probe - the probe
+ * @returns {{label: string, status: number | null, output: string}[]} the failed steps
+ */
+function runBefore(probe) {
+  return (probe.before ?? []).flatMap((command) => {
+    const { status, output } = execute(command);
+    const label = [command.program.split(sep).at(-1) ?? "", ...command.args.slice(0, 3)].join(" ");
+    return status === 0 ? [] : [{ label, status, output }];
+  });
+}
+
+/**
+ * Run one probe in the scratch copy and undo its changes.
+ *
+ * @param {Probe} probe - the violation and the gate
+ * @returns {string | null} why the gate let the violation through, or null when it caught it
+ */
+function prove(probe) {
+  const undo = plant(probe);
+  try {
+    const failedBefore = runBefore(probe);
+    const { status, output } = execute(probe.run);
+    return verdict(probe, { status, output, shared: false, failedBefore }, TIMEOUT_MS / 1000);
+  } finally {
+    undo();
+  }
+}
+
+/**
+ * Run the ESLint probes in one ESLint run and judge each by the lines about its own files.
+ *
+ * @param {Probe[]} probes - the ESLint probes, whose files do not overlap
+ * @returns {(string | null)[]} each probe's leak, or null when ESLint caught it
+ */
+function proveTogether(probes) {
+  const paths = probes.flatMap((probe) => Object.keys(probe.files));
+  if (new Set(paths).size !== paths.length || probes.some((p) => p.edits || p.before)) {
+    console.error("The ESLint probes must write distinct files and edit nothing.");
+    process.exit(1);
+  }
+  const undos = probes.map(plant);
+  try {
+    const { status, output } = execute(npmRun("lint"));
+    const sections = sectionsByFile(output);
+    // An ESLint run that crashed reports no file: show its output rather than a silent pass.
+    const own = (/** @type {Probe} */ probe) =>
+      sections.size === 0
+        ? output
+        : Object.keys(probe.files)
+            .map((path) => sections.get(join(PROBE_UI, path)) ?? "")
+            .join("");
+    return probes.map((probe) =>
+      verdict(
+        probe,
+        { status, output: own(probe), shared: true, failedBefore: [] },
+        TIMEOUT_MS / 1000,
+      ),
+    );
+  } finally {
+    for (const undo of undos) {
+      undo();
+    }
   }
 }
 
 prepareScratch();
 const leaks = [];
+const started = Date.now();
+const together = PROBES.filter((probe) => probe.eslint === true);
+const sharedLeaks = proveTogether(together);
 for (const probe of PROBES) {
-  const leak = prove(probe);
+  const leak =
+    probe.eslint === true ? (sharedLeaks[together.indexOf(probe)] ?? null) : prove(probe);
   if (leak === null && probe.accept === true) {
     console.log(`ok   ${probe.gate}: accepted its allowed file, as it should`);
   } else if (leak === null) {
@@ -388,4 +440,7 @@ if (leaks.length > 0) {
   );
   process.exit(1);
 }
-console.log(`\nAll ${String(PROBES.length)} gate probes got the verdict they should.`);
+const seconds = String(Math.round((Date.now() - started) / 1000));
+console.log(
+  `\nAll ${String(PROBES.length)} gate probes got the verdict they should (${seconds} s).`,
+);

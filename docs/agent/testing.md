@@ -1163,8 +1163,15 @@ first failure; CI's `ui` job runs them one step each.
   `navigator.sendBeacon` or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type errors, an import out of `src/api/` and a cycle, an unused file, an
   untested branch, a size limit of 1 B, an 80-token copy), runs the gate and requires it to fail
   with the expected message; one probe checks the other way round, that a `fetch` inside
-  `src/api/` is accepted. It prints one line per probe and fails naming every gate that got its
-  probe wrong: fix the gate, not the probe. It refuses a `$GATE_PROBE_DIR` that is not empty and
+  `src/api/` is accepted. The nine ESLint probes share one ESLint run (one run takes 15 s locally,
+  about 23 s in CI; nine runs made the proofs take 290 s of the `ui` job, #586): all their files
+  are written at once and each probe must find its rules in the lines ESLint prints about its own
+  files. ESLint runs with `--max-warnings 0`, so each of those lines alone fails the run; the
+  allowed file passes when ESLint says nothing about it. The verdicts live in
+  `ui/scripts/gate-verdict.mjs`, tested by Vitest (`gate-verdict.test.ts`). When a step before a
+  gate fails (the coverage probe's `test:coverage`, say), the probe's message ends with that
+  step's exit status and the end of its output. It prints one line per probe and fails naming
+  every gate that got its probe wrong: fix the gate, not the probe. It refuses a `$GATE_PROBE_DIR` that is not empty and
   lacks its marker file `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm --prefix ui run build`)
   and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof is the smoke test's
   positive control (an image without alt text must be found); the audits prove themselves in
@@ -1184,6 +1191,9 @@ first failure; CI's `ui` job runs them one step each.
 - **When it runs.** The `ui` job runs on drafts too, and skips its steps when a pull request
   provably changes nothing under `ui/`, `tools/jscpd/`, the three ratchet scripts, the UI
   duplication baseline, lakana-server's `ui.py` and `test_ui_real_build.py`, `packages/lakana-server` or `packages/lakana-core` (for `e2e:server`), or `ci.yml`. Its time budget is 10 minutes (`scripts/time-budgets.toml`).
+- **Vitest workers.** `ui/vitest.config.ts` caps Vitest at 8 workers (its default is one per CPU
+  but one): 19 workers on a 20-thread machine needed more than the 4 GB cap for the coverage run.
+  CI's 4-CPU runners keep the default of three.
 - **Locally.** Use Node 26: `~/.local/share/node/current/bin` first on `PATH`, or any Node 26
   (`node --version` must print `v26.*`). Run npm under the memory cap with `TMPDIR` off `/tmp`:
 
