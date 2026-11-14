@@ -201,6 +201,161 @@ def test_a_node_upstream_and_downstream_at_once_says_both(tmp_path: Path) -> Non
     assert "both" in _row(result.output, "asset", "s.loop").split()
 
 
+def _lead(row: str) -> list[str]:
+    """Read a table row's first two cells, its distance and its side.
+
+    Parameters
+    ----------
+    row
+        One line of the table.
+
+    Returns
+    -------
+    list of str
+        The two cells.
+    """
+    return [cell for cell in row.split() if cell != "│"][:2]
+
+
+def _leaf_world(*leaves: dict[str, object]) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
+    """Build a lineage answer around `silver.sales` with leaves added.
+
+    `asset:r/up` builds the start and sits upstream at 1, `asset:r/far` upstream at 2,
+    `asset:r/down` reads the start and sits downstream at 1, and `asset:r/aside` is joined to
+    nothing that flows into or out of the start.
+
+    Parameters
+    ----------
+    *leaves
+        Each ``{"id", "kind", "name", "distance", "edges"}``: a job or connection and its edges.
+
+    Returns
+    -------
+    tuple
+        The nodes and the edges.
+    """
+    nodes: list[dict[str, object]] = [
+        {"id": "table:s", "kind": "table", "name": "silver.sales", "distance": 0},
+        {"id": "asset:r/up", "kind": "asset", "name": "silver.sales", "distance": 1},
+        {"id": "table:b", "kind": "table", "name": "bronze.raw", "distance": 1},
+        {"id": "asset:r/far", "kind": "asset", "name": "bronze.raw", "distance": 2},
+        {"id": "asset:r/down", "kind": "asset", "name": "gold.fact", "distance": 1},
+        {"id": "asset:r/aside", "kind": "asset", "name": "gold.aside", "distance": 1},
+    ]
+    edges = [
+        {"kind": "builds", "source": "asset:r/up", "target": "table:s"},
+        {"kind": "reads", "source": "asset:r/up", "target": "table:b"},
+        {"kind": "builds", "source": "asset:r/far", "target": "table:b"},
+        {"kind": "reads", "source": "asset:r/down", "target": "table:s"},
+    ]
+    for leaf in leaves:
+        nodes.append({k: v for k, v in leaf.items() if k != "edges"})
+        extra = leaf["edges"]
+        assert isinstance(extra, list)
+        edges += extra
+    return nodes, edges
+
+
+def _leaf(kind: str, name: str, distance: int, *assets: str) -> dict[str, object]:
+    """Build a job or a connection attached to assets.
+
+    Parameters
+    ----------
+    kind
+        ``job`` or ``connection``.
+    name
+        Its name; one word.
+    distance
+        The distance the server gives it.
+    *assets
+        The asset ids it is attached to.
+
+    Returns
+    -------
+    dict
+        The leaf, with its `runs` (job → asset) or `uses` (asset → connection) edges.
+    """
+    leaf_id = f"{kind}:{name}"
+    edges = [
+        {"kind": "runs", "source": leaf_id, "target": a}
+        if kind == "job"
+        else {"kind": "uses", "source": a, "target": leaf_id}
+        for a in assets
+    ]
+    return {"id": leaf_id, "kind": kind, "name": name, "distance": distance, "edges": edges}
+
+
+def _lineage_rows(tmp_path: Path, *leaves: dict[str, object]) -> str:
+    """Ask `lakana graph lineage silver.sales` of a `_leaf_world` answer.
+
+    Parameters
+    ----------
+    tmp_path
+        The test's directory.
+    *leaves
+        The leaves.
+
+    Returns
+    -------
+    str
+        The command's output.
+    """
+    nodes, edges = _leaf_world(*leaves)
+    api = FakeApi()
+    api.on("GET", _LINEAGE, json={"nodes": nodes, "edges": edges, "next_cursor": None})
+    result = invoke(make_state(tmp_path, api), "graph", "lineage", "silver.sales", "--env", "prod")
+    assert result.exit_code == 0, result.output
+    return result.output
+
+
+def test_cli_lineage_gives_a_connection_its_assets_side(tmp_path: Path) -> None:
+    output = _lineage_rows(
+        tmp_path,
+        _leaf("connection", "pg-up", 1, "asset:r/up"),
+        _leaf("connection", "pg-far", 2, "asset:r/far"),
+        _leaf("connection", "pg-down", 1, "asset:r/down"),
+        _leaf("connection", "pg-aside", 1, "asset:r/aside"),
+        _leaf("connection", "pg-lone", 1),
+    )
+    assert _lead(_row(output, "connection", "pg-up")) == ["1", "up"]
+    assert _lead(_row(output, "connection", "pg-far")) == ["2", "up"]
+    assert _lead(_row(output, "connection", "pg-down")) == ["1", "down"]
+    assert _lead(_row(output, "connection", "pg-aside")) == ["1", "join"]
+    assert _lead(_row(output, "connection", "pg-lone")) == ["1", "join"]
+
+
+def test_cli_lineage_gives_a_job_the_side_of_its_nearest_asset(tmp_path: Path) -> None:
+    output = _lineage_rows(
+        tmp_path,
+        _leaf("job", "j-up", 1, "asset:r/up", "asset:r/far"),
+        _leaf("job", "j-down", 1, "asset:r/down"),
+        _leaf("job", "j-both", 1, "asset:r/far", "asset:r/down"),
+    )
+    assert _lead(_row(output, "job", "j-up")) == ["1", "up"]
+    assert _lead(_row(output, "job", "j-down")) == ["1", "down"]
+    assert _lead(_row(output, "job", "j-both")) == ["1", "join"]
+
+
+def test_cli_lineage_puts_the_leaves_of_a_start_asset_upstream(tmp_path: Path) -> None:
+    nodes = [
+        {"id": "asset:r/s", "kind": "asset", "name": "silver.sales", "distance": 0},
+        {"id": "table:s", "kind": "table", "name": "silver.sales", "distance": 0},
+        {"id": "job:r/load", "kind": "job", "name": "r/load", "distance": 0},
+        {"id": "connection:pg-sales", "kind": "connection", "name": "pg-sales", "distance": 0},
+    ]
+    edges = [
+        {"kind": "builds", "source": "asset:r/s", "target": "table:s"},
+        {"kind": "runs", "source": "job:r/load", "target": "asset:r/s"},
+        {"kind": "uses", "source": "asset:r/s", "target": "connection:pg-sales"},
+    ]
+    api = FakeApi()
+    api.on("GET", _LINEAGE, json={"nodes": nodes, "edges": edges, "next_cursor": None})
+    result = invoke(make_state(tmp_path, api), "graph", "lineage", "asset:r/s", "--env", "prod")
+    assert result.exit_code == 0, result.output
+    assert _lead(_row(result.output, "job", "r/load")) == ["0", "up"]
+    assert _lead(_row(result.output, "connection", "pg-sales")) == ["0", "up"]
+
+
 def test_lang_shows_the_labels_in_table_mode(tmp_path: Path) -> None:
     api = FakeApi()
     labelled = {**_ROOT, "label": "Magasins"}

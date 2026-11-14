@@ -26,6 +26,23 @@ def test_extracts_lineage_across_a_join() -> None:
 
 
 @pytest.mark.parametrize(
+    "source",
+    ['"bronze"."raw"."eu"."orders"', "bronze.raw.eu.orders AS o", "bronze.raw.eu.orders"],
+)
+def test_a_table_in_a_three_level_namespace_keeps_every_part(source: str) -> None:
+    """`bronze.raw.eu.orders` is the table `orders` of `bronze.raw.eu`, never `bronze.raw.orders`.
+
+    Parameters
+    ----------
+    source
+        The table as the query names it.
+    """
+    lineage = extract_lineage(f"SELECT id FROM {source}")
+
+    assert lineage == {"id": [{"table": "bronze.raw.eu.orders", "column": "id"}]}
+
+
+@pytest.mark.parametrize(
     ("sql", "column"),
     [
         ("SELECT COUNT(*) FROM bronze.weather", "*"),

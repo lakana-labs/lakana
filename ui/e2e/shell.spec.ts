@@ -70,9 +70,9 @@ for (const theme of ["light", "dark"] as const) {
       });
 
       test("a deep link loads styled", async ({ page }) => {
-        await page.goto("/catalog/does/not/exist");
+        await page.goto("/catalog/prod/gold.sales/fact_sales");
 
-        const heading = page.getByRole("heading", { level: 1, name: "This page does not exist" });
+        const heading = page.getByRole("heading", { level: 1, name: "fact_sales" });
         await expect(heading).toBeVisible();
         const font = await heading.evaluate((node) => getComputedStyle(node).fontFamily);
         expect(font).toMatch(/^"?IBM Plex Sans/);

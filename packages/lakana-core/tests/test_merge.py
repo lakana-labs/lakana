@@ -576,6 +576,20 @@ def test_a_nested_key_column_is_refused() -> None:
     )
 
 
+def test_a_uuid_key_column_is_refused_with_the_cast_to_write() -> None:
+    """A uuid cannot be grouped by pyarrow, so the batch is refused before it is grouped (#427)."""
+    ids = pa.array([uuid.UUID(int=1).bytes, uuid.UUID(int=2).bytes], pa.binary(16))
+    data = pa.table({"id": pa.ExtensionArray.from_storage(pa.uuid(), ids)})
+
+    with pytest.raises(ValidationError) as info:
+        check_merge_batch(data, ["id"], table_columns=["id"], table_name="bronze.customers")
+
+    assert str(info.value) == (
+        "key column `id` is a uuid, which a merge key cannot be; cast it in the SELECT, for "
+        "example `CAST(id AS VARCHAR)`."
+    )
+
+
 def test_a_schema_mismatch_is_refused_by_column(cat: Cat) -> None:
     """The batch must fit the table, as for an append."""
     data = pa.table({"id": pa.array([1], pa.int64()), "name": ["a"]}).cast(

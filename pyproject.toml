@@ -57,7 +57,7 @@ check = [
     "cryptography>=50.0.2",
     "PyMySQL>=1.2.3",
 ]
-# The documentation site (docs/site). Built in CI; published at the public beta.
+# The documentation site (docs/site), built in CI.
 docs = [
     "zensical>=0.1.0",
 ]

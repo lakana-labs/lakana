@@ -14,10 +14,13 @@ from lakana_core.auth import AllowAllAuthorization
 from lakana_core.catalog.descriptions import sync_project_descriptions
 from lakana_core.catalog.graph_model import NO_NODE
 from lakana_core.catalog.graph_service import GraphService
+from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.models import (
+    Connection,
     Environment,
     EnvironmentDeployment,
     JobVersion,
+    Principal,
     Repository,
     RepositoryKind,
     Table,
@@ -260,6 +263,7 @@ def test_lineage_and_neighbours_have_the_documented_shape(client: TestClient) ->
         ("table", "bronze.stores_raw", 1),
         ("asset", "gold.fact_sales", 1),
         ("table", "gold.fact_sales", 1),
+        ("job", "sales/nightly", 1),
     }
     root = body["nodes"][0]
     assert root["id"].startswith("table:") and root["repository"] == "stores"
@@ -275,7 +279,7 @@ def test_lineage_and_neighbours_have_the_documented_shape(client: TestClient) ->
         "owner",
         "label",
     }
-    assert {e["kind"] for e in body["edges"]} == {"builds", "reads"}
+    assert {e["kind"] for e in body["edges"]} == {"builds", "reads", "runs"}
     near = client.get(
         f"{_GRAPH}/neighbours",
         headers=AUTH_HEADER,
@@ -297,6 +301,7 @@ def test_a_viewer_of_one_table_sees_what_she_may_and_nothing_counts_the_rest(
     assert {(n["kind"], n["name"]) for n in body["nodes"]} == {
         ("table", "gold.fact_sales"),
         ("asset", "gold.fact_sales"),
+        ("job", "sales/nightly"),
     }
     assert set(body) == {"nodes", "edges", "next_cursor"}
     near = client.get(
@@ -509,3 +514,106 @@ def test_join_path_has_the_documented_shape_and_hides_what_the_reader_may_not_se
     hidden = client.get(f"{_GRAPH}/join-path", headers=alice, params=pair)
     assert hidden.status_code == 404
     assert hidden.json()["detail"] == NO_NODE.format(node="gold.dim_store", env="dev")
+
+
+def test_table_out_uuid_is_the_graph_table_id(client: TestClient) -> None:
+    create_environment(client)
+    _table(client, "gold", "dim_store", "store_id")
+    table = client.get(
+        "/api/v1/environments/dev/namespaces/gold/tables/dim_store", headers=AUTH_HEADER
+    )
+    assert table.status_code == 200, table.text
+    node = f"table:{table.json()['uuid']}"
+    answer = client.get(f"{_GRAPH}/lineage", headers=AUTH_HEADER, params={"node": node})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["nodes"][0]["id"] == node
+
+
+def _ingest(client: TestClient) -> None:
+    """Deploy `ingest`: a Python asset building `bronze.stores_raw` through `pg-sales`.
+
+    Parameters
+    ----------
+    client
+        The test client; `_star` has run.
+    """
+    entry = {"table": "bronze.stores_raw", "kind": "python", "connections": ["pg-sales"]}
+    with Session(client.app.state.engine) as session:
+        env_id = session.scalars(select(Environment.id).where(Environment.name == "dev")).one()
+        session.add(
+            Connection(
+                id=uuid.uuid4(),
+                environment_id=env_id,
+                name="pg-sales",
+                kind=ConnectionKind.POSTGRESQL,
+                address={"host": "db.example.com", "port": 5432, "database": "sales"},
+                settings={"user": "reader", "tls": "verify-full"},
+                created_by=session.scalars(select(Principal.id)).first(),
+            )
+        )
+        _deploy(session, env_id, "ingest", {"version": 13, "assets": [entry]})
+
+
+def test_a_connection_node_is_a_valid_start_through_the_route(client: TestClient) -> None:
+    _star(client)
+    _ingest(client)
+    near = client.get(
+        f"{_GRAPH}/neighbours", headers=AUTH_HEADER, params={"node": "connection:pg-sales"}
+    )
+    assert near.status_code == 200, near.text
+    root = near.json()["nodes"][0]
+    assert (root["id"], root["kind"], root["name"], root.get("connection_kind")) == (
+        "connection:pg-sales",
+        "connection",
+        "pg-sales",
+        "postgresql",
+    )
+    assert near.json()["edges"] == [
+        {"kind": "uses", "source": "asset:ingest/bronze.stores_raw", "target": root["id"]}
+    ]
+    up = client.get(
+        f"{_GRAPH}/lineage",
+        headers=AUTH_HEADER,
+        params={"node": "gold.dim_store", "direction": "up", "depth": 2},
+    ).json()
+    assert ("connection", "pg-sales", 2, "postgresql") in {
+        (n["kind"], n["name"], n["distance"], n.get("connection_kind")) for n in up["nodes"]
+    }
+    only = client.get(
+        f"{_GRAPH}/neighbours",
+        headers=AUTH_HEADER,
+        params={"node": "asset:ingest/bronze.stores_raw", "kinds": ["uses"]},
+    ).json()
+    assert [n["id"] for n in only["nodes"]] == [
+        "asset:ingest/bronze.stores_raw",
+        "connection:pg-sales",
+    ]
+
+
+def test_a_task_token_cannot_tell_a_declared_connection_from_an_undeclared_one(
+    client: TestClient,
+) -> None:
+    _star(client)
+    _ingest(client)
+    minted = client.post(
+        "/api/v1/task-tokens",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "admin",
+            "environment": "dev",
+            "asset_scope": ["bronze.stores_raw"],
+            "ttl_seconds": 300,
+        },
+    )
+    assert minted.status_code == 201, minted.text
+    task = {"Authorization": f"Bearer {minted.json()['token']}"}
+    declared, undeclared = (
+        client.get(f"{_GRAPH}/neighbours", headers=task, params={"node": f"connection:{name}"})
+        for name in ("pg-sales", "nobody-declared")
+    )
+    assert declared.status_code == undeclared.status_code == 404
+    # The answer echoes the name that was asked for; with that one substitution the bodies are
+    # byte for byte equal, so nothing tells a declared connection from an undeclared one.
+    assert declared.content.replace(b"pg-sales", b"NAME") == undeclared.content.replace(
+        b"nobody-declared", b"NAME"
+    )

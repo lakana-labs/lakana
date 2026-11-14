@@ -98,9 +98,14 @@ from lakana_core.catalog.environment_deletion import (
     NAME_HELD_MESSAGE,
     NO_DELETED_MESSAGE,
     NOT_DELETED_MESSAGE,
+    ROWS_PURGE_CHAINED_MESSAGE,
+    ROWS_PURGE_MISSING_MESSAGE,
+    ROWS_PURGE_NOT_DELETED_MESSAGE,
+    ROWS_PURGE_REACHABLE_MESSAGE,
     delete_rows,
     lock_live_environment,
     purge_early,
+    purge_rows,
     restore_rows,
 )
 from lakana_core.catalog.external_location import check_claim_free, parse_external_location
@@ -380,6 +385,7 @@ from lakana_core.secrets.uses import (
     require_secret_management_for_storage_change,
 )
 from lakana_core.storage.base import StoredObject
+from lakana_core.storage.fsspec_storage import FSSPEC_CHAIN
 from lakana_core.storage.resolver import (
     ResolvedStorage,
     StorageResolver,
@@ -388,6 +394,7 @@ from lakana_core.storage.resolver import (
     is_id_suffixed_location,
     is_within_location,
     nested_locations_within,
+    root_never_resolves,
     table_root_from_metadata_location,
 )
 from lakana_core.storage.unavailable import (
@@ -787,7 +794,7 @@ class TableDescription:
     readers_7d
         How many distinct principals read it in the last 7 UTC days, today included; never who.
     health_summary
-        Its health in one word, with the failing reference checks the reader may see.
+        Its health in one word, with the reference checks the reader may see.
     """
 
     ref: TableRef
@@ -1790,6 +1797,69 @@ class CatalogService:
         )
         self._session.commit()
         return env
+
+    def purge_environment_rows(self, p: PrincipalRef, name: str) -> int:
+        """Remove a deleted environment whose storage cannot be resolved, rows only.
+
+        The location sweep skips an environment whose storage cannot be resolved (a root in a
+        scheme Lakana cannot read, such as ``local://`` or ``memory://``, or an fsspec chain),
+        so its row and its name would stay for ever. Only the stored root decides
+        (`root_never_resolves`): a storage secret that cannot be used is a setting to fix, and
+        its storage may hold every file; a chained root is refused, because releases before
+        0.18.0 wrote files to the part before ``::``. This deletes the row and what the sweep
+        would have removed with it (`lakana_core.catalog.environment_deletion.purge_rows`),
+        under the row's lock, and touches no file. An environment whose storage resolves keeps
+        its undo period and its file purge.
+
+        Parameters
+        ----------
+        p
+            The acting principal; needs ``MANAGE_ENVIRONMENT`` on the instance.
+        name
+            Environment name.
+
+        Returns
+        -------
+        int
+            How many location records went with the row.
+
+        Raises
+        ------
+        NotFoundError
+            If no environment has that name (`ROWS_PURGE_MISSING_MESSAGE`).
+        ConflictError
+            If it is not deleted (`ROWS_PURGE_NOT_DELETED_MESSAGE`), its root is an fsspec chain
+            whose first part older releases wrote to (`ROWS_PURGE_CHAINED_MESSAGE`), or its root
+            can be resolved (`ROWS_PURGE_REACHABLE_MESSAGE`), whatever its secret or options say.
+        PermissionDenied
+            If the principal may not manage environments on the instance.
+        StepUpRequired
+            If a browser session's last passkey touch is not fresh: the purge cannot be undone.
+        """
+        self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        require_step_up(p)
+        env = self._lock_environment_row(name)
+        if env is None:
+            self._session.rollback()
+            raise NotFoundError(ROWS_PURGE_MISSING_MESSAGE.format(name=name))
+        if env.deleted_at is None or env.purge_after is None:
+            self._session.rollback()
+            raise ConflictError(ROWS_PURGE_NOT_DELETED_MESSAGE.format(name=name))
+        # Decided on the stored root alone: a secret, a key or an option can be fixed, and the
+        # files behind them may all be there, so only a root no release could open counts.
+        if FSSPEC_CHAIN in env.storage_root:
+            before = env.storage_root.split(FSSPEC_CHAIN, 1)[0]
+            self._session.rollback()
+            raise ConflictError(
+                ROWS_PURGE_CHAINED_MESSAGE.format(name=name, root=env.storage_root, before=before)
+            )
+        if not root_never_resolves(env.storage_root):
+            until = env.purge_after.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
+            self._session.rollback()
+            raise ConflictError(ROWS_PURGE_REACHABLE_MESSAGE.format(name=name, purge_after=until))
+        forgotten = purge_rows(self._session, p, env, now=db_now(self._session))
+        self._session.commit()
+        return forgotten
 
     def list_deleted_environments(self, p: PrincipalRef) -> list[Environment]:
         """List the deleted environments `p` may read, whose files are not deleted yet.
@@ -3984,6 +4054,7 @@ class CatalogService:
         *,
         days: int,
         now: datetime,
+        with_readers: bool = True,
     ) -> TableHealth:
         """Show a table's last maintenance, newest check results, readers and health signals.
 
@@ -3999,12 +4070,14 @@ class CatalogService:
             The window of the readers in days, already checked against the kept period.
         now
             The present time.
+        with_readers
+            `False` leaves the readers out: no lookup, no `ACTIVITY_VIEWED` row, whoever `p` is.
 
         Returns
         -------
         TableHealth
-            The health. `readers` is `None` unless `p` may see grants (`MANAGE_GRANT` and the
-            `ADMIN` role, as for the grants listing).
+            The health. `readers` is `None` unless `with_readers` and `p` may see grants
+            (`MANAGE_GRANT` and the `ADMIN` role, as for the grants listing).
 
         Raises
         ------
@@ -4020,7 +4093,7 @@ class CatalogService:
         self._authz.authorize(p, Action.READ_TABLE, scope)
         _, row = self._find_table(ref)
         shown = None
-        if may_see_grants(self._session, self._authz, p):
+        if with_readers and may_see_grants(self._session, self._authz, p):
             shown = readers(self._session, row.id, days=days, now=now)
             others = sum(1 for reader in shown if reader.principal != p.name)
             record_view(

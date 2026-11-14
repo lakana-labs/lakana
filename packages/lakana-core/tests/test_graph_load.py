@@ -14,6 +14,7 @@ from graph_test_helpers import (
     asset_entry,
     check_entry,
     point,
+    python_entry,
     sales_manifest,
 )
 from pyiceberg.types import NestedField, StringType
@@ -673,3 +674,31 @@ def test_mask_fields_are_cached_per_table() -> None:
     table = uuid.uuid4()
     assert fields(table) == fields(table) == ()
     assert read == [table]
+
+
+def test_an_asset_reads_its_connections_as_a_python_asset_declares_them() -> None:
+    entries = [
+        python_entry("bronze.a", ["pg-sales", "crm-db"]),
+        python_entry("bronze.b", "crm-db"),
+        python_entry("bronze.c", ["pg-sales", "../x"]),
+        {**asset_entry("gold.dim_store", ("bronze.stores_raw",), "o"), "connections": ["pg-sales"]},
+    ]
+    assets = manifest_part("r", {"assets": entries}).assets
+    assert [(a.name, a.connections) for a in assets] == [
+        ("bronze.a", ("pg-sales", "crm-db")),
+        ("bronze.b", ()),
+        ("bronze.c", ()),
+        ("gold.dim_store", ()),
+    ]
+
+
+def test_a_graph_read_stays_silent_about_a_damaged_connections_entry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only a deploy warns about a damaged entry; every graph request would repeat it."""
+    with caplog.at_level("WARNING"):
+        assets = manifest_part(
+            "r", {"assets": [python_entry("bronze.c", ["pg-sales", "../x"])]}
+        ).assets
+    assert [a.connections for a in assets] == [()]
+    assert caplog.records == []

@@ -1729,6 +1729,86 @@ def test_blacklist_refuses_other_table_functions(function: str) -> None:
         check_blacklist(f"SELECT * FROM {function}('x')")
 
 
+_NAMED_READERS = [
+    # Parquet, Avro, Delta and Iceberg metadata: each reads the file or the table at a path.
+    "parquet_metadata",
+    "parquet_schema",
+    "parquet_file_metadata",
+    "parquet_kv_metadata",
+    "parquet_full_metadata",
+    "parquet_bloom_probe",
+    "avro_metadata",
+    "delta_domain_metadata",
+    "delta_get_transaction_version",
+    "delta_list_files",
+    "iceberg_column_stats",
+    "iceberg_files",
+    "iceberg_history",
+    "iceberg_load_table_response",
+    "iceberg_manifests",
+    "iceberg_metadata",
+    "iceberg_partition_specs",
+    "iceberg_partition_stats",
+    "iceberg_refs",
+    "iceberg_snapshots",
+    # Another database.
+    "sqlite_attach",
+    "sqlite_query",
+    "postgres_query",
+    "postgres_execute",
+    "mysql_query",
+    "mysql_execute",
+    # Already named before #487.
+    "glob",
+    "sniff_csv",
+]
+"""DuckDB 2.0.0's table functions that read a file, a URL or another database by a name that
+neither starts with ``read_`` nor ends with ``_scan`` (``duckdb_functions()``, with the parquet,
+json, httpfs, iceberg, delta, sqlite, postgres, mysql, avro and ducklake extensions loaded)."""
+
+
+@pytest.mark.parametrize("function", _NAMED_READERS)
+def test_a_reader_by_another_name_is_refused_as_a_reader(function: str) -> None:
+    """The refusal names the cause, not a typo (#487); the allow-list is unchanged.
+
+    Parameters
+    ----------
+    function
+        The table function the query calls.
+    """
+    with pytest.raises(ValidationError, match=f"table function {function} is not allowed") as info:
+        check_blacklist(f"SELECT * FROM {function}('x')")
+    assert "it reaches data directly" in str(info.value)
+    assert "check the name" not in str(info.value)
+
+
+@pytest.mark.parametrize("function", ["postgres_execute", "mysql_execute", "sqlite_attach"])
+def test_a_function_that_runs_statements_or_attaches_is_described_as_such(function: str) -> None:
+    """``postgres_execute`` runs a statement and ``sqlite_attach`` attaches: neither only reads.
+
+    Parameters
+    ----------
+    function
+        The table function the query calls.
+    """
+    with pytest.raises(ValidationError) as info:
+        check_blacklist(f"SELECT * FROM {function}('x')")
+    assert "runs statements in or attaches another database" in str(info.value)
+
+
+@pytest.mark.parametrize("function", ["parquet_metadat", "iceberg_snapshot", "mystery"])
+def test_a_misspelt_name_is_asked_to_be_checked(function: str) -> None:
+    """A name that is not a known reader keeps the line that asks to check it.
+
+    Parameters
+    ----------
+    function
+        A name DuckDB does not have.
+    """
+    with pytest.raises(ValidationError, match="check the name"):
+        check_blacklist(f"SELECT * FROM {function}('x')")
+
+
 _LATERAL_BYPASSES = [
     ("SELECT * FROM (SELECT 1 a) b, LATERAL iceberg_scan('x')", "iceberg_scan"),
     ("SELECT * FROM (SELECT 1 a) b, LATERAL delta_scan('x')", "delta_scan"),

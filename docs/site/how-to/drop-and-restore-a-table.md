@@ -161,6 +161,25 @@ tables' files left. An environment deleted before this release kept every file a
 the catalog; nothing changes for it. To remove such leftovers, see
 [Clean up files left by older releases](clean-up-files-left-by-older-releases.md).
 
+### When the storage of a deleted environment cannot be reached
+
+Older releases accepted a storage root in a scheme Lakana cannot read, such as `local://` or
+`memory://`. The worker's clean-up cannot reach such a storage, so it skips the deleted environment
+on every run, and the environment keeps its name: `lakana env create` refuses the name. An
+administrator of the instance removes such an environment from the catalog with
+`lakana env purge NAME --rows-only --yes`, for example `lakana env purge old --rows-only --yes`.
+
+It removes the environment and its records of dropped tables, and the name is free again. Only the
+root decides: a storage secret that cannot be used (missing, or bound to a connection, an index or a
+repository) can be fixed, so such an environment is refused; fix the secret, and the clean-up
+deletes it. A root that contains `::` is refused as well: releases before 0.18.0 wrote its files to the
+part before `::`, and the environment is the only record of them. Look there, delete what you no
+longer need yourself, and give a new environment another name. Its
+files, if there are any, are not touched: delete them in the storage yourself if you no longer need
+them. It is refused for an environment that is not deleted, and for one whose storage can still be
+reached: the clean-up deletes that one's files and then the environment, and
+`lakana env delete NAME --purge` has it do so at the next clean-up. It cannot be undone.
+
 ## Through the APIs
 
 - **REST.** `DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}` drops, with
@@ -171,12 +190,15 @@ the catalog; nothing changes for it. To remove such leftovers, see
   body `{"new_name": "..."}`, and answers with the table.
   For an environment: `DELETE /api/v1/environments/{name}` (with `?purge=true`) answers with the
   environment and its `deleted_at` and `purge_after`; `GET /api/v1/environments?deleted=true` lists
-  the deleted ones; `POST /api/v1/environments/{name}/restore` restores one.
+  the deleted ones; `POST /api/v1/environments/{name}/restore` restores one;
+  `POST /api/v1/environments/{name}/purge-rows` removes a deleted environment whose storage cannot
+  be reached from the catalog (204, no body); from the web interface it asks for a passkey touch
+  within the last 15 minutes, a token never does.
 - **SDK.** `client.tables.delete(env, "silver.orders", purge=False)`,
   `client.tables.list_dropped(env, "silver")` and
   `client.tables.undrop(env, "silver.orders", new_name=None)`; for an environment
   `client.environments.delete(name, purge=False)`, `client.environments.list(deleted=True)` and
-  `client.environments.restore(name)`.
+  `client.environments.restore(name)` and `client.environments.purge_rows(name)`.
 - **Iceberg REST catalog.** A drop from an engine keeps the files for the undo period like any other;
   `purgeRequested=true` makes them due at the next sweep.
 
@@ -194,6 +216,9 @@ the catalog; nothing changes for it. To remove such leftovers, see
 | `Environment 'sandbox' cannot be created: an environment of that name was deleted, ...` | A deleted environment holds the name until its files are deleted. | Restore it, or delete its files now with `lakana env delete sandbox --purge`. |
 | `Environment 'sandbox' cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the environment was deleted with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |
 | `Environment 'sandbox' cannot be restored: the worker's clean-up has started deleting ...` | The sweep began deleting one of its tables' files. | Restore from a backup if you have one. |
+| `Environment 'old' was not purged: its storage can still be reached, ...` | `lakana env purge --rows-only` is only for an environment whose storage cannot be reached. | Let the clean-up delete it after its undo period, or run `lakana env delete old --purge`. |
+| `Environment 'old' was not purged: its storage root ... contains '::', ...` | Releases before 0.18.0 wrote this environment's files to the part of its root before `::`. | Look there and delete what you no longer need yourself; choose another name for a new environment. |
+| `Environment 'old' is not deleted, so its rows were not purged. ...` | Only a deleted environment can be purged. | Delete it first with `lakana env delete old`. |
 
 ## What the audit log records
 
@@ -213,4 +238,6 @@ the catalog; nothing changes for it. To remove such leftovers, see
 - `ENVIRONMENT_RESTORED` for a restore: `tables`, `restored_policies` (how many came back) and
   `deleted_at`; each table has its own `TABLE_UNDROPPED` with `reason` `environment_restored`.
 - `ENVIRONMENT_PURGED` when the sweep removes a deleted environment after its last files, with no
-  person.
+  person; or by the administrator who ran `lakana env purge --rows-only`, with `rows_only`,
+  `locations`, the number of dropped tables' records that went with it, and `storage_root`, where
+  any files it left are.

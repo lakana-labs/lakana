@@ -188,6 +188,34 @@ def acts_as_instance_admin(session: Session, authz: AuthorizationService, p: Pri
     return isinstance(authz, AllowAllAuthorization) or holds_instance_admin(session, p.id)
 
 
+def credential_acts_as_admin(
+    session: Session, authz: AuthorizationService, p: PrincipalRef
+) -> bool:
+    """Say whether `p` acts as the instance administrator with the credential it used.
+
+    `authorize_admin_only` for `MANAGE_GRANT` asked as a yes or no, without the exemption of
+    `AllowAllAuthorization`: the `ADMIN` role is always asked, once. Nothing is recorded.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    authz
+        The authorization service of the calling service.
+    p
+        The caller.
+
+    Returns
+    -------
+    bool
+        `True` if `authz` permits `MANAGE_GRANT` at instance scope (never for a task or CI
+        token) and `p` holds the `ADMIN` role there.
+    """
+    return authz.permits(p, Action.MANAGE_GRANT, Securable.instance_scope()) and (
+        holds_instance_admin(session, p.id)
+    )
+
+
 def may_see_grants(session: Session, authz: AuthorizationService, p: PrincipalRef) -> bool:
     """Say whether `p` may see who holds access: the same rule as the grants listing.
 

@@ -852,6 +852,9 @@ _NOTHING_OF_A_KEPT_TABLE = {
         "brings the deleted environment's tables back as they were, notes included, and returns "
         "only the environment; reading one goes through `load_table`"
     ),
+    "purge_environment_rows": (
+        "deletes a deleted environment's rows and returns only a count; reads no table and no file"
+    ),
     "list_deleted_environments": _NO_TABLE,
     "find_orphaned_locations": (
         "lists directories that no table and no location record names, with file counts and "

@@ -111,10 +111,63 @@ _SUBJECTS = {"connection-test": "connection test"}
 _NEVER = (
     ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("100.100.100.200/32"),
+    ipaddress.ip_network("168.63.129.16/32"),
+    ipaddress.ip_network("192.0.0.192/32"),
     ipaddress.ip_network("fd00:ec2::254/128"),
+    ipaddress.ip_network("fd20:ce::254/128"),
 )
 """Beyond loopback, link-local, multicast, unspecified and reserved: "this network" and the
-metadata addresses outside link-local (Alibaba Cloud, AWS over IPv6)."""
+cloud service addresses outside link-local (Alibaba Cloud, Azure's WireServer, Oracle Compute
+Classic and Cloud@Customer's metadata address, AWS and Google Cloud over IPv6). A copy of
+`lakana_core.net.egress._NEVER_NETWORKS`, which the launcher cannot import; a test keeps the two
+in sync."""
+
+
+# jscpd:ignore-start
+# A copy of `lakana_core.net.egress._embedded_ipv4` and its NAT64 prefixes, like `_NEVER`: the
+# launcher imports only the standard library and itself (lint-imports), and
+# test_the_proxy_unwraps_the_embedded_ipv4_forms_core_unwraps keeps the two in agreement.
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+"""The well-known NAT64 prefix (RFC 6052)."""
+_LOCAL_NAT64 = ipaddress.ip_network("64:ff9b:1::/48")
+"""The local-use NAT64 prefix (RFC 8215)."""
+
+
+def _embedded_ipv4(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> list[ipaddress.IPv4Address]:
+    """Return the IPv4 addresses an IPv6 address carries.
+
+    A copy of `lakana_core.net.egress._embedded_ipv4`, which the launcher cannot import; a test
+    keeps the two in agreement form by form.
+
+    Parameters
+    ----------
+    address
+        Any address.
+
+    Returns
+    -------
+    list[ipaddress.IPv4Address]
+        The IPv4-mapped, IPv4-compatible, 6to4, Teredo and NAT64 embedded addresses (the
+        well-known ``64:ff9b::/96`` and the local-use ``64:ff9b:1::/48``, by their last 32
+        bits); empty for IPv4 and for IPv6 addresses that carry none.
+    """
+    if not isinstance(address, ipaddress.IPv6Address):
+        return []
+    found: list[ipaddress.IPv4Address] = []
+    if address.ipv4_mapped is not None:
+        found.append(address.ipv4_mapped)
+    if address.sixtofour is not None:
+        found.append(address.sixtofour)
+    if address.teredo is not None:
+        found.extend(address.teredo)
+    if address in _NAT64 or address in _LOCAL_NAT64 or int(address) >> 32 == 0:
+        found.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+    return found
+
+
+# jscpd:ignore-end
 
 
 REFUSED_FILE = "refused.json"
@@ -469,21 +522,53 @@ def forbidden(
     -------
     bool
         ``True`` for an address in `refused`, loopback, link-local, multicast, unspecified,
-        reserved, a metadata address, or an address on a connected network.
+        reserved, a metadata address, an address on a connected network, or an IPv6 address
+        that carries such an IPv4 address (IPv4-mapped, IPv4-compatible, 6to4, Teredo, NAT64).
+        `reachable` opens none of these but IPv4 loopback, where the tests' servers listen,
+        reserved IPv6 that carries no such address, and connected networks: never link-local,
+        multicast, unspecified, ``240.0.0.0/4`` or `_NEVER`.
     """
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
         address = address.ipv4_mapped
+    if any(
+        forbidden(inner, connected, reachable, refused=refused) for inner in _embedded_ipv4(address)
+    ):
+        return True
     if any(address in network for network in refused if network.version == address.version):
+        return True
+    if _never(address):
         return True
     if any(address in network for network in reachable if network.version == address.version):
         return False
     return (
         address.is_loopback
-        or address.is_link_local
+        or address.is_reserved
+        or any(address in n for n in connected if n.version == address.version)
+    )
+
+
+def _never(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Say whether an address is refused before `reachable` is consulted.
+
+    The launcher's side of `lakana_core.net.egress.is_never_reachable`, loopback aside.
+
+    Parameters
+    ----------
+    address
+        A resolved address, unwrapped.
+
+    Returns
+    -------
+    bool
+        ``True`` for link-local (the metadata service at 169.254.169.254), multicast,
+        unspecified, reserved IPv4 (``240.0.0.0/4``) and every `_NEVER` address.
+    """
+    return (
+        address.is_link_local
         or address.is_multicast
         or address.is_unspecified
-        or address.is_reserved
-        or any(address in n for n in (*_NEVER, *connected) if n.version == address.version)
+        or (address.version == 4 and address.is_reserved)
+        or any(address in n for n in _NEVER if n.version == address.version)
     )
 
 

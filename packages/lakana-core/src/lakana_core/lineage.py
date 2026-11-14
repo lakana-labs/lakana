@@ -12,6 +12,8 @@ import sqlglot
 import sqlglot.errors
 import sqlglot.lineage
 
+from lakana_core.query_rewrite import _dotted_table_name
+
 
 def extract_lineage(sql: str, dialect: str = "duckdb") -> dict[str, list[dict[str, str]]]:
     """Trace each of a query's output columns back to its source table and column.
@@ -57,12 +59,11 @@ def extract_lineage(sql: str, dialect: str = "duckdb") -> dict[str, list[dict[st
         sources = []
         for leaf in node.walk():
             if leaf.downstream == [] and isinstance(leaf.source, sqlglot.expressions.Table):
-                table = leaf.source
-                parts = [
-                    part.name
-                    for part in (table.args.get("catalog"), table.args.get("db"), table.this)
-                    if part
-                ]
-                sources.append({"table": ".".join(parts), "column": leaf.name.rsplit(".", 1)[-1]})
+                sources.append(
+                    {
+                        "table": _dotted_table_name(leaf.source),
+                        "column": leaf.name.rsplit(".", 1)[-1],
+                    }
+                )
         result[column_name] = sources
     return result

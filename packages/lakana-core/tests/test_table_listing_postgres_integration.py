@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any
 
 import pytest
 from home_test_helpers import environment, person
@@ -15,7 +16,7 @@ from testcontainers.postgres import PostgresContainer
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.catalog import search
 from lakana_core.catalog.search import CatalogSearch, SearchPage
-from lakana_core.catalog.table_listing import DEFAULT_ORDER, TableListing, TableSort
+from lakana_core.catalog.table_listing import DEFAULT_ORDER, SortOrder, TableListing, TableSort
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
 from lakana_core.errors import ValidationError
@@ -200,3 +201,63 @@ def test_an_integer_cursor_is_read_or_refused_never_sent_out_of_range(
     else:
         with pytest.raises(ValidationError, match="cursor is not valid"):
             listing.list(admin, sort=sort, cursor=cursor)
+
+
+_SORT_COLUMNS = {
+    TableSort.ROWS: "row_count",
+    TableSort.SIZE: "size_bytes",
+    TableSort.LAST_WRITE: "last_write_at",
+    TableSort.LAST_READ: "last_read_at",
+    TableSort.HEALTH: "health_rank",
+    TableSort.CREATED: "created_at",
+}
+"""The stored key of each sort that has an index of its own."""
+
+
+@pytest.mark.parametrize("order", list(SortOrder))
+@pytest.mark.parametrize("sort", list(_SORT_COLUMNS))
+def test_a_sorted_page_reads_its_index_in_order_without_a_sort(
+    session: Session, engine: Engine, sort: TableSort, order: SortOrder
+) -> None:
+    # Postgres reads a `(key, id)` index backwards only as `DESC NULLS FIRST`; a descending
+    # page sorts nulls last, so it needs an index of its own. Sorting and sequential scans are
+    # priced out, so the plan shows a Sort only when no index gives the order.
+    admin, _ = _world(session)
+    sent: list[tuple[str, Sequence[Any]]] = []
+
+    def _keep(
+        conn: object, cursor: object, statement: str, parameters: Sequence[Any], *args: object
+    ) -> None:
+        """Keep one statement with its parameters.
+
+        Parameters
+        ----------
+        conn
+            The connection.
+        cursor
+            The cursor.
+        statement
+            The SQL.
+        parameters
+            Its parameters, as the driver takes them.
+        *args
+            The rest.
+        """
+        sent.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", _keep)
+    try:
+        TableListing(session, GrantAuthorization(session)).list(admin, sort=sort, order=order)
+    finally:
+        event.remove(engine, "before_cursor_execute", _keep)
+    column = _SORT_COLUMNS[sort]
+    [(scan, parameters)] = [
+        (s, p) for s, p in sent if f"ORDER BY tables.{column} {order.value.upper()}" in s
+    ]
+    with engine.connect() as conn:
+        conn.exec_driver_sql("SET enable_seqscan = off")
+        conn.exec_driver_sql("SET enable_sort = off")
+        plan = "\n".join(row[0] for row in conn.exec_driver_sql(f"EXPLAIN {scan}", parameters))
+    index = f"ix_tables_{column}_id_desc" if order is SortOrder.DESC else f"ix_tables_{column}_id"
+    assert index in plan, plan
+    assert "Sort" not in plan, plan
