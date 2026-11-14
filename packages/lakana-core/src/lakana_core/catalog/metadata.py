@@ -13,7 +13,7 @@ nothing from either vocabulary may reach it untranslated.
 from __future__ import annotations
 
 import uuid as uuid_module
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 
 from pyiceberg.catalog import TABLE_METADATA_FILE_NAME_REGEX
 from pyiceberg.exceptions import CommitFailedException
@@ -26,10 +26,17 @@ from pyiceberg.table.locations import load_location_provider
 from pyiceberg.table.metadata import TableMetadata
 from pyiceberg.table.metadata import new_table_metadata as _new_table_metadata
 from pyiceberg.table.sorting import UNSORTED_SORT_ORDER, SortOrder
-from pyiceberg.table.update import TableRequirement, TableUpdate, update_table_metadata
+from pyiceberg.table.update import (
+    AddSchemaUpdate,
+    TableRequirement,
+    TableUpdate,
+    update_table_metadata,
+)
+from pyiceberg.types import ListType, MapType, NestedField, StructType
 
 from lakana_core.errors import ConflictError, LakanaError
 from lakana_core.errors import ValidationError as LakanaValidationError
+from lakana_core.identifiers import refuse_hidden_characters
 
 
 def parse_metadata_version(location: str | None) -> int:
@@ -92,6 +99,50 @@ def next_metadata_location(
     return provider.new_table_metadata_file_location(parse_metadata_version(current_location) + 1)
 
 
+def _field_names(fields: Iterable[NestedField]) -> Iterator[str]:
+    """Walk every field name of a schema, nested struct, list and map fields included.
+
+    Parameters
+    ----------
+    fields
+        The top-level fields.
+
+    Yields
+    ------
+    str
+        Each field's own name (not its dotted path), depth first.
+    """
+    for field in fields:
+        yield field.name
+        kind = field.field_type
+        if isinstance(kind, StructType):
+            yield from _field_names(kind.fields)
+        elif isinstance(kind, ListType):
+            yield from _field_names([kind.element_field])
+        elif isinstance(kind, MapType):
+            yield from _field_names([kind.key_field, kind.value_field])
+
+
+def refuse_hidden_column_names(schema: Schema, *, stored: frozenset[str] = frozenset()) -> None:
+    """Refuse a new column name that holds an invisible or line-breaking character.
+
+    Parameters
+    ----------
+    schema
+        A new table's schema, or a schema a commit or write adds.
+    stored
+        Names the table's schemas already hold; they keep working and are not judged.
+
+    Raises
+    ------
+    LakanaValidationError
+        From `refuse_hidden_characters`, for the first new name that holds such a character.
+    """
+    for name in _field_names(schema.fields):
+        if name not in stored:
+            refuse_hidden_characters(name, what="Column name")
+
+
 def build_table_metadata(
     *,
     schema: Schema,
@@ -133,7 +184,14 @@ def build_table_metadata(
     TableMetadata
         Freshly constructed metadata, with `table_uuid` as its
         ``table-uuid`` when given, or a freshly generated one otherwise.
+
+    Raises
+    ------
+    LakanaValidationError
+        If a column name holds an invisible or line-breaking character
+        (`refuse_hidden_column_names`).
     """
+    refuse_hidden_column_names(schema)
     return _new_table_metadata(
         schema=schema,
         partition_spec=partition_spec or UNPARTITIONED_PARTITION_SPEC,
@@ -226,8 +284,15 @@ def apply_updates(base: TableMetadata, updates: Sequence[TableUpdate]) -> TableM
         properties dict unguarded — a `KeyError`, which is a `LookupError`
         and so is caught by neither of the other two. All three are
         translated here because `lakana-server` cannot import pyiceberg and so
-        cannot catch any of them.
+        cannot catch any of them. Also if an added schema has a new column name that holds an
+        invisible or line-breaking character (`refuse_hidden_column_names`); a name one of
+        `base`'s schemas already holds is kept.
     """
+    added = [update.schema_ for update in updates if isinstance(update, AddSchemaUpdate)]
+    if added:
+        stored = frozenset(name for schema in base.schemas for name in _field_names(schema.fields))
+        for schema in added:
+            refuse_hidden_column_names(schema, stored=stored)
     # pyiceberg requires a tuple here, not an arbitrary sequence.
     try:
         return update_table_metadata(base, tuple(updates))

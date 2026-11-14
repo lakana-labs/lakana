@@ -9,10 +9,14 @@ import pyarrow as pa
 import pyarrow.ipc
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lakana_core.audit.service import AuditService
 from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.models import AuditEvent, AuditEventType
 from lakana_worker.pipeline import run_one
+from tests.api.platform.test_tables_definition import _record_refusing_source_viewed
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -219,6 +223,73 @@ def test_a_view_reader_who_cant_read_a_reference_gets_no_sql_or_references(
     assert "bronze.src" not in restricted.text
     assert full.json()["sql"] == "SELECT id FROM bronze.src"
     assert full.json()["hidden_references"] == 0
+
+
+def test_a_view_reader_without_read_environment_gets_no_sql_and_a_read_is_audited(
+    client: TestClient,
+) -> None:
+    """The SQL needs the content gate of "Defined in" (#587); a shown text is audited."""
+    _setup(client)
+    status = _submit_and_run(
+        client,
+        {"sql": "SELECT id FROM bronze.src", "target": {"table": "gold.v", "mode": "view"}},
+    )
+    assert status["status"] == "SUCCEEDED", status
+    reader = _reader_headers(client)
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "reader",
+            "action": "READ_TABLE",
+            "kind": "NAMESPACE",
+            "environment": "dev",
+            "namespace": "bronze",
+        },
+    )
+    assert granted.status_code == 201, granted.text
+    path = "/api/v1/environments/dev/namespaces/gold/tables"
+
+    restricted = client.get(f"{path}/v", headers=reader).json()
+    listed = client.get(path, headers=reader).json()
+    full = client.get(f"{path}/v", headers=AUTH_HEADER).json()
+
+    assert restricted["sql"] is None
+    assert restricted["content_reason"] == "restricted"
+    assert restricted["content_message"].startswith("The file is shown only to people")
+    assert [r["name"] for r in restricted["references"]] == ["bronze.src"]
+    assert listed[0]["sql"] is None and listed[0]["content_reason"] == "restricted"
+    assert full["sql"] == "SELECT id FROM bronze.src"
+    assert (full["content_reason"], full["content_message"]) == (None, None)
+    with Session(client.app.state.engine) as session:
+        rows = session.scalars(
+            select(AuditEvent).where(AuditEvent.event_type == AuditEventType.SOURCE_VIEWED)
+        ).all()
+    assert [(row.securable_table, set(row.detail)) for row in rows] == [("v", {"view_sql_sha256"})]
+
+
+def test_a_failed_audit_write_of_a_views_sql_is_503_with_no_sql(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`table get` records the SQL before it shows it; a refused write shows nothing (#587)."""
+    _setup(client)
+    status = _submit_and_run(
+        client,
+        {"sql": "SELECT id FROM bronze.src", "target": {"table": "gold.v", "mode": "view"}},
+    )
+    assert status["status"] == "SUCCEEDED", status
+    monkeypatch.setattr(AuditService, "record", _record_refusing_source_viewed)
+
+    response = client.get("/api/v1/environments/dev/namespaces/gold/tables/v", headers=AUTH_HEADER)
+
+    assert response.status_code == 503, response.text
+    assert "SELECT" not in response.text and "bronze.src" not in response.text
+    assert "Retry-After" in response.headers
+    with Session(client.app.state.engine) as session:
+        rows = session.scalars(
+            select(AuditEvent).where(AuditEvent.event_type == AuditEventType.SOURCE_VIEWED)
+        ).all()
+    assert rows == []
 
 
 def test_a_merge_target_is_a_422_that_names_what_merges(client: TestClient) -> None:

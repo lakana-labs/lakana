@@ -49,7 +49,6 @@ from lakana_core.models import (
 from lakana_core.policy.field_binding import UnreadablePolicyError
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.projects.browse import browse_url
-from lakana_core.projects.checks import may_read_every
 from lakana_core.projects.source_map import (
     GATE_VERSION,
     SOURCE_FILE_MAX_BYTES,
@@ -444,9 +443,13 @@ def passes_content_gate(
     environment
         The environment's name.
     table
-        The dotted name of the table the file defines (or checks); untrusted.
+        The table the file defines (or checks): a `TableRef` the caller resolved (trusted,
+        judged as it is), or its dotted name (untrusted, parsed).
     gate_tables
-        The table names the file uses; untrusted, so anything but a list of strings refuses.
+        The tables the file uses: a list of `TableRef`s and dotted names, as for `table`;
+        anything else refuses. Pass a `TableRef` whenever the table is known by its row: a
+        dotted name read again splits a component that holds a ``.`` (a name from before dots
+        were refused) and can miss the table and so its row filter or column mask.
     gate_raw
         Whether the file reads a raw path or a connection; only `False` passes.
     defines
@@ -458,40 +461,65 @@ def passes_content_gate(
     -------
     bool
         Whether the reader holds READ_ENVIRONMENT; the file reads no raw path or connection;
-        `table` and every gate name are table names the reader may read; no gate table is a
-        view, except `table` itself when `defines`; and no row filter or column mask (or an
+        `table` and every gate table are tables the reader may read; no gate table is a view,
+        except `table` itself when `defines`; and no row filter or column mask (or an
         unreadable one) applies to the reader on any gate table that exists.
     """
     if not authorization.permits(
         p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment)
     ):
         return False
-    if gate_raw is not False or not isinstance(gate_tables, list) or not isinstance(table, str):
+    if gate_raw is not False or not isinstance(gate_tables, list):
         return False
-    if not all(isinstance(name, str) for name in gate_tables):
+    own = _gate_ref(environment, table)
+    others = [_gate_ref(environment, entry) for entry in gate_tables]
+    if own is None or any(ref is None for ref in others):
         return False
-    dotted = table
-    names = sorted({dotted, *gate_tables})
-    try:
-        gate = [TableRef.from_dotted(environment, name) for name in names]
-    except ValidationError:
-        return False
-    if not may_read_every(authorization, p, environment, names):
-        return False
+    gate = {(ref.namespace.parts, ref.name): ref for ref in (own, *others) if ref is not None}
+    for ref in gate.values():
+        scope = Securable.table_scope(environment, ref.namespace, ref.name)
+        if not authorization.permits(p, Action.READ_TABLE, scope):
+            return False
     resolver = PolicyResolver(session)
-    for name, table_ref in zip(names, gate, strict=True):
-        live = _live_table(session, table_ref)
+    for ref in gate.values():
+        live = _live_table(session, ref)
         if live is None:
             continue
-        if live.table_type is TableType.VIEW and (not defines or name != dotted):
+        if live.table_type is TableType.VIEW and (not defines or ref != own):
             return False
         try:
-            policy = resolver.resolve(p, table_ref, table_id=live.id)
+            policy = resolver.resolve(p, ref, table_id=live.id)
         except UnreadablePolicyError:
             return False
         if policy.row_filters or policy.column_masks:
             return False
     return True
+
+
+def _gate_ref(environment: str, entry: object) -> TableRef | None:
+    """Read one entry of the content gate as a table of the environment.
+
+    Parameters
+    ----------
+    environment
+        The environment's name.
+    entry
+        A `TableRef` (kept when it is of `environment`) or a dotted name (parsed).
+
+    Returns
+    -------
+    TableRef or None
+        The table; `None` for anything else, a ref of another environment, or a name that is
+        not a table name, which refuses.
+    """
+    if isinstance(entry, TableRef):
+        return entry if entry.environment == environment else None
+    if not isinstance(entry, str):
+        return None
+    try:
+        return TableRef.from_dotted(environment, entry)
+    except ValidationError:
+        return None
 
 
 def table_definition_file(
@@ -545,9 +573,8 @@ def table_definition_file(
         return TableDefinitionFile(definition, None, None, None, None)
     if row is None or row.gate_version != GATE_VERSION:
         return _refused(definition, DefinitionReason.NOT_RECORDED)
-    dotted = f"{ref.namespace}.{ref.name}"
     if not passes_content_gate(
-        session, authorization, p, ref.environment, dotted, row.gate_tables, row.gate_raw
+        session, authorization, p, ref.environment, ref, row.gate_tables, row.gate_raw
     ):
         return _refused(definition, DefinitionReason.RESTRICTED)
     if row.bytes > SOURCE_FILE_MAX_BYTES:

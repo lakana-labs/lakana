@@ -546,6 +546,11 @@ class Table:
     hidden_references
         How many of the view's references the caller may not read; when
         non-zero, `sql` and `references` are withheld.
+    content_reason
+        ``restricted`` when a view's `sql` is withheld by the rules of "Defined in" although
+        every reference is readable; `None` otherwise and from an older server.
+    content_message
+        What `content_reason` means and what to do; `None` when it is `None`.
     snapshot_id
         The table's current snapshot id; `None` without one, for a view or an
         external table, and from an older server.
@@ -633,6 +638,8 @@ class Table:
     sql: str | None = None
     references: list[TableReference] = field(default_factory=list)
     hidden_references: int = 0
+    content_reason: str | None = None
+    content_message: str | None = None
     snapshot_id: int | None = None
     state: str = "published"
     state_message: str | None = None

@@ -159,6 +159,32 @@ case must use the namespace's exact name.
 - An older CLI shows the jobs and connections of a start asset as `start` and other leaves as
   `join` in the lineage and neighbours output. Upgrade the CLI together with the server.
 
+### Invisible characters in new table, namespace and column names are refused (breaking)
+
+A new namespace, table, view, artifact or column name may no longer hold a control character, a format
+character (Unicode category `Cf`: a bidirectional control such as U+202E, a zero-width space, a
+soft hyphen) or the line or paragraph separator (U+2028, U+2029). Such a character is invisible
+or reorders the text around it, so the name could look like another table's. The rule applies
+wherever a name is created: `lakana table create`, the REST API, an Iceberg client, a view, a
+rename or undrop target, a deploy or load that creates a table or adds a column, and an external
+table, whose column names come from its files (`lakana table create-external`). The refusal
+names the character and its position, for example `Table name 'orders\u202e' holds U+202E at
+character 7, … Choose a name without it`.
+
+Earlier releases accepted such names, so a client, script, project or load that still creates one
+now fails where it worked before (422 from the REST API, a refused commit from an Iceberg client, a
+failed task for a deploy or load whose query returns such a column name). To migrate, choose a name
+without the character: retype it with visible characters (letters, digits, `_`), rename the column
+in the query that produces it with an alias (`… AS order_id`), or clean the header of the file an external
+table reads.
+
+Existing names are not touched: they stay readable and writable, a schema change or redeploy may
+keep a column it already has, and an Iceberg client's rename (`rename_table`) moves a table to a
+plain name. To find them, search the JSON output of `lakana --output json table list` (and of
+`lakana --output json table get NAME` for columns) for these characters, for example with
+`grep -nP '[\x{00AD}\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2028}\x{2029}\x{2060}-\x{206F}\x{FEFF}]|\\u00[0-9a-f]{2}'`
+in a UTF-8 locale.
+
 ### Control characters in asset files are refused (breaking)
 
 A deploy now refuses an asset file that contains a control character (NUL, a C0 control other
@@ -209,6 +235,30 @@ deployed before you upgrade to this release, no asset's SQL is shown to anyone (
 until you deploy a new commit, or read the file in your git host; its checks' SQL follows the rules
 above. A script that reads `sql` from a project version
 should handle its absence and print `content_message`.
+
+### A view's SQL is shown only under the rules of a table's file (breaking)
+
+`lakana table get` on a view (`GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}`, the
+table list `GET …/tables` and the two routes that set a description, which answer with the table)
+now shows the view's `sql` only to a reader who would be shown the file by
+`lakana table definition --show`: who may read the environment and every table the view reads, none
+of them a view or a file, with no row filter or column mask on any of them
+([The same rules for a view's SQL](../how-to/see-where-a-table-is-defined.md#the-same-rules-for-a-views-sql)).
+Before, reading every referenced table was enough. A withheld view has no `sql` but
+`content_reason` (`restricted`) and `content_message`, and its references stay. Each shown text is
+recorded in the audit log as `SOURCE_VIEWED` with `view_sql_sha256`; if that row cannot be
+written, the request answers 503 and shows nothing. A script that reads a view's `sql` should
+handle its absence and print `content_message`; give its principal `READ_ENVIRONMENT` if it needs
+the text and no policy applies to it.
+
+### The query of a check's rows no longer holds the check's SQL
+
+The query `lakana check rows` queues now stores the line `-- The rows of check NAME. Its SQL is
+read by the worker and not shown here.` as its text, and the worker reads the check's SQL itself.
+The `QUERY_COMPLETED` event of such a query in the audit log shows that line, and a failure of the database is reported with a fixed sentence instead of its text, which
+could quote the SQL ([The rows of a check](../reference/checks.md#the-rows-of-a-check)). The rows,
+and the row filters and column masks applied to them, are as before. Read a check's SQL in its file
+or with `lakana project-version show`.
 
 ### Project files are recorded at deploy
 

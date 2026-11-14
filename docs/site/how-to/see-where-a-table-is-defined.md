@@ -130,6 +130,18 @@ rules sit on the tables beneath it. For any other asset, the `sql` column says
 under the table. The text output lists only assets; a check's reason is in `--output json`,
 where a hidden entry has no `sql` and carries `content_reason` and `content_message`.
 
+## The same rules for a view's SQL
+
+A view's SQL is the text of the asset that defines it (`materialize: view`), so `lakana table get`
+on a view (and `GET …/tables/{name}`, the table list and `--output json`) shows its `sql` only to a
+reader who would be shown a file here: you may read the environment and every table the view
+reads, none of them is a view or a file, and no row filter or column mask applies to you on any of
+them. Otherwise `lakana table get` prints `SQL hidden:` with the sentence of the table above, and
+the JSON has no `sql` but `content_reason` `restricted` and `content_message`; the references
+stay. A reader who may not read a referenced table sees, as before, only how many references are
+hidden. Each time the SQL is shown, the audit log records a `SOURCE_VIEWED` event for the view
+(with a digest of the text instead of a file), once per person and text per hour.
+
 ## Control characters
 
 A deploy refuses an asset file that contains a control character, so a file Lakana records cannot

@@ -660,6 +660,8 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         if description.kind != "VIEW"
         else [TableReferenceOut(id=i, name=n) for i, n in description.references],
         hidden_references=description.hidden_references,
+        content_reason=description.content_reason,  # ty: ignore[invalid-argument-type]
+        content_message=description.content_message,
         snapshot_id=description.snapshot_id,
         state=description.state,
         state_message=description.state_message,
@@ -1208,7 +1210,12 @@ def list_tables(
     ns = NamespacePath.from_parts(path.split("."))
     refs = catalog.list_tables(principal, env, ns)
     described = [
-        catalog.describe_table(principal, ref, languages=languages)
+        catalog.describe_table(
+            principal,
+            ref,
+            languages=languages,
+            view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
+        )
         for ref in refs
         if catalog.can_read_table(principal, ref)
     ]
@@ -1233,9 +1240,11 @@ def get_table(
     """Show a table.
 
     Shows its texts in the reader's language, each saying which language it is in. Needs
-    `READ_TABLE`. Answers 404 when the table does not exist, 422 for a `lang` that is not a
+    `READ_TABLE`. A view's `sql` is shown only to a reader who passes the content gate of
+    "Defined in" (otherwise `content_reason` says why), and each shown text is recorded as
+    `SOURCE_VIEWED`. Answers 404 when the table does not exist, 422 for a `lang` that is not a
     language tag, and 503 when the environment's storage cannot be reached (try again after
-    `Retry-After`).
+    `Retry-After`) or the audit row of a view's SQL cannot be written.
 
     Parameters
     ----------
@@ -1271,7 +1280,15 @@ def get_table(
     languages = reader_languages(request, lang, principal, main_language)
     ns = NamespacePath.from_parts(path.split("."))
     ref = TableRef(environment=env, namespace=ns, name=name)
-    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
+    return _describe_out(
+        path,
+        catalog.describe_table(
+            principal,
+            ref,
+            languages=languages,
+            view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
+        ),
+    )
 
 
 @router.get("/{name}/health", response_model=TableHealthOut, responses=errors(403, 404, 503))
@@ -1466,7 +1483,7 @@ def _sent(body: DescriptionIn, field: Literal["description", "label"]) -> str | 
     return getattr(body, field) if field in body.model_fields_set else KEEP
 
 
-@router.patch("/{name}", response_model=TableOut, responses=errors(403, 404))
+@router.patch("/{name}", response_model=TableOut, responses=errors(403, 404, 503))
 def describe_table(
     env: str,
     path: str,
@@ -1532,11 +1549,21 @@ def describe_table(
         label=_sent(body, "label"),
         language=lang,
     )
-    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
+    return _describe_out(
+        path,
+        catalog.describe_table(
+            principal,
+            ref,
+            languages=languages,
+            view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
+        ),
+    )
 
 
 @router.put(
-    "/{name}/columns/{column}/description", response_model=TableOut, responses=errors(403, 404)
+    "/{name}/columns/{column}/description",
+    response_model=TableOut,
+    responses=errors(403, 404, 503),
 )
 def describe_column(
     request: Request,
@@ -1605,7 +1632,15 @@ def describe_column(
         label=_sent(body, "label"),
         language=lang,
     )
-    return _describe_out(path, catalog.describe_table(principal, ref, languages=languages))
+    return _describe_out(
+        path,
+        catalog.describe_table(
+            principal,
+            ref,
+            languages=languages,
+            view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
+        ),
+    )
 
 
 @router.get("/{name}/lineage", response_model=LineageOut, responses=errors(403, 404))

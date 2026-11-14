@@ -1107,6 +1107,34 @@ def test_table_get_on_a_view_with_hidden_references_says_the_sql_is_hidden(
     assert "SQL hidden: 2 referenced table(s) you can't read" in result.stdout
 
 
+def test_table_get_on_a_view_whose_sql_the_content_gate_withholds_says_why(
+    tmp_path: Path,
+) -> None:
+    """A reader of every reference who fails the content gate sees the server's sentence."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        f"{_BASE}/v",
+        json={
+            **_TABLE,
+            "name": "v",
+            "kind": "VIEW",
+            "metadata_location": None,
+            "sql": None,
+            "references": [{"id": "1", "name": "bronze.sales"}],
+            "hidden_references": 0,
+            "content_reason": "restricted",
+            "content_message": "The file is shown only to people who may read this environment.",
+        },
+    )
+
+    result = invoke(make_state(tmp_path, api), "table", "get", "bronze.v", "--env", "dev")
+
+    assert result.exit_code == 0, result.stderr
+    assert "SQL hidden: The file is shown only to people" in result.stdout
+    assert "bronze.sales" in result.stdout
+
+
 _LINEAGE = {
     "root_id": "t",
     "direction": "upstream",

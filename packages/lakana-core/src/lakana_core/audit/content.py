@@ -57,6 +57,10 @@ CONTENT_FIELDS: Mapping[AuditEventType, Mapping[str, Hiding]] = MappingProxyType
         # decimal, date or timestamp (`catalog.watermark`), stored typed (`date:2026-10-20`): few
         # enough values to try them all against a digest, so it is withheld.
         AuditEventType.TABLE_WRITE: MappingProxyType({"watermark": Hiding.WITHHELD}),
+        # The digest of a view's SQL that `table get` showed (#587). A short view's text can be
+        # guessed and confirmed against a digest, and the text is shown only under the content
+        # gate, so the digest is withheld from a reader of the audit log without the right.
+        AuditEventType.SOURCE_VIEWED: MappingProxyType({"view_sql_sha256": Hiding.WITHHELD}),
     }
 )
 """The fields of each event type that hold content, and how each is hidden without the right.

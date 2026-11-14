@@ -148,7 +148,13 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.grants.revocation import revoke_attached
-from lakana_core.identifiers import NamespacePath, TableRef, shown, validate_path_component
+from lakana_core.identifiers import (
+    NamespacePath,
+    TableRef,
+    refuse_hidden_characters,
+    shown,
+    validate_path_component,
+)
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -1301,13 +1307,17 @@ class ArtifactService:
         Raises
         ------
         ValidationError
-            If the name is not a valid artifact name.
+            If the name is not a valid artifact name, or holds an invisible or line-breaking
+            character (`refuse_hidden_characters`).
         NotFoundError
             If the name space does not exist.
         ConflictError
             If another request created the name at the same moment.
         """
         validate_path_component(ref.name, what="Artifact name")
+        # Listed among the namespace's tables: a name that looks like another is refused (#593).
+        # A `%` stays allowed: an artifact holds no table directory.
+        refuse_hidden_characters(ref.name, what="Artifact name")
         namespace_id = self._session.execute(
             select(Namespace.id)
             .join(Environment, Namespace.environment_id == Environment.id)

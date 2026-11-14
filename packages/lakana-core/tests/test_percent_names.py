@@ -89,7 +89,7 @@ def test_a_new_name_with_a_percent_sign_is_refused_and_says_what_is_allowed(
     """The refusal names the reason and every character that is allowed."""
     with pytest.raises(ValidationError, match="must not contain '%'") as refused:
         refuse_percent_in_new_name(component, what="Table name")
-    assert "Every other character" in str(refused.value)
+    assert "Every other visible character" in str(refused.value)
     refuse_percent_in_new_name("plain", what="Table name")
 
 

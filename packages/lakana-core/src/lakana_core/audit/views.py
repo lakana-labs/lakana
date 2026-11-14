@@ -19,7 +19,9 @@ people seen, row ids or SQL.
 
 `record_source_view` writes `SOURCE_VIEWED` for a read of a project file ("Defined in",
 `lakana_core.projects.definition`, and a project version), the same way: once per reader, table,
-commit and path within the same window, failing closed. Both share `_record_once`.
+commit and path within the same window, failing closed. `record_view_sql_view` writes it for a
+read of a view's stored SQL (`lakana table get`, #587), once per reader, view and text. All of
+them share `_record_once`.
 """
 
 from __future__ import annotations
@@ -305,4 +307,55 @@ def record_source_view(
             and stored.get("path") == path
         ),
         refused="a read of a project file",
+    )
+
+
+def record_view_sql_view(
+    session_factory: Callable[[], Session],
+    principal: PrincipalRef,
+    scope: Securable,
+    *,
+    sql_sha256: str,
+    window_minutes: int,
+) -> bool:
+    """Record that `principal` read a view's stored SQL, once per window.
+
+    The row is `SOURCE_VIEWED` with the detail ``{"view_sql_sha256": ...}``, written whatever
+    `LAKANA_VIEW_AUDIT__ENABLED` says. A row of the same reader, view and text within the window
+    counts as this one, so a view replaced with another text is recorded again.
+
+    Parameters
+    ----------
+    session_factory
+        Opens the session the lookup and the row use (`sessions_like`).
+    principal
+        The reader.
+    scope
+        The view.
+    sql_sha256
+        The SHA-256 of the SQL shown, in hex; never the SQL itself.
+    window_minutes
+        `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`.
+
+    Returns
+    -------
+    bool
+        Whether a row was written.
+
+    Raises
+    ------
+    AuditUnavailableError
+        If the lookup or the write failed; the caller must not return the SQL.
+    """
+    return _record_once(
+        session_factory,
+        principal,
+        AuditEventType.SOURCE_VIEWED,
+        scope,
+        {"view_sql_sha256": sql_sha256},
+        window_minutes=window_minutes,
+        same=lambda stored: (
+            isinstance(stored, dict) and stored.get("view_sql_sha256") == sql_sha256
+        ),
+        refused="a read of a view's SQL",
     )

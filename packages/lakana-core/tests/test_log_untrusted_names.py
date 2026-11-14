@@ -19,10 +19,11 @@ from core_test_helpers import ARTIFACT_REF, artifact_service, store_version
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from lakana_core.artifacts.service import ArtifactService
 from lakana_core.artifacts.sweep import sweep_artifacts
 from lakana_core.auth import PrincipalRef
 from lakana_core.identifiers import TableRef
-from lakana_core.models import ArtifactVersion, Environment
+from lakana_core.models import ArtifactVersion, Environment, Table
 from lakana_core.storage.fsspec_storage import FsspecStorage
 
 HOSTILE = "x\n2026-10-08 ERROR forged record\x1b[2J"
@@ -49,6 +50,35 @@ def _assert_one_line_and_escaped(records: list[logging.LogRecord], expected: int
         assert ESCAPED in message
 
 
+def _stored_hostile_artifact(
+    session: Session, service: ArtifactService, principal: PrincipalRef
+) -> TableRef:
+    """Store two versions of an artifact and give it `HOSTILE` as its name.
+
+    A new artifact name may not hold a control character (#593), so the name is written as an
+    older release could have stored it.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    service
+        The artifact service.
+    principal
+        The creator.
+
+    Returns
+    -------
+    TableRef
+        The artifact under its hostile name.
+    """
+    store_version(service, principal, ARTIFACT_REF, {"a": b"one"})
+    store_version(service, principal, ARTIFACT_REF, {"a": b"two"})
+    session.execute(update(Table).where(Table.name == ARTIFACT_REF.name).values(name=HOSTILE))
+    session.commit()
+    return TableRef(ARTIFACT_REF.environment, ARTIFACT_REF.namespace, HOSTILE)
+
+
 def test_a_failed_removal_of_bytes_logs_the_artifact_name_escaped(
     session: Session,
     tmp_path: Path,
@@ -57,10 +87,8 @@ def test_a_failed_removal_of_bytes_logs_the_artifact_name_escaped(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Deleting a version and dropping an artifact: the names in `artifacts/service.py`."""
-    ref = TableRef(ARTIFACT_REF.environment, ARTIFACT_REF.namespace, HOSTILE)
     service = artifact_service(session, tmp_path)
-    store_version(service, principal, ref, {"a": b"one"})
-    store_version(service, principal, ref, {"a": b"two"})
+    ref = _stored_hostile_artifact(session, service, principal)
 
     def broken(self: FsspecStorage, path: str) -> None:
         raise OSError("storage is down")
@@ -77,10 +105,8 @@ def test_a_kept_version_logs_the_artifact_name_escaped(
     session: Session, tmp_path: Path, principal: PrincipalRef, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The line that says why a deleted version's files were kept."""
-    ref = TableRef(ARTIFACT_REF.environment, ARTIFACT_REF.namespace, HOSTILE)
     service = artifact_service(session, tmp_path)
-    store_version(service, principal, ref, {"a": b"one"})
-    store_version(service, principal, ref, {"a": b"two"})
+    ref = _stored_hostile_artifact(session, service, principal)
     session.execute(
         update(ArtifactVersion)
         .where(ArtifactVersion.version == 2)

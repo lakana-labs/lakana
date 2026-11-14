@@ -475,6 +475,104 @@ def test_a_reading_table_function_is_never_reported_as_an_empty_name() -> None:
         assert "" not in sql_file_references(sql, []), sql
 
 
+_READER_FORMS = [
+    "SELECT * FROM read_parquet('a/b.parquet')",
+    "SELECT * FROM read_parquet(['x', 'y'])",
+    "SELECT * FROM read_parquet('s3://bucket/x.parquet', union_by_name = true)",
+    "SELECT * FROM read_csv('x.csv')",
+    "SELECT * FROM read_csv(['a.csv'], header = true)",
+    "SELECT * FROM read_csv_auto('a.csv')",
+    "SELECT * FROM read_json('a.json')",
+    "SELECT * FROM read_json_auto('a.json')",
+    "SELECT * FROM read_ndjson('a.json')",
+    "SELECT * FROM read_text('a.txt')",
+    "SELECT * FROM read_blob('a')",
+    "SELECT * FROM read_xlsx('a.xlsx')",
+    "SELECT * FROM parquet_scan('a.parquet')",
+    "SELECT * FROM iceberg_scan('s3://b/t')",
+    "SELECT * FROM delta_scan('s3://b/t')",
+    "SELECT * FROM sqlite_scan('a.db', 't')",
+    "SELECT * FROM postgres_scan('host=h password=secret', 's', 't')",
+    "SELECT * FROM read_parquet(x)",
+    "SELECT * FROM LATERAL read_parquet('x.parquet')",
+    "SELECT * FROM TABLE(read_parquet('x.parquet'))",
+    "SELECT (SELECT count(*) FROM read_parquet('y.parquet'))",
+    "SELECT * FROM gold.t JOIN read_parquet('z.parquet') ON true",
+    "SELECT * FROM some_function_duckdb_adds_later('p')",
+]
+
+
+@pytest.mark.parametrize("sql", _READER_FORMS)
+def test_every_table_function_that_reads_is_a_file_reference(sql: str) -> None:
+    """The content gate and the deploy see a reader in any `FROM` position (#591)."""
+    from lakana_core.projects.parse import sql_file_references
+
+    found = sql_file_references(sql, ["gold.t"])
+    assert found
+    assert "gold.t" not in found
+    assert not any("secret" in name for name in found)
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT * FROM read_parquet('a/b.parquet')", {"a/b.parquet"}),
+        ("SELECT * FROM read_parquet(['x', 'y'])", {"x", "y"}),
+        ("SELECT * FROM read_csv('bronze.csv', header = true)", {"bronze.csv"}),
+        ("SELECT * FROM TABLE(read_parquet('t.parquet'))", {"t.parquet"}),
+        ("SELECT * FROM read_parquet(x)", {"read_parquet"}),
+        ("SELECT * FROM postgres_scan('host=h password=secret', 's', 't')", {"postgres_scan"}),
+        ("SELECT * FROM sqlite_scan('a.db', 't')", {"sqlite_scan"}),
+    ],
+)
+def test_a_readers_path_is_reported_so_it_never_passes_as_a_table(
+    sql: str, expected: set[str]
+) -> None:
+    """A path that looks like a table name is a file; a database's connection is never named."""
+    from lakana_core.projects.parse import sql_file_references
+
+    assert sql_file_references(sql, []) == expected
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT * FROM LATERAL main.read_csv('a.csv')", {"a.csv"}),
+        ("SELECT * FROM t, LATERAL x", {"lateral"}),
+        ("SELECT * FROM ROWS FROM (read_csv('a.csv'))", {"rows from", "a.csv"}),
+        ('SELECT * FROM ""', set()),
+    ],
+)
+def test_odd_from_items_are_reported_by_what_they_call(sql: str, expected: set[str]) -> None:
+    """A schema-qualified `LATERAL` call, a `LATERAL` without a call and `ROWS FROM`."""
+    from lakana_core.projects.parse import sql_file_references
+
+    assert sql_file_references(sql, []) == expected
+
+
+def test_the_file_form_of_from_is_a_file_reference_by_its_path() -> None:
+    """``FROM 'file.parquet'`` passes the guard and is reported as written, as before."""
+    from lakana_core.projects.parse import sql_file_references
+
+    sql = "SELECT * FROM 'file.parquet'"
+    assert sql_file_references(sql, ["file.parquet"]) == {"file.parquet"}
+
+
+def test_every_reader_the_query_guard_knows_is_a_file_reference() -> None:
+    """The guard's reader names (#487) and its prefix and suffix families cannot drift away."""
+    from lakana_core.projects.parse import sql_file_references
+    from lakana_core.query_rewrite import _READER_NAMES, _READER_PREFIXES, _READER_SUFFIXES
+
+    names = {
+        *_READER_NAMES,
+        *(f"{prefix}anything" for prefix in _READER_PREFIXES),
+        *(f"anything{suffix}" for suffix in _READER_SUFFIXES),
+    }
+    for name in sorted(names):
+        assert sql_file_references(f"SELECT * FROM {name}(x)", []) == {name}, name
+        assert sql_file_references(f"SELECT * FROM {name}('p')", []), name
+
+
 @pytest.mark.parametrize(
     ("sql", "cause"),
     [

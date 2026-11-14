@@ -443,6 +443,8 @@ def _table_from_json(data: dict[str, Any]) -> Table:
             TableReference(id=r["id"], name=r["name"]) for r in data.get("references") or []
         ],
         hidden_references=data.get("hidden_references", 0),
+        content_reason=data.get("content_reason"),
+        content_message=data.get("content_message"),
         snapshot_id=data.get("snapshot_id"),
         state=data.get("state", "published"),
         state_message=data.get("state_message"),
