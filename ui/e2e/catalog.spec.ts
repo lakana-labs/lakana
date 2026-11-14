@@ -324,6 +324,24 @@ test.describe("the Catalog in real Chromium", () => {
     }
   });
 
+  test("compact rows are lower than roomy rows", async ({ page }) => {
+    const heights: number[] = [];
+    await openCatalog(page);
+    for (const density of ["roomy", "compact"] as const) {
+      await page.evaluate(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme: "light", density, language: "en" })],
+      );
+      await openCatalog(page);
+      await expect(page.locator("html")).toHaveAttribute("data-density", density);
+      const row = await page.locator("tbody tr").first().boundingBox();
+      heights.push(row?.height ?? 0);
+    }
+    expect(heights[1], heights.join(" against ")).toBeLessThan(heights[0] ?? 0);
+  });
+
   test("no horizontal scroll at 320 px; the list scrolls in its own focusable region", async ({
     page,
   }) => {

@@ -113,9 +113,11 @@ logo (see `docs/legal/TRADEMARK.md` in the repository).
 ## Density
 
 Roomy is the default: 44 px rows, few columns, and the kind and last change of an object as a
-quiet second line under its name. Compact, with 36 px rows, is a personal setting in the menu
-under your name. Roomy is the default because the interface is for people who do not live in
-it all day; someone who does can choose compact for themselves.
+quiet second line under its name. Compact, with 36 px rows and tighter lines (so a row with a
+second line is lower too), is a personal setting in the menu under your name; it applies to
+every list, the Catalog's and those on a table's page included. Roomy is the default because
+the interface is for people who do not live in it all day; someone who does can choose compact
+for themselves.
 
 ## One pattern for every area
 

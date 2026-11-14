@@ -242,6 +242,41 @@ test.describe("the table page in real Chromium", () => {
     expect(await grid.evaluate((node) => node.contains(document.activeElement))).toBe(false);
   });
 
+  test("compact rows of Columns, Health and Access are lower than roomy rows", async ({ page }) => {
+    const heights: Record<string, number[]> = {};
+    /**
+     * Records the height of the first row of the tab's first list.
+     *
+     * @param name - The tab's name.
+     */
+    const measure = async (name: string): Promise<void> => {
+      const box = await page.locator(".list tbody tr").first().boundingBox();
+      (heights[name] ??= []).push(box?.height ?? 0);
+    };
+    await openTable(page);
+    for (const density of ["roomy", "compact"] as const) {
+      await page.evaluate(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme: "light", density, language: "en" })],
+      );
+      await openTable(page, "/columns");
+      await expect(page.locator("html")).toHaveAttribute("data-density", density);
+      await measure("Columns");
+      for (const entry of NEW_TABS.slice(1)) {
+        await openNewTab(page, entry);
+        await measure(entry[0]);
+      }
+    }
+    expect(Object.keys(heights)).toHaveLength(3);
+    for (const [name, [roomy, compact]] of Object.entries(heights)) {
+      expect(compact, `${name}: ${String(compact)} against ${String(roomy)}`).toBeLessThan(
+        roomy ?? 0,
+      );
+    }
+  });
+
   test("no horizontal scroll at 320 px on every tab; wide tables scroll in their own focusable region", async ({
     page,
   }) => {
