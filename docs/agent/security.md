@@ -63,7 +63,10 @@ Anything parsed from **stored or generated** text must never reach a reader thro
 parse sites under `packages/*/src` are:
 
 - reader's own query (`check_blacklist`, `extract_table_refs`, `extract_lineage` in
-  `pipeline.run_one`): the syntax message, with line and column, to the reader;
+  `pipeline._statement_of`): the syntax message, with line and column, to the reader;
+- a check's stored SQL in a query of its rows (`pipeline._statement_of`, #588):
+  `CHECK_ROWS_SQL_REFUSED`, none of its text, for a refusal and a syntax error alike (also one the
+  rewrite raises later);
 - a stored view's SQL in `query_rewrite._expand_into`: `View 'gold.v' could not be read. Ask its
   owner to recreate it.` — the view the reader named, none of its text, since the reader may
   lack READ on what it references; the two re-parses of the expanded statement
@@ -3416,9 +3419,21 @@ found through a query run of their own that is bound to the check result
   read again from the SQL (`projects.checks.check_sql_references`), never from the manifest's
   `references`: the stored manifest is untrusted. SQL whose tables cannot be listed is treated
   as no entry at all. The worker authorizes the read of every table again, as for every query.
-  The query run is `QUEUED`, submitted by the caller, has no task run, and its `sql_text` is the
-  check's SQL from the manifest, so only a caller who may read every table it names ever sees
-  it. `DeployService.job_version` applies the same rule to the manifest's `checks`
+  The query run is `QUEUED`, submitted by the caller, has no task run, and its `sql_text` is
+  `check_rows_sql_text` (a comment line naming the check), **never the check's SQL** (#588): the
+  text reaches the caller through the query's status, the query list and their own
+  `QUERY_COMPLETED` events. The worker reads the SQL by the run's `check_result_id`
+  (`runs.check_rows.check_rows_sql`: the result in the run's environment, its run's project
+  version, the same manifest entry the submit authorized; gone results and entries give
+  `CHECK_RESULT_REMOVED` and `check_sql_gone_message`), in `pipeline._statement_of`, through the
+  same core session every query run uses (no new route or side channel). A parse or guard
+  refusal of that stored text fails the run with `CHECK_ROWS_SQL_REFUSED`, which quotes none of
+  it; a syntax error re-raised by the rewrite does too. A failure whose message is the
+  database's own text (`_engine_text`: an error document of a query child, other than the
+  worker's own `UNCONVERTED_VALUE` and certificate wordings) gets
+  `check_rows_query_failed_message(cause)` instead, and so does an unexpected error; Lakana's
+  own texts (withheld column, policy, snapshot gone, stopped) stay. The rows stay under the
+  caller's grants, row filters and column masks, as before. `DeployService.job_version` applies the same rule to the manifest's `checks`
   (`_visible_checks`): a check whose SQL names an unreadable table, or whose tables cannot be
   listed, loses `sql` and `references` and carries `hidden_references`, as an asset does; and
   since #560 a check's `sql` also needs the content gate ("Preview and Defined in").
@@ -5694,7 +5709,7 @@ exit criterion is being re-run after the M3f fixes above — see
 | `GET …/project-versions/{id}` (#560) | `READ_ENVIRONMENT`; an asset's or check's `sql` and `normalized_sql` also need `passes_content_gate`, per file | `DeployService.job_version`. An asset is judged on the version's own `project_files` row (by table and path): none, or another `gate_version`, is `not_recorded` before any other condition, as in "Defined in"; a check on its table and the tables its SQL names (read again from the SQL), with `gate_raw` from `sql_file_references` over that SQL, a string `path`, and `defines=False`: any view in its gate refuses, its own table included, since a check's gate set does not list a view's base tables. Every entry carries `content_reason` and `content_message` (the "Defined in" sentences, `null` when shown); a withheld entry keeps everything else the older rules leave (`references` and `lineage` stay for a reader of every referenced table). `SOURCE_VIEWED` per shown file, table scope, the same window and dedup as "Defined in" (a reader, table, commit and path, so an asset file and each check file of one table get a row each, and "Defined in" shares the asset file's row), on `sessions_like` sessions; any failure is 503 and nothing is returned. A version deployed before 0077 shows no asset's SQL to anyone until a redeploy; its checks' SQL is judged by the check rule above. |
 | `GET …/tables/{name}`, `GET …/tables`, the two description routes (#587) | `READ_TABLE`; a view's `sql` also needs `READ_TABLE` on every reference (else `hidden_references`, as before) and `passes_content_gate` | `CatalogService._gate_view_sql`, only when the route passes `view_sql_window_minutes`; an internal caller of `describe_table` (`None`) gets no SQL and writes nothing. The gate set is each reference's **current** name, looked up by its stored id (a dropped one refuses), `gate_raw` from `sql_file_references` over the SQL, and `defines=True` (the view itself may be a view; a referenced view refuses). A refused reader keeps `references` and gets `content_reason` `restricted` with `RESTRICTED_MESSAGE`. A shown text is first recorded as `SOURCE_VIEWED` with `{"view_sql_sha256"}` (`record_view_sql_view`; once per reader, view and text in the window; fail-closed 503). The digest is content (`Hiding.WITHHELD`). |
 | Source map at deploy | written by the worker in `record_deploy`, both branches | `git archive` runs with `* -export-subst` in `$GIT_DIR/info/attributes` (`export-ignore` unchanged). A reused version writes a row only for a missing or stale `gate_version`, and only when the text matches the manifest (`normalized_sql` or the Python source digest). A foreign key to the texts (`ON DELETE RESTRICT`); the text insert locks the row and the sweep skips locked rows. C0 and C1 controls in asset files are refused at deploy (breaking, see the release note). Unreferenced texts are swept. |
-| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) Closed by #560: `DeployService.job_version` applies the same gate and audit. Left: a version is judged under today's grants and policies, so an old version's SQL is shown to whoever passes the gate now; and `lakana check rows` still puts a check's SQL into the caller's own query under `READ_TABLE` alone (the rows stay filtered and masked). A view's SQL in `table get` follows the gate since #587. (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
+| Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) Closed by #560: `DeployService.job_version` applies the same gate and audit. Left: a version is judged under today's grants and policies, so an old version's SQL is shown to whoever passes the gate now; `lakana check rows` no longer puts a check's SQL into the caller's query text or error messages (#588; the worker reads it by the result). A view's SQL in `table get` follows the gate since #587. (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
 
 The preview route asks for no step-up: it is a read under the caller's own rights, like `POST …/queries` (`NO_STEP_UP` in `test_step_up_routes.py`). The conversion slot (`ThreadSafeConcurrencyLimiter`, one `threading.Lock` over the total and the count per principal, because the route runs in the thread pool) is given back once the page's bytes are built, before they are sent, and also when the conversion fails.
 

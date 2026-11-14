@@ -1929,6 +1929,62 @@ A check result stores a count and never the SQL; the SQL is read from the manife
 project version the run used.
 """
 
+
+def check_rows_sql_text(check: str) -> str:
+    """Word the text a query that shows the rows of a check stores in place of the check's SQL.
+
+    The query's text reaches its caller through the query's status and their own
+    `QUERY_COMPLETED` events, and a check's SQL is shown only under the content gate of the
+    check's file (#588), so the query stores this line and the worker reads the SQL by the
+    check result's id (`runs.check_rows.check_rows_sql`).
+
+    Parameters
+    ----------
+    check
+        The check's name, ``<table>/<check>``.
+
+    Returns
+    -------
+    str
+        One SQL comment line that names the check, escaped (`shown`).
+    """
+    return f"-- The rows of check {shown(check)}. Its SQL is read by the worker and not shown here."
+
+
+CHECK_ROWS_SQL_REFUSED = (
+    "The SQL of this check could not be run as it is stored: the query checks of this release "
+    "refuse it or cannot read it. Its SQL is not shown here, because it is shown only to people "
+    "who may read the check's file. Deploy the project again and run it, or read the check in "
+    "your git host; the number of rows the check found remains in `lakana check list`."
+)
+"""Why the worker fails a query of the rows of a check whose stored SQL it will not run.
+
+The parse and the query guard's refusal would quote the stored text, which this caller may not
+be shown (#588); this sentence names none of it."""
+
+
+def check_rows_query_failed_message(cause: str) -> str:
+    """Word that the database refused the query that shows the rows of a check.
+
+    Parameters
+    ----------
+    cause
+        The failure's class, as `failure_cause` names it (``invalid_query``).
+
+    Returns
+    -------
+    str
+        A text that says what failed and what to do, without the database's message, which
+        can quote the check's SQL (#588).
+    """
+    return (
+        f"The query that shows the rows of this check failed in the database ({cause}). Its "
+        "message is not shown, because it can quote the check's SQL, which is shown only to "
+        "people who may read the check's file. Ask the check's owner to run the check's SQL; "
+        "the number of rows the check found remains in `lakana check list`."
+    )
+
+
 CHECK_RESULT_REMOVED = (
     "The check result this query reads is no longer there: it was recorded again by a new "
     "attempt of its task, or removed with its run. Run `lakana check rows` again."

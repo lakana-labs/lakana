@@ -243,6 +243,16 @@ written, the request answers 503 and shows nothing. A script that reads a view's
 handle its absence and print `content_message`; give its principal `READ_ENVIRONMENT` if it needs
 the text and no policy applies to it.
 
+### The query of a check's rows no longer holds the check's SQL
+
+The query `lakana check rows` queues now stores the line `-- The rows of check NAME. Its SQL is
+read by the worker and not shown here.` as its text, and the worker reads the check's SQL itself.
+`lakana query status`, the query list and the `QUERY_COMPLETED` event of such a query show that
+line, and a failure of the database is reported with a fixed sentence instead of its text, which
+could quote the SQL ([The rows of a check](../reference/checks.md#the-rows-of-a-check)). The rows,
+and the row filters and column masks applied to them, are as before. Read a check's SQL in its file
+or with `lakana project-version show`.
+
 ### Project files are recorded at deploy
 
 Migration `0077` adds two tables, which hold the files of each deployed project version; it runs

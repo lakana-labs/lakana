@@ -166,8 +166,11 @@ from lakana_core.query_rewrite import (
     unreadable_view_message,
 )
 from lakana_core.runs import pools
+from lakana_core.runs.check_rows import check_rows_sql
 from lakana_core.runs.checks import (
     CHECK_RESULT_REMOVED,
+    CHECK_ROWS_SQL_REFUSED,
+    check_rows_query_failed_message,
     checked_snapshot_gone_message,
     column_not_shown_message,
     no_column_left_message,
@@ -207,7 +210,8 @@ from lakana_worker.executor import (
     stream_query,
 )
 from lakana_worker.memory import MACHINE_MEMORY_ADVICE
-from lakana_worker.query_protocol import STORE_CERTIFICATE_UNVERIFIED
+from lakana_worker.query_process import ChildFailed
+from lakana_worker.query_protocol import STORE_CERTIFICATE_UNVERIFIED, UNCONVERTED_VALUE
 from lakana_worker.resources import current_collector, usage_collector
 
 if TYPE_CHECKING:
@@ -2676,6 +2680,72 @@ def _watching_for_cancel(
         thread.join(_CANCEL_WATCH_JOIN_SECONDS)
 
 
+def _statement_of(
+    session: Session, run: QueryRun
+) -> tuple[str, list[str], dict[str, list[dict[str, str]]]]:
+    """Give the statement a read or write run executes, with its table names and its lineage.
+
+    A run bound to a check result stores a placeholder (`check_rows_sql_text`) instead of the
+    check's SQL, so the SQL is read here by the result's id (`check_rows_sql`, #588). A parse
+    or a refusal of the query guard on that stored text would quote it to a caller who may not
+    see it: such a run fails with `CHECK_ROWS_SQL_REFUSED`, which names none of it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run
+        The query run.
+
+    Returns
+    -------
+    tuple
+        The SQL, the dotted names it reads (`extract_table_refs`) and its lineage
+        (`extract_lineage`).
+
+    Raises
+    ------
+    CheckResultGoneError
+        If the run's check result is gone (`check_rows_sql`).
+    CheckSqlGoneError
+        If its check's SQL is gone from the manifest (`check_rows_sql`).
+    ValidationError
+        From the guard on the caller's own SQL; `CHECK_ROWS_SQL_REFUSED` for a check's.
+    """
+    if run.check_result_id is None:
+        check_blacklist(run.sql_text)
+        return run.sql_text, extract_table_refs(run.sql_text), extract_lineage(run.sql_text)
+    sql = check_rows_sql(session, run.check_result_id, run.environment_id)
+    try:
+        check_blacklist(sql)
+        return sql, extract_table_refs(sql), extract_lineage(sql)
+    except (LakanaError, *SQL_SYNTAX_ERRORS) as exc:
+        raise ValidationError(CHECK_ROWS_SQL_REFUSED) from exc
+
+
+def _engine_text(exc: BaseException) -> bool:
+    """Say whether a failure's message is the database's own text, which may quote the SQL.
+
+    Parameters
+    ----------
+    exc
+        The failure.
+
+    Returns
+    -------
+    bool
+        Whether it comes from an error document of a query child (`ChildFailed.error`) and is
+        not one of the worker's own wordings (`UNCONVERTED_VALUE`, the certificate text).
+    """
+    cause: BaseException | None = exc.__cause__
+    while cause is not None and not isinstance(cause, ChildFailed):
+        cause = cause.__cause__
+    if cause is None or cause.error is None:
+        return False
+    text = str(exc)
+    return UNCONVERTED_VALUE not in text and STORE_CERTIFICATE_UNVERIFIED not in text
+
+
 def run_one(
     session: Session,
     query_run_id: uuid.UUID,
@@ -2920,14 +2990,12 @@ def _run_one(
         if run.write_mode == WriteMode.MAINTAIN:
             _run_maintenance(session, run, environment.name, principal, authz, key_provider)
         else:
-            check_blacklist(run.sql_text)
-            dotted_refs = extract_table_refs(run.sql_text)
-            lineage = extract_lineage(run.sql_text)
+            sql, dotted_refs, lineage = _statement_of(session, run)
             prepared = _resolve_and_rewrite(
                 session,
                 environment.name,
                 principal,
-                run.sql_text,
+                sql,
                 authz,
                 key_provider,
                 locations,
@@ -3056,10 +3124,17 @@ def _run_one(
             failure = _without_the_value(failure, prepared.restricted)
         run.error_message = _redact(str(failure), locations)
         run.error_cause = failure_cause(failure).value
+        if run.check_result_id is not None and failure is exc and _engine_text(exc):
+            # The database's message can quote the check's SQL, which its caller may not see.
+            run.error_message = check_rows_query_failed_message(failure_cause(failure).value)
     except SQL_SYNTAX_ERRORS as exc:
         failure_exc = exc
         outcome = QueryRunStatus.FAILED
-        run.error_message = _redact(describe_syntax_error(exc), locations)
+        run.error_message = (
+            _redact(describe_syntax_error(exc), locations)
+            if run.check_result_id is None
+            else CHECK_ROWS_SQL_REFUSED
+        )
         run.error_cause = failure_cause(exc).value
     except MemoryError:
         # An allocation outside DuckDB (pyarrow, Python) failed: the machine or the container
@@ -3074,7 +3149,11 @@ def _run_one(
     except Exception as exc:  # see docstring: nothing may propagate out of this function
         failure_exc = exc
         outcome = QueryRunStatus.FAILED
-        run.error_message = _redact(f"Unexpected error: {exc}", locations)
+        run.error_message = (
+            _redact(f"Unexpected error: {exc}", locations)
+            if run.check_result_id is None
+            else check_rows_query_failed_message(failure_cause(exc).value)
+        )
         run.error_cause = failure_cause(exc).value
     if isinstance(failure_exc, WriteFenceRefused):
         logger.warning(

@@ -628,6 +628,7 @@ def _started_run(client: TestClient) -> str:
 def test_the_rows_of_a_check_are_queued_as_a_query_of_the_caller(client: TestClient) -> None:
     """The answer is the one `POST .../queries` gives, and the run row is bound to the result."""
     from lakana_core.models import QueryRun
+    from lakana_core.runs.checks import check_rows_sql_text
 
     run_id = _started_run(client)
     result_id = _store_failed_check(client, run_id)
@@ -639,12 +640,14 @@ def test_the_rows_of_a_check_are_queued_as_a_query_of_the_caller(client: TestCli
     with Session(client.app.state.engine) as session:
         query = session.get(QueryRun, uuid.UUID(answer.json()["query_id"]))
         assert query is not None
-        assert (query.sql_text, query.check_result_id) == (_ROWS_SQL, result_id)
+        # The check's SQL is never the caller's query text (#588); the worker reads it.
+        assert (query.sql_text, query.check_result_id) == (check_rows_sql_text(_CHECK), result_id)
         assert query.task_run_id is None
     status = client.get(
         f"/api/v1/environments/dev/queries/{answer.json()['query_id']}", headers=AUTH_HEADER
     )
     assert (status.status_code, status.json()["status"]) == (200, "QUEUED")
+    assert _ROWS_SQL not in status.text
 
 
 def test_a_check_the_run_does_not_have_is_404_with_the_way_to_list_them(

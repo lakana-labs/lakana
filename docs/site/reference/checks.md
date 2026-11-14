@@ -399,8 +399,12 @@ checked` under it. A check generated from the asset's header reads `key_unique (
 
 A result holds a count and never a row. `lakana check rows` makes the rows from the check's SQL.
 
-**How it works.** The command queues an ordinary query of yours whose text is the check's SQL,
-taken from the project version the run used. The query is tied to the check's result. When it
+**How it works.** The command queues an ordinary query of yours that runs the check's SQL,
+taken from the project version the run used. The query is tied to the check's result. Its stored
+text is not the SQL but the line `-- The rows of check NAME. Its SQL is read by the worker and not
+shown here.`: the worker reads the SQL by the check's result. So the SQL never reaches you through
+the query's status, the query list or your audit events, and a failure of the database is
+reported without its text, which could quote the SQL (see the messages below). When it
 runs, the worker reads the checked table at the snapshot the check read, and every other table
 the SQL names as it is now, under your own grants, row filters and column masks. Nothing in the
 request names a snapshot.
@@ -425,7 +429,7 @@ request names a snapshot.
 `SUBMIT_QUERY` on the environment; the roles `ANALYST` and above have both. A caller who lacks
 them is refused before Lakana looks at any run or check, so the refusal says nothing about whether
 they exist. Then, once the check is found, the right to read every table the check's SQL names
-(`READ_TABLE`): the SQL becomes the text of the caller's query, so a caller without it is refused
+(`READ_TABLE`): the query runs that SQL under the caller's rights, so a caller without it is refused
 (403) before any other answer about the check, with a message that names none of the tables and
 not their number. The worker checks the right to read the tables again when it runs the query, as
 for every query.
@@ -441,7 +445,8 @@ no row filter or column mask on the check's table or any table its SQL names, no
 `content_reason` (`restricted`) and `content_message`; both are `null` when the SQL is shown, and
 showing it is recorded as `SOURCE_VIEWED`.
 
-**In the audit log.** The `QUERY_COMPLETED` event of such a query has, next to `sql_text`,
+**In the audit log.** The `QUERY_COMPLETED` event of such a query has, next to `sql_text` (the
+placeholder line, never the check's SQL),
 `tables_touched`, `row_count` and `status`, the field `check_result_id`: the id of the check
 result whose rows were asked for. The event of every other query does not have the field. An
 administrator can so tell a read of a table's failed or earlier state from an ordinary query of
@@ -499,6 +504,8 @@ The others are the failure of the query, after it was queued.
 | ``The column `COLUMN` of the checked snapshot is not shown: `TABLE` does not have it in this form any more (it was added by the run that failed, or dropped or changed since), so the rows this check found cannot be listed with it. The number of rows the check found remains: `lakana check list --run RUN --env ENV`.`` | The check's SQL names a column that is not shown, in any letter case and also through a table alias (`o.note`). | The count is in `lakana check list`. |
 | ``None of the columns of the checked snapshot is in `TABLE` in the same form any more, so the rows this check found cannot be listed. The number of rows the check found remains: `lakana check list --run RUN --env ENV`.`` | The table was built again with other columns. | The count is in `lakana check list`. |
 | ``A row filter or column mask of yours on `TABLE` uses the column `COLUMN`, which is not the same column in the checked snapshot and in the table now (it was added, dropped or renamed since, or another column took its name), so the rows this check found cannot be shown under it. The number of rows the check found remains: `lakana check list --run RUN --env ENV`.`` | A row filter or a mask expression of yours reads a column that is not the same then and now. | Ask whoever manages your policies to adjust it. |
+| ``The query that shows the rows of this check failed in the database (CAUSE). Its message is not shown, because it can quote the check's SQL, which is shown only to people who may read the check's file. Ask the check's owner to run the check's SQL; the number of rows the check found remains in `lakana check list`.`` | The database refused the check's SQL when it ran (a column it names does not exist, a type does not match, ...). | Read the check's file in your git host, or ask its owner, and fix the check. |
+| ``The SQL of this check could not be run as it is stored: the query checks of this release refuse it or cannot read it. Its SQL is not shown here, because it is shown only to people who may read the check's file. Deploy the project again and run it, or read the check in your git host; the number of rows the check found remains in `lakana check list`.`` | The stored SQL does not parse, or the query checks of this release refuse it. | Deploy the project again; the deploy names the problem in the check's file. |
 | ``The rows of this check cannot be read from `TABLE`: the check result is not one of this table as it exists now, or was removed with its run.`` | The result is not one of the live table (the table was dropped and built again, or the result is of another table). | The count, if the result still exists, is in `lakana check list`. |
 
 ## SDK and REST

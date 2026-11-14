@@ -95,7 +95,13 @@ from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.projects.checks import CheckSpec
 from lakana_core.query_rewrite import TableSource, rewrite_query
 from lakana_core.runs.check_rows import submit_check_rows
-from lakana_core.runs.checks import policy_needs_a_column_message, record_result
+from lakana_core.runs.checks import (
+    CHECK_ROWS_SQL_REFUSED,
+    check_rows_query_failed_message,
+    check_rows_sql_text,
+    policy_needs_a_column_message,
+    record_result,
+)
 from lakana_core.runs.tasks import Written
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.storage.resolver import StorageResolver
@@ -1358,9 +1364,8 @@ def test_a_column_the_query_names_that_nobody_has_keeps_the_databases_message(
 
     message, cause = _failure(session, tmp_path, ana, result)
 
-    assert message is not None
-    assert "Binder Error" in message
-    assert "is not shown" not in message
+    assert message == check_rows_query_failed_message(QueryErrorCause.INVALID_QUERY.value)
+    assert "nowhere" not in message and "SELECT" not in message
     assert cause == QueryErrorCause.INVALID_QUERY.value
 
 
@@ -1404,9 +1409,8 @@ def test_a_column_that_another_table_of_the_query_has_is_not_explained_as_withhe
 
     assert alone == {"note": _not_shown("note", result.run_id)}
     assert beside == {}
-    assert message is not None
-    assert "Binder Error" in message
-    assert "is not shown" not in message
+    # The database's own message would quote the check's SQL (#588).
+    assert message == check_rows_query_failed_message(QueryErrorCause.INVALID_QUERY.value)
     assert cause == QueryErrorCause.INVALID_QUERY.value
 
 
@@ -1489,7 +1493,7 @@ def test_the_event_of_a_query_that_shows_the_rows_of_a_check_names_the_result(
 
     assert _completed(session)[before:] == [
         {
-            "sql_text": _NEGATIVE,
+            "sql_text": check_rows_sql_text(result.check_name),
             "tables_touched": ["gold.orders"],
             "row_count": 2,
             "status": "SUCCEEDED",
@@ -1516,20 +1520,101 @@ def test_the_event_of_a_failed_or_refused_query_of_the_rows_names_the_result_too
 
     assert _completed(session)[before:] == [
         {
-            "sql_text": _NEGATIVE,
+            "sql_text": check_rows_sql_text(result.check_name),
             "tables_touched": ["gold.orders"],
             "row_count": None,
             "status": "FAILED",
             "check_result_id": result_id,
         },
         {
-            "sql_text": _NEGATIVE,
+            "sql_text": check_rows_sql_text(result.check_name),
             "tables_touched": [],
             "row_count": None,
             "status": "FAILED",
             "check_result_id": result_id,
         },
     ]
+
+
+def test_a_check_whose_sql_fails_at_run_time_shows_its_sql_nowhere(
+    session: Session, admin: PrincipalRef, tmp_path: Path
+) -> None:
+    """Text, audit event and error carry the placeholder and a fixed sentence only (#588)."""
+    sql = "SELECT id, missing_secret_col FROM gold.orders WHERE region = 'top-secret'"
+    result = _failed_run(session, admin, sql=sql)
+    ana = reader(session, admin, "ana", "orders")
+    before = len(_completed(session))
+
+    finished, rows = run(session, tmp_path, _submit(session, ana, result))
+
+    assert (finished.status, rows) == (QueryRunStatus.FAILED, [])
+    assert finished.sql_text == check_rows_sql_text(result.check_name)
+    assert finished.error_message == check_rows_query_failed_message(
+        QueryErrorCause.INVALID_QUERY.value
+    )
+    [event] = _completed(session)[before:]
+    for text in (finished.sql_text, finished.error_message, str(event)):
+        assert "missing_secret_col" not in text and "top-secret" not in text
+
+
+def test_a_stored_sql_the_guard_refuses_is_failed_without_quoting_it(
+    session: Session, admin: PrincipalRef, tmp_path: Path
+) -> None:
+    """The worker parses the stored text, so neither the parse nor the guard may quote it.
+
+    The manifest is changed after the result was recorded, as a stored manifest is untrusted:
+    the submit would refuse such SQL itself, so the query is queued as the submit queues it.
+    """
+    result = _failed_run(session, admin)
+    ana = reader(session, admin, "ana", "orders")
+    version = session.get(
+        JobVersion,
+        session.execute(select(Run.job_version_id).where(Run.id == result.run_id)).scalar_one(),
+    )
+    assert version is not None
+    for stored in (
+        "SELECT * FROM read_csv('secret.csv')",
+        "SELECT secret FROM gold.orders WHERE (",
+    ):
+        manifest = dict(version.manifest_json)
+        manifest["checks"] = [{**manifest["checks"][0], "sql": stored}]
+        version.manifest_json = manifest
+        session.commit()
+        finished, _ = run(session, tmp_path, _submit_raw(session, ana, result))
+        assert finished.status is QueryRunStatus.FAILED
+        assert finished.error_message == CHECK_ROWS_SQL_REFUSED
+        assert "secret" not in str(finished.error_message)
+
+
+def _submit_raw(session: Session, reader_: PrincipalRef, result: CheckResult) -> uuid.UUID:
+    """Queue a query bound to `result` with the placeholder text, past the submit's checks.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    reader_
+        The caller.
+    result
+        The check result.
+
+    Returns
+    -------
+    uuid.UUID
+        The query run's id.
+    """
+    query = QueryRun(
+        id=uuid.uuid4(),
+        environment_id=result.environment_id,
+        principal_id=reader_.id,
+        sql_text=check_rows_sql_text(result.check_name),
+        status=QueryRunStatus.QUEUED,
+        task_token_id=None,
+        check_result_id=result.id,
+    )
+    session.add(query)
+    session.commit()
+    return query.id
 
 
 def test_the_event_of_an_ordinary_query_has_the_keys_it_always_had(

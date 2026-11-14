@@ -444,7 +444,7 @@ fewer rows, and `--timeout SECONDS` limits the wait.
 
 You need the right to read the run (`READ_ENVIRONMENT` on the environment, or `RUN`) and to submit
 queries (`SUBMIT_QUERY`; the roles `ANALYST` and above have it), and the right to read every table
-the check's SQL reads (`READ_TABLE`). The check's SQL becomes the text of your query, so without
+the check's SQL reads (`READ_TABLE`). The query runs the check's SQL, so without
 that right the command refuses before anything else: ``You may not read every table this check
 reads, so its rows and its SQL are not shown to you. Ask an administrator for READ on the tables
 the check reads, or run the check's file from the project repository yourself.`` The message names
@@ -453,6 +453,13 @@ counts the tables you may not read instead, as it does for an asset. That comman
 still: it shows a check's SQL only under the rules of a table's file, so not while a row filter or
 column mask applies to you on one of its tables ([Who may read the
 file](see-where-a-table-is-defined.md#who-may-read-the-file)).
+
+The query you get never holds the check's SQL as its text: `lakana query status`, the query list and
+your audit events show `-- The rows of check NAME. Its SQL is read by the worker and not shown
+here.` The worker reads the SQL itself. When the database refuses the check's SQL, the message
+says that it failed and which kind of failure, not the database's text, which could quote the SQL.
+To see the SQL, read the check's file in your git host, or `lakana project-version show` under the
+rules above.
 
 A task of a pipeline cannot use the command. A blocking check keeps the rows that failed away from
 everything downstream, and a task that could read them would get them after all. It is a command

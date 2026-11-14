@@ -6,6 +6,11 @@ the check's SQL and is bound to the result (`QueryRun.check_result_id`). The wor
 one table the result names at the checked snapshot and every other table as it is now, under
 the caller's own grants, row filters and column masks.
 
+The query's stored text is a placeholder (`check_rows_sql_text`), never the check's SQL: the
+text reaches the caller through the query's status and their own audit events, and the SQL is
+shown only under the content gate of the check's file (#588). The worker reads the SQL by the
+result's id (`check_rows_sql`).
+
 This module decides who may ask and what is queued, and is the only place that sets the
 binding. Reading the table is `CatalogService.load_table_at_check`.
 """
@@ -20,6 +25,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import (
     CheckNotInRunError,
+    CheckResultGoneError,
     CheckSqlGoneError,
     NoCheckedSnapshotError,
     NotFoundError,
@@ -28,6 +34,7 @@ from lakana_core.errors import (
 from lakana_core.models import (
     CheckOutcome,
     CheckResult,
+    Environment,
     JobVersion,
     QueryRun,
     QueryRunStatus,
@@ -36,15 +43,18 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.projects.checks import (
+    CheckSpec,
     check_sql_references,
     may_read_every,
     read_manifest_checks,
 )
 from lakana_core.projects.health_checks import is_health_check
 from lakana_core.runs.checks import (
+    CHECK_RESULT_REMOVED,
     CHECK_ROWS_NOT_EVERY_TABLE,
     CHECK_ROWS_NOT_FOR_A_TASK,
     check_not_in_run_message,
+    check_rows_sql_text,
     check_sql_gone_message,
     check_sql_unreadable_message,
     health_check_rows_message,
@@ -96,6 +106,76 @@ def _no_snapshot_reason(
     return no_checked_snapshot_message(result.run_id)
 
 
+def _check_spec(session: Session, job_version_id: uuid.UUID, check: str) -> CheckSpec | None:
+    """Find a check's entry in the manifest of a project version.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    job_version_id
+        The project version a run used.
+    check
+        The check's name.
+
+    Returns
+    -------
+    CheckSpec or None
+        The entry; `None` when the version or its entry is gone or cannot be read.
+    """
+    # The foreign key from a run to its project version removes the run with the version, so
+    # a run that is found has one; a manifest that cannot be read holds no checks.
+    manifest = session.execute(
+        select(JobVersion.manifest_json).where(JobVersion.id == job_version_id)
+    ).scalar_one_or_none()
+    return next((s for s in read_manifest_checks(manifest).specs if s.name == check), None)
+
+
+def check_rows_sql(session: Session, check_result_id: uuid.UUID, environment_id: uuid.UUID) -> str:
+    """Read the SQL of the check a query of its rows is bound to, for the worker to run.
+
+    The query run stores `check_rows_sql_text` instead (#588); this is the worker's only way to
+    the SQL, by the result's id the run was bound to (`submit_check_rows`) and through the same
+    manifest entry that was authorized there.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    check_result_id
+        `QueryRun.check_result_id`.
+    environment_id
+        The query run's environment; a result of another environment counts as gone.
+
+    Returns
+    -------
+    str
+        The check's SQL from the manifest of its run's project version.
+
+    Raises
+    ------
+    CheckResultGoneError
+        If the result, or its run, is gone from the environment (`CHECK_RESULT_REMOVED`).
+    CheckSqlGoneError
+        If the manifest holds no readable entry for the check (`check_sql_gone_message`).
+    """
+    row = session.execute(
+        select(CheckResult.check_name, Run.id, Run.job_version_id)
+        .join(Run, Run.id == CheckResult.run_id)
+        .where(CheckResult.id == check_result_id, CheckResult.environment_id == environment_id)
+    ).one_or_none()
+    if row is None:
+        raise CheckResultGoneError(CHECK_RESULT_REMOVED)
+    check, run_id, job_version_id = row
+    spec = _check_spec(session, job_version_id, check)
+    if spec is None:
+        environment = session.execute(
+            select(Environment.name).where(Environment.id == environment_id)
+        ).scalar_one()
+        raise CheckSqlGoneError(check_sql_gone_message(run_id, environment))
+    return spec.sql
+
+
 def submit_check_rows(
     session: Session,
     authorization: AuthorizationService,
@@ -137,7 +217,9 @@ def submit_check_rows(
     QueryRun
         The inserted row: `QUEUED`, submitted by the caller, without a task run, with the
         check's SQL as its text and the result's id as `check_result_id`. A check that passed
-        is queued like any other; its query returns no rows.
+        is queued like any other; its query returns no rows. Its text is
+        `check_rows_sql_text`, never the check's SQL (#588): the worker reads that by the
+        result's id (`check_rows_sql`).
 
     Raises
     ------
@@ -183,14 +265,7 @@ def submit_check_rows(
         result.run_id, result.check_name, result.generated
     ):
         raise CheckNotInRunError(check_not_in_run_message(run.id, check, env.name))
-    # The foreign key from a run to its project version removes the run with the version, so
-    # a run that is found has one; a manifest that cannot be read holds no checks.
-    manifest = session.execute(
-        select(JobVersion.manifest_json).where(JobVersion.id == run.job_version_id)
-    ).scalar_one_or_none()
-    spec = next(
-        (s for s in read_manifest_checks(manifest).specs if s.name == result.check_name), None
-    )
+    spec = _check_spec(session, run.job_version_id, result.check_name)
     names = None if spec is None else check_sql_references(spec.sql)
     # SQL whose tables cannot be listed cannot be checked against the caller's grants: it is
     # never queued, and no reason is derived from it.
@@ -210,7 +285,7 @@ def submit_check_rows(
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=p.id,
-        sql_text=spec.sql,
+        sql_text=check_rows_sql_text(spec.name),
         status=QueryRunStatus.QUEUED,
         task_token_id=None,
         check_result_id=result.id,
