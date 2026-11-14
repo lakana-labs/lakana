@@ -4580,7 +4580,7 @@ def test_a_lock_file_without_a_hash_fails_with_the_authors_step_not_the_registry
     assert message.startswith(
         "uv.lock: has no SHA-256 (or SHA-384, SHA-512) hash for a file of six"
     )
-    assert message.endswith("then deploy again.")
+    assert message.endswith('add `hash = "sha256:..."` for each of its files to uv.lock yourself.')
     assert "register the index again" not in message
 
 

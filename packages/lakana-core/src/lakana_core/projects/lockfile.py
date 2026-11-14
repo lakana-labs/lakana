@@ -667,9 +667,11 @@ def _pinning_issues(lock: dict[str, object]) -> list[ProjectIssue]:
                 LOCK_FILE,
                 None,
                 f"has no SHA-256 (or SHA-384, SHA-512) hash for a file of {_listed(unhashed)}; "
-                "`uv lock` writes one for every file of a package index, and the worker builds "
-                "only what the lock pins. Run `uv lock`, commit the lock as it writes it, then "
-                "deploy again",
+                "the worker builds only what the lock pins. Run `uv lock`, commit the lock as "
+                "it writes it, then deploy again. If the lock still has no such hash, the "
+                "index serves none (only MD5, or no hash at all): take the package from an "
+                'index that serves SHA-256 hashes, or add `hash = "sha256:..."` for each of '
+                "its files to uv.lock yourself",
             )
         )
     return issues

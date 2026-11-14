@@ -1098,9 +1098,11 @@ def test_a_file_of_an_index_without_a_strong_hash_is_refused(entry: str) -> None
     """A lock written by `uv lock` always has one; a hand-edited lock need not (#77)."""
     lock = _with_files("https://pypi.org/simple", entry)
     expected = [
-        "uv.lock: has no SHA-256 (or SHA-384, SHA-512) hash for a file of zzpkg; `uv lock` "
-        "writes one for every file of a package index, and the worker builds only what the "
-        "lock pins. Run `uv lock`, commit the lock as it writes it, then deploy again"
+        "uv.lock: has no SHA-256 (or SHA-384, SHA-512) hash for a file of zzpkg; the worker "
+        "builds only what the lock pins. Run `uv lock`, commit the lock as it writes it, then "
+        "deploy again. If the lock still has no such hash, the index serves none (only MD5, or "
+        "no hash at all): take the package from an index that serves SHA-256 hashes, or add "
+        '`hash = "sha256:..."` for each of its files to uv.lock yourself'
     ]
     assert _messages(_PYPROJECT, lock, sources=_SOURCES) == expected
     assert [issue.render() for issue in pinning_issues(lock)] == expected
