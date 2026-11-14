@@ -6914,7 +6914,11 @@ layer fails the run. Fix it at the root, strictest first:
 
 - **Debian packages:** Dependabot's weekly `docker` update moves the `python:*-slim` digests in
   `Dockerfile` and `Dockerfile.task` (both images pin the same 3.14 digest; a test keeps them
-  equal). When Debian publishes a fix after the newest digest, both images upgrade exactly that
+  equal). The `docker` entry exempts `python` from Dependabot's default three-day cooldown (Docker
+  Hub re-pushes the `-slim` tags every few days, so the cooldown skipped them for weeks, #516)
+  and ignores its minor and major updates: the four `python` stages of `Dockerfile.task` are one
+  dependency to Dependabot, and a minor bump rewrote all four to the newest (PR 575). A Python
+  minor upgrade is its own pull request. When Debian publishes a fix after the newest digest, both images upgrade exactly that
   package (`apt-get install --only-upgrade <package>`, never a blanket `apt-get upgrade`) and the
   build checks the version with `dpkg --compare-versions`, so a stale mirror fails the build
   rather than the scan. `_DEBIAN_FIXES` in `packages/lakana/tests/test_dockerfile.py` lists them;
