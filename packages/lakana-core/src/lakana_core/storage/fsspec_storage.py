@@ -1,6 +1,7 @@
 """An fsspec-backed implementation of the storage protocol."""
 
 import contextlib
+import errno
 import io
 import os
 import posixpath
@@ -72,7 +73,11 @@ def _translate_s3_options(options: Mapping[str, str]) -> dict[str, object]:
     return translated
 
 
-_LOCAL_READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0)
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+"""`O_NOFOLLOW` where the platform has it (not on Windows, where the module must still import)."""
+_LOCAL_READ_FLAGS = (
+    os.O_RDONLY | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+)
 """How the local backend opens an object to read it: never through a link at its own name, and
 never blocking on a pipe someone put there."""
 
@@ -105,7 +110,7 @@ class _LocalStreamWriter:
         directory, name = os.path.split(final)
         self._final = final
         self._temp = os.path.join(directory, f".{name}.{secrets.token_hex(8)}{PART_SUFFIX}")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         # 0666 less the process umask, like every other file the backend writes: the operator
         # decides who else may read objects (a worker in the server's group, with umask 027).
         self._handle: io.BufferedWriter | None = os.fdopen(os.open(self._temp, flags, 0o666), "wb")
@@ -462,7 +467,16 @@ class FsspecStorage:
         full = self._full(path)
         parent = full.rsplit("/", 1)[0]
         if isinstance(self._fs, LocalFileSystem):
-            self._refuse_symlinked_parents(full)
+            # The stream's way: a new name opened without following a link, synced, renamed
+            # over the object (a link at its name is replaced, never written through).
+            stream = self.open_write(path)
+            try:
+                stream.write(data)
+            except BaseException:
+                stream.abort()
+                raise
+            stream.commit()
+            return
         try:
             self._fs.makedirs(parent, exist_ok=True)
             with self._fs.open(full, "wb") as handle:
@@ -475,6 +489,40 @@ class FsspecStorage:
             raise ConflictError(
                 f"Cannot write {path!r}: it already exists as a directory."
             ) from exc
+
+    def _make_local_parents(self, full: str) -> None:
+        """Make the missing directories of a local object, each one durable in its parent.
+
+        Parameters
+        ----------
+        full
+            The backend path, already confined to the root and checked for links on the way.
+
+        Raises
+        ------
+        NotADirectoryError
+            If a component of the way exists and is not a directory.
+        """
+        if not os.path.isdir(self._base):
+            # A root nothing was written to yet: made as fsspec made it, synced into its parent.
+            os.makedirs(self._base, exist_ok=True)
+            _sync_directory(os.path.dirname(self._base) or "/")
+        walked = self._base
+        for part in [p for p in full[len(self._base) :].split("/")[:-1] if p]:
+            parent, walked = walked, f"{walked}/{part}"
+            try:
+                info = os.lstat(walked)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(walked)
+                except FileExistsError:
+                    pass  # made by a concurrent writer: judged below like an old one
+                else:
+                    _sync_directory(parent)
+                    continue
+                info = os.lstat(walked)
+            if not stat.S_ISDIR(info.st_mode):
+                raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), walked)
 
     def _refuse_symlinked_parents(self, full: str) -> None:
         """Refuse a path whose directories include a symbolic link (local backend).
@@ -561,7 +609,10 @@ class FsspecStorage:
         if local:
             self._refuse_symlinked_parents(full)
         try:
-            self._fs.makedirs(parent, exist_ok=True)
+            if local:
+                self._make_local_parents(full)
+            else:
+                self._fs.makedirs(parent, exist_ok=True)
             if self._fs.isdir(full):
                 raise ConflictError(f"Cannot write {path!r}: it already exists as a directory.")
             if local:

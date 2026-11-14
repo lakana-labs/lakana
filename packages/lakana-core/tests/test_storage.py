@@ -984,7 +984,8 @@ def test_a_committed_object_is_durable_in_its_directory(
     writer = build_storage(config).open_write("d/x")
     writer.write(b"1")
     writer.commit()
-    assert synced == [(False, False), (True, True)]
+    # `d` is new: the root is synced for it, then the file, then `d` after the rename
+    assert synced == [(True, False), (False, False), (True, True)]
 
 
 @pytest.mark.parametrize(("umask", "mode"), [(0o027, 0o640), (0o077, 0o600), (0o022, 0o644)])
@@ -1002,3 +1003,61 @@ def test_a_streamed_object_follows_the_process_umask(
     assert (
         stat.S_IMODE(os.stat(Path(config.root.removeprefix("file://")) / "d" / "x").st_mode) == mode
     )
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_write_replaces_a_link_at_the_objects_name_and_never_writes_through_it(
+    tmp_path: Path, dangling: bool
+) -> None:
+    """`write` follows a link at its name no more than `open_write` does (review of #70)."""
+    outside = tmp_path / "outside.txt"
+    if not dangling:
+        outside.write_bytes(b"secret")
+    root = tmp_path / "root"
+    root.mkdir()
+    os.symlink(outside, root / "obj")
+    storage = FsspecStorage(f"file://{root}", {})
+    storage.write("obj", b"new")
+    assert not os.path.islink(root / "obj")
+    assert (root / "obj").read_bytes() == b"new"
+    if dangling:
+        assert not outside.exists()
+    else:
+        assert outside.read_bytes() == b"secret"
+
+
+def test_write_refuses_a_link_in_a_directory_on_the_way(tmp_path: Path) -> None:
+    storage, outside = _linked_root(tmp_path)
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.write("real/inner-link/new", b"through")
+    assert sorted(os.listdir(outside)) == ["sub", "x"]
+
+
+def test_write_is_atomic_and_durable_like_a_stream(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file, its directory and each directory made for it are synced (review of #70)."""
+    synced: list[str] = []
+    real_fsync = os.fsync
+
+    def fsync(descriptor: int) -> None:
+        info = os.fstat(descriptor)
+        synced.append("dir" if stat.S_ISDIR(info.st_mode) else "file")
+        real_fsync(descriptor)
+
+    root = Path(config.root.removeprefix("file://"))
+    made: list[str] = []
+    real_mkdir = os.mkdir
+
+    def mkdir(path: str, mode: int = 0o777, **kwargs: object) -> None:
+        made.append(str(path))
+        real_mkdir(path, mode, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "mkdir", mkdir)
+    build_storage(config).write("a/b/x", b"1")
+    assert (root / "a" / "b" / "x").read_bytes() == b"1"
+    assert made == [str(root / "a"), str(root / "a" / "b")]
+    # the root (for `a`), `a` (for `b`), the file, then `b` after the rename
+    assert synced == ["dir", "dir", "file", "dir"]
+    assert [name for name in os.listdir(root / "a" / "b") if name != "x"] == []

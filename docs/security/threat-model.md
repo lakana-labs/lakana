@@ -700,8 +700,9 @@ otherwise would misrepresent what the platform does.
   `FsspecStorage` (see "path confinement" below) confines the root-relative path string it
   is given. Its own reads, writes, deletes and listings on the local backend refuse a
   directory on the way that is a symlink (`_refuse_symlinked_parents`, a check by path, not
-  by descriptor), open an object without following a link at its name, and skip links in a
-  listing (#70); but Iceberg files are read and written through PyIceberg's `FileIO` and by
+  by descriptor), open an object without following a link at its name, write one only under a
+  new name renamed over it (a link there is replaced, never written through), and skip links in
+  a listing (#70); but Iceberg files are read and written through PyIceberg's `FileIO` and by
   DuckDB, which follow a symlink placed inside the root. Closing this with a `realpath` containment check would add a stat on every
   call and a TOCTOU window between checking and using the resolved path, and the fix does
   not generalise: object-store backends such as S3 and ABFS have no symlinks and are

@@ -367,10 +367,16 @@ gets the mode the process's **umask** leaves: `0666` less the umask, and directo
   artifact as failed otherwise). With the common default umask `022`, files would be readable by
   every user of the host, and the data in them is access-controlled in Lakana. With `077`, a worker
   of another user cannot read them.
-- After a power loss, an object that Lakana recorded as written is on disk: each write is synced, and
-  so is its directory after the rename that publishes it.
-- A symbolic link inside the root is never followed by Lakana's own reads, writes and listings of
-  that root. Do not create links there.
+- **What is synced to disk.** The files Lakana stores itself (artifact files and manifests, code
+  archives, task logs, query results) are written under a temporary name, synced, renamed into
+  place, and their directory is synced after the rename; a directory made for one is synced into its
+  parent. After a power loss such a file that Lakana recorded as written is there. Table data and
+  table metadata (Iceberg files, written by PyIceberg and DuckDB) are not synced by Lakana: they
+  are as durable as the file system makes them without a sync.
+- **Symbolic links.** Lakana's own storage calls (the files listed above, and listings of a table's
+  directory or an external table's `raw/` directory) never follow a link at a file's name and refuse
+  a link in a directory on the way. Iceberg files are read and written through libraries that do
+  follow links. Do not create links inside the root.
 
 ### Settings
 
