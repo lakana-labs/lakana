@@ -1176,7 +1176,10 @@ first failure; CI's `ui` job runs them one step each.
   --update`; never lower the baseline or add a coverage exclusion to fit.
 - **`prove-gates`** (`ui/scripts/prove-gates.mjs`) copies `ui/` and the build into a scratch
   directory (`$GATE_PROBE_DIR`, default `~/.cache/lakana-ui-gate-probe`; CI uses
-  `$RUNNER_TEMP/gate-probe`), writes one violation per gate (an unsafe `any`, a conditional hook, an
+  `$RUNNER_TEMP/gate-probe`), links in the server sources Vitest reads (`SERVER_SOURCES`:
+  lakana-core's `health_signals.py` and `health_record.py`, whose effects and reasons the interface
+  must have words for; a test reading another file outside `ui/` adds it there), writes one
+  violation per gate (an unsafe `any`, a conditional hook, an
   image without alt text, an undocumented export, a `fetch`, `window.fetch`, `navigator.sendBeacon`
   or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type
   errors, an import out of `src/api/` and a cycle, an unused file, an untested branch, a size limit
