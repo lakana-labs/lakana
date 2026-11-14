@@ -4334,7 +4334,9 @@ class CatalogService:
             return described
         if window_minutes is None:
             return replace(described, sql=None)
-        names: list[str] = []
+        # Each reference by its id, as a `TableRef`: its dotted name read again would split a
+        # namespace part that holds a "." and miss the table and its policies.
+        current_refs: list[object] = []
         for reference_id, _ in described.references:
             current = self._session.get(Table, uuid.UUID(reference_id))
             if current is None:
@@ -4342,16 +4344,15 @@ class CatalogService:
             path = self._session.execute(
                 select(Namespace.path).where(Namespace.id == current.namespace_id)
             ).scalar_one()
-            names.append(".".join((*NamespacePath.parse(path).parts, current.name)))
-        dotted = ".".join((*ref.namespace.parts, ref.name))
+            current_refs.append(TableRef(ref.environment, NamespacePath.parse(path), current.name))
         stored = [name for _, name in described.references]
         if not passes_content_gate(
             self._session,
             self._authz,
             p,
             ref.environment,
-            dotted,
-            names,
+            ref,
+            current_refs,
             bool(sql_file_references(sql, stored)),
         ):
             return self._restricted_view_sql(described)
