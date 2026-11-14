@@ -217,15 +217,16 @@ def _visible(text: str) -> str:
         `text` with each line break a line feed, each tab four spaces, and every other control
         and bidirectional control character written as an escape; other characters, non-ASCII
         letters included, are unchanged; at most `_MAX_CELL_LINES` lines and, when there are
-        more, a last line ``… (N more lines; use --output json to see all)``.
+        more, a last line ``… (N more lines; use --output json to see all)`` (``1 more line``).
     """
     flat = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", _TAB_SPACES)
     lines = _BLANK_LINES.sub("\n", _UNSAFE.sub(_escaped, flat)).strip("\n").split("\n")
     if len(lines) <= _MAX_CELL_LINES:
         return "\n".join(lines)
     more = len(lines) - _MAX_CELL_LINES
+    unit = "line" if more == 1 else "lines"
     return "\n".join(
-        [*lines[:_MAX_CELL_LINES], f"… ({more} more lines; use --output json to see all)"]
+        [*lines[:_MAX_CELL_LINES], f"… ({more} more {unit}; use --output json to see all)"]
     )
 
 

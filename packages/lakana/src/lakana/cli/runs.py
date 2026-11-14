@@ -278,7 +278,8 @@ def _emit_tasks(state: CliState, run: Run) -> None:
     if hidden:
         typer.echo(
             f"+{hidden} more failed tasks; "
-            f"see `lakana runs show {run.id} --env {run.environment} --output json`."
+            f"see `lakana runs show {_output.inline(run.id)} --env "
+            f"{_output.inline(run.environment)} --output json`."
         )
 
 
@@ -655,7 +656,7 @@ def _summary(state: CliState, run: Run) -> None:
     if state.output == "json":
         _output.print_json(run)
         return
-    typer.echo(f"Run {run.id} {run.status}")
+    typer.echo(f"Run {_output.inline(run.id)} {run.status}")
     _emit_tasks(state, run)
     _emit_failures(run)
     _emit_schema_changes(run)
@@ -771,14 +772,14 @@ def follow_run(
     except KeyboardInterrupt as exc:
         typer.echo(
             "Interrupted. The run keeps going; follow it with "
-            f"'lakana runs show {started.id} --env {environment}'.",
+            f"'lakana runs show {_output.inline(started.id)} --env {environment}'.",
             err=True,
         )
         raise typer.Exit(130) from exc
     except TimeoutError as exc:
         typer.echo(
             f"error: {exc}. The run keeps going; follow it with "
-            f"'lakana runs show {started.id} --env {environment}'.",
+            f"'lakana runs show {_output.inline(started.id)} --env {environment}'.",
             err=True,
         )
         raise typer.Exit(1) from exc

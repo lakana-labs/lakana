@@ -161,6 +161,12 @@ lakana project-version show ID --env dev
   host (many indexes keep their files on a storage service): uv fetches it from there, and the
   credential is **not** sent to that host. Keep the files on the index's own host and port if
   they need the password.
+- **Every file of an index is pinned by its hash, and only by an `http` or `https` URL.** `uv lock`
+  writes both; a lock edited by hand that drops a hash, keeps only an MD5 one, or names a `file:`
+  URL is refused at deploy and before every run. The hash is what makes another download host
+  safe: the bytes cannot differ from what you locked. Which hosts a build may reach at all is set by
+  the operator's network rules for tasks, not by the lock. Files in `wheelhouse` are named by their path and
+  need no hash: the deployed commit fixes their bytes.
 - **The worker builds without your `[tool.uv]` settings.** It runs `uv sync --frozen --no-config`.
   Ignored on the worker: the settings under `[tool.uv]` (for example `no-build`,
   `no-binary-package`, `required-version`, `compile-bytecode`, proxy and TLS settings) and any

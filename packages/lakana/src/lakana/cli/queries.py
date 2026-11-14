@@ -938,7 +938,11 @@ def submit(ctx: typer.Context, query: str, env: _ENV = None) -> None:
     environment = resolve_environment(state, env)
     text = sys.stdin.read() if query == "-" else query
     run = state.client().queries.submit(text, environment)
-    _output.done(state, f"Submitted query {run.id}", Submitted(id=run.id, environment=environment))
+    _output.done(
+        state,
+        f"Submitted query {_output.inline(run.id)}",
+        Submitted(id=run.id, environment=environment),
+    )
 
 
 @query_app.command("status")

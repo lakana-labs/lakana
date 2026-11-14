@@ -72,7 +72,8 @@ def retry_wait(exc: LakanaError) -> float:
     text = (exc.retry_after or "").strip()
     if not re.fullmatch(r"[0-9]+", text):
         return BUSY_BACKOFF_SECONDS
-    seconds = float(int(text)) if len(text) <= 9 else RETRY_AFTER_CAP_SECONDS
+    digits = text.lstrip("0") or "0"
+    seconds = float(int(digits)) if len(digits) <= 9 else RETRY_AFTER_CAP_SECONDS
     return min(seconds, RETRY_AFTER_CAP_SECONDS)
 
 

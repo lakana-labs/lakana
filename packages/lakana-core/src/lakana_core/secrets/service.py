@@ -25,7 +25,7 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.connections.endpoints import endpoint_hosts
 from lakana_core.db import refuse_concurrent_change
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, ValidationError
-from lakana_core.identifiers import shown
+from lakana_core.identifiers import is_secret_name, shown
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -52,6 +52,31 @@ from lakana_core.secrets.uses import (
     target_row,
     used_by_its_environment,
 )
+
+
+def require_storable_name(name: str) -> None:
+    """Refuse a name a new secret may not have, before any query sees it.
+
+    The rule is `is_secret_name`, the one every index, repository and deploy key applies to the
+    secret it names, so a new secret never has a name nothing could name. It also keeps out
+    what PostgreSQL refuses in a text parameter (a NUL, a lone surrogate), which would otherwise
+    reach the caller as a server error. A secret created before the rule keeps its name.
+
+    Parameters
+    ----------
+    name
+        The name a caller gave.
+
+    Raises
+    ------
+    ValidationError
+        If `is_secret_name` refuses it.
+    """
+    if not is_secret_name(name):
+        raise ValidationError(
+            "A secret name must be 1-255 characters with no space, control character, ':', "
+            "lone surrogate or bidirectional control character; give the secret another name."
+        )
 
 
 def insert_secret(
@@ -334,12 +359,13 @@ class SecretService:
         ValidationError
             If `use` is an index, repository or connection and the environment itself uses a
             secret of this name, for storage or webhooks, or `use` is a connection of another
-            environment.
+            environment; or the name is one the database cannot store (`require_storable_name`).
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_SECRET, Securable.environment_scope(environment))
         require_step_up(p)
+        require_storable_name(name)
         env = self._get_environment(environment)
         with refuse_concurrent_change(self._session, f"Secret '{shown(name)}'"):
             if use is not None:

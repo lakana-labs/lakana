@@ -199,7 +199,7 @@ def _report(state: CliState, deploy: Deploy, verb: str) -> None:
         if start.outcome == _PENDING:
             typer.echo(
                 f"warning: the start of job `{_output.inline(start.job)}` is not recorded yet. "
-                f"See what came of it with 'lakana deploys show {deploy.id} --env "
+                f"See what came of it with 'lakana deploys show {_output.inline(deploy.id)} --env "
                 f"{deploy.environment}'.",
                 err=True,
             )
@@ -356,7 +356,9 @@ def deploy(
         hint = "; ".join(part for part in (exc.hint, _MOVED_HINT) if part)
         raise CliError(str(exc), exc.exit_code, hint=hint, kind=exc.kind) from exc
     if not no_wait:
-        typer.echo(f"Queued {'dry run' if dry_run else 'deploy'} {accepted.id}", err=True)
+        typer.echo(
+            f"Queued {'dry run' if dry_run else 'deploy'} {_output.inline(accepted.id)}", err=True
+        )
     if no_wait:
         if state.output == "json":
             _output.print_json(accepted)
@@ -424,7 +426,7 @@ def rollback(
     accepted = client.deploys.create(
         environment, repository, kind="rollback", to_sha=to, to_previous=to_previous
     )
-    typer.echo(f"Queued rollback {accepted.id}", err=True)
+    typer.echo(f"Queued rollback {_output.inline(accepted.id)}", err=True)
     _report(state, _wait(state, client, environment, accepted.id, timeout), "Rolled back")
 
 

@@ -1,10 +1,12 @@
 """An fsspec-backed implementation of the storage protocol."""
 
 import contextlib
+import errno
 import io
 import os
 import posixpath
 import secrets
+import stat
 import urllib.parse
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
@@ -71,6 +73,34 @@ def _translate_s3_options(options: Mapping[str, str]) -> dict[str, object]:
     return translated
 
 
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+"""`O_NOFOLLOW` where the platform has it (not on Windows, where the module must still import)."""
+_LOCAL_READ_FLAGS = (
+    os.O_RDONLY | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+)
+"""How the local backend opens an object to read it: never through a link at its own name, and
+never blocking on a pipe someone put there."""
+
+
+def _sync_directory(directory: str) -> None:
+    """Write a directory's entries to disk, so that a rename in it survives a power loss.
+
+    Parameters
+    ----------
+    directory
+        The directory.
+    """
+    descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+_TEMP_NAME_BYTES = 100
+"""Bytes of an object's name kept in its temporary name (file systems allow 255 per name)."""
+
+
 class _LocalStreamWriter:
     """Write to a temporary name next to the target and rename on commit.
 
@@ -83,9 +113,14 @@ class _LocalStreamWriter:
     def __init__(self, final: str) -> None:
         directory, name = os.path.split(final)
         self._final = final
-        self._temp = os.path.join(directory, f".{name}.{secrets.token_hex(8)}{PART_SUFFIX}")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
-        self._handle: io.BufferedWriter | None = os.fdopen(os.open(self._temp, flags, 0o600), "wb")
+        # At most 100 bytes of the name, so that the temporary name fits a 255-byte limit too;
+        # the leading dot and the suffix are what a sweep recognises it by.
+        kept = os.fsdecode(os.fsencode(name)[:_TEMP_NAME_BYTES])
+        self._temp = os.path.join(directory, f".{kept}.{secrets.token_hex(8)}{PART_SUFFIX}")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        # 0666 less the process umask, like every other file the backend writes: the operator
+        # decides who else may read objects (a worker in the server's group, with umask 027).
+        self._handle: io.BufferedWriter | None = os.fdopen(os.open(self._temp, flags, 0o666), "wb")
 
     def write(self, data: bytes) -> None:
         """Add bytes.
@@ -105,7 +140,11 @@ class _LocalStreamWriter:
         self._handle.write(data)
 
     def commit(self) -> None:
-        """Flush, sync and rename over the target.
+        """Flush, sync and rename over the target, then sync the directory.
+
+        The directory's sync makes the rename itself durable: without it, a power loss after
+        the call returns can leave the old name (or none), while a database row written next
+        already says the object is there.
 
         Raises
         ------
@@ -126,6 +165,7 @@ class _LocalStreamWriter:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(self._temp)
             raise
+        _sync_directory(os.path.dirname(self._final))
 
     def abort(self) -> None:
         """Remove the temporary file. A no-op once closed."""
@@ -358,16 +398,58 @@ class FsspecStorage:
         Raises
         ------
         NotFoundError
-            If no object exists at that path, or the path names a directory
-            rather than an object.
+            If no object exists at that path, the path names a directory
+            rather than an object, or (local backend) a link is at its name.
         ValidationError
-            If the path contains a NUL byte, or escapes the configured storage
-            root.
+            If the path contains a NUL byte, escapes the configured storage
+            root, or (local backend) passes through a symbolic link.
         """
+        full = self._full(path)
+        if isinstance(self._fs, LocalFileSystem):
+            with os.fdopen(self._open_local(full, path), "rb") as handle:
+                return handle.read()
         try:
-            return self._fs.cat_file(self._full(path))
+            return self._fs.cat_file(full)
         except (FileNotFoundError, IsADirectoryError) as exc:
             raise NotFoundError(f"No object at {path!r}.") from exc
+
+    def _open_local(self, full: str, path: str) -> int:
+        """Open a local object for reading, refusing what `open_write` refuses.
+
+        Parameters
+        ----------
+        full
+            The backend path, already confined to the root.
+        path
+            The root-relative path, for messages.
+
+        Returns
+        -------
+        int
+            An open descriptor of a regular file; the caller closes it.
+
+        Raises
+        ------
+        ValidationError
+            If a directory between the root and the object is a symbolic link.
+        NotFoundError
+            If nothing, a directory, a link or anything but a regular file is at that name: a
+            link is not an object, as the listings skip it.
+        PermissionError
+            If the process may not read the file.
+        """
+        self._refuse_symlinked_parents(full)
+        missing = NotFoundError(f"No object at {path!r}.")
+        try:
+            descriptor = os.open(full, _LOCAL_READ_FLAGS)
+        except PermissionError:
+            raise
+        except OSError as exc:
+            raise missing from exc
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            os.close(descriptor)
+            raise missing
+        return descriptor
 
     def write(self, path: str, data: bytes) -> None:
         """Write an object, creating parent directories as needed.
@@ -386,11 +468,22 @@ class FsspecStorage:
             also be used as a directory, or if `path` itself already exists
             as a directory.
         ValidationError
-            If the path contains a NUL byte, or escapes the configured storage
-            root.
+            If the path contains a NUL byte, escapes the configured storage
+            root, or (local backend) passes through a symbolic link.
         """
         full = self._full(path)
         parent = full.rsplit("/", 1)[0]
+        if isinstance(self._fs, LocalFileSystem):
+            # The stream's way: a new name opened without following a link, synced, renamed
+            # over the object (a link at its name is replaced, never written through).
+            stream = self.open_write(path)
+            try:
+                stream.write(data)
+            except BaseException:
+                stream.abort()
+                raise
+            stream.commit()
+            return
         try:
             self._fs.makedirs(parent, exist_ok=True)
             with self._fs.open(full, "wb") as handle:
@@ -403,6 +496,40 @@ class FsspecStorage:
             raise ConflictError(
                 f"Cannot write {path!r}: it already exists as a directory."
             ) from exc
+
+    def _make_local_parents(self, full: str) -> None:
+        """Make the missing directories of a local object, each one durable in its parent.
+
+        Parameters
+        ----------
+        full
+            The backend path, already confined to the root and checked for links on the way.
+
+        Raises
+        ------
+        NotADirectoryError
+            If a component of the way exists and is not a directory.
+        """
+        if not os.path.isdir(self._base):
+            # A root nothing was written to yet: made as fsspec made it, synced into its parent.
+            os.makedirs(self._base, exist_ok=True)
+            _sync_directory(os.path.dirname(self._base) or "/")
+        walked = self._base
+        for part in [p for p in full[len(self._base) :].split("/")[:-1] if p]:
+            parent, walked = walked, f"{walked}/{part}"
+            try:
+                info = os.lstat(walked)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(walked)
+                except FileExistsError:
+                    pass  # made by a concurrent writer: judged below like an old one
+                else:
+                    _sync_directory(parent)
+                    continue
+                info = os.lstat(walked)
+            if not stat.S_ISDIR(info.st_mode):
+                raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), walked)
 
     def _refuse_symlinked_parents(self, full: str) -> None:
         """Refuse a path whose directories include a symbolic link (local backend).
@@ -489,7 +616,10 @@ class FsspecStorage:
         if local:
             self._refuse_symlinked_parents(full)
         try:
-            self._fs.makedirs(parent, exist_ok=True)
+            if local:
+                self._make_local_parents(full)
+            else:
+                self._fs.makedirs(parent, exist_ok=True)
             if self._fs.isdir(full):
                 raise ConflictError(f"Cannot write {path!r}: it already exists as a directory.")
             if local:
@@ -525,12 +655,15 @@ class FsspecStorage:
         Raises
         ------
         NotFoundError
-            If no object exists at that path. Raised by this call, before
-            the iterator is returned.
+            If no object exists at that path, or (local backend) a link is at its name.
+            Raised by this call, before the iterator is returned.
         ValidationError
-            If the path contains a NUL byte, or escapes the storage root.
+            If the path contains a NUL byte, escapes the storage root, or (local backend)
+            passes through a symbolic link.
         """
         full = self._full(path)
+        if isinstance(self._fs, LocalFileSystem):
+            return _chunks(os.fdopen(self._open_local(full, path), "rb"), chunk_bytes)
         if not self._fs.isfile(full):
             raise NotFoundError(f"No object at {path!r}.")
         try:
@@ -555,10 +688,13 @@ class FsspecStorage:
         PermissionError
             If the backend refuses to delete the object.
         ValidationError
-            If the path contains a NUL byte, or escapes the configured storage
-            root.
+            If the path contains a NUL byte, escapes the configured storage
+            root, or (local backend) passes through a symbolic link. A link at
+            the object's own name is removed, never what it points to.
         """
         full = self._full(path)
+        if isinstance(self._fs, LocalFileSystem):
+            self._refuse_symlinked_parents(full)
         try:
             self._fs.rm_file(full)
         except (FileNotFoundError, IsADirectoryError) as exc:
@@ -593,7 +729,33 @@ class FsspecStorage:
             If the path contains a NUL byte, or escapes the configured storage
             root.
         """
-        return bool(self._fs.isfile(self._full(path)))
+        full = self._full(path)
+        if isinstance(self._fs, LocalFileSystem):
+            return self._local_regular(full)
+        return bool(self._fs.isfile(full))
+
+    def _local_regular(self, full: str) -> bool:
+        """Say whether a local path is a regular file reached without a link.
+
+        Parameters
+        ----------
+        full
+            The backend path, already confined to the root.
+
+        Returns
+        -------
+        bool
+            ``False`` for a link at the name or on the way, as the reads refuse both.
+        """
+        walked = self._base
+        for part in [p for p in full[len(self._base) :].split("/")[:-1] if p]:
+            walked = f"{walked}/{part}"
+            if os.path.islink(walked):
+                return False
+        try:
+            return stat.S_ISREG(os.lstat(full).st_mode)
+        except OSError:
+            return False
 
     def list(self, prefix: str) -> Iterator[str]:
         """List objects beneath a prefix.
@@ -606,7 +768,8 @@ class FsspecStorage:
         Yields
         ------
         str
-            Root-relative paths.
+            Root-relative paths, sorted. On the local backend a symlink is skipped, and a
+            symlink anywhere between the root and `prefix` yields nothing.
 
         Raises
         ------
@@ -615,6 +778,12 @@ class FsspecStorage:
             root.
         """
         full = self._full(prefix)
+        if isinstance(self._fs, LocalFileSystem):
+            if full != self._base and self._local_regular(full):
+                yield full[len(self._base) + 1 :]  # a prefix that is one object, as `find` says
+                return
+            yield from sorted(found.path for found in self._list_local_objects(full))
+            return
         if not self._fs.exists(full):
             return
         for found in self._fs.find(full):

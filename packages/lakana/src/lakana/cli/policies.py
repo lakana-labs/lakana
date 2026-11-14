@@ -142,7 +142,7 @@ def create_row_filter(
     row_filter = state.client().row_filters.create(**target, expression=expression)
     _output.done(
         state,
-        f"Created row filter {row_filter.id} on "
+        f"Created row filter {_output.inline(row_filter.id)} on "
         f"{_output.inline(target['environment'])}/{_output.inline(table)}",
         row_filter,
     )
@@ -256,7 +256,7 @@ def create_column_mask(
     mask = state.client().column_masks.create(**target, column=column, expression=expression)
     _output.done(
         state,
-        f"Created column mask {mask.id} on "
+        f"Created column mask {_output.inline(mask.id)} on "
         f"{_output.inline(target['environment'])}/{_output.inline(table)}.{_output.inline(column)}",
         mask,
     )

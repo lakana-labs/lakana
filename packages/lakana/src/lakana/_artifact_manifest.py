@@ -73,9 +73,9 @@ READ_BYTES = 1024 * 1024
 """Bytes read from a local file at a time."""
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
 _FILE_FLAGS = os.O_RDONLY | _NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
-_BY_DESCRIPTOR = (
+BY_DESCRIPTOR = (
     hasattr(os, "O_DIRECTORY")
     and _NOFOLLOW != 0
     and os.open in os.supports_dir_fd
@@ -152,6 +152,10 @@ class LocalFile:
         allows, the file is opened again from this directory by descriptor, one component at a
         time without following a link, so a directory swapped for a link after the scan is
         not followed.
+    dir_fd
+        The descriptor the scan was given, or `None`: `root` (or `source` for a single file) is
+        then looked up relative to it, never relative to the working directory. The caller of
+        the scan keeps it open until the upload is done.
     """
 
     path: str
@@ -159,6 +163,7 @@ class LocalFile:
     size: int
     sha256: str
     root: str | None = None
+    dir_fd: int | None = None
 
 
 @dataclass(frozen=True)
@@ -398,7 +403,7 @@ def root_label(path: object) -> str:
     return text if len(text) <= _ROOT_SHOWN else "..." + text[-(_ROOT_SHOWN - 3) :]
 
 
-def _below(root: str, parts: list[str]) -> int:
+def _below(root: str, parts: list[str], dir_fd: int | None = None) -> int:
     """Open a file below a directory by descriptor, never following a link on the way.
 
     Each directory is opened relative to the one before it with `O_NOFOLLOW`, so a directory
@@ -410,6 +415,8 @@ def _below(root: str, parts: list[str]) -> int:
         The directory the walk started in.
     parts
         The path components below it; the last is the file.
+    dir_fd
+        A directory `root` is relative to, or `None` for the working directory.
 
     Returns
     -------
@@ -421,10 +428,10 @@ def _below(root: str, parts: list[str]) -> int:
     OSError
         If a component cannot be opened; `ELOOP` and `ENOTDIR` mean it was swapped.
     """
-    directory = os.open(root, _DIR_FLAGS)
+    directory = os.open(root, DIR_FLAGS, dir_fd=dir_fd)
     try:
         for part in parts[:-1]:
-            child = os.open(part, _DIR_FLAGS, dir_fd=directory)
+            child = os.open(part, DIR_FLAGS, dir_fd=directory)
             os.close(directory)
             directory = child
         return os.open(parts[-1], _FILE_FLAGS, dir_fd=directory)
@@ -432,7 +439,7 @@ def _below(root: str, parts: list[str]) -> int:
         os.close(directory)
 
 
-def open_regular(source: str, path: str, root: str | None = None) -> int:
+def open_regular(source: str, path: str, root: str | None = None, dir_fd: int | None = None) -> int:
     """Open a local file for reading without following a link, and check what it is.
 
     Parameters
@@ -443,7 +450,10 @@ def open_regular(source: str, path: str, root: str | None = None) -> int:
         Its path inside the artifact, for messages.
     root
         The directory it was found below; when given and the platform allows, every directory
-        on the way is opened by descriptor without following a link (`_BY_DESCRIPTOR`).
+        on the way is opened by descriptor without following a link (`BY_DESCRIPTOR`).
+    dir_fd
+        A directory `root`, or `source` when `root` is `None`, is relative to; `None` for the
+        working directory.
 
     Returns
     -------
@@ -457,10 +467,10 @@ def open_regular(source: str, path: str, root: str | None = None) -> int:
         opened.
     """
     try:
-        if root is not None and _BY_DESCRIPTOR:
-            descriptor = _below(root, path.split("/"))
+        if root is not None and BY_DESCRIPTOR:
+            descriptor = _below(root, path.split("/"), dir_fd)
         else:
-            descriptor = os.open(source, _FILE_FLAGS)
+            descriptor = os.open(source, _FILE_FLAGS, dir_fd=dir_fd)
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
             raise ManifestError(_SWAPPED.format(path=shown(path))) from exc
@@ -491,7 +501,11 @@ def _identity(info: os.stat_result) -> tuple[int, int, int, int]:
 
 
 def _hashed(
-    source: str, path: str, expected: os.stat_result | None = None, root: str | None = None
+    source: str,
+    path: str,
+    expected: os.stat_result | None = None,
+    root: str | None = None,
+    dir_fd: int | None = None,
 ) -> LocalFile:
     """Hash one regular file without following a link, noticing a change under the hash.
 
@@ -505,6 +519,8 @@ def _hashed(
         What the scan saw of the file; a different file, size or modification time is a change.
     root
         The directory it was found below, as for `open_regular`.
+    dir_fd
+        The directory `root` or `source` is relative to, as for `open_regular`.
 
     Returns
     -------
@@ -517,7 +533,7 @@ def _hashed(
         If it is a link or not a regular file when opened, cannot be read, or changed while it
         was scanned.
     """
-    descriptor = open_regular(source, path, root)
+    descriptor = open_regular(source, path, root, dir_fd)
     digest = hashlib.sha256()
     size = 0
     with os.fdopen(descriptor, "rb") as handle:
@@ -537,7 +553,9 @@ def _hashed(
             ) from exc
         if _identity(os.fstat(handle.fileno())) != _identity(before) or size != before.st_size:
             raise ManifestError(CHANGED.format(path=shown(path)))
-    return LocalFile(path=path, source=source, size=size, sha256=digest.hexdigest(), root=root)
+    return LocalFile(
+        path=path, source=source, size=size, sha256=digest.hexdigest(), root=root, dir_fd=dir_fd
+    )
 
 
 def _unreadable(path: str, exc: OSError) -> str:
@@ -706,7 +724,7 @@ def _walk_by_descriptor(
                     raise ManifestError(_LINK.format(path=shown(name)))
                 if stat.S_ISDIR(info.st_mode):
                     try:
-                        child = os.open(entry.name, _DIR_FLAGS, dir_fd=directory)
+                        child = os.open(entry.name, DIR_FLAGS, dir_fd=directory)
                     except OSError as exc:
                         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
                             raise ManifestError(_SWAPPED.format(path=shown(name))) from exc
@@ -760,12 +778,14 @@ def _walk_by_path(collector: _Collector, root: str) -> None:
             raise ManifestError(_unreadable(prefix.rstrip("/") or ".", exc)) from exc
 
 
-def _walk(root: str, limits: ScanLimits) -> list[tuple[str, str, os.stat_result]]:
+def _walk(
+    root: str, limits: ScanLimits, dir_fd: int | None = None
+) -> list[tuple[str, str, os.stat_result]]:
     """List the regular files below a directory, giving up as soon as a limit is passed.
 
     Links are neither followed nor accepted, entries are visited as they are listed (a directory
     of millions of names is never read whole), and the walk stops at the first entry beyond the
-    limits. Where the platform allows (`_BY_DESCRIPTOR`) every directory is opened relative to its
+    limits. Where the platform allows (`BY_DESCRIPTOR`) every directory is opened relative to its
     parent with `O_NOFOLLOW`, so one swapped for a link while the walk runs is refused.
 
     Parameters
@@ -774,6 +794,9 @@ def _walk(root: str, limits: ScanLimits) -> list[tuple[str, str, os.stat_result]
         The directory.
     limits
         What a scan may look at.
+    dir_fd
+        A directory `root` is relative to, or `None` for the working directory; given only where
+        the walk is by descriptor.
 
     Returns
     -------
@@ -786,11 +809,11 @@ def _walk(root: str, limits: ScanLimits) -> list[tuple[str, str, os.stat_result]
         For a link, a device, socket or pipe, an unreadable directory, or a limit passed.
     """
     collector = _Collector(limits)
-    if not _BY_DESCRIPTOR:
+    if not BY_DESCRIPTOR:
         _walk_by_path(collector, root)
         return collector.found
     try:
-        top = os.open(root, _DIR_FLAGS)
+        top = os.open(root, DIR_FLAGS, dir_fd=dir_fd)
     except OSError as exc:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
             raise ManifestError(_SWAPPED.format(path=root_label(root))) from exc
@@ -802,7 +825,9 @@ def _walk(root: str, limits: ScanLimits) -> list[tuple[str, str, os.stat_result]
     return collector.found
 
 
-def scan(path: Path, limits: ScanLimits | None = None) -> LocalArtifact:
+def scan(
+    path: Path, limits: ScanLimits | None = None, *, dir_fd: int | None = None
+) -> LocalArtifact:
     """Turn a local file or directory into an artifact, refusing what cannot be stored.
 
     Everything in a directory is stored, hidden files (a name starting with a dot, such as
@@ -816,6 +841,11 @@ def scan(path: Path, limits: ScanLimits | None = None) -> LocalArtifact:
         A regular file, or a directory.
     limits
         What the scan may look at; the server's defaults when `None`.
+    dir_fd
+        An open descriptor of a directory: `path` is then ``.`` (that directory) or one name in
+        it, and nothing is looked up relative to the working directory, now or when the upload
+        opens the files again. The caller keeps it open until the upload is done. Needs a
+        platform that opens files relative to a directory (Linux, macOS).
 
     Returns
     -------
@@ -824,6 +854,9 @@ def scan(path: Path, limits: ScanLimits | None = None) -> LocalArtifact:
 
     Raises
     ------
+    ValueError
+        If `dir_fd` is given with a path that is not ``.`` or one name, or on a platform that
+        cannot open files relative to a directory.
     ManifestError
         For a missing or unreadable path, a symbolic link anywhere, a device, socket or
         pipe, a file hard-linked from outside, a name the server would
@@ -832,8 +865,10 @@ def scan(path: Path, limits: ScanLimits | None = None) -> LocalArtifact:
         file at all.
     """
     limits = limits or ScanLimits()
+    if dir_fd is not None:
+        _check_relative_name(path)
     try:
-        top = os.lstat(path)
+        top = os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
     except OSError as exc:
         if exc.errno in (errno.ENOENT, errno.ENOTDIR):
             raise ManifestError(
@@ -848,7 +883,7 @@ def scan(path: Path, limits: ScanLimits | None = None) -> LocalArtifact:
         raise ManifestError(_LINK.format(path=root_label(path)))
     if stat.S_ISDIR(top.st_mode):
         root = str(path)
-        found = _walk(root, limits)
+        found = _walk(root, limits, dir_fd)
     elif stat.S_ISREG(top.st_mode):
         _within(Path(path).name, top.st_size, 0, limits)
         found = [(Path(path).name, str(path), top)]
@@ -882,5 +917,33 @@ def scan(path: Path, limits: ScanLimits | None = None) -> LocalArtifact:
         raise ManifestError(collision)
     return LocalArtifact(
         is_directory=root is not None,
-        files=tuple(_hashed(entry, relative, info, root) for relative, entry, info in found),
+        files=tuple(
+            _hashed(entry, relative, info, root, dir_fd) for relative, entry, info in found
+        ),
     )
+
+
+def _check_relative_name(path: Path) -> None:
+    """Refuse a path that cannot be looked up below a directory descriptor by one step.
+
+    Parameters
+    ----------
+    path
+        What the caller gave with `dir_fd`.
+
+    Raises
+    ------
+    ValueError
+        If it is absolute, has more than one component or is ``..``, or the platform cannot
+        open files relative to a directory without following a link.
+    """
+    if not BY_DESCRIPTOR:
+        raise ValueError(
+            "a path with dir_fd needs a platform that opens files relative to a directory "
+            "without following links (Linux or macOS)"
+        )
+    text = os.fspath(path)
+    if text != "." and (text in ("", "..") or os.sep in text or "/" in text):
+        raise ValueError(
+            f"a path with dir_fd must be '.' or one name in that directory, got {shown(text)}"
+        )

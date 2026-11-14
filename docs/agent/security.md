@@ -1789,9 +1789,15 @@ code in this area has to know.
   rule names indexes, not download hosts: each package's `source.registry` must be PyPI, the
   project's `wheelhouse` folder, the operator's `LAKANA_RUN__INDEX_URL` or a registered package
   index, and another index, a git source and a direct URL are refused at deploy and before every
-  execution (`lockfile_issues`, `source_issues`). A wheel's or sdist's own URL in the lock is not
-  checked: it may point at another host, uv downloads from it, and no credential is sent there
-  (a credential is bound to its index's scheme, host and port). A URL the strict
+  execution (`lockfile_issues`, `source_issues`). A wheel's or sdist's own URL in the lock is
+  checked only for its scheme (#77): an index's file must be an absolute `http`/`https` URL (no
+  `file:`, no path) with a `sha256`/`sha384`/`sha512` hash, and a `wheelhouse` package's file must
+  be a `path` inside the folder (no `url`); `wheelhouse` files carry no hash, since `uv lock`
+  writes none for a folder. The host is not checked, by decision (#77): the strong hash pins the
+  bytes, so another host cannot change what is installed, and which hosts a build may reach is a
+  question for the egress rules of task isolation, not for the lock check. uv downloads from that
+  host, and no credential is sent there (a credential is bound to its index's scheme, host and
+  port). A URL the strict
   `comparable_index_url` rule refuses is not a registered index; the operator's index has its own
   lenient comparison (`KnownSources.is_known`). Local path and workspace dependencies are refused at deploy
   (`lockfile_issues`) and again before the build. Detached child processes of user code are not
@@ -1824,12 +1830,11 @@ code in this area has to know.
   created without rows is proven by its location's `holder_run_id`, and only the current claim of a
   task run can commit, `record_pending`), the child's output (redacted, control characters replaced, 1 MiB per
   attempt in all), uv's output (redacted of proxy and index credentials).
-- **The artifact harness has two residuals that are recorded, not closed (#67):** the upload
-  works with `os.fchdir` into the directory it pinned, and the check that `inputs` is still the
-  directory the harness made is by path. Both hold against code that swaps a directory by name, not
-  against code of the task running at the same time (a thread that calls `os.chdir` redirects the
-  scan). It adds nothing to what in-process code can already do with the task's rights. Details
-  under "The artifact store (M5c2b)", "Residuals of the harness".
+- **The artifact harness works by directory descriptor (#67):** the scan and the upload run below
+  the descriptor `lakana._artifact_harness.pin` returns (`client.artifacts.upload(..., dir_fd=...)`), and each input is
+  downloaded below the descriptor `make_workspace` holds on `inputs` (`download(..., dir_fd=...)`);
+  the process's working directory is never changed or used. Details under "The artifact store
+  (M5c2b)", "Residuals of the harness".
 - **Review checklist for changes here:** a new exit path must still revoke the token, release
   the venv lease and remove the attempt directory; a new action for bound tokens must be added
   to `BOUND_TASK_TOKEN_ACTIONS` *and* handled in `_check_bound_scope`; nothing may put the
@@ -2591,16 +2596,21 @@ accident or believes it closed:
 - `list_artifacts` and the version list are not paged; the download route answers `GET` only and
   ignores `Range`.
 
-**Residuals of the harness (#67).** The harness uploads with `os.fchdir` to the pinned
-directory and re-checks by path that `inputs` is still the directory it made before it downloads into
-it. Both hold against code that swaps a directory **by name**, not against code of the task that runs
-at the same time: a thread of the asset's code that calls `os.chdir` during the upload redirects the
-scan (in the review's experiment in 76 to 86 % of bounded attempts), and one that swaps `inputs`
-between the re-check and the download is not stopped (the asset's module is imported, so its code is
-already running). It adds nothing to what in-process code can do with the task's own rights. Closing
-it needs the scan, the upload and the download to work by directory descriptor (`dir_fd`): #67. Words
-in code, messages and docs stay "by name" and "a check, not a guarantee"; never write that a link "is
-never followed" without that qualification.
+**Residuals of the harness (#67, closed by descriptors).** The harness passes the descriptor it
+pinned (`lakana._artifact_harness.pin`) to `client.artifacts.upload(..., dir_fd=...)`: the scan opens `.` or one name below
+it, and the upload opens each file again from it (`LocalFile.dir_fd`), so neither `os.chdir` by a
+thread of the asset's code nor a directory moved or replaced by a link redirects what is stored. A
+download goes into `download(..., dir_fd=...)` below a copy (`_held_copy`, judged by device and
+inode like `pin`'s) of the descriptor `make_workspace` opened on `inputs`; the path check before it
+stays, to fail a visible swap with a clear message. Left: the consumer receives `inputs/<name>` as a
+path, which the task's own code can make lead elsewhere after the download, and files changed during
+the upload can fail it. Neither adds anything to what in-process code can do with the task's own
+rights. Pins: `test_runner.py`
+(`test_a_thread_that_changes_the_working_directory_during_the_upload_cannot_redirect_it`,
+`test_an_inputs_directory_swapped_for_a_link_after_the_check_does_not_redirect_the_download`),
+`test_artifact_scan.py` (`test_a_scan_by_descriptor_ignores_the_working_directory`),
+`test_resources_artifacts.py`
+(`test_a_download_by_descriptor_lands_in_the_pinned_parent_even_when_its_name_is_a_link`).
 
 ## Table locations: the claim, the fence and the sweep (#90)
 
@@ -4156,10 +4166,17 @@ scheme existed — where `tables.external_claim` is `NULL` — must not go unche
 (NFD, casefold, NFD again — not a single NFC-then-casefold pass, which disagrees with the
 canonical algorithm on some characters), so `raw/Customers`
 and `raw/customers` — or an NFD- and an NFC-encoded `raw/café` — are still caught as the
-same directory on a case- or normalization-insensitive local filesystem. **Known gap, partly
-closed:** on local (`file://`) storage, a symlink placed under a table's `raw/` claim is
-still followed by the listing/read that infers its schema at creation. The query process no
-longer follows it: allow-list mode refuses a symlink whose target lies outside the
+same directory on a case- or normalization-insensitive local filesystem. **Known gap, closed
+for Lakana's own reads (#70):** on local (`file://`) storage, a symlink placed under a table's
+`raw/` claim is skipped by `Storage.list`, and `Storage.read` refuses a link at the object's
+name or on the way, so the schema inference at creation and the worker's listing of the claim
+no longer follow it (a check by path: a link swapped in between the listing and the open is
+refused by the open's `O_NOFOLLOW` only at the last component). Files of the local backend, streamed objects included, are created
+`0666` less the process umask (#70, by decision: the operator sets `umask 027` so that a worker in
+the server's group can read them and nobody else can; `deploy-with-compose.md`, "A storage root on
+a local directory"). Never hard-code a narrower mode in one writer: a worker of another user then
+fails to read the object. The query process does not
+follow one either: allow-list mode refuses a symlink whose target lies outside the
 directories the query may open (unless it points into another table the same query reads).
 Placing one needs write access to the *host* filesystem underneath the storage root.
 

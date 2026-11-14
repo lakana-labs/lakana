@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from scripts.pytest_memory_limit import open_descriptors
+from descriptor_watch import watch_opened_descriptors
 
 from lakana import _artifact_manifest as artifact_manifest
 from lakana._artifact_manifest import (
@@ -534,7 +534,7 @@ def test_a_path_that_runs_through_a_file_is_reported_as_missing(tmp_path: Path) 
 def test_both_walks_refuse_and_find_the_same_things(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by_descriptor: bool
 ) -> None:
-    monkeypatch.setattr(artifact_manifest, "_BY_DESCRIPTOR", by_descriptor)
+    monkeypatch.setattr(artifact_manifest, "BY_DESCRIPTOR", by_descriptor)
     out = tmp_path / "out"
     (out / "sub").mkdir(parents=True)
     (out / "sub" / "w.bin").write_bytes(b"w")
@@ -584,7 +584,7 @@ class _Listing:
 def test_an_entry_that_vanishes_during_the_walk_is_named(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by_descriptor: bool
 ) -> None:
-    monkeypatch.setattr(artifact_manifest, "_BY_DESCRIPTOR", by_descriptor)
+    monkeypatch.setattr(artifact_manifest, "BY_DESCRIPTOR", by_descriptor)
     monkeypatch.setattr(artifact_manifest.os, "scandir", lambda _path: _Listing([_Entry()]))
     with pytest.raises(ManifestError) as caught:
         scan(tmp_path)
@@ -598,7 +598,7 @@ def test_an_entry_that_vanishes_during_the_walk_is_named(
 def test_a_directory_that_cannot_be_listed_is_reported_with_its_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by_descriptor: bool
 ) -> None:
-    monkeypatch.setattr(artifact_manifest, "_BY_DESCRIPTOR", by_descriptor)
+    monkeypatch.setattr(artifact_manifest, "BY_DESCRIPTOR", by_descriptor)
 
     def refuse(_path: object) -> object:
         raise PermissionError(13, "Permission denied")
@@ -615,7 +615,7 @@ def test_a_root_directory_that_is_swapped_or_locked_when_it_is_opened_is_reporte
     real = os.open
 
     def swapped(path: object, flags: int, *args: object, **kwargs: object) -> int:
-        if path == str(tmp_path) and "dir_fd" not in kwargs:
+        if path == str(tmp_path) and kwargs.get("dir_fd") is None:
             raise OSError(errno.ELOOP, "Too many levels of symbolic links")
         return real(path, flags, *args, **kwargs)  # ty: ignore[invalid-argument-type]
 
@@ -634,20 +634,94 @@ def test_a_root_directory_that_is_swapped_or_locked_when_it_is_opened_is_reporte
             locked.chmod(0o700)
 
 
-@pytest.mark.skipif(
-    not Path("/proc/self/fd").is_dir(), reason="open descriptors are counted in /proc"
-)
-def test_a_scan_leaves_no_descriptor_open_whether_it_succeeds_or_fails(tmp_path: Path) -> None:
+def test_a_scan_leaves_no_descriptor_open_whether_it_succeeds_or_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     tree = tmp_path / "tree"
     (tree / "a" / "b").mkdir(parents=True)
     (tree / "c").mkdir()
     (tree / "a" / "b" / "f.bin").write_bytes(b"f")
     (tree / "c" / "g.bin").write_bytes(b"g")
-    scan(tree)  # warm-up: anything the first call opens for good is not a leak of the scan
-    before = open_descriptors()
+    opened = watch_opened_descriptors(monkeypatch)
     assert len(scan(tree).files) == 2
-    assert open_descriptors() == before
+    assert opened.ever  # the walk and the hashing opened descriptors of their own
     (tree / "c" / "link").symlink_to(tree / "a")
     with pytest.raises(ManifestError):
         scan(tree)
-    assert open_descriptors() == before
+    assert opened.leaked() == []
+
+
+_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+_NEEDS_DIR_FD = pytest.mark.skipif(
+    not artifact_manifest.BY_DESCRIPTOR, reason="needs files opened relative to a directory"
+)
+
+
+@_NEEDS_DIR_FD
+def test_a_scan_by_descriptor_ignores_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A thread that changes the working directory during the scan cannot redirect it (#67)."""
+    pinned = tmp_path / "pinned"
+    (pinned / "sub").mkdir(parents=True)
+    (pinned / "sub" / "w.bin").write_bytes(b"inside")
+    (pinned / "model.json").write_bytes(b"{}")
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (outside / "sub" / "w.bin").write_bytes(b"stolen")
+    (outside / "model.json").write_bytes(b"stolen")
+    descriptor = os.open(pinned, _DIR_FLAGS)
+    try:
+        monkeypatch.chdir(outside)
+        tree = scan(Path("."), dir_fd=descriptor)
+        single = scan(Path("model.json"), dir_fd=descriptor)
+        # The pinned directory is moved away by name: the files are still read through it.
+        os.rename(pinned, tmp_path / "moved")
+        os.symlink(outside, pinned)
+        for file in (*tree.files, *single.files):
+            handle = artifact_manifest.open_regular(file.source, file.path, file.root, file.dir_fd)
+            with os.fdopen(handle, "rb") as opened:
+                assert opened.read() != b"stolen"
+    finally:
+        os.close(descriptor)
+    assert [(f.path, f.sha256) for f in tree.files] == [
+        ("model.json", hashlib.sha256(b"{}").hexdigest()),
+        ("sub/w.bin", hashlib.sha256(b"inside").hexdigest()),
+    ]
+    assert tree.is_directory is True
+    assert [(f.path, f.size) for f in single.files] == [("model.json", 2)]
+    assert single.is_directory is False
+
+
+@_NEEDS_DIR_FD
+@pytest.mark.parametrize("given", ["/abs", "a/b", ".."])
+def test_a_scan_by_descriptor_takes_only_the_directory_itself_or_one_name_in_it(
+    tmp_path: Path, given: str
+) -> None:
+    descriptor = os.open(tmp_path, _DIR_FLAGS)
+    try:
+        with pytest.raises(ValueError, match="with dir_fd"):
+            scan(Path(given), dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@_NEEDS_DIR_FD
+def test_a_scan_by_descriptor_refuses_a_link_at_the_name(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "a").write_bytes(b"a")
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    descriptor = os.open(tmp_path, _DIR_FLAGS)
+    try:
+        with pytest.raises(ManifestError, match="link"):
+            scan(Path("link"), dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def test_a_scan_by_descriptor_needs_a_platform_that_opens_by_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(artifact_manifest, "BY_DESCRIPTOR", False)
+    with pytest.raises(ValueError, match="Linux or macOS"):
+        scan(Path("."), dir_fd=0)

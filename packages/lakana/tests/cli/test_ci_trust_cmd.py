@@ -252,3 +252,14 @@ def test_start_on_deploy_jobs_is_sent_only_when_asked_for(tmp_path: Path) -> Non
     assert json.loads(api.requests[1].content) == {"start_on_deploy_jobs": False}
     invoke(state, "ci-trust", "update", _ID, "--start-on-deploy-jobs")
     assert json.loads(api.requests[2].content) == {"start_on_deploy_jobs": True}
+
+
+def test_a_confirmation_bounds_the_id_the_server_answered(tmp_path: Path) -> None:
+    """An id comes from the server's answer: shown through `inline`, cut at 200 (#80)."""
+    api = FakeApi()
+    api.on("POST", f"{_BASE}/{_ID}/enable", json={**_RULE, "id": "r" * 5000})
+    state = make_state(tmp_path, api)
+    enabled = invoke(state, "ci-trust", "enable", _ID)
+    assert enabled.exit_code == 0, enabled.output
+    line = enabled.stdout.splitlines()[0]
+    assert line == f"Enabled CI trust rule {'r' * 200}…."

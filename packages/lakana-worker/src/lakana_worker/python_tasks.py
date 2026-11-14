@@ -91,6 +91,7 @@ from lakana_core.projects.lockfile import (
     UV_TOML_MESSAGE,
     lock_digest,
     lockfile_issues,
+    pinning_issues,
     source_issues,
     task_interpreter,
     used_indexes,
@@ -335,7 +336,7 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2
 """Characters that could rewrite a terminal or reorder a line when a log is shown."""
 
 
-def _listed_issues(issues: Sequence[ProjectIssue]) -> str:
+def _listed_issues(issues: Sequence[ProjectIssue]) -> tuple[str, int]:
     """Join issues for a failure message, in whole issues, within `_MAX_ISSUES_CHARS`.
 
     Parameters
@@ -345,16 +346,18 @@ def _listed_issues(issues: Sequence[ProjectIssue]) -> str:
 
     Returns
     -------
-    str
-        The rendered issues joined with ``; `` when they fit; else the first whole issues
-        that fit with ``; and N more`` after them, so the text never ends inside a command or
-        a URL. When not even the first fits: the first issue cut to the bound, ending in
-        ``…``, then ``; and N more`` if there are others.
+    tuple of (str, int)
+        The text, and how many issues it shows (whole or, for the first alone, cut): the
+        rendered issues joined with ``; `` when they fit; else the first whole issues that fit
+        with ``; and N more`` after them, so the text never ends inside a command or a URL.
+        When not even the first fits: the first issue cut to the bound, ending in ``…``, then
+        ``; and N more`` if there are others. Advice that follows the text is chosen from the
+        issues it shows, so it never names a kind of problem that was cut off.
     """
     rendered = [issue.render() for issue in issues]
     whole = "; ".join(rendered)
     if len(whole) <= _MAX_ISSUES_CHARS:
-        return whole
+        return whole, len(rendered)
     # The text up to issue `n` plus its "and N more" grows with `n`, so the issues that fit
     # are a prefix and can be counted.
     ends = accumulate(len(text) + 2 for text in rendered)
@@ -364,9 +367,9 @@ def _listed_issues(issues: Sequence[ProjectIssue]) -> str:
         if end - 2 + len(f"; and {len(rendered) - position - 1} more") <= _MAX_ISSUES_CHARS
     )
     if best:
-        return f"{'; '.join(rendered[:best])}; and {len(rendered) - best} more"
+        return f"{'; '.join(rendered[:best])}; and {len(rendered) - best} more", best
     more = f"; and {len(rendered) - 1} more" if len(rendered) > 1 else ""
-    return rendered[0][: _MAX_ISSUES_CHARS - len(more) - 1] + "…" + more
+    return rendered[0][: _MAX_ISSUES_CHARS - len(more) - 1] + "…" + more, 1
 
 
 def _closing_for(issues: Sequence[ProjectIssue]) -> str:
@@ -2502,11 +2505,18 @@ class PythonRuntime:
                 "uv.lock does not match the project version's lock_sha256; redeploy",
                 FailureCode.CODE_CHANGED,
             )
+        unpinned = pinning_issues(lock)
+        if unpinned:
+            # Each message ends with the author's step (`uv lock`, deploy again).
+            raise TaskFailure(
+                FailureKind.PERMANENT, f"{_listed_issues(unpinned)[0]}.", FailureCode.BUILD_FAILED
+            )
         unknown = source_issues(pyproject, lock, sources)
         if unknown:
+            listed, shown_count = _listed_issues(unknown)
             raise TaskFailure(
                 FailureKind.PERMANENT,
-                f"{_listed_issues(unknown)}. {_closing_for(unknown)}",
+                f"{listed}. {_closing_for(unknown[:shown_count])}",
                 FailureCode.BUILD_FAILED,
             )
         issues = lockfile_issues(
@@ -2521,8 +2531,8 @@ class PythonRuntime:
         if issues:
             raise TaskFailure(
                 FailureKind.PERMANENT,
-                f"{_listed_issues(issues)}. This project version was deployed for another platform "
-                "version: update the lock and redeploy.",
+                f"{_listed_issues(issues)[0]}. This project version was deployed for another "
+                "platform version: update the lock and redeploy.",
                 FailureCode.BUILD_FAILED,
             )
         return expected

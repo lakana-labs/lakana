@@ -633,7 +633,7 @@ def test_a_cell_is_capped_at_fifty_lines_with_the_true_count_of_the_rest() -> No
     assert shown[:50] == [f"l{i}" for i in range(50)]
     assert shown[50:] == ["… (70 more lines; use --output json to see all)"]
     one_more = _output._cell("\n".join(f"l{i}" for i in range(51))).plain.split("\n")
-    assert one_more[-1] == "… (1 more lines; use --output json to see all)"
+    assert one_more[-1] == "… (1 more line; use --output json to see all)"
 
 
 def test_a_value_of_five_thousand_line_breaks_is_one_line() -> None:

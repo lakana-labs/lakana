@@ -372,12 +372,15 @@ def test_secret_name_option_writes_that_name(world: World) -> None:
     assert world.repo.credential_secret == "git-key"
 
 
-@pytest.mark.parametrize("name", ["has space", "a:b", "x" * 256, ""])
+@pytest.mark.parametrize(
+    "name", ["has space", "a:b", "x" * 256, "", "key\ud800", "key\u202e", "key\u0085"]
+)
 def test_a_secret_name_that_cannot_be_a_credential_is_refused(world: World, name: str) -> None:
     """The name must be one a repository can name as its credential."""
     with pytest.raises(ValidationError, match="secret name"):
         world.service().generate(world.admin, "analytics", secret=name)
-    assert world.secrets(name) == {}
+    if "\ud800" not in name:  # the database cannot even be asked for a lone surrogate
+        assert world.secrets(name) == {}
 
 
 def test_a_default_name_that_is_too_long_names_the_option(world: World) -> None:

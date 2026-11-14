@@ -14,6 +14,7 @@ from lakana_core.projects.lockfile import (
     PYPROJECT_FILE,
     lock_digest,
     lockfile_issues,
+    pinning_issues,
     python_admitted,
     source_issues,
     task_interpreter,
@@ -1039,3 +1040,135 @@ def test_requires_python_names_lakana_yaml_when_the_project_names_its_python() -
         "uv.lock: requires-python '>=3.13' does not admit the worker's Python 3.12.4"
     ]
     assert _messages(_PYPROJECT, lock, python=(3, 13, 0), named_python="3.13") == []
+
+
+_HASH = "sha256:" + "a" * 64
+
+
+def _with_files(registry: str, *entries: str) -> bytes:
+    """Build a fine lock plus a package `zzpkg` with the given file entries.
+
+    Parameters
+    ----------
+    registry
+        The package's ``registry``.
+    *entries
+        TOML lines of the package table, such as ``wheels = [...]`` or ``sdist = {...}``.
+
+    Returns
+    -------
+    bytes
+        The lock file.
+    """
+    body = "".join(entry + "\n" for entry in entries)
+    return (
+        _GOOD
+        + (
+            '\n[[package]]\nname = "zzpkg"\nversion = "1"\n'
+            f'source = {{ registry = "{registry}" }}\n' + body
+        ).encode()
+    )
+
+
+def test_files_of_an_index_with_a_hash_on_its_own_or_another_host_pass() -> None:
+    """The rule names indexes, not download hosts (#77 leaves hosts open)."""
+    lock = _with_files(
+        "https://pypi.org/simple",
+        f'sdist = {{ url = "https://files.pythonhosted.org/z.tar.gz", hash = "{_HASH}" }}',
+        f'wheels = [{{ url = "https://files.pythonhosted.org/z.whl", hash = "{_HASH}" }}]',
+    )
+    assert _messages(_PYPROJECT, lock, sources=_SOURCES) == []
+    assert pinning_issues(lock) == []
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        'wheels = [{ url = "https://files.pythonhosted.org/z.whl" }]',
+        'sdist = { url = "https://files.pythonhosted.org/z.tar.gz" }',
+        'wheels = [{ url = "https://files.pythonhosted.org/z.whl", hash = "" }]',
+        'wheels = [{ url = "https://files.pythonhosted.org/z.whl", hash = 7 }]',
+        'wheels = [{ url = "https://files.pythonhosted.org/z.whl", hash = "md5:'
+        + "a" * 32
+        + '" }]',
+        'wheels = [{ url = "https://files.pythonhosted.org/z.whl", hash = "sha256:abc" }]',
+    ],
+)
+def test_a_file_of_an_index_without_a_strong_hash_is_refused(entry: str) -> None:
+    """A lock written by `uv lock` always has one; a hand-edited lock need not (#77)."""
+    lock = _with_files("https://pypi.org/simple", entry)
+    expected = [
+        "uv.lock: has no SHA-256 (or SHA-384, SHA-512) hash for a file of zzpkg; the worker "
+        "builds only what the lock pins. Run `uv lock`, commit the lock as it writes it, then "
+        "deploy again. If the lock still has no such hash, the index serves none (only MD5, or "
+        "no hash at all): take the package from an index that serves SHA-256 hashes, or add "
+        '`hash = "sha256:..."` for each of its files to uv.lock yourself'
+    ]
+    assert _messages(_PYPROJECT, lock, sources=_SOURCES) == expected
+    assert [issue.render() for issue in pinning_issues(lock)] == expected
+    assert source_issues(_PYPROJECT, lock, _SOURCES) == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/zzpkg-1-py3-none-any.whl",
+        "FILE:/home/worker/.cache/uv/zzpkg.whl",
+        "ftp://files.example/zzpkg.whl",
+        "zzpkg-1-py3-none-any.whl",
+        "//files.example/zzpkg.whl",
+    ],
+)
+def test_a_file_of_an_index_that_is_not_an_http_url_is_refused(url: str) -> None:
+    """A `file:` URL would let a lock install any file the worker can read (#77)."""
+    lock = _with_files(
+        "https://pypi.org/simple", f'wheels = [{{ url = "{url}", hash = "{_HASH}" }}]'
+    )
+    expected = [
+        "uv.lock: takes zzpkg from a file that is not an http or https URL; a lock may name "
+        "only the files of a package index, or files inside the folder `wheelhouse` by their "
+        "path. Run `uv lock`, commit the lock as it writes it, then deploy again"
+    ]
+    assert _messages(_PYPROJECT, lock, sources=_SOURCES) == expected
+    assert [issue.render() for issue in pinning_issues(lock)] == expected
+    assert source_issues(_PYPROJECT, lock, _SOURCES) == []
+
+
+def test_a_wheelhouse_package_that_names_a_url_is_outside_the_folder() -> None:
+    """`uv lock` names a wheelhouse file by its path; a URL there leaves the folder (#77)."""
+    for url in ("file:///etc/zzpkg.whl", "https://files.example/zzpkg.whl"):
+        lock = _with_files("wheelhouse", f'wheels = [{{ url = "{url}", hash = "{_HASH}" }}]')
+        (message,) = _messages(_PYPROJECT, lock, sources=_SOURCES)
+        assert message.startswith(
+            "uv.lock: takes zzpkg from a file outside the folder `wheelhouse`"
+        )
+
+
+def test_files_inside_the_wheelhouse_need_no_hash() -> None:
+    """`uv lock` writes none for a local folder; the deployed commit fixes their bytes."""
+    lock = _with_files(
+        "wheelhouse",
+        'sdist = { path = "zzpkg-1.tar.gz" }',
+        'wheels = [{ path = "zzpkg-1-py3-none-any.whl" }]',
+    )
+    assert _messages(_PYPROJECT, lock, sources=_SOURCES) == []
+
+
+def test_a_file_entry_that_is_not_a_table_counts_as_unpinned() -> None:
+    """A hand-edited `wheels = ["x"]` has no hash to check (#77)."""
+    lock = _with_files("https://pypi.org/simple", 'wheels = ["zzpkg.whl"]')
+    (message,) = [issue.render() for issue in pinning_issues(lock)]
+    assert message.startswith("uv.lock: has no SHA-256")
+
+
+def test_odd_wheelhouse_entries_are_judged_by_their_paths_only() -> None:
+    """An entry that is not a table, or names neither a path nor a URL, is left to uv (#77)."""
+    lock = _with_files("wheelhouse", 'wheels = ["zzpkg.whl", { size = 3 }]')
+    assert _messages(_PYPROJECT, lock, sources=_SOURCES) == []
+
+
+@pytest.mark.parametrize("lock", [None, b"\xff\xfe not utf-8", b"not = [toml"])
+def test_pinning_issues_of_a_lock_that_cannot_be_read_are_left_to_lockfile_issues(
+    lock: bytes | None,
+) -> None:
+    assert pinning_issues(lock) == []

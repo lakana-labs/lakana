@@ -10,6 +10,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -32,6 +33,8 @@ class ArtifactVersion(Base):
 
     __tablename__ = "artifact_versions"
     __table_args__ = (UniqueConstraint("artifact_id", "version"),)
+    # Every foreign key to a principal, a task run or a job version is indexed, so a delete
+    # there finds its rows without a scan (migration 0079).
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     artifact_id: Mapped[uuid.UUID] = mapped_column(
@@ -44,20 +47,20 @@ class ArtifactVersion(Base):
     file_count: Mapped[int] = mapped_column(Integer)
     is_directory: Mapped[bool] = mapped_column(Boolean)
     task_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True, index=True
     )
     claim: Mapped[int | None] = mapped_column(Integer, nullable=True)
     job_version_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("job_versions.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("job_versions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("principals.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("principals.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     deleted_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("principals.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("principals.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
 
@@ -79,6 +82,10 @@ class ArtifactUpload(Base):
     """
 
     __tablename__ = "artifact_uploads"
+    # `principal_id` is served by this index too (its first column).
+    __table_args__ = (
+        Index("ix_artifact_uploads_principal_id_expires_at", "principal_id", "expires_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     artifact_id: Mapped[uuid.UUID] = mapped_column(
@@ -88,7 +95,7 @@ class ArtifactUpload(Base):
     manifest_sha256: Mapped[str] = mapped_column(String(64))
     manifest_json: Mapped[dict] = mapped_column(JSON)
     task_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("task_runs.id", ondelete="SET NULL"), nullable=True, index=True
     )
     claim: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)

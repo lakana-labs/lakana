@@ -101,6 +101,38 @@ _TAKEN = "{target} already exists and is not an empty directory; give a new or a
 _TARGET_LINK = "{target} is a symbolic link; give a real directory."
 
 
+def check_target_name(directory: str | os.PathLike[str]) -> str:
+    """Refuse a download target given with `dir_fd` that is not one name in that directory.
+
+    Parameters
+    ----------
+    directory
+        What the caller gave.
+
+    Returns
+    -------
+    str
+        The name.
+
+    Raises
+    ------
+    ValueError
+        If it is empty, ``.``, ``..`` or more than one component, or the platform cannot
+        write files relative to a directory without following a link.
+    """
+    if not _WRITE_BY_DESCRIPTOR:
+        raise ValueError(
+            "a download with dir_fd needs a platform that writes files relative to a "
+            "directory without following links (Linux or macOS)"
+        )
+    name = os.fspath(directory)
+    if name in ("", ".", "..") or os.sep in name or "/" in name:
+        raise ValueError(
+            f"a download with dir_fd needs one new name in that directory, got {shown(name)}"
+        )
+    return name
+
+
 def check_manifest(files: Sequence[ArtifactFile], is_directory: bool) -> None:
     """Refuse a manifest whose files cannot be written safely.
 
@@ -348,7 +380,10 @@ class TreeWriter:
         self.target = target
         self.staging = staging
         self._at = root_label(target)
-        self._at_parent = root_label(target.parent)
+        # A target given relative to a descriptor has no path worth showing above it.
+        self._at_parent = (
+            root_label(target.parent) if target.is_absolute() else "the directory it goes in"
+        )
         self._parent_fd = parent_fd
         self._root_fd = root_fd
         self._inside = inside
@@ -362,7 +397,9 @@ class TreeWriter:
         self._keep = False
 
     @classmethod
-    def begin(cls, directory: Path, needed: int, *, read_only: bool = False) -> TreeWriter:
+    def begin(
+        cls, directory: Path, needed: int, *, read_only: bool = False, dir_fd: int | None = None
+    ) -> TreeWriter:
         """Check the target and the free space, and create the staging directory.
 
         Nothing is created before the free space is known to be enough, and parents created for
@@ -378,6 +415,9 @@ class TreeWriter:
             The version's size in bytes.
         read_only
             Seal the finished copy: files 0400 and directories 0500.
+        dir_fd
+            An open descriptor of the target's parent: `directory` is then one name in it, and
+            nothing is looked up by path (see `_begin_at`).
 
         Returns
         -------
@@ -390,6 +430,8 @@ class TreeWriter:
             If the directory is a link, exists with something in it or is not a directory, cannot
             be created or written to, or its disk has less free space than `needed`.
         """
+        if dir_fd is not None:
+            return cls._begin_at(dir_fd, directory, needed, read_only=read_only)
         absolute = Path(os.path.abspath(directory))
         taken = ManifestError(_TAKEN.format(target=root_label(directory)))
         if absolute.parent == absolute:
@@ -434,6 +476,62 @@ class TreeWriter:
                 raise cls._cannot_create(directory, exc, inside=existing) from exc
             raise
 
+    @classmethod
+    def _begin_at(cls, dir_fd: int, directory: Path, needed: int, *, read_only: bool) -> TreeWriter:
+        """Begin a download into one name of a directory that is already open.
+
+        The parent is never looked up by path: the writer keeps its own copy of `dir_fd`, so the
+        tree lands in the directory the descriptor names even when its path has since been
+        moved or replaced by a link. The target's path, the staging directory's and the result's
+        are relative to that directory.
+
+        Parameters
+        ----------
+        dir_fd
+            The open parent directory; the caller keeps and closes it.
+        directory
+            The target's name in it.
+        needed
+            The version's size in bytes.
+        read_only
+            Seal the finished copy: files 0400 and directories 0500.
+
+        Returns
+        -------
+        TreeWriter
+            A writer.
+
+        Raises
+        ------
+        ValueError
+            If `directory` is not one name, or the platform cannot write by descriptor.
+        ManifestError
+            If the target is a link, is not an empty directory, cannot be created, or the disk
+            has less free space than `needed`.
+        """
+        name = check_target_name(directory)
+        try:
+            usage = os.statvfs(dir_fd)
+        except OSError as exc:
+            raise cls._cannot_create(directory, exc) from exc
+        free = usage.f_bavail * usage.f_frsize
+        if needed > free:
+            raise ManifestError(
+                f"The artifact needs {needed} bytes but only {free} are free in "
+                f"{root_label(directory)}; free some space or choose another directory."
+            )
+        staging_name = f".{name[:_STAGING_NAME_CHARS]}.lakana-partial-{secrets.token_hex(8)}"
+        try:
+            parent_fd = os.dup(dir_fd)
+        except OSError as exc:
+            raise cls._cannot_create(directory, exc) from exc
+        try:
+            return cls._begin_by_descriptor(
+                directory, Path(), name, staging_name, read_only=read_only, parent_fd=parent_fd
+            )
+        except OSError as exc:
+            raise cls._cannot_create(directory, exc) from exc
+
     @staticmethod
     def _cannot_create(directory: Path, exc: OSError, *, inside: bool = False) -> ManifestError:
         """Build the refusal for a staging location that cannot be made.
@@ -460,7 +558,14 @@ class TreeWriter:
 
     @classmethod
     def _begin_by_descriptor(
-        cls, directory: Path, home: Path, name: str, staging_name: str, *, read_only: bool
+        cls,
+        directory: Path,
+        home: Path,
+        name: str,
+        staging_name: str,
+        *,
+        read_only: bool,
+        parent_fd: int | None = None,
     ) -> TreeWriter:
         """Open the target's parent, then the target inside it, and make the staging directory.
 
@@ -483,6 +588,9 @@ class TreeWriter:
             The staging directory's name.
         read_only
             Whether the copy is to be sealed.
+        parent_fd
+            The parent, already open (the writer takes it over and closes it); `None` opens
+            `home`.
 
         Returns
         -------
@@ -496,7 +604,8 @@ class TreeWriter:
         OSError
             If the parent or the target cannot be opened, or the staging directory made.
         """
-        parent_fd = os.open(home, _DIR_FLAGS)
+        if parent_fd is None:
+            parent_fd = os.open(home, _DIR_FLAGS)
         held = parent_fd
         try:
             try:

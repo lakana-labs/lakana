@@ -69,7 +69,6 @@ import ast
 import contextlib
 import ctypes
 import datetime as dt
-import errno
 import importlib.util
 import inspect
 import json
@@ -83,28 +82,36 @@ import tempfile
 import traceback
 import types
 import unicodedata
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 import pyarrow as pa
 
-from lakana import _usage, assets, context
+from lakana import _usage, context
 from lakana._arrow import (
     cast_timestamp_ns_columns_to_us,
     normalize_view_columns,
     schema_to_columns,
 )
+from lakana._artifact_harness import (
+    ArtifactInputError,
+    InputError,
+    InvalidResult,
+    Output,
+    WorkspaceError,
+    fetch_artifact,
+    make_workspace,
+    pin,
+    upload_pinned,
+)
 from lakana._artifact_manifest import (
-    _BY_DESCRIPTOR,
-    _DIR_FLAGS,
     ManifestError,
     StoredManifestDamaged,
     StoredManifestInvalid,
     shown,
 )
-from lakana._models import ArtifactVersion
 from lakana.assets import ASSET_ATTRIBUTE, DECIMALS_MODES, WRITE_CHOICES, AssetSpec, _unsafe
 from lakana.client import Client
 from lakana.context import (
@@ -144,9 +151,6 @@ COMPOSITE_KEY_MAX_ROWS = 5_000
 harness says so first, in words a Python asset can act on."""
 MAX_INPUT_VERSION = 2**31 - 1
 """The largest artifact version a description may name (the catalog stores a 32-bit integer)."""
-_SAVE_FLAGS = _DIR_FLAGS | getattr(os, "O_PATH", 0)
-"""How the working directory is saved: by ``O_PATH`` where there is one, which needs no read
-permission on the directory, so code that took that away cannot make the upload fail."""
 _PARAMETER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
 """A parameter name that may become a directory name: an ASCII identifier."""
 _KINDS = ("table", "artifact")
@@ -199,33 +203,12 @@ _PERMANENT_QUERY_CAUSES = frozenset({"not_found", "permission_denied", "result_t
 missing cause (an older server)."""
 
 
-class InvalidResult(Exception):
-    """The asset returned something that cannot replace its table. Not retryable."""
-
-
 class AssetLoadError(Exception):
     """The asset file cannot be turned into one asset function. Not retryable."""
 
 
 class UploadRefused(Exception):
     """The server refused the upload as invalid. Not retryable: the same bytes fail again."""
-
-
-class InputError(Exception):
-    """An input could not be read through the query API or downloaded."""
-
-
-class ArtifactInputError(InputError):
-    """An artifact input could not be downloaded.
-
-    Kept apart from a failed table read because a 404 means something else here: the
-    version the worker resolved may have been pruned since (another run's producer
-    committed), and the next attempt resolves again.
-    """
-
-
-class WorkspaceError(Exception):
-    """The attempt's directories are not what the harness made. Not retryable."""
 
 
 _PERMANENT_REFUSALS = (PermissionDenied, NotFound, AuthenticationError, PayloadTooLarge)
@@ -1156,281 +1139,6 @@ def _read_input(
     return frame.cast(cast(Any, floats)) if floats else frame
 
 
-@dataclass(frozen=True)
-class _Output:
-    """The output directory of an artifact asset, pinned by a descriptor.
-
-    Parameters
-    ----------
-    path
-        `lakana.output_dir()`: the real path of ``<work_dir>/output``.
-    descriptor
-        The directory opened without following a link right after it was made,
-        before any repository code ran. Everything the harness checks and
-        stores is reached from it, never by the path again.
-    identity
-        The device and inode of that directory. Code of the asset may close the
-        descriptor, and the number then goes to the next file opened in the
-        process, so the harness checks, before it uses or closes the number, that it
-        refers to a directory with this device and inode (`_is_held`). That proves
-        the number is not a file or another directory that still exists; it does not
-        prove it is the same directory object in time: after a delete and re-create
-        on a file system that reuses inode numbers, a new directory can match. Such
-        a directory is always one the task made itself inside its own attempt.
-    """
-
-    path: Path
-    descriptor: int
-    identity: tuple[int, int]
-
-
-@dataclass(frozen=True)
-class _Workspace:
-    """The directories the harness made for this attempt.
-
-    Parameters
-    ----------
-    inputs
-        ``<work_dir>/inputs`` when an input is an artifact.
-    inputs_identity
-        Its device and inode when it was made; a descriptor held on it for the
-        attempt keeps the inode from being reused.
-    output
-        The output directory of an artifact asset.
-    """
-
-    inputs: Path | None = None
-    inputs_identity: tuple[int, int] | None = None
-    output: _Output | None = None
-
-
-def _is_held(descriptor: int, identity: tuple[int, int]) -> bool:
-    """Say whether a descriptor refers to a directory with the identity the harness recorded.
-
-    This is a check of device and inode, not of history: a directory the task deleted and
-    re-created can have the same pair on a file system that reuses inode numbers.
-
-    A descriptor number the asset's code closed goes to the next file the process
-    opens, so the number alone says nothing about what it names now.
-
-    Parameters
-    ----------
-    descriptor
-        The number the harness holds.
-    identity
-        The device and inode of the directory it opened under that number.
-
-    Returns
-    -------
-    bool
-        ``True`` if the number is open and names a directory with that identity;
-        ``False`` if it is closed or names anything else.
-    """
-    try:
-        info = os.fstat(descriptor)
-    except OSError:
-        return False
-    return stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) == identity
-
-
-def _identity_of(descriptor: int, held: list[tuple[int, tuple[int, int]]]) -> tuple[int, int]:
-    """Read the identity of a directory the harness just opened and put it on the list.
-
-    If reading it fails, the descriptor is closed here, so it cannot leak: the clean-up of
-    `_workspace` only knows what is on `held`.
-
-    Parameters
-    ----------
-    descriptor
-        The directory just opened.
-    held
-        The descriptors the clean-up closes, with their identities; appended to.
-
-    Returns
-    -------
-    tuple[int, int]
-        Its device and inode.
-    """
-    try:
-        info = os.fstat(descriptor)
-    except BaseException:
-        os.close(descriptor)
-        raise
-    identity = (info.st_dev, info.st_ino)
-    held.append((descriptor, identity))
-    return identity
-
-
-def _make_directory(path: Path) -> None:
-    """Make a private directory that must not exist yet.
-
-    Parameters
-    ----------
-    path
-        Where.
-
-    Raises
-    ------
-    OSError
-        If it exists or cannot be made; the text shows the path escaped and bounded.
-    """
-    try:
-        os.mkdir(path, 0o700)
-    except OSError as exc:
-        reason = exc.strerror or type(exc).__name__
-        raise OSError(exc.errno, f"could not create {shown(str(path))}: {reason}") from exc
-
-
-@contextlib.contextmanager
-def _workspace(description: TaskDescription) -> Generator[_Workspace]:
-    """Make the attempt's directories before any repository code runs.
-
-    Parameters
-    ----------
-    description
-        The task description.
-
-    Yields
-    ------
-    _Workspace
-        What was made. On exit `lakana.output_dir()` is unset and the descriptors
-        of the output and the inputs directory are closed while they still are the
-        harness's (`_is_held`), whatever happened.
-
-    Raises
-    ------
-    WorkspaceError
-        For an asset that reads or makes an artifact, on a platform that cannot open files
-        relative to a directory without following links; nothing is made before this.
-    OSError
-        If a directory cannot be made (``inputs`` or ``output`` exists already,
-        or the disk is full).
-    """
-    held: list[tuple[int, tuple[int, int]]] = []
-    try:
-        inputs = identity = output = None
-        work = Path(os.path.realpath(description.work_dir))
-        if not _BY_DESCRIPTOR and (
-            "artifact" in description.input_kinds.values() or description.output == "artifact"
-        ):
-            raise WorkspaceError(
-                "an artifact asset needs a platform that opens files relative to a "
-                "directory without following links (Linux or macOS); run the worker there"
-            )
-        if "artifact" in description.input_kinds.values():
-            inputs = work / "inputs"
-            _make_directory(inputs)
-            # Held open until the attempt ends: while it is, the file system cannot give
-            # this directory's inode to another one, so a directory made in its place
-            # after an rmdir never has the same identity.
-            pinned = os.open(inputs, _DIR_FLAGS)
-            identity = _identity_of(pinned, held)
-        if description.output == "artifact":
-            path = work / "output"
-            _make_directory(path)
-            descriptor = os.open(path, _DIR_FLAGS)
-            output = _Output(path, descriptor, _identity_of(descriptor, held))
-            assets._set_output_dir(path)
-        yield _Workspace(inputs, identity, output)
-    finally:
-        assets._set_output_dir(None)
-        # Code of the asset may have closed these (a library calling `os.closerange`), and the
-        # number may since name another file of the process (the result record's, say): close
-        # a number only while it refers to a directory with the identity recorded here. A
-        # failing close must not replace the attempt's result, nor skip the other close.
-        for number, expected in held:
-            if _is_held(number, expected):
-                with contextlib.suppress(OSError):
-                    os.close(number)
-
-
-def _fetch_artifact(
-    client: Client,
-    description: TaskDescription,
-    workspace: _Workspace,
-    parameter: str,
-    name: str,
-) -> Path:
-    """Download one artifact input into the attempt's directory.
-
-    The copy is placed by one rename into a target that does not exist yet, so
-    its root is sealed read-only too. Before the download the ``inputs``
-    directory is checked, by path, to be the one the harness made. That is a
-    check, not a guarantee: the asset's module is already imported, so code of
-    the task that swaps the directory between this check and the download is
-    not stopped. It gives the code nothing it could not do itself; closing it
-    needs the download to work by directory descriptor, which is issue #67.
-
-    Parameters
-    ----------
-    client
-        The SDK client holding the task's token.
-    description
-        The task description.
-    workspace
-        The attempt's directories.
-    parameter
-        The function parameter the input is for (checked as a plain
-        identifier by `parse_description`).
-    name
-        The artifact's dotted name.
-
-    Returns
-    -------
-    Path
-        The read-only local copy: a file, or a directory.
-
-    Raises
-    ------
-    WorkspaceError
-        If the ``inputs`` directory is, by a check of its path, no longer the one
-        the harness made.
-    ArtifactInputError
-        If the download is refused, fails or does not match its manifest (an
-        `InputError`).
-    """
-    version = description.input_versions[parameter]
-    inputs = workspace.inputs
-    if inputs is None or not _is_directory(inputs, workspace.inputs_identity):
-        raise WorkspaceError(
-            "the inputs directory of this attempt was replaced while the task ran, so nothing "
-            "was downloaded into it; make sure the asset's code (including its threads and "
-            "processes) does not change the attempt's directory, then run the task again"
-        )
-    try:
-        got = client.artifacts.download(
-            description.environment, name, inputs / parameter, version=version, read_only=True
-        )
-    except (LakanaError, OSError) as exc:
-        reason = str(exc) or type(exc).__name__
-        raise ArtifactInputError(
-            f"reading input {parameter!r} ({name}, version {version}) failed: {reason}"
-        ) from exc
-    return Path(got.path)
-
-
-def _is_directory(path: Path, identity: tuple[int, int] | None) -> bool:
-    """Tell whether a path is still the directory that was made.
-
-    Parameters
-    ----------
-    path
-        The directory's path.
-    identity
-        Its device and inode when it was made.
-
-    Returns
-    -------
-    bool
-        `True` if it is a directory (not a link) with that identity.
-    """
-    try:
-        info = os.lstat(path)
-    except OSError:
-        return False
-    return stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) == identity
-
-
 def _sources(description: TaskDescription) -> dict[str, int | None]:
     """Name what the task read, for lineage.
 
@@ -1710,245 +1418,8 @@ def _check_history_rows(
     _check_repeated_keys(table, key)
 
 
-def _returned_text(result: object) -> str:
-    """Read the text of a returned path once, trusting nothing else about the object.
-
-    The object is the user's: its methods may lie, raise or change their answer.
-    It is accepted only if its exact type is a subclass of `pathlib.Path`
-    (`__class__` is not asked) and `os.fspath` gives a `str`; this text is then
-    the only thing the harness looks at.
-
-    Parameters
-    ----------
-    result
-        The function's return value.
-
-    Returns
-    -------
-    str
-        The path as written.
-
-    Raises
-    ------
-    InvalidResult
-        If it is not a `pathlib.Path` with a readable text.
-    """
-    kind = type(result)
-    if issubclass(kind, Path):
-        try:
-            text = os.fspath(cast(Path, result))
-        except Exception:
-            text = None
-        if type(text) is str:
-            return text
-    name = shown(_safe(lambda: f"{kind.__module__}.{kind.__qualname__}", "an unknown type"))
-    hint = "; wrap it in pathlib.Path" if issubclass(kind, str) else ""
-    raise InvalidResult(
-        "an artifact asset must return a pathlib.Path inside lakana.output_dir() (a file, or "
-        f"the directory itself), got {name}{hint}"
-    )
-
-
-_DESCRIPTOR_CLOSED = (
-    "the asset's code closed a file descriptor the task needs, so nothing was uploaded; do not "
-    "close descriptors you did not open (for example with os.closerange), then run the task again"
-)
-
-
-def _pin(result: object, output: _Output) -> tuple[int, str]:
-    """Check what an artifact asset returned and pin the directory it lies in.
-
-    The returned text is judged lexically (``..`` collapsed, so
-    ``output/m/../x`` is ``output/x``) against the output directory's real path,
-    and then followed from the output directory's descriptor, one component at a
-    time, without following a link. What the harness gives the upload is the
-    descriptor of the directory to store, or of the directory that holds the one
-    file to store, plus a bare name: nothing the user's code can swap by name
-    afterwards is looked up again.
-
-    Parameters
-    ----------
-    result
-        The function's return value.
-    output
-        The attempt's output directory.
-
-    Returns
-    -------
-    tuple
-        An open descriptor the caller must close, and ``"."`` (store that
-        directory) or the name of the file in it (store that file).
-
-    Raises
-    ------
-    InvalidResult
-        If it is not a `pathlib.Path` inside the output directory, does not
-        exist, passes through a link, was swapped while it was followed, or the
-        asset's code closed the harness's descriptor of the output directory.
-    """
-    text = _returned_text(result)
-    base = os.fspath(output.path)
-    normal = os.path.normpath(text) if os.path.isabs(text) else ""
-    if normal == base:
-        parts: list[str] = []
-    elif normal.startswith(base + os.sep):
-        parts = normal[len(base) + 1 :].split(os.sep)
-    else:
-        raise InvalidResult(
-            f"the asset returned {shown(text)}, which is not inside lakana.output_dir(); "
-            "write the artifact's files there and return that directory or a file in it"
-        )
-    missing = InvalidResult(
-        f"the asset returned {shown(text)}, which does not exist; write the file before "
-        "returning its path"
-    )
-    try:
-        current = os.dup(output.descriptor)
-    except OSError as exc:
-        raise InvalidResult(_DESCRIPTOR_CLOSED) from exc
-    # The copy is judged, not the number: it is one open file from here on, so a later close
-    # or reopen of the number by another thread of the asset's code does not change what is
-    # checked and used. A closed number reused for any other file is refused.
-    if not _is_held(current, output.identity):
-        os.close(current)
-        raise InvalidResult(_DESCRIPTOR_CLOSED)
-    try:
-        for index, part in enumerate(parts):
-            try:
-                info = os.stat(part, dir_fd=current, follow_symlinks=False)
-            except (OSError, ValueError) as exc:  # ValueError: a NUL or a lone surrogate
-                if isinstance(exc, OSError) and exc.errno == errno.EACCES:
-                    _refuse_unopenable(text, exc)
-                raise missing from exc
-            if stat.S_ISLNK(info.st_mode):
-                raise InvalidResult(
-                    f"the asset returned {shown(text)}, which passes through a symbolic link; "
-                    "an artifact holds only regular files and directories"
-                )
-            is_directory = stat.S_ISDIR(info.st_mode)
-            if index == len(parts) - 1 and not is_directory:
-                return current, part
-            if not is_directory:
-                raise missing
-            try:
-                child = os.open(part, _DIR_FLAGS, dir_fd=current)
-            except OSError as exc:
-                if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
-                    _refuse_unopenable(text, exc)
-                raise InvalidResult(
-                    f"the asset returned {shown(text)}, which was replaced by a symbolic link or "
-                    "another file while it was checked; make sure no thread or process of the "
-                    "asset's code changes the output directory, then run the task again"
-                ) from exc
-            os.close(current)
-            current = child
-        return current, "."
-    except BaseException:
-        os.close(current)
-        raise
-
-
-def _refuse_unopenable(text: str, exc: OSError) -> NoReturn:
-    """Refuse a returned path whose directory cannot be used.
-
-    Parameters
-    ----------
-    text
-        The returned path as the function gave it.
-    exc
-        The error the operating system raised.
-
-    Raises
-    ------
-    InvalidResult
-        Always; its text names the cause and the next step.
-    """
-    reason = exc.strerror or type(exc).__name__
-    raise InvalidResult(
-        f"the asset returned {shown(text)}, which cannot be opened ({reason}); "
-        "keep the permissions of the directories below lakana.output_dir() as "
-        "they were made, then run the task again"
-    ) from exc
-
-
-def _upload_pinned(
-    client: Client, description: TaskDescription, directory: int, entry: str
-) -> ArtifactVersion:
-    """Upload ``entry`` of a pinned directory, working inside it.
-
-    The upload scans and re-opens what it stores by name relative to the current
-    directory, which is made the pinned directory for the call and restored
-    after it. A directory the task's code swaps for a link by name meanwhile is
-    therefore not followed by name. This is not a guarantee against code of the
-    task that runs at the same time: the working directory belongs to the whole
-    process, so a thread of the asset's code that calls ``os.chdir`` during the
-    upload redirects the scan. That gives the code nothing it could not do itself
-    (it runs with the task's own rights); scanning, uploading and downloading by
-    directory descriptor would close it and is issue #67. If the saved directory
-    cannot be restored afterwards, the process stays where it is and the upload's
-    own outcome is what is recorded: the result record's path is absolute.
-
-    Parameters
-    ----------
-    client
-        The SDK client holding the task's token.
-    description
-        The task description.
-    directory
-        An open descriptor of the directory; closed here.
-    entry
-        ``"."`` or the name of a file in the directory.
-
-    Returns
-    -------
-    ArtifactVersion
-        The stored version.
-
-    Raises
-    ------
-    InvalidResult
-        If the directory cannot be entered, or the directory the process was in
-        cannot be reopened to be restored (the code changed their permissions or
-        its working directory); another attempt would meet the same.
-    """
-    try:
-        try:
-            saved = os.open(".", _SAVE_FLAGS)
-        except OSError as exc:
-            raise InvalidResult(
-                "the asset's code left the working directory in a place the harness cannot "
-                "reopen (for example a directory without read permission), so nothing was "
-                "uploaded; do not change the working directory in the asset, or change it back "
-                "before the function returns, then run the task again"
-            ) from exc
-        try:
-            try:
-                os.fchdir(directory)
-            except OSError as exc:
-                raise InvalidResult(
-                    "the directory the asset returned (or lakana.output_dir() itself) is one the "
-                    "harness cannot enter, so nothing was uploaded; do not remove the "
-                    "permissions of the output directory in the asset's code, then run the "
-                    "task again"
-                ) from exc
-            try:
-                return client.artifacts.upload(
-                    description.environment,
-                    description.table,
-                    Path(entry),
-                    sources=_sources(description),
-                )
-            finally:
-                with contextlib.suppress(OSError):
-                    os.fchdir(saved)
-        finally:
-            os.close(saved)
-    finally:
-        os.close(directory)
-
-
 def _store_artifact(
-    client: Client, description: TaskDescription, output: _Output, result: object
+    client: Client, description: TaskDescription, output: Output, result: object
 ) -> dict[str, object]:
     """Validate an artifact asset's return value, upload it and build the record.
 
@@ -1981,10 +1452,10 @@ def _store_artifact(
         Raised for a refused upload and wrapped in a `Failure` of phase ``upload``.
     """
     with _Phase("validate"):
-        directory, entry = _pin(result, output)
+        directory, entry = pin(result, output)
     with _Phase("upload"):
         try:
-            stored = _upload_pinned(client, description, directory, entry)
+            stored = upload_pinned(client, description, _sources(description), directory, entry)
         except ManifestError as exc:
             raise InvalidResult(str(exc)) from exc
         except ValidationError as exc:
@@ -2104,7 +1575,7 @@ def run_asset(description: TaskDescription, client: Client, root: Path) -> dict[
     """
     with contextlib.ExitStack() as stack:
         with _Phase("load"):
-            workspace = stack.enter_context(_workspace(description))
+            workspace = stack.enter_context(make_workspace(description))
             _import_dependencies()
             source = root / "src"
             # Appended: a repository module never shadows the stdlib, the SDK or a package.
@@ -2115,7 +1586,7 @@ def run_asset(description: TaskDescription, client: Client, root: Path) -> dict[
         for parameter, name in description.inputs.items():
             with _Phase("inputs"):
                 if description.input_kinds.get(parameter) == "artifact":
-                    values[parameter] = _fetch_artifact(
+                    values[parameter] = fetch_artifact(
                         client, description, workspace, parameter, name
                     )
                 else:

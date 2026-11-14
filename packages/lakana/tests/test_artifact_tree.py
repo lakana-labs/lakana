@@ -1192,3 +1192,86 @@ def test_a_failed_write_shows_the_target_escaped(tmp_path: Path) -> None:
         writer.discard()
     assert "\x1b" not in str(refusal)
     assert "out\\x1b[0m" in str(refusal)
+
+
+_PIN = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+_BY_FD = pytest.mark.skipif(
+    not _artifact_tree._WRITE_BY_DESCRIPTOR, reason="needs files written relative to a directory"
+)
+
+
+def test_a_target_by_descriptor_needs_a_platform_that_writes_by_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_artifact_tree, "_WRITE_BY_DESCRIPTOR", False)
+    with pytest.raises(ValueError, match="Linux or macOS"):
+        _artifact_tree.check_target_name("model")
+
+
+@_BY_FD
+def test_a_descriptor_whose_disk_cannot_be_asked_is_refused_with_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failing(_fd: int) -> os.statvfs_result:
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(os, "statvfs", failing)
+    descriptor = os.open(tmp_path, _PIN)
+    try:
+        with pytest.raises(ManifestError, match="Cannot create model: Input/output error"):
+            TreeWriter.begin(Path("model"), 1, dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@_BY_FD
+def test_a_download_by_descriptor_checks_the_free_space_of_that_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = os.statvfs
+
+    def small(fd: int) -> Any:  # ruff: ignore[any-type]
+        found = real(fd)
+        return types.SimpleNamespace(f_bavail=1, f_frsize=found.f_frsize)
+
+    monkeypatch.setattr(os, "statvfs", small)
+    descriptor = os.open(tmp_path, _PIN)
+    try:
+        with pytest.raises(ManifestError, match="free some space"):
+            TreeWriter.begin(Path("model"), 10**15, dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+    assert os.listdir(tmp_path) == []
+
+
+@_BY_FD
+def test_a_descriptor_that_cannot_be_copied_is_refused_with_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failing(_fd: int) -> int:
+        raise OSError(errno.EMFILE, "Too many open files")
+
+    descriptor = os.open(tmp_path, _PIN)
+    monkeypatch.setattr(os, "dup", failing)
+    try:
+        with pytest.raises(ManifestError, match="Too many open files"):
+            TreeWriter.begin(Path("model"), 1, dir_fd=descriptor)
+    finally:
+        monkeypatch.undo()
+        os.close(descriptor)
+
+
+@_BY_FD
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_a_directory_by_descriptor_that_cannot_be_written_is_refused_with_the_reason(
+    tmp_path: Path,
+) -> None:
+    parent = tmp_path / "inputs"
+    parent.mkdir(mode=0o500)
+    descriptor = os.open(parent, _PIN)
+    try:
+        with pytest.raises(ManifestError, match="Cannot create model: Permission denied"):
+            TreeWriter.begin(Path("model"), 1, dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+        parent.chmod(0o700)

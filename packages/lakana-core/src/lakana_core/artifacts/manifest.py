@@ -18,12 +18,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
+from lakana_core.bounds import SHA256_HEX
 from lakana_core.config import ArtifactsConfig
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import shown
@@ -33,7 +33,7 @@ MAX_PATH_BYTES = 1024
 MAX_PATH_SEGMENTS = 32
 MAX_SEGMENT_BYTES = 255
 
-SHA256_PATTERN = re.compile(r"\A[0-9a-f]{64}\Z")
+SHA256_PATTERN = SHA256_HEX
 """A SHA-256 digest as the store and the manifest write it: 64 lowercase hex digits."""
 _UNSAFE = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 _RESERVED_NAMES = frozenset(

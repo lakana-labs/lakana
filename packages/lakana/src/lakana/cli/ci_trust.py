@@ -108,7 +108,7 @@ def create(
     starts = " Each deploy starts the deploy's on_deploy jobs." if rule.start_on_deploy_jobs else ""
     _output.done(
         state,
-        f"Created CI trust rule {rule.id}: {_output.inline(rule.issuer)} jobs may "
+        f"Created CI trust rule {_output.inline(rule.id)}: {_output.inline(rule.issuer)} jobs may "
         f"{' and '.join(rule.kinds)} {_output.inline(repo)} to {_output.inline(env)} as "
         f"{_output.inline(principal)}.{starts}\n"
         f"Check that {_output.inline(principal)} holds DEPLOY there: "
@@ -216,7 +216,7 @@ def update(
         start_on_deploy_jobs=start_on_deploy_jobs,
         override_reason=why,
     )
-    _output.done(state, f"Updated CI trust rule {rule.id}.", rule)
+    _output.done(state, f"Updated CI trust rule {_output.inline(rule.id)}.", rule)
 
 
 @ci_trust_app.command("enable")
@@ -242,7 +242,7 @@ def enable(
     why = override_reason(override_managed, reason)
     state = state_of(ctx)
     rule = state.client().ci_trust_rules.enable(rule_id, override_reason=why)
-    _output.done(state, f"Enabled CI trust rule {rule.id}.", rule)
+    _output.done(state, f"Enabled CI trust rule {_output.inline(rule.id)}.", rule)
 
 
 @ci_trust_app.command("disable")
@@ -270,7 +270,8 @@ def disable(
     rule = state.client().ci_trust_rules.disable(rule_id, override_reason=why)
     _output.done(
         state,
-        f"Disabled CI trust rule {rule.id}; the tokens issued under it no longer work.",
+        f"Disabled CI trust rule {_output.inline(rule.id)}; the tokens issued under it no "
+        "longer work.",
         rule,
     )
 
@@ -392,9 +393,9 @@ def explain(
     lines = [f"Verdict: {_output.inline(report.verdict, 500)}"]
     for rule in report.rules:
         if rule.matches:
-            lines.append(f"  {rule.rule_id}: matches")
+            lines.append(f"  {_output.inline(rule.rule_id)}: matches")
             continue
-        lines.append(f"  {rule.rule_id}: does not match")
+        lines.append(f"  {_output.inline(rule.rule_id)}: does not match")
         lines.extend(f"    - {_output.inline(reason, 500)}" for reason in rule.reasons)
     if not report.rules:
         lines.append("  (no rules; create one with lakana ci-trust create)")
