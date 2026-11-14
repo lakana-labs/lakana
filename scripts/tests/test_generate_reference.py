@@ -51,7 +51,7 @@ def _fixture_app(*, extra: bool = False) -> typer.Typer:
         ceiling: int = typer.Option(3, max=9),
         many: Annotated[list[str] | None, typer.Option(help="Repeat me.")] = None,
         rate: float = typer.Option(1.5, help="A number."),
-        upload: typer.FileText | None = typer.Option(None, help="A file to read."),
+        upload: Annotated[typer.FileText | None, typer.Option(help="A file to read.")] = None,
     ) -> None:
         """Greet someone.
 
