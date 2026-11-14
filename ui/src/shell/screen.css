@@ -197,11 +197,25 @@ tr:hover .chevron {
   background: var(--color-surface);
 }
 
+/* Inside a panel a list sits closer to what follows it than panels sit to each other. */
+.flat-panel .list {
+  margin-bottom: var(--space-3);
+}
+
+/* After the rule above, so a list that ends a panel has no margin either. */
 .flat-panel > *:last-child {
   margin-bottom: 0;
 }
 
-/* Inside a panel a list sits closer to what follows it than panels sit to each other. */
-.flat-panel .list {
-  margin-bottom: var(--space-3);
+/* An empty copy hint keeps no room at the end of a panel; it stays in the page as the live
+   region that says "Select the command" when copying fails. */
+.flat-panel .copy-hint:empty {
+  min-height: 0;
+}
+
+/* Narrow screens: less padding, so a table inside keeps its words whole. */
+@media (max-width: 639.98px) {
+  .flat-panel {
+    padding: var(--space-3);
+  }
 }

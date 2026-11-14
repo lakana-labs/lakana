@@ -478,10 +478,18 @@
   overflow-wrap: anywhere;
 }
 
+/* The checks scroll in their own region on a narrow screen rather than break a check's name into
+   letters; four short columns need less room than the Catalog's seven. */
+.checks-scroll .list {
+  min-width: 480px;
+}
+
+/* A status word with its glyph never breaks: "Failed" in three pieces cannot be read. */
 .glyph-word {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  white-space: nowrap;
 }
 
 .expression,

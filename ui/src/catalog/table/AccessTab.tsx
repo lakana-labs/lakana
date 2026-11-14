@@ -49,7 +49,7 @@ function SubjectName({ subject }: { readonly subject: Subject }): JSX.Element {
     return (
       <>
         <Link to={personPath(subject.principal.name)}>
-          <VisibleText text={subject.principal.name} />
+          <VisibleText text={subject.principal.name} breakable />
         </Link>
         {subject.principal.principal_type === "service" && (
           <span className="second">{t("table.access.serviceAccount")}</span>
@@ -62,7 +62,7 @@ function SubjectName({ subject }: { readonly subject: Subject }): JSX.Element {
       <Trans
         t={t}
         i18nKey="table.access.group"
-        components={{ name: <VisibleText text={subject.group} /> }}
+        components={{ name: <VisibleText text={subject.group} breakable /> }}
       />
     );
   }
@@ -283,7 +283,7 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
                         t("table.access.who.role", {
                           role: t(`table.access.roles.${grant.role}`),
                         })}
-                      {grant.action !== null && <VisibleText text={grant.action} />}
+                      {grant.action !== null && <VisibleText text={grant.action} breakable />}
                     </td>
                     <td>
                       <When iso={grant.granted_at} never="" />
@@ -396,7 +396,7 @@ function RowFilters(): JSX.Element {
                   </td>
                   <td>
                     <code className="expression">
-                      <VisibleText text={filter.expression} />
+                      <VisibleText text={filter.expression} breakable />
                     </code>
                   </td>
                 </tr>
@@ -449,11 +449,11 @@ function ColumnMasks(): JSX.Element {
                     <SubjectName subject={mask} />
                   </td>
                   <td>
-                    <VisibleText text={mask.column} />
+                    <VisibleText text={mask.column} breakable />
                   </td>
                   <td>
                     <code className="expression">
-                      <VisibleText text={mask.expression} />
+                      <VisibleText text={mask.expression} breakable />
                     </code>
                   </td>
                 </tr>

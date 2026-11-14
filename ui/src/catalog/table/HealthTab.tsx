@@ -94,7 +94,7 @@ function Checks({ health }: HealthProps): JSX.Element {
     return (
       <tr key={check.name}>
         <td>
-          <VisibleText text={check.name} />
+          <VisibleText text={check.name} breakable />
         </td>
         <td>
           <span className="glyph-word">
@@ -126,19 +126,28 @@ function Checks({ health }: HealthProps): JSX.Element {
       {health.checks.length === 0 ? (
         <p className="second">{t("table.healthTab.checks.none")}</p>
       ) : (
-        <table className="list list-static">
-          <thead>
-            <tr>
-              <th scope="col">{t("table.healthTab.checks.name")}</th>
-              <th scope="col">{t("table.healthTab.checks.result")}</th>
-              <th scope="col" className="number">
-                {t("table.healthTab.checks.failingRows")}
-              </th>
-              <th scope="col">{t("table.healthTab.checks.finished")}</th>
-            </tr>
-          </thead>
-          <tbody>{health.checks.map(row)}</tbody>
-        </table>
+        <div
+          className="list-scroll checks-scroll"
+          role="region"
+          aria-label={t("table.healthTab.checks.region")}
+          // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+          tabIndex={0}
+        >
+          <table className="list list-static">
+            <thead>
+              <tr>
+                <th scope="col">{t("table.healthTab.checks.name")}</th>
+                <th scope="col">{t("table.healthTab.checks.result")}</th>
+                <th scope="col" className="number">
+                  {t("table.healthTab.checks.failingRows")}
+                </th>
+                <th scope="col">{t("table.healthTab.checks.finished")}</th>
+              </tr>
+            </thead>
+            <tbody>{health.checks.map(row)}</tbody>
+          </table>
+        </div>
       )}
       {health.hidden_checks > 0 && (
         <p className="second">

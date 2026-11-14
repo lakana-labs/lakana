@@ -211,18 +211,36 @@ for (const theme of ["light", "dark"] as const) {
         }
       });
 
-      test("the sections of Overview, Health and Access are flat panels; Columns has none", async ({
+      test("the sections of Overview, Lineage, Health and Access are flat panels; Columns has none", async ({
         page,
       }) => {
         await page.setViewportSize({ width: 1920, height: 1080 });
         await openTable(page);
         await expect(page.getByText("Check unique_sale_id failed")).toBeVisible();
         const looks = [...(await panelLooks(page))];
-        for (const entry of NEW_TABS.slice(1)) {
+        for (const entry of NEW_TABS) {
           await openNewTab(page, entry);
-          looks.push(...(await panelLooks(page)));
+          const found = await panelLooks(page);
+          expect(found.length, entry[0]).toBeGreaterThan(0);
+          looks.push(...found);
+          if (entry[0] === "/health") {
+            // The Checks panel ends with a command and its empty copy hint: no more room below
+            // the command than the panel's padding and the command line's own margin.
+            const below = await page.evaluate(() => {
+              const panel = document.querySelector(".health-section");
+              const line = panel?.querySelector(".copy-line");
+              const pad = panel === null ? 0 : parseFloat(getComputedStyle(panel).paddingBottom);
+              return {
+                gap:
+                  (panel?.getBoundingClientRect().bottom ?? 0) -
+                  (line?.getBoundingClientRect().bottom ?? 0),
+                allowed: pad + 1 + 12,
+              };
+            });
+            expect(below.gap, JSON.stringify(below)).toBeLessThanOrEqual(below.allowed);
+          }
         }
-        expect(looks.length).toBeGreaterThanOrEqual(8);
+        expect(looks.length).toBeGreaterThanOrEqual(9);
         for (const look of looks) {
           const said = JSON.stringify(look);
           expect(look.background, said).not.toBe(look.ground);
@@ -369,6 +387,40 @@ test.describe("the table page in real Chromium", () => {
       expect(compact, `${name}: ${String(compact)} against ${String(roomy)}`).toBeLessThan(
         roomy ?? 0,
       );
+    }
+  });
+
+  test("at 320 px a status word in Health and Access stays on one line", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    for (const entry of NEW_TABS.slice(1)) {
+      await openNewTab(page, entry);
+      const words = page.locator(".table-tab .glyph-word");
+      await expect(words.first()).toBeVisible();
+      const heights = await words.evaluateAll((nodes) =>
+        nodes.map((node) => [
+          node.textContent,
+          node.getBoundingClientRect().height,
+          parseFloat(getComputedStyle(node).lineHeight),
+        ]),
+      );
+      expect(heights.length, entry[0]).toBeGreaterThan(0);
+      for (const [word, height, line] of heights) {
+        expect(height, `${entry[0]} ${String(word)}`).toBeLessThanOrEqual(Number(line) + 1);
+      }
+      // A list that does not scroll in its own region stays inside its panel.
+      const outside = await page.evaluate(() =>
+        [...document.querySelectorAll(".flat-panel .list")]
+          .filter((list) => list.closest(".list-scroll") === null)
+          .map((list) => {
+            const panel = list.closest(".flat-panel");
+            const right =
+              (panel?.getBoundingClientRect().right ?? 0) -
+              parseFloat(panel === null ? "0" : getComputedStyle(panel).paddingRight);
+            return list.getBoundingClientRect().right - right;
+          })
+          .filter((over) => over > 0.5),
+      );
+      expect(outside, entry[0]).toEqual([]);
     }
   });
 

@@ -20,6 +20,29 @@ export const INVISIBLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p
 export interface VisibleTextProps {
   /** The text, as the server sent it. */
   readonly text: string;
+  /**
+   * Offer a line break after `_`, `.`, `,`, `/` and `(`, so a long identifier in a narrow cell
+   * breaks between its parts rather than inside a word; off by default.
+   */
+  readonly breakable?: boolean | undefined;
+}
+
+/** After each of these characters a breakable text offers a line break. */
+const BREAK_AFTER = /(?<=[_.,/(])/;
+
+/**
+ * A string with a `<wbr>` after each character of {@link BREAK_AFTER}.
+ *
+ * @param text - A plain part of the text.
+ * @param key - The part's place, for the keys of its pieces.
+ * @returns The pieces and the breaks between them.
+ */
+function withBreaks(text: string, key: number): ReactNode[] {
+  return text
+    .split(BREAK_AFTER)
+    .flatMap((piece, index) =>
+      index === 0 ? [piece] : [<wbr key={`${String(key)}-${String(index)}`} />, piece],
+    );
 }
 
 /**
@@ -99,12 +122,17 @@ export function markedText(text: string): string {
  *
  * @param props - The text.
  * @param props.text - The text, as the server sent it.
+ * @param props.breakable - Whether to offer line breaks between the parts of an identifier.
  * @returns The text and its marks.
  */
-export function VisibleText({ text }: VisibleTextProps): JSX.Element {
-  const shown: ReactNode[] = markInvisible(text).map((part, index) =>
+export function VisibleText({ text, breakable = false }: VisibleTextProps): JSX.Element {
+  const shown: ReactNode[] = markInvisible(text).flatMap((part, index) =>
     typeof part === "string" ? (
-      part
+      breakable ? (
+        withBreaks(part, index)
+      ) : (
+        part
+      )
     ) : (
       <span key={index} className="char-mark">
         {part.mark}
