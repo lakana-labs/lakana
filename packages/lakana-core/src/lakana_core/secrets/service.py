@@ -53,7 +53,6 @@ from lakana_core.secrets.uses import (
     used_by_its_environment,
 )
 
-
 _NAME_MAX = 255
 """The longest secret name the catalog stores (`Secret.name`)."""
 
