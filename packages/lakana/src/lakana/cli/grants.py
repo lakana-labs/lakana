@@ -323,11 +323,11 @@ def list_grants(
 
     A grant gives a role or a single action, so one column, `access`, shows whichever it is;
     it never drops. The table names who each grant is for in `subject` (`user alice`,
-    `service ci-bot`, `group analysts`); the API answers with the names, so listing costs one request. Only an
-    answer without a name shows the id and a notice (a server older than this CLI, or a
-    person or group deleted a moment ago). A column with nothing in it is left out. When the
-    terminal is too narrow the table leaves out `kind`, `namespace`, `table` and `environment`,
-    in that order, and folds a long `subject` onto more lines, so that the `id` that
+    `service ci-bot`, `group analysts`); the API answers with the names, so listing costs one
+    request. Only an answer without a name shows the id and a notice (a server older than this
+    CLI, or a person or group deleted a moment ago). A column with nothing in it is left out.
+    When the terminal is too narrow the table leaves out `kind`, `namespace`, `table` and
+    `environment`, in that order, and folds a long `subject` onto more lines, so that the `id` that
     `grant revoke` needs always stays whole, and a line under the table shows the revoke
     command; `--output json` always has every field.
 
