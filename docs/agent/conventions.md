@@ -497,7 +497,9 @@ package-index or artifact names. A new column name meets `refuse_hidden_characte
 `catalog.metadata` (`build_table_metadata` for a new table, `apply_updates` for each added schema,
 which skips a name one of the table's schemas already holds), in `create_or_replace_view` (which
 skips a column the replaced view already had) and in `create_external_table` (the names inferred
-from the caller's sample file). The `.`
+from the caller's sample file). A new artifact name meets `refuse_hidden_characters` as well
+(`ArtifactService._create`), since it is listed among the namespace's tables, but not the `%`
+rule. The `.`
 rule keeps the dotted display form (`gold.sales`) unambiguous: `["a.b"]` and
 `["a", "b"]` would otherwise render identically.
 

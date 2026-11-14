@@ -161,7 +161,7 @@ case must use the namespace's exact name.
 
 ### Invisible characters in new table, namespace and column names are refused
 
-A new namespace, table, view or column name may no longer hold a control character, a format
+A new namespace, table, view, artifact or column name may no longer hold a control character, a format
 character (Unicode category `Cf`: a bidirectional control such as U+202E, a zero-width space, a
 soft hyphen) or the line or paragraph separator (U+2028, U+2029). Such a character is invisible
 or reorders the text around it, so the name could look like another table's. The rule applies
