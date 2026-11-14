@@ -98,12 +98,27 @@ budgets").
 `addopts` carries no `-n`, so a plain `uv run pytest` stays serial. The default Python of a
 checkout is 3.14 (`.python-version`; the image runs 3.14 too), so a plain `uv run` is the 3.14
 run. Locally, a pull request runs the tests its change selects (see "Local gates"); to run the
-whole suite the way the 3.14 shards do together, inside the capped scope, use `-n 2`:
+whole suite with coverage the way the 3.14 shards do together, run it **one package at a time**
+and combine the data, as CI combines its shards:
 
 ```bash
-systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 timeout 900 \
-  uv run pytest -n 2 --dist loadfile --cov --cov-report=json -q -p no:cacheprovider
+for target in packages/lakana-core packages/lakana packages/lakana-server packages/lakana-worker scripts; do
+  COVERAGE_FILE=".coverage.local-$(basename "$target")" \
+    systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 timeout 2400 \
+    uv run pytest "$target" -n 2 --dist loadfile --cov --cov-report= -q -p no:cacheprovider || break
+done
+uv run coverage combine .coverage.local-* && uv run coverage json
+uv run python scripts/coverage_ratchet.py
 ```
+
+One run over the whole repository no longer fits (#488): it grew to 7.0 GB by about 99 % (in
+`scripts/tests/test_workflows.py`) and the memory limit stopped it. Its two workers live through
+all five targets; which part of what they keep grows (coverage data, a cache, imported modules)
+was not isolated, since the per-target runs fit with room to spare. Fresh workers per target
+peak at 2.9 GB (`lakana-core`), 2.3 GB (`lakana-worker`), 2.2 GB (`lakana-server`, `scripts`)
+and 1.3 GB (`lakana`) (2026-11-14, Python 3.14, `-n 2`, `--cov`); the combined report is the
+whole suite's and passed the ratchet at 100.00 %. `lakana-core` took 39 minutes that day on a
+busy machine, `lakana-server` and `lakana-worker` 7 each, `scripts` 3, `lakana` 1.5.
 
 - **Why `loadfile`:** every test of one file runs in one process, in file order. Test-level
   isolation under `--dist load` (module-level state, ports, environment variables,
@@ -1050,12 +1065,8 @@ that fails the ratchet is named by file and line in that job's log. One shard al
 suite: the ratchet only ever reads the combined report.
 
 The ratchet is a CI gate (see "Local gates"); to reproduce a failure locally, run it the
-same way CI does, over the whole suite:
-
-```bash
-uv run pytest --cov --cov-report=json --cov-report=term
-uv run python scripts/coverage_ratchet.py
-```
+same way CI does, over the whole suite: one package at a time, the data combined (the loop in
+"Running the unit suite in parallel"; one run over everything outgrows the memory limit, #488).
 
 **To raise the baseline** after adding tests that increase coverage, pass `--update`:
 
