@@ -105,6 +105,27 @@ describe("Overview", () => {
       .map((heading) => heading.textContent);
     expect(names).toEqual(["Description", "Columns", "Health", "Facts", "Comes from · goes to"]);
   });
+
+  it("gives administrators Readers › and Health details › on Overview", async () => {
+    renderShell(PAGE);
+
+    expect(await screen.findByRole("link", { name: "Readers ›" })).toHaveAttribute(
+      "href",
+      `${PAGE}/health#readers`,
+    );
+    expect(screen.getByRole("link", { name: "Health details ›" })).toHaveAttribute(
+      "href",
+      `${PAGE}/health`,
+    );
+  });
+
+  it("gives everyone else Health details › and no Readers ›", async () => {
+    renderShell(PAGE, { me: { name: "kim.schulz", admin: false } });
+
+    expect(await screen.findByRole("link", { name: "Health details ›" })).toBeVisible();
+    await screen.findByRole("heading", { level: 2, name: "Facts" });
+    expect(screen.queryByRole("link", { name: "Readers ›" })).not.toBeInTheDocument();
+  });
 });
 
 const PERMISSIONS = "GET /api/v1/principals/admin/permissions";
