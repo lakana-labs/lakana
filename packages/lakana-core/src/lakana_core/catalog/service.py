@@ -43,6 +43,7 @@ from pyiceberg.table.update import (
     SetDefaultSortOrderUpdate,
     SetDefaultSpecUpdate,
     SetLocationUpdate,
+    SetPropertiesUpdate,
     SetSnapshotRefUpdate,
     TableRequirement,
     TableUpdate,
@@ -1195,6 +1196,48 @@ def _refusal_before_lookup(update: TableUpdate) -> str | None:
     if isinstance(update, (RemoveSchemasUpdate, RemovePartitionSpecsUpdate)):
         return _NO_SCHEMA_OR_SPEC_REMOVAL
     return None
+
+
+LAKANA_PROPERTY_PREFIX = "lakana."
+"""Properties under this prefix are Lakana's own (`lakana.history-key`): no client sets one."""
+
+
+def _reserved_property(keys: Iterable[str]) -> str | None:
+    """Name the first `lakana.*` key among `keys`, if there is one.
+
+    Parameters
+    ----------
+    keys
+        Table property keys a caller asked to set or remove.
+
+    Returns
+    -------
+    str or None
+        The first reserved key in sorted order, or `None` when there is none.
+    """
+    return next((key for key in sorted(keys) if key.startswith(LAKANA_PROPERTY_PREFIX)), None)
+
+
+def _reserved_property_in_commit(updates: Sequence[TableUpdate]) -> str | None:
+    """Name the first `lakana.*` key that `updates` set or remove, if there is one.
+
+    Parameters
+    ----------
+    updates
+        A commit's updates.
+
+    Returns
+    -------
+    str or None
+        The reserved key, or `None` when the commit leaves every `lakana.*` property alone.
+    """
+    keys: list[str] = []
+    for table_update in updates:
+        if isinstance(table_update, SetPropertiesUpdate):
+            keys.extend(table_update.updates)
+        elif isinstance(table_update, RemovePropertiesUpdate):
+            keys.extend(table_update.removals)
+    return _reserved_property(keys)
 
 
 _MAX_LONG = 2**63 - 1
@@ -2767,6 +2810,7 @@ class CatalogService:
             If `ref.name` is not a valid table name; if `properties` is
             refused by
             :meth:`lakana_core.storage.resolver.ResolvedStorage.validate_table_properties`;
+            if `properties` holds a `lakana.*` key (Lakana's own, #428);
             if `location` is not `None`; if the metadata location computed
             from the assigned table location does not resolve to somewhere
             inside the environment's storage root; or if `ref.namespace`'s
@@ -2787,6 +2831,12 @@ class CatalogService:
             Action.CREATE_TABLE,
             Securable.table_scope(ref.environment, ref.namespace, ref.name),
         )
+        reserved = _reserved_property(properties or {})
+        if reserved is not None:
+            raise ValidationError(
+                f"The table property {reserved} is reserved for Lakana: a table may not be "
+                f"created with a {LAKANA_PROPERTY_PREFIX}* property. Leave it out of the request."
+            )
         self._guard.check(p, ref.environment, WriteOperation.CREATE_TABLE, table_target(ref))
         prepared = self._prepare_table(
             ref,
@@ -5164,7 +5214,8 @@ class CatalogService:
             sort order current; if `updates` add a schema, partition spec or sort order
             under an id the table already has; if `updates` set a
             table property that `ResolvedStorage.validate_table_properties`
-            refuses; if `updates` includes an `AddSnapshotUpdate` whose
+            refuses; if `updates` set or remove a `lakana.*` table property (Lakana's own,
+            #428); if `updates` includes an `AddSnapshotUpdate` whose
             `snapshot.manifest_list` does not lie under the table's own
             location, whose snapshot id or sequence number lies outside 0 to 2^63-1, or
             whose sequence number on a format v2 or later table is not above the table's
@@ -5214,6 +5265,15 @@ class CatalogService:
             for refused in map(_refusal_before_lookup, updates):
                 if refused is not None:
                     raise PermissionDenied(refused)
+        # Lakana writes its own properties only when it creates a table (`_prepare_table`);
+        # no commit, whoever sends it, sets or removes one (#428).
+        reserved = _reserved_property_in_commit(updates)
+        if reserved is not None:
+            raise ValidationError(
+                f"The table property {reserved} is reserved for Lakana: an Iceberg commit may "
+                f"not set or remove a {LAKANA_PROPERTY_PREFIX}* property. Leave it out of the "
+                "commit."
+            )
         if not maintenance:
             self._guard.check(
                 p,

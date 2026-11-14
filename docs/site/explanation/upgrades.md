@@ -159,6 +159,19 @@ case must use the namespace's exact name.
 - An older CLI shows the jobs and connections of a start asset as `start` and other leaves as
   `join` in the lineage and neighbours output. Upgrade the CLI together with the server.
 
+### Table properties named `lakana.*` are Lakana's own (breaking)
+
+An Iceberg client may no longer set or remove a table property whose name starts with `lakana.`,
+neither when it creates a table nor in a commit. Lakana keeps its own facts there, such as the key
+of a history table (`lakana.history-key`), and a client that changed one could make a history
+table forget its key. The refusal names the property, for example `The table property
+lakana.history-key is reserved for Lakana: an Iceberg commit may not set or remove a lakana.*
+property. Leave it out of the commit.` (422 from the REST API).
+
+Earlier releases accepted such properties. A client or script that sets one of its own under
+`lakana.` must use another prefix, for example `team.` or the name of your company. Properties a
+table already has are not touched: a commit that leaves them alone works as before.
+
 ### Invisible characters in new table, namespace and column names are refused (breaking)
 
 A new namespace, table, view, artifact or column name may no longer hold a control character, a format

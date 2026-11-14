@@ -34,6 +34,10 @@ A commit's snapshot summary may not carry `lakana.task-run-id` or `lakana.task-c
 removes both from every snapshot a client commits, because only the platform records which Python
 task attempt wrote a snapshot.
 
+A table property whose name starts with `lakana.` (such as `lakana.history-key`, the key of a
+history table) is Lakana's own: a client may neither create a table with one nor set or remove one
+in a commit. Lakana refuses such a request with a 422 that names the property.
+
 ## The promise
 
 - **Before v1.0.0**, a minor release (0.N.0) may break the platform API, but only openly: the

@@ -1880,3 +1880,21 @@ def test_a_table_that_is_not_published_still_exists_and_is_still_listed(
 
     assert catalog.table_exists(principal, ref) is True
     assert catalog.list_tables(principal, "dev", ns) == [ref]
+
+
+def test_create_table_refuses_a_lakana_property(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A `lakana.*` property is Lakana's own: a caller may not set one when creating a table."""
+    ref = _prepared_ref(catalog, principal, tmp_path)
+
+    with pytest.raises(ValidationError) as info:
+        catalog.create_table(
+            principal, ref, schema=_schema(), properties={"lakana.history-key": '["id"]'}
+        )
+
+    assert str(info.value) == (
+        "The table property lakana.history-key is reserved for Lakana: a table may not be "
+        "created with a lakana.* property. Leave it out of the request."
+    )
+    assert catalog.table_exists(principal, ref) is False

@@ -3268,13 +3268,18 @@ writes history only into its own asset, and only as a reader of it would: pins
 `test_a_task_of_a_write_only_principal_may_not_write_history`,
 `test_a_task_of_a_reading_and_writing_principal_writes_history` (server).
 
-**Limit: `lakana.history-key` is an ordinary table property.** An Iceberg REST commit with
-`WRITE_TABLE` can set or remove it (`SetPropertiesUpdate`, `RemovePropertiesUpdate`):
-`validate_table_properties` refuses only the location and class-path properties, and no
-`lakana.*` table property is reserved on that path. It is no escalation (the same writer may
-rewrite the rows), but "a history table keeps its key" holds only against writes through
-`CatalogService.history`; a removed property makes the next history run refuse the table with
-`not_history_message`.
+**`lakana.*` table properties are reserved (#428).** No `commit_table` call, whoever sends it,
+may set or remove a `lakana.*` key (`SetPropertiesUpdate`, `RemovePropertiesUpdate`;
+`_reserved_property_in_commit`, `ValidationError` naming the key, checked before the table is
+looked up, so a removal of a key the table does not have is refused alike and tells nothing). The
+public `create_table` (which the Iceberg REST create route calls with its `properties`) refuses a `lakana.*` key in
+`properties` too. Lakana writes its own properties only where it creates a table itself
+(`_write_new_table` → `_prepare_table`, for `lakana.history-key`), which no request reaches with
+caller-chosen properties. So "a history table keeps its key" holds against every writer. Pins:
+`test_an_iceberg_commit_may_not_set_or_remove_a_lakana_property`,
+`test_an_iceberg_commit_of_other_properties_keeps_the_history_key` (core),
+`test_create_table_refuses_a_lakana_property` (core),
+`test_a_commit_may_not_set_or_remove_a_lakana_property` (server).
 
 **An Iceberg REST commit never removes snapshots** (`_NO_SNAPSHOT_REMOVAL`, 403 for every caller).
 `commit_table` refuses `remove-snapshots`, and `remove-snapshot-ref` for a ref named
