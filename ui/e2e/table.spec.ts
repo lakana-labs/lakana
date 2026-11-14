@@ -243,7 +243,8 @@ for (const theme of ["light", "dark"] as const) {
         expect(framed).toBe(false);
       });
 
-      // The flat panels (2026-11-14) need about 130 px more than 800: a 1280 × 800 window scrolls.
+      // Since the flat panels (decided 2026-11-14) Overview needs about 130 px more than 800, and a
+      // 1280 × 800 window may scroll it; it must still fit a 1920 × 1080 window.
       test("Overview fits 1920 × 1080 without scrolling for the typical table", async ({
         page,
       }) => {
