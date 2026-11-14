@@ -285,7 +285,7 @@ def _unguarded(app: FastAPI) -> list[str]:
     found: list[str] = []
     for route in _flatten(app.routes):
         if not isinstance(route, APIRoute):
-            if route.path not in _DOCS_ROUTES:  # ty: ignore[unresolved-attribute]
+            if route.path not in _DOCS_ROUTES:  # ty: ignore[missing-attribute]
                 found.append(f"unknown route kind {route!r}")
             continue
         if route.path not in _OPEN_ROUTES and not depends_on_get_principal(route.dependant):

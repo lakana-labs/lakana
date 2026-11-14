@@ -17,7 +17,7 @@ import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { AccessFrame } from "./AccessFrame";
-import { personPath } from "./paths";
+import { personPath } from "./personPath";
 import { RecoveryDialog } from "./RecoveryDialog";
 import { PendingButton } from "../shell/PendingButton";
 

@@ -647,10 +647,10 @@ def test_a_leader_held_while_it_books_makes_the_other_skip_the_time(stack: Query
 def test_a_fire_during_an_active_run_starts_when_that_run_ends(stack: QueryStack) -> None:
     """The fire waits behind the run, is consumed, and runs once the project is free."""
     project = _project(stack)
-    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[unresolved-attribute]
+    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[missing-attribute]
     _arm(stack, project)
     (fire,) = _fire(stack)
-    assert fire.outcome is FireOutcome.WAITING  # ty: ignore[unresolved-attribute]
+    assert fire.outcome is FireOutcome.WAITING  # ty: ignore[missing-attribute]
     assert _start_waiting(stack) == []
     assert len(_runs(stack, project)) == 1
     _end_runs(stack, project)
@@ -669,12 +669,12 @@ def test_a_start_by_hand_while_busy_then_the_fire_give_one_waiting_start_and_one
 ) -> None:
     """The two requests merge into the one waiting start; one run follows."""
     project = _project(stack)
-    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[unresolved-attribute]
-    waiting = _by_hand(stack, project, "fast").waiting  # ty: ignore[unresolved-attribute]
+    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[missing-attribute]
+    waiting = _by_hand(stack, project, "fast").waiting  # ty: ignore[missing-attribute]
     assert waiting is not None and waiting.trigger == "manual"
     _arm(stack, project)
     (fire,) = _fire(stack)
-    assert fire.outcome is FireOutcome.WAITING  # ty: ignore[unresolved-attribute]
+    assert fire.outcome is FireOutcome.WAITING  # ty: ignore[missing-attribute]
     row = _schedule(stack, project, "fast")
     assert row is not None and row.pending_start is not None
     assert (row.pending_start["trigger"], row.pending_start["merged"]) == ("schedule", 2)
@@ -690,8 +690,8 @@ def test_a_deploy_that_removes_a_job_with_a_waiting_start_leaves_no_start_behind
 ) -> None:
     """The row goes with the job, and the project's later free moment starts nothing."""
     project = _project(stack)
-    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[unresolved-attribute]
-    assert _by_hand(stack, project, "gone").waiting is not None  # ty: ignore[unresolved-attribute]
+    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[missing-attribute]
+    assert _by_hand(stack, project, "gone").waiting is not None  # ty: ignore[missing-attribute]
     commit_files(project.path, {"lakana.yaml": _JOBS_WITHOUT_GONE, **_FILES})
     deploy = stack.admin.deploys.create(project.environment, project.repository)
     _drain(stack)
@@ -707,8 +707,8 @@ def test_start_waiting_racing_a_start_by_hand_gives_one_run_and_loses_no_start(
 ) -> None:
     """The waiting start is held at its insert; the start by hand then parks instead of failing."""
     project = _project(stack)
-    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[unresolved-attribute]
-    assert _by_hand(stack, project, "fast").waiting is not None  # ty: ignore[unresolved-attribute]
+    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[missing-attribute]
+    assert _by_hand(stack, project, "fast").waiting is not None  # ty: ignore[missing-attribute]
     _end_runs(stack, project)
     with StatementPause(stack.db, "INSERT INTO runs", "waiter") as pause:
         waiter, waited = run_in_thread("waiter", lambda: _start_waiting(stack))
@@ -723,8 +723,8 @@ def test_start_waiting_racing_a_start_by_hand_gives_one_run_and_loses_no_start(
     (started,) = thread_result(waiter, waited)  # ty: ignore[not-iterable]
     result = thread_result(hand, handed)
     assert started.job == "fast"
-    assert result.run is None and result.waiting is not None  # ty: ignore[unresolved-attribute]
-    assert result.waiting.waits_for_run_id == started.id  # ty: ignore[unresolved-attribute]
+    assert result.run is None and result.waiting is not None  # ty: ignore[missing-attribute]
+    assert result.waiting.waits_for_run_id == started.id  # ty: ignore[missing-attribute]
     row = _schedule(stack, project, "gone")
     assert row is not None and row.pending_start is not None
     assert len([r for r in _runs(stack, project) if r.job == "fast"]) == 1
@@ -733,15 +733,15 @@ def test_start_waiting_racing_a_start_by_hand_gives_one_run_and_loses_no_start(
 def test_start_waiting_racing_a_park_merges_into_the_started_run(stack: QueryStack) -> None:
     """A park that holds the locks first adds to the waiting start; the run it starts says so."""
     project = _project(stack)
-    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[unresolved-attribute]
-    assert _by_hand(stack, project, "fast").waiting is not None  # ty: ignore[unresolved-attribute]
+    assert _by_hand(stack, project, "slow").run is not None  # ty: ignore[missing-attribute]
+    assert _by_hand(stack, project, "fast").waiting is not None  # ty: ignore[missing-attribute]
     with StatementPause(stack.db, "UPDATE job_schedules", "parker") as pause:
         parker, parked = run_in_thread("parker", lambda: _by_hand(stack, project, "fast"))
         pause.wait()
         _end_runs(stack, project)
         waiter, waited = run_in_thread("waiter", lambda: _start_waiting(stack))
         wait_for_lock_waiter(stack.db, pause.backend or 0)
-    assert thread_result(parker, parked).waiting is not None  # ty: ignore[unresolved-attribute]
+    assert thread_result(parker, parked).waiting is not None  # ty: ignore[missing-attribute]
     (started,) = thread_result(waiter, waited)  # ty: ignore[not-iterable]
     assert started.job == "fast" and _merged(stack, project, started) == 2
     assert len(_runs(stack, project)) == 2
@@ -755,8 +755,8 @@ def test_a_deploy_a_fire_a_waiting_start_and_a_pause_do_not_deadlock(stack: Quer
     """
     project = _project(stack)
     admin = _admin(stack)
-    assert _by_hand(stack, project, "gone").run is not None  # ty: ignore[unresolved-attribute]
-    assert _by_hand(stack, project, "slow").waiting is not None  # ty: ignore[unresolved-attribute]
+    assert _by_hand(stack, project, "gone").run is not None  # ty: ignore[missing-attribute]
+    assert _by_hand(stack, project, "slow").waiting is not None  # ty: ignore[missing-attribute]
     _end_runs(stack, project)
     _arm(stack, project)
     commit_files(project.path, {"lakana.yaml": _JOBS.replace("0 3 * * *", "5 3 * * *"), **_FILES})
@@ -834,7 +834,7 @@ def test_a_deploy_that_holds_the_pointer_makes_the_tick_give_up_and_the_next_one
     assert thread_result(deployer, deployed) is None
     stack.admin.deploys.wait(project.environment, deploy.id, timeout=30)
     (fire,) = _fire(stack)
-    assert fire.outcome is FireOutcome.STARTED  # ty: ignore[unresolved-attribute]
+    assert fire.outcome is FireOutcome.STARTED  # ty: ignore[missing-attribute]
 
 
 def test_binding_a_principal_after_fire_times_were_consumed_gives_no_burst(
@@ -844,14 +844,14 @@ def test_binding_a_principal_after_fire_times_were_consumed_gives_no_burst(
     project = _project(stack, bind=False)
     _arm(stack, project)
     (fire,) = _fire(stack)
-    assert fire.outcome is FireOutcome.NO_RUN_PRINCIPAL  # ty: ignore[unresolved-attribute]
+    assert fire.outcome is FireOutcome.NO_RUN_PRINCIPAL  # ty: ignore[missing-attribute]
     assert _runs(stack, project) == []
     _bind(stack, project)
     assert _fire(stack) == []
     assert _runs(stack, project) == []
     (next_fire,) = _fire(stack, NOW + timedelta(days=1))
-    assert next_fire.scheduled_for == FIRE + timedelta(days=1)  # ty: ignore[unresolved-attribute]
-    assert next_fire.missed == 0  # ty: ignore[unresolved-attribute]
+    assert next_fire.scheduled_for == FIRE + timedelta(days=1)  # ty: ignore[missing-attribute]
+    assert next_fire.missed == 0  # ty: ignore[missing-attribute]
     (run,) = _runs(stack, project)
     assert run.scheduled_for == FIRE + timedelta(days=1)
 
@@ -941,7 +941,7 @@ def test_a_due_schedule_is_fired_by_the_leader_and_a_worker_builds_its_table(
         work()
         reader.join(0.1)
     table = thread_result(reader, result)
-    assert table.to_pylist() == [{"id": 1}, {"id": 2}, {"id": 3}]  # ty: ignore[unresolved-attribute]
+    assert table.to_pylist() == [{"id": 1}, {"id": 2}, {"id": 3}]  # ty: ignore[missing-attribute]
 
 
 _ON_DEPLOY = (

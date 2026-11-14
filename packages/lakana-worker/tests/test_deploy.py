@@ -1306,7 +1306,7 @@ def test_a_losing_tarball_is_deleted_when_nothing_else_names_it(
     deploy_module._discard_losing_upload(
         session, upload, version.repository_id, version.environment_id, world.sha
     )
-    assert not storage.exists(upload.path)  # ty: ignore[unresolved-attribute]
+    assert not storage.exists(upload.path)  # ty: ignore[missing-attribute]
 
 
 def test_a_losing_tarball_another_environment_records_is_kept(
@@ -1320,7 +1320,7 @@ def test_a_losing_tarball_another_environment_records_is_kept(
     deploy_module._discard_losing_upload(
         session, upload, dev.repository_id, dev.environment_id, world.sha
     )
-    assert storage.exists(upload.path)  # ty: ignore[unresolved-attribute]
+    assert storage.exists(upload.path)  # ty: ignore[missing-attribute]
 
 
 _PY_ASSET = (

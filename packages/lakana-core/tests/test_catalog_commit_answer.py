@@ -11,7 +11,7 @@ import pytest
 from core_test_helpers import ActionAllowList
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
-from pyiceberg.table.metadata import TableMetadataUtil
+from pyiceberg.table.metadata import TableMetadataUtil, TableMetadataV2, TableMetadataV3
 from pyiceberg.table.sorting import SortField, SortOrder
 from pyiceberg.table.update import (
     AddPartitionSpecUpdate,
@@ -212,7 +212,8 @@ def test_a_writer_without_read_gets_no_history(
     assert metadata["table-uuid"] == str(full.table_uuid)
     assert metadata["location"] == full.location
     assert metadata["current-schema-id"] == full.current_schema_id
-    assert metadata["last-sequence-number"] == full.last_sequence_number  # ty: ignore[unresolved-attribute]
+    assert isinstance(full, TableMetadataV2 | TableMetadataV3)
+    assert metadata["last-sequence-number"] == full.last_sequence_number
 
 
 def test_a_reader_gets_the_whole_metadata(
@@ -407,7 +408,8 @@ def test_an_update_that_does_not_fit_tells_a_writer_without_read_nothing(
         )
     )
     writer = CatalogService(session, StorageResolver(session), ActionAllowList(Action.WRITE_TABLE))
-    stored = str(metadata.last_sequence_number)  # ty: ignore[unresolved-attribute]
+    assert isinstance(metadata, TableMetadataV2 | TableMetadataV3)
+    stored = str(metadata.last_sequence_number)
 
     for caller in _writers(principal):
         with pytest.raises(ValidationError) as refused:

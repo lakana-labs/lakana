@@ -5,13 +5,16 @@
  * @packageDocumentation
  */
 import type {
+  ColumnMaskOut,
   ColumnOut,
+  GrantOut,
   GraphNodeOut,
   GraphOut,
   PermissionsOut,
   QueryRunStatus,
   QueryStatusOut,
   ResultPageOut,
+  RowFilterOut,
   TableDefinitionFileOut,
   TableDefinitionOut,
   TableHealthOut,
@@ -200,7 +203,7 @@ export function signalResult(overrides: Partial<SignalResult> = {}): SignalResul
     signal: "volume",
     column: null,
     state: "ok",
-    effect: "alert",
+    effect: "warn",
     snapshot_id: 4821,
     observed_at: "2026-11-12T06:06:00Z",
     observed: null,
@@ -221,6 +224,23 @@ export const HEALTH: TableHealthOut = {
   signals: [signalResult()],
 };
 
+/** Who read the fact table in the last seven days, as an administrator is told. */
+export const READERS: NonNullable<TableHealthOut["readers"]> = [
+  { principal: "kim.schulz", read_count: 4, last_read_at: "2026-11-13T07:30:00Z" },
+  { principal: "ana.nowak", read_count: 1, last_read_at: "2026-11-11T16:00:00Z" },
+];
+
+/** The last maintenance of the fact table: it expired snapshots and deleted orphaned files. */
+export const MAINTENANCE: NonNullable<TableHealthOut["last_maintenance"]> = {
+  run_id: "3c2b1a09-8f7e-4d6c-9b5a-4e3d2c1b0a99",
+  finished_at: "2026-11-12T02:00:00Z",
+  status: "complete",
+  snapshots_expired: 14,
+  files_deleted: 37,
+  bytes_deleted: 48_200_000,
+  tags_removed: 1,
+};
+
 /**
  * The health with some fields changed.
  *
@@ -231,16 +251,50 @@ export function health(overrides: Partial<TableHealthOut> = {}): TableHealthOut 
   return { ...HEALTH, ...overrides };
 }
 
+/** An edge of a lineage answer. */
+type GraphEdge = GraphOut["edges"][number];
+
 /**
- * A node of the lineage.
+ * A node of the lineage, with its id built as the server builds it from the kind and the name.
  *
- * @param kind - The node kind: table, job or connection.
- * @param name - Its name; a dotted name for a table.
- * @param distance - Steps from the table.
+ * @param kind - The node kind: table, asset, job or connection.
+ * @param name - Its name; a dotted name for a table and an asset, `<repository>/<job>` for a job.
+ * @param distance - Assets crossed from the table; a job or connection has its asset's.
+ * @param overrides - The fields that differ, such as an asset's `id` and `repository`.
  * @returns The node.
  */
-function node(kind: string, name: string, distance: number): GraphNodeOut {
-  return { id: `${kind}:${name}`, kind, name, distance };
+export function graphNode(
+  kind: string,
+  name: string,
+  distance: number,
+  overrides: Partial<GraphNodeOut> = {},
+): GraphNodeOut {
+  return { id: `${kind}:${name}`, kind, name, distance, ...overrides };
+}
+
+/**
+ * An asset of the lineage: its id names its repository, its name is the table it builds.
+ *
+ * @param name - The dotted table it builds.
+ * @param distance - Assets crossed from the table, itself included.
+ * @param repository - The repository that declares it.
+ * @returns The node.
+ */
+export function assetNode(name: string, distance: number, repository = "analytics"): GraphNodeOut {
+  return graphNode("asset", name, distance, { id: `asset:${repository}/${name}`, repository });
+}
+
+/**
+ * An edge of the lineage, as the server writes it: `builds` and `reads` from an asset to a table,
+ * `runs` from a job to an asset, `uses` from an asset to a connection.
+ *
+ * @param kind - The edge's kind.
+ * @param source - The node it leaves.
+ * @param target - The node it reaches.
+ * @returns The edge.
+ */
+export function graphEdge(kind: string, source: GraphNodeOut, target: GraphNodeOut): GraphEdge {
+  return { kind, source: source.id, target: target.id };
 }
 
 /** The table's own node: its id is built from the table's uuid. */
@@ -255,21 +309,182 @@ export const ROOT: GraphNodeOut = {
  * A lineage answer: the table's own node, then the others.
  *
  * @param others - The other nodes.
+ * @param edges - The edges between them.
  * @returns The answer.
  */
-export function lineage(others: readonly GraphNodeOut[]): GraphOut {
-  return { nodes: [ROOT, ...others], edges: [], next_cursor: null };
+export function lineage(
+  others: readonly GraphNodeOut[],
+  edges: readonly GraphEdge[] = [],
+): GraphOut {
+  return { nodes: [ROOT, ...others], edges, next_cursor: null };
 }
 
-/** What feeds the fact table: a staging table, the job that builds it and a connection. */
-export const UP: GraphOut = lineage([
-  node("table", "staging.stg_sales", 1),
-  node("job", "shop/load_sales", 1),
-  node("connection", "shop_db", 2),
-]);
+/** The asset that builds the fact table. */
+const FACT_ASSET = assetNode("gold.sales.fact_sales", 1);
 
-/** What the fact table feeds: one table. */
-export const DOWN: GraphOut = lineage([node("table", "gold.sales.daily_sales", 1)]);
+/** The staging table the fact table's asset reads. */
+const STG_SALES = graphNode("table", "staging.stg_sales", 1);
+
+/** The job that runs the fact table's asset; a job's name starts with its repository. */
+const DAILY_SALES_JOB = graphNode("job", "analytics/daily_sales", 1, { repository: "analytics" });
+
+/** The connection the fact table's asset loads from. */
+const PG_SALES = graphNode("connection", "pg-sales", 1, { connection_kind: "postgresql" });
+
+/**
+ * What feeds the fact table, one step up, as the server answers it: the asset that builds it,
+ * the staging table that asset reads, the job that runs it and the connection it uses. The job
+ * and the connection are leaves at their asset's distance.
+ */
+export const UP: GraphOut = lineage(
+  [FACT_ASSET, STG_SALES, DAILY_SALES_JOB, PG_SALES],
+  [
+    graphEdge("builds", FACT_ASSET, ROOT),
+    graphEdge("reads", FACT_ASSET, STG_SALES),
+    graphEdge("runs", DAILY_SALES_JOB, FACT_ASSET),
+    graphEdge("uses", FACT_ASSET, PG_SALES),
+  ],
+);
+
+/** The asset that builds the staging table, two steps up. */
+const STG_ASSET = assetNode("staging.stg_sales", 2);
+
+/** The raw table the staging table's asset reads, two steps up. */
+const SALES_RAW = graphNode("table", "bronze.sales_raw", 2);
+
+/** What feeds the fact table two steps up: {@link UP}, and the staging table's asset and its source. */
+export const UP2: GraphOut = lineage(
+  [...UP.nodes.slice(1), STG_ASSET, SALES_RAW],
+  [
+    ...UP.edges,
+    graphEdge("builds", STG_ASSET, STG_SALES),
+    graphEdge("reads", STG_ASSET, SALES_RAW),
+  ],
+);
+
+/** The asset that builds the daily table from the fact table. */
+const DAILY_ASSET = assetNode("gold.sales.daily_sales", 1);
+
+/** The table the fact table feeds. */
+const DAILY_SALES = graphNode("table", "gold.sales.daily_sales", 1);
+
+/** What the fact table feeds, one step down: the asset that reads it and the table it builds. */
+export const DOWN: GraphOut = lineage(
+  [DAILY_ASSET, DAILY_SALES],
+  [graphEdge("reads", DAILY_ASSET, ROOT), graphEdge("builds", DAILY_ASSET, DAILY_SALES)],
+);
+
+/**
+ * A grant on the fact table, with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The grant.
+ */
+export function grant(overrides: Partial<GrantOut> = {}): GrantOut {
+  return {
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b01",
+    principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+    group_id: null,
+    principal: {
+      id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+      name: "kim.schulz",
+      principal_type: "user",
+    },
+    group: null,
+    role: "ANALYST",
+    action: null,
+    kind: "TABLE",
+    environment: "prod",
+    namespace: "gold.sales",
+    table: "fact_sales",
+    granted_by: "0f0e0d0c-0b0a-4909-8807-060504030201",
+    granted_at: "2026-10-02T09:00:00Z",
+    note: null,
+    ...overrides,
+  };
+}
+
+/**
+ * The grants on the fact table: Kim's Analyst role, the loader service account's single action,
+ * the analysts group's Viewer role, and one whose person was deleted while the list was read.
+ */
+export const GRANTS: readonly GrantOut[] = [
+  grant(),
+  grant({
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b02",
+    principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c02",
+    principal: {
+      id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c02",
+      name: "loader",
+      principal_type: "service",
+    },
+    role: null,
+    action: "WRITE_TABLE",
+  }),
+  grant({
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b03",
+    principal_id: null,
+    group_id: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d01",
+    principal: null,
+    group: "analysts",
+    role: "VIEWER",
+  }),
+  grant({
+    id: "6d5c4b3a-2f1e-4d0c-9b8a-7f6e5d4c3b04",
+    principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c09",
+    principal: null,
+    role: "VIEWER",
+  }),
+];
+
+/** The path of the grants listing on the server. */
+export const GRANTS_PATH = "/api/v1/grants";
+
+/**
+ * A row filter on the fact table, with some fields changed.
+ *
+ * @param overrides - The fields that differ.
+ * @returns The row filter.
+ */
+export function rowFilter(overrides: Partial<RowFilterOut> = {}): RowFilterOut {
+  return {
+    id: "7e6d5c4b-3a2f-4e1d-8c0b-9a8f7e6d5c01",
+    principal_id: null,
+    group_id: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d01",
+    principal: null,
+    group: "analysts",
+    environment: "prod",
+    namespace: "gold.sales",
+    table: "fact_sales",
+    expression: "store_id IN (1, 2, 3)",
+    created_by: "0f0e0d0c-0b0a-4909-8807-060504030201",
+    created_at: "2026-10-03T09:00:00Z",
+    bound: true,
+    ...overrides,
+  };
+}
+
+/** The fact table's row filters: the analysts group sees three stores. */
+export const FILTERS: readonly RowFilterOut[] = [rowFilter()];
+
+/** The fact table's column masks: Kim sees a hash of the customer's email. */
+export const MASKS: readonly ColumnMaskOut[] = [
+  {
+    ...rowFilter({
+      id: "8f7e6d5c-4b3a-4f2e-9d1c-0b9a8f7e6d01",
+      principal_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+      group_id: null,
+      principal: {
+        id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01",
+        name: "kim.schulz",
+        principal_type: "user",
+      },
+      group: null,
+      expression: "sha256(customer_email)",
+    }),
+    column: "customer_email",
+  },
+];
 
 /** The path of the table's lineage on the server. */
 export const LINEAGE_PATH = "/api/v1/environments/prod/graph/lineage";
@@ -380,8 +595,9 @@ export const VIEW_RESULT: ResultPageOut = result({
 
 /**
  * The routes the table page reads and writes for a person: the table, what they may do, the
- * record that they opened it, its health, lineage, where it is defined and its preview, which
- * has finished at the first poll. The person may do everything.
+ * record that they opened it, its health (with the readers only when asked for them), lineage,
+ * where it is defined, its preview, which has finished at the first poll, and the grants (on the
+ * table only), row filters and column masks of the Access tab. The person may do everything.
  *
  * @param person - The person's principal name.
  * @returns The routes.
@@ -394,7 +610,18 @@ export function tableRoutes(person = "admin"): Record<string, FakeRoute> {
       body: permissions(person, ["READ_TABLE", "WRITE_TABLE", "DROP_TABLE", "SUBMIT_QUERY"]),
     },
     [`POST /api/v1/principals/${person}/recent`]: { status: 204 },
-    [`GET ${TABLE_PATH}/health`]: { status: 200, body: HEALTH },
+    // As the server: the names only when they are asked for (only an administrator may).
+    [`GET ${TABLE_PATH}/health`]: (request) => ({
+      status: 200,
+      body: request.path.includes("readers=false") ? HEALTH : health({ readers: READERS }),
+    }),
+    // The grants on the table itself; none on its namespaces or the environment.
+    [`GET ${GRANTS_PATH}`]: (request) => ({
+      status: 200,
+      body: request.path.includes("table=") ? GRANTS : [],
+    }),
+    [`GET /api/v1/row-filters`]: { status: 200, body: FILTERS },
+    [`GET /api/v1/column-masks`]: { status: 200, body: MASKS },
     [`GET ${TABLE_PATH}/definition`]: { status: 200, body: DEFINITION },
     [`GET ${TABLE_PATH}/definition/file`]: { status: 200, body: definitionFile() },
     [`GET ${LINEAGE_PATH}`]: (request) => ({

@@ -998,7 +998,9 @@ def test_a_tag_is_old_only_when_its_snapshot_is_more_than_seven_days_old(
     tag = failed_snapshot_tag(_RUN)
     _tag(catalog, principal, "gold.daily", tag, snapshot_id)
     metadata = catalog.load_table(principal, _ref("gold.daily")).metadata
-    stamp = metadata.snapshot_by_id(snapshot_id).timestamp_ms  # ty: ignore[unresolved-attribute]
+    tagged = metadata.snapshot_by_id(snapshot_id)
+    assert tagged is not None
+    stamp = tagged.timestamp_ms
     limit = stamp + FAILED_SNAPSHOT_KEEP_DAYS * _DAY_MS
 
     assert old_failed_tags(metadata, now_ms=limit - 1) == []
@@ -1255,7 +1257,9 @@ def test_an_old_tag_goes_and_its_snapshot_stays_when_it_is_an_ancestor_of_a_rema
         ],
     )
     metadata = catalog.load_table(principal, ref).metadata
-    assert metadata.snapshot_by_id(built_on_it).parent_snapshot_id == rolled.failed  # ty: ignore[unresolved-attribute]
+    child = metadata.snapshot_by_id(built_on_it)
+    assert child is not None
+    assert child.parent_snapshot_id == rolled.failed
 
     report = catalog.maintain(principal, ref, now=_later(8))
 

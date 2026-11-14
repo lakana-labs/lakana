@@ -1825,9 +1825,9 @@ def test_a_worker_that_dies_at_three_leaves_two_and_at_four_leaves_two(
     blocked = _queued(session, dev, three, age=30)
     assert _poll(session) is False
     session.expire_all()
-    assert {session.get(QueryRun, run_id).status for run_id in running} == {  # ty: ignore[unresolved-attribute]
-        QueryRunStatus.RUNNING
-    }, "nothing is stopped"
+    stopped = [session.get(QueryRun, run_id) for run_id in running]
+    assert None not in stopped
+    assert {run.status for run in stopped if run} == {QueryRunStatus.RUNNING}, "nothing is stopped"
     _end(session, running[0])
     assert _poll(session) is False, "two of three are still running"
     _end(session, running[1])

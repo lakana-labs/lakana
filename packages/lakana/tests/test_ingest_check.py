@@ -1562,7 +1562,7 @@ def test_a_gcs_key_signs_a_token_request_and_lists_one_object(
     def decoded(part: str) -> bytes:
         return base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
 
-    server.public_key.verify(  # ty: ignore[unresolved-attribute]
+    server.public_key.verify(  # ty: ignore[missing-attribute]
         decoded(signature), f"{head}.{claims}".encode(), padding.PKCS1v15(), hashes.SHA256()
     )
     assert json.loads(decoded(head)) == {"alg": "RS256", "typ": "JWT", "kid": "kid-1"}
@@ -1704,8 +1704,8 @@ def _fake_postgres(
     import types
 
     module = types.ModuleType("adbc_driver_postgresql.dbapi")
-    module.connect = connect  # ty: ignore[unresolved-attribute]
-    module.Error = _PgError  # ty: ignore[unresolved-attribute]
+    module.connect = connect  # ty: ignore[missing-attribute]
+    module.Error = _PgError  # ty: ignore[missing-attribute]
     monkeypatch.setitem(sys.modules, "adbc_driver_postgresql.dbapi", module)
     return seen
 
@@ -1925,8 +1925,8 @@ def _fake_pymysql(monkeypatch: pytest.MonkeyPatch, refuse: Exception | None = No
     import types
 
     module = types.ModuleType("pymysql")
-    module.connections = types.SimpleNamespace(Connection=Connection)  # ty: ignore[unresolved-attribute]
-    module.MySQLError = _MyError  # ty: ignore[unresolved-attribute]
+    module.connections = types.SimpleNamespace(Connection=Connection)  # ty: ignore[missing-attribute]
+    module.MySQLError = _MyError  # ty: ignore[missing-attribute]
     monkeypatch.setitem(sys.modules, "pymysql", module)
     return seen
 
@@ -2006,7 +2006,7 @@ def _certificate_refused() -> Exception:
         A 2003 error whose `original_exception` is the certificate error.
     """
     error = _MyError(2003, "Can't connect to MySQL server on '127.0.0.1'")
-    error.original_exception = ssl.SSLCertVerificationError("certificate verify failed")  # ty: ignore[unresolved-attribute]
+    error.original_exception = ssl.SSLCertVerificationError("certificate verify failed")  # ty: ignore[missing-attribute]
     return error
 
 

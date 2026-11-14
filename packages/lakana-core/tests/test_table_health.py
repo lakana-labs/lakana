@@ -974,7 +974,7 @@ def test_a_view_has_no_numbers(
     session: Session, principal: PrincipalRef, catalog_with_orders: CatalogService
 ) -> None:
     session.execute(
-        Table.__table__.update().where(Table.name == "orders").values(table_type="VIEW")  # ty: ignore[unresolved-attribute]
+        Table.__table__.update().where(Table.name == "orders").values(table_type="VIEW")  # ty: ignore[missing-attribute]
     )
     session.commit()
     shown = catalog_with_orders.describe_table(principal, _ORDERS)

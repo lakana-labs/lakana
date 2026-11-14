@@ -419,7 +419,7 @@ def test_under_cap_stands_inside_an_update_of_the_same_table(
             .values(sql_text="SELECT 2")
             .execution_options(synchronize_session=False)
         )
-        assert result.rowcount == matched  # ty: ignore[unresolved-attribute]
+        assert result.rowcount == matched  # ty: ignore[missing-attribute]
 
 
 def test_the_cap_lock_is_a_postgres_advisory_lock_with_two_keys() -> None:

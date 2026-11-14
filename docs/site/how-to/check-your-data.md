@@ -387,6 +387,9 @@ Not shown: on_failure. Use --output json to see it.
 The result holds **how many** rows a check found, and the check's file, but not the rows
 themselves. [Look at the rows that failed](#look-at-the-rows-that-failed) shows how to see them.
 
+In the web interface, a table's **Health** tab lists the latest result of each of its checks; see
+[Open a table](open-a-table.md#health).
+
 ## Look at the rows that failed
 
 `lakana check rows RUN_ID CHECK --env dev` shows the rows a check found in a run. `RUN_ID` is the

@@ -167,7 +167,7 @@ def test_a_quiet_connection_trimmed_out_keeps_its_newest_file_and_its_lookback(
     assert sorted(f.name for f in report.files) == ["x3", "x4", "x5", "y2"]
 
     engine = sqlalchemy.create_engine("sqlite://")
-    IncrementalFileRead.__table__.create(engine)  # ty: ignore[unresolved-attribute]
+    IncrementalFileRead.__table__.create(engine)  # ty: ignore[missing-attribute]
     table_id = uuid.uuid4()
     mark = _MARK + 5 * hour
     with Session(engine) as session:

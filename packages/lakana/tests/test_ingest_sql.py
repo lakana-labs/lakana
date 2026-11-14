@@ -327,8 +327,8 @@ def driver(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Driver:
     """
     fake = _Driver(_Cursor([_batch(id=[1, 2])]))
     module = types.ModuleType("adbc_driver_postgresql.dbapi")
-    module.connect = fake.connect  # ty: ignore[unresolved-attribute]
-    module.Error = _Error  # ty: ignore[unresolved-attribute]
+    module.connect = fake.connect  # ty: ignore[missing-attribute]
+    module.Error = _Error  # ty: ignore[missing-attribute]
     monkeypatch.setitem(sys.modules, "adbc_driver_postgresql.dbapi", module)
     monkeypatch.setattr(sql.socket, "gethostbyname", lambda name: "10.207.0.3")
     bundle = tmp_path / "bundle.pem"
@@ -1587,11 +1587,11 @@ def mysql(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return made
 
     module = types.ModuleType("pymysql")
-    module.connections = types.SimpleNamespace(Connection=make)  # ty: ignore[unresolved-attribute]
-    module.cursors = types.SimpleNamespace(SSCursor=object)  # ty: ignore[unresolved-attribute]
-    module.MySQLError = _MyError  # ty: ignore[unresolved-attribute]
+    module.connections = types.SimpleNamespace(Connection=make)  # ty: ignore[missing-attribute]
+    module.cursors = types.SimpleNamespace(SSCursor=object)  # ty: ignore[missing-attribute]
+    module.MySQLError = _MyError  # ty: ignore[missing-attribute]
     constants = types.ModuleType("pymysql.constants")
-    constants.SERVER_STATUS = types.SimpleNamespace(  # ty: ignore[unresolved-attribute]
+    constants.SERVER_STATUS = types.SimpleNamespace(  # ty: ignore[missing-attribute]
         SERVER_STATUS_NO_BACKSLASH_ESCAPES=512
     )
     monkeypatch.setitem(sys.modules, "pymysql", module)
@@ -1735,7 +1735,7 @@ def test_mariadb_a_certificate_failure_gives_the_tls_text(mysql: dict[str, Any])
     import ssl
 
     refused = _MyError(2003, "Can't connect to MySQL server on 'db.example.com'")
-    refused.original_exception = ssl.SSLCertVerificationError("certificate verify failed")  # ty: ignore[unresolved-attribute]
+    refused.original_exception = ssl.SSLCertVerificationError("certificate verify failed")  # ty: ignore[missing-attribute]
     mysql["refuse"] = refused
     _mariadb(relay=True)
 

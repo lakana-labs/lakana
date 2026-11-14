@@ -129,7 +129,7 @@ class SafeFormatterMixin:
                 record = copy.copy(record)
                 first, newline, rest = record.getMessage().partition("\n")
                 record.msg, record.args = f"{first} event={code}{newline}{rest}", None
-            return escape_record(super().format(record))  # ty: ignore[unresolved-attribute]
+            return escape_record(super().format(record))  # ty: ignore[missing-attribute]
         except Exception:
             return self._fallback(record)
 
@@ -157,7 +157,7 @@ class SafeFormatterMixin:
                 stand_in = copy.copy(record)
                 stand_in.msg, stand_in.args = "(this record could not be formatted)", ()
                 stand_in.exc_info = stand_in.exc_text = stand_in.stack_info = None
-                parts.append(super().format(stand_in))  # ty: ignore[unresolved-attribute]
+                parts.append(super().format(stand_in))  # ty: ignore[missing-attribute]
             except Exception:
                 parts.append(
                     f"{record.levelname} {record.name}: (this record could not be formatted)"
@@ -170,7 +170,7 @@ class SafeFormatterMixin:
             text = " ".join(parts)
             try:
                 if record.exc_info and record.exc_info[0] is not None:
-                    text += "\n" + self.formatException(record.exc_info)  # ty: ignore[unresolved-attribute]
+                    text += "\n" + self.formatException(record.exc_info)  # ty: ignore[missing-attribute]
             except Exception:
                 text += "\n(its exception cannot be shown)"
             return escape_record(text)

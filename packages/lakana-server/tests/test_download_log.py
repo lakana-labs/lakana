@@ -97,5 +97,5 @@ def test_the_blob_route_labels_its_download_with_download_label() -> None:
             service=Service(),  # ty: ignore[invalid-argument-type]
         )
     )
-    label = response._label  # ty: ignore[unresolved-attribute]
+    label = response._label  # ty: ignore[missing-attribute]
     assert label == "models.x\\n2026-10-08 ERROR forged record\\x1b[2J version 3"

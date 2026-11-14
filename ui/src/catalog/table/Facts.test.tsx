@@ -66,11 +66,23 @@ describe("Facts", () => {
   });
 
   it("counts the readers of the last 7 days and never names them", async () => {
-    renderShell(PAGE);
+    renderShell(PAGE, { me: { name: "kim.schulz", admin: false } });
 
     const last = fact(await facts(), "Last read");
     expect(last).toHaveTextContent("3 readers in the last 7 days");
     expect(screen.queryByRole("link", { name: /readers/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("kim.schulz")).not.toBeInTheDocument();
+  });
+
+  it("gives an administrator Readers › to the names on the Health tab", async () => {
+    renderShell(PAGE);
+
+    const last = fact(await facts(), "Last read");
+    expect(last).toHaveTextContent("3 readers in the last 7 days");
+    expect(within(last).getByRole("link", { name: "Readers ›" })).toHaveAttribute(
+      "href",
+      `${PAGE}/health#readers`,
+    );
   });
 
   it("says one reader in the singular", async () => {

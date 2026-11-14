@@ -300,8 +300,8 @@ def _column_size(column: pa.Array) -> int:
             return rows * max(values.type.bit_width // 8, 1) + bitmap
         except ValueError:
             return rows * values.nbytes + bitmap
-    lengths = pc.take(pc.binary_length(values), column.indices)  # ty: ignore[unresolved-attribute]
-    return (pc.sum(lengths).as_py() or 0) + offsets + bitmap  # ty: ignore[unresolved-attribute]
+    lengths = pc.take(pc.binary_length(values), column.indices)  # ty: ignore[missing-attribute]
+    return (pc.sum(lengths).as_py() or 0) + offsets + bitmap  # ty: ignore[missing-attribute]
 
 
 def _view_size(column: pa.Array) -> int:
@@ -324,8 +324,8 @@ def _view_size(column: pa.Array) -> int:
     views = pa.Array.from_buffers(
         pa.int32(), 4 * rows, [None, column.buffers()[1]], offset=4 * column.offset
     )
-    lengths = pc.if_else(column.is_valid(), views[::4], 0)  # ty: ignore[unresolved-attribute]
-    total = pc.sum(lengths).as_py() or 0  # ty: ignore[unresolved-attribute]
+    lengths = pc.if_else(column.is_valid(), views[::4], 0)  # ty: ignore[missing-attribute]
+    total = pc.sum(lengths).as_py() or 0  # ty: ignore[missing-attribute]
     return total + 4 * (rows + 1) + (rows + 7) // 8
 
 
