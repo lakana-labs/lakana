@@ -1368,14 +1368,20 @@ class TableOut(BaseModel):
     columns
         The columns, serialized as `schema`.
     sql
-        A view's SELECT. `None` if the caller may not read every reference
-        .
+        A view's SELECT. `None` if the caller may not read every reference, or fails the
+        content gate of "Defined in" (`content_reason`).
     references
         A view's references. Empty if the caller may not read every
         reference.
     hidden_references
         The number of the view's references the caller may not read, and
         so are withheld from `sql` and `references`.
+    content_reason
+        ``restricted`` when a view's `sql` is withheld because the caller lacks
+        READ_ENVIRONMENT, a referenced table is a view, the SQL reads a file, or a row filter
+        or column mask applies to the caller on a referenced table; `None` otherwise.
+    content_message
+        What `content_reason` means and what to do, in one sentence; `None` when it is `None`.
     snapshot_id
         The current snapshot of a managed table; `None`
         without one, and for a view or an external table.
@@ -1459,6 +1465,8 @@ class TableOut(BaseModel):
     sql: str | None = None
     references: list[TableReferenceOut] | None = None
     hidden_references: int = 0
+    content_reason: Literal["restricted"] | None = None
+    content_message: str | None = None
     snapshot_id: int | None = None
     state: Literal["published", "not_published", "kept"] = "published"
     state_message: str | None = None

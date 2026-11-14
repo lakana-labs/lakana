@@ -228,6 +228,21 @@ until you deploy a new commit, or read the file in your git host; its checks' SQ
 above. A script that reads `sql` from a project version
 should handle its absence and print `content_message`.
 
+### A view's SQL is shown only under the rules of a table's file (breaking)
+
+`lakana table get` on a view (`GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}`, the
+table list `GET …/tables` and the two routes that set a description, which answer with the table)
+now shows the view's `sql` only to a reader who would be shown the file by
+`lakana table definition --show`: who may read the environment and every table the view reads, none
+of them a view or a file, with no row filter or column mask on any of them
+([The same rules for a view's SQL](../how-to/see-where-a-table-is-defined.md#the-same-rules-for-a-views-sql)).
+Before, reading every referenced table was enough. A withheld view has no `sql` but
+`content_reason` (`restricted`) and `content_message`, and its references stay. Each shown text is
+recorded in the audit log as `SOURCE_VIEWED` with `view_sql_sha256`; if that row cannot be
+written, the request answers 503 and shows nothing. A script that reads a view's `sql` should
+handle its absence and print `content_message`; give its principal `READ_ENVIRONMENT` if it needs
+the text and no policy applies to it.
+
 ### Project files are recorded at deploy
 
 Migration `0077` adds two tables, which hold the files of each deployed project version; it runs

@@ -7,6 +7,7 @@ to this same class.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import uuid
@@ -53,7 +54,13 @@ from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
 from lakana_core.artifacts.store import current_version, version_row
 from lakana_core.audit.service import AuditService
-from lakana_core.audit.views import View, ViewDetail, record_view, sessions_like
+from lakana_core.audit.views import (
+    View,
+    ViewDetail,
+    record_view,
+    record_view_sql_view,
+    sessions_like,
+)
 from lakana_core.auth import (
     Action,
     AuthorizationService,
@@ -354,7 +361,13 @@ from lakana_core.policy.schema_change import (
     broken_policies,
     changed_columns,
 )
+from lakana_core.projects.definition import (
+    REASON_MESSAGES,
+    DefinitionReason,
+    passes_content_gate,
+)
 from lakana_core.projects.layers import LAYERS
+from lakana_core.projects.parse import sql_file_references
 from lakana_core.projects.translations import MAX_LANGUAGES
 from lakana_core.query_rewrite import ViewDefinition
 from lakana_core.runs.checks import (
@@ -698,8 +711,9 @@ class TableDescription:
         Its columns: the Iceberg schema, an external table's inferred
         schema, or a view's planned output.
     sql
-        A view's SELECT. `None` if the caller may not read every reference,
-        even if the view itself stores one.
+        A view's SELECT. `None` if the caller may not read every reference, fails the content
+        gate of "Defined in" (`passes_content_gate`), or the caller of `describe_table` did not
+        ask for it, even if the view itself stores one.
     references
         A view's references, as ``(id, dotted name)`` pairs. Empty if the
         caller may not read every reference.
@@ -708,6 +722,11 @@ class TableDescription:
         so cannot see named in `sql` or `references`. `0` for a table, an
         external table, or a view whose every reference the caller may
         read.
+    content_reason
+        ``"restricted"`` when a view's SQL is withheld by the content gate although the caller
+        may read every reference; `None` otherwise.
+    content_message
+        The sentence of `content_reason` (`REASON_MESSAGES`); `None` when it is `None`.
     snapshot_id
         The current snapshot of a managed table; `None` without one, and for
         a view or an external table.
@@ -806,6 +825,8 @@ class TableDescription:
     sql: str | None = None
     references: tuple[tuple[str, str], ...] = ()
     hidden_references: int = 0
+    content_reason: str | None = None
+    content_message: str | None = None
     snapshot_id: int | None = None
     state: Literal["published", "not_published", "kept"] = "published"
     state_message: str | None = None
@@ -3675,7 +3696,12 @@ class CatalogService:
         return row
 
     def describe_table(
-        self, p: PrincipalRef, ref: TableRef, *, languages: Sequence[str] = ()
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        *,
+        languages: Sequence[str] = (),
+        view_sql_window_minutes: int | None = None,
     ) -> TableDescription:
         """Describe a table, an external table or a view for the platform API.
 
@@ -3687,6 +3713,10 @@ class CatalogService:
             The table reference.
         languages
             The reader's languages, most wanted first; empty: the main language.
+        view_sql_window_minutes
+            `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`, from a route that shows a view's SQL. `None`
+            (an internal caller that needs only the columns) never returns a view's SQL and
+            records nothing.
 
         Returns
         -------
@@ -3700,9 +3730,18 @@ class CatalogService:
             If it does not exist.
         PermissionDenied
             If `p` may not read it.
+        AuditUnavailableError
+            If a view's SQL passed the content gate but its `SOURCE_VIEWED` row could not be
+            written; nothing is returned.
 
         Notes
         -----
+        A view's SQL is the text of the asset that defines it, so it is shown only under the
+        content gate of "Defined in" (#587): READ_ENVIRONMENT, read on every table it
+        references, none of them a view, no row filter or column mask on any of them, and no
+        file read. A refused reader gets `content_reason` ``"restricted"``; a shown text is
+        recorded as `SOURCE_VIEWED` first (`record_view_sql_view`).
+
         A view's `sql` and `references` name every table it reads, so
         READ_TABLE on the view alone is not enough to show them: a
         principal can hold READ on a view without READ on what it
@@ -3722,7 +3761,9 @@ class CatalogService:
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
         namespace, row = self._find_table(ref)
-        described = self._describe_row(p, ref, row)
+        described = self._gate_view_sql(
+            p, ref, row, self._describe_row(p, ref, row), view_sql_window_minutes
+        )
         chooser = TextChooser(
             row.text_language or self._main_language,
             languages,
@@ -4250,6 +4291,95 @@ class CatalogService:
         """
         self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
         return current_fields(self._session, self._storage, table_id)
+
+    def _gate_view_sql(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        row: Table,
+        described: TableDescription,
+        window_minutes: int | None,
+    ) -> TableDescription:
+        """Keep a view's SQL only for a reader who passes the content gate, and record the read.
+
+        Parameters
+        ----------
+        p
+            The reader, who may read the view.
+        ref
+            The view.
+        row
+            Its row.
+        described
+            What `_describe_row` gave; its `sql` is set only when `p` may read every reference.
+        window_minutes
+            The audit window; `None` withholds the SQL without a reason or an audit row.
+
+        Returns
+        -------
+        TableDescription
+            `described`, with its SQL, or without it and with the reason.
+
+        Raises
+        ------
+        AuditUnavailableError
+            If the `SOURCE_VIEWED` row could not be written.
+        """
+        sql = described.sql
+        if sql is None:
+            return described
+        if window_minutes is None:
+            return replace(described, sql=None)
+        names: list[str] = []
+        for reference_id, _ in described.references:
+            current = self._session.get(Table, uuid.UUID(reference_id))
+            if current is None:
+                return self._restricted_view_sql(described)
+            path = self._session.execute(
+                select(Namespace.path).where(Namespace.id == current.namespace_id)
+            ).scalar_one()
+            names.append(".".join((*NamespacePath.parse(path).parts, current.name)))
+        dotted = ".".join((*ref.namespace.parts, ref.name))
+        stored = [name for _, name in described.references]
+        if not passes_content_gate(
+            self._session,
+            self._authz,
+            p,
+            ref.environment,
+            dotted,
+            names,
+            bool(sql_file_references(sql, stored)),
+        ):
+            return self._restricted_view_sql(described)
+        record_view_sql_view(
+            sessions_like(self._session),
+            p,
+            Securable.table_scope(ref.environment, ref.namespace, ref.name),
+            sql_sha256=hashlib.sha256(sql.encode()).hexdigest(),
+            window_minutes=window_minutes,
+        )
+        return described
+
+    @staticmethod
+    def _restricted_view_sql(described: TableDescription) -> TableDescription:
+        """Withhold a view's SQL with the content gate's reason.
+
+        Parameters
+        ----------
+        described
+            The view's description.
+
+        Returns
+        -------
+        TableDescription
+            Without `sql`, with `content_reason` ``"restricted"`` and its sentence.
+        """
+        return replace(
+            described,
+            sql=None,
+            content_reason=DefinitionReason.RESTRICTED.value,
+            content_message=REASON_MESSAGES[DefinitionReason.RESTRICTED],
+        )
 
     def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:
         """Describe a table row by kind, without its descriptions.
