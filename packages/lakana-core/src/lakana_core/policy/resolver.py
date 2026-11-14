@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
@@ -322,14 +323,12 @@ class PolicyResolver:
             return {}
         group_ids, member_group_names = self._groups_of(principal)
         filter_rows, mask_rows = self._policy_rows(principal, group_ids, wanted)
-        filters_of: dict[uuid.UUID, list[RowFilter]] = {table_id: [] for table_id in wanted}
-        masks_of: dict[uuid.UUID, list[ColumnMask]] = {table_id: [] for table_id in wanted}
+        filters_of: defaultdict[uuid.UUID | None, list[RowFilter]] = defaultdict(list)
+        masks_of: defaultdict[uuid.UUID | None, list[ColumnMask]] = defaultdict(list)
         for row in filter_rows:
-            if row.table_id is not None:  # matched by `table_id IN …`, so never `None`
-                filters_of[row.table_id].append(row)
+            filters_of[row.table_id].append(row)
         for row in mask_rows:
-            if row.table_id is not None:
-                masks_of[row.table_id].append(row)
+            masks_of[row.table_id].append(row)
         resolved: dict[uuid.UUID, ResolvedPolicy | UnreadablePolicyError] = {}
         for table_id in wanted:
             try:

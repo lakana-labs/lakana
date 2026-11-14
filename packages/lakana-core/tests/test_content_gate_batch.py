@@ -32,6 +32,8 @@ from test_projects_definition import (
 from lakana_core.audit.service import AuditService
 from lakana_core.audit.views import sessions_like
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.catalog import identity
+from lakana_core.catalog.identity import table_ids_in
 from lakana_core.errors import AuditUnavailableError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, TableRef
@@ -45,7 +47,9 @@ from lakana_core.models import (
     Table,
     TableType,
 )
+from lakana_core.projects.checks import may_read_every
 from lakana_core.projects.definition import ContentGate, passes_content_gate
+from lakana_core.projects.deploys import _manifest_names, _ReadableNames
 
 
 def _reference_ref(environment: str, entry: object) -> TableRef | None:
@@ -496,3 +500,50 @@ def test_a_reference_that_is_not_a_string_is_hidden_never_an_error(session: Sess
     assert view.manifest["hidden_edges"] == 3
     assert view.manifest["external_inputs"] == ["silver.a"]
     assert view.manifest["hidden_external_inputs"] == 2
+
+
+def test_table_ids_in_reads_the_named_tables_or_every_table(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _world(session)
+    every = table_ids_in(session, "dev")
+    assert set(every) == {("gold", "f"), ("silver", "a")}
+    assert table_ids_in(session, "dev", {("gold", "f"), ("gold", "none")}) == {
+        ("gold", "f"): every["gold", "f"]
+    }
+    assert table_ids_in(session, "dev", set()) == {}
+    monkeypatch.setattr(identity, "NAMED_TABLES_LIMIT", 1)
+    assert table_ids_in(session, "dev", {("gold", "f"), ("silver", "a")}) == every
+
+
+def test_may_read_every_refuses_a_name_that_is_not_a_table_name(session: Session) -> None:
+    _world(session)
+    viewer = _analyst(session)
+    authz = GrantAuthorization(session)
+    assert may_read_every(authz, viewer, "dev", ["gold.f", "silver.a"])
+    assert not may_read_every(authz, viewer, "dev", ["gold.f", "nodot"])
+
+
+def test_readable_names_answers_a_name_it_was_not_asked_ahead(session: Session) -> None:
+    _world(session)
+    reader = _person(session, "r", "gold.f")
+    readable = _ReadableNames(GrantAuthorization(session), reader, "dev")
+    assert readable("gold.f") is True
+    assert readable("silver.a") is False
+    assert readable("nodot") is False
+    assert readable({"t": 1}) is False
+
+
+def test_the_manifest_names_skip_what_is_not_a_name() -> None:
+    manifest = {
+        "assets": [
+            "not a mapping",
+            {"references": ["silver.a"], "model": {"references": ["x", {"target": "gold.d"}]}},
+            {"references": "not a list", "model": "not a mapping"},
+        ],
+        "edges": [[], "x", ["silver.b", "gold.f"]],
+        "external_inputs": ["bronze.raw"],
+        "checks": ["x", {"table": "gold.f", "sql": "SELECT * FROM silver.c"}],
+    }
+    assert _manifest_names(manifest) == ["silver.a", "gold.d", "silver.b", "bronze.raw", "silver.c"]
+    assert _manifest_names({}) == []
