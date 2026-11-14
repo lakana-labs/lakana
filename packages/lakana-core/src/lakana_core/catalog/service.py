@@ -43,12 +43,13 @@ from pyiceberg.table.update import (
     SetDefaultSortOrderUpdate,
     SetDefaultSpecUpdate,
     SetLocationUpdate,
+    SetPropertiesUpdate,
     SetSnapshotRefUpdate,
     TableRequirement,
     TableUpdate,
 )
 from pyiceberg.types import NestedField
-from sqlalchemy import delete, event, null, or_, select, text, update
+from sqlalchemy import String, cast, delete, event, null, or_, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
@@ -1062,8 +1063,11 @@ _STORAGE_FAILED = "the table's metadata could not be read or written: {error}"
 CHANGED_BY_ANOTHER_REASON = "another writer changed it during this run"
 """`Rollback.reason` of `changed_since` when the task run has no write of its own to set back."""
 
-_DROPPED = "the table was dropped while the rollback was prepared"
-"""`Rollback.reason` of `changed_since` when the table is gone."""
+_DROPPED = "the table was dropped, renamed or replaced while the rollback was prepared"
+"""`Rollback.reason` of `changed_since` when the table is no longer there under its name.
+
+`commit_table` says `NotFoundError` for a table that is gone, has no metadata yet, or is an
+artifact: the last two only when another table took the name after the rollback read it."""
 
 _LANDED_OUTCOMES = frozenset(
     o.value for o in (RollbackOutcome.ROLLED_BACK, RollbackOutcome.UNPUBLISHED)
@@ -1195,6 +1199,48 @@ def _refusal_before_lookup(update: TableUpdate) -> str | None:
     if isinstance(update, (RemoveSchemasUpdate, RemovePartitionSpecsUpdate)):
         return _NO_SCHEMA_OR_SPEC_REMOVAL
     return None
+
+
+LAKANA_PROPERTY_PREFIX = "lakana."
+"""Properties under this prefix are Lakana's own (`lakana.history-key`): no client sets one."""
+
+
+def _reserved_property(keys: Iterable[str]) -> str | None:
+    """Name the first `lakana.*` key among `keys`, if there is one.
+
+    Parameters
+    ----------
+    keys
+        Table property keys a caller asked to set or remove.
+
+    Returns
+    -------
+    str or None
+        The first reserved key in sorted order, or `None` when there is none.
+    """
+    return next((key for key in sorted(keys) if key.startswith(LAKANA_PROPERTY_PREFIX)), None)
+
+
+def _reserved_property_in_commit(updates: Sequence[TableUpdate]) -> str | None:
+    """Name the first `lakana.*` key that `updates` set or remove, if there is one.
+
+    Parameters
+    ----------
+    updates
+        A commit's updates.
+
+    Returns
+    -------
+    str or None
+        The reserved key, or `None` when the commit leaves every `lakana.*` property alone.
+    """
+    keys: list[str] = []
+    for table_update in updates:
+        if isinstance(table_update, SetPropertiesUpdate):
+            keys.extend(table_update.updates)
+        elif isinstance(table_update, RemovePropertiesUpdate):
+            keys.extend(table_update.removals)
+    return _reserved_property(keys)
 
 
 _MAX_LONG = 2**63 - 1
@@ -2767,6 +2813,7 @@ class CatalogService:
             If `ref.name` is not a valid table name; if `properties` is
             refused by
             :meth:`lakana_core.storage.resolver.ResolvedStorage.validate_table_properties`;
+            if `properties` holds a `lakana.*` key (Lakana's own, #428);
             if `location` is not `None`; if the metadata location computed
             from the assigned table location does not resolve to somewhere
             inside the environment's storage root; or if `ref.namespace`'s
@@ -2787,6 +2834,12 @@ class CatalogService:
             Action.CREATE_TABLE,
             Securable.table_scope(ref.environment, ref.namespace, ref.name),
         )
+        reserved = _reserved_property(properties or {})
+        if reserved is not None:
+            raise ValidationError(
+                f"The table property {reserved} is reserved for Lakana: a table may not be "
+                f"created with a {LAKANA_PROPERTY_PREFIX}* property. Leave it out of the request."
+            )
         self._guard.check(p, ref.environment, WriteOperation.CREATE_TABLE, table_target(ref))
         prepared = self._prepare_table(
             ref,
@@ -3013,6 +3066,9 @@ class CatalogService:
                 file_io=prepared.resolved.file_io,
                 effects=_stored_effects(row, ref.dotted()),
                 new_table=True,
+                # Only this service's own writes create a table with a snapshot
+                # (`_write_new_table`); an Iceberg client's create has none.
+                own_summaries=True,
             )
             if metadata.current_snapshot_id is not None
             else []
@@ -5164,7 +5220,8 @@ class CatalogService:
             sort order current; if `updates` add a schema, partition spec or sort order
             under an id the table already has; if `updates` set a
             table property that `ResolvedStorage.validate_table_properties`
-            refuses; if `updates` includes an `AddSnapshotUpdate` whose
+            refuses; if `updates` set or remove a `lakana.*` table property (Lakana's own,
+            #428); if `updates` includes an `AddSnapshotUpdate` whose
             `snapshot.manifest_list` does not lie under the table's own
             location, whose snapshot id or sequence number lies outside 0 to 2^63-1, or
             whose sequence number on a format v2 or later table is not above the table's
@@ -5214,6 +5271,15 @@ class CatalogService:
             for refused in map(_refusal_before_lookup, updates):
                 if refused is not None:
                     raise PermissionDenied(refused)
+        # Lakana writes its own properties only when it creates a table (`_prepare_table`);
+        # no commit, whoever sends it, sets or removes one (#428).
+        reserved = _reserved_property_in_commit(updates)
+        if reserved is not None:
+            raise ValidationError(
+                f"The table property {reserved} is reserved for Lakana: an Iceberg commit may "
+                f"not set or remove a {LAKANA_PROPERTY_PREFIX}* property. Leave it out of the "
+                "commit."
+            )
         if not maintenance:
             self._guard.check(
                 p,
@@ -5402,6 +5468,7 @@ class CatalogService:
                 file_io=resolved.file_io,
                 effects=effects,
                 files=checked_files,
+                own_summaries=own_data_files,
             )
             if not maintenance
             and not internal_rollback
@@ -5566,6 +5633,7 @@ class CatalogService:
         effects: HealthEffects,
         files: Sequence[DataFile] | None = None,
         new_table: bool = False,
+        own_summaries: bool = False,
     ) -> list[TableHealthSignal]:
         """Observe the health signals of a snapshot this commit makes current (#340).
 
@@ -5594,6 +5662,8 @@ class CatalogService:
             them.
         new_table
             Whether the table is being created: it has no history to read.
+        own_summaries
+            Whether this service wrote the snapshots through pyiceberg (`commit_observations`).
 
         Returns
         -------
@@ -5611,6 +5681,7 @@ class CatalogService:
                 file_io=file_io,
                 effects=effects,
                 files=files,
+                own_summaries=own_summaries,
             )
             now = db_now(self._session)
         snapshot = after.current_snapshot()
@@ -5774,9 +5845,15 @@ class CatalogService:
             p, ref.environment, WriteOperation.COMMIT, table_target(ref), rollback=True
         )
         self._require_own_task(p, ref, task_run_id)
-        claim = self._session.execute(
-            select(TaskRun.claim_count).where(TaskRun.id == task_run_id)
-        ).scalar_one_or_none()
+        # The claim this attempt holds: a bound caller's own (the guard has just checked it is
+        # the task's), so the landed check after a lost acknowledgement looks for this
+        # attempt's row; read from the task run only for a caller without one.
+        context = p.run_context
+        claim = context.claim if context is not None else None
+        if claim is None:
+            claim = self._session.execute(
+                select(TaskRun.claim_count).where(TaskRun.id == task_run_id)
+            ).scalar_one_or_none()
         detail: dict[str, object] = {
             "task_run_id": str(task_run_id),
             "claim": claim,
@@ -5945,21 +6022,23 @@ class CatalogService:
             self._session.execute(
                 select(Table.id).where(Table.id == table_id).with_for_update(read=True)
             ).first()
-            details = self._session.execute(
-                select(AuditEvent.detail).where(
+            # Compared as text, never cast to a number: a stored claim that is not a number
+            # neither fails the statement (PostgreSQL) nor reads as 0 (SQLite). A stored int
+            # reads as its digits on both (`->>` gives text; SQLite casts the int).
+            stored_claim = cast(AuditEvent.detail["claim"].as_string(), String)
+            outcome = self._session.execute(
+                select(AuditEvent.detail["outcome"].as_string())
+                .where(
                     AuditEvent.event_type == AuditEventType.TABLE_ROLLED_BACK,
                     AuditEvent.securable_environment == ref.environment,
                     AuditEvent.securable_table == ref.name,
+                    AuditEvent.detail["task_run_id"].as_string() == str(task_run_id),
+                    stored_claim.is_(None) if claim is None else stored_claim == str(claim),
+                    AuditEvent.detail["outcome"].as_string().in_(sorted(_LANDED_OUTCOMES)),
                 )
-            ).scalars()
-            for detail in details:
-                if (
-                    detail.get("task_run_id") == str(task_run_id)
-                    and detail.get("claim") == claim
-                    and detail.get("outcome") in _LANDED_OUTCOMES
-                ):
-                    return RollbackOutcome(detail["outcome"])
-            return None
+                .limit(1)
+            ).scalar_one_or_none()
+            return None if outcome is None else RollbackOutcome(outcome)
         finally:
             self._session.rollback()
 

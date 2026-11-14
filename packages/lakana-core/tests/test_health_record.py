@@ -939,3 +939,189 @@ def test_a_table_created_with_rows_stores_its_word(
     row = session.get(Table, _table_id(session))
     assert row is not None
     assert (row.health_item, row.health_rank) == ("healthy", 15)
+
+
+@pytest.mark.parametrize(
+    ("effects", "volume"),
+    [
+        ({"null_rate": "off", "range": "off"}, ("volume", None, "no_history", "warn")),
+        (
+            {"null_rate": "off", "range": "off", "null_rate.status": "off", "range.id": "off"},
+            ("volume", None, "no_history", "warn"),
+        ),
+        (
+            {"volume": "off", "null_rate": "off", "range": "off", "schema": "off"},
+            ("volume", None, "off", "off"),
+        ),
+    ],
+    ids=["signals-off", "columns-off-too", "health-off"],
+)
+def test_a_table_whose_column_signals_are_off_reads_no_manifests_at_commit(
+    catalog: CatalogService,
+    session: Session,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+    effects: dict[str, str],
+    volume: tuple[str, str | None, str, str],
+) -> None:
+    """With every column signal off, a commit records one table-level `off` row for each (#454).
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    monkeypatch
+        Records the manifest reads.
+    effects
+        The table's stored effects.
+    volume
+        The volume row expected.
+    """
+    calls = _recording(monkeypatch)
+    table = session.get(Table, _table_id(session))
+    assert table is not None
+    table.health_effects = effects
+    session.commit()
+
+    catalog.append(principal, _ORDERS, _rows([1, 2]))
+
+    assert calls == []
+    schema = (
+        ("schema", None, "off", "off") if "schema" in effects else ("schema", None, "ok", "warn")
+    )
+    assert _signals(session) == [
+        ("null_rate", None, "off", "off"),
+        ("range", None, "off", "off"),
+        schema,
+        volume,
+    ]
+    recorded = session.scalars(
+        select(TableHealthSignal).where(TableHealthSignal.signal == "volume")
+    ).one()
+    if volume[2] != "off":
+        assert recorded.observed == {"added": 2, "total": 2}
+
+
+def test_a_column_signal_on_for_one_column_still_reads_the_manifests(
+    catalog: CatalogService,
+    session: Session,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One column whose signal is not off needs the files' metrics.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    monkeypatch
+        Records the manifest reads.
+    """
+    calls = _recording(monkeypatch)
+    table = session.get(Table, _table_id(session))
+    assert table is not None
+    table.health_effects = {"null_rate": "off", "range": "off", "null_rate.status": "block"}
+    session.commit()
+
+    catalog.append(principal, _ORDERS, _rows([1, 2]))
+
+    assert len(calls) == 1
+    assert ("null_rate", "status", "no_history", "block") in _signals(session)
+
+
+_COLUMNS_OFF = HealthEffects({"null_rate": "off", "range": "off"})
+
+
+@pytest.mark.parametrize(
+    ("own", "files", "compaction", "reads", "volume"),
+    [
+        (True, None, False, 0, ("ok", {"added": 0, "loaded": False, "total": None})),
+        (False, [], False, 0, ("ok", {"added": 0, "loaded": False, "total": None})),
+        (False, [], True, 0, ("ok", {"added": 0, "loaded": False, "total": None})),
+        (
+            False,
+            [cast(DataFile, object())],
+            True,
+            1,
+            ("ok", {"added": 0, "loaded": False, "total": None}),
+        ),
+    ],
+    ids=["own-summary", "checked-files", "checked-none-with-compaction", "client-compaction"],
+)
+def test_with_column_signals_off_volume_decides_as_before(
+    catalog: CatalogService,
+    session: Session,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+    own: bool,
+    files: list[DataFile] | None,
+    compaction: bool,
+    reads: int,
+    volume: tuple[str, dict],
+) -> None:
+    """A commit that adds no data file loads nothing, read or not; reads only when undecided.
+
+    The snapshot is a delete whose summary has no counts, as pyiceberg writes one.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    monkeypatch
+        Records the manifest reads and makes them find no file.
+    own
+        Whether this service wrote the snapshots.
+    files
+        The files the field-id check read, if any.
+    compaction
+        Whether a compaction comes first in the commit.
+    reads
+        The manifest reads expected.
+    volume
+        The volume observation's state and values.
+    """
+    catalog.append(principal, _ORDERS, _rows([1, 2]))
+    metadata = catalog.load_table(principal, _ORDERS).metadata
+    snapshot = metadata.snapshots[-1]
+    deleted = snapshot.model_copy(update={"summary": Summary(Operation.DELETE)})
+    added = [deleted]
+    if compaction:
+        compacted = snapshot.model_copy(
+            update={"snapshot_id": snapshot.snapshot_id + 1, "summary": Summary(Operation.REPLACE)}
+        )
+        added = [compacted, deleted]
+    after = metadata.model_copy(update={"snapshots": added})
+    calls: list[tuple] = []
+    monkeypatch.setattr(health_record, "added_data_files", lambda *a: calls.append(a) or [])
+    pairs = commit_observations(
+        session,
+        table="silver.orders",
+        table_id=_table_id(session),
+        before=metadata,
+        after=after,
+        snapshots=added,
+        file_io=catalog._storage.for_environment("dev").file_io,
+        effects=_COLUMNS_OFF,
+        files=files,
+        own_summaries=own,
+    )
+    assert len(calls) == reads
+    assert [(o.signal, o.column, o.state) for o, _ in pairs] == [
+        ("volume", None, volume[0]),
+        ("schema", None, "ok"),
+        ("null_rate", None, "off"),
+        ("range", None, "off"),
+    ]
+    assert pairs[0][0].observed == volume[1]

@@ -23,22 +23,24 @@ from __future__ import annotations
 
 import enum
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Row, select
+from sqlalchemy import Row, select, tuple_
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.views import record_source_view
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import TableRef, shown
 from lakana_core.models import (
+    LIVE_ENVIRONMENT,
     Environment,
     EnvironmentDeployment,
     JobVersion,
+    Namespace,
     ProjectFile,
     ProjectFileText,
     Repository,
@@ -429,7 +431,7 @@ def passes_content_gate(
     """Apply the strict content rule to one file: the rule of every route that shows a file.
 
     "Defined in" (`table_definition_file`) asks it with a current source-map row; the
-    project-versions route asks it for each asset file and each check. The
+    project-versions route asks `ContentGate`, the same rule for many files at once. The
     conditions use `permits`, so a refusal writes no audit event per gate table.
 
     Parameters
@@ -465,35 +467,229 @@ def passes_content_gate(
         except `table` itself when `defines`; and no row filter or column mask (or an
         unreadable one) applies to the reader on any gate table that exists.
     """
-    if not authorization.permits(
-        p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment)
-    ):
-        return False
-    if gate_raw is not False or not isinstance(gate_tables, list):
-        return False
-    own = _gate_ref(environment, table)
-    others = [_gate_ref(environment, entry) for entry in gate_tables]
-    if own is None or any(ref is None for ref in others):
-        return False
-    gate = {(ref.namespace.parts, ref.name): ref for ref in (own, *others) if ref is not None}
-    for ref in gate.values():
-        scope = Securable.table_scope(environment, ref.namespace, ref.name)
-        if not authorization.permits(p, Action.READ_TABLE, scope):
+    return ContentGate(session, authorization, p, environment).passes(
+        table, gate_tables, gate_raw, defines=defines
+    )
+
+
+@dataclass(frozen=True)
+class _LiveTable:
+    """A table of a live environment, as the gate needs it.
+
+    Parameters
+    ----------
+    id
+        The table's id.
+    table_type
+        Its type.
+    """
+
+    id: uuid.UUID
+    table_type: TableType
+
+
+class ContentGate:
+    """The strict content rule of `passes_content_gate`, for many files of one reader at once.
+
+    Every file is judged exactly as `passes_content_gate` judges it. What the rule reads is
+    read once per request and kept: the reader's `READ_ENVIRONMENT` and `READ_TABLE` answers
+    (one `permits_each` batch), the live tables the files name (one statement) and the policies
+    that apply to the reader on them (`PolicyResolver.resolve_each`). `prepare` reads them for
+    every file to come, so judging a version's files costs a fixed number of statements; a
+    table `prepare` did not see is read when a file names it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    authorization
+        Authorization service.
+    p
+        The reader.
+    environment
+        The environment's name.
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        authorization: AuthorizationService,
+        p: PrincipalRef,
+        environment: str,
+    ) -> None:
+        self._session = session
+        self._authorization = authorization
+        self._p = p
+        self._environment = environment
+        self._reads_environment: bool | None = None
+        self._reads: dict[tuple[tuple[str, ...], str], bool] = {}
+        self._live: dict[tuple[str, str], _LiveTable | None] = {}
+        self._policies: dict[uuid.UUID, bool] = {}
+
+    def prepare(self, files: Iterable[tuple[object, object]]) -> None:
+        """Read what judging these files needs, in a fixed number of statements.
+
+        Parameters
+        ----------
+        files
+            ``(table, gate_tables)`` of each file, as `passes` takes them; entries that are not
+            tables are skipped (they refuse anyway).
+        """
+        refs: dict[tuple[tuple[str, ...], str], TableRef] = {}
+        for table, gate_tables in files:
+            entries = [table, *(gate_tables if isinstance(gate_tables, list) else [])]
+            for entry in entries:
+                ref = _gate_ref(self._environment, entry)
+                if ref is not None:
+                    refs.setdefault((ref.namespace.parts, ref.name), ref)
+        self._permit([ref for key, ref in refs.items() if key not in self._reads])
+        live = self._live_tables(refs.values())
+        ids = [
+            found.id
+            for ref in refs.values()
+            if (found := live.get((ref.namespace.joined(), ref.name))) is not None
+            and found.id not in self._policies
+        ]
+        self._resolve(ids)
+
+    def passes(
+        self, table: object, gate_tables: object, gate_raw: object, *, defines: bool = True
+    ) -> bool:
+        """Judge one file as `passes_content_gate` does.
+
+        Parameters
+        ----------
+        table
+            As `passes_content_gate` takes it.
+        gate_tables
+            As `passes_content_gate` takes it.
+        gate_raw
+            As `passes_content_gate` takes it.
+        defines
+            As `passes_content_gate` takes it.
+
+        Returns
+        -------
+        bool
+            What `passes_content_gate` returns.
+        """
+        if not self._may_read_environment():
             return False
-    resolver = PolicyResolver(session)
-    for ref in gate.values():
-        live = _live_table(session, ref)
-        if live is None:
-            continue
-        if live.table_type is TableType.VIEW and (not defines or ref != own):
+        if gate_raw is not False or not isinstance(gate_tables, list):
             return False
-        try:
-            policy = resolver.resolve(p, ref, table_id=live.id)
-        except UnreadablePolicyError:
+        own = _gate_ref(self._environment, table)
+        others = [_gate_ref(self._environment, entry) for entry in gate_tables]
+        if own is None or any(ref is None for ref in others):
             return False
-        if policy.row_filters or policy.column_masks:
+        gate = {(ref.namespace.parts, ref.name): ref for ref in (own, *others) if ref is not None}
+        self._permit([ref for key, ref in gate.items() if key not in self._reads])
+        if not all(self._reads[key] for key in gate):
             return False
-    return True
+        live = self._live_tables(gate.values())
+        for ref in gate.values():
+            found = live.get((ref.namespace.joined(), ref.name))
+            if found is None:
+                continue
+            if found.table_type is TableType.VIEW and (not defines or ref != own):
+                return False
+            if found.id not in self._policies:
+                self._resolve([found.id])
+            if self._policies[found.id]:
+                return False
+        return True
+
+    def _may_read_environment(self) -> bool:
+        """Answer, once, whether the reader holds `READ_ENVIRONMENT`.
+
+        Returns
+        -------
+        bool
+            The answer.
+        """
+        if self._reads_environment is None:
+            self._reads_environment = self._authorization.permits(
+                self._p, Action.READ_ENVIRONMENT, Securable.environment_scope(self._environment)
+            )
+        return self._reads_environment
+
+    def _permit(self, refs: list[TableRef]) -> None:
+        """Ask `READ_TABLE` on tables not asked yet, in one batch.
+
+        Parameters
+        ----------
+        refs
+            The tables.
+        """
+        if not refs:
+            return
+        answers = permits_each(
+            self._authorization,
+            self._p,
+            [
+                (
+                    Action.READ_TABLE,
+                    Securable.table_scope(self._environment, ref.namespace, ref.name),
+                )
+                for ref in refs
+            ],
+        )
+        for ref, answer in zip(refs, answers, strict=True):
+            self._reads[ref.namespace.parts, ref.name] = answer
+
+    def _live_tables(self, refs: Iterable[TableRef]) -> dict[tuple[str, str], _LiveTable | None]:
+        """Read the tables of the live environment that `refs` name and were not read yet.
+
+        One statement for all of them, filtered to their ``(namespace path, name)`` pairs, so
+        the cost does not grow with the environment's other tables.
+
+        Parameters
+        ----------
+        refs
+            The tables wanted.
+
+        Returns
+        -------
+        dict
+            ``(namespace in storage form, name)`` to the table, or `None` for a name that is no
+            table of a live environment; every pair read so far.
+        """
+        wanted = {
+            (ref.namespace.joined(), ref.name)
+            for ref in refs
+            if (ref.namespace.joined(), ref.name) not in self._live
+        }
+        if wanted:
+            rows = self._session.execute(
+                select(Table.id, Table.table_type, Namespace.path, Table.name)
+                .join(Namespace, Table.namespace_id == Namespace.id)
+                .join(Environment, Namespace.environment_id == Environment.id)
+                .where(
+                    Environment.name == self._environment,
+                    LIVE_ENVIRONMENT,
+                    tuple_(Namespace.path, Table.name).in_(sorted(wanted)),
+                )
+            )
+            found = {
+                (path, name): _LiveTable(table_id, table_type)
+                for table_id, table_type, path, name in rows
+            }
+            for pair in wanted:
+                self._live[pair] = found.get(pair)
+        return self._live
+
+    def _resolve(self, table_ids: list[uuid.UUID]) -> None:
+        """Note, for each table, whether a policy applies to the reader or cannot be read.
+
+        Parameters
+        ----------
+        table_ids
+            The tables.
+        """
+        resolved = PolicyResolver(self._session).resolve_each(self._p, table_ids)
+        for table_id, policy in resolved.items():
+            self._policies[table_id] = isinstance(policy, UnreadablePolicyError) or bool(
+                policy.row_filters or policy.column_masks
+            )
 
 
 def _gate_ref(environment: str, entry: object) -> TableRef | None:

@@ -7,8 +7,10 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from lakana_core.audit.service import AuditService
 from lakana_core.db import db_now
 from lakana_core.models import (
     AuditEvent,
@@ -378,6 +380,60 @@ def test_a_project_versions_sql_is_shown_only_for_a_recorded_file_and_audited(
     assert event.detail == {"repository": "analytics", "path": record.path, "commit": "a" * 40}
     client.get(path, headers=AUTH_HEADER)
     assert len(_source_viewed(client)) == 1
+
+
+@pytest.mark.parametrize("failing", ["write", "commit"])
+def test_a_project_version_whose_audit_fails_after_the_lookup_is_503_without_sql(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, failing: str
+) -> None:
+    """A SOURCE_VIEWED write or commit that fails is a 503 that holds no SQL, and no row lands."""
+    _setup(client)
+    version_id = _insert_job_version(client, "dev")
+    record = ProjectFileRecord(
+        path="assets/silver/clean.sql",
+        table="silver.clean",
+        text="SELECT 1\n",
+        normalized_sql="SELECT 1",
+        gate_tables=("silver.clean",),
+        gate_raw=False,
+    )
+    with Session(client.app.state.engine) as session:
+        version = session.get_one(JobVersion, version_id)
+        version.manifest_json = {
+            **version.manifest_json,
+            "assets": [
+                {
+                    **version.manifest_json["assets"][0],
+                    "path": record.path,
+                    "normalized_sql": record.normalized_sql,
+                }
+            ],
+        }
+        write_source_map(session, version, [record])
+        session.commit()
+
+    def fail(*_: object, **__: object) -> None:
+        raise OperationalError("INSERT", {}, Exception("disk full"))
+
+    if failing == "write":
+        monkeypatch.setattr(AuditService, "record", fail)
+    else:
+        real = AuditService.record
+
+        def record_then_fail_commit(self: AuditService, *args: object, **kwargs: object) -> object:
+            monkeypatch.setattr(self._session, "commit", fail)
+            return real(self, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+        monkeypatch.setattr(AuditService, "record", record_then_fail_commit)
+
+    answer = client.get(
+        f"/api/v1/environments/dev/project-versions/{version_id}", headers=AUTH_HEADER
+    )
+
+    assert answer.status_code == 503, answer.text
+    assert "SELECT" not in answer.text and "always recorded" in answer.text
+    monkeypatch.undo()
+    assert _source_viewed(client) == []
 
 
 def test_adopted_tables_are_hidden_from_a_reader_over_rest(client: TestClient) -> None:

@@ -266,11 +266,15 @@ def _observe(
     snapshots: Sequence[Snapshot],
     file_io: FileIO,
     files: Sequence[DataFile] | None,
+    effects: HealthEffects,
+    own_summaries: bool,
 ) -> list[Observation]:
     """Observe the commit signals of a new snapshot.
 
     The files are read before the history, so no manifest read waits on an open transaction
-    that this function started.
+    that this function started. With every column signal off
+    (`HealthEffects.column_signals_off`) the files' metrics are not needed: see
+    `_columns_off_observations`.
 
     Parameters
     ----------
@@ -292,6 +296,11 @@ def _observe(
         Reads the table's storage.
     files
         The data files the commit adds when they were read already; `None` reads them.
+    effects
+        The table's effects.
+    own_summaries
+        Whether this service wrote the snapshots through pyiceberg, so their summaries hold
+        ``added-data-files`` exactly when a data file was added.
 
     Returns
     -------
@@ -307,6 +316,22 @@ def _observe(
     counted = [s for s in added if s.snapshot_id not in compactions]
     if not counted:
         return [found_schema]
+    if effects.column_signals_off():
+        return _columns_off_observations(
+            session,
+            table=table,
+            table_id=table_id,
+            before=before,
+            after=after,
+            added=added,
+            counted=counted,
+            compactions=compactions,
+            file_io=file_io,
+            files=files,
+            volume_off=effects.of("volume") == "off",
+            own_summaries=own_summaries,
+            found_schema=found_schema,
+        )
     if files is None or compactions:
         # The field-id check's files include the compactions'; they are read again without.
         files = _read_added_files(added, before or after, file_io, table, compactions)
@@ -330,6 +355,91 @@ def _observe(
     return found
 
 
+def _columns_off_observations(
+    session: Session,
+    *,
+    table: str,
+    table_id: uuid.UUID | None,
+    before: TableMetadata | None,
+    after: TableMetadata,
+    added: Sequence[Snapshot],
+    counted: Sequence[Snapshot],
+    compactions: Collection[int],
+    file_io: FileIO,
+    files: Sequence[DataFile] | None,
+    volume_off: bool,
+    own_summaries: bool,
+    found_schema: Observation,
+) -> list[Observation]:
+    """Observe a commit that loads data into a table whose column signals are all off (#454).
+
+    The column signals record one table-level ``off`` row each, ``null_rate`` and ``range``,
+    whatever the commit added, so no data file's metrics are read. Volume needs only whether the
+    commit added a data file, which is known without reading in the common cases: volume is off;
+    the field-id check read the files already (none were added, or no compaction is among
+    them); or this service wrote the snapshots, whose summaries pyiceberg writes with
+    ``added-data-files`` exactly when it is above 0. Otherwise (an Iceberg client's commit
+    that mixes in a compaction) the manifests are read as before, so volume decides the same.
+
+    Parameters
+    ----------
+    session
+        Database session, for the history.
+    table
+        The dotted name.
+    table_id
+        The table; `None` for a table being created.
+    before
+        The metadata before the commit; `None` for a table being created.
+    after
+        The metadata the commit makes current.
+    added
+        Every snapshot the commit adds.
+    counted
+        Those that are not compactions; not empty.
+    compactions
+        The ids of the compactions among `added`.
+    file_io
+        Reads the table's storage.
+    files
+        The data files the commit adds when they were read already.
+    volume_off
+        Whether the volume signal is off.
+    own_summaries
+        Whether this service wrote the snapshots through pyiceberg.
+    found_schema
+        The schema observation.
+
+    Returns
+    -------
+    list of Observation
+        Volume, schema, and the ``off`` observations of ``null_rate`` and ``range``.
+    """
+    no_data_files: bool
+    if volume_off:
+        no_data_files = False
+    elif files is not None and (not compactions or not files):
+        no_data_files = not files
+    elif own_summaries:
+        no_data_files = all(
+            (s.summary or {}).get("added-data-files") in (None, "0", 0) for s in counted
+        )
+    else:
+        read = _read_added_files(added, before or after, file_io, table, compactions)
+        no_data_files = read == []
+    history = {} if table_id is None else recent_observations(session, table_id)
+    return [
+        volume_signal(
+            counted[-1].summary,
+            history.get(("volume", None), []),
+            no_data_files=no_data_files,
+        ),
+        found_schema,
+        Observation("null_rate", None, "off", None, None),
+        Observation("range", None, "off", None, None),
+    ]
+
+
 def commit_observations(
     session: Session,
     *,
@@ -341,6 +451,7 @@ def commit_observations(
     file_io: FileIO,
     effects: HealthEffects,
     files: Sequence[DataFile] | None = None,
+    own_summaries: bool = False,
 ) -> list[tuple[Observation, str]]:
     """Observe a new snapshot's commit signals and apply the table's effects.
 
@@ -365,7 +476,10 @@ def commit_observations(
         The table's effects.
     files
         The data files the commit adds, when the field-id check read them already; `None`
-        reads them here.
+        reads them here (unless every column signal is off, see `_columns_off_observations`).
+    own_summaries
+        Whether this service wrote the snapshots through pyiceberg, so their summaries can
+        stand in for the files when every column signal is off.
 
     Returns
     -------
@@ -394,6 +508,8 @@ def commit_observations(
             snapshots=snapshots,
             file_io=file_io,
             files=files,
+            effects=effects,
+            own_summaries=own_summaries,
         )
     except SQLAlchemyError:
         raise

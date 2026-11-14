@@ -841,6 +841,21 @@ class HealthEffects:
         effect = self.entries.get(signal, DEFAULT_EFFECT)
         return DEFAULT_EFFECT if signal == "freshness" and effect == "block" else effect
 
+    def column_signals_off(self) -> bool:
+        """Say whether every column signal is off for every column.
+
+        Returns
+        -------
+        bool
+            Whether ``null_rate`` and ``range`` are off for the table and no column has an entry
+            of either that is not ``off``: a commit then needs no data file's metrics (#454).
+        """
+        return all(self.of(signal) == "off" for signal in COLUMN_SIGNALS) and all(
+            effect == "off"
+            for key, effect in self.entries.items()
+            if key.partition(".")[0] in COLUMN_SIGNALS
+        )
+
     def flat(self) -> dict[str, str]:
         """Give the entries as they are stored.
 

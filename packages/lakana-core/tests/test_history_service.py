@@ -23,6 +23,7 @@ from pyiceberg.expressions import EqualTo
 from pyiceberg.manifest import DataFileContent
 from pyiceberg.schema import Schema
 from pyiceberg.table import DataScan, StaticTable
+from pyiceberg.table.update import RemovePropertiesUpdate, SetPropertiesUpdate
 from pyiceberg.types import BooleanType, LongType, NestedField, StringType, TimestamptzType
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -1550,3 +1551,51 @@ def test_a_write_that_would_leave_too_many_open_versions_stages_nothing(hist: Hi
     assert hist.files(".parquet") == parquet
     replaced = hist.run([("C", "north")], T2, max_open_versions=2, close_missing=True)
     assert (replaced.versions_opened, replaced.versions_closed) == (1, 2)
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        SetPropertiesUpdate(updates={HISTORY_KEY_PROPERTY: json.dumps(["region"])}),
+        RemovePropertiesUpdate(removals=[HISTORY_KEY_PROPERTY]),
+        SetPropertiesUpdate(updates={"lakana.anything-new": "x"}),
+    ],
+    ids=["set", "remove", "unknown-lakana-key"],
+)
+def test_an_iceberg_commit_may_not_set_or_remove_a_lakana_property(
+    hist: Hist, update: SetPropertiesUpdate | RemovePropertiesUpdate
+) -> None:
+    hist.run([("A", "north")], T1, first=True)
+    before = hist.static().metadata
+
+    with pytest.raises(ValidationError) as info:
+        hist.service.commit_table(hist.admin, hist.ref(), requirements=[], updates=[update])
+
+    key = (
+        next(iter(update.updates))
+        if isinstance(update, SetPropertiesUpdate)
+        else update.removals[0]
+    )
+    assert str(info.value) == (
+        f"The table property {key} is reserved for Lakana: an Iceberg commit may not set or "
+        "remove a lakana.* property. Leave it out of the commit."
+    )
+    after = hist.static().metadata
+    assert after.properties == before.properties
+    assert hist.run([("A", "south")], T2).versions_opened == 1
+
+
+def test_an_iceberg_commit_of_other_properties_keeps_the_history_key(hist: Hist) -> None:
+    hist.run([("A", "north")], T1, first=True)
+
+    hist.service.commit_table(
+        hist.admin,
+        hist.ref(),
+        requirements=[],
+        updates=[SetPropertiesUpdate(updates={"owner": "data-team", "lakanax.note": "kept"})],
+    )
+
+    properties = hist.static().metadata.properties
+    assert json.loads(properties[HISTORY_KEY_PROPERTY]) == ["customer_id"]
+    assert (properties["owner"], properties["lakanax.note"]) == ("data-team", "kept")
+    assert hist.run([("A", "south")], T2).versions_opened == 1
