@@ -310,6 +310,7 @@ describe("bandWords", () => {
     expect(words("skew", { low: 1, high: 2 })).toBe("low 1, high 2");
     expect(words("volume", { high: 3 })).toBe("high 3");
     expect(words("freshness", { low: 1 })).toBe("low 1");
+    expect(words("range", { low: 1 })).toBe("low 1");
     expect(words("null_rate", { high: "x" })).toBe("high x");
   });
 });

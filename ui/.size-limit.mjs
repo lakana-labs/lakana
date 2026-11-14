@@ -76,7 +76,9 @@ const NAMED_LIMITS = [
   // Measured 3.83 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
   // included. The page and the two tabs share them, so the bundler gave them a chunk of their own,
   // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.
-  { name: "the table page's strings", prefix: "tableStrings-", limit: "4.21 kB" },
+  // Raised to the measured 4.23 kB (2026-11-14) + 10 %: the words for what a signal observed,
+  // its usual band, its effect and the reasons the server records instead of values.
+  { name: "the table page's strings", prefix: "tableStrings-", limit: "4.65 kB" },
   // Measured 662 B (2026-11-13) + 10 %: the status glyph, which the table page, the Health tab
   // and the Access tab share.
   { name: "the status glyph", prefix: "StatusGlyph-", limit: "0.73 kB" },
