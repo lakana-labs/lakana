@@ -3,6 +3,7 @@
 import errno
 import logging
 import os
+import stat
 import tracemalloc
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -898,3 +899,89 @@ def test_list_objects_skips_a_file_that_vanishes_while_the_directory_is_walked(
 
     monkeypatch.setattr(os, "stat", stat)
     assert [found.path for found in storage.list_objects("t")] == ["t/keep"]
+
+
+def _linked_root(tmp_path: Path) -> tuple[FsspecStorage, Path]:
+    """Build a local storage whose root holds a link `link` to a directory outside it.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest-provided temporary directory.
+
+    Returns
+    -------
+    tuple
+        The storage and the outside directory, which holds `x` and `sub/y`.
+    """
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (outside / "x").write_bytes(b"outside")
+    (outside / "sub" / "y").write_bytes(b"outside")
+    root = tmp_path / "root"
+    (root / "real").mkdir(parents=True)
+    (root / "real" / "kept").write_bytes(b"inside")
+    os.symlink(outside, root / "link")
+    os.symlink(outside, root / "real" / "inner-link")
+    os.symlink(outside / "x", root / "real" / "file-link")
+    return FsspecStorage(f"file://{root}", {}), outside
+
+
+def test_reads_refuse_a_symbolic_link_in_a_directory_as_writes_do(tmp_path: Path) -> None:
+    """`read`, `read_chunks` and `delete` refuse a link on the way, as `open_write` does (#70)."""
+    storage, outside = _linked_root(tmp_path)
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.read("link/x")
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.read_chunks("link/x")
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.delete("link/x")
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.read("real/inner-link/sub/y")
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.write("link/new", b"through")
+    assert (outside / "x").read_bytes() == b"outside"
+    assert sorted(os.listdir(outside)) == ["sub", "x"]
+
+
+def test_a_read_never_follows_a_link_at_the_objects_own_name(tmp_path: Path) -> None:
+    """A link is not an object: the listings skip it, so the reads do not find it (#70)."""
+    storage, _ = _linked_root(tmp_path)
+    with pytest.raises(NotFoundError):
+        storage.read("real/file-link")
+    with pytest.raises(NotFoundError):
+        storage.read_chunks("real/file-link")
+    assert storage.exists("real/file-link") is False
+
+
+def test_list_never_follows_a_symbolic_link(tmp_path: Path) -> None:
+    """`list` agrees with `list_objects`: links are skipped, a linked prefix lists nothing (#70)."""
+    storage, _ = _linked_root(tmp_path)
+    assert list(storage.list("")) == ["real/kept"]
+    assert list(storage.list("real")) == ["real/kept"]
+    assert list(storage.list("link")) == []
+    assert list(storage.list("missing")) == []
+
+
+def test_a_committed_object_is_durable_in_its_directory(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After the rename the directory is synced too, so a power loss keeps the new name (#70)."""
+    synced: list[tuple[bool, bool]] = []
+    real_fsync, real_replace = os.fsync, os.replace
+    renamed: list[bool] = []
+
+    def fsync(descriptor: int) -> None:
+        synced.append((stat.S_ISDIR(os.fstat(descriptor).st_mode), bool(renamed)))
+        real_fsync(descriptor)
+
+    def replace(source: str, target: str) -> None:
+        real_replace(source, target)
+        renamed.append(True)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "replace", replace)
+    writer = build_storage(config).open_write("d/x")
+    writer.write(b"1")
+    writer.commit()
+    assert synced == [(False, False), (True, True)]

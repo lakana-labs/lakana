@@ -4160,10 +4160,13 @@ scheme existed — where `tables.external_claim` is `NULL` — must not go unche
 (NFD, casefold, NFD again — not a single NFC-then-casefold pass, which disagrees with the
 canonical algorithm on some characters), so `raw/Customers`
 and `raw/customers` — or an NFD- and an NFC-encoded `raw/café` — are still caught as the
-same directory on a case- or normalization-insensitive local filesystem. **Known gap, partly
-closed:** on local (`file://`) storage, a symlink placed under a table's `raw/` claim is
-still followed by the listing/read that infers its schema at creation. The query process no
-longer follows it: allow-list mode refuses a symlink whose target lies outside the
+same directory on a case- or normalization-insensitive local filesystem. **Known gap, closed
+for Lakana's own reads (#70):** on local (`file://`) storage, a symlink placed under a table's
+`raw/` claim is skipped by `Storage.list`, and `Storage.read` refuses a link at the object's
+name or on the way, so the schema inference at creation and the worker's listing of the claim
+no longer follow it (a check by path: a link swapped in between the listing and the open is
+refused by the open's `O_NOFOLLOW` only at the last component). The query process does not
+follow one either: allow-list mode refuses a symlink whose target lies outside the
 directories the query may open (unless it points into another table the same query reads).
 Placing one needs write access to the *host* filesystem underneath the storage root.
 
