@@ -1228,6 +1228,53 @@ def deploy_manifest(
     return version
 
 
+def deploy_assets(
+    session: Session,
+    environment: str,
+    repository: str,
+    assets: Mapping[str, Mapping[str, object]],
+) -> JobVersion:
+    """Make a project version whose manifest declares the given assets.
+
+    Each entry is merged over the default SQL table entry
+    ``{"table": name, "kind": "sql", "path": "assets/<namespace dirs>/<name>.sql",
+    "materialize": "table"}``. The repository is registered on first use and the
+    environment's deployment of it points at the new version.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    environment
+        The environment's name; it must exist.
+    repository
+        The repository's name.
+    assets
+        Dotted table name to the entry fields that override the defaults.
+
+    Returns
+    -------
+    JobVersion
+        The new current version.
+    """
+    entries: list[dict[str, object]] = []
+    for dotted, fields in assets.items():
+        *namespace, name = dotted.split(".")
+        entries.append(
+            {
+                "table": dotted,
+                "kind": "sql",
+                "path": "/".join(["assets", *namespace, f"{name}.sql"]),
+                "materialize": "table",
+                **fields,
+            }
+        )
+    version = deploy_manifest(session, environment, repository, {})
+    version.manifest_json = {"assets": entries}
+    session.commit()
+    return version
+
+
 def deploy_files(
     session: Session,
     environment: str,
