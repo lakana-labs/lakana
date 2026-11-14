@@ -430,12 +430,12 @@ def test_a_single_grant_gets_the_exact_revoke_command(tmp_path: Path) -> None:
 
 
 def test_an_empty_column_is_left_out(tmp_path: Path) -> None:
-    """`action`, `namespace` and `table` are empty here, so they take no room."""
+    """`namespace` and `table` are empty here, so they take no room."""
     result = invoke(make_state(tmp_path, _api()), "grant", "list", "--env", "dev")
 
     header = result.stdout.splitlines()[1]
-    assert "action" not in header and "namespace" not in header and "table" not in header
-    assert "role" in header and "environment" in header
+    assert "namespace" not in header and "table" not in header
+    assert "access" in header and "environment" in header
 
 
 _LONG = _grant(
@@ -503,3 +503,30 @@ def test_resolved_names_print_no_warning_and_json_none(tmp_path: Path) -> None:
     api.on("GET", "/api/v1/grants", json=[_without_names(g) for g in _GRANTS])
     quiet = invoke(make_state(tmp_path, api), "--output", "json", "grant", "list")
     assert quiet.stderr == ""
+
+
+def test_a_role_and_an_action_share_one_column_that_stays_whole_at_80_columns(
+    tmp_path: Path,
+) -> None:
+    """With a full principal id `MANAGE_GRANT` stays whole: role and action are one column (#80)."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/grants",
+        json=[
+            _without_names(
+                _grant(_ANALYST_GRANT, principal_id=_ALICE_ID, role=None, action="MANAGE_GRANT")
+            ),
+            _without_names(_grant(_ENGINEER_GRANT, principal_id=_ALICE_ID, role="DATA_ENGINEER")),
+        ],
+    )
+
+    result = invoke(make_state(tmp_path, api), "grant", "list", env={"COLUMNS": "80"})
+
+    assert result.exit_code == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert max(len(line) for line in lines) <= 80, result.stdout
+    header = lines[1]
+    assert "access" in header and header.split("┃")[3].strip() == "access"
+    assert any(_ANALYST_GRANT in line and "MANAGE_GRANT" in line for line in lines), result.stdout
+    assert any(_ENGINEER_GRANT in line and "DATA_ENGINEER" in line for line in lines)
