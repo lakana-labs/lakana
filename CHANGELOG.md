@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.23.0](https://github.com/lakana-labs/lakana/compare/v0.22.0...v0.23.0) (2026-11-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **security:** GET …/project-versions/{id} now returns an asset's or a check's SQL only to a reader who passes the Defined-in content gate (no row filter or column mask on any table the file uses, no view, READ_ENVIRONMENT); others get the entry without sql and normalized_sql, with content_reason and content_message. Versions deployed before project files were recorded show their assets' SQL to nobody until the project is deployed again. Deploy a new commit to record the files.
+* **catalog:** A deploy now refuses an asset file that contains a control character (NUL, C0 except tab and line feed, DEL, or C1). Remove them from the file, commit, and deploy; the error names the file and line. A deploy no longer expands `$Format:…$` placeholders (`export-subst` in `.gitattributes`) in deployed files; read the deployed commit from Lakana instead (`lakana deployments`, or the commit `lakana table definition` shows).
+* **ui:** a reverse proxy on the same host is no longer trusted for X-Forwarded-For and X-Forwarded-Proto by default; set LAKANA_TRUSTED_PROXIES (e.g. ["127.0.0.1"]) to keep real client addresses in audit records and rate limits. With LAKANA_UI__ENABLED=true, browsers must use the public address or a name in LAKANA_UI__ALLOWED_HOSTS (other Host headers get 421), and a proxy must pass the Host header through. See the upgrade notes. Part of #32.
+
+### Features
+
+* **catalog:** list every table across environments with search, sorting, owner, last read, health ([#556](https://github.com/lakana-labs/lakana/issues/556)) ([f035a1a](https://github.com/lakana-labs/lakana/commit/f035a1affc728427650ebf2c1f8f2a5f1cdfe288)), closes [#551](https://github.com/lakana-labs/lakana/issues/551)
+* **catalog:** name access subjects, health without readers, jobs and connections in lineage ([#583](https://github.com/lakana-labs/lakana/issues/583)) ([316e6b7](https://github.com/lakana-labs/lakana/commit/316e6b72f49eb5a491d1f0f157ed0a721f103d1b))
+* **catalog:** preview a table's rows as the viewer and page query results as bounded JSON ([#566](https://github.com/lakana-labs/lakana/issues/566)) ([ba94b01](https://github.com/lakana-labs/lakana/commit/ba94b01bfb2d3afabb60ba8f5a5ad03b6e9d4939))
+* **catalog:** purge the rows of an environment whose storage never resolves; uuid merge key ([#598](https://github.com/lakana-labs/lakana/issues/598)) ([bc3c807](https://github.com/lakana-labs/lakana/commit/bc3c807cb3b5baa95272ceef481e33634b05b5dc)), closes [#261](https://github.com/lakana-labs/lakana/issues/261) [#427](https://github.com/lakana-labs/lakana/issues/427) [#584](https://github.com/lakana-labs/lakana/issues/584)
+* **catalog:** show the file that defines a table, and refuse control characters in assets ([41cb653](https://github.com/lakana-labs/lakana/commit/41cb65395a7b0118b68ef69db5004a9ffa353d24))
+* **ui:** a flat Lakana mark, glyphs checked for colour blindness, and the look explained ([#541](https://github.com/lakana-labs/lakana/issues/541)) ([cc563da](https://github.com/lakana-labs/lakana/commit/cc563daa6607f3b0986a22a2ce882850b8daa3e3)), closes [#502](https://github.com/lakana-labs/lakana/issues/502) [#503](https://github.com/lakana-labs/lakana/issues/503) [#504](https://github.com/lakana-labs/lakana/issues/504) [#505](https://github.com/lakana-labs/lakana/issues/505)
+* **ui:** Home, the first-sign-in tour, Help, profile pictures and connecting a repository ([#545](https://github.com/lakana-labs/lakana/issues/545)) ([e19710f](https://github.com/lakana-labs/lakana/commit/e19710f3d2a52544bd6b0ea2d09c76a882ee39ff))
+* **ui:** reach Connect a repository from Settings and show a pending sign on waiting buttons ([#549](https://github.com/lakana-labs/lakana/issues/549)) ([c013617](https://github.com/lakana-labs/lakana/commit/c013617d949ddcc90272c213cbba4933c160743a)), closes [#547](https://github.com/lakana-labs/lakana/issues/547) [#548](https://github.com/lakana-labs/lakana/issues/548)
+* **ui:** sign in to the web interface with passkeys, invites and recovery links ([c252373](https://github.com/lakana-labs/lakana/commit/c25237316bee26ee2562b6e519250cf1ef717db7))
+* **ui:** the Catalog: find a table by place, name or column, sorted, with health at a glance ([#570](https://github.com/lakana-labs/lakana/issues/570)) ([e4d9377](https://github.com/lakana-labs/lakana/commit/e4d93772590fd15bc1636476163b8703e8d763b2))
+* **ui:** the first part of the web interface: gates, Still Water shell, served behind a setting ([#508](https://github.com/lakana-labs/lakana/issues/508)) ([a619e1f](https://github.com/lakana-labs/lakana/commit/a619e1f506f0988ff95076a7cce678c0e9bc7cf2)), closes [#481](https://github.com/lakana-labs/lakana/issues/481)
+* **ui:** the table page: Overview, Columns, editing, Defined in and Preview ([#595](https://github.com/lakana-labs/lakana/issues/595)) ([a05ceed](https://github.com/lakana-labs/lakana/commit/a05ceed976435eb1b93c97651648eb8fb0d87a54))
+* **ui:** the table page's Lineage, Health and Access tabs ([#601](https://github.com/lakana-labs/lakana/issues/601)) ([f4f7a0d](https://github.com/lakana-labs/lakana/commit/f4f7a0d65e12f006bb1b0fcd735c1732e6839230))
+
+
+### Bug Fixes
+
+* **catalog:** deep namespaces in lineage and deploys; table list health, capped, sorts, case ([#594](https://github.com/lakana-labs/lakana/issues/594)) ([d29083c](https://github.com/lakana-labs/lakana/commit/d29083cdb936675f933bb8d8f018206f49908baa)), closes [#564](https://github.com/lakana-labs/lakana/issues/564) [#557](https://github.com/lakana-labs/lakana/issues/557)
+* **ci:** confirm a flagged slow test by the fastest of three solo runs ([#554](https://github.com/lakana-labs/lakana/issues/554)) ([5c45c7b](https://github.com/lakana-labs/lakana/commit/5c45c7b99f6fa54855f3ba6effff0bda2eeadf7f)), closes [#550](https://github.com/lakana-labs/lakana/issues/550)
+* **ci:** remeasure each package's slow-test candidates in a pytest process of its own ([#523](https://github.com/lakana-labs/lakana/issues/523)) ([7b53846](https://github.com/lakana-labs/lakana/commit/7b5384691dad3e8195bde03d62e40110ea258fab))
+* **ci:** warm each re-measured slow-test candidate up with a test that shares its fixtures ([#526](https://github.com/lakana-labs/lakana/issues/526)) ([1663c9d](https://github.com/lakana-labs/lakana/commit/1663c9d65ec0926cdb400d31428ad8f655412f5c))
+* **cli:** open the local sign-in link itself in the browser, valid for 60 seconds ([#535](https://github.com/lakana-labs/lakana/issues/535)) ([2143aeb](https://github.com/lakana-labs/lakana/commit/2143aeb49b9f34c806a35ae1436f77bc4c92344b))
+* **docs:** hide uv's package count when comparing example output ([#537](https://github.com/lakana-labs/lakana/issues/537)) ([0cd1a1c](https://github.com/lakana-labs/lakana/commit/0cd1a1c7049eeba2f597e8a33b3bdead1a90ca54))
+* **security:** current base images, patched zlib, no pip in the server image ([#514](https://github.com/lakana-labs/lakana/issues/514)) ([1b1ee42](https://github.com/lakana-labs/lakana/commit/1b1ee422bb49fdfaffe8aa8a151781c0acc22102))
+* **security:** never reach Azure WireServer, lock tables in id order, name metadata readers ([#585](https://github.com/lakana-labs/lakana/issues/585)) ([4332ac5](https://github.com/lakana-labs/lakana/commit/4332ac5a77ee00a757506b614a5fa72624d1911c)), closes [#543](https://github.com/lakana-labs/lakana/issues/543) [#558](https://github.com/lakana-labs/lakana/issues/558) [#487](https://github.com/lakana-labs/lakana/issues/487)
+* **security:** version SQL behind the Defined-in gate, setup links bound to their token, whoami ([1b4be82](https://github.com/lakana-labs/lakana/commit/1b4be82afb0f4daa2a8a19184a4f797ec302130f))
+* the module's `_deploy` helper now defaults to a clock that never advances; the direct `_impact_warnings` call gets it too. The two budget tests keep their own clocks. No product change. No other core or server test module asserts the checked text through a real clock (`test_retype_impact.py` does not use `DeployService`). ([8ac0b9a](https://github.com/lakana-labs/lakana/commit/8ac0b9a61ccf293d36b443db477650e3f83dc324))
+* **ui:** a softer light theme, a gentle theme switch and a centred search, from the first review ([#513](https://github.com/lakana-labs/lakana/issues/513)) ([3fd7571](https://github.com/lakana-labs/lakana/commit/3fd7571a4da59418c9ebcf32f7d35ba152a7a024))
+* **ui:** breadcrumbs, readable sessions and clearer recovery and CLI errors from the sign-in review ([#539](https://github.com/lakana-labs/lakana/issues/539)) ([7fa0d00](https://github.com/lakana-labs/lakana/commit/7fa0d00e7af4fef7f9be985a02d436ed64761544))
+* **ui:** say how to add a second passkey when the browser already holds one ([#540](https://github.com/lakana-labs/lakana/issues/540)) ([86aea63](https://github.com/lakana-labs/lakana/commit/86aea63b6fbec104e78e586419b40531424b1ea6))
+* **worker:** take no query or deploy that a poll reads after a drain was signalled ([#531](https://github.com/lakana-labs/lakana/issues/531)) ([1baeb91](https://github.com/lakana-labs/lakana/commit/1baeb91e3aaf1948a039da09124a6a87cfe2845e))
+
+
+### Documentation
+
+* no public beta; release candidates before v1.0.0 ([#572](https://github.com/lakana-labs/lakana/issues/572)) ([d2ae0e1](https://github.com/lakana-labs/lakana/commit/d2ae0e1c1a06e05b55795ee3f2a60733ada67dc9))
+* the beta is planned for about early January 2027 ([#500](https://github.com/lakana-labs/lakana/issues/500)) ([0e3b750](https://github.com/lakana-labs/lakana/commit/0e3b750c2836863ac17683c8bf33eea230e68c60))
+
+
+### Dependencies
+
+* bump alpine digest in /packages/lakana-worker/tests/sshd ([#573](https://github.com/lakana-labs/lakana/issues/573)) ([f925328](https://github.com/lakana-labs/lakana/commit/f925328d6bf478b4be5d731ff7f5236b2ef789c9))
+* bump ruff from 0.17.3 to 0.17.4 ([#529](https://github.com/lakana-labs/lakana/issues/529)) ([225ab27](https://github.com/lakana-labs/lakana/commit/225ab27f269cfa80acdbd149bcd66a8bc1f47139))
+* bump the python group across 1 directory with 2 updates ([#521](https://github.com/lakana-labs/lakana/issues/521)) ([8269353](https://github.com/lakana-labs/lakana/commit/826935386d464e4665118a878403e68f489f0d03))
+* bump the python group with 3 updates ([#536](https://github.com/lakana-labs/lakana/issues/536)) ([5a44ccf](https://github.com/lakana-labs/lakana/commit/5a44ccfe032b34518a266f49a46db9dbbdb5ac60))
+* bump the ui-runtime group across 1 directory with 2 updates ([#576](https://github.com/lakana-labs/lakana/issues/576)) ([44588df](https://github.com/lakana-labs/lakana/commit/44588df24416e014f2e8f4daaefc076255e97813))
+* bump ty from 0.0.97 to 0.0.99 ([#530](https://github.com/lakana-labs/lakana/issues/530)) ([42e1b24](https://github.com/lakana-labs/lakana/commit/42e1b24e1e72e56d3bcb9e6c34252489e98ee556))
+* bump ty from 0.0.99 to 0.0.100 ([#582](https://github.com/lakana-labs/lakana/issues/582)) ([bac4ffa](https://github.com/lakana-labs/lakana/commit/bac4ffafa4be1c8005836351cc3fa69b86821751))
+* bump typer from 0.28.0 to 0.29.0 in the python group across 1 directory ([#581](https://github.com/lakana-labs/lakana/issues/581)) ([e66efd5](https://github.com/lakana-labs/lakana/commit/e66efd52a76b4ab33197a069ca1f3c1a8e5c6b02))
+
 ## [0.22.0](https://github.com/lakana-labs/lakana/compare/v0.21.0...v0.22.0) (2026-11-07)
 
 
