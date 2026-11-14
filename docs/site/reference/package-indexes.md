@@ -50,7 +50,8 @@ registered indexes, and no others (see "Sources a lock may name").
   second spelling of a URL that is already registered is refused, and the message names the index
   that has it.
 - `credential_secret` is the name of a secret: 1 to 255 characters, with no space, control
-  character or `:`, or empty.
+  character, `:` or bidirectional control character (such as U+202E), or empty. A repository's
+  `credential_secret` and a deploy key's `--secret` follow the same rule.
 
 Two forms that many indexes use work as they are:
 

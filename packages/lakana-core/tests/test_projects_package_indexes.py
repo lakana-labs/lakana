@@ -169,6 +169,9 @@ def test_a_second_spelling_of_a_registered_url_is_refused_and_names_the_index(
         ({"url": "http://pkgs.example.org/simple"}, "must use https"),
         ({"credential_secret": "two words"}, "credential_secret must be a secret name"),
         ({"credential_secret": ""}, "credential_secret must be a secret name"),
+        # A lone surrogate cannot be encoded for PostgreSQL: refused, never a server error (#79).
+        ({"credential_secret": "team\ud800"}, "credential_secret must be a secret name"),
+        ({"credential_secret": "team\u202eindex"}, "credential_secret must be a secret name"),
     ],
 )
 def test_create_validates_every_field(

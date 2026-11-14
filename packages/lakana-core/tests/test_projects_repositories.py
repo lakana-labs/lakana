@@ -124,6 +124,8 @@ def test_create_local_repository_confined_to_roots(
         ({"ssh_known_hosts": "h ssh-ed25519 AAAA"}, "only for ssh"),
         ({"credential_username": "a:b"}, "credential_username"),
         ({"credential_secret": "has space"}, "credential_secret"),
+        ({"credential_secret": "key\ud800"}, "credential_secret"),
+        ({"credential_username": "user\ud800"}, "credential_username"),
         ({"default_ref": "--upload-pack=x"}, "not a valid git ref"),
         ({"url": "https://u:p@github.com/a/b"}, "credentials"),
     ],

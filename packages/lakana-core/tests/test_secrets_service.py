@@ -97,6 +97,19 @@ def test_create_encrypts_the_values_and_returns_only_metadata(session: Session) 
     assert b"AKIA123" not in created.ciphertext
 
 
+@pytest.mark.parametrize("name", ["s3\x00creds", "s3\ud800creds", ""])
+def test_a_name_the_database_cannot_store_is_refused_not_a_server_error(
+    session: Session, name: str
+) -> None:
+    """A NUL or a lone surrogate reaches PostgreSQL as a server error otherwise (#79)."""
+    admin = _add_principal(session, "admin")
+    _add_environment(session, "dev")
+    service = SecretService(session, AllowAllAuthorization(), _key_provider())
+
+    with pytest.raises(ValidationError, match="secret name"):
+        service.create(admin, environment="dev", name=name, values={"k": "v"})
+
+
 def test_create_raises_not_found_for_an_unknown_environment(session: Session) -> None:
     """Creating a secret for an environment that doesn't exist is a NotFoundError."""
     admin = _add_principal(session, "admin")

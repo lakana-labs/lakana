@@ -54,6 +54,38 @@ from lakana_core.secrets.uses import (
 )
 
 
+_NAME_MAX = 255
+"""The longest secret name the catalog stores (`Secret.name`)."""
+
+
+def require_storable_name(name: str) -> None:
+    """Refuse a secret name the database cannot store, before any query sees it.
+
+    PostgreSQL refuses a NUL character and a lone surrogate in a text parameter with an
+    error that would reach the caller as a server error.
+
+    Parameters
+    ----------
+    name
+        The name a caller gave.
+
+    Raises
+    ------
+    ValidationError
+        If it is empty, longer than 255 characters, or holds a NUL or a lone surrogate.
+    """
+    if (
+        not name
+        or len(name) > _NAME_MAX
+        or "\x00" in name
+        or any("\ud800" <= char <= "\udfff" for char in name)
+    ):
+        raise ValidationError(
+            f"A secret name must be 1-{_NAME_MAX} characters with no NUL character and no lone "
+            "surrogate; give the secret another name."
+        )
+
+
 def insert_secret(
     session: Session,
     key_provider: KeyProvider,
@@ -334,12 +366,13 @@ class SecretService:
         ValidationError
             If `use` is an index, repository or connection and the environment itself uses a
             secret of this name, for storage or webhooks, or `use` is a connection of another
-            environment.
+            environment; or the name is one the database cannot store (`require_storable_name`).
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
         """
         self._authz.authorize(p, Action.MANAGE_SECRET, Securable.environment_scope(environment))
         require_step_up(p)
+        require_storable_name(name)
         env = self._get_environment(environment)
         with refuse_concurrent_change(self._session, f"Secret '{shown(name)}'"):
             if use is not None:
