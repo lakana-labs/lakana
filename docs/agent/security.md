@@ -4169,7 +4169,11 @@ for Lakana's own reads (#70):** on local (`file://`) storage, a symlink placed u
 `raw/` claim is skipped by `Storage.list`, and `Storage.read` refuses a link at the object's
 name or on the way, so the schema inference at creation and the worker's listing of the claim
 no longer follow it (a check by path: a link swapped in between the listing and the open is
-refused by the open's `O_NOFOLLOW` only at the last component). The query process does not
+refused by the open's `O_NOFOLLOW` only at the last component). Files of the local backend, streamed objects included, are created
+`0666` less the process umask (#70, by decision: the operator sets `umask 027` so that a worker in
+the server's group can read them and nobody else can; `deploy-with-compose.md`, "A storage root on
+a local directory"). Never hard-code a narrower mode in one writer: a worker of another user then
+fails to read the object. The query process does not
 follow one either: allow-list mode refuses a symlink whose target lies outside the
 directories the query may open (unless it points into another table the same query reads).
 Placing one needs write access to the *host* filesystem underneath the storage root.

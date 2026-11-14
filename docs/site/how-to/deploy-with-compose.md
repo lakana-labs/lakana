@@ -353,6 +353,25 @@ never holds a whole file in memory, so its memory use does not depend on file si
 every uploaded and downloaded file crosses the server. Plan the bandwidth between the workers,
 the people and the server for the artifacts you store.
 
+### A storage root on a local directory
+
+The bundle stores data in SeaweedFS. If you give an environment a storage root on a directory
+instead (`file:///data/lakana`), every file Lakana writes there (table data, artifacts, manifests)
+gets the mode the process's **umask** leaves: `0666` less the umask, and directories `0777` less it.
+
+- **Set `umask 027` for the server and every worker** (in a container: run the process through a
+  shell that sets it, or set it in the service's entry point). Files are then `0640`: the owner
+  writes, the group reads, nobody else sees them.
+- **Why:** the server and a worker may run as different users in one group, and the worker must read
+  what the server stored (for example an artifact's manifest when the sweep runs; it counts that
+  artifact as failed otherwise). With the common default umask `022`, files would be readable by
+  every user of the host, and the data in them is access-controlled in Lakana. With `077`, a worker
+  of another user cannot read them.
+- After a power loss, an object that Lakana recorded as written is on disk: each write is synced, and
+  so is its directory after the rename that publishes it.
+- A symbolic link inside the root is never followed by Lakana's own reads, writes and listings of
+  that root. Do not create links there.
+
 ### Settings
 
 Set these where the server and the worker read them. In the bundle, the lines under `x-lakana-env`

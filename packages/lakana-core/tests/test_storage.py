@@ -985,3 +985,20 @@ def test_a_committed_object_is_durable_in_its_directory(
     writer.write(b"1")
     writer.commit()
     assert synced == [(False, False), (True, True)]
+
+
+@pytest.mark.parametrize(("umask", "mode"), [(0o027, 0o640), (0o077, 0o600), (0o022, 0o644)])
+def test_a_streamed_object_follows_the_process_umask(
+    config: StorageConfig, umask: int, mode: int
+) -> None:
+    """As every other file of the backend: a worker in the server's group can read it (#70)."""
+    previous = os.umask(umask)
+    try:
+        writer = build_storage(config).open_write("d/x")
+        writer.write(b"1")
+        writer.commit()
+    finally:
+        os.umask(previous)
+    assert (
+        stat.S_IMODE(os.stat(Path(config.root.removeprefix("file://")) / "d" / "x").st_mode) == mode
+    )

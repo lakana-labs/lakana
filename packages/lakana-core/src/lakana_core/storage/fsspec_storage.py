@@ -106,7 +106,9 @@ class _LocalStreamWriter:
         self._final = final
         self._temp = os.path.join(directory, f".{name}.{secrets.token_hex(8)}{PART_SUFFIX}")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
-        self._handle: io.BufferedWriter | None = os.fdopen(os.open(self._temp, flags, 0o600), "wb")
+        # 0666 less the process umask, like every other file the backend writes: the operator
+        # decides who else may read objects (a worker in the server's group, with umask 027).
+        self._handle: io.BufferedWriter | None = os.fdopen(os.open(self._temp, flags, 0o666), "wb")
 
     def write(self, data: bytes) -> None:
         """Add bytes.
