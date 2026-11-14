@@ -3066,6 +3066,9 @@ class CatalogService:
                 file_io=prepared.resolved.file_io,
                 effects=_stored_effects(row, ref.dotted()),
                 new_table=True,
+                # Only this service's own writes create a table with a snapshot
+                # (`_write_new_table`); an Iceberg client's create has none.
+                own_summaries=True,
             )
             if metadata.current_snapshot_id is not None
             else []
@@ -5465,6 +5468,7 @@ class CatalogService:
                 file_io=resolved.file_io,
                 effects=effects,
                 files=checked_files,
+                own_summaries=own_data_files,
             )
             if not maintenance
             and not internal_rollback
@@ -5629,6 +5633,7 @@ class CatalogService:
         effects: HealthEffects,
         files: Sequence[DataFile] | None = None,
         new_table: bool = False,
+        own_summaries: bool = False,
     ) -> list[TableHealthSignal]:
         """Observe the health signals of a snapshot this commit makes current (#340).
 
@@ -5657,6 +5662,8 @@ class CatalogService:
             them.
         new_table
             Whether the table is being created: it has no history to read.
+        own_summaries
+            Whether this service wrote the snapshots through pyiceberg (`commit_observations`).
 
         Returns
         -------
@@ -5674,6 +5681,7 @@ class CatalogService:
                 file_io=file_io,
                 effects=effects,
                 files=files,
+                own_summaries=own_summaries,
             )
             now = db_now(self._session)
         snapshot = after.current_snapshot()

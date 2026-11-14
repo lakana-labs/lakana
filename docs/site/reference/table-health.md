@@ -213,6 +213,12 @@ that are damaged count as `not_recorded`.
 or time limit records `no_metrics` with reason `unreadable` for `null_rate` and `range`; it never
 fails the write.
 
+**With `null_rate` and `range` both `off`.** When both are `off` for the table and no column has
+its own entry of either that is not `off` (`health: off` included), a commit does not read the
+added files' column metrics at all. Each commit that adds data then records exactly one `off` row
+for `null_rate` and one for `range`, without a column, whatever it added; a column's own `off`
+entry adds no row of its own. `volume` and `schema` are judged as before.
+
 ### What `observed` and `band` hold
 
 | Signal | `observed` | `band` |
