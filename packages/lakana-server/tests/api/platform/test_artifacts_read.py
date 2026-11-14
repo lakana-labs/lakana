@@ -1241,3 +1241,23 @@ def test_a_nul_in_an_artifact_name_is_a_validation_error_not_a_server_error(
     )
     assert response.status_code == 422
     assert response.json()["detail"] == "Table name must not contain a NUL byte."
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"{_ENV}/namespaces/models/artifacts/ch%00urn",
+        f"{_ENV}/namespaces/mo%00dels/artifacts/churn",
+        "/api/v1/environments/d%00ev/namespaces/models/artifacts/churn",
+        f"{_ENV}/namespaces/models/artifacts/ch%00urn/versions",
+        f"{_ENV}/namespaces/models/artifacts/ch%00urn/versions/current",
+        f"{_ENV}/artifacts?namespace=mo%00dels",
+    ],
+)
+def test_a_nul_character_in_a_name_is_refused_before_it_reaches_sql(
+    stored: TestClient, path: str
+) -> None:
+    """PostgreSQL refuses a NUL in a text parameter with a server error (#71, item 8)."""
+    answer = stored.get(path, headers=AUTH_HEADER)
+    assert answer.status_code == 422, answer.text
+    assert "NUL" in answer.json()["detail"]

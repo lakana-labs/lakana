@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import pydantic
 
+from lakana_core import bounds
 from lakana_core.connections.kinds import NAME
 from lakana_core.identifiers import NOTIFY_FORMATS
 from lakana_core.languages import canonical_language
@@ -140,7 +140,7 @@ LISTS_CHECKS = (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
 """The versions whose manifest always carries a `checks` list (version 4 a non-empty one). A
 tuple, not a set: a stored version may be any JSON value, a list too, and must not raise."""
 
-_SHA256 = re.compile(r"\A[0-9a-f]{64}\Z")
+SHA256_HEX = bounds.SHA256_HEX
 
 WRITE_MODES: dict[str, tuple[str, str]] = {
     "table": ("replace", "create"),
@@ -1203,7 +1203,7 @@ def manifest_lock_sha256(manifest: Mapping[str, object]) -> str | None:
         string (it becomes a directory name in the venv cache).
     """
     value = manifest.get("lock_sha256")
-    return value if isinstance(value, str) and _SHA256.match(value) else None
+    return value if isinstance(value, str) and SHA256_HEX.match(value) else None
 
 
 def manifest_python(manifest: Mapping[str, object]) -> str | None:

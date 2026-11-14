@@ -105,6 +105,26 @@ def _revoke_lines(grants: Sequence[Grant], subject: Callable[[Grant], str]) -> l
     return lines
 
 
+_GIVES = "access"
+"""The column that shows what a grant gives: its role, or its single action."""
+
+
+def _gives(grant: Grant) -> str:
+    """Say what a grant gives, for the `access` column.
+
+    Parameters
+    ----------
+    grant
+        The grant.
+
+    Returns
+    -------
+    str
+        Its role, else its action, else nothing.
+    """
+    return grant.role or grant.action or ""
+
+
 def _marker(grant: Grant) -> str:
     """Say in a table cell that a grant has no effect.
 
@@ -301,12 +321,13 @@ def list_grants(
     lists the grants on exactly that object. A long list prints a "More results" line with the
     command that shows the next page.
 
-    The table names who each grant is for in `subject` (`user alice`, `service ci-bot`,
-    `group analysts`); the API answers with the names, so listing costs one request. Only an
-    answer without a name shows the id and a notice (a server older than this CLI, or a
-    person or group deleted a moment ago). A column with nothing in it is left out. When the
-    terminal is too narrow the table leaves out `kind`, `namespace`, `table`, `environment` and
-    `action`, in that order, and folds a long `subject` onto more lines, so that the `id` that
+    A grant gives a role or a single action, so one column, `access`, shows whichever it is;
+    it never drops. The table names who each grant is for in `subject` (`user alice`,
+    `service ci-bot`, `group analysts`); the API answers with the names, so listing costs one
+    request. Only an answer without a name shows the id and a notice (a server older than this
+    CLI, or a person or group deleted a moment ago). A column with nothing in it is left out.
+    When the terminal is too narrow the table leaves out `kind`, `namespace`, `table` and
+    `environment`, in that order, and folds a long `subject` onto more lines, so that the `id` that
     `grant revoke` needs always stays whole, and a line under the table shows the revoke
     command; `--output json` always has every field.
 
@@ -354,11 +375,11 @@ def list_grants(
     grants = page.items
     if state.output != "json":
         _warn_about_unnamed(state, grants)
-    columns = ["id", "subject", "role", "action", "kind", "environment", "namespace", "table"]
-    for name in ("role", "action", "environment", "namespace", "table"):
+    columns = ["id", "subject", _GIVES, "kind", "environment", "namespace", "table"]
+    for name in ("environment", "namespace", "table"):
         if not any(getattr(grant, name) for grant in grants):
             columns.remove(name)
-    droppable = ["kind", "namespace", "table", "environment", "action"]
+    droppable = ["kind", "namespace", "table", "environment"]
     footnotes: dict[str, str] = {}
     if len(grants) == 1:
         footnotes["id"] = (
@@ -374,7 +395,7 @@ def list_grants(
         grants,
         columns=columns,
         droppable=droppable,
-        derived={"subject": subject_of, "note": _marker},
+        derived={"subject": subject_of, "note": _marker, _GIVES: _gives},
         whole=["note"],
         footnotes=footnotes,
     )

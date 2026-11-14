@@ -14,6 +14,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.artifacts.manifest import SHA256_PATTERN
+from lakana_core.bounds import MAX_INT32
 from lakana_core.db import rowcount
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import TableRef
@@ -29,11 +30,11 @@ from lakana_core.storage.base import Storage, StoredObject
 from lakana_core.storage.resolver import ARTIFACTS_PREFIX
 
 _MANIFEST_RELATIVE = re.compile(r"\Amanifests/([1-9][0-9]{0,9})\.json\Z")
-MAX_VERSION = 2**31 - 1
+MAX_VERSION = MAX_INT32
 """Largest version number: the column is a 32-bit integer."""
 _STREAM_ROWS = 4
 """Manifests fetched from the database at a time while the referenced hashes are built."""
-_IN_CHUNK = 500
+IN_CHUNK = 500
 """Hashes per `IN` list, well below every backend's parameter limit."""
 
 
@@ -341,11 +342,11 @@ def stored_hashes(
     """
     wanted = sorted(set(hashes))
     found: dict[str, int] = {}
-    for start in range(0, len(wanted), _IN_CHUNK):
+    for start in range(0, len(wanted), IN_CHUNK):
         rows = session.execute(
             select(ArtifactBlob.sha256, ArtifactBlob.size_bytes).where(
                 ArtifactBlob.artifact_id == artifact_id,
-                ArtifactBlob.sha256.in_(wanted[start : start + _IN_CHUNK]),
+                ArtifactBlob.sha256.in_(wanted[start : start + IN_CHUNK]),
             )
         )
         found.update({digest: size for digest, size in rows})

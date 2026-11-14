@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import base64
 import enum
-import re
 import shlex
 import uuid
 from collections.abc import Sequence
@@ -33,7 +32,7 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.db import refuse_concurrent_change
 from lakana_core.errors import ConflictError, ValidationError
-from lakana_core.identifiers import shown
+from lakana_core.identifiers import is_secret_name, shown
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -56,9 +55,6 @@ from lakana_core.secrets.uses import (
     record_refusal,
     used_by_its_environment,
 )
-
-_SECRET_NAME = re.compile(r"\A[^\x00-\x20\x7f:]{1,255}\Z")
-"""What a repository may name as its credential (`credential_secret`), and so a key's secret."""
 
 REPLACED_NOTE = "The old key for {environment} stops working: replace it at your git host now."
 """What a call says for each environment whose key it replaced."""
@@ -393,13 +389,13 @@ class DeployKeyService:
             If the name is not one a repository can name as its credential.
         """
         if secret is not None:
-            if not _SECRET_NAME.match(secret):
+            if not is_secret_name(secret):
                 raise ValidationError(
                     "--secret must be a secret name of 1-255 characters with no spaces or ':'."
                 )
             return secret
         name = deploy_key_secret_name(repository)
-        if not _SECRET_NAME.match(name):
+        if not is_secret_name(name):
             raise ValidationError(
                 f"The default secret name '{shown(name)}' is longer than 255 characters: name "
                 "the secret yourself with --secret NAME."

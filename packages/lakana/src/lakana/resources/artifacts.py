@@ -65,7 +65,7 @@ from lakana._artifact_manifest import (
     scan,
     shown,
 )
-from lakana._artifact_tree import TreeWriter, check_manifest
+from lakana._artifact_tree import TreeWriter, check_manifest, check_target_name
 from lakana._http import (
     BUSY_ATTEMPTS,
     BUSY_BACKOFF_SECONDS,
@@ -369,7 +369,7 @@ def _file_chunks(file: LocalFile) -> Iterator[bytes]:
     ManifestError
         If the file cannot be read or is not the one that was scanned.
     """
-    descriptor = open_regular(file.source, file.path, file.root)
+    descriptor = open_regular(file.source, file.path, file.root, file.dir_fd)
     digest = hashlib.sha256()
     size = 0
     with os.fdopen(descriptor, "rb") as handle:
@@ -758,6 +758,7 @@ class Artifacts:
         sources: Mapping[str, int | None] | None = None,
         break_glass_reason: str | None = None,
         limits: ScanLimits | None = None,
+        dir_fd: int | None = None,
     ) -> ArtifactVersion:
         """Store a local file or directory as the next version of an artifact.
 
@@ -785,6 +786,12 @@ class Artifacts:
             What the local scan may look at before it gives up. `None` (the default) uses the
             limits the server's operator set, read once per client from the info route (the
             defaults when the server sends none).
+        dir_fd
+            An open descriptor of a directory: `path` is then ``.`` (that directory) or the name
+            of one file or directory in it, and nothing is looked up relative to the working
+            directory, so a thread that changes it during the upload cannot redirect what is
+            stored. You keep the descriptor open until the call returns and close it yourself.
+            Linux and macOS only.
 
         Returns
         -------
@@ -808,9 +815,14 @@ class Artifacts:
             every attempt (the version may exist; the message says how to find out).
         lakana.errors.InvalidResponse
             If the server's answer is not what a Lakana server sends.
+        ValueError
+            If `dir_fd` is given with a path that is not ``.`` or one name, or on a platform
+            that cannot open files relative to a directory.
         """
         namespace, name = _split_namespace_table(qualified_name)
-        local = scan(Path(path), limits if limits is not None else self._scan_limits())
+        local = scan(
+            Path(path), limits if limits is not None else self._scan_limits(), dir_fd=dir_fd
+        )
         by_hash: dict[str, LocalFile] = {}
         for file in local.files:
             by_hash.setdefault(file.sha256, file)
@@ -1541,6 +1553,7 @@ class Artifacts:
         *,
         version: int | None = None,
         read_only: bool = False,
+        dir_fd: int | None = None,
     ) -> ArtifactDownload:
         """Write a version's files into a new or an empty directory on this machine.
 
@@ -1577,12 +1590,19 @@ class Artifacts:
         read_only
             Make the copy read-only: files 0400 and directories 0500 (the directory itself
             only if this call created it). The default is private and deletable (0600/0700).
+        dir_fd
+            An open descriptor of the directory to write in: `directory` is then one new or
+            empty name in it, and the directory is never looked up by path, so the copy lands
+            in the one the descriptor names even if its path has since been moved or replaced
+            by a link. You keep the descriptor open until the call returns and close it
+            yourself. Linux and macOS only.
 
         Returns
         -------
         ArtifactDownload
             `path` is `directory` (resolved) for a directory artifact, and
-            ``<directory>/<file name>`` for a single file.
+            ``<directory>/<file name>`` for a single file. With `dir_fd` it is relative to that
+            directory: ``<directory>`` or ``<directory>/<file name>``.
 
         Raises
         ------
@@ -1613,7 +1633,12 @@ class Artifacts:
             which, with the server's own text).
         lakana.errors.InvalidResponse
             If the server's answer is not what a Lakana server sends.
+        ValueError
+            If `dir_fd` is given with a `directory` that is not one name, or on a platform that
+            cannot write files relative to a directory.
         """
+        if dir_fd is not None:
+            check_target_name(directory)
         found = self.version(environment, qualified_name, version)
         if found.deleted_at is not None:
             raise NotFound(
@@ -1636,7 +1661,7 @@ class Artifacts:
                 "it, or use `lakana artifact upload`)."
             )
         writer = TreeWriter.begin(
-            Path(directory), sum(f.size for f in found.files), read_only=read_only
+            Path(directory), sum(f.size for f in found.files), read_only=read_only, dir_fd=dir_fd
         )
         path_params = self._path_params(environment, qualified_name)
         try:

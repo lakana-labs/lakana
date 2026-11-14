@@ -110,6 +110,7 @@ from sqlalchemy.orm import Session
 from lakana_core.artifacts.manifest import SHA256_PATTERN
 from lakana_core.artifacts.store import (
     DROPPED_MARKER,
+    IN_CHUNK,
     UnreadableManifest,
     artifact_prefix,
     blob_path,
@@ -155,8 +156,8 @@ _MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 _ARTIFACT_ID = re.compile(r"\A[0-9a-f]{32}\Z")
 _ROW_BATCH = 500
 """`artifact_blobs` rows looked at per locked step."""
-_FILE_BATCH = 500
-"""Listed file names whose rows are checked in one query."""
+FILE_BATCH = IN_CHUNK
+"""Listed file names whose rows are checked in one query: one `IN` list of the store."""
 _PROBE = "a hash no manifest names"
 """Not a SHA-256, so no manifest names it and a search for it reads every manifest."""
 
@@ -732,7 +733,7 @@ class _Run:
                     name = rest[6:]
                     if SHA256_PATTERN.match(name):
                         pending.append(found)
-                        if len(pending) >= _FILE_BATCH:
+                        if len(pending) >= FILE_BATCH:
                             self._files(artifact_id, pending)
                             pending = []
                     elif name.startswith(".") and name.endswith(PART_SUFFIX):

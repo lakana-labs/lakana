@@ -21,7 +21,12 @@ NAMESPACE_SEPARATOR: Final[str] = "\x1f"
 """ASCII unit separator, matching the Iceberg REST namespace encoding."""
 
 
-_SECRET_NAME = re.compile(r"\A[^\x00-\x20\x7f:]{1,255}\Z")
+_SECRET_NAME = re.compile(
+    r"\A[^\x00-\x20\x7f-\x9f:\ud800-\udfff\u061c\u200e\u200f\u2028\u2029\u202a-\u202e"
+    r"\u2066-\u2069]{1,255}\Z"
+)
+"""1 to 255 characters: no space, control, ``:``, lone surrogate (PostgreSQL cannot store one)
+or bidirectional control (it would reorder the name where it is shown)."""
 
 _SHOWN_CHARS = 200
 _SHOWN_TAIL_CHARS = 120
@@ -42,8 +47,8 @@ def is_secret_name(name: object) -> bool:
     Returns
     -------
     bool
-        `True` for text of 1 to 255 characters with no space, no control character and no
-        ``:``.
+        `True` for text of 1 to 255 characters with no space, no control character, no ``:``,
+        no lone surrogate and no bidirectional control character.
     """
     return isinstance(name, str) and _SECRET_NAME.match(name) is not None
 

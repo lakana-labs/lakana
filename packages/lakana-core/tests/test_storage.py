@@ -3,6 +3,8 @@
 import errno
 import logging
 import os
+import stat
+import sys
 import tracemalloc
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -898,3 +900,270 @@ def test_list_objects_skips_a_file_that_vanishes_while_the_directory_is_walked(
 
     monkeypatch.setattr(os, "stat", stat)
     assert [found.path for found in storage.list_objects("t")] == ["t/keep"]
+
+
+def _linked_root(tmp_path: Path) -> tuple[FsspecStorage, Path]:
+    """Build a local storage whose root holds a link `link` to a directory outside it.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest-provided temporary directory.
+
+    Returns
+    -------
+    tuple
+        The storage and the outside directory, which holds `x` and `sub/y`.
+    """
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (outside / "x").write_bytes(b"outside")
+    (outside / "sub" / "y").write_bytes(b"outside")
+    root = tmp_path / "root"
+    (root / "real").mkdir(parents=True)
+    (root / "real" / "kept").write_bytes(b"inside")
+    os.symlink(outside, root / "link")
+    os.symlink(outside, root / "real" / "inner-link")
+    os.symlink(outside / "x", root / "real" / "file-link")
+    return FsspecStorage(f"file://{root}", {}), outside
+
+
+def test_reads_refuse_a_symbolic_link_in_a_directory_as_writes_do(tmp_path: Path) -> None:
+    """`read`, `read_chunks` and `delete` refuse a link on the way, as `open_write` does (#70)."""
+    storage, outside = _linked_root(tmp_path)
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.read("link/x")
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.read_chunks("link/x")
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.delete("link/x")
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.read("real/inner-link/sub/y")
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.write("link/new", b"through")
+    assert (outside / "x").read_bytes() == b"outside"
+    assert sorted(os.listdir(outside)) == ["sub", "x"]
+
+
+def test_a_read_never_follows_a_link_at_the_objects_own_name(tmp_path: Path) -> None:
+    """A link is not an object: the listings skip it, so the reads do not find it (#70)."""
+    storage, _ = _linked_root(tmp_path)
+    with pytest.raises(NotFoundError):
+        storage.read("real/file-link")
+    with pytest.raises(NotFoundError):
+        storage.read_chunks("real/file-link")
+    assert storage.exists("real/file-link") is False
+
+
+def test_list_never_follows_a_symbolic_link(tmp_path: Path) -> None:
+    """`list` agrees with `list_objects`: links are skipped, a linked prefix lists nothing (#70)."""
+    storage, _ = _linked_root(tmp_path)
+    assert list(storage.list("")) == ["real/kept"]
+    assert list(storage.list("real")) == ["real/kept"]
+    assert list(storage.list("link")) == []
+    assert list(storage.list("missing")) == []
+
+
+def test_a_committed_object_is_durable_in_its_directory(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After the rename the directory is synced too, so a power loss keeps the new name (#70)."""
+    synced: list[tuple[bool, bool]] = []
+    real_fsync, real_replace = os.fsync, os.replace
+    renamed: list[bool] = []
+
+    def fsync(descriptor: int) -> None:
+        synced.append((stat.S_ISDIR(os.fstat(descriptor).st_mode), bool(renamed)))
+        real_fsync(descriptor)
+
+    def replace(source: str, target: str) -> None:
+        real_replace(source, target)
+        renamed.append(True)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "replace", replace)
+    writer = build_storage(config).open_write("d/x")
+    writer.write(b"1")
+    writer.commit()
+    # `d` is new: the root is synced for it, then the file, then `d` after the rename
+    assert synced == [(True, False), (False, False), (True, True)]
+
+
+@pytest.mark.parametrize(("umask", "mode"), [(0o027, 0o640), (0o077, 0o600), (0o022, 0o644)])
+def test_a_streamed_object_follows_the_process_umask(
+    config: StorageConfig, umask: int, mode: int
+) -> None:
+    """As every other file of the backend: a worker in the server's group can read it (#70)."""
+    previous = os.umask(umask)
+    try:
+        writer = build_storage(config).open_write("d/x")
+        writer.write(b"1")
+        writer.commit()
+    finally:
+        os.umask(previous)
+    assert (
+        stat.S_IMODE(os.stat(Path(config.root.removeprefix("file://")) / "d" / "x").st_mode) == mode
+    )
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_write_replaces_a_link_at_the_objects_name_and_never_writes_through_it(
+    tmp_path: Path, dangling: bool
+) -> None:
+    """`write` follows a link at its name no more than `open_write` does (review of #70)."""
+    outside = tmp_path / "outside.txt"
+    if not dangling:
+        outside.write_bytes(b"secret")
+    root = tmp_path / "root"
+    root.mkdir()
+    os.symlink(outside, root / "obj")
+    storage = FsspecStorage(f"file://{root}", {})
+    storage.write("obj", b"new")
+    assert not os.path.islink(root / "obj")
+    assert (root / "obj").read_bytes() == b"new"
+    if dangling:
+        assert not outside.exists()
+    else:
+        assert outside.read_bytes() == b"secret"
+
+
+def test_write_refuses_a_link_in_a_directory_on_the_way(tmp_path: Path) -> None:
+    storage, outside = _linked_root(tmp_path)
+    with pytest.raises(ValidationError, match="symbolic link"):
+        storage.write("real/inner-link/new", b"through")
+    assert sorted(os.listdir(outside)) == ["sub", "x"]
+
+
+def test_write_is_atomic_and_durable_like_a_stream(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file, its directory and each directory made for it are synced (review of #70)."""
+    synced: list[str] = []
+    real_fsync = os.fsync
+
+    def fsync(descriptor: int) -> None:
+        info = os.fstat(descriptor)
+        synced.append("dir" if stat.S_ISDIR(info.st_mode) else "file")
+        real_fsync(descriptor)
+
+    root = Path(config.root.removeprefix("file://"))
+    made: list[str] = []
+    real_mkdir = os.mkdir
+
+    def mkdir(path: str, mode: int = 0o777, **kwargs: object) -> None:
+        made.append(str(path))
+        real_mkdir(path, mode, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "mkdir", mkdir)
+    build_storage(config).write("a/b/x", b"1")
+    assert (root / "a" / "b" / "x").read_bytes() == b"1"
+    assert made == [str(root / "a"), str(root / "a" / "b")]
+    # the root (for `a`), `a` (for `b`), the file, then `b` after the rename
+    assert synced == ["dir", "dir", "file", "dir"]
+    assert [name for name in os.listdir(root / "a" / "b") if name != "x"] == []
+
+
+@pytest.mark.parametrize("length", [232, 233, 255])
+def test_an_object_with_a_name_of_up_to_255_bytes_can_be_written(
+    config: StorageConfig, length: int
+) -> None:
+    """The temporary name stays under the file system's limit too (re-review of #70)."""
+    name = "t" * (length - 4) + ".log"
+    storage = build_storage(config)
+    storage.write(f"logs/{name}", b"1")
+    writer = storage.open_write(f"logs/b{name[1:]}")
+    writer.write(b"2")
+    writer.commit()
+    assert storage.read(f"logs/{name}") == b"1"
+    assert sorted(storage.list("logs")) == sorted([f"logs/{name}", f"logs/b{name[1:]}"])
+
+
+def test_an_object_whose_name_holds_a_lone_surrogate_can_be_written(config: StorageConfig) -> None:
+    """A name the file system takes but strict UTF-8 cannot encode still writes (review of #616).
+
+    The name is the byte 0xff, which is not UTF-8. Linux file systems take any bytes; APFS on
+    macOS refuses a name that is not UTF-8 with `EILSEQ`, which reaches the caller as it is.
+    """
+    name = "a\udcff.log"
+    storage = build_storage(config)
+    if sys.platform == "darwin":
+        with pytest.raises(OSError) as refused:
+            storage.write(f"logs/{name}", b"1")
+        assert refused.value.errno == errno.EILSEQ
+        return
+    storage.write(f"logs/{name}", b"1")
+    assert storage.read(f"logs/{name}") == b"1"
+
+
+def test_an_object_store_reads_writes_and_lists_through_its_own_calls() -> None:
+    """The local-only paths leave every other backend to fsspec as before (#70)."""
+    storage = FsspecStorage("memory://plain-lake", {})
+    storage.write("a", b"1")
+    storage.write("d/x", b"2")
+    assert storage.read("d/x") == b"2"
+    with pytest.raises(NotFoundError):
+        storage.read("d/missing")
+    with pytest.raises(ConflictError, match="a segment of the path is already a file"):
+        storage.write("a/b", b"3")
+    with pytest.raises(ConflictError, match="already exists as a directory"):
+        storage.write("d", b"3")
+    assert list(storage.list("d")) == ["d/x"]
+    assert list(storage.list("none")) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file without read permission")
+def test_a_local_object_the_process_may_not_read_is_a_permission_error(
+    config: StorageConfig,
+) -> None:
+    """Not `NotFoundError`: the file is there, the operator must fix its mode."""
+    storage = build_storage(config)
+    storage.write("locked", b"1")
+    target = Path(config.root.removeprefix("file://")) / "locked"
+    target.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            storage.read("locked")
+    finally:
+        target.chmod(0o600)
+
+
+def test_a_write_that_fails_midway_leaves_neither_the_object_nor_a_temporary_file(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = Path(config.root.removeprefix("file://"))
+
+    def broken(self: object, data: bytes) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("lakana_core.storage.fsspec_storage._LocalStreamWriter.write", broken)
+    with pytest.raises(OSError, match="No space left"):
+        build_storage(config).write("d/x", b"1")
+    assert os.listdir(root / "d") == []
+
+
+def test_a_directory_another_writer_made_meanwhile_is_used(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two writers making the same new directory: the second one's mkdir fails and it goes on."""
+    real = os.mkdir
+
+    def racing(path: str, mode: int = 0o777, **kwargs: object) -> None:
+        real(path, mode)
+        raise FileExistsError(17, "File exists", path)
+
+    monkeypatch.setattr(os, "mkdir", racing)
+    storage = build_storage(config)
+    storage.write("d/x", b"1")
+    monkeypatch.undo()
+    assert storage.read("d/x") == b"1"
+
+
+def test_a_local_prefix_that_is_one_object_lists_itself_and_a_linked_one_nothing(
+    tmp_path: Path,
+) -> None:
+    """As fsspec's `find` did for a prefix that names one file (#70)."""
+    storage, _ = _linked_root(tmp_path)
+    assert list(storage.list("real/kept")) == ["real/kept"]
+    assert storage.exists("link/x") is False
+    assert list(storage.list("link/x")) == []

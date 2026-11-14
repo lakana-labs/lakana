@@ -390,7 +390,7 @@ _LISTINGS = {
         key=_ID,
         whole=(("id", _ID),),
         wraps_at=(80,),
-        headers=("subject", "role"),
+        headers=("subject", "access"),
     ),
     "row filters": _Listing(
         ("row-filter", "list"),
@@ -532,7 +532,7 @@ def test_a_listing_is_readable_at_80_100_and_120_columns(
         cell
         in set(listing.items[0])
         | {"size", "subject", "age", "last_seen", "doing", "caches", "memory", "run", "rows"}
-        | {"schedule", "triggers", "next_run", "last_run"}
+        | {"schedule", "triggers", "next_run", "last_run", "access"}
         for cell in cells
     ), cells
     assert all(header in cells for header in listing.headers), (cells, listing.headers)

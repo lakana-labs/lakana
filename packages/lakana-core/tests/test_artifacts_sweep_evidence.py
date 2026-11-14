@@ -828,7 +828,7 @@ def _staging(session: Session, tmp_path: Path, principal: PrincipalRef) -> Table
 def test_the_second_environment_is_swept_in_the_same_run_as_a_backlogged_first(
     session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(sweep_module, "_FILE_BATCH", 5)
+    monkeypatch.setattr(sweep_module, "FILE_BATCH", 5)
     service = artifact_service(session, tmp_path)
     ref = _staging(session, tmp_path, principal)
     store_version(service, principal, ARTIFACT_REF, {"a": b"a"})
@@ -1549,7 +1549,7 @@ def test_the_warning_about_named_files_survives_a_run_that_stops_inside_the_arti
     """m-1: a deadline or a shutdown between two batches must not swallow what was kept."""
     contents = {f"f{n}": f"x{n}".encode() for n in range(4)}
     _lose_records_of_named_files(session, tmp_path, principal, contents)
-    monkeypatch.setattr(sweep_module, "_FILE_BATCH", 2)
+    monkeypatch.setattr(sweep_module, "FILE_BATCH", 2)
     stop = [False]
     named = {_sha(value) for value in contents.values()}
     real = sweep_module.unreferenced_hashes
@@ -1611,7 +1611,7 @@ def test_several_batches_keep_the_named_files_warn_once_and_drop_no_file(
     garbage = [blob_path(artifact_id, str(n) * 64) for n in range(1, 5)]
     for path in garbage:
         _put_old(session, path)
-    monkeypatch.setattr(sweep_module, "_FILE_BATCH", 2)
+    monkeypatch.setattr(sweep_module, "FILE_BATCH", 2)
     with caplog.at_level(logging.WARNING):
         report = _sweep(session)
     assert report == SweepReport(named_files_kept=4, blobs_deleted=4)

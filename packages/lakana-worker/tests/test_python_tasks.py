@@ -4565,6 +4565,35 @@ def test_an_index_declared_without_explicit_ends_with_what_the_author_must_do(
     assert "register the index again" not in message
 
 
+def test_a_lock_file_without_a_hash_fails_with_the_authors_step_not_the_registrys(
+    py: PyWorld,
+) -> None:
+    """A file of an index without a hash: `uv lock` and deploy again (#77)."""
+    lock = _lock() + (
+        b'\n[[package]]\nname = "six"\nversion = "1.17.0"\n'
+        b'source = { registry = "https://pypi.org/simple" }\n'
+        b'wheels = [{ url = "https://files.pythonhosted.org/six.whl" }]\n'
+    )
+    py.deploy(lock, code=_code(lock))
+    task, message = _fails(py, py.engine(_forged))
+    assert task.status == TaskStatus.FAILED
+    assert message.startswith(
+        "uv.lock: has no SHA-256 (or SHA-384, SHA-512) hash for a file of six"
+    )
+    assert message.endswith('add `hash = "sha256:..."` for each of its files to uv.lock yourself.')
+    assert "register the index again" not in message
+
+
+def test_the_advice_after_a_cut_list_fits_the_issues_it_shows() -> None:
+    """The issues that were cut off do not choose the closing sentence (#80)."""
+    declared = ProjectIssue("pyproject.toml", None, "d" * 1400)
+    locked = [ProjectIssue("uv.lock", None, f"l{n}" + "x" * 300) for n in range(3)]
+    listed, shown = python_tasks_module._listed_issues([declared, *locked])
+    assert shown == 1 and listed.endswith("; and 3 more")
+    closing = python_tasks_module._closing_for([declared, *locked][:shown])
+    assert closing == python_tasks_module._DECLARED_AGAIN
+
+
 @pytest.mark.parametrize("count", [1, 3, 40])
 def test_the_issues_at_execution_are_cut_at_an_issue_boundary(count: int) -> None:
     """Whole issues that fit, then `and N more`; never the middle of a command."""
@@ -4577,15 +4606,16 @@ def test_the_issues_at_execution_are_cut_at_an_issue_boundary(count: int) -> Non
         )
         for n in range(count)
     ]
-    listed = python_tasks_module._listed_issues(issues)
+    listed, shown = python_tasks_module._listed_issues(issues)
     assert len(listed) <= 1500
     whole = "; ".join(issue.render() for issue in issues)
     if len(whole) <= 1500:
-        assert listed == whole
+        assert (listed, shown) == (whole, count)
     else:
         head, _, tail = listed.rpartition("; and ")
         assert tail.endswith(" more") and head
         kept = int(tail.split()[0])
+        assert shown == count - kept
         assert head == "; ".join(issue.render() for issue in issues[: count - kept])
         assert all(issue.render() in head for issue in issues[: count - kept])
 
@@ -4603,9 +4633,11 @@ def test_both_kinds_of_issue_end_with_the_deploy_not_with_a_new_run() -> None:
 
 def test_one_issue_longer_than_the_bound_is_cut_with_a_mark_never_lost() -> None:
     long = ProjectIssue("uv.lock", None, "x" * 2000)
-    listed = python_tasks_module._listed_issues([long])
+    listed, shown = python_tasks_module._listed_issues([long])
     assert len(listed) == 1500 and listed.startswith("uv.lock: xxx") and listed.endswith("…")
-    two = python_tasks_module._listed_issues([long, long])
+    assert shown == 1
+    two, shown_of_two = python_tasks_module._listed_issues([long, long])
+    assert shown_of_two == 1
     assert len(two) <= 1500 and two.endswith("…; and 1 more")
     assert "problems" not in listed + two
 

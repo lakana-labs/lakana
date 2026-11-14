@@ -32,7 +32,7 @@ from lakana_core.errors import (
     NotFoundError,
     ValidationError,
 )
-from lakana_core.identifiers import validate_path_component
+from lakana_core.identifiers import is_secret_name, validate_path_component
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AuditEventType,
@@ -58,7 +58,9 @@ UPDATABLE_FIELDS = frozenset(
 )
 """What `PATCH /repositories/{name}` may change. Name and kind are fixed."""
 
-_TOKEN = re.compile(r"\A[^\x00-\x20\x7f:]{1,255}\Z")
+_TOKEN = re.compile(r"\A[^\x00-\x20\x7f-\x9f:\ud800-\udfff]{1,255}\Z")
+"""A user name for a git host: no space, control, ``:`` or lone surrogate (which PostgreSQL
+cannot store)."""
 _MAX_KNOWN_HOSTS = 64 * 1024
 
 
@@ -98,7 +100,7 @@ def _validate(repo: Repository, repo_roots: Sequence[str]) -> None:
             raise ValidationError(
                 "credential_username must be 1-255 characters with no ':' or spaces."
             )
-    if repo.credential_secret is not None and not _TOKEN.match(repo.credential_secret):
+    if repo.credential_secret is not None and not is_secret_name(repo.credential_secret):
         raise ValidationError("credential_secret must be a secret name with no spaces.")
     if repo.default_ref is not None:
         validate_ref(repo.default_ref)

@@ -14,7 +14,6 @@ import stat
 import subprocess
 import sys
 import textwrap
-import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -26,8 +25,10 @@ from typing import Any
 import polars as pl
 import pyarrow as pa
 import pytest
+from descriptor_watch import watch_opened_descriptors
 
-from lakana import _usage, assets, runner
+from lakana import _artifact_harness, _usage, assets, runner
+from lakana._artifact_harness import InvalidResult, WorkspaceError
 from lakana._artifact_manifest import (
     ManifestError,
     StoredManifestDamaged,
@@ -1655,11 +1656,19 @@ class _Artifacts:
         self.downloads: list[dict[str, object]] = []
         self.given: list[str] = []
         self.working_directories: list[str] = []
+        self.directories: list[tuple[int, int]] = []
         self.before_scan: Callable[[], None] | None = None
+        self.before_download: Callable[[], None] | None = None
         self.parent_modes: list[int] = []
 
     def upload(
-        self, environment: str, qualified_name: str, path: Path, **options: object
+        self,
+        environment: str,
+        qualified_name: str,
+        path: Path,
+        *,
+        dir_fd: int,
+        **options: object,
     ) -> object:
         """Record the upload and the tree it was given.
 
@@ -1670,7 +1679,9 @@ class _Artifacts:
         qualified_name
             The artifact.
         path
-            The local path.
+            ``"."`` or a name in the directory `dir_fd` names.
+        dir_fd
+            The pinned directory.
         **options
             `sources`.
 
@@ -1680,15 +1691,22 @@ class _Artifacts:
             The configured version.
         """
         self.given.append(str(path))
-        self.working_directories.append(os.getcwd())
+        try:
+            self.working_directories.append(os.getcwd())
+        except PermissionError:
+            # macOS cannot name a working directory the code made unsearchable (Linux can); the
+            # upload itself never needs it, which is what the tests of it check.
+            self.working_directories.append("<unsearchable>")
+        info = os.fstat(dir_fd)
+        self.directories.append((info.st_dev, info.st_ino))
         if self.before_scan is not None:
             self.before_scan()
-        local = scan(Path(path))
+        local = scan(Path(path), dir_fd=dir_fd)
         self.uploads.append(
             {
                 "environment": environment,
                 "artifact": qualified_name,
-                "path": Path(os.path.abspath(path)),
+                "path": str(path),
                 "is_directory": local.is_directory,
                 "files": [f.path for f in local.files],
                 **options,
@@ -1702,10 +1720,11 @@ class _Artifacts:
         self,
         environment: str,
         qualified_name: str,
-        directory: Path,
+        directory: str,
         *,
         version: int,
         read_only: bool = False,
+        dir_fd: int,
     ) -> ArtifactDownload:
         """Write one small file as the downloaded artifact.
 
@@ -1716,33 +1735,46 @@ class _Artifacts:
         qualified_name
             The artifact.
         directory
-            Where to write; it must not exist yet.
+            The name to write in `dir_fd`; it must not exist yet.
         version
             The version asked for.
         read_only
             Whether the copy is to be sealed.
+        dir_fd
+            The pinned parent directory.
 
         Returns
         -------
         ArtifactDownload
-            Pointing at the written file.
+            Pointing at the written file, relative to `dir_fd`.
         """
         self.downloads.append(
             {
                 "environment": environment,
                 "artifact": qualified_name,
-                "directory": Path(directory),
+                "directory": directory,
                 "version": version,
                 "read_only": read_only,
             }
         )
-        self.parent_modes.append(stat.S_IMODE(os.stat(Path(directory).parent).st_mode))
+        if self.before_download is not None:
+            self.before_download()
+        parent = os.fstat(dir_fd)
+        self.parent_modes.append(stat.S_IMODE(parent.st_mode))
+        self.directories.append((parent.st_dev, parent.st_ino))
         if isinstance(self.outcome, Exception):
             raise self.outcome
-        Path(directory).mkdir()
-        target = Path(directory) / "model.json"
-        target.write_bytes(self.files[Path(directory).name])
-        return ArtifactDownload(str(target), version, "a" * 64, target.stat().st_size, 1)
+        os.mkdir(directory, 0o700, dir_fd=dir_fd)
+        content = self.files[directory]
+        made = os.open(directory, os.O_RDONLY | os.O_DIRECTORY, dir_fd=dir_fd)
+        try:
+            handle = os.open("model.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=made)
+            with os.fdopen(handle, "wb") as written:
+                written.write(content)
+        finally:
+            os.close(made)
+        target = os.path.join(directory, "model.json")
+        return ArtifactDownload(target, version, "a" * 64, len(content), 1)
 
 
 _STORED = ArtifactVersion(
@@ -1856,7 +1888,7 @@ def test_a_producer_writes_into_the_output_directory_and_uploads_what_it_returne
     assert upload == {
         "environment": "dev",
         "artifact": "models.churn",
-        "path": output / "model.json",
+        "path": "model.json",
         "is_directory": False,
         "files": ["model.json"],
         "sources": {"silver.weather": None},
@@ -1869,20 +1901,58 @@ def test_a_producer_writes_into_the_output_directory_and_uploads_what_it_returne
         assets.output_dir()
 
 
-def test_the_upload_runs_with_the_returned_directory_as_the_working_directory(
+def _identity(path: Path) -> tuple[int, int]:
+    """Read a directory's device and inode.
+
+    Parameters
+    ----------
+    path
+        The directory.
+
+    Returns
+    -------
+    tuple[int, int]
+        Its device and inode.
+    """
+    info = os.lstat(path)
+    return info.st_dev, info.st_ino
+
+
+def test_the_upload_is_given_the_returned_directory_by_descriptor_and_the_cwd_stays(
     world: _World,
 ) -> None:
-    """The scan opens '.' and a bare name, so a swapped path cannot redirect it."""
+    """The scan opens '.' or a bare name below the pinned descriptor, never by path (#67)."""
     overrides = _artifact_world(world, _PRODUCER)
     assert world.run(**overrides) == 0
     artifacts = world.client.artifacts
     assert artifacts.given == ["model.json"]
-    assert artifacts.working_directories == [str(_output(world))]
+    assert artifacts.directories == [_identity(_output(world))]
+    assert artifacts.working_directories == [str(world.root)]
     overrides = _artifact_world(world, _TREE.replace("RETURNED", 'lakana.output_dir() / "m"'))
     shutil.rmtree(_output(world))
     assert world.run(**overrides) == 0
     assert world.client.artifacts.given == ["."]
-    assert world.client.artifacts.working_directories == [str(_output(world) / "m")]
+    assert world.client.artifacts.directories == [_identity(_output(world) / "m")]
+    assert world.client.artifacts.working_directories == [str(world.root)]
+
+
+def test_a_thread_that_changes_the_working_directory_during_the_upload_cannot_redirect_it(
+    world: _World, tmp_path: Path
+) -> None:
+    """Before #67 the scan opened '.' of the process, which any thread can move."""
+    outside = tmp_path / "outside"
+    (outside / "m" / "w").mkdir(parents=True)
+    (outside / "m" / "w" / "a.bin").write_bytes(b"stolen")
+    (outside / "m" / "stolen.txt").write_bytes(b"stolen")
+    overrides = _artifact_world(world, _TREE.replace("RETURNED", 'lakana.output_dir() / "m"'))
+    artifacts = world.client.artifacts
+    artifacts.before_scan = lambda: os.chdir(outside / "m")
+    try:
+        assert world.run(**overrides) == 0, world.record()
+    finally:
+        os.chdir(world.root)
+    (upload,) = artifacts.uploads
+    assert upload["files"] == ["w/a.bin"]
 
 
 @pytest.mark.parametrize(
@@ -2079,85 +2149,12 @@ def test_a_descriptor_number_the_code_reuses_is_not_taken_for_the_harness_s_dire
     assert world.client.artifacts.uploads == []
 
 
-@dataclass
-class _Opened:
-    """The descriptors `_watch_opened_descriptors` saw opened, with the file each named."""
-
-    ever: list[tuple[int, tuple[int, int]]] = field(default_factory=list)
-
-    @property
-    def numbers(self) -> list[int]:
-        """The numbers of every descriptor opened.
-
-        Returns
-        -------
-        list[int]
-            In the order they were opened.
-        """
-        return [number for number, _ in self.ever]
-
-    def leaked(self) -> list[int]:
-        """Return the descriptors opened that still name the file they were opened on.
-
-        Closing may happen through `os.close` or a file object, so this asks the system:
-        a number that is closed, or names another file now, is not a leak.
-
-        Returns
-        -------
-        list[int]
-            The numbers still open on the same device and inode.
-        """
-        found = []
-        for number, identity in self.ever:
-            try:
-                info = os.fstat(number)
-            except OSError:
-                continue
-            if (info.st_dev, info.st_ino) == identity:
-                found.append(number)
-        return found
-
-
-def _watch_opened_descriptors(monkeypatch: pytest.MonkeyPatch) -> _Opened:
-    """Watch the descriptors the calling thread opens with `os.open`.
-
-    Other threads and finalizers also open and close descriptors, so comparing every
-    descriptor of the process before and after is flaky. This sees only what the
-    code under test opens, in the thread that calls it.
-
-    Parameters
-    ----------
-    monkeypatch
-        Wraps `os.open` until the test ends.
-
-    Returns
-    -------
-    _Opened
-        Every descriptor the calling thread opened; it fills as the test goes on.
-    """
-    mine = threading.get_ident()
-    seen = _Opened()
-    real_open, real_fstat = os.open, os.fstat
-
-    def watching_open(
-        path: str | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None
-    ) -> int:
-        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
-        if threading.get_ident() == mine:
-            info = real_fstat(descriptor)
-            seen.ever.append((descriptor, (info.st_dev, info.st_ino)))
-        return descriptor
-
-    monkeypatch.setattr(os, "open", watching_open)
-    return seen
-
-
 def test_a_failing_fstat_after_opening_the_output_directory_leaks_no_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The harness closes a directory it opened but could not identify."""
     description: Any = SimpleNamespace(work_dir=tmp_path, input_kinds={}, output="artifact")
-    opened = _watch_opened_descriptors(monkeypatch)
+    opened = watch_opened_descriptors(monkeypatch)
     real = os.fstat
     identified: list[int] = []
 
@@ -2168,7 +2165,10 @@ def test_a_failing_fstat_after_opening_the_output_directory_leaks_no_descriptor(
         raise OSError(errno.EIO, "Input/output error")
 
     monkeypatch.setattr(runner.os, "fstat", failing)
-    with pytest.raises(OSError, match="Input/output error"), runner._workspace(description):
+    with (
+        pytest.raises(OSError, match="Input/output error"),
+        _artifact_harness.make_workspace(description),
+    ):
         pass  # pragma: no cover - the workspace raises before it yields
     assert len(identified) == 1
     assert opened.leaked() == []
@@ -2183,12 +2183,12 @@ def test_the_workspace_closes_only_a_descriptor_that_is_still_its_directory(
     elsewhere.mkdir()
     stranger = None
     try:
-        with runner._workspace(description) as workspace:
+        with _artifact_harness.make_workspace(description) as workspace:
             assert workspace.output is not None
             number = workspace.output.descriptor
-            assert runner._is_held(number, workspace.output.identity)
+            assert _artifact_harness.is_held(number, workspace.output.identity)
             os.close(number)
-            assert not runner._is_held(number, workspace.output.identity)
+            assert not _artifact_harness.is_held(number, workspace.output.identity)
             # Another file takes the number: forced, so that nothing else in the process
             # can take it first.
             source = os.open(elsewhere, os.O_RDONLY | os.O_DIRECTORY)
@@ -2198,7 +2198,7 @@ def test_the_workspace_closes_only_a_descriptor_that_is_still_its_directory(
                 if source != number:
                     os.close(source)
             assert stranger == number
-            assert not runner._is_held(number, workspace.output.identity)
+            assert not _artifact_harness.is_held(number, workspace.output.identity)
         try:
             os.fstat(stranger)
         except OSError:  # pragma: no cover - the failure this test exists to name
@@ -2279,43 +2279,20 @@ def test_an_output_directory_the_code_made_unenterable_fails_for_good(world: _Wo
 
 
 @_NEEDS_PERMISSION_BITS
-def test_a_working_directory_the_harness_cannot_reopen_fails_for_good(world: _World) -> None:
-    """The code chdirs into a directory and removes every permission of ``.`` itself."""
+@pytest.mark.parametrize("mode", [0, 0o300])
+def test_the_working_directory_the_code_left_does_not_matter_to_the_upload(
+    world: _World, mode: int
+) -> None:
+    """The code chdirs into a directory and removes permissions of ``.``.
+
+    The upload works by descriptor, so it neither enters nor restores a working directory.
+    """
     source = _PRODUCER.replace(
         "    return out\n",
         "    import os\n"
         "    os.mkdir(lakana.output_dir() / 'cwd')\n"
         "    os.chdir(lakana.output_dir() / 'cwd')\n"
-        "    os.chmod('.', 0)\n"
-        "    return out\n",
-    )
-    overrides = _artifact_world(world, source)
-    try:
-        assert world.run(**overrides) == 1
-    finally:
-        os.chdir(world.root)
-        (_output(world) / "cwd").chmod(0o700)
-    record = world.record()
-    assert (record["phase"], record["retryable"], record["error_type"]) == (
-        "upload",
-        False,
-        "InvalidResult",
-    )
-    assert "cannot reopen" in record["message"]
-    assert "Errno" not in record["message"]
-    assert world.client.artifacts.uploads == []
-
-
-@_NEEDS_PERMISSION_BITS
-@pytest.mark.skipif(not hasattr(os, "O_PATH"), reason="needs O_PATH")
-def test_a_working_directory_without_read_permission_is_still_restored_and_stored(
-    world: _World,
-) -> None:
-    source = _PRODUCER.replace(
-        "    return out\n",
-        "    import os\n"
-        "    os.mkdir(lakana.output_dir() / 'cwd', 0o300)\n"
-        "    os.chdir(lakana.output_dir() / 'cwd')\n"
+        f"    os.chmod('.', {mode})\n"
         "    return out\n",
     )
     overrides = _artifact_world(world, source)
@@ -2325,36 +2302,6 @@ def test_a_working_directory_without_read_permission_is_still_restored_and_store
         os.chdir(world.root)
         (_output(world) / "cwd").chmod(0o700)
     assert world.client.artifacts.uploads[0]["files"] == ["model.json"]
-
-
-@pytest.mark.parametrize("upload_fails", [False, True])
-def test_a_failure_to_restore_the_working_directory_does_not_replace_the_uploads_outcome(
-    world: _World, monkeypatch: pytest.MonkeyPatch, upload_fails: bool
-) -> None:
-    """The record's path is absolute, so the process may simply stay where it is."""
-    real = os.fchdir
-    calls: list[int] = []
-
-    def fail_the_second(descriptor: int) -> None:
-        calls.append(descriptor)
-        if len(calls) == 2:
-            raise PermissionError(13, "Permission denied")
-        real(descriptor)
-
-    outcome = ValidationError("refused", status=422) if upload_fails else _STORED
-    overrides = _artifact_world(world, _PRODUCER, outcome)
-    try:
-        with monkeypatch.context() as patch:
-            patch.setattr(os, "fchdir", fail_the_second)
-            assert world.run(**overrides) == (1 if upload_fails else 0)
-    finally:
-        os.chdir(world.root)
-    assert len(calls) == 2
-    record = world.record()
-    if upload_fails:
-        assert (record["phase"], record["error_type"]) == ("upload", "UploadRefused")
-    else:
-        assert (record["status"], record["version"]) == ("succeeded", 7)
 
 
 _LIAR = '''\
@@ -2587,7 +2534,7 @@ def test_the_output_directory_moved_or_replaced_by_a_link_is_never_looked_up_aga
     overrides = _artifact_world(world, source)
     assert world.run(**overrides) == 0, world.record()
     artifacts = world.client.artifacts
-    assert artifacts.working_directories == [str(_output(world).with_name("output.orig"))]
+    assert artifacts.directories == [_identity(_output(world).with_name("output.orig"))]
     assert artifacts.uploads[0]["files"] == ["model.json"]
     assert (outside / "model.json").read_text() == "stolen"
 
@@ -2613,7 +2560,7 @@ def test_a_platform_without_descriptor_access_refuses_an_artifact_asset(
     world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     overrides = _artifact_world(world, _PRODUCER)
-    monkeypatch.setattr(runner, "_BY_DESCRIPTOR", False)
+    monkeypatch.setattr(_artifact_harness, "BY_DESCRIPTOR", False)
     assert world.run(**overrides) == 1
     record = world.record()
     assert (record["phase"], record["retryable"]) == ("load", False)
@@ -2627,7 +2574,7 @@ def test_a_platform_without_descriptor_access_refuses_a_consumer_with_the_same_t
     """The check comes before the inputs directory is pinned, so a consumer gets the clear text."""
     (world.root / "assets" / "gold" / "scores.py").write_text(_CONSUMER)
     world.client.artifacts = _Artifacts(files={"model": b'{"factor": 3}'})
-    monkeypatch.setattr(runner, "_BY_DESCRIPTOR", False)
+    monkeypatch.setattr(_artifact_harness, "BY_DESCRIPTOR", False)
     real_open = os.open
     opened: list[object] = []
 
@@ -2753,11 +2700,12 @@ def test_a_consumer_receives_a_path_and_records_the_version_it_read(world: _Worl
     assert download == {
         "environment": "dev",
         "artifact": "models.churn",
-        "directory": world.result_path.parent / "inputs" / "model",
+        "directory": "model",
         "version": 4,
         "read_only": True,
     }
     assert artifacts.parent_modes == [0o700]
+    assert artifacts.directories == [_identity(world.result_path.parent / "inputs")]
     (call,) = world.client.tables.calls
     assert call["data"].column("score").to_pylist() == [3, 6]  # ty: ignore[missing-attribute]
     assert call["sources"] == ["models.churn", "silver.weather"]
@@ -2765,6 +2713,34 @@ def test_a_consumer_receives_a_path_and_records_the_version_it_read(world: _Worl
     assert world.record()["status"] == "succeeded"
     assert "output" not in world.record()
     assert world.client.queries.submitted == [(_SELECT, "dev")]
+
+
+def test_an_inputs_directory_swapped_for_a_link_after_the_check_does_not_redirect_the_download(
+    world: _World, tmp_path: Path
+) -> None:
+    """The download writes below the descriptor the harness pinned, never by path (#67)."""
+    (world.root / "assets" / "gold" / "scores.py").write_text(_CONSUMER)
+    artifacts = _Artifacts(files={"model": b'{"factor": 3}'})
+    world.client.artifacts = artifacts
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    inputs = world.result_path.parent / "inputs"
+
+    def swap() -> None:
+        os.rename(inputs, inputs.with_name("inputs.orig"))
+        os.symlink(outside, inputs)
+
+    artifacts.before_download = swap
+    overrides = {
+        "inputs": {"model": "models.churn", "obs": "silver.weather"},
+        "input_kinds": {"model": "artifact", "obs": "table"},
+        "input_versions": {"model": 4},
+    }
+    world.run(**overrides)
+    assert os.listdir(outside) == []
+    assert (inputs.with_name("inputs.orig") / "model" / "model.json").read_bytes() == (
+        b'{"factor": 3}'
+    )
 
 
 def test_an_artifact_asset_may_consume_an_artifact(world: _World) -> None:
@@ -2865,7 +2841,7 @@ def _failing_closes(world: _World, monkeypatch: pytest.MonkeyPatch) -> list[str]
         real(fd)
         # Only the close of the workspace itself: the harness also closes duplicates of the
         # output descriptor while it stores the artifact.
-        if sys._getframe(1).f_code.co_name == "_workspace" and target in (
+        if sys._getframe(1).f_code.co_name == "make_workspace" and target in (
             f"{work}/inputs",
             f"{work}/output",
         ):
@@ -3025,7 +3001,7 @@ def test_a_404_on_a_table_read_stays_permanent_beside_an_artifact_input(world: _
 def test_the_output_directory_is_unset_and_the_descriptor_closed_after_every_outcome(
     world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    opened = _watch_opened_descriptors(monkeypatch)
+    opened = watch_opened_descriptors(monkeypatch)
     outcomes = []
     for source, error in (
         (_PRODUCER, _STORED),
@@ -4901,3 +4877,44 @@ def test_every_record_carries_the_tasks_own_peak_memory_on_linux(world: _World) 
     world.result_path.parent.mkdir(exist_ok=True)
     assert world.run() == 0
     assert world.raw_record()["peak_memory_bytes"] > 0
+
+
+def test_a_held_copy_refuses_a_missing_closed_or_reused_inputs_descriptor(
+    tmp_path: Path,
+) -> None:
+    """The inputs descriptor is judged as the output one: never trusted by its number (#67)."""
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "other").mkdir()
+    pinned = os.open(tmp_path / "inputs", os.O_RDONLY | os.O_DIRECTORY)
+    info = os.fstat(pinned)
+    identity = (info.st_dev, info.st_ino)
+    try:
+        copy = _artifact_harness._held_copy(pinned, identity)
+        os.close(copy)
+        with pytest.raises(WorkspaceError, match="closed a file descriptor"):
+            _artifact_harness._held_copy(None, identity)
+        other = os.open(tmp_path / "other", os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with pytest.raises(WorkspaceError, match="closed a file descriptor"):
+                _artifact_harness._held_copy(other, identity)
+        finally:
+            os.close(other)
+    finally:
+        os.close(pinned)
+    with pytest.raises(WorkspaceError, match="closed a file descriptor"):
+        _artifact_harness._held_copy(pinned, identity)
+
+
+def test_a_returned_type_whose_name_cannot_be_read_is_named_unknown() -> None:
+    """The type is the user's: reading its module or name may raise anything."""
+
+    class Lying(type):
+        @property
+        def __module__(cls) -> str:  # ty: ignore[incompatible-property-override]
+            raise RuntimeError("no module")
+
+    class Odd(metaclass=Lying):
+        pass
+
+    with pytest.raises(InvalidResult, match="got an unknown type"):
+        _artifact_harness._returned_text(Odd())

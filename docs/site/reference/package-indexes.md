@@ -50,7 +50,8 @@ registered indexes, and no others (see "Sources a lock may name").
   second spelling of a URL that is already registered is refused, and the message names the index
   that has it.
 - `credential_secret` is the name of a secret: 1 to 255 characters, with no space, control
-  character or `:`, or empty.
+  character, `:` or bidirectional control character (such as U+202E), or empty. A repository's
+  `credential_secret` and a deploy key's `--secret` follow the same rule.
 
 Two forms that many indexes use work as they are:
 
@@ -221,5 +222,5 @@ Three audit events record the changes. None holds a credential: only the name of
 | Event | When | Detail |
 |---|---|---|
 | `PACKAGE_INDEX_CREATED` | An index is registered. | `name`, `url`, `credential_secret` |
-| `PACKAGE_INDEX_UPDATED` | An index is changed. | `name`, `changed` (the field names), `url` and `credential_secret` after the change, `previous` (the value each changed field had before) |
+| `PACKAGE_INDEX_UPDATED` | An index is changed. An update that gives the values the index already has (a URL in another spelling counts as the same) changes nothing and records no event. | `name`, `changed` (the names of the fields whose value changed), `url` and `credential_secret` after the change, `previous` (the value each changed field had before) |
 | `PACKAGE_INDEX_DELETED` | An index is deleted. | `name`, `url` |

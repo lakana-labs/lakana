@@ -801,7 +801,7 @@ def test_the_sweep_lists_lazily_and_deletes_as_it_goes(
     monkeypatch.setattr(FsspecStorage, "list_objects", list_objects)
     monkeypatch.setattr(FsspecStorage, "delete", delete)
     monkeypatch.setattr(FsspecStorage, "list", refuse_a_full_listing)
-    monkeypatch.setattr(sweep_module, "_FILE_BATCH", 2)  # the files' rows are checked 2 at a time
+    monkeypatch.setattr(sweep_module, "FILE_BATCH", 2)  # the files' rows are checked 2 at a time
     _sweep(session)
     assert events.index("deleted") < events.index("listing ended")
 

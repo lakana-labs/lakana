@@ -5985,3 +5985,60 @@ def test_0078_adds_an_index_for_each_descending_sort_and_downgrade_drops_them(
     assert descending() == _DESCENDING_SORT_INDEXES
     command.downgrade(config, _REVISION_0077)
     assert descending() == {}
+
+
+_REVISION_0079 = "c4e8a1f2d937"
+_ARTIFACT_INDEXES: dict[tuple[str, str], list[str | None]] = {
+    ("artifact_versions", "ix_artifact_versions_task_run_id"): ["task_run_id"],
+    ("artifact_versions", "ix_artifact_versions_job_version_id"): ["job_version_id"],
+    ("artifact_versions", "ix_artifact_versions_created_by"): ["created_by"],
+    ("artifact_versions", "ix_artifact_versions_deleted_by"): ["deleted_by"],
+    ("artifact_uploads", "ix_artifact_uploads_task_run_id"): ["task_run_id"],
+    ("artifact_uploads", "ix_artifact_uploads_principal_id_expires_at"): [
+        "principal_id",
+        "expires_at",
+    ],
+}
+
+
+def test_0079_indexes_the_artifact_rows_other_rows_point_at_and_downgrade_drops_them(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0079`: six indexes on the artifact rows (#71).
+
+    A delete of a principal, task run or job version finds its artifact rows without a scan,
+    and the listing of a principal's open uploads reads one index.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0078)
+    config = Config(str(ALEMBIC_INI))
+
+    def present() -> dict[tuple[str, str], list[str | None]]:
+        """Read the indexes of this revision that exist.
+
+        Returns
+        -------
+        dict
+            ``(table, index name)`` → its columns.
+        """
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            found: dict[tuple[str, str], list[str | None]] = {}
+            for table in ("artifact_versions", "artifact_uploads"):
+                for index in inspect(engine).get_indexes(table):
+                    name = index["name"]
+                    if name is not None and (table, name) in _ARTIFACT_INDEXES:
+                        found[table, name] = index["column_names"]
+            return found
+        finally:
+            engine.dispose()
+
+    assert present() == {}
+    command.upgrade(config, _REVISION_0079)
+    assert present() == _ARTIFACT_INDEXES
+    command.downgrade(config, _REVISION_0078)
+    assert present() == {}

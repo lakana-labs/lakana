@@ -135,6 +135,45 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### A lock's files need a strong hash and an http URL (breaking)
+
+A deploy, and every run of a deployed version, now refuses a `uv.lock` in which a file of a package
+index has no SHA-256, SHA-384 or SHA-512 hash, or is named by a `file:` URL, another scheme or a
+path, and one in which a package of the folder `wheelhouse` names a URL. `uv lock` writes a hash
+for every file of an index that serves one, so a lock it wrote passes unless an index serves only
+MD5 or no hash at all; a lock edited by hand may fail too. A task of a version deployed with such a
+lock fails until you deploy again: run `uv lock`, commit the lock unchanged and deploy. For an index
+that serves no SHA-256 hash, the message says what to do ([Python
+assets](../reference/python-assets.md)).
+
+### Files on a local storage root follow the umask
+
+On a storage root that is a directory (`file://`), files written as a stream (artifact files, query
+results) were always created `0600`. They now get `0666` less the process's umask, like every other
+file Lakana writes there. **Under the common umask `022` new files are readable by every user of the
+host.** Before you upgrade such an instance, run the server and the workers with `umask 027`
+([A storage root on a local directory](../how-to/deploy-with-compose.md#a-storage-root-on-a-local-directory)).
+Files written before keep their mode. Storage on S3 or SeaweedFS is not affected.
+
+### Indexes on the artifact tables
+
+Migration `0079` adds six indexes to `artifact_versions` and `artifact_uploads`, so deleting a
+person, a run or a project version finds their artifact rows without reading the whole table. It
+runs with the other migrations, and nothing else has to be done. Going back drops them.
+
+### `grant list` shows one `access` column
+
+The table of `lakana grant list` has one column, `access`, with the grant's role or its single
+action, instead of the two columns `role` and `action`. A script that reads the table must read
+`access`; `--output json` is unchanged and still has `role` and `action`.
+
+### A new secret's name follows the rule of the names that refer to it
+
+`lakana secret create` (and `POST .../secrets`) now refuses a name with a space, a control
+character, `:`, a lone surrogate or a bidirectional control character, or longer than 255
+characters: the rule a package index, a repository and a deploy key already apply to the secret they
+name. A secret created before keeps its name and keeps working.
+
 ### Lineage of tables in deep namespaces
 
 Lineage recorded before this release for a table in a namespace three or more levels deep keeps
