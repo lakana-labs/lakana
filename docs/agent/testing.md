@@ -323,7 +323,12 @@ every missing output of it means "run everything".
   `packages/*/src/` as well as for the bundle, packaging and script files in the filter of its
   "Did the bundle change?" step, and for the files and the REST stand-in of the `ingest-files`
   and `ingest-rest` examples, which its ingestion part reads (M6's exit criterion, see
-  `docs/agent/release.md`). Its last step, `scripts/offline_install_test.sh`, runs the built image under
+  `docs/agent/release.md`). It also runs the backup and restore drill (#389,
+  `docs/examples/compose-restore.sh`, which the how-to "Deploying with Compose" shows): back up the
+  catalog and the storage, change a table, lose the instance, restore into a new directory, and
+  compare rows, snapshot id, runs, grants, secrets, an artifact and a table of a second environment;
+  it prints `restore took N s` (the RTO). `scripts/tests/test_compose_restore_drill.py` pins what the
+  script must check. Its last step, `scripts/offline_install_test.sh`, runs the built image under
   `docker run --network none` with `LAKANA_WORKER__EXTENSION_SOURCE=none` and checks that local mode
   starts and answers `lakana sql` (#493, the proof for the offline install how-to); the script is in
   the filter too. A `unit` shard has a 25-minute timeout, `test` 15 minutes.
