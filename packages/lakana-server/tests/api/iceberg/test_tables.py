@@ -697,7 +697,9 @@ def test_the_iceberg_commit_route_refuses_to_remove_main(
     assert response.json()["error"]["type"] == "ValidationError"
     assert response.json()["error"]["message"] == (
         "A commit cannot remove a table's current snapshot: readers would see an empty table. "
-        "Drop the table, or write the rows it should hold."
+        "Write the rows it should hold, or start gold.sales again: `lakana table rebuild "
+        'gold.sales --env dev --reason "…"` if a deployed project builds it, otherwise '
+        "`lakana table delete gold.sales --env dev`."
     )
     after = client.get("/v1/dev/namespaces/gold/tables/sales", headers=AUTH_HEADER).json()
     assert after["metadata-location"] == before["metadata-location"]

@@ -1086,7 +1086,9 @@ def _stored(session: Session, name: str) -> tuple[uuid.UUID | None, str | None]:
 
 _NO_REMOVAL = (
     "A commit cannot remove a table's current snapshot: readers would see an empty table. "
-    "Drop the table, or write the rows it should hold."
+    "Write the rows it should hold, or start gold.daily again: `lakana table rebuild gold.daily "
+    '--env dev --reason "…"` if a deployed project builds it, otherwise `lakana table delete '
+    'gold.daily --env dev`.'
 )
 
 

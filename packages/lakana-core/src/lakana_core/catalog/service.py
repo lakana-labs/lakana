@@ -933,9 +933,12 @@ def _stored_effects(row: Table, dotted: str) -> HealthEffects:
 
 _NO_UNPUBLISHING = (
     "A commit cannot remove a table's current snapshot: readers would see an empty table. "
-    "Drop the table, or write the rows it should hold."
+    "Write the rows it should hold, or start {table} again: `lakana table rebuild {table} --env "
+    '{environment} --reason "…"` if a deployed project builds it, otherwise `lakana table delete '
+    "{table} --env {environment}`."
 )
-"""Why a commit may not leave a table with no current snapshot."""
+"""Why a commit may not leave a table with no current snapshot. A table a deployed project
+builds cannot be dropped by a person (`git_owned`), so the text names a rebuild for it."""
 
 _NO_SIDE_DOOR = (
     "{table} is not published: its first build did not finish, or failed a check. A commit can "
@@ -5553,7 +5556,9 @@ class CatalogService:
             p, ref, ValidationError, _UPDATE_DOES_NOT_FIT, publication_only=True
         ):
             if had is not None and has is None and not internal_rollback:
-                raise ValidationError(_NO_UNPUBLISHING)
+                raise ValidationError(
+                    _NO_UNPUBLISHING.format(table=ref.dotted(), environment=ref.environment)
+                )
             if not maintenance and unpublished and has is not None and has not in added:
                 raise ValidationError(_NO_SIDE_DOOR.format(table=ref.dotted()))
 
