@@ -170,7 +170,7 @@ def list_audit_events(
     """List audit events.
 
     Lists one page of audit events, newest first, with optional filters. The cursor of the
-    next page is in the `X-Next-Cursor` response header. Needs `READ_AUDIT_LOG` on the
+    next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the
     instance. Another principal's query text and column values are hidden unless the caller
     also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than
     `connection`, or an `event_type` that is not of `kind`, and 503 when the read

@@ -308,3 +308,23 @@ def test_the_shared_403_meaning_claims_nothing_some_routes_do_not_do() -> None:
     """Token refusals on Home's routes and picture reads are not audited, so no audit claim."""
     assert "audit" not in ERROR_MEANING[403]
     assert ERROR_MEANING[403].startswith("Signed in, but not allowed to do this")
+
+
+def test_only_a_route_that_sets_the_next_cursor_header_documents_it() -> None:
+    """A route that names `X-Next-Cursor` in its docs must set the header (#492).
+
+    `GET /api/v1/audit-events` said its cursor was in the header while it sends it only in the
+    body as `next_cursor`, and the REST reference repeated the claim.
+    """
+    from lakana_server.app import ROUTERS
+
+    wrong = [
+        f"{method} {route.path}"
+        for router in ROUTERS
+        for route in router.routes
+        if isinstance(route, APIRoute)
+        and "X-Next-Cursor" in (inspect.getdoc(route.endpoint) or "")
+        and "set_next_cursor(" not in inspect.getsource(route.endpoint)
+        for method in sorted(route.methods)
+    ]
+    assert wrong == []
