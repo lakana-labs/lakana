@@ -257,7 +257,10 @@ from lakana_core.catalog.retention import (
     planned_expiry,
     retention_candidates,
 )
-from lakana_core.catalog.row_actions import dropped_actions_each, table_actions_each
+from lakana_core.catalog.row_actions import (
+    dropped_actions_each,
+    readable_table_actions_each,
+)
 from lakana_core.catalog.schema_compat import SchemaDiff, arrow_to_iceberg_schema, plan_schema
 from lakana_core.catalog.schema_inference import infer_schema
 from lakana_core.catalog.table_listing import TableOwner, table_facts
@@ -4185,8 +4188,6 @@ class CatalogService:
         ((defined_by, actions),) = self._row_actions(
             p, [(ref, table_kind(row.table_type), row.owner_id, namespace.environment_id)]
         )
-        if defined_by is not None and not self.can_read_table(p, ref):
-            defined_by = None
         return defined_by, actions
 
     def _row_actions(
@@ -4213,7 +4214,7 @@ class CatalogService:
             for environment_id in dict.fromkeys(env for *_, env in rows)
         }
         found = [definition_for(definitions[env], ref) for ref, _, _, env in rows]
-        actions = table_actions_each(
+        answers = readable_table_actions_each(
             self._authz,
             p,
             [
@@ -4221,9 +4222,10 @@ class CatalogService:
                 for (ref, kind, owner_id, _), file in zip(rows, found, strict=True)
             ],
         )
+        # The file is named only to a reader of the row (ruling 2), whoever calls this.
         return [
-            (file if owned_by_git(file, kind) else None, allowed)
-            for (_, kind, _, _), file, allowed in zip(rows, found, actions, strict=True)
+            (file if readable and owned_by_git(file, kind) else None, allowed)
+            for (_, kind, _, _), file, (readable, allowed) in zip(rows, found, answers, strict=True)
         ]
 
     def table_references(self, p: PrincipalRef, ref: TableRef) -> TableReferences:

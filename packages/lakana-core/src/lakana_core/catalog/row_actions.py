@@ -99,6 +99,30 @@ def table_actions_each(
 ) -> list[tuple[str, ...]]:
     """Say which of `TABLE_ACTIONS` the reader's rights allow on each table row.
 
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    p
+        The reader.
+    rows
+        ``(ref, kind, owner_id, declared)`` per row, as `readable_table_actions_each` takes.
+
+    Returns
+    -------
+    list of tuple of str
+        Each row's actions, in `TABLE_ACTIONS` order.
+    """
+    return [actions for _, actions in readable_table_actions_each(authz, p, rows)]
+
+
+def readable_table_actions_each(
+    authz: AuthorizationService,
+    p: PrincipalRef,
+    rows: Sequence[tuple[TableRef, str, uuid.UUID | None, bool]],
+) -> list[tuple[bool, tuple[str, ...]]]:
+    """Say whether the reader may read each table row, and which `TABLE_ACTIONS` they may take.
+
     - ``drop``: `DROP_TABLE` on the table, for every kind. An artifact row offers it as the
       artifact list does (`ArtifactService.drop_artifact`), so a row agrees across lists.
     - ``rebuild``: `DROP_TABLE` on the table and `RUN` on the environment, for the same kinds,
@@ -119,13 +143,15 @@ def table_actions_each(
 
     Returns
     -------
-    list of tuple of str
-        Each row's actions, in `TABLE_ACTIONS` order.
+    list of tuple
+        Per row, whether the reader holds `READ_TABLE` on it (asked in the same batch, for a
+        caller that must not name what owns a row the reader may not read) and its actions, in
+        `TABLE_ACTIONS` order.
     """
     per_row: list[list[_Question]] = []
     for ref, kind, owner_id, declared in rows:
         scope = _table(ref)
-        questions: list[_Question] = []
+        questions: list[_Question] = [(Action.READ_TABLE, scope)]
         if kind in _DROPPABLE or kind == "ARTIFACT":
             questions.append((Action.DROP_TABLE, scope))
             if declared and kind in _DROPPABLE:
@@ -135,7 +161,7 @@ def table_actions_each(
             if owner_id != p.id:
                 questions.append((Action.WRITE_TABLE, scope))
         per_row.append(questions)
-    result: list[tuple[str, ...]] = []
+    result: list[tuple[bool, tuple[str, ...]]] = []
     for (ref, kind, owner_id, declared), questions, answers in zip(
         rows, per_row, _ask(authz, p, per_row), strict=True
     ):
@@ -150,7 +176,12 @@ def table_actions_each(
             "set_retention": kind == "TABLE"
             and (owner_id == p.id or allowed.get((Action.WRITE_TABLE, scope), False)),
         }
-        result.append(tuple(word for word in TABLE_ACTIONS if words[word]))
+        result.append(
+            (
+                allowed[Action.READ_TABLE, scope],
+                tuple(word for word in TABLE_ACTIONS if words[word]),
+            )
+        )
     return result
 
 

@@ -57,7 +57,7 @@ from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.identity.groups import GroupService
-from lakana_core.models import AuditEvent, PrincipalType
+from lakana_core.models import AuditEvent, Namespace, PrincipalType
 from lakana_core.projects.deploys import DeployService
 from lakana_core.runs.service import RunService
 from lakana_core.storage.resolver import StorageResolver
@@ -861,3 +861,26 @@ def test_a_create_or_restore_answer_names_the_file_only_to_a_reader(
 
     assert (defined_by is not None) == named
     assert actions == ("drop", "set_retention")  # the principal created, so owns, the table
+
+
+def test_the_row_fill_names_no_file_to_a_caller_who_may_not_read_the_row(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """N1: `_row_actions` itself gates `defined_by` on READ_TABLE, asked in the same batch."""
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    catalog.create_table(principal, _CLEAN, schema=_minimal_schema())
+    deploy_assets(session, "dev", "analytics", {"silver.clean": {}})
+    environment_id = session.scalar(select(Namespace.environment_id).limit(1))
+    assert environment_id is not None
+    stranger = _p()
+    rows = [(_CLEAN, "TABLE", principal.id, environment_id)]
+
+    for rights, named in (
+        ((Action.DROP_TABLE,), False),
+        ((Action.DROP_TABLE, Action.READ_TABLE), True),
+    ):
+        batch = _Batch(ActionAllowList(*rights))
+        caller = CatalogService(session, StorageResolver(session), batch)
+        ((defined_by, actions),) = caller._row_actions(stranger, rows)
+        assert (defined_by is not None, actions) == (named, ("drop",))
+        assert batch.calls == 1

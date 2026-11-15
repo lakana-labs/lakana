@@ -574,7 +574,7 @@ def test_every_public_catalog_method_calls_authorize() -> None:
     `commit_answer` asks
     `list_namespace_page` delegates to `list_namespaces`, which authorizes before it lists.
     `row_actions` and `with_row_actions` ask the rights through `_row_actions`, whose
-    `table_actions_each` is one `permits_each` batch; `row_actions` also asks `can_read_table`.
+    `readable_table_actions_each` is one `permits_each` batch, `READ_TABLE` included.
     `_may_see_state`, which calls `permits` for READ_TABLE. `set_table_description` and
     `set_column_description` ask `_find_table_to_describe`, which authorizes (the owner, or
     `DROP_TABLE`) before it says anything.
@@ -598,7 +598,7 @@ def test_every_public_catalog_method_calls_authorize() -> None:
             or "self._readable_environments(" in source
             or "self._row_actions(" in source
         ), name
-    assert "table_actions_each(\n            self._authz," in inspect.getsource(
+    assert "readable_table_actions_each(\n            self._authz," in inspect.getsource(
         CatalogService._row_actions
     )
     assert "permits_each(" in inspect.getsource(CatalogService._readable_environments)
