@@ -79,8 +79,9 @@ python3 -c 'import json,sys; ids=lambda t: sorted(r["id"] for r in json.loads(t)
 # change after it made), the grants and secrets are the same, and the second environment's table
 # reads, which only works if the master key decrypts its storage secret.
 [ "$(snapshot)" = "$snapshot_before" ] || { echo "snapshot differs: $(snapshot) != $snapshot_before" >&2; exit 1; }
-[ "$(lakana --output json grant list --env dev)" = "$grants_before" ] || { echo "the grants differ after the restore" >&2; exit 1; }
+grants_after=$(lakana --output json grant list --env dev)
+[ "$grants_after" = "$grants_before" ] || { printf "the grants differ after the restore\nbefore: %s\nafter:  %s\n" "$grants_before" "$grants_after" >&2; exit 1; }
 [ "$(secrets)" = "$secrets_before" ] || { echo "the secrets differ after the restore: $(secrets) != $secrets_before" >&2; exit 1; }
 out=$(lakana --output json sql "SELECT id FROM bronze.drill ORDER BY id" --env prod)
 python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == [{"id":7},{"id":8}], sys.argv[1]' "$out"
-echo "restore took $((SECONDS - restore_start)) s (backup to a started, checked instance)"
+echo "restore took $((SECONDS - restore_start)) s (restore to a started, checked instance; images already pulled)"

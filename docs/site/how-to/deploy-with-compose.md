@@ -1278,14 +1278,17 @@ lakana runs list --env dev
 ```
 
 **Order.** Catalog first (step 3), then storage (step 4), then start everything (step 5), as above.
+Nothing may start before both are back, or the server reads a catalog that points at missing
+files; and `.env` with its master key must be in place before step 5, or no secret decrypts.
 
 **What a restore loses (RPO) and how long it takes (RTO).** The recovery point is the moment of the
 backup: everything written after it is gone, so the most you can lose is the time since your last
 backup. Take backups as often as you can afford to lose work, and note that the instance is
 unavailable while each backup runs. The recovery time is the time to copy the two files back,
-start the stack and check it. It grows with the size of the archive and the speed of the disk, not
-with the number of tables. The `compose-smoke` job prints it as `restore took N s` for a small
-instance; time a restore of your own backups on a spare machine to learn yours.
+start the stack and check it. It grows with the size of the archive and the speed of the disk, and
+loading the catalog grows with the number of tables, snapshots and runs. The `compose-smoke` job
+prints it as `restore took N s` for a small instance, with images already pulled and its own checks
+included; time a restore of your own backups on a spare machine to learn yours.
 
 The same job proves the round trip before the project ships a release: it checks that the table is
 at the same snapshot, that the grants and the secrets are the same, and that a table of a second

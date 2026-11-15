@@ -57,7 +57,7 @@ def test_the_drill_compares_snapshot_grants_and_secrets_after_the_restore() -> N
     """The restored instance has the same snapshot id, grants and secrets."""
     after = _after_restore()
     assert '"$(snapshot)" = "$snapshot_before"' in after
-    assert '"$(lakana --output json grant list --env dev)" = "$grants_before"' in after
+    assert '"$grants_after" = "$grants_before"' in after
     assert '"$(secrets)" = "$secrets_before"' in after
 
 
