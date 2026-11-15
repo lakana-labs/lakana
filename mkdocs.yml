@@ -9,11 +9,35 @@ site_url: https://lakana-labs.github.io/lakana/
 docs_dir: docs/site
 site_dir: site-build
 theme:
-  # No web font: the site makes no request to a third party, so it works on an internal network.
+  # No web font from Google: the site makes no request to a third party, so it works on an
+  # internal network. IBM Plex is bundled under assets/fonts and loaded by still-water.css.
   font: false
+  # Still Water, the look of the web interface: its tokens and the bundled IBM Plex are in
+  # assets/stylesheets/still-water.css; scripts/tests/test_docs_look.py keeps them in step.
+  logo: assets/images/lakana-logo.png
+  favicon: assets/images/lakana-favicon.png
+  # A first visit follows the system setting; the toggle in the header switches and is kept.
+  # "custom" leaves every colour to the stylesheet.
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: lucide/moon
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: lucide/sun
+        name: Switch to light mode
   features:
     - content.code.copy
     - navigation.sections
+extra_css:
+  - assets/stylesheets/still-water.css
 markdown_extensions:
   - admonition
   - pymdownx.superfences
