@@ -50,13 +50,15 @@ const NAMED_LIMITS = [
   // Raised to the measured 3.41 kB (2026-11-16) + 10 %: the list frame, the Expiring list (when, due now and the
   // retention sentence) and the Orphans list with its Drop dialog and its sentences.
   { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.75 kB" },
-  // Measured 1.82 kB (2026-11-16) + 10 %: what the Catalog's views and the table's Actions
-  // share: the API calls of catalog management, the hook that reads whether an environment is
-  // protected, the break-glass reason field and the strings of the actions. The chunk is named
-  // after its first module.
-  // Raised to the measured 2.29 kB (2026-11-16) + 10 %: the strings of Maintain now and
-  // Retention, and the calls that read and set a retention.
-  { name: "the views' and actions' shared part", prefix: "useProtected-", limit: "2.52 kB" },
+  // Measured 2.29 kB (2026-11-16) + 10 %: the Drop dialog with the break-glass reason field and
+  // the strings of the actions, which the table's Actions and the Catalog's views share.
+  { name: "the Drop dialog", prefix: "DropDialog-", limit: "2.52 kB" },
+  // Measured 0.94 kB (2026-11-16) + 10 %: the API calls of catalog management, shared by the
+  // table's Actions and the Catalog's views.
+  { name: "the calls of catalog management", prefix: "manage-", limit: "1.04 kB" },
+  // Measured 1.17 kB (2026-11-16) + 10 %: the retention sentences and calls, shared by the
+  // Retention dialog and the Catalog's views.
+  { name: "retention", prefix: "retention-", limit: "1.29 kB" },
   // Measured 1.96 kB (2026-11-16) + 10 %: a table's Actions menu with Drop and Rebuild from git,
   // their dialogs and the git-owned note, loaded once the table page has read the table.
   // Raised to the measured 2.44 kB (2026-11-16) + 10 %: the loaders of the two dialogs below.
