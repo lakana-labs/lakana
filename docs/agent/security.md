@@ -321,7 +321,7 @@ cookie set for another host.
   127.0.0.1 redirect, a cross-origin POST refused, a used link, passkeys with a virtual
   authenticator, and the local link's automatic sign-in (the server runs with
   `LAKANA_UI__LOCAL_SIGN_IN`) with every Back and Forward step free of the secret. Chromium runs
-  per pull request (CI `ui`); Firefox and WebKit nightly (`canary.yml`). Not covered: HTTPS
+  per pull request (CI `ui (e2e server)`); Firefox and WebKit nightly (`canary.yml`). Not covered: HTTPS
   (`__Host-` cookie), a reverse proxy, a second origin's passkey, and the CLI side of
   `lakana server start --local` (opening the browser).
   `packages/lakana-server/tests/test_ui_real_build.py` still checks the policy header and every

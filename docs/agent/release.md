@@ -260,7 +260,7 @@ not reach it (a target's own `artifacts` would replace the shared one;
   wheel. The image installs that wheel, so it carries the same files.
 - **`ui-browsers`** runs the interface's whole Playwright suite (`e2e:all`) in Chromium, Firefox
   and WebKit on the tag, read-only, before the approval; a pull request runs Chromium only (the
-  `ui` job of `ci.yml`). A failure there stops the release before anything is published.
+  `ui (e2e smoke)` and `ui (e2e server)` jobs of `ci.yml`). A failure there stops the release before anything is published.
 - A wheel built without the interface (CI's, a source checkout's) serves it only after
   `npm --prefix ui ci && npm --prefix ui run build`; with `LAKANA_UI__ENABLED=true` and no build,
   the server refuses to start and says so.

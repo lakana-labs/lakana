@@ -142,11 +142,16 @@ jobs:
       - name: duplication of ui/ (ratchet)
         run: uv run python scripts/duplication_ratchet.py --report jscpd-report-ui/jscpd-report.json --baseline scripts/duplication-baseline-ui.json
 
-  # The web interface (ui/): every gate of `npm --prefix ui run check`, the coverage ratchet, the
-  # Playwright smoke test on Chromium, and `prove-gates`, which shows each gate still fails on a
-  # violation. It runs on drafts too, and only when the interface, a tool its gates run or this
-  # workflow changed. See docs/agent/testing.md, "The ui/ gates".
-  ui:
+  # The web interface (ui/) in three jobs side by side, so the Playwright suites do not add to
+  # the gates' time (#586): `ui (gates)` runs every gate of `npm --prefix ui run check`, the
+  # coverage ratchet and `prove-gates`, which shows each gate still fails on a violation;
+  # `ui (e2e smoke)` and `ui (e2e server)` each build the interface again (about a second) and run
+  # one Playwright suite on Chromium. The required check `ui` waits for the three. They run on
+  # drafts too, and only when the interface, a tool its gates run or this workflow changed; the
+  # three scope steps are the same (scripts/tests/test_workflows.py). See docs/agent/testing.md,
+  # "The ui/ gates".
+  ui-gates:
+    name: ui (gates)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
@@ -213,22 +218,125 @@ jobs:
         name: size-limit
         run: npm --prefix ui run size
       - if: steps.scope.outputs.run == 'true'
-        name: Playwright smoke test (Chromium)
-        run: |
-          npx --prefix ui playwright install --with-deps chromium
-          npm --prefix ui run e2e:smoke
-      # The sign-in end to end: a real lakana-server on a fresh SQLite database serves the build
-      # that was just made (Firefox and WebKit run nightly in canary.yml).
-      - if: steps.scope.outputs.run == 'true'
-        name: Playwright against lakana-server (Chromium)
-        run: npm --prefix ui run e2e:server -- --project=chromium
-      - if: steps.scope.outputs.run == 'true'
         name: every gate fails on a violation
         env:
           GATE_PROBE_DIR: ${{ runner.temp }}/gate-probe
         run: |
           npm ci --ignore-scripts --prefix tools/jscpd
           npm --prefix ui run prove-gates
+
+  # The Playwright smoke test on Chromium against the production build, its API routes stubbed.
+  ui-e2e-smoke:
+    name: ui (e2e smoke)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Did the interface change?
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Anything but a pull request that provably changes nothing relevant runs the job.
+          if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null \
+            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|packages/lakana-(server|core)/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|packages/lakana-server/(src/lakana_server/ui|tests/test_ui_real_build)\.py|\.github/workflows/ci\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change to ui/ or its gates: skipping the interface's gates."
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - if: steps.scope.outputs.run == 'true'
+        name: install
+        run: npm ci --ignore-scripts --prefix ui
+      - if: steps.scope.outputs.run == 'true'
+        name: build
+        run: npm --prefix ui run build
+      - if: steps.scope.outputs.run == 'true'
+        name: Chromium
+        run: npx --prefix ui playwright install --with-deps chromium
+      - if: steps.scope.outputs.run == 'true'
+        name: Playwright smoke test (Chromium)
+        run: npm --prefix ui run e2e:smoke
+
+  # The sign-in end to end: a real lakana-server on a fresh SQLite database serves the build
+  # that was just made (Firefox and WebKit run nightly in canary.yml).
+  ui-e2e-server:
+    name: ui (e2e server)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Did the interface change?
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Anything but a pull request that provably changes nothing relevant runs the job.
+          if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null \
+            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|packages/lakana-(server|core)/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|packages/lakana-server/(src/lakana_server/ui|tests/test_ui_real_build)\.py|\.github/workflows/ci\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change to ui/ or its gates: skipping the interface's gates."
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - if: steps.scope.outputs.run == 'true'
+        name: install
+        run: npm ci --ignore-scripts --prefix ui
+      - if: steps.scope.outputs.run == 'true'
+        name: build
+        run: npm --prefix ui run build
+      - if: steps.scope.outputs.run == 'true'
+        name: Chromium
+        run: npx --prefix ui playwright install --with-deps chromium
+      - if: steps.scope.outputs.run == 'true'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - if: steps.scope.outputs.run == 'true'
+        name: Playwright against lakana-server (Chromium)
+        run: |
+          uv sync --all-packages --locked
+          npm --prefix ui run e2e:server -- --project=chromium
+
+  # The required check `ui`: green only when every interface job above was.
+  ui:
+    needs: [changes, ui-gates, ui-e2e-smoke, ui-e2e-server]
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: Interface jobs
+        env:
+          GATES: ${{ needs.ui-gates.result }}
+          E2E_SMOKE: ${{ needs.ui-e2e-smoke.result }}
+          E2E_SERVER: ${{ needs.ui-e2e-server.result }}
+        run: |
+          failed=0
+          for pair in "gates:$GATES" "e2e smoke:$E2E_SMOKE" "e2e server:$E2E_SERVER"; do
+            if [ "${pair#*:}" != "success" ]; then
+              echo "::error::The job 'ui (${pair%%:*})' ended with '${pair#*:}': its log names the failing step."
+              failed=1
+            fi
+          done
+          exit "$failed"
 
   # The unit suite in four shards per Python version, side by side. `LAKANA_TEST_SHARD=I/N`
   # (scripts/pytest_selection.py) keeps whole test files, spread by the seconds in

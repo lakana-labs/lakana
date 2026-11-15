@@ -10,7 +10,7 @@ import secrets
 import signal
 import socket
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -52,6 +52,11 @@ from lakana_core.projects.source_map import sweep_project_file_texts
 from lakana_core.secrets.crypto import ACCEPT_FORMAT_1_WARNING
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.storage.resolver import StorageResolver
+from lakana_core.storage.temp_sweep import (
+    TEMP_FILE_MIN_AGE,
+    TEMP_SWEEP_MAX_SECONDS,
+    sweep_temp_files,
+)
 from lakana_worker.attempt_sweep import AttemptSweeper
 from lakana_worker.ca_bundle import CaBundleError, find_ca_bundle, query_ca_bundle
 from lakana_worker.caches import CacheKeeper, CachePaths, PackageCacheTrim, TrimSettings
@@ -623,6 +628,9 @@ def main() -> None:
     def housekeeping(now: datetime, stop: threading.Event) -> None:
         """Sweep artifacts, table locations (and expire tables), code archives, job fires and reads.
 
+        Also removes the temporary files that writes killed before their rename left in local
+        storage.
+
         Also deletes the project file texts that no deployed version references.
 
         Also checks the freshness of tables and deletes their health signals past the kept period.
@@ -689,6 +697,27 @@ def main() -> None:
         except Exception as exc:
             logger.warning(
                 "The code archive sweep failed (%s).",
+                type(exc).__name__,
+                exc_info=True,
+                extra=log_event(LogEvent.SWEEP_FAILED),
+            )
+        try:
+            with session_factory() as session:
+                sweep_temp_files(
+                    session,
+                    StorageResolver(session, key_provider),
+                    now=now,
+                    # An upload may wait this long between two pieces of a file it streams.
+                    min_age=max(
+                        TEMP_FILE_MIN_AGE,
+                        timedelta(seconds=settings.artifacts.upload_ttl_seconds),
+                    ),
+                    rotation=rotation,
+                    should_stop=stop.is_set,
+                )
+        except Exception as exc:
+            logger.warning(
+                "The temporary file sweep failed (%s).",
                 type(exc).__name__,
                 exc_info=True,
                 extra=log_event(LogEvent.SWEEP_FAILED),
@@ -807,6 +836,7 @@ def main() -> None:
         housekeeping_limit=DEFAULT_MAX_SECONDS
         + LOCATION_SWEEP_MAX_SECONDS
         + CODE_SWEEP_MAX_SECONDS
+        + TEMP_SWEEP_MAX_SECONDS
         + SIZE_MEASURE_MAX_SECONDS
         + HEALTH_SWEEP_MAX_SECONDS,
         lease_seconds=settings.run.lease_seconds,

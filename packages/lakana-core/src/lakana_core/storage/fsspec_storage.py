@@ -3,12 +3,15 @@
 import contextlib
 import errno
 import io
+import logging
 import os
 import posixpath
+import re
 import secrets
 import stat
 import urllib.parse
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,6 +22,7 @@ from pyiceberg.io import FileIO, load_file_io
 
 from lakana_core.config import StorageConfig
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
+from lakana_core.identifiers import shown
 from lakana_core.storage.base import (
     PART_SUFFIX,
     STREAM_BLOCK_BYTES,
@@ -27,6 +31,8 @@ from lakana_core.storage.base import (
     StoredObject,
     StreamWriter,
 )
+
+logger = logging.getLogger(__name__)
 
 _S3_OPTION_TRANSLATION = {
     "s3.endpoint": "endpoint_url",
@@ -99,6 +105,55 @@ def _sync_directory(directory: str) -> None:
 
 _TEMP_NAME_BYTES = 100
 """Bytes of an object's name kept in its temporary name (file systems allow 255 per name)."""
+_TEMP_TOKEN_BYTES = 8
+"""Random bytes in a temporary name, written as 16 lower-case hex digits."""
+_TEMP_NAME = re.compile(rf"\.(?s:.+)\.[0-9a-f]{{{2 * _TEMP_TOKEN_BYTES}}}{re.escape(PART_SUFFIX)}")
+"""A temporary name as `_LocalStreamWriter` makes it: a dot, the object's name, a dot, the
+random hex digits and `PART_SUFFIX`."""
+
+
+def is_temp_name(name: str) -> bool:
+    """Say whether a file name is one the local backend gives a write in progress.
+
+    Parameters
+    ----------
+    name
+        A file name, without its directory.
+
+    Returns
+    -------
+    bool
+        Whether it has the exact shape of a temporary name: ``.<name>.<16 hex>.part``.
+    """
+    return _TEMP_NAME.fullmatch(name) is not None
+
+
+@dataclass
+class TempFileCounts:
+    """What one sweep of a local storage root's temporary files did.
+
+    Parameters
+    ----------
+    removed
+        Temporary files (or links with such a name) removed.
+    freed_bytes
+        The size of the regular files among them; a link frees nothing.
+    kept_fresh
+        Temporary files kept because they were written to too recently.
+    left_alone
+        Entries with a temporary name that are neither a file nor a link (a directory, say).
+    failed
+        Removals that failed.
+    stopped
+        Whether `should_stop` ended the walk before it was done.
+    """
+
+    removed: int = 0
+    freed_bytes: int = 0
+    kept_fresh: int = 0
+    left_alone: int = 0
+    failed: int = 0
+    stopped: bool = False
 
 
 class _LocalStreamWriter:
@@ -116,7 +171,9 @@ class _LocalStreamWriter:
         # At most 100 bytes of the name, so that the temporary name fits a 255-byte limit too;
         # the leading dot and the suffix are what a sweep recognises it by.
         kept = os.fsdecode(os.fsencode(name)[:_TEMP_NAME_BYTES])
-        self._temp = os.path.join(directory, f".{kept}.{secrets.token_hex(8)}{PART_SUFFIX}")
+        self._temp = os.path.join(
+            directory, f".{kept}.{secrets.token_hex(_TEMP_TOKEN_BYTES)}{PART_SUFFIX}"
+        )
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         # 0666 less the process umask, like every other file the backend writes: the operator
         # decides who else may read objects (a worker in the server's group, with umask 027).
@@ -900,6 +957,109 @@ class FsspecStorage:
                     size=stat.st_size,
                     modified_at=datetime.fromtimestamp(stat.st_mtime, UTC),
                 )
+
+    def remove_stale_temp_files(
+        self, *, older_than: datetime, should_stop: Callable[[], bool], rotation: int = 0
+    ) -> TempFileCounts:
+        """Remove the temporary files that writes killed before their rename left behind.
+
+        Only the local backend has them (`_LocalStreamWriter`); on any other the call does
+        nothing. The walk never follows a link, and goes through directory descriptors, so a
+        directory swapped for a link while it runs cannot lead it outside the root. An entry is
+        removed only if its name has the exact shape `is_temp_name` describes, it is a regular
+        file or a link (a link is removed itself, its target is never touched or looked at), and
+        its own modification time is before `older_than`. The root itself may be a link (an
+        operator's mount point); it is resolved once, at the start.
+
+        Parameters
+        ----------
+        older_than
+            Entries written to at or after this time are kept.
+        should_stop
+            Called before every directory and every removal; the walk ends when it returns
+            `True`.
+        rotation
+            Turns the order of the root's own directories, so that a walk cut short does not
+            always spend its time in the same ones.
+
+        Returns
+        -------
+        TempFileCounts
+            What was removed and kept.
+        """
+        counts = TempFileCounts()
+        walk = getattr(os, "fwalk", None)  # not on Windows: nothing is swept there
+        top = os.path.realpath(self._base)
+        if not isinstance(self._fs, LocalFileSystem) or walk is None or not os.path.isdir(top):
+            return counts
+        cutoff = older_than.timestamp()
+        with contextlib.closing(walk(top, follow_symlinks=False)) as entries:
+            for directory, subdirectories, files, descriptor in entries:
+                if should_stop():
+                    counts.stopped = True
+                    break
+                if directory == top and subdirectories:
+                    subdirectories.sort()
+                    turn = rotation % len(subdirectories)
+                    subdirectories[:] = subdirectories[turn:] + subdirectories[:turn]
+                for name in [n for n in (*subdirectories, *files) if is_temp_name(n)]:
+                    if should_stop():
+                        counts.stopped = True
+                        return counts
+                    if self._remove_if_stale(directory, name, descriptor, cutoff, counts):
+                        with contextlib.suppress(ValueError):
+                            subdirectories.remove(name)  # a link to a directory, now gone
+        return counts
+
+    def _remove_if_stale(
+        self, directory: str, name: str, descriptor: int, cutoff: float, counts: TempFileCounts
+    ) -> bool:
+        """Remove one entry with a temporary name if it is a file or a link and old enough.
+
+        Parameters
+        ----------
+        directory
+            The directory's path, for the log.
+        name
+            The entry's name in it.
+        descriptor
+            The directory, open; the entry is looked at and removed through it.
+        cutoff
+            The time (seconds since the epoch) the entry must be older than.
+        counts
+            Updated with what happened.
+
+        Returns
+        -------
+        bool
+            Whether the entry was removed.
+        """
+        try:
+            found = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        if not (stat.S_ISREG(found.st_mode) or stat.S_ISLNK(found.st_mode)):
+            counts.left_alone += 1
+            return False
+        if found.st_mtime >= cutoff:
+            counts.kept_fresh += 1
+            return False
+        try:
+            os.unlink(name, dir_fd=descriptor)  # removes a link itself, never what it names
+        except FileNotFoundError:
+            return False  # gone already: the writer's abort, or another sweep
+        except OSError as exc:
+            counts.failed += 1
+            logger.warning(
+                "Temporary file sweep: could not remove %s (%s).",
+                shown(os.path.join(directory, name)),
+                type(exc).__name__,
+            )
+            return False
+        counts.removed += 1
+        if stat.S_ISREG(found.st_mode):
+            counts.freed_bytes += found.st_size
+        return True
 
     def resolve_read_url(self, path: str, *, ttl_seconds: int) -> str:
         """Return a URL a caller with no storage credential of its own can read from.
