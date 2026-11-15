@@ -14,12 +14,13 @@ const MAINTENANCE =
 /**
  * Renders the dialog.
  *
+ * @param place - The table the dialog acts on.
  * @returns The close handler and a user-event session.
  */
-function renderMaintain() {
+function renderMaintain(place: TableRef = PLACE) {
   const onClose = vi.fn();
   const user = userEvent.setup();
-  render(<MaintainDialog place={PLACE} onClose={onClose} />);
+  render(<MaintainDialog place={place} onClose={onClose} />);
   return { onClose, user };
 }
 
@@ -36,6 +37,24 @@ function maintenances<T extends { method: string; path: string }>(sent: readonly
 }
 
 describe("MaintainDialog", () => {
+  it.each(["a b", "$(x)"])(
+    "quotes the environment %s in the command to copy",
+    async (environment) => {
+      fakeServer({
+        ...manageRoutes(),
+        [`POST /api/v1/environments/${environment}/namespaces/gold.sales/tables/fact_sales/maintenance`]:
+          { status: 202, body: { query_id: "q-1" } },
+      });
+      const { user } = renderMaintain({ ...PLACE, environment });
+
+      await user.click(screen.getByRole("button", { name: "Maintain now" }));
+
+      expect(
+        await screen.findByText(`lakana query status 'q-1' --env '${environment}'`),
+      ).toBeInTheDocument();
+    },
+  );
+
   it("shows the defaults 7, 5, 72 and dry run off", () => {
     fakeServer(manageRoutes());
     renderMaintain();
@@ -70,7 +89,7 @@ describe("MaintainDialog", () => {
 
     const done = await screen.findByText("Maintenance is queued as query q-1.");
     expect(done).toHaveFocus();
-    expect(screen.getByText("lakana query status q-1 --env prod")).toBeInTheDocument();
+    expect(screen.getByText("lakana query status 'q-1' --env 'prod'")).toBeInTheDocument();
     const [sent] = maintenances(server.sent);
     expect(sent?.body).toEqual({
       keep_days: 14,

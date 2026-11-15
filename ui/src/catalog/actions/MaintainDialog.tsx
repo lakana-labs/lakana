@@ -11,6 +11,7 @@ import { MAINTENANCE_DEFAULTS, maintainTable, type TableRef } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
 import { CopyLine } from "../../shell/CopyLine";
 import { useFocusAfter } from "../../shell/useFocusAfter";
+import { shellQuote } from "../../shell/shellQuote";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
@@ -137,7 +138,7 @@ export function MaintainDialog({ place, onClose }: MaintainDialogProps): JSX.Ele
           </p>
           <p>{t("table.actions.maintain.follow")}</p>
           <CopyLine
-            text={`lakana query status ${queryId} --env ${place.environment}`}
+            text={`lakana query status ${shellQuote(queryId)} --env ${shellQuote(place.environment)}`}
             copyLabel={t("table.actions.maintain.copy")}
           />
           <div className="step-actions">

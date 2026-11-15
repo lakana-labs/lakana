@@ -12,6 +12,7 @@ import { rebuildTable, type TableRebuildOut, type TableRef } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
 import { CopyLine } from "../../shell/CopyLine";
 import { useFocusAfter } from "../../shell/useFocusAfter";
+import { shellQuote } from "../../shell/shellQuote";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import { catalogPath } from "../paths";
@@ -107,7 +108,7 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
             )}
           </p>
           <CopyLine
-            text={`lakana runs show ${rebuilt.run_id} --env ${environment}`}
+            text={`lakana runs show ${shellQuote(rebuilt.run_id)} --env ${shellQuote(environment)}`}
             copyLabel={t("table.actions.rebuild.copy")}
           />
           <div className="step-actions">

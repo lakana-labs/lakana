@@ -16,15 +16,16 @@ const REASON = "History columns lost after a manual replace";
 /**
  * Renders the dialog on the table's page, in a router whose location a test can read.
  *
+ * @param place - The table the dialog acts on.
  * @returns The router, the close handler and a user-event session.
  */
-function renderRebuild() {
+function renderRebuild(place: TableRef = PLACE) {
   const onClose = vi.fn();
   const router = createMemoryRouter(
     [
       {
         path: "/catalog/prod/gold.sales/fact_sales",
-        element: <RebuildDialog place={PLACE} onClose={onClose} />,
+        element: <RebuildDialog place={place} onClose={onClose} />,
       },
       { path: "/catalog", element: <p>The catalog</p> },
     ],
@@ -86,13 +87,40 @@ describe("RebuildDialog", () => {
       `Dropped gold.sales.fact_sales and queued run ${REBUILT.run_id} of sales-project, which builds it again from assets/fact_sales.py.`,
     );
     expect(done).toHaveFocus();
-    expect(screen.getByText(`lakana runs show ${REBUILT.run_id} --env prod`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`lakana runs show '${REBUILT.run_id}' --env 'prod'`),
+    ).toBeInTheDocument();
     const [sent] = rebuilds(server.sent);
     expect(sent?.body).toEqual({ reason: REASON });
     expect(new URL(sent?.path ?? "", "http://x").searchParams.has("break_glass_reason")).toBe(
       false,
     );
   });
+
+  it.each(["a b", "$(x)"])(
+    "quotes the environment %s in the command to copy",
+    async (environment) => {
+      fakeServer({
+        ...manageRoutes(),
+        [`POST /api/v1/environments/${environment}/namespaces/gold.sales/tables/fact_sales/rebuild`]:
+          {
+            status: 202,
+            body: REBUILT,
+          },
+      });
+      const { user } = renderRebuild({ ...PLACE, environment });
+
+      await user.type(
+        screen.getByRole("textbox", { name: "Why it is rebuilt (recorded in the audit log)" }),
+        REASON,
+      );
+      await user.click(await screen.findByRole("button", { name: "Rebuild" }));
+
+      expect(
+        await screen.findByText(`lakana runs show '${REBUILT.run_id}' --env '${environment}'`),
+      ).toBeInTheDocument();
+    },
+  );
 
   it("leaves the file out when the answer has no path", async () => {
     fakeServer({ ...manageRoutes(), [REBUILD]: { status: 202, body: { ...REBUILT, path: null } } });
