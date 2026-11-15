@@ -50,11 +50,18 @@ GIT_OWNED_RENAME = (
 GIT_OWNED_RENAME_HIDDEN = "A deployed project defines this table; rename it in git and deploy."
 """The rename refusal to a caller who may not read the table."""
 
+GIT_OWNED_REPLACE = (
+    "`{name}` is built by a deployed project. Defined in {repository}/{path}. Change it there "
+    "and deploy."
+)
+"""The refusal of a person's replacement of a view a deployment builds."""
+
 GIT_OWNED_HIDDEN = "A deployed project defines this table; change it in git."
 """Every table refusal (drop or create) to a caller who may not read the table."""
 
 GIT_OWNED_ARTIFACT_HIDDEN = "A deployed project defines this artifact; change it in git."
-"""The artifact drop's refusal to a caller who may not read the artifact."""
+"""An artifact's refusal (a drop, or a person's upload that would create it) to a caller who
+may not read the artifact."""
 
 
 def git_owned_refusal(
@@ -196,18 +203,61 @@ def refuse_declared_name(
         raise refusal
 
 
+def refuse_owned_replace(
+    session: Session,
+    authz: AuthorizationService,
+    p: PrincipalRef,
+    ref: TableRef,
+    environment_id: uuid.UUID,
+    kind: str,
+) -> None:
+    """Refuse a person's replacement of a row a deployed project builds, such as a view's SQL.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    authz
+        The authorization service, for the copy (`git_owned_refusal`).
+    p
+        The caller.
+    ref
+        The row's name.
+    environment_id
+        Its environment.
+    kind
+        The row's kind (`Table.kind`).
+
+    Raises
+    ------
+    ConflictError
+        If a current deployment builds the row (`GIT_OWNED_REPLACE` or `GIT_OWNED_HIDDEN`).
+    """
+    found = defining_ref(session, environment_id, ref)
+    if found is None or not owned_by_git(found, kind):
+        return
+    refusal: ConflictError = git_owned_refusal(
+        authz, p, ref, found, template=GIT_OWNED_REPLACE, hidden=GIT_OWNED_HIDDEN
+    )
+    raise refusal
+
+
 def undrop_refusal(
     session: Session,
     authz: AuthorizationService,
     p: PrincipalRef,
     ref: TableRef,
     environment_id: uuid.UUID,
+    *,
+    renamed: bool,
 ) -> ConflictError | None:
-    """Tell whether restoring a managed table under `ref` would take a name declared otherwise.
+    """Tell whether restoring a managed table under `ref` would take a declared name.
 
-    A dropped table can come back under a name a deployment declares as a table or a view:
-    that is the table the project builds (an orphan restored, ruling 6). Under a name declared
-    as an artifact it would take what git defines as something else.
+    A dropped table can come back under its own name when a deployment declares that name as
+    a table or a view: that is the table the project builds (an orphan restored, ruling 6).
+    Under a name declared as an artifact it would take what git defines as something else.
+    Restored under another name (`--as`), it is a create under that name, refused whatever
+    the name is declared as.
 
     Parameters
     ----------
@@ -221,6 +271,8 @@ def undrop_refusal(
         The name the table would come back under.
     environment_id
         Its environment.
+    renamed
+        The table comes back under another name than it had.
 
     Returns
     -------
@@ -228,7 +280,7 @@ def undrop_refusal(
         The refusal to raise (`GIT_OWNED_CREATE` or `GIT_OWNED_HIDDEN`), or `None`.
     """
     found = defining_ref(session, environment_id, ref)
-    if found is None or owned_by_git(found, "TABLE"):
+    if found is None or (not renamed and owned_by_git(found, "TABLE")):
         return None
     return git_owned_refusal(
         authz, p, ref, found, template=GIT_OWNED_CREATE, hidden=GIT_OWNED_HIDDEN

@@ -46,7 +46,9 @@ from lakana_core.catalog.git_owned import (
     GIT_OWNED_HIDDEN,
     GIT_OWNED_RENAME,
     GIT_OWNED_RENAME_HIDDEN,
+    GIT_OWNED_REPLACE,
 )
+from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import ConflictError, PermissionDenied
 from lakana_core.grants.authorization import GrantAuthorization
@@ -678,3 +680,139 @@ def test_a_run_of_one_repository_cannot_create_a_table_another_declares(
 
     session.rollback()
     assert session.scalars(select(Table).where(Table.name == "b")).all() == []
+
+
+def test_an_undrop_as_a_declared_table_name_is_refused(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    # A person's own table, restored under a name the project declares, would take that name.
+    draft = TableRef("dev", _SILVER, "draft")
+    _managed(catalog, principal, draft)
+    catalog.drop_table(principal, draft)
+    _declare(session, "silver.clean")
+
+    with pytest.raises(ConflictError) as refused:
+        catalog.undrop_table(principal, draft, new_name="clean")
+
+    assert str(refused.value) == _create_message()
+    session.rollback()
+    assert session.scalars(select(Table).where(Table.name.in_(["clean", "draft"]))).all() == []
+
+
+def _view(catalog: CatalogService, p: PrincipalRef, sql: str = "SELECT 1 AS id") -> Table:
+    """Create or replace the view `silver.clean`.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    p
+        The writer.
+    sql
+        The view's SELECT.
+
+    Returns
+    -------
+    Table
+        The view's row.
+    """
+    return catalog.create_or_replace_view(
+        p,
+        _CLEAN,
+        sql=sql,
+        references=[],
+        columns=[ColumnSpec(name="id", type="int64", nullable=True)],
+    )
+
+
+def test_a_persons_view_under_a_declared_name_is_refused_before_the_first_run(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    _declare(session, "silver.clean", materialize="view")
+
+    with pytest.raises(ConflictError) as refused:
+        _view(catalog, principal)
+
+    assert str(refused.value) == _create_message()
+    session.rollback()
+    assert session.scalars(select(Table).where(Table.name == "clean")).all() == []
+
+
+def test_a_persons_view_under_a_name_declared_as_a_table_is_refused(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    _declare(session, "silver.clean")
+
+    with pytest.raises(ConflictError) as refused:
+        _view(catalog, principal)
+
+    assert str(refused.value) == _create_message()
+
+
+def _run_of_clean(session: Session, principal: PrincipalRef) -> PrincipalRef:
+    """Make the principal of a running task of `silver.clean`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The run's principal.
+
+    Returns
+    -------
+    PrincipalRef
+        It, with the task's run context.
+    """
+    task = python_task_run(session, principal.id, asset="silver.clean", kind="sql")
+    return dataclasses.replace(principal, run_context=RunContext(task_run_id=task.id, claim=1))
+
+
+def test_a_run_still_creates_the_view_its_project_declares(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    _declare(session, "silver.clean", materialize="view")
+
+    row = _view(catalog, _run_of_clean(session, principal))
+
+    assert row.table_type is TableType.VIEW
+
+
+def test_a_person_may_not_replace_the_sql_of_a_project_view(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    _declare(session, "silver.clean", materialize="view")
+    view_id = _view(catalog, _run_of_clean(session, principal)).id
+
+    with pytest.raises(ConflictError) as refused:
+        _view(catalog, principal, "SELECT 2 AS id")
+
+    assert str(refused.value) == GIT_OWNED_REPLACE.format(
+        name="silver.clean", repository=_REPO, path="assets/silver/clean.sql", environment="dev"
+    )
+    session.rollback()
+    assert (session.get_one(Table, view_id).view_definition or {})["sql"] == "SELECT 1 AS id"
+
+
+def test_a_person_replacing_a_project_view_without_read_is_not_told_the_file(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    _declare(session, "silver.clean", materialize="view")
+    _view(catalog, _run_of_clean(session, principal))
+    writer = _with(session, ActionAllowList(Action.WRITE_TABLE))
+
+    with pytest.raises(ConflictError) as refused:
+        _view(writer, principal, "SELECT 2 AS id")
+
+    assert str(refused.value) == GIT_OWNED_HIDDEN
+
+
+def test_a_person_may_still_replace_a_view_no_project_builds(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    _view(catalog, principal)
+    _declare(session, "silver.other")
+
+    row = _view(catalog, principal, "SELECT 2 AS id")
+
+    assert (row.view_definition or {})["sql"] == "SELECT 2 AS id"

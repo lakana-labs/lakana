@@ -45,11 +45,18 @@ lakana orphans --env dev
 lakana table delete silver.clean --env dev --yes
 ```
 
-A name that a deployed project declares cannot be taken by anything else either: `lakana table
-create`, `lakana table create-external`, a `lakana load` or `PUT …/data` that would create the
-table, a `lakana artifact upload` that would create a new artifact, and an Iceberg client's create
-or rename onto the name all answer 409. The project's own runs still create what it declares.
-Choose another name, or remove the asset and deploy first.
+Only the project's own runs create what it declares. These refuse a declared name with a 409,
+whatever the project declares there (a table, a view or an artifact):
+
+- `lakana table create` and `lakana table create-external`;
+- a `lakana load` or `PUT …/data` that would create the table;
+- a `lakana sql … --into NAME --mode view` of yours that would create the view;
+- a `lakana artifact upload` that would create a new artifact;
+- `lakana table undrop OLD --as NAME`;
+- an Iceberg client's create, or its rename onto the name.
+
+A `--mode view` query of yours cannot replace the SQL of a view the project builds either:
+change the view in git and deploy. Choose another name, or remove the asset and deploy first.
 
 An Iceberg client cannot rename a table the project builds either. The answer is
 ``` `silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Rename it there and deploy.```
@@ -96,9 +103,10 @@ The table comes back as it was when it was dropped:
 What does not come back is the record of who read the table: [table health](../reference/table-health.md)
 counts readers again from the restore on.
 
-A table can be restored under a name a deployed project declares as a table or a view: that is
-the table the project builds. Under a name it declares as an artifact, the restore is refused
-with the `is declared by a deployed project` message; restore it under another name with `--as`.
+A table can be restored under its own name when a deployed project declares that name as a
+table or a view: that is the table the project builds. When the project declares its name as an
+artifact, the restore is refused with the `is declared by a deployed project` message; restore it
+under another name with `--as`, one that no deployed project declares.
 
 Restoring needs the right to drop tables and the right to create tables in the namespace. In a
 protected environment it is refused like any other change outside a run; add `--break-glass` with a

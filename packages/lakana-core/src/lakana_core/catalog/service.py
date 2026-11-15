@@ -127,6 +127,7 @@ from lakana_core.catalog.files_read import (
 from lakana_core.catalog.git_owned import (
     refuse_declared_name,
     refuse_owned_drop,
+    refuse_owned_replace,
     undrop_refusal,
 )
 from lakana_core.catalog.glossary_read import TableTerms, TermRef, table_terms
@@ -8377,6 +8378,10 @@ class CatalogService:
         ValidationError
             If the namespace is not under bronze, silver or gold, or a new
             view's name contains a ``.``.
+        ConflictError
+            If `p` acts for no run and a deployed project declares the name of a new view
+            (`GIT_OWNED_CREATE`), or builds the view being replaced (`GIT_OWNED_REPLACE`);
+            see `lakana_core.catalog.git_owned`.
         """
         securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
         # Which action applies depends on what is there, so the target is
@@ -8424,6 +8429,12 @@ class CatalogService:
             )
         if existing is not None and existing.table_type is not TableType.VIEW:
             raise AlreadyExistsError(f"{ref.dotted()} is a table; a view can't replace it.")
+        if p.run_context is None:
+            # A person's view run: a project's run builds what its project declares.
+            if existing is None:
+                refuse_declared_name(self._session, self._authz, p, ref, env.id)
+            else:
+                refuse_owned_replace(self._session, self._authz, p, ref, env.id, existing.kind)
         stored_columns = (
             {c.get("name") for c in (existing.view_definition or {}).get("columns", [])}
             if existing is not None
@@ -9628,10 +9639,10 @@ class CatalogService:
             If a table of the name exists now (`NAME_TAKEN_MESSAGE` names `--as`).
         ConflictError
             If the undo period has ended or the purge has started, the table's metadata file is
-            gone, a deployed project now declares the name as an artifact
-            (`lakana_core.catalog.git_owned.undrop_refusal`; a name declared as a table or view
-            is restored), or the write failed for another reason (the namespace dropped at the
-            same moment).
+            gone, a deployed project now declares the name as an artifact, or `new_name` is a
+            name it declares, whatever as (`lakana_core.catalog.git_owned.undrop_refusal`; the
+            table's own name declared as a table or view is restored), or the write failed
+            for another reason (the namespace dropped at the same moment).
         """
         target = ref if new_name is None else replace(ref, name=new_name)
         if new_name is not None:
@@ -9683,7 +9694,9 @@ class CatalogService:
             holder = taken.table_type
             self._session.rollback()
             raise AlreadyExistsError(self._undrop_taken_message(ref, target, holder))
-        refusal = undrop_refusal(self._session, self._authz, p, target, env.id)
+        refusal = undrop_refusal(
+            self._session, self._authz, p, target, env.id, renamed=new_name is not None
+        )
         if refusal is not None:
             self._session.rollback()
             raise refusal
