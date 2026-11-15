@@ -103,7 +103,7 @@ describe("OrphansView", () => {
     expect(screen.queryByRole("button", { name: /^Drop / })).not.toBeInTheDocument();
     expect(rows()[0]).toHaveTextContent("Dropped; it can still be restored");
     expect(
-      screen.getByRole("link", { name: "Restore gold.sales.old_totals from Dropped" }),
+      screen.getByRole("link", { name: "Restore it from Dropped: gold.sales.old_totals" }),
     ).toHaveAttribute("href", "/catalog?env=prod&ns=gold.sales&view=dropped");
   });
 

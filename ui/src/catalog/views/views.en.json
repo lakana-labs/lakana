@@ -59,7 +59,7 @@
     "dropFor": "Drop {{table}}",
     "droppedAlready": "Dropped; it can still be restored.",
     "restore": "Restore it from Dropped",
-    "restoreFor": "Restore {{table}} from Dropped",
+    "restoreFor": "Restore it from Dropped: {{table}}",
     "purpose": "Tables no project in {{environment}} builds any more."
   }
 }
