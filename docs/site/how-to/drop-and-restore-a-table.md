@@ -148,6 +148,15 @@ To see the tables dropped from every namespace of the environment, leave out the
 `GET /api/v1/environments/{env}/dropped-tables`, and the SDK's `client.tables.iter_dropped(env)`
 walks every page.
 
+In the web interface, open **Catalog** and choose **Dropped** above the list. It lists the tables
+dropped from one environment, newest first, with the namespace each was dropped from, when it was
+dropped and until when it can be restored. Choose an environment in the tree first: with none
+chosen, the page lists your environments to pick from. Choose a namespace in the tree to see only
+the tables dropped from that namespace. **Show more** adds the next page. A table whose undo
+period has ended says "No longer restorable" and has no button. The view says so when nothing that can
+still be restored was dropped there. If the server refuses the list, for example because you may
+not read the environment, the page shows its sentence with **Try again**.
+
 ## Restore a table
 
 <!-- source: docs/examples/drop-and-restore-a-table/run.sh#undrop -->
@@ -177,6 +186,13 @@ Restoring needs the right to drop tables and the right to create tables in the n
 protected environment it is refused like any other change outside a run; add `--break-glass` with a
 `--reason`, as for a create.
 
+In the web interface, press **Undrop** on the row in the Dropped view of the Catalog. It restores
+the table at once, removes the row and says "Restored gold.sales.orders" with a link to the table's
+page; the focus moves to that line. A person may press it if the server lists `undrop` for the row,
+which needs the same rights as the command. In a protected environment the button first opens a
+dialog that asks why you break the protection of the environment, the same reason `--break-glass`
+takes; the audit log records it, and the server's sentence shows if it refuses the reason.
+
 ### When the name is taken
 
 If a new table has the dropped table's name, restore the old one under another name in the same
@@ -186,6 +202,10 @@ namespace:
 ```bash
 lakana table undrop silver.orders --as orders_before
 ```
+
+In the web interface, **Undrop** on that row shows the server's sentence ("A table orders already
+exists in silver ...") in a dialog with a field **Restore as**; type the other name and press
+**Undrop** again.
 
 If a name was dropped more than once, `lakana table undrop` brings back the newest. Restore it, or
 drop the table that holds the name, then run the command again (with `--as` if needed) for the

@@ -183,7 +183,7 @@
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
 "table retention": { class: ui, part: 3 }
-"table undrop": { class: ui, part: 3 }
+"table undrop": { class: ui, part: 3, done: true }
 "table rebuild": { class: ui, part: 3 }
 "task history": { class: read, part: 5 }
 "task-token mint":
@@ -265,8 +265,9 @@
   { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}/blobs/{sha256}":
   { class: ui, part: 3 }
-"GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables": { class: ui, part: 3 }
-"GET /api/v1/environments/{env}/dropped-tables": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables":
+  { class: ui, part: 3, done: true }
+"GET /api/v1/environments/{env}/dropped-tables": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: read, part: 3, done: true }
@@ -427,7 +428,8 @@
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview":
   { class: read, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild": { class: ui, part: 3 }
-"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop": { class: ui, part: 3 }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop":
+  { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/queries": { class: ui, part: 4 }
 "POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4 }
 "POST /api/v1/environments/{env}/runs": { class: ui, part: 5 }

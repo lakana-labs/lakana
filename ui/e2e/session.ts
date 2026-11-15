@@ -105,6 +105,32 @@ const HOME: Record<string, unknown> = {
 
 /** What the Catalog reads besides the list: a tree of two environments and an empty namespace. */
 const CATALOG: Record<string, unknown> = {
+  "/api/v1/environments/prod": { name: "prod", is_protected: false },
+  "/api/v1/environments/prod/dropped-tables": {
+    items: [
+      {
+        name: "fact_returns",
+        namespace: "gold.sales",
+        uuid: "5c1d7e90-2f3a-4b6c-9d8e-0a1b2c3d4e5f",
+        kind: "TABLE",
+        dropped_at: "2026-11-14T09:30:00Z",
+        purge_after: "2026-11-21T09:30:00Z",
+        restorable: true,
+        actions: ["undrop"],
+      },
+      {
+        name: "old_totals",
+        namespace: "gold",
+        uuid: "7e2f9a41-3b5c-4d6e-8f70-1a2b3c4d5e6f",
+        kind: "TABLE",
+        dropped_at: "2026-10-01T09:30:00Z",
+        purge_after: "2026-10-08T09:30:00Z",
+        restorable: false,
+        actions: ["undrop"],
+      },
+    ],
+    next_cursor: null,
+  },
   "/api/v1/tables/tree": {
     count: 4,
     environments: [

@@ -1,0 +1,21 @@
+{
+  "choose": "Dropped tables, expiring tables and orphans are listed per environment. Choose one:",
+  "chooseLabel": "Environments",
+  "dropped": {
+    "region": "Dropped tables",
+    "inEnvironment": "Tables dropped in {{environment}}.",
+    "fromNamespace": "Tables dropped from {{namespace}}.",
+    "empty": "Nothing was dropped in {{place}} that can still be restored.",
+    "columns": {
+      "table": "Table",
+      "dropped": "Dropped",
+      "until": "Restorable until",
+      "actions": "Actions"
+    },
+    "neverKnown": "Not known",
+    "gone": "No longer restorable",
+    "droppedNow": "Dropped {{table}}.",
+    "restored": "Restored {{table}}.",
+    "open": "Open the table"
+  }
+}

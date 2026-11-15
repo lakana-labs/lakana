@@ -35,7 +35,14 @@ const NAMED_LIMITS = [
   // Raised from 32 kB: measured 29.64 kB with the route of a table's page (the heading and the
   // breadcrumb from the address, so the focus the shell puts on the heading survives the page's
   // own chunk and its read), 2026-11-13, + 10 %.
+  // Measured 30.3 kB (2026-11-16) with the view switch, the lazy import of the views and the
+  // list's skeleton as a component; the limit holds.
   { name: "Catalog", prefix: "CatalogScreen-", limit: "32.6 kB" },
+  // Measured 3.6 kB (2026-11-16) + 10 %: the Catalog's views other than All, loaded when one is
+  // chosen: the choice of an environment, the Dropped list with its paging, Undrop and its
+  // dialog with the reason of a protected environment, the hook that reads the protection and
+  // the strings of the views and of the actions. It is never in the first load.
+  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.96 kB" },
   // Measured 1.49 kB (a table's page: the read, the record of it as opened, the header with its
   // tabs and the states, 2026-11-13) + 10 %. It loads on /catalog/{environment}/{namespace}/{table}.
   // Raised to the measured 4.07 kB (2026-11-13) + 10 % with the Overview (description, first
@@ -93,7 +100,9 @@ const NAMED_LIMITS = [
   { name: "quoting a command", prefix: "shellQuote-", limit: "0.1 kB" },
   // Measured 789 B (React Aria's text field, shared by the Catalog's search and the screens with
   // a text field; a chunk of its own since the table page's route, 2026-11-13) + 10 %.
-  { name: "the text field", prefix: "TextField-", limit: "0.87 kB" },
+  // Raised to the measured 1.04 kB (2026-11-16) + 10 %: React Aria's text area moved into this
+  // chunk, because the Undrop dialog's reason field shares it with the table page's editor.
+  { name: "the text field", prefix: "TextField-", limit: "1.15 kB" },
   // Measured 180 B (a date and time in the person's language; the Catalog's list and the table
   // page share it, 2026-11-13) + 10 %.
   { name: "dates and times", prefix: "useWhen-", limit: "0.2 kB" },

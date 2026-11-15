@@ -299,6 +299,28 @@ export function createTable(
 }
 
 /**
+ * Drops a table, as the platform's own token does.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param namespace - The dotted namespace.
+ * @param name - The table's name.
+ * @returns Resolves once the server answered.
+ */
+export async function dropTable(
+  request: APIRequestContext,
+  environment: string,
+  namespace: string,
+  name: string,
+): Promise<void> {
+  const path = `/api/v1/environments/${environment}/namespaces/${namespace}/tables/${name}`;
+  const response = await request.delete(path, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  await ensureOk(`DELETE ${path}`, response);
+}
+
+/**
  * Lets a person read one table.
  *
  * @param request - The request context.

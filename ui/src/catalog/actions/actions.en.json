@@ -1,0 +1,15 @@
+{
+  "protected": {
+    "label": "Why you break the protection of {{environment}}",
+    "text": "{{environment}} is protected: only runs write there. Doing this by hand needs the right to manage the environment and is recorded in the audit log."
+  },
+  "undrop": {
+    "button": "Undrop",
+    "for": "Undrop {{table}}",
+    "title": "Restore {{table}}",
+    "text": "The table comes back with its data as it was when it was dropped.",
+    "restoreAs": "Restore as",
+    "restoreAsHelp": "The table comes back under this name. Choose one that no table in {{namespace}} has.",
+    "confirm": "Undrop"
+  }
+}

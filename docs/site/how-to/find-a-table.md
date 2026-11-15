@@ -128,6 +128,22 @@ not a column, and **Order** names the direction in words that fit the key ("Newe
 comes last. The sort is in the address, so Back returns to the previous order and a link
 shares it.
 
+### The views
+
+Above the search, a row of links switches the Catalog between **All tables**, **Dropped**,
+**Expiring** and **Orphans**. The current one is marked. Dropped lists the tables dropped from an
+environment that can still be restored and lets you restore them
+(see [Drop and restore a table](drop-and-restore-a-table.md#see-what-can-be-restored)). Expiring
+and Orphans are listed per environment too.
+
+Only All tables has the search and the sort. The other views list one
+environment, or one namespace of it, so they start by asking you to choose an environment when the
+address names none: the page lists your environments as links, each keeping the view. Choosing a
+place in the tree, switching views and following a link keep the place; the choice is part of the
+address (`?view=dropped`), so a link opens the same view. A view lists nothing when no table matches
+its rule in that place; the page says so in a sentence, and an error shows the server's own words
+with **Try again**.
+
 ### Narrow the list with the tree
 
 Beside the list, the tree of places has **All tables** on top, then one entry per environment
@@ -156,7 +172,7 @@ choose a namespace.
 
 ### Share a view, and come back to it
 
-The place, the search and the sort are in the address, so a link shows the same list and Back
+The place, the view, the search and the sort are in the address, so a link shows the same list and Back
 and Forward step through your choices. Opening **Catalog** without a query takes you to the
 place you chose last. This browser keeps that choice for you, nobody else sees it, and a link
 with its own place always wins.

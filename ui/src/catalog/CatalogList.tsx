@@ -6,7 +6,7 @@
  */
 import "./catalog.css";
 
-import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import {
@@ -33,13 +33,32 @@ import { SortControl } from "./SortControl";
 import { TableList } from "./TableList";
 import { buildTree, findNode } from "./tree";
 import { useTablePages } from "./useTablePages";
+import { ViewSwitch } from "./views/ViewSwitch";
 import { type CatalogView, DEFAULT_VIEW, placed, readView, sortedBy, viewSearch } from "./view";
+
+// The body of every view but All loads on demand, with the strings and the code of its lists.
+const ViewBody = lazy(() => import("./views/ViewBody"));
 
 // How long loading takes before the page says so in words.
 const SAY_LOADING_AFTER_MS = 1000;
 // How many tables the server looks at in a search before it stops.
 const SEARCH_CAP = 5000;
 const SKELETON_ROWS = 5;
+
+/**
+ * The skeleton rows shown while a list is read.
+ *
+ * @returns The rows, hidden from assistive technology.
+ */
+function ListSkeleton(): JSX.Element {
+  return (
+    <div className="skeleton" aria-hidden="true">
+      {Array.from({ length: SKELETON_ROWS }, (_row, index) => (
+        <div className="skeleton-row" key={index} />
+      ))}
+    </div>
+  );
+}
 
 /**
  * Whether something has lasted longer than a delay.
@@ -128,7 +147,8 @@ export function CatalogList(): JSX.Element {
   // waits behind the skeleton, so its error for the gone place never shows.
   const stale = fromMemory && root !== null && findNode(root, environment, namespace) === null;
   const settled = treeKnown && !stale;
-  const reading = items === undefined ? error === null : items.length === 0 && busy;
+  const onAll = view.view === "all";
+  const reading = onAll && (items === undefined ? error === null : items.length === 0 && busy);
   const loading = reading || !settled;
   const slow = useLonger(loading, SAY_LOADING_AFTER_MS);
 
@@ -195,7 +215,7 @@ export function CatalogList(): JSX.Element {
   let result = "";
   if (slow) {
     result = t("catalog.loading");
-  } else if (settled && items !== undefined && items.length > 0 && (hasMore || !busy)) {
+  } else if (onAll && settled && items !== undefined && items.length > 0 && (hasMore || !busy)) {
     const kind = view.q === "" ? "result" : "matches";
     result = t(`catalog.${kind}.${hasMore ? "first" : "all"}`, { count: items.length, place });
   }
@@ -280,17 +300,18 @@ export function CatalogList(): JSX.Element {
             {notice}
             {notice === null && (
               <>
-                <CatalogSearch view={view} onSearch={search} />
+                <ViewSwitch view={view} />
+                {onAll && <CatalogSearch view={view} onSearch={search} />}
                 <div className="catalog-bar">
                   <div className="catalog-result-line">
                     <p className="catalog-result" role="status" tabIndex={-1} ref={resultLine}>
                       {result}
                     </p>
-                    {settled && items !== undefined && items.length > 0 && widenButton}
+                    {onAll && settled && items !== undefined && items.length > 0 && widenButton}
                   </div>
-                  <SortControl view={view} onChange={go} />
+                  {onAll && <SortControl view={view} onChange={go} />}
                 </div>
-                {listAlert && (
+                {onAll && listAlert && (
                   <>
                     <p className="step-error" role="alert">
                       {error}
@@ -300,39 +321,48 @@ export function CatalogList(): JSX.Element {
                     </Button>
                   </>
                 )}
-                {loading && (
-                  <div className="skeleton" aria-hidden="true">
-                    {Array.from({ length: SKELETON_ROWS }, (_row, index) => (
-                      <div className="skeleton-row" key={index} />
-                    ))}
-                  </div>
+                {loading && <ListSkeleton />}
+                {!onAll && settled && root !== null && (
+                  <Suspense fallback={<ListSkeleton />}>
+                    <ViewBody view={view} root={root} />
+                  </Suspense>
                 )}
-                {settled && items !== undefined && items.length === 0 && !busy && view.q !== "" && (
-                  <div className="empty">
-                    <p>{t("catalog.noHits", { place, q: view.q })}</p>
-                    {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
-                  </div>
-                )}
-                {settled && items !== undefined && items.length === 0 && !busy && view.q === "" && (
-                  <div className="empty">
-                    <p>
-                      {t("catalog.empty.text", {
-                        place: view.namespace ?? view.environment ?? t("catalog.place.all"),
-                      })}
-                    </p>
-                    <CopyLine
-                      text={`lakana deploy --env ${view.environment ?? "dev"}`}
-                      copyLabel={t("catalog.empty.copy")}
-                    />
-                    <p>
-                      <a href={TUTORIAL_URL} target="_blank" rel="noreferrer">
-                        {t("catalog.empty.tutorial")}
-                        <span className="visually-hidden"> {t("home.newTab")}</span>
-                      </a>
-                    </p>
-                  </div>
-                )}
-                {settled && items !== undefined && items.length > 0 && (
+                {onAll &&
+                  settled &&
+                  items !== undefined &&
+                  items.length === 0 &&
+                  !busy &&
+                  view.q !== "" && (
+                    <div className="empty">
+                      <p>{t("catalog.noHits", { place, q: view.q })}</p>
+                      {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
+                    </div>
+                  )}
+                {onAll &&
+                  settled &&
+                  items !== undefined &&
+                  items.length === 0 &&
+                  !busy &&
+                  view.q === "" && (
+                    <div className="empty">
+                      <p>
+                        {t("catalog.empty.text", {
+                          place: view.namespace ?? view.environment ?? t("catalog.place.all"),
+                        })}
+                      </p>
+                      <CopyLine
+                        text={`lakana deploy --env ${view.environment ?? "dev"}`}
+                        copyLabel={t("catalog.empty.copy")}
+                      />
+                      <p>
+                        <a href={TUTORIAL_URL} target="_blank" rel="noreferrer">
+                          {t("catalog.empty.tutorial")}
+                          <span className="visually-hidden"> {t("home.newTab")}</span>
+                        </a>
+                      </p>
+                    </div>
+                  )}
+                {onAll && settled && items !== undefined && items.length > 0 && (
                   <>
                     <TableList
                       items={items}
