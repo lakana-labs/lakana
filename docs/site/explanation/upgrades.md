@@ -544,6 +544,16 @@ destination, and a webhook or a connection that names one is refused the way one
   result page), which is different from "no column was masked" (an empty list). Only runs after
   the upgrade record the masks ([Preview a table](../how-to/preview-a-table.md)).
 
+### Task images ship no pip, setuptools or wheel
+
+The task images (`lakana-task:<version>-py3.11` to `-py3.14`) no longer contain the base image's
+`pip`, nor `setuptools` and `wheel` (only the Python 3.11 image had those two). Their bundled copies
+lagged security fixes, and nothing in the image uses them: the environment of a Python asset is
+built by uv from the project's lock. A task that calls the system `pip` (for example `pip install`
+at run time) now fails. Declare every package the task needs in `[project] dependencies`, run
+`uv lock` and deploy ([Dependencies](../reference/python-assets.md#dependencies)). Pull the task
+images of the new version together with the others.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

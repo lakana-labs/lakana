@@ -395,6 +395,13 @@ spill directory and, when the worker has a memory limit, two more `POLARS_*` set
 output and the output of the environment build are in `lakana runs logs`, up to 1 MiB per
 attempt (see [Run](../how-to/projects.md#run)).
 
+When the attempt ends, the worker deletes those directories, whatever the task did to them: it
+restores modes the task removed, and on macOS (the local runner) it clears the flags `uchg` and
+`uappnd` and the ACLs the task set on its own files. It never follows a link out of the
+directory, and it leaves a locked file that has a second hard link: its flags and ACL belong to
+the other name too, which can lie outside. What it cannot delete it names in its log, once per directory on macOS with the commands
+that remove it by hand.
+
 Each attempt also records its highest memory, its processor time and the bytes it read; see
 [`lakana task history`](../how-to/instance-health.md). The SDK counts the bytes read by its own
 readers (`lakana.ingest` and the table reads), so a task that reads with another library shows
@@ -476,6 +483,10 @@ it, keyed by the hash of the lock together with your `pyproject.toml`, the Pytho
 platform. With the local runner, projects whose lock and `pyproject.toml` are both identical
 share the environment; with the docker runner an environment belongs to one project in one
 environment. A change to either file builds a new one.
+
+The environment holds only what the lock names: `uv sync` adds no `pip`. With the docker runner the task
+image has none either (nor `setuptools` or `wheel`): a task that runs `pip install` at run time
+fails. Name every package in `[project] dependencies` and lock it instead.
 
 Put a Python asset's dependencies in `[project] dependencies`. Packages in a dependency group
 (`[dependency-groups]`, including `dev`, and `[tool.uv] default-groups`) are not installed for a

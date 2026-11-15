@@ -97,22 +97,34 @@ A Compose bundle starts these images, and the first three come from registries o
 | Image | Used for |
 |---|---|
 | `ghcr.io/lakana-labs/lakana:<version>` | The server, the workers, the launcher, `egress`, `migrate` and `setup` |
-| `ghcr.io/lakana-labs/lakana-task:<version>-py3.11` to `-py3.14` | The containers that run Python tasks and build their environments (the default runner); only the Pythons your projects name are used |
-| `postgres:16` and `chrislusf/seaweedfs:4.47` | The catalog and the object storage |
+| `ghcr.io/lakana-labs/lakana-task:<version>-py3.11` | Python tasks of projects on Python 3.11: the containers that run them and build their environments (the default runner) |
+| `ghcr.io/lakana-labs/lakana-task:<version>-py3.12` | The same, for Python 3.12 |
+| `ghcr.io/lakana-labs/lakana-task:<version>-py3.13` | The same, for Python 3.13 |
+| `ghcr.io/lakana-labs/lakana-task:<version>-py3.14` | The same, for Python 3.14 |
+| `postgres:16` | The catalog |
+| `chrislusf/seaweedfs:4.47` | The object storage |
 
-`docker compose config --images` lists the images of the Compose file; the task images are not in
-it, because the launcher starts them from `LAKANA_TASK_IMAGE`. On a machine with internet access
-pull each image and save it to one archive, carry the archive, and load it on the Docker host
-before `docker compose up`:
+This table is the complete list. `docker compose config --images` is not: it lists the images of
+the Compose file, and the task images are not in it, because the launcher starts them from
+`LAKANA_TASK_IMAGE`. You need only the task images of the Pythons your projects run on:
+`-py3.14` for a project whose `lakana.yaml` names no `python:`, and the one it names otherwise
+([Choose the Python](run-python-tasks-in-containers.md#choose-the-python)). On a machine
+with internet access pull each image and save it to one archive, carry the archive, and load it on
+the Docker host before `docker compose up`:
 
 <!-- not tested: needs Docker, the internet and a published release; the steps are Docker's own -->
 ```bash
 docker pull ghcr.io/lakana-labs/lakana:<version>
+docker pull ghcr.io/lakana-labs/lakana-task:<version>-py3.11
+docker pull ghcr.io/lakana-labs/lakana-task:<version>-py3.12
+docker pull ghcr.io/lakana-labs/lakana-task:<version>-py3.13
 docker pull ghcr.io/lakana-labs/lakana-task:<version>-py3.14
 docker pull postgres:16
 docker pull chrislusf/seaweedfs:4.47
 docker save -o lakana-images.tar \
-  ghcr.io/lakana-labs/lakana:<version> ghcr.io/lakana-labs/lakana-task:<version>-py3.14 \
+  ghcr.io/lakana-labs/lakana:<version> \
+  ghcr.io/lakana-labs/lakana-task:<version>-py3.11 ghcr.io/lakana-labs/lakana-task:<version>-py3.12 \
+  ghcr.io/lakana-labs/lakana-task:<version>-py3.13 ghcr.io/lakana-labs/lakana-task:<version>-py3.14 \
   postgres:16 chrislusf/seaweedfs:4.47
 
 # on the Docker host, after carrying the archive:

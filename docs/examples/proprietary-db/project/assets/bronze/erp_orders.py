@@ -53,7 +53,9 @@ def connect(name, database):
             f"{name}: the server refused the login ({exc.text}); check the user and the "
             f"password: lakana connection update {name} --values-stdin"
         ) from None
-    except OSError as exc:  # refused, reset or timed out before the login
+    # refused, reset or timed out before the login, or closed with no answer (the relay closes
+    # a connection its target refused: pytds reads the end of the stream before any reply)
+    except (OSError, pytds.ClosedConnectionError) as exc:
         raise RuntimeError(
             f"{name}: no answer from the server; under the Docker runner a line "
             "'lakana-relay: refused ...' above says why; check the address: "

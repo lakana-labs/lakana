@@ -1278,11 +1278,11 @@ def _real_environment(stack: Stack, wheels: Path) -> None:
         [
             "sh",
             "-c",
-            "python -m venv /env && /env/bin/python -m pip install -q --no-index "
-            "--find-links /wheels 'lakana[assets]'",
+            "uv venv -q --allow-existing --python /usr/local/bin/python /env && uv pip install -q "
+            "--python /env/bin/python --no-index --find-links /wheels 'lakana[assets]'",
         ],
         user="10002:10002",
-        environment={"HOME": "/tmp"},
+        environment={"HOME": "/tmp", "UV_NO_CACHE": "1", "UV_PYTHON_DOWNLOADS": "never"},
         network_mode="none",
         volumes={volume: {"bind": "/env", "mode": "rw"}, store: {"bind": "/wheels", "mode": "ro"}},
         labels=stack.labels,

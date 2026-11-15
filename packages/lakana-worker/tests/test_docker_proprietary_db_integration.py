@@ -91,7 +91,7 @@ pycparser==3.12 \\
     --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
 """
 """The driver and what it pulls in, with the SHA-256 of each linux x86-64 wheel PyPI has for it
-(cryptography's abi3 wheels, cffi's for CPython 3.11 to 3.14): pip installs them with
+(cryptography's abi3 wheels, cffi's for CPython 3.11 to 3.14): uv installs them with
 ``--require-hashes``, so a file added to a release later is refused. Another Python needs cffi's
 hash for it, and the install says so."""
 
@@ -324,12 +324,13 @@ def _driver_environment(stack: Stack, wheels: Path) -> None:
         [
             "sh",
             "-c",
-            "python -m venv /env && /env/bin/python -m pip install -q --no-index "
-            "--find-links /wheels 'lakana[assets]' && /env/bin/python -m pip install -q "
-            "--require-hashes --no-deps --only-binary=:all: -r /wheels/driver.txt",
+            "uv venv -q --allow-existing --python /usr/local/bin/python /env && uv pip install -q "
+            "--python /env/bin/python --no-index --find-links /wheels 'lakana[assets]' "
+            "&& uv pip install -q --python /env/bin/python --require-hashes --no-deps "
+            "--only-binary=:all: -r /wheels/driver.txt",
         ],
         user="10002:10002",
-        environment={"HOME": "/tmp"},
+        environment={"HOME": "/tmp", "UV_NO_CACHE": "1", "UV_PYTHON_DOWNLOADS": "never"},
         volumes={volume: {"bind": "/env", "mode": "rw"}, store: {"bind": "/wheels", "mode": "ro"}},
         labels=stack.labels,
         remove=True,

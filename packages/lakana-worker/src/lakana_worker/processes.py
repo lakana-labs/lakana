@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import logging
 import os
 import re
+import shlex
 import stat
 import subprocess  # nosec B404 -- only signals a process the caller started; no shell
+import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -357,6 +360,196 @@ _REFUSALS_LOGGED: set[str] = set()
 """Directories whose refused restore was logged already; each is named once per process."""
 
 
+_DARWIN = sys.platform == "darwin"
+"""Whether a task can lock its files with user flags or an ACL that the cleanup must clear."""
+
+_LOCK_FLAGS = stat.UF_IMMUTABLE | stat.UF_APPEND
+"""The user flags that make an entry undeletable: ``uchg`` and ``uappnd``."""
+
+_ACL_TYPE_EXTENDED = 0x100
+"""macOS's ``ACL_TYPE_EXTENDED``, the only ACL type it has."""
+
+
+class _MacLocks:
+    """macOS's libc calls that clear what a task can lock its files with, on a descriptor.
+
+    A descriptor names the inode that was opened, so a rename that races the cleanup cannot
+    redirect a call, and nothing here takes a path.
+
+    Parameters
+    ----------
+    load
+        Returns the C library; called once, on first use.
+    """
+
+    def __init__(self, load: Callable[[], ctypes.CDLL]) -> None:
+        """Keep the loader; nothing is loaded before the first call.
+
+        Parameters
+        ----------
+        load
+            Returns the C library.
+        """
+        self._load = load
+        self._lib: ctypes.CDLL | None = None
+
+    def _libc(self) -> ctypes.CDLL:
+        """Load the C library and declare the signatures used here.
+
+        Returns
+        -------
+        ctypes.CDLL
+            The library.
+        """
+        if self._lib is None:
+            lib = self._load()
+            lib.fchflags.argtypes = (ctypes.c_int, ctypes.c_uint)
+            lib.fchflags.restype = ctypes.c_int
+            lib.acl_init.argtypes = (ctypes.c_int,)
+            lib.acl_init.restype = ctypes.c_void_p
+            lib.acl_set_fd_np.argtypes = (ctypes.c_int, ctypes.c_void_p, ctypes.c_uint)
+            lib.acl_set_fd_np.restype = ctypes.c_int
+            lib.acl_free.argtypes = (ctypes.c_void_p,)
+            lib.acl_free.restype = ctypes.c_int
+            self._lib = lib
+        return self._lib
+
+    def clear_flags(self, fd: int, flags: int) -> None:
+        """Clear ``uchg`` and ``uappnd`` (`chflags nouchg,nouappnd`), keeping every other flag.
+
+        Parameters
+        ----------
+        fd
+            An open descriptor of the entry.
+        flags
+            Its current flags (``st_flags``).
+
+        Raises
+        ------
+        OSError
+            If ``fchflags`` fails.
+        """
+        if flags & _LOCK_FLAGS and self._libc().fchflags(fd, flags & ~_LOCK_FLAGS) != 0:
+            _raise_errno("fchflags")
+
+    def strip_acl(self, fd: int) -> None:
+        """Replace the entry's ACL with an empty one (`chmod -N`), deny-delete entries included.
+
+        Parameters
+        ----------
+        fd
+            An open descriptor of the entry.
+
+        Raises
+        ------
+        OSError
+            If ``acl_init`` or ``acl_set_fd_np`` fails.
+        """
+        lib = self._libc()
+        acl = lib.acl_init(1)
+        if not acl:
+            _raise_errno("acl_init")
+        try:
+            if lib.acl_set_fd_np(fd, acl, _ACL_TYPE_EXTENDED) != 0:
+                _raise_errno("acl_set_fd_np")
+        finally:
+            lib.acl_free(acl)
+
+
+def _raise_errno(call: str) -> None:
+    """Raise the error a C call left in ``errno``.
+
+    Parameters
+    ----------
+    call
+        The C function's name, for the message.
+
+    Raises
+    ------
+    OSError
+        Always.
+    """
+    code = ctypes.get_errno()
+    raise OSError(code, f"{call}: {os.strerror(code)}")
+
+
+_mac_locks = _MacLocks(lambda: ctypes.CDLL(None, use_errno=True))
+"""The calls, through the process's own C library (libSystem); used on macOS only."""
+
+
+def _unlock_descriptor(fd: int) -> bool:
+    """Clear the lock flags and the ACL of an open entry the task could have locked (macOS).
+
+    Only an entry of the worker's own user, and a non-directory only when it has no other hard
+    link: a hard link shares its inode, flags and ACL with a file that may lie outside the
+    task's tree. Each call is best effort; the caller's retry finds out whether it was enough.
+
+    Parameters
+    ----------
+    fd
+        A descriptor opened below the task's tree without following a link.
+
+    Returns
+    -------
+    bool
+        Whether the entry qualified and both calls were made without an error.
+    """
+    info = os.fstat(fd)
+    if info.st_uid != os.geteuid():
+        return False
+    if not stat.S_ISDIR(info.st_mode) and info.st_nlink != 1:
+        return False
+    cleared = True
+    try:
+        _mac_locks.clear_flags(fd, getattr(info, "st_flags", 0))
+    except OSError:
+        cleared = False
+    try:
+        _mac_locks.strip_acl(fd)
+    except OSError:
+        cleared = False
+    return cleared
+
+
+def _unlink_unlocked(name: str, parent_fd: int) -> bool:
+    """Unlock a non-directory entry the kernel refused to unlink, then unlink it (macOS).
+
+    The entry is opened relative to `parent_fd` as itself: a symlink by ``O_SYMLINK`` (never
+    its target), anything else with ``O_NOFOLLOW``, and ``O_NONBLOCK`` so a FIFO does not wait.
+    Where ``O_SYMLINK`` is missing, a link fails that open and is left.
+
+    Parameters
+    ----------
+    name
+        The entry's name.
+    parent_fd
+        A descriptor of its directory, already unlocked.
+
+    Returns
+    -------
+    bool
+        Whether the entry is gone.
+    """
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC
+    try:
+        is_link = stat.S_ISLNK(os.lstat(name, dir_fd=parent_fd).st_mode)
+        as_itself = getattr(os, "O_SYMLINK", 0) if is_link else 0
+        handle = os.open(name, flags | (as_itself or os.O_NOFOLLOW), dir_fd=parent_fd)
+    except OSError:
+        return False
+    try:
+        unlocked = _unlock_descriptor(handle)
+    finally:
+        os.close(handle)
+    if not unlocked:
+        return False
+    try:
+        os.unlink(name, dir_fd=parent_fd)
+    except OSError:
+        return False
+    return True
+
+
 def restore_directory_access(name: str, parent_fd: int, path: Path) -> bool:
     """Set a directory the task locked back to mode 0700, never through a symlink.
 
@@ -539,6 +732,8 @@ def _clear_directory(root_fd: int, root: Path) -> bool:
         Whether everything below it was removed.
     """
     complete = True
+    if _DARWIN:
+        _unlock_descriptor(root_fd)
     os.fchmod(root_fd, 0o700)
     stack: list[tuple[int, str, list[str], Path]] = [(root_fd, "", os.listdir(root_fd), root)]
     while stack:
@@ -562,13 +757,16 @@ def _clear_directory(root_fd: int, root: Path) -> bool:
             try:
                 os.unlink(name, dir_fd=fd)
             except OSError:
-                complete = False
+                if not (_DARWIN and _unlink_unlocked(name, fd)):
+                    complete = False
             continue
         child = None if len(stack) >= _MAX_REMOVE_DEPTH else _open_directory(name, fd, where / name)
         if child is None:
             complete = False
             continue
         try:
+            if _DARWIN:
+                _unlock_descriptor(child)
             os.fchmod(child, 0o700)
             stack.append((child, name, os.listdir(child), where / name))
         except OSError:
@@ -615,8 +813,25 @@ def remove_private_tree(path: Path) -> bool:
         finally:
             os.close(parent_fd)
     if not removed:
-        logger.warning("could not remove %s completely", path)
+        if _DARWIN and str(path) not in _MANUAL_FIX_LOGGED:
+            _MANUAL_FIX_LOGGED.add(str(path))
+            quoted = shlex.quote(str(path))
+            logger.warning(
+                "could not remove %s completely. On macOS a task can lock its files with flags "
+                "or an ACL that the worker does not clear safely: a hard link to a file "
+                "elsewhere (find %s -type f -links +1 lists them), or a locked directory with "
+                "mode 000. To remove it by hand: chflags -R nouchg,nouappnd %s && chmod -R -N "
+                "%s && chmod -R u+rwX %s && rm -rf %s",
+                shown(str(path)),
+                *(shown(quoted),) * 5,
+            )
+        else:
+            logger.warning("could not remove %s completely", path)
     return removed
+
+
+_MANUAL_FIX_LOGGED: set[str] = set()
+"""Trees whose manual fix was logged already (macOS); each is named once per process."""
 
 
 def _remove_entry(name: str, parent_fd: int, path: Path) -> bool:
