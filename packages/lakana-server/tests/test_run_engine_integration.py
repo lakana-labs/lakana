@@ -1626,6 +1626,7 @@ def _checked_project(
     *,
     on_failure: str | None = None,
     config: str = "",
+    existing: dict[str, pa.Table] | None = None,
 ) -> str:
     """Create `env`, and register and deploy a project with assets and checks.
 
@@ -1647,6 +1648,10 @@ def _checked_project(
         The ``on_failure`` of every check; `None` writes none, so the default applies.
     config
         Lines appended to the project's ``lakana.yaml``, e.g. a ``checks:`` section.
+    existing
+        Tables a person creates before the deploy, dotted name to their rows (``_IDS``): the
+        project then takes each over, as a deploy of a table a person built does. After the
+        deploy a person may no longer create a name the project declares.
 
     Returns
     -------
@@ -1657,6 +1662,9 @@ def _checked_project(
     admin.environments.create(env, storage={**stack.storage, "root": f"s3://lakana/{env}"})
     admin.tables.create(env, "bronze.events", schema=_IDS)
     admin.tables.append(env, "bronze.events", pa.table({"id": pa.array([1, 2], pa.int64())}))
+    for table, rows in (existing or {}).items():
+        admin.tables.create(env, table, schema=_IDS)
+        admin.tables.append(env, table, rows)
     path = stack.roots / repo
     for (table, check), sql in checks.items():
         _write_check(path, table, check, sql, on_failure=on_failure)
@@ -2101,7 +2109,7 @@ def test_a_table_that_is_not_published_takes_grants_policies_and_a_delete(
 ) -> None:
     """Spec section 7: its identity does not change, so governance can be set meanwhile."""
     client, admin = sdk
-    env, _, _, why = _unpublished(stack, admin, client)
+    env, repo, _, why = _unpublished(stack, admin, client)
     reader = _name()
     admin.principals.create(reader, "USER")
     where = {"environment": env, "namespace": "silver", "table": "orders"}
@@ -2112,6 +2120,10 @@ def test_a_table_that_is_not_published_takes_grants_policies_and_a_delete(
     assert [f.id for f in admin.row_filters.list(principal_name=reader)] == [row_filter.id]
     assert [m.id for m in admin.column_masks.list(principal_name=reader)] == [mask.id]
     assert admin.tables.get(env, "silver.orders").state_message == why  # still not published
+    # The project still builds it, so a person drops it only once the project is undeployed.
+    with pytest.raises(Conflict, match="is built by a deployed project"):
+        admin.tables.delete(env, "silver.orders")
+    admin.deployments.undeploy(env, repo)
     admin.tables.delete(env, "silver.orders")
     with pytest.raises(NotFound):
         admin.tables.get(env, "silver.orders")
@@ -2387,9 +2399,8 @@ def _replaced_project(
             "assets/gold/report.sql": _REPORT,
         },
         {("silver.orders", "wrong"): check},
+        existing={"silver.orders": pa.table({"id": pa.array([7, 8], pa.int64())})},
     )
-    admin.tables.create(env, "silver.orders", schema=_IDS)
-    admin.tables.append(env, "silver.orders", pa.table({"id": pa.array([7, 8], pa.int64())}))
     return env, repo
 
 
