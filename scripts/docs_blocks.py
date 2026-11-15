@@ -849,7 +849,8 @@ def _output_problem(
     )
     return (
         f"{where}: this output block differs from what {value} printed "
-        f"(parts that differ per run are masked, progress lines left out):\n{diff}\nRun the examples with "
+        f"(parts that differ per run are masked, progress lines left out):\n{diff}\n"
+        "Run the examples with "
         f"LAKANA_DOCS_CAPTURE={captured} and `uv run python scripts/docs_blocks.py --fix "
         f"--captured {captured}` to copy the run into the page, or change the CLI back."
     )
