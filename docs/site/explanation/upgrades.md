@@ -178,8 +178,8 @@ rebuild`. A script that restored a name with `undrop --as` onto a declared name 
 restorable for the undo period, and queues a run of its asset, all in one transaction. It is also
 `POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild` and
 `client.tables.rebuild(environment, "namespace.table", reason=…)`. It needs `DROP_TABLE` on the table
-and `RUN` on the environment, asks a browser for a passkey touch, and refuses while a run of the
-asset is active. A deploy that switches a table to `write: history` fails the table's precheck
+and `RUN` on the environment, asks a browser for a passkey touch, and refuses while any run of
+the project is active. A deploy that switches a table to `write: history` fails the table's precheck
 until the table is built again (`HISTORY_COLUMN_MISSING`): deploy, then rebuild. See [Drop and
 restore a table](../how-to/drop-and-restore-a-table.md).
 
@@ -221,6 +221,10 @@ A refusal that told you to drop a table and wait for the next run now names the 
 `HISTORY_COLUMN_MISSING` (no longer "and deploy again"), the refusal of a commit that would leave a
 table with no current snapshot, and the history refusals (two open versions of a key, a surrogate key
 shared, delete files from another writer, a table its first history run did not create). A script that matches those texts must change.
+The refusals of a namespace delete now read "X still holds N tables." (or artifacts, or namespaces) and "X is not
+empty; drop what it holds first.", not "Namespace X still contains tables.". The table of `lakana orphans`
+has the new columns `kind` and `state` ("exists" or "dropped, restorable"): a script that reads it by
+column should use `--output json`.
 
 ### A lock's files need a strong hash and an http URL (breaking)
 

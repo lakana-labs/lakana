@@ -347,8 +347,10 @@ silver.station_temperatures/no_missing_station --env dev`. It is published by th
 ```
 
 The next run in which the table's checks pass publishes it, and `state` reads `published` again.
-You can set grants, row filters and column masks on the table meanwhile, and `lakana table delete`
-removes it as it removes any table.
+You can set grants, row filters and column masks on the table meanwhile. A project builds the table, so
+`lakana table delete` is refused: build it again from git with `lakana table rebuild
+silver.station_temperatures --env dev --reason "…"`, or remove its asset in git, deploy, and drop the
+table from Orphans.
 
 ## See what failed
 
