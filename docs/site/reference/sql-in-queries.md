@@ -80,7 +80,11 @@ with ...; remove it from the query.": `AT (...)`, `ONLY`, `WITH ORDINALITY`, a t
 
 `TABLE gold.sales` is shorthand for `SELECT * FROM gold.sales`: it returns the rows your row
 filters leave, with your column masks applied. `SORT BY` is refused with "SORT BY is not
-supported; use ORDER BY."; write `ORDER BY` instead.
+supported; use ORDER BY." in a query, a SQL asset or a check; write `ORDER BY` instead.
+
+Lakana before this release accepted `SORT BY` and ran the query without it, so a view created then
+can hold one. A query over that view now fails with "View 'gold.v' could not be read. Ask its owner
+to recreate it."; the owner creates the view again with `ORDER BY` in place of `SORT BY`.
 
 ## Recursive queries are refused
 

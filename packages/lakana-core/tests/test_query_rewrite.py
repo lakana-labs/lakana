@@ -2755,6 +2755,7 @@ def test_a_clause_duckdb_does_not_take_on_a_bare_values_list_is_refused(
         "select a from bronze.x sort by a",
         "SELECT * FROM (SELECT 1 AS a SORT BY a) AS s",
         "SELECT a FROM bronze.x SORT\n  BY a",
+        "SELECT sort by FROM bronze.x SORT BY by",
     ],
 )
 def test_a_sort_by_is_refused_with_the_order_by_hint(sql: str) -> None:
@@ -2775,7 +2776,12 @@ def test_a_sort_by_is_refused_with_the_order_by_hint(sql: str) -> None:
 
 @pytest.mark.parametrize(
     "sql",
-    ["SELECT 1 +", "SELECT sort, by FROM", "SELECT 'SORT BY' AS s FROM"],
+    [
+        "SELECT 1 +",
+        "SELECT sort, by FROM",
+        "SELECT 'SORT BY' AS s FROM",
+        "SELECT sort by FROM bronze.x WHERE",
+    ],
 )
 def test_a_syntax_error_without_sort_by_stays_a_syntax_error(sql: str) -> None:
     """Only the words `SORT BY` outside a string get the hint; other broken SQL does not.

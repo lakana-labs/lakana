@@ -582,6 +582,15 @@ _VALUES_ALIAS = "__lakana_values"
 _SORT_BY_MESSAGE = "SORT BY is not supported; use ORDER BY."
 """Why a query with a `SORT BY` is refused: neither sqlglot nor DuckDB reads the clause."""
 
+
+class SortByError(ValidationError):
+    """SQL that does not parse because of a `SORT BY` clause (`_SORT_BY_MESSAGE`).
+
+    A subclass so that a caller parsing text the reader did not write, such as a stored view's,
+    can tell it apart and report that text as unreadable instead of handing the reader the hint.
+    """
+
+
 _JOIN_WITHOUT_FROM_MESSAGE = (
     "A JOIN needs a FROM before it: write SELECT ... FROM a JOIN b ON ... and submit it again."
 )
@@ -1049,13 +1058,52 @@ def _render(parsed: exp.Expr, dialect: str) -> str:
     return parsed.sql(dialect=dialect)
 
 
-def _parse_with_hints(sql: str, dialect: str) -> exp.Expr:
-    """Parse submitted SQL as `_parse_sql` does, naming `ORDER BY` for a `SORT BY` it cannot read.
+_VAR = sqlglot.tokens.TokenType.VAR
+"""The token type of a plain word, which `SORT` and `BY` are to Lakana's tokenizer."""
+
+
+def refuse_sort_by(sql: str, dialect: str, error: sqlglot.errors.ParseError) -> None:
+    """Raise the `ORDER BY` hint when `error` is sqlglot failing on a `SORT BY` clause in `sql`.
 
     From sqlglot 30.25 the DuckDB parser fails on `SORT BY` (30.24 parsed it and dropped it from
-    the rendering). Only when the parse fails are the tokens looked at: `SORT` followed by `BY`
-    outside a string or quoted name turns the syntax error into the refusal that says what to
-    write instead.
+    the rendering). The hint fires only when the parse failed at the `SORT` or the `BY` of a pair
+    of plain words `SORT` `BY` (outside a string or quoted name): a column `sort` aliased `by` in
+    text that fails somewhere else keeps its own syntax error.
+
+    Parameters
+    ----------
+    sql
+        The text that did not parse.
+    dialect
+        The SQL dialect it was parsed as.
+    error
+        The parse failure.
+
+    Raises
+    ------
+    SortByError
+        If the failure is at a `SORT BY`.
+    """
+    position = next(
+        ((e.get("line"), e.get("col")) for e in error.errors if e.get("line") is not None),
+        None,
+    )
+    if position is None:
+        return
+    # The parse tokenized this text already; a text that does not tokenize raised a
+    # TokenError there, never the ParseError handled here.
+    tokens = sqlglot.tokenize(sql, dialect=sql_dialect.reading_dialect(dialect))
+    for first, second in itertools.pairwise(tokens):
+        words = [t.text.upper() for t in (first, second) if t.token_type is _VAR]
+        if words == ["SORT", "BY"] and position in {
+            (first.line, first.col),
+            (second.line, second.col),
+        }:
+            raise SortByError(_SORT_BY_MESSAGE) from error
+
+
+def _parse_with_hints(sql: str, dialect: str) -> exp.Expr:
+    """Parse submitted SQL as `_parse_sql` does, naming `ORDER BY` for a `SORT BY` it cannot read.
 
     Parameters
     ----------
@@ -1071,23 +1119,15 @@ def _parse_with_hints(sql: str, dialect: str) -> exp.Expr:
 
     Raises
     ------
-    ValidationError
-        If the text does not parse and holds `SORT BY` (`_SORT_BY_MESSAGE`).
+    SortByError
+        If the text does not parse because of a `SORT BY` (`refuse_sort_by`).
     sqlglot.errors.ParseError
         If it does not parse for any other reason; see `_parse_sql`.
     """
     try:
         return _parse_sql(sql, dialect)
     except sqlglot.errors.ParseError as exc:
-        # The parse tokenized this text already; a text that does not tokenize raised a
-        # TokenError there, never the ParseError caught here.
-        tokens = sqlglot.tokenize(sql, dialect=sql_dialect.reading_dialect(dialect))
-        words = [
-            token.text.upper() if token.token_type is sqlglot.tokens.TokenType.VAR else None
-            for token in tokens
-        ]
-        if any(a == "SORT" and b == "BY" for a, b in itertools.pairwise(words)):
-            raise ValidationError(_SORT_BY_MESSAGE) from exc
+        refuse_sort_by(sql, dialect, exc)
         raise
 
 
@@ -2311,8 +2351,10 @@ def _expand_into(
         try:
             check_blacklist(view.sql, dialect)
             inner = _parse_checked(view.sql, dialect)
-        except SQL_SYNTAX_ERRORS as exc:
-            # The stored SQL may name tables the reader cannot see: name the view only.
+        except (*SQL_SYNTAX_ERRORS, SortByError) as exc:
+            # The stored SQL may name tables the reader cannot see: name the view only. A
+            # `SORT BY` is unreadable too (a view saved under sqlglot 30.24 can hold one): the
+            # reader never wrote it, so the `ORDER BY` hint is not theirs to act on.
             raise ValidationError(unreadable_view_message(dotted)) from exc
         _expand_into(inner, lookup, (*stack, dotted), expanded, named_views, max_depth, dialect)
         alias = table.args.get("alias")
