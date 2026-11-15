@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -165,7 +166,9 @@ def test_a_fired_block_signal_fails_the_task_and_sets_the_table_back(world: Worl
     assert result.error is not None
     assert result.error.startswith("health signal volume fired at snapshot ")
     assert "`lakana table health silver.orders --env dev --signals`" in result.error
-    assert "1000" not in result.error and "1,000" not in result.error  # no values
+    # The snapshot id is random and may contain "1000"; the values must not appear anywhere else.
+    without_snapshot = re.sub(r"snapshot \d+", "snapshot <id>", result.error)
+    assert "1000" not in without_snapshot and "1,000" not in without_snapshot  # no values
     assert task.error_message is not None
     assert task.error_message.startswith(
         "Check `silver.orders/health_volume` failed: health signal volume fired at snapshot "

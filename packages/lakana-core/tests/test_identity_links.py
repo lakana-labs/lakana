@@ -479,8 +479,13 @@ def test_principal_create_refuses_a_case_variant(world: World) -> None:
         )
 
 
-def test_invite_name_is_reserved_while_open(world: World, clock: _Clock) -> None:
+def test_invite_name_is_reserved_while_open(
+    world: World, clock: _Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """While an invite is open its name cannot be created or invited again; after expiry it can."""
+    # The principal service reads the wall clock; run it on the test's clock, so the invite's
+    # seven days are counted from START and the test does not expire with the calendar.
+    monkeypatch.setattr("lakana_core.identity.principals.utc_now", clock)
     link = _invite(world, "carol")
     principals = PrincipalService(world.session, world.authz)
     with pytest.raises(AlreadyExistsError, match="invite"):
