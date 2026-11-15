@@ -94,7 +94,7 @@ lakana deploy --env dev
 lakana job run nightly --env dev
 ```
 
-<!-- output -->
+<!-- output: notice-a-broken-pipeline#change -->
 ```text
 Queued deploy 35965e28-ba00-40cf-8ea5-feb2a5c7f4f0
 Deployed readings in dev at 6f88d1f50b9d03d18da160d9eb498c6a638b4a75
@@ -145,7 +145,7 @@ everyone who may read the run reads it; the history has them:
 lakana table health silver.orders --env dev --signals --signal schema
 ```
 
-<!-- output -->
+<!-- output: notice-a-broken-pipeline#signals -->
 ```text
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
 ┃ observed_at               ┃ signal ┃ column ┃ state            ┃ effect ┃ snapshot_id         ┃
@@ -153,7 +153,7 @@ lakana table health silver.orders --env dev --signals --signal schema
 │ 2026-11-05T00:33:19+00:00 │ schema │        │ fired (set back) │ block  │ 5033228317085625887 │
 │ 2026-11-05T00:33:12+00:00 │ schema │        │ ok               │ block  │ 8968045175124190761 │
 └───────────────────────────┴────────┴────────┴──────────────────┴────────┴─────────────────────┘
-Fired: silver.orders: schema changed: added amount (decimal(3, 1)) (snapshot 5033228317085625887, 05 Nov 00:33 UTC); 
+Fired: silver.orders: schema changed: added amount (decimal(3, 1)) (snapshot 5033228317085625887, 05 Nov 00:33 UTC);
 check that what reads silver.orders still works, or set health: {schema: off} if such changes are expected
 ```
 

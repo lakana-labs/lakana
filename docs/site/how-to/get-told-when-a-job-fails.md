@@ -94,7 +94,7 @@ one of three things:
 A job with no `notify:` in the environment is refused, with the next step. On a working setup the
 command prints:
 
-<!-- output -->
+<!-- output: get-told#notify-test -->
 ```text
 delivered
 ```
@@ -212,8 +212,41 @@ After the tasks, the end of the output lists the notifications of the run: the e
 id (the `delivery_id` of the message, and what `lakana job notification ID --env dev` takes) and
 where the delivery is:
 
-<!-- output -->
+<!-- output: get-told#runs-show -->
 ```text
+┌─────────────────────┬──────────────────────────────────────────┐
+│ id                  │ 119707f1-0db3-4121-85cf-ca9a7e9460b8     │
+│ repository          │ readings                                 │
+│ commit_sha          │ 3f4bc90194e40ad22c14ba8e9e0d147352e96bf5 │
+│ kind                │ selection                                │
+│ job                 │ daily_bronze                             │
+│ trigger             │ manual                                   │
+│ scheduled_for       │                                          │
+│ missed              │ 0                                        │
+│ status              │ failed                                   │
+│ cancel_requested    │ False                                    │
+│ triggered_by        │ admin                                    │
+│ run_as              │ admin                                    │
+│ resumed_from_run_id │                                          │
+│ error_message       │                                          │
+│ created_at          │ 2026-11-15T16:02:36.808450+00:00         │
+│ started_at          │ 2026-11-15T16:02:36+00:00                │
+│ finished_at         │ 2026-11-15T16:02:37+00:00                │
+└─────────────────────┴──────────────────────────────────────────┘
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ asset           ┃ status ┃ attempt ┃ rows ┃ error                                                                    ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ bronze.readings │ failed │ 1/3     │      │ Query failed: Conversion Error: Could not convert string 'n/a' to DOUBLE │
+└─────────────────┴────────┴─────────┴──────┴──────────────────────────────────────────────────────────────────────────┘
+Not shown: duration. Use --output json to see it.
+
+Resources used (peak memory, processor time, bytes read):
+  bronze.readings attempt 1: 153 MiB · 0.5 s CPU
+
+bronze.readings failed: query_invalid
+  The task's SQL is invalid or was refused.
+  Next: Read the message in the task's log, fix the SQL and deploy again.
+
 Notifications
   failed    4630943a-8f1b-4a57-877a-07d15f91176b  delivered
 ```

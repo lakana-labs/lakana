@@ -350,7 +350,7 @@ terminal (a pipe or a file, as for the output below, which was made in a window 
 and written to a file) it ends with "Use --output json to see it." The whole digest and the whole
 record are in `--output json`:
 
-<!-- output -->
+<!-- output: train-and-predict#artifact-versions -->
 ```text
 ┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
 ┃ version ┃ created_at                  ┃ size  ┃ manifest_sha256 ┃ run_id                               ┃ deleted_at ┃
