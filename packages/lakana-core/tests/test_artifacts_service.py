@@ -268,6 +268,27 @@ def test_artifacts_page_by_namespace_then_name(
     assert seen == ["gold.a", "gold.z", "models.a", "models.b"]
 
 
+def test_a_parent_namespace_lists_its_artifacts_before_its_childs(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """`gold` comes before `gold.sub` whatever the names are, and a page resumes in that order."""
+    service = artifact_service(session, tmp_path)
+    parent = NamespacePath.from_parts(["gold"])
+    child = NamespacePath.from_parts(["gold", "sub"])
+    _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[parent, child])
+    for ref in (TableRef("dev", child, "a"), TableRef("dev", parent, "z")):
+        store_version(service, principal, ref, _FILES)
+    seen: list[str] = []
+    cursor = None
+    while True:
+        page = service.list_artifacts(principal, "dev", limit=1, cursor=cursor)
+        seen.append(f"{page.items[0].ref.namespace}.{page.items[0].ref.name}")
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert seen == ["gold.z", "gold.sub.a"]
+
+
 def test_a_forged_artifact_cursor_reveals_nothing(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:

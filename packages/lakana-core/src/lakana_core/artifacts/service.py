@@ -1194,7 +1194,7 @@ class ArtifactService:
         page = page_in_order(
             readable,
             kind="artifacts",
-            key_of=lambda item: (json.dumps(list(item[0].namespace.parts)), item[0].name),
+            key_of=lambda item: (*item[0].namespace.parts, "", item[0].name),
             limit=limit,
             cursor=cursor,
         )
