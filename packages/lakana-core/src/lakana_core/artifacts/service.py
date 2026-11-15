@@ -2791,9 +2791,10 @@ class ArtifactService:
         self._guard.check(p, ref.environment, WriteOperation.DROP_ARTIFACT, table_target(ref))
         artifact = self._artifact(ref)
         artifact_id = artifact.id
+        # The artifact was found by its environment's name, so that environment is live.
         environment_id = resolve_environment_id(self._session, ref.environment)
-        if environment_id is not None:
-            refuse_owned_drop(self._session, self._authz, p, ref, environment_id, artifact.kind)
+        assert environment_id is not None  # nosec B101
+        refuse_owned_drop(self._session, self._authz, p, ref, environment_id, artifact.kind)
         storage = self._storage.for_environment(ref.environment).storage
         marker = dropped_marker_path(artifact_id)
         marked = False

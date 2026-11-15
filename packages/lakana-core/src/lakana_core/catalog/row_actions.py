@@ -151,11 +151,9 @@ def readable_table_actions_each(
     per_row: list[list[_Question]] = []
     for ref, kind, owner_id, declared in rows:
         scope = _table(ref)
-        questions: list[_Question] = [(Action.READ_TABLE, scope)]
-        if kind in _DROPPABLE or kind == "ARTIFACT":
-            questions.append((Action.DROP_TABLE, scope))
-            if declared and kind in _DROPPABLE:
-                questions.append((Action.RUN, Securable.environment_scope(ref.environment)))
+        questions: list[_Question] = [(Action.READ_TABLE, scope), (Action.DROP_TABLE, scope)]
+        if declared and kind in _DROPPABLE:
+            questions.append((Action.RUN, Securable.environment_scope(ref.environment)))
         if kind == "TABLE":
             questions.append((Action.MAINTAIN_TABLE, scope))
             if owner_id != p.id:

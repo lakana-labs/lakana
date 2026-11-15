@@ -860,6 +860,36 @@ def test_a_dropped_orphan_stays_listed_as_restorable_until_its_purge(
     assert service.orphans(principal, "dev").orphans == []
 
 
+def test_two_dropped_orphans_are_listed_from_one_read_of_the_tombstones(
+    session: Session, env: None, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The dropped tables are read once and answer for every dropped orphan of the list."""
+    repo = _repo(session)
+    names = ("old", "older")
+    catalog = _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        tables=[TableRef("dev", _SILVER, n) for n in names],
+    )
+    _deployed(
+        session,
+        principal,
+        repo,
+        "a" * 40,
+        *(make_asset(f"silver.{n}") for n in names),
+        make_asset("silver.k"),
+    )
+    _deployed(session, principal, repo, "b" * 40, make_asset("silver.k"))
+    for n in names:
+        catalog.drop_table(principal, TableRef("dev", _SILVER, n))
+    orphans = DeployService(session, AllowAllAuthorization()).orphans(principal, "dev").orphans
+    assert [(o.table, o.exists) for o in orphans] == [
+        ("silver.old", False),
+        ("silver.older", False),
+    ]
+
+
 def _orphans_of_two_repositories(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> DeployService:
