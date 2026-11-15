@@ -26,20 +26,31 @@ from core_test_helpers import (
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, AllowAllAuthorization, AuthorizationService, PrincipalRef
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    AuthorizationService,
+    PrincipalRef,
+    SecurableKind,
+)
 from lakana_core.catalog.rebuild import (
     NOT_BUILT_BY_A_PROJECT,
     REBUILD_ARTIFACT,
     REBUILD_RUN_ACTIVE,
     REBUILD_RUN_ACTIVE_UNREAD,
+    REBUILD_SELECTION_MISMATCH,
     TableRebuild,
 )
 from lakana_core.catalog.service import CatalogService
-from lakana_core.errors import ConflictError, PermissionDenied, ValidationError
+from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
+from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
+    Principal,
+    PrincipalType,
     Run,
     Table,
     TableLocation,
@@ -289,6 +300,128 @@ def test_rebuild_names_the_file_only_to_a_caller_who_may_read_the_table(
     result = _rebuild(session, catalog, authz).rebuild(principal, _CLEAN, reason=_REASON)
 
     assert (result.repository, result.path) == ("analytics", None)
+
+
+def _granted_user(session: Session, *table_actions: Action) -> PrincipalRef:
+    """Make a user with `RUN` on `dev` and the given actions on `silver.clean` alone.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    *table_actions
+        The actions granted on the table itself.
+
+    Returns
+    -------
+    PrincipalRef
+        The user.
+    """
+    user = PrincipalRef(id=uuid.uuid4(), name="rebuilder", type=PrincipalType.USER)
+    session.add(Principal(id=user.id, type=user.type, name=user.name, is_active=True))
+    session.commit()
+    grants = GrantService(session, AllowAllAuthorization())
+    grants.grant(
+        user,
+        principal=user.name,
+        action=Action.RUN,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="dev",
+    )
+    for action in table_actions:
+        grants.grant(
+            user,
+            principal=user.name,
+            action=action,
+            kind=SecurableKind.TABLE,
+            environment="dev",
+            namespace="silver",
+            table="clean",
+        )
+    return user
+
+
+@pytest.mark.parametrize(
+    ("table_actions", "path"),
+    [
+        ((Action.DROP_TABLE, Action.READ_TABLE), "assets/silver/clean.sql"),
+        ((Action.DROP_TABLE,), None),
+    ],
+)
+def test_a_read_granted_on_the_table_itself_names_the_file(
+    session: Session,
+    tmp_path: Path,
+    principal: PrincipalRef,
+    table_actions: tuple[Action, ...],
+    path: str | None,
+) -> None:
+    """The read is decided before the drop revokes the table's own grants and deletes its row."""
+    catalog = _catalog(session, tmp_path)
+    _managed(catalog, principal)
+    deploy_assets(session, "dev", "analytics", {"silver.clean": {}})
+    user = _granted_user(session, *table_actions)
+
+    result = _rebuild(session, catalog, GrantAuthorization(session)).rebuild(
+        user, _CLEAN, reason=_REASON
+    )
+
+    assert result.path == path
+
+
+def test_a_name_with_a_glob_character_queues_only_its_own_asset(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """`silver.c*` is matched as itself, never as a pattern that also takes `silver.clean`."""
+    catalog = _catalog(session, tmp_path)
+    starred = TableRef("dev", _SILVER, "c*")
+    catalog.create_table(principal, starred, schema=_minimal_schema())
+    _managed(catalog, principal)
+    deploy_assets(session, "dev", "analytics", {"silver.c*": {}, "silver.clean": {}})
+
+    result = _rebuild(session, catalog).rebuild(principal, starred, reason=_REASON)
+
+    tasks = session.scalars(select(TaskRun.asset).where(TaskRun.run_id == result.run_id)).all()
+    assert list(tasks) == ["silver.c*"]
+
+
+def test_a_selection_of_more_than_its_asset_drops_nothing(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """Without the escape, `silver.c*` would take `silver.clean` too: refused before any write."""
+    catalog = _catalog(session, tmp_path)
+    starred = TableRef("dev", _SILVER, "c*")
+    starred_id = catalog.create_table(principal, starred, schema=_minimal_schema()).uuid
+    _managed(catalog, principal)
+    deploy_assets(session, "dev", "analytics", {"silver.c*": {}, "silver.clean": {}})
+
+    with (
+        mock.patch("lakana_core.catalog.rebuild._literal", lambda dotted: dotted),
+        pytest.raises(ConflictError) as refused,
+    ):
+        _rebuild(session, catalog).rebuild(principal, starred, reason=_REASON)
+
+    assert str(refused.value) == REBUILD_SELECTION_MISMATCH.format(name="silver.c*", assets=2)
+    _assert_intact(session, starred_id)
+    assert session.scalars(select(Run)).all() == []
+
+
+def test_a_row_gone_after_the_run_is_inserted_leaves_no_run(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """The rebuild rolls back its own run when the row vanished under it; no caller needed."""
+    catalog = _catalog(session, tmp_path)
+    _managed(catalog, principal)
+    deploy_assets(session, "dev", "analytics", {"silver.clean": {}})
+    rebuild = _rebuild(session, catalog)
+    gone = NotFoundError("Table 'clean' not found in silver.")
+
+    with (
+        mock.patch.object(CatalogService, "_lock_table_row", side_effect=gone),
+        pytest.raises(NotFoundError),
+    ):
+        rebuild.rebuild(principal, _CLEAN, reason=_REASON)
+
+    assert session.scalars(select(Run)).all() == []
 
 
 def test_rebuild_while_a_run_is_active_drops_nothing(

@@ -15,6 +15,7 @@ This module imports `lakana_core.runs.service`; `runs.service` never imports
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -64,6 +65,31 @@ REBUILD_RUN_ACTIVE_UNREAD = (
     "Wait for it to end, then rebuild again."
 )
 """`REBUILD_RUN_ACTIVE` when the active run ended before its id could be read."""
+
+REBUILD_SELECTION_MISMATCH = (
+    "The run for `{name}` would cover {assets} assets instead of exactly that one, so nothing was "
+    "dropped. Deploy the project again, then rebuild again."
+)
+"""The refusal when the selection of a rebuild does not resolve to exactly its own asset."""
+
+
+def _literal(dotted: str) -> str:
+    """Escape a dotted name for a selection pattern, so that it matches only itself.
+
+    Selections are `fnmatch` globs, and a table name may hold ``*``, ``?`` or ``[``; each is
+    put in brackets, where it stands for itself.
+
+    Parameters
+    ----------
+    dotted
+        The dotted table name.
+
+    Returns
+    -------
+    str
+        A pattern that matches exactly `dotted`.
+    """
+    return re.sub(r"([*?\[])", r"[\1]", dotted)
 
 
 @dataclass(frozen=True)
@@ -163,8 +189,9 @@ class TableRebuild:
         ConflictError
             If it is an artifact (`REBUILD_ARTIFACT`), no current deployment declares it
             (`NOT_BUILT_BY_A_PROJECT`), another run of the project is active
-            (`REBUILD_RUN_ACTIVE`), or a protected environment has no usable run principal.
-            Nothing is written.
+            (`REBUILD_RUN_ACTIVE`), a protected environment has no usable run principal, or
+            the selection does not resolve to exactly its asset
+            (`REBUILD_SELECTION_MISMATCH`). Nothing is written.
         """
         scope = Securable.table_scope(ref.environment, ref.namespace, ref.name)
         self._authz.authorize(p, Action.DROP_TABLE, scope)
@@ -181,13 +208,20 @@ class TableRebuild:
                 NOT_BUILT_BY_A_PROJECT.format(name=ref.dotted(), environment=ref.environment)
             )
         table_id = row.id
+        # Decided now: the drop revokes the table's own grants and deletes its row, after which
+        # a read granted on the table itself no longer counts.
+        path = found.path if self._authz.permits(p, Action.READ_TABLE, scope) else None
         prepared = self._runs.prepare_start(
             p,
             ref.environment,
             found.repository,
-            Selection(patterns=(ref.dotted(),)),
+            Selection(patterns=(_literal(ref.dotted()),)),
             authorize=False,
         )
+        if tuple(prepared.assets) != (ref.dotted(),):
+            raise ConflictError(
+                REBUILD_SELECTION_MISMATCH.format(name=ref.dotted(), assets=len(prepared.assets))
+            )
         try:
             run = self._runs.insert_run(
                 prepared.actor,
@@ -213,28 +247,33 @@ class TableRebuild:
                     name=ref.dotted(),
                 )
             raise ConflictError(message) from None
-        row = self._catalog._lock_table_row(ref, table_id)
-        now = db_now(self._session)
-        drop_row(
-            self._session,
-            p,
-            ref,
-            row,
-            now=now,
-            purge_after=now + timedelta(days=self._undo_days),
-            reason="rebuild",
-            detail={"rebuild_reason": reason},
-        )
-        # No repository and no path in the event: the audit log is read with `READ_AUDIT_LOG`
-        # alone, and a file is named only to a caller who may read the table. The run's own
-        # `RUN_STARTED` names the repository and the project version.
-        AuditService(self._session).record(
-            p.id,
-            AuditEventType.TABLE_REBUILT,
-            securable=scope,
-            detail={"table_id": str(table_id), "reason": reason, "run_id": str(run.id)},
-        )
-        path = found.path if self._authz.permits(p, Action.READ_TABLE, scope) else None
-        self._guard.record_pending()
-        self._session.commit()
+        try:
+            row = self._catalog._lock_table_row(ref, table_id)
+            now = db_now(self._session)
+            drop_row(
+                self._session,
+                p,
+                ref,
+                row,
+                now=now,
+                purge_after=now + timedelta(days=self._undo_days),
+                reason="rebuild",
+                detail={"rebuild_reason": reason},
+            )
+            # No repository and no path in the event: the audit log is read with
+            # `READ_AUDIT_LOG` alone, and a file is named only to a caller who may read the
+            # table. The run's own `RUN_STARTED` names the repository and the project version.
+            AuditService(self._session).record(
+                p.id,
+                AuditEventType.TABLE_REBUILT,
+                securable=scope,
+                detail={"table_id": str(table_id), "reason": reason, "run_id": str(run.id)},
+            )
+            self._guard.record_pending()
+            self._session.commit()
+        except BaseException:
+            # The run is flushed; never leave it for the caller's session to commit without
+            # the drop (the row vanished under its lock, or the drop failed).
+            self._session.rollback()
+            raise
         return RebuildResult(ref=ref, run_id=run.id, repository=found.repository, path=path)
