@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useId, useState } from "react";
+import { type JSX, lazy, Suspense, useId, useState } from "react";
 import { Button, Menu, MenuItem, MenuTrigger, Popover, Separator } from "react-aria-components";
 import { Trans, useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
@@ -16,6 +16,14 @@ import { DEFAULT_VIEW } from "../view";
 import "./actionStrings";
 import { DropDialog } from "./DropDialog";
 import { RebuildDialog } from "./RebuildDialog";
+
+// Maintain now and Retention have forms of their own, which most visits to the menu never open.
+const MaintainDialog = lazy(() =>
+  import("./MaintainDialog").then((module) => ({ default: module.MaintainDialog })),
+);
+const RetentionDialog = lazy(() =>
+  import("./RetentionDialog").then((module) => ({ default: module.RetentionDialog })),
+);
 
 /** The items before the separator, which keep the table, in menu order. */
 const KEEPING: readonly TableAction[] = ["maintain", "set_retention"];
@@ -122,6 +130,10 @@ export default function TableActions({ place, table }: TableActionsProps): JSX.E
           }}
         />
       )}
+      <Suspense fallback={null}>
+        {open === "maintain" && <MaintainDialog place={place} onClose={close} />}
+        {open === "set_retention" && <RetentionDialog place={place} onClose={close} />}
+      </Suspense>
       {open === "rebuild" && <RebuildDialog place={place} onClose={close} />}
     </>
   );

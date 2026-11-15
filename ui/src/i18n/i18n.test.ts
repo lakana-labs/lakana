@@ -49,6 +49,9 @@ it("ships no string of the views or the actions in the first load, and importing
   expect(i18n.exists("catalog.views.dropped.empty")).toBe(false);
   expect(i18n.exists("table.actions.undrop.title")).toBe(false);
   expect(i18n.exists("table.actions.drop.title")).toBe(false);
+  expect(i18n.exists("table.actions.maintain.title")).toBe(false);
+  expect(i18n.exists("table.actions.retention.title")).toBe(false);
+  expect(i18n.exists("catalog.views.retention.never")).toBe(false);
   expect(i18n.t("catalog.view.dropped")).toBe("Dropped");
 
   await import("../catalog/views/ViewBody");
@@ -62,4 +65,8 @@ it("ships no string of the views or the actions in the first load, and importing
   expect(i18n.t("table.actions.drop.title", { table: "gold.sales.fact" })).toBe(
     "Drop gold.sales.fact?",
   );
+  expect(i18n.t("table.actions.maintain.title", { table: "gold.sales.fact" })).toBe(
+    "Maintain gold.sales.fact now",
+  );
+  expect(i18n.t("catalog.views.retention.never")).toBe("never");
 });

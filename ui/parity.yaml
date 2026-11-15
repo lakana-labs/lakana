@@ -169,7 +169,7 @@
 "table health": { class: read, part: 3, done: true }
 "table lineage": { class: read, part: 3, note: "run lineage is not shown on the table page" }
 "table list": { class: ui, part: 3, done: true }
-"table maintain": { class: ui, part: 3 }
+"table maintain": { class: ui, part: 3, done: true }
 "table merge":
   {
     class: git,
@@ -182,7 +182,7 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
-"table retention": { class: ui, part: 3 }
+"table retention": { class: ui, part: 3, done: true }
 "table undrop": { class: ui, part: 3, done: true }
 "table rebuild": { class: ui, part: 3, done: true }
 "task history": { class: read, part: 5 }
@@ -287,7 +287,8 @@
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage":
   { class: read, part: 3, note: "run lineage is not shown on the table page" }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references": { class: ui, part: 3 }
-"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
+  { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }
 "GET /api/v1/environments/{env}/orphans": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/project-versions/{project_version_id}": { class: ui, part: 5 }
@@ -420,7 +421,7 @@
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/load":
   { class: git, reason: "`lakana load` (UI file load #224 optional)" }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/maintenance":
-  { class: ui, part: 3 }
+  { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge":
   {
     class: git,
@@ -479,7 +480,8 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
-"PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
+"PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
+  { class: ui, part: 3, done: true }
 "PUT /api/v1/environments/{name}/retention": { class: ui, part: 8 }
 "PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
 "PUT /api/v1/principals/{name}/picture": { class: ui, part: 2 }

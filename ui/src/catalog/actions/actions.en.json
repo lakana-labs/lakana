@@ -38,5 +38,30 @@
     "restoreAs": "Restore as",
     "restoreAsHelp": "The table comes back under this name. Choose one that no table in {{namespace}} has.",
     "confirm": "Undrop"
+  },
+  "maintain": {
+    "title": "Maintain {{table}} now",
+    "text": "Maintenance expires old snapshots and deletes the files nothing references any more. It runs as a query in the background.",
+    "keepDays": "Keep snapshots younger than (days)",
+    "keepLast": "Always keep the latest snapshots",
+    "olderThanHours": "Delete unreferenced files older than (hours)",
+    "dryRun": "Dry run: report, change nothing",
+    "confirm": "Maintain now",
+    "done": "Maintenance is queued as query {{id}}.",
+    "follow": "Its progress is not shown here yet. Follow it with:",
+    "copy": "Copy command",
+    "close": "Close"
+  },
+  "retention": {
+    "title": "Retention of {{table}}",
+    "expires": "Expires {{when}}; last activity {{last}}.",
+    "rule": "When it expires",
+    "daysChoice": "After days without activity",
+    "onChoice": "On a day",
+    "neverChoice": "Never",
+    "days": "Days",
+    "day": "Day",
+    "save": "Save",
+    "close": "Close"
   }
 }

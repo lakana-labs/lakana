@@ -11,13 +11,13 @@ import { useNavigate } from "react-router";
 import { rebuildTable, type TableRebuildOut, type TableRef } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
 import { CopyLine } from "../../shell/CopyLine";
-import { PendingButton } from "../../shell/PendingButton";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { markedText } from "../../shell/VisibleText";
-import { AttemptStatus, useAttempt } from "../../sign-in/Attempt";
+import { useAttempt } from "../../sign-in/Attempt";
 import { catalogPath } from "../paths";
 import { DEFAULT_VIEW } from "../view";
 import "./actionStrings";
+import { ConfirmRow } from "./ConfirmRow";
 import { useProtected } from "./useProtected";
 
 /** The most the server takes as a reason. */
@@ -82,20 +82,14 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
             <Label>{t("table.actions.rebuild.reason")}</Label>
             <TextArea rows={3} />
           </TextField>
-          <div className="step-actions">
-            <PendingButton
-              className="button button-primary"
-              pending={attempt.busy || protectedEnvironment === undefined}
-              isDisabled={reason.trim() === ""}
-              onPress={rebuild}
-            >
-              {t("table.actions.rebuild.confirm")}
-            </PendingButton>
-            <Button className="button" onPress={onClose}>
-              {t("dialog.cancel")}
-            </Button>
-          </div>
-          <AttemptStatus attempt={attempt} waiting={t("common.working")} />
+          <ConfirmRow
+            attempt={attempt}
+            label={t("table.actions.rebuild.confirm")}
+            waiting={protectedEnvironment === undefined}
+            disabled={reason.trim() === ""}
+            onConfirm={rebuild}
+            onCancel={onClose}
+          />
         </>
       ) : (
         <>

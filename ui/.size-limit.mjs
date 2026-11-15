@@ -52,10 +52,22 @@ const NAMED_LIMITS = [
   // share: the API calls of catalog management, the hook that reads whether an environment is
   // protected, the break-glass reason field and the strings of the actions. The chunk is named
   // after its first module.
-  { name: "the views' and actions' shared part", prefix: "useProtected-", limit: "2.0 kB" },
+  // Raised to the measured 2.29 kB (2026-11-16) + 10 %: the strings of Maintain now and
+  // Retention, and the calls that read and set a retention.
+  { name: "the views' and actions' shared part", prefix: "useProtected-", limit: "2.52 kB" },
   // Measured 1.96 kB (2026-11-16) + 10 %: a table's Actions menu with Drop and Rebuild from git,
   // their dialogs and the git-owned note, loaded once the table page has read the table.
-  { name: "a table's Actions", prefix: "TableActions-", limit: "2.16 kB" },
+  // Raised to the measured 2.44 kB (2026-11-16) + 10 %: the loaders of the two dialogs below.
+  { name: "a table's Actions", prefix: "TableActions-", limit: "2.69 kB" },
+  // Measured 1.17 kB (2026-11-16) + 10 %: the Maintain now form, loaded when it is chosen.
+  { name: "Maintain now", prefix: "MaintainDialog-", limit: "1.29 kB" },
+  // Measured 3.99 kB (2026-11-16) + 10 %: the Retention dialog (its three rules, the sentence
+  // that states the retention and the date field), loaded when it is chosen.
+  { name: "Retention", prefix: "RetentionDialog-", limit: "4.39 kB" },
+  // Measured 9.06 kB (2026-11-16) + 10 %: React Aria's number field with its parsing and
+  // formatting, which only the Maintain now and Retention forms use; loaded with the first of
+  // them.
+  { name: "the number field", prefix: "NumberField-", limit: "9.97 kB" },
   // Measured 1.49 kB (a table's page: the read, the record of it as opened, the header with its
   // tabs and the states, 2026-11-13) + 10 %. It loads on /catalog/{environment}/{namespace}/{table}.
   // Raised to the measured 4.07 kB (2026-11-13) + 10 % with the Overview (description, first

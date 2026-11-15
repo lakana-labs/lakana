@@ -183,4 +183,41 @@ describe("TableActions", () => {
     });
     expect(button).toHaveFocus();
   });
+
+  it("opens Maintain now and Close after queuing returns the focus to Actions", async () => {
+    fakeServer(manageRoutes());
+    const { user } = renderActions(table({ actions: ["maintain"] }));
+    const button = screen.getByRole("button", { name: "Actions" });
+
+    await user.click(button);
+    await user.click(screen.getByRole("menuitem", { name: "Maintain now…" }));
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName(
+      "Maintain gold.sales.fact_sales now",
+    );
+    await user.click(screen.getByRole("button", { name: "Maintain now" }));
+    await user.click(await screen.findByRole("button", { name: "Close" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(button).toHaveFocus();
+  });
+
+  it("opens Retention and Cancel returns the focus to Actions", async () => {
+    fakeServer(manageRoutes());
+    const { user } = renderActions(table({ actions: ["set_retention"] }));
+    const button = screen.getByRole("button", { name: "Actions" });
+
+    await user.click(button);
+    await user.click(screen.getByRole("menuitem", { name: "Retention…" }));
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName(
+      "Retention of gold.sales.fact_sales",
+    );
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(button).toHaveFocus();
+  });
 });

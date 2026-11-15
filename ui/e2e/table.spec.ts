@@ -1275,3 +1275,82 @@ test.describe("the table's Actions in real Chromium", () => {
     );
   });
 });
+
+test.describe("Maintain now and Retention in Chromium", () => {
+  const origin = "http://localhost:4173";
+  const table = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
+
+  test("Maintain now queues maintenance and names the query and its command; axe is clean", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+    await page.route(
+      (url) => url.pathname === `${table}/maintenance`,
+      (route) => route.fulfill({ status: 202, json: { query_id: "q-77" } }),
+    );
+
+    await page.goto(`${origin}${TABLE}`);
+    await page.getByRole("button", { name: "Actions" }).click();
+    await page.getByRole("menuitem", { name: "Maintain now…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Maintain gold.sales.fact_sales now" });
+    await expect(dialog.getByRole("textbox", { name: /Keep snapshots younger/ })).toHaveValue("7");
+    expect(await violations(page), "the Maintain now form").toEqual([]);
+    await dialog.getByRole("button", { name: "Maintain now" }).click();
+
+    await expect(dialog.getByText("Maintenance is queued as query q-77.")).toBeVisible();
+    await expect(dialog.getByText("lakana query status q-77 --env prod")).toBeVisible();
+    expect(await violations(page), "the queued dialog").toEqual([]);
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("button", { name: "Actions" })).toBeFocused();
+  });
+
+  test("Retention shows the rule, saves another and shows its sentence; axe is clean", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+    const retention = {
+      name: "fact_sales",
+      namespace: "gold.sales",
+      uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+      source: "table",
+      days: 30,
+      on: null,
+      never: false,
+      set_by: "ana",
+      set_at: "2026-11-01T08:00:00Z",
+      last_activity_at: "2026-11-12T06:00:00Z",
+      expires_at: "2026-12-12T06:00:00Z",
+      kept: null,
+    };
+    let body: unknown = null;
+    await page.route(
+      (url) => url.pathname === `${table}/retention`,
+      async (route) => {
+        if (route.request().method() === "PUT") {
+          body = route.request().postDataJSON();
+          return route.fulfill({
+            json: { ...retention, days: null, never: true, expires_at: null },
+          });
+        }
+        return route.fulfill({ json: retention });
+      },
+    );
+
+    await page.goto(`${origin}${TABLE}`);
+    await page.getByRole("button", { name: "Actions" }).click();
+    await page.getByRole("menuitem", { name: "Retention…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Retention of gold.sales.fact_sales" });
+    await expect(
+      dialog.getByText("30 days after its last activity, set for the table by ana"),
+    ).toBeVisible();
+    expect(await violations(page), "the Retention form").toEqual([]);
+    await dialog.getByText("On a day").click();
+    expect(await violations(page), "the day field").toEqual([]);
+    await dialog.getByText("Never").click();
+    await dialog.getByRole("button", { name: "Save" }).click();
+
+    await expect(dialog.getByText("never, set for the table by ana")).toBeVisible();
+    expect(body).toEqual({ never: true });
+    expect(await violations(page), "the saved retention").toEqual([]);
+  });
+});

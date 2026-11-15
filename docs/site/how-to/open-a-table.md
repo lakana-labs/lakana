@@ -30,8 +30,10 @@ server says you may do, so an item you see is one you are allowed to use; with n
 no **Actions** at all. An artifact's page has no **Actions** either: drop an artifact with
 `lakana artifact drop`.
 
-- **Maintain now…** queues maintenance for the table, as `lakana table maintain` does.
-- **Retention…** shows and changes when the table expires, as `lakana table retention` does.
+- **Maintain now…** queues maintenance for the table, as `lakana table maintain` does. See
+  [Maintain a table now](#maintain-a-table-now).
+- **Retention…** shows and changes when the table expires, as `lakana table retention` does. See
+  [Let tables expire](let-tables-expire.md#see-a-tables-retention).
 - **Rebuild from git…** drops a table a deployed project builds and queues the run that builds it
   again. It asks why, for the audit log. See
   [Rebuild a table from git](drop-and-restore-a-table.md#rebuild-a-table-from-git).
@@ -49,6 +51,26 @@ fails, the dialog stays open with the reason, nothing is dropped, and **Cancel**
 protected environment Drop also asks why you break the protection, which the audit log records.
 Rebuild from git asks for no second reason: the one reason it asks for is also sent as the reason
 you break the protection, as `--break-glass` does.
+
+### Maintain a table now
+
+Maintenance expires a table's old snapshots, deletes the files nothing references any more and
+removes the tags of failed checks (see `lakana table maintain` in the
+[CLI reference](../reference/cli.md#lakana-table-maintain)). In the web interface, choose
+**Actions**, then **Maintain now…**. The form starts with the server's defaults, the same as the
+command's:
+
+- **Keep snapshots younger than (days):** 7, from 0 up.
+- **Always keep the latest snapshots:** 5, from 1 up.
+- **Delete unreferenced files older than (hours):** 72, from 1 to 87,600.
+- **Dry run: report, change nothing:** off.
+
+Press **Maintain now**. The dialog then says "Maintenance is queued as query" with the query's
+identifier and gives a command to copy, `lakana query status <id> --env <environment>`. Maintenance
+runs in the background; the web interface does not show its progress yet, so follow it with that
+command. If the server refuses, for example because you lack the right to maintain the table, the
+form stays open with the server's sentence. **Maintain now…** is in the menu only for a managed
+table you may maintain.
 
 ## Overview
 

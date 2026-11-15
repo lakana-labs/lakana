@@ -17,5 +17,18 @@
     "droppedNow": "Dropped {{table}}.",
     "restored": "Restored {{table}}.",
     "open": "Open the table"
+  },
+  "retention": {
+    "days_one": "{{count}} day after its last activity",
+    "days_other": "{{count}} days after its last activity",
+    "on": "on {{date}}",
+    "never": "never",
+    "setForTable": "{{rule}}, set for the table",
+    "setForEnvironment": "{{rule}}, set for the environment",
+    "setForTableBy": "{{rule}}, set for the table by {{who}}",
+    "setForEnvironmentBy": "{{rule}}, set for the environment by {{who}}",
+    "projectAsset": "A deployed project declares this table, so it does not expire while it is deployed.",
+    "protected": "Tables in a protected environment never expire.",
+    "none": "No retention: it never expires."
   }
 }
