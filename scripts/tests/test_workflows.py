@@ -944,7 +944,8 @@ def test_lint_measures_duplication_in_ui_too() -> None:
 
 
 _LODASH_4_17_20_INTEGRITY = (
-    "sha512-PlhdFcillOINfeV7Ni6oF1TAEayyZBoZ8bcshTHqOYJYlrqzRK5hagpagky5o4HfCzzd1TRkXPMFq6cKk9rGmA=="
+    "sha512-PlhdFcillOINfeV7Ni6oF1TAEayyZBoZ8bcshTHqOYJYlrqzRK5hagpag"
+    "ky5o4HfCzzd1TRkXPMFq6cKk9rGmA=="
 )
 """The registry's integrity hash of lodash 4.17.20 (`npm view lodash@4.17.20 dist.integrity`)."""
 
