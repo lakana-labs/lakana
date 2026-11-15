@@ -503,6 +503,31 @@ def test_audit_list_shows_a_cursor_hint_in_table_mode(tmp_path: Path) -> None:
     assert "More: --cursor c1" in result.stdout
 
 
+def test_audit_list_table_shows_the_raw_type_of_an_unknown_event(tmp_path: Path) -> None:
+    """An event of a type this release does not know shows `UNKNOWN (<raw>)` in the table."""
+    base = {
+        "occurred_at": "2026-01-01T00:00:00+00:00",
+        "principal_id": "p1",
+        "securable_kind": None,
+        "securable_environment": None,
+        "securable_namespace": None,
+        "securable_table": None,
+        "detail": {},
+    }
+    events = [
+        {**base, "id": "e1", "event_type": "UNKNOWN", "event_type_raw": "FUTURE_THING"},
+        {**base, "id": "e2", "event_type": "GRANT_CREATED", "event_type_raw": "GRANT_CREATED"},
+    ]
+    api = FakeApi()
+    api.on("GET", "/api/v1/audit-events", json={"items": events, "next_cursor": None})
+
+    result = invoke(make_state(tmp_path, api), "audit", "list")
+
+    assert result.exit_code == 0, result.stderr
+    assert "UNKNOWN (FUTURE_THING)" in result.stdout
+    assert "GRANT_CREATED (" not in result.stdout
+
+
 def test_audit_list_treats_a_naive_since_as_utc(tmp_path: Path) -> None:
     """`--since 2026-01-01T00:00:00` is sent with an explicit UTC offset."""
     api = FakeApi()

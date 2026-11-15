@@ -159,7 +159,8 @@ be recorded could not be.
 older release, an event that the newer release wrote under a type the older one does not know is
 listed with `event_type` `UNKNOWN` and the newer release's name for it in `event_type_raw`, so the
 list still answers and no event is left out. `--event-type` (and `event_type`) takes only the
-types this release knows, so it cannot select such an event; read them without that filter.
+types this release knows, so it cannot select such an event; read them without that filter. The
+table output of `lakana audit list` shows such an event as `UNKNOWN (<type as stored>)`.
 
 ## Export every month, and keep the files
 
