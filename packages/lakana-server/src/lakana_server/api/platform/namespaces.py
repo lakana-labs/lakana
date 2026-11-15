@@ -214,12 +214,10 @@ def drop_namespace(
     Raises
     ------
     lakana_core.errors.StepUpRequired
-        Mapped to 403, for a browser session whose last passkey touch is older than 15
-        minutes.
+        Mapped to 403 when a browser session's last passkey touch is over 15 minutes old.
     lakana_core.errors.NotFoundError
-        Mapped to 404 by `install_exception_handlers`.
+        Mapped to 404: the namespace does not exist.
     lakana_core.errors.ConflictError
-        Mapped to 409 if the namespace still contains tables or child
-        namespaces.
+        Mapped to 409 while the namespace holds tables, artifacts or child namespaces.
     """
     catalog.drop_namespace(principal, env, NamespacePath.from_parts(path.split(".")))

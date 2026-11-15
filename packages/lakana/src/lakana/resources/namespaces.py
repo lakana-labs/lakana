@@ -176,13 +176,14 @@ class Namespaces:
         environment
             The environment name.
         parent
-            Dot-joined path; only the namespaces below it, at every depth.
+            Dot-joined path of a namespace: keep only what lies below it, at every depth.
         depth
-            ``1`` keeps only the direct children of `parent` (the top level without one).
+            ``1`` keeps the direct children of `parent` only (the top level when there is no
+            `parent`).
         limit
-            Most namespaces returned (1 to 200); `None` leaves it to the server (100).
+            Page size, 1 to 200; `None` takes the server's default of 100.
         cursor
-            A previous page's `next_cursor`. Send the same `parent` and `depth`.
+            The `next_cursor` of the page before this one, with the same `parent` and `depth`.
 
         Returns
         -------
