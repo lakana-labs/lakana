@@ -4533,16 +4533,34 @@ to bind (its lambda reaches DuckDB as JSON); it never runs anything the guard di
 **Lakana reads DuckDB SQL with its own parser, not sqlglot's newest reading (#415).** From
 sqlglot 30.25 the DuckDB parser no longer records that a lambda was written with `LAMBDA`
 (`upper(lambda j: 'a')` and `upper(j -> 'a')` became one tree, and the first ran as the JSON
-extract) and reads `~`/`!~` as DuckDB 2.0's partial match. Every parse in the packages goes
+extract) and reads `~`/`!~` as DuckDB 2.0's partial match. Every parse of submitted or stored
+SQL text in the packages (a query, a view, a check, an asset, a row filter or column mask) goes
 through `lakana_core.sql_dialect` (`parse_one`, `parse`), whose parser marks a keyword lambda
 (`KEYWORD_LAMBDA` in its `meta`, which `_json_arrows_outside_lambda_functions` reads) and reads
 `~` as `RegexpFullMatch`, so a query, a check and a deployed asset keep the whole-text match the
 user documentation promises (`test_a_tilde_runs_as_a_whole_text_match`,
 `test_a_keyword_lambda_outside_a_lambda_function_is_refused_by_duckdb`). A new parse site that
 calls `sqlglot.parse_one` directly gets the other reading; use the module. sqlglot's
-`lineage` is handed the parsed tree, never the text (`lineage.extract_lineage`), and
-`scripts/tests/test_one_sql_parser.py` scans `packages/*/src` for a second parser
-(`sqlglot.parse_one`, `parse`, `transpile`, `maybe_parse`, `lineage` on text).
+`lineage` is handed the parsed tree, never the text (`lineage.extract_lineage`).
+
+`scripts/tests/test_one_sql_parser.py` scans every file under `packages/*/src` except
+`sql_dialect.py`. It resolves each name a file binds to sqlglot (any alias, any import form) and
+finds: an import of `parse`, `parse_one`, `parse_into`, `transpile` or `maybe_parse` from sqlglot; a
+call of one of them on anything rooted in sqlglot, through attributes and calls
+(`sqlglot.Dialect.get_or_raise("duckdb").parse_one(...)`); any use of sqlglot's `Dialect`,
+`dialects`, `parser` or `parsers` (so a dialect object kept in a variable, or `DuckDB().parse`,
+is refused where it is reached); and every call of sqlglot's `lineage`, under any name, outside
+the functions `LINEAGE_ALLOWED` names with a reason. Whether a `lineage` argument holds text
+cannot be told from the source, so that rule fails closed: a new call needs an allow-list entry,
+and an allowed call is still refused if it hands `lineage` a string literal or `sources=` (whose
+values sqlglot parses with its own reading). It does not see dynamic access (`getattr`,
+`importlib`), and it does not see sqlglot's builders that parse a string argument with sqlglot's
+stock reading: `exp.to_table`, `exp.condition`, `exp.cast` (its type), `exp.DataType.build`,
+`Select.where`/`from_`/`select`, `exp.alias_` and `sqlglot.optimizer.optimize`. The packages hand
+those builders nodes or no SQL of a user: the generated read alias is built as
+`exp.Table(this=exp.to_identifier(alias))`, a column's declared type is read by
+`query_rewrite._type` with `sql_dialect.reading_dialect`, and `checks.count_query` and the empty
+relation pass only expressions and identifiers. A reviewer checks a new builder call by hand.
 
 **The ambiguity gate qualifies tables, not columns.** `_require_unambiguous_references` runs
 `qualify(..., qualify_columns=False)`: from 30.25 the column step refuses every unqualified

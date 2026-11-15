@@ -1785,6 +1785,22 @@ def _cte_reference_ids(parsed: exp.Expr) -> set[int]:
     }
 
 
+def _type(type_name: str) -> exp.DataType:
+    """Read a DuckDB type name with Lakana's reading (`sql_dialect`), as every other parse is.
+
+    Parameters
+    ----------
+    type_name
+        A DuckDB type name, such as `DECIMAL(10, 2)`.
+
+    Returns
+    -------
+    sqlglot.expressions.DataType
+        The type.
+    """
+    return exp.DataType.build(type_name, dialect=sql_dialect.reading_dialect("duckdb"))
+
+
 def _empty_relation(dotted: str, columns: Mapping[str, str]) -> exp.Select:
     """Build a zero-row relation shaped like a table's declared schema.
 
@@ -1813,7 +1829,7 @@ def _empty_relation(dotted: str, columns: Mapping[str, str]) -> exp.Select:
             f"Table {dotted!r} has no files and no declared columns to stand in for them."
         )
     projections = [
-        exp.alias_(exp.cast(exp.null(), type_name, dialect="duckdb"), name, quoted=True)
+        exp.alias_(exp.cast(exp.null(), _type(type_name)), name, quoted=True)
         for name, type_name in columns.items()
     ]
     return exp.select(*projections).where(exp.false())
@@ -2630,7 +2646,7 @@ def rewrite_query(
                     parameters[_schema_variable(index)] = tuple(source.field_ids)
             else:
                 ctes[alias] = _empty_relation(dotted, source.columns)
-        replacement = exp.to_table(alias)
+        replacement = exp.Table(this=exp.to_identifier(alias))
         original_alias = table.args.get("alias")
         if original_alias is not None:
             replacement.set("alias", original_alias)
