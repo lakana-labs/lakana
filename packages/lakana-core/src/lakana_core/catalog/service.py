@@ -9965,7 +9965,13 @@ class CatalogService:
             self._session.rollback()
             raise AlreadyExistsError(self._undrop_taken_message(ref, target, holder))
         refusal = undrop_refusal(
-            self._session, self._authz, p, target, env.id, renamed=new_name is not None
+            self._session,
+            self._authz,
+            p,
+            target,
+            env.id,
+            renamed=new_name is not None,
+            kind=str(snapshot["row"]["table_type"]),
         )
         if refusal is not None:
             self._session.rollback()

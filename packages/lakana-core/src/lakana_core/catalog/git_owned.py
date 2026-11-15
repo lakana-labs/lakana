@@ -250,12 +250,14 @@ def undrop_refusal(
     environment_id: uuid.UUID,
     *,
     renamed: bool,
+    kind: str = "TABLE",
 ) -> ConflictError | None:
-    """Tell whether restoring a managed table under `ref` would take a declared name.
+    """Tell whether restoring a dropped row under `ref` would take a declared name.
 
     A dropped table can come back under its own name when a deployment declares that name as
-    a table or a view: that is the table the project builds (an orphan restored, ruling 6).
-    Under a name declared as an artifact it would take what git defines as something else.
+    a table, and a dropped view when it declares a view: that is what the project builds (an
+    orphan restored, ruling 6). Under a name declared as another kind (a table's name declared
+    as a view or an artifact) it would take what git defines as something else.
     Restored under another name (`--as`), it is a create under that name, refused whatever
     the name is declared as.
 
@@ -273,6 +275,9 @@ def undrop_refusal(
         Its environment.
     renamed
         The table comes back under another name than it had.
+    kind
+        The dropped row's type name (`TableType`); ``VIEW`` for a view, anything else is
+        restored as a table.
 
     Returns
     -------
@@ -280,7 +285,8 @@ def undrop_refusal(
         The refusal to raise (`GIT_OWNED_CREATE` or `GIT_OWNED_HIDDEN`), or `None`.
     """
     found = defining_ref(session, environment_id, ref)
-    if found is None or (not renamed and owned_by_git(found, "TABLE")):
+    wanted = "view" if kind == "VIEW" else "table"
+    if found is None or (not renamed and found.output == wanted):
         return None
     return git_owned_refusal(
         authz, p, ref, found, template=GIT_OWNED_CREATE, hidden=GIT_OWNED_HIDDEN

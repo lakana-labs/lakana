@@ -651,6 +651,21 @@ def test_an_undrop_onto_a_name_declared_as_a_table_is_allowed(
     assert restored.ref == _CLEAN
 
 
+def test_an_undrop_onto_a_name_now_declared_as_a_view_is_refused(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """A managed table is another kind than the view the project now builds under its name."""
+    _dropped(catalog, principal)
+    _declare(session, "silver.clean", materialize="view")
+
+    with pytest.raises(ConflictError) as refused:
+        catalog.undrop_table(principal, _CLEAN)
+
+    assert str(refused.value) == _create_message("silver.clean", "assets/silver/clean.sql")
+    session.rollback()
+    assert session.scalars(select(Table).where(Table.name == "clean")).all() == []
+
+
 def test_a_run_of_one_repository_cannot_create_a_table_another_declares(
     session: Session, catalog: CatalogService, principal: PrincipalRef
 ) -> None:
