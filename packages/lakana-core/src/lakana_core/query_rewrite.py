@@ -1079,10 +1079,9 @@ def _parse_with_hints(sql: str, dialect: str) -> exp.Expr:
     try:
         return _parse_sql(sql, dialect)
     except sqlglot.errors.ParseError as exc:
-        try:
-            tokens = sqlglot.tokenize(sql, dialect=sql_dialect.reading_dialect(dialect))
-        except sqlglot.errors.SqlglotError:
-            raise exc from None
+        # The parse tokenized this text already; a text that does not tokenize raised a
+        # TokenError there, never the ParseError caught here.
+        tokens = sqlglot.tokenize(sql, dialect=sql_dialect.reading_dialect(dialect))
         words = [
             token.text.upper() if token.token_type is sqlglot.tokens.TokenType.VAR else None
             for token in tokens
