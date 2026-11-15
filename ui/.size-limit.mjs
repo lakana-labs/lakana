@@ -37,12 +37,25 @@ const NAMED_LIMITS = [
   // own chunk and its read), 2026-11-13, + 10 %.
   // Measured 30.3 kB (2026-11-16) with the view switch, the lazy import of the views and the
   // list's skeleton as a component; the limit holds.
+  // Measured 30.46 kB (2026-11-16) with the table page's lazy Actions menu in the heading row; the
+  // limit holds.
   { name: "Catalog", prefix: "CatalogScreen-", limit: "32.6 kB" },
   // Measured 3.6 kB (2026-11-16) + 10 %: the Catalog's views other than All, loaded when one is
   // chosen: the choice of an environment, the Dropped list with its paging, Undrop and its
   // dialog with the reason of a protected environment, the hook that reads the protection and
   // the strings of the views and of the actions. It is never in the first load.
-  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.96 kB" },
+  // Lowered to the measured 2.94 kB (2026-11-16) + 10 %: the API calls of catalog management,
+  // the protection hook, the reason field and the actions' strings moved into a chunk the views
+  // share with the table's Actions (below).
+  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.23 kB" },
+  // Measured 1.82 kB (2026-11-16) + 10 %: what the Catalog's views and the table's Actions
+  // share: the API calls of catalog management, the hook that reads whether an environment is
+  // protected, the break-glass reason field and the strings of the actions. The chunk is named
+  // after its first module.
+  { name: "the views' and actions' shared part", prefix: "useProtected-", limit: "2.0 kB" },
+  // Measured 1.96 kB (2026-11-16) + 10 %: a table's Actions menu with Drop and Rebuild from git,
+  // their dialogs and the git-owned note, loaded once the table page has read the table.
+  { name: "a table's Actions", prefix: "TableActions-", limit: "2.16 kB" },
   // Measured 1.49 kB (a table's page: the read, the record of it as opened, the header with its
   // tabs and the states, 2026-11-13) + 10 %. It loads on /catalog/{environment}/{namespace}/{table}.
   // Raised to the measured 4.07 kB (2026-11-13) + 10 % with the Overview (description, first
@@ -174,7 +187,10 @@ export default [
   // strings of Lineage, Health and Access, which load there too, do not use it up. With the Health
   // and Access tabs it measures 208.3 kB (2026-11-13), with the copy line and the signed-in
   // person, which the tabs share with the first load, in chunks of their own that index.html
-  // preloads.
+  // preloads. It measures 210.13 kB (2026-11-16) with a table's Actions menu: React Aria's Menu,
+  // which the user menu and Help draw on the first paint, is now shared with that menu's chunk,
+  // so the bundler splits it and its hooks into a chunk of their own that index.html preloads
+  // (+1.7 kB of the split, measured with and without the menu's lazy import); the limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -204,6 +220,8 @@ export default [
   // Raised from 8.16 kB: measured 8.26 kB with the shared data grid (dense rows, sticky header and
   // row-number gutter), the full-screen lineage that fills the window and Health's no-break rules
   // (2026-11-14) + 10 %.
+  // Measured 8.43 kB (2026-11-16) with the menu's separator and the note under a menu's items;
+  // the limit holds.
   { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "9.09 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

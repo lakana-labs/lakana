@@ -676,6 +676,8 @@ const TABLE_DETAIL = {
   last_read_at: "2026-11-10T07:50:00Z",
   readers_7d: 2,
   health_summary: { state: "failing", item: "check_failed", text: "Check failed", others: 2 },
+  defined_by: null,
+  actions: ["drop", "maintain", "set_retention"],
 };
 
 /** What the administrator may do with `fact_sales`: everything the page asks about. */

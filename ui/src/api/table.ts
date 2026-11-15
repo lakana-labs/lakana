@@ -53,7 +53,7 @@ export interface ColumnOut {
 }
 
 /** What a person may do to a table, as the server offers it. */
-type TableAction = "drop" | "rebuild" | "maintain" | "set_retention";
+export type TableAction = "drop" | "rebuild" | "maintain" | "set_retention";
 
 /** The deployed project file that declares a table. */
 interface DefinedByOut {

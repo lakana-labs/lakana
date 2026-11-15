@@ -27,6 +27,19 @@ From the web interface, a drop asks for a recent passkey touch: one from the las
 or without purging the files. The browser asks you to touch your passkey when yours is older. The
 command line uses a token and is never asked. Restoring a table asks for no touch.
 
+In the web interface, open the table's page and choose **Actions**, then **Drop…**. The menu shows
+**Drop…** only if you may drop the table. The dialog says what a drop does: the table leaves the
+catalog with its grants, row filters and column masks, and you can restore it from **Dropped**
+during the undo period (7 days unless your operator changed it). Check **Delete the files now: the
+table cannot be restored** to purge the files as `--purge` does (see
+[Delete a table's files now](#delete-a-tables-files-now)). Press **Drop the table**; the Catalog
+opens at the **Dropped** view of the table's namespace and says "Dropped gold.sales.orders." In a
+protected environment the dialog also asks why you break the protection of the environment, the
+same reason `--break-glass` takes.
+
+If the drop is refused, or the passkey touch fails, the dialog stays open with the server's
+sentence and nothing is dropped; **Cancel** closes it.
+
 ## When a project builds the table
 
 A table or view that a deployed project builds is defined in git, so it is changed in git.
@@ -36,6 +49,12 @@ A table or view that a deployed project builds is defined in git, so it is chang
 ```text
 `silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Remove it there and deploy; then drop it from Orphans. To build it again from git instead: `lakana table rebuild silver.clean --env dev --reason "…"`.
 ```
+
+In the web interface, **Drop…** under the table's **Actions** is shown but cannot be chosen, and
+the menu says `Defined in analytics/assets/silver/clean.sql — change it in git` with the
+repository and the file that define the table; a screen reader hears it when the menu opens.
+**Rebuild from git…** stays available. If a deploy makes the table git-owned after you opened
+its page, the Drop dialog shows the server's sentence above and stays open.
 
 Neither `--purge` nor a break-glass reason gets past this, and the REST API, the UI and Iceberg
 clients refuse alike. To build it again from git instead, see
@@ -120,6 +139,19 @@ What it needs:
 In a protected environment the run writes as the deployment's run principal. Rebuilding from
 outside a run needs `--break-glass`, which sends the same `--reason` as the break-glass reason and
 needs `MANAGE_ENVIRONMENT`.
+
+In the web interface, open the table's page and choose **Actions**, then **Rebuild from git…**. The
+menu shows it only if you may rebuild the table. The dialog says what happens: it drops the table,
+which you can restore like any drop, and queues a run of the asset that builds it. Type why it is
+rebuilt in **Why it is rebuilt (recorded in the audit log)**; **Rebuild** stays unavailable until
+you do. In a protected environment the dialog says that your reason is also sent as the reason you
+break the protection, as `--break-glass` does; the server checks its length and its sentence
+shows if the reason is too short. After the rebuild the dialog names the run, the repository and
+the file, as the command does, such as "Dropped gold.sales.orders and queued run 9f1c… of
+analytics, which builds it again from assets/silver/orders.sql.", with **Copy command** for
+`lakana runs show RUN_ID --env ENV`. **Close** opens the Catalog at the table's namespace: the
+table is gone until its run builds it again. A refusal, or a failed passkey touch, stays in the
+dialog with its sentence, and nothing was dropped.
 
 When it is refused, nothing was dropped:
 

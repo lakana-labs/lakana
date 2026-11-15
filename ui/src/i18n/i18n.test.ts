@@ -48,6 +48,7 @@ it("ships no string of the views or the actions in the first load, and importing
   expect(Object.keys(en.catalog)).not.toContain("views");
   expect(i18n.exists("catalog.views.dropped.empty")).toBe(false);
   expect(i18n.exists("table.actions.undrop.title")).toBe(false);
+  expect(i18n.exists("table.actions.drop.title")).toBe(false);
   expect(i18n.t("catalog.view.dropped")).toBe("Dropped");
 
   await import("../catalog/views/ViewBody");
@@ -57,5 +58,8 @@ it("ships no string of the views or the actions in the first load, and importing
   );
   expect(i18n.t("table.actions.undrop.title", { table: "gold.sales.fact" })).toBe(
     "Restore gold.sales.fact",
+  );
+  expect(i18n.t("table.actions.drop.title", { table: "gold.sales.fact" })).toBe(
+    "Drop gold.sales.fact?",
   );
 });

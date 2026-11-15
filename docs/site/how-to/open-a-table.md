@@ -20,8 +20,33 @@ The page has:
   and the environment's label.
 - **Tabs**: Overview, Columns, Preview, Lineage, Health and Access. Every tab has its own
   address, so a link opens the tab you were looking at. Everyone sees the same tabs.
+- **Actions** beside the name, once the table is read, when there is something you may do to the
+  table (see [Actions](#actions)).
 
-The page has no button beside the name. What you may do is in the tabs.
+## Actions
+
+**Actions** opens a menu of what you may do to the table as a whole. It lists only what the
+server says you may do, so an item you see is one you are allowed to use; with none, the page has
+no **Actions** at all. An artifact's page has no **Actions** either: drop an artifact with
+`lakana artifact drop`.
+
+- **Maintain now…** queues maintenance for the table, as `lakana table maintain` does.
+- **Retention…** shows and changes when the table expires, as `lakana table retention` does.
+- **Rebuild from git…** drops a table a deployed project builds and queues the run that builds it
+  again. It asks why, for the audit log. See
+  [Rebuild a table from git](drop-and-restore-a-table.md#rebuild-a-table-from-git).
+- **Drop…** asks first, then drops the table and opens the **Dropped** view of its namespace,
+  where you can undo it. See [Drop a table](drop-and-restore-a-table.md#drop-a-table).
+
+When a deployed project builds the table, **Drop…** is shown but cannot be chosen, and the menu
+says `Defined in analytics/assets/silver/clean.sql — change it in git`, with the table's own
+repository and file. A screen reader hears that sentence when the menu opens. Change the table in
+git, or use **Rebuild from git…**.
+
+Drop and Rebuild from git ask for a recent passkey touch: one from the last 15 minutes. When yours
+is older, the browser asks you to touch your passkey and the action is sent again. If the touch
+fails, the dialog stays open with the reason, nothing is dropped, and **Cancel** closes it. In a
+protected environment both also ask why you break the protection, which the audit log records.
 
 ## Overview
 

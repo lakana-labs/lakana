@@ -168,12 +168,13 @@ describe("TablePage", () => {
       ]);
     });
 
-    it("offers no primary action", async () => {
+    it("offers Actions as the one thing beside the heading", async () => {
       renderShell(PAGE);
 
       await tabs();
-      const head = (await heading()).parentElement as HTMLElement;
-      expect(head.children).toHaveLength(1);
+      const title = await heading();
+      const actions = await screen.findByRole("button", { name: "Actions" });
+      expect([...(title.parentElement as HTMLElement).children]).toEqual([title, actions]);
     });
 
     it("answers an unknown tab with the not-found state", async () => {

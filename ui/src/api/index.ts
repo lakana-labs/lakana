@@ -113,6 +113,7 @@ export type {
   ResultPageOut,
   RowFilterOut,
   ScopeOut,
+  TableAction,
   TableDefinitionFileOut,
   TableDefinitionOut,
   TableHealthOut,
@@ -121,5 +122,7 @@ export type {
   TextChange,
   ViaOut,
 } from "./table";
+export { dropArtifact, dropTable, rebuildTable } from "./manage";
+export type { OrphanOut, TableRebuildOut } from "./manage";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";

@@ -1,7 +1,34 @@
 {
+  "menu": {
+    "button": "Actions",
+    "maintain": "Maintain now…",
+    "retention": "Retention…",
+    "rebuild": "Rebuild from git…",
+    "drop": "Drop…",
+    "definedIn": "Defined in <file /> — change it in git"
+  },
   "protected": {
     "label": "Why you break the protection of {{environment}}",
     "text": "{{environment}} is protected: only runs write there. Doing this by hand needs the right to manage the environment and is recorded in the audit log."
+  },
+  "drop": {
+    "title": "Drop {{table}}?",
+    "text": "It leaves the catalog with its grants, row filters and column masks. You can restore it from Dropped during the undo period (7 days unless your operator changed it).",
+    "purge": "Delete the files now: the table cannot be restored",
+    "confirm": "Drop the table",
+    "artifactText": "This cannot be undone: every version's files are deleted.",
+    "artifactConfirm": "Drop the artifact"
+  },
+  "rebuild": {
+    "title": "Rebuild {{table}} from git?",
+    "text": "It drops the table, which you can restore like any drop, and queues a run of the asset that builds it.",
+    "reason": "Why it is rebuilt (recorded in the audit log)",
+    "protected": "{{environment}} is protected: only runs write there. Your reason is also sent as the reason you break its protection, which needs the right to manage the environment.",
+    "confirm": "Rebuild",
+    "done": "Dropped {{table}} and queued run {{run}} of {{repository}}, which builds it again from {{path}}.",
+    "doneNoPath": "Dropped {{table}} and queued run {{run}} of {{repository}}.",
+    "copy": "Copy command",
+    "close": "Close"
   },
   "undrop": {
     "button": "Undrop",
