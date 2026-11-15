@@ -480,7 +480,7 @@ def _node_from_the_nvmrc(step: dict) -> bool:
 
 def test_ci_and_the_release_take_node_from_the_same_action() -> None:
     """The pinned setup-node of the release is the one ``ci.yml`` uses."""
-    steps = _jobs("ci.yml")["ui"]["steps"]
+    steps = _jobs("ci.yml")["ui-gates"]["steps"]
     assert any(str(s.get("uses", "")).startswith(_SETUP_NODE) for s in steps)
 
 
@@ -699,44 +699,161 @@ UI_GATES = (
     "run build",
     "pytest packages/lakana-server/tests/test_ui_real_build.py",
     "run size",
-    "playwright install --with-deps chromium",
-    "run e2e:smoke",
     "run prove-gates",
 )
+UI_WORK_JOBS = ("ui-gates", "ui-e2e-smoke", "ui-e2e-server")
+"""The jobs that run the interface's gates side by side; ``ui`` waits for the three (#586)."""
+UI_E2E = {
+    "ui-e2e-smoke": ("run e2e:smoke",),
+    "ui-e2e-server": ("uv sync --all-packages --locked", "run e2e:server -- --project=chromium"),
+}
+"""The Playwright command(s) of each end-to-end job, after its install and build."""
 
 
-def test_the_ui_job_runs_every_gate() -> None:
+def _job_commands(name: str) -> list[str]:
+    """List every command of a ``ci.yml`` job, in step order.
+
+    Parameters
+    ----------
+    name
+        The job's key.
+
+    Returns
+    -------
+    list of str
+        The commands of all its steps.
+    """
+    return [command for step in _jobs("ci.yml")[name]["steps"] for command in _commands(step)]
+
+
+def _first(commands: list[str], text: str) -> int:
+    """Find the first command that contains ``text``.
+
+    Parameters
+    ----------
+    commands
+        The commands to look through.
+    text
+        The text to find.
+
+    Returns
+    -------
+    int
+        Its index.
+    """
+    return next(i for i, c in enumerate(commands) if text in c)
+
+
+def test_the_ui_gates_job_runs_every_gate() -> None:
     """Every gate of the interface, in the order ``npm --prefix ui run check`` runs them.
 
     The coverage ratchet reads the report the coverage run has just written, the size check
-    measures the build, the smoke test serves it, and ``prove-gates`` shows that each gate
-    still fails on a violation.
+    measures the build, and ``prove-gates`` shows that each gate still fails on a violation.
     """
-    job = _jobs("ci.yml")["ui"]
-    commands = [command for step in job["steps"] for command in _commands(step)]
-    found = []
-    for gate in UI_GATES:
-        found.append(next(i for i, c in enumerate(commands) if gate in c))
+    job = _jobs("ci.yml")["ui-gates"]
+    assert job["name"] == "ui (gates)"
+    commands = _job_commands("ui-gates")
+    found = [_first(commands, gate) for gate in UI_GATES]
     assert found == sorted(found)
-    jscpd = next(i for i, c in enumerate(commands) if "--prefix tools/jscpd" in c)
+    jscpd = _first(commands, "--prefix tools/jscpd")
     assert jscpd < found[-1]
     probe = next(s for s in job["steps"] if "run prove-gates" in str(s.get("run")))
     assert probe["env"]["GATE_PROBE_DIR"] == "${{ runner.temp }}/gate-probe"
-    assert job["timeout-minutes"] == 15
+    assert not any("playwright" in c or "run e2e" in c for c in commands)
+
+
+@pytest.mark.parametrize("name", sorted(UI_E2E))
+def test_each_playwright_suite_runs_in_its_own_job_on_a_fresh_build(name: str) -> None:
+    """Install, build and Chromium come before the suite; nothing else is run there (#586)."""
+    commands = _job_commands(name)
+    install = _first(commands, "npm ci --ignore-scripts --prefix ui")
+    build = _first(commands, "npm --prefix ui run build")
+    browser = _first(commands, "playwright install --with-deps chromium")
+    suite = [_first(commands, command) for command in UI_E2E[name]]
+    assert install < build < browser < min(suite)
+    assert suite == sorted(suite)
+    assert not any(gate in c for c in commands for gate in UI_GATES[1:8] + UI_GATES[9:])
+
+
+def test_the_two_playwright_suites_and_the_gates_cover_what_one_ui_job_ran() -> None:
+    """Every Playwright suite runs in exactly one job, and none in the gates job."""
+    everywhere = [c for name in UI_WORK_JOBS for c in _job_commands(name)]
+    assert sum("run e2e:smoke" in c for c in everywhere) == 1
+    assert sum("run e2e:server" in c for c in everywhere) == 1
+    assert sum("run prove-gates" in c for c in everywhere) == 1
+
+
+@pytest.mark.parametrize("name", UI_WORK_JOBS)
+def test_each_ui_job_waits_only_for_changes_and_has_a_timeout(name: str) -> None:
+    """The three start together, right after ``changes``, under the same condition as ``ui``."""
+    job = _jobs("ci.yml")[name]
     assert job["needs"] == "changes"
+    assert job["timeout-minutes"] == 15
+    assert job["if"] == _jobs("ci.yml")["ui"]["if"]
+    assert job["name"].startswith("ui (")
 
 
-def test_the_ui_job_takes_node_from_the_nvmrc() -> None:
+def test_the_required_check_ui_is_green_only_when_all_three_ui_jobs_were() -> None:
+    """``ui`` stays the required check: it waits for the three and names a failed one."""
+    job = _jobs("ci.yml")["ui"]
+    assert set(job["needs"]) == {"changes", *UI_WORK_JOBS}
+    assert job["timeout-minutes"] == 5
+    assert "name" not in job
+    (step,) = job["steps"]
+    for name in UI_WORK_JOBS:
+        assert step["env"][name.removeprefix("ui-").upper().replace("-", "_")] == (
+            f"${{{{ needs.{name}.result }}}}"
+        )
+    assert '!= "success"' in step["run"]
+
+
+@pytest.mark.parametrize(
+    ("results", "status"),
+    [
+        (("success", "success", "success"), 0),
+        (("success", "failure", "success"), 1),
+        (("success", "success", "cancelled"), 1),
+        (("skipped", "success", "success"), 1),
+        (("", "success", "success"), 1),
+    ],
+)
+def test_the_ui_check_fails_unless_every_ui_job_succeeded(
+    results: tuple[str, str, str], status: int
+) -> None:
+    """Run the step of ``ui`` with the results its three jobs could have."""
+    (step,) = _jobs("ci.yml")["ui"]["steps"]
+    env = {**os.environ}
+    for name, result in zip(UI_WORK_JOBS, results, strict=True):
+        env[name.removeprefix("ui-").upper().replace("-", "_")] = result
+    done = subprocess.run(
+        ["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True
+    )
+    assert done.returncode == status
+    if status:
+        assert "::error::" in done.stdout
+
+
+@pytest.mark.parametrize("name", UI_WORK_JOBS)
+def test_the_ui_jobs_take_node_from_the_nvmrc(name: str) -> None:
     """One Node version, written once: ``ui/.nvmrc``; the npm cache keys on the lock."""
-    steps = _jobs("ci.yml")["ui"]["steps"]
+    steps = _jobs("ci.yml")[name]["steps"]
     node = next(s for s in steps if str(s.get("uses", "")).startswith("actions/setup-node"))
     assert node["with"]["node-version-file"] == "ui/.nvmrc"
     assert node["with"]["cache-dependency-path"] == "ui/package-lock.json"
     assert "node-version" not in node["with"]
 
 
+def test_the_three_ui_jobs_share_one_scope_step() -> None:
+    """The question "did the interface change?" has one answer, asked the same way three times."""
+    scopes = [
+        next(s for s in _jobs("ci.yml")[name]["steps"] if s.get("id") == "scope")
+        for name in UI_WORK_JOBS
+    ]
+    assert all(scope == scopes[0] for scope in scopes)
+
+
 def _run_ui_scope_step(tmp_path: Path, changed: str) -> str:
-    """Run the ``scope`` step of the ``ui`` job over a pull request that changes one file.
+    """Run the ``scope`` step of the ``ui`` jobs over a pull request that changes one file.
 
     Parameters
     ----------
@@ -750,7 +867,7 @@ def _run_ui_scope_step(tmp_path: Path, changed: str) -> str:
     str
         The content the step wrote to ``GITHUB_OUTPUT``.
     """
-    steps = _jobs("ci.yml")["ui"]["steps"]
+    steps = _jobs("ci.yml")["ui-gates"]["steps"]
     step = next(s for s in steps if s.get("id") == "scope")
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -803,9 +920,10 @@ def test_the_ui_job_skips_a_change_outside_ui(path: str, tmp_path: Path) -> None
     assert _run_ui_scope_step(tmp_path, path) == ""
 
 
-def test_every_ui_step_after_the_scope_waits_for_it() -> None:
+@pytest.mark.parametrize("name", UI_WORK_JOBS)
+def test_every_ui_step_after_the_scope_waits_for_it(name: str) -> None:
     """A skipped scope skips everything but the checkout and the scope step itself."""
-    steps = _jobs("ci.yml")["ui"]["steps"]
+    steps = _jobs("ci.yml")[name]["steps"]
     scope = next(i for i, s in enumerate(steps) if s.get("id") == "scope")
     assert all(s["if"] == "steps.scope.outputs.run == 'true'" for s in steps[scope + 1 :])
 
@@ -1198,6 +1316,9 @@ HEAVY_ON_READY = (
 DRAFT_RUNS = (
     "lint",
     "ui",
+    "ui-gates",
+    "ui-e2e-smoke",
+    "ui-e2e-server",
     "unit",
     "docs-examples",
     "docs-examples-shard",
@@ -1251,6 +1372,9 @@ ALREADY_TESTED_OUTPUT = (
 SKIPPED_WHEN_TESTED = (
     "unit",
     "ui",
+    "ui-gates",
+    "ui-e2e-smoke",
+    "ui-e2e-server",
     "test",
     "integration",
     "integration-services",
@@ -1395,6 +1519,9 @@ EVENTS = {
 _FULL_RUN = {
     "lint",
     "ui",
+    "ui-gates",
+    "ui-e2e-smoke",
+    "ui-e2e-server",
     "unit",
     "test",
     "unit-macos",
@@ -1415,6 +1542,9 @@ WHAT_RUNS = {
     "push to a draft": {
         "lint",
         "ui",
+        "ui-gates",
+        "ui-e2e-smoke",
+        "ui-e2e-server",
         "unit",
         "test",
         "docs",
@@ -2661,6 +2791,7 @@ def test_every_ci_job_has_a_time_budget() -> None:
     assert "integration (services, 2/2)" in names
     assert "docs-examples (3/3)" in names
     assert "docs-examples" in names
+    assert {"ui", "ui (gates)", "ui (e2e smoke)", "ui (e2e server)"} <= set(names)
     errors, _ = check_jobs([JobTime(name, 0.0) for name in names], budgets)
     assert errors == []
 

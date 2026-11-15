@@ -15,6 +15,9 @@ SKIPPED_JOBS = {
     "ci.yml": (
         "lint",
         "ui",
+        "ui-gates",
+        "ui-e2e-smoke",
+        "ui-e2e-server",
         "unit",
         "integration",
         "integration-services",
