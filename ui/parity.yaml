@@ -424,6 +424,7 @@
   }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview":
   { class: read, part: 3, done: true }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild": { class: ui, part: 3 }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop": { class: ui, part: 3 }
 "POST /api/v1/environments/{env}/queries": { class: ui, part: 4 }
 "POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4 }

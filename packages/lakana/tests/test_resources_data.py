@@ -45,6 +45,7 @@ from lakana._models import (
     PolicyWarning,
     QueryStatus,
     Table,
+    TableRebuild,
     TableReference,
     TableReferences,
     TranslationCoverage,
@@ -634,6 +635,53 @@ def test_tables_undrop_posts_the_new_name_and_returns_the_table() -> None:
     assert seen == [
         ("POST", path, {"new_name": "sales_before", "break_glass_reason": None}),
         ("POST", path, {"new_name": None, "break_glass_reason": None}),
+    ]
+
+
+def test_tables_rebuild_posts_the_reason_and_returns_the_run() -> None:
+    """`rebuild` POSTs `.../tables/{name}/rebuild` with the reason; break-glass is a query."""
+    seen: list[tuple[str, str, str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(
+            (
+                request.method,
+                request.url.path,
+                str(request.url.query, "ascii"),
+                json.loads(request.content),
+            )
+        )
+        return httpx.Response(
+            202,
+            json={
+                "table": "silver.clean",
+                "run_id": "r1",
+                "repository": "analytics",
+                "path": "assets/silver/clean.sql",
+            },
+        )
+
+    tables = Tables(_transport(handler))
+    rebuilt = tables.rebuild("dev", "silver.clean", reason="the source was corrected")
+    tables.rebuild(
+        "prod", "silver.clean", reason="the source was corrected", break_glass_reason="incident 4"
+    )
+
+    assert rebuilt == TableRebuild(
+        table="silver.clean",
+        run_id="r1",
+        repository="analytics",
+        path="assets/silver/clean.sql",
+    )
+    body = {"reason": "the source was corrected"}
+    assert seen == [
+        ("POST", "/api/v1/environments/dev/namespaces/silver/tables/clean/rebuild", "", body),
+        (
+            "POST",
+            "/api/v1/environments/prod/namespaces/silver/tables/clean/rebuild",
+            "break_glass_reason=incident+4",
+            body,
+        ),
     ]
 
 

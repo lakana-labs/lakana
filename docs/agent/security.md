@@ -5596,11 +5596,13 @@ already allows.
   (`namespace`, dotted) and `NAMESPACE_DROPPED` (`namespace`, `revoked_grants`), for the platform
   API and the Iceberg REST catalog alike; `TABLE_CREATED` for an external table (`table_id`,
   `kind: EXTERNAL`, `location`, the pattern relative to the environment's storage root, and
-  `format`); `ARTIFACT_UPLOAD_ABORTED` (`artifact`, `upload_id`). `TABLE_REBUILT` is the type a
-  rebuild writes. No detail names a repository or a deployed file's path: the audit log is read
-  with `READ_AUDIT_LOG` alone, and a file is named only to a caller with `READ_TABLE`. A refused
-  change rolls back and writes no event. The new fields (`namespace`, `revoked_grants`, `format`,
-  `upload_id`) are in `SHOWN_FIELDS`.
+  `format`); `ARTIFACT_UPLOAD_ABORTED` (`artifact`, `upload_id`). A rebuild
+  (`lakana_core.catalog.rebuild`) writes `TABLE_DROPPED` (`reason: rebuild`, `rebuild_reason`) and
+  `TABLE_REBUILT` (`table_id`, `reason`, `run_id`) next to its run's `RUN_STARTED`. No detail names
+  a repository or a deployed file's path: the audit log is read with `READ_AUDIT_LOG` alone, and
+  a file is named only to a caller with `READ_TABLE` (the rebuild's answer has `path: null`
+  otherwise). A refused change rolls back and writes no event. The new fields (`namespace`,
+  `revoked_grants`, `format`, `upload_id`, `rebuild_reason`) are in `SHOWN_FIELDS`.
 - **Reads of a deployed file are audited (M7 part 3a).** `table_definition_file`
   (`lakana_core.projects.definition`) writes `SOURCE_VIEWED` (the table as scope; `repository`,
   `path`, `commit`) through `record_source_view` before it returns a file's text, once per reader,

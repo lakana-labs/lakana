@@ -953,6 +953,28 @@ class DroppedTable:
 
 
 @dataclass(frozen=True)
+class TableRebuild:
+    """What `Tables.rebuild` did: the table it dropped and the run that builds it again.
+
+    Parameters
+    ----------
+    table
+        The table's dotted ``"namespace.table"`` name.
+    run_id
+        The queued run; follow it with `Runs.get`.
+    repository
+        The repository whose asset builds the table.
+    path
+        The asset's file in the repository; `None` to someone who may not read the table.
+    """
+
+    table: str
+    run_id: str
+    repository: str
+    path: str | None
+
+
+@dataclass(frozen=True)
 class ExternalTable:
     """A registered raw-zone table backed by files already on storage.
 

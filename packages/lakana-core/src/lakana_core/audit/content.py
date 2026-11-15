@@ -218,6 +218,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "protected",
         "purge",
         "reason",
+        # why a person rebuilt a table (`lakana_core.catalog.rebuild`), on its `TABLE_DROPPED`:
+        # one line written for the reviewer of the log, like a break-glass reason
+        "rebuild_reason",
         # the scopes an access apply stopped managing
         "released",
         "replaced",

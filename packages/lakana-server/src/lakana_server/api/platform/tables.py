@@ -41,6 +41,7 @@ from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
 from lakana_core.catalog.loads import require_bronze
 from lakana_core.catalog.preview import submit_preview
 from lakana_core.catalog.query_service import QueryService
+from lakana_core.catalog.rebuild import TableRebuild
 from lakana_core.catalog.retention import TableRetention
 from lakana_core.catalog.service import CatalogService, LoadedTable, TableDescription
 from lakana_core.catalog.writes import (
@@ -86,6 +87,8 @@ from lakana_server.api.platform.schemas import (
     TableHealthOut,
     TableModelOut,
     TableOut,
+    TableRebuildIn,
+    TableRebuildOut,
     TableReferenceOut,
     TableReferencesOut,
     TableRetentionIn,
@@ -106,6 +109,7 @@ from lakana_server.deps import (
     get_principal,
     get_query_service,
     get_session,
+    get_table_rebuild,
     get_write_principal,
     with_break_glass,
 )
@@ -2189,6 +2193,81 @@ def undrop_table(
         loaded,
         language=reader_languages(request, None, principal, main_language)[0],
         main_language=main_language,
+    )
+
+
+@router.post(
+    "/{name}/rebuild",
+    response_model=TableRebuildOut,
+    status_code=202,
+    responses=errors(403, 404, 409),
+)
+def rebuild_table(
+    env: str,
+    path: str,
+    name: str,
+    body: TableRebuildIn,
+    principal: PrincipalRef = Depends(get_write_principal),
+    rebuild: TableRebuild = Depends(get_table_rebuild),
+) -> TableRebuildOut:
+    """Rebuild a table a deployed project builds: drop it and queue a run of its asset.
+
+    For a table that has to be built again from scratch from git. In one transaction it drops
+    the table, which stays restorable with undrop for the undo period like any drop, and
+    queues a run of exactly the asset that declares it; the answer names that run. Needs
+    `DROP_TABLE` on the table and `RUN` on the environment. From the web interface it needs a
+    passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does. In a
+    protected environment it needs `?break_glass_reason=`, and the deployment's run principal
+    writes the table. The repository's file is named only to a caller who may read the
+    table (`path` is `null` otherwise). Answers 404 when the table does not exist, 409 when it
+    is an artifact, when no deployed project declares it (drop it instead), when another run
+    of the project is active (nothing is dropped; wait for it and rebuild again) or when a
+    protected environment has no run principal, and 422 when the reason is not 10 to 500
+    characters on one line.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table name.
+    body
+        Why the table is rebuilt.
+    principal
+        The authenticated caller, with any `?break_glass_reason=` attached.
+    rebuild
+        The rebuild service for this request.
+
+    Returns
+    -------
+    TableRebuildOut
+        The table, the queued run and the file that builds it.
+
+    Raises
+    ------
+    lakana_core.errors.PermissionDenied
+        Mapped to 403: without `DROP_TABLE` on the table or `RUN` on the environment, or in a
+        protected environment without a break-glass reason.
+    lakana_core.errors.StepUpRequired
+        Mapped to 403, for a browser session whose last passkey touch is older than 15
+        minutes.
+    lakana_core.errors.NotFoundError
+        Mapped to 404, if the table does not exist.
+    lakana_core.errors.ConflictError
+        Mapped to 409: an artifact, a table no deployed project builds, another active run of
+        the project, or no run principal in a protected environment. Nothing is dropped.
+    lakana_core.errors.ValidationError
+        Mapped to 422, if the reason is not 10 to 500 characters on one line.
+    """
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    result = rebuild.rebuild(principal, ref, reason=body.reason)
+    return TableRebuildOut(
+        table=result.ref.dotted(),
+        run_id=str(result.run_id),
+        repository=result.repository,
+        path=result.path,
     )
 
 

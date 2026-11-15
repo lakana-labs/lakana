@@ -1,9 +1,10 @@
 """A browser session needs a fresh passkey touch before it drops data; a token never does.
 
-Dropping a table, a namespace, an artifact or one artifact version cannot be undone from the
-browser the way an ordinary edit can, so each asks a browser session for a passkey touch no
-older than 15 minutes (`lakana_core.identity.sessions.require_step_up`), as an environment
-purge already does. A token caller (the CLI, an agent) has no session and is never asked.
+Dropping a table, a namespace, an artifact or one artifact version, and rebuilding a table,
+cannot be undone from the browser the way an ordinary edit can, so each asks a browser session
+for a passkey touch no older than 15 minutes (`lakana_core.identity.sessions.require_step_up`),
+as an environment purge already does. A token caller (the CLI, an agent) has no session and is
+never asked.
 """
 
 from __future__ import annotations
@@ -27,9 +28,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SessionContext
+from lakana_core.catalog.rebuild import TableRebuild
 from lakana_core.errors import ConflictError, StepUpRequired
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import ArtifactVersion, AuditEvent, Namespace, Table
+from lakana_core.runs.service import RunService
 
 _SILVER = NamespacePath.from_parts(["silver"])
 _SCRATCH = NamespacePath.from_parts(["scratch"])
@@ -184,11 +187,40 @@ def _version_delete(session: Session, tmp_path: Path, p: PrincipalRef) -> Drop:
     return Drop(run=lambda who: service.delete_version(who, ARTIFACT_REF, 1), intact=intact)
 
 
+def _table_rebuild(session: Session, tmp_path: Path, p: PrincipalRef) -> Drop:
+    """Create a managed table a deployed project builds, and offer its rebuild.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        The environment's storage root.
+    p
+        The principal that creates the table.
+
+    Returns
+    -------
+    Drop
+        The rebuild, and a check that the row is still there.
+    """
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    table_id = catalog.create_table(p, _CLEAN, schema=_minimal_schema()).uuid
+    deploy_assets(session, "dev", "analytics", {"silver.clean": {}})
+    authz = AllowAllAuthorization()
+    rebuild = TableRebuild(session, catalog, RunService(session, authz), authz, undo_days=7)
+    return Drop(
+        run=lambda who: rebuild.rebuild(who, _CLEAN, reason="the source was corrected"),
+        intact=lambda: session.get(Table, table_id) is not None,
+    )
+
+
 DROPS: dict[str, Callable[[Session, Path, PrincipalRef], Drop]] = {
     "catalog.drop_table": _table_drop,
     "catalog.drop_namespace": _namespace_drop,
     "artifacts.drop_artifact": _artifact_drop,
     "artifacts.delete_version": _version_delete,
+    "rebuild.rebuild": _table_rebuild,
 }
 """Every call that asks a browser session for a fresh touch, by name."""
 

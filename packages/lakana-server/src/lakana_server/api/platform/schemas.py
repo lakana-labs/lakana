@@ -1918,6 +1918,41 @@ class DroppedTableOut(BaseModel):
     restorable: bool
 
 
+class TableRebuildIn(BaseModel):
+    """Request body that rebuilds a table a deployed project builds.
+
+    Parameters
+    ----------
+    reason
+        Why it is rebuilt: 10 to 500 characters on one line, recorded in the audit log.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class TableRebuildOut(BaseModel):
+    """What a rebuild did: the table it dropped and the run that builds it again.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    run_id
+        The queued run; follow it with `GET /api/v1/environments/{env}/runs/{run_id}`.
+    repository
+        The repository whose asset builds the table.
+    path
+        The asset's file in the repository; `null` to a caller who may not read the table.
+    """
+
+    table: str
+    run_id: str
+    repository: str
+    path: str | None
+
+
 class LineageNodeOut(BaseModel):
     """One node of a lineage graph.
 

@@ -52,6 +52,7 @@ from lakana._models import (
     TableHealth,
     TableModel,
     TableOwner,
+    TableRebuild,
     TableReference,
     TableReferences,
     TableRetention,
@@ -1210,6 +1211,64 @@ class Tables:
             json={"new_name": new_name, "break_glass_reason": break_glass_reason},
         )
         return _table_from_json(response.json())
+
+    def rebuild(
+        self,
+        environment: str,
+        qualified_name: str,
+        *,
+        reason: str,
+        break_glass_reason: str | None = None,
+    ) -> TableRebuild:
+        """Rebuild a table a deployed project builds: drop it and queue a run of its asset.
+
+        The drop keeps the undo period, so `undrop` restores the old table within it. Needs
+        `DROP_TABLE` on the table and `RUN` on the environment.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+        reason
+            Why: 10-500 characters on one line, recorded in the audit log.
+        break_glass_reason
+            Rebuild in a protected environment: 10-500 characters, needs
+            `MANAGE_ENVIRONMENT`, audited. The run writes as the deployment's run principal.
+
+        Returns
+        -------
+        TableRebuild
+            The table, the queued run and the file that builds it.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If no such table exists.
+        lakana.errors.Conflict
+            If it is an artifact, no deployed project builds it (drop it instead), another
+            run of the project is active (nothing was dropped; rebuild again once it ends),
+            or a protected environment has no run principal.
+        lakana.errors.ValidationError
+            If the reason is not 10-500 characters on one line.
+        """
+        namespace, name = _split_namespace_table(qualified_name)
+        response = self._transport.request(
+            ROUTES["tables.rebuild"],
+            path_params={"env": environment, "path": namespace, "name": name},
+            params=None
+            if break_glass_reason is None
+            else {"break_glass_reason": break_glass_reason},
+            json={"reason": reason},
+        )
+        data = response.json()
+        return TableRebuild(
+            table=data["table"],
+            run_id=data["run_id"],
+            repository=data["repository"],
+            path=data["path"],
+        )
 
     def retention(self, environment: str, qualified_name: str) -> TableRetention:
         """Show a managed table's retention, where it comes from and when the table expires.

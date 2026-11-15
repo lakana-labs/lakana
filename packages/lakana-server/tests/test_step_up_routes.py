@@ -21,7 +21,7 @@ from __future__ import annotations
 import itertools
 import shutil
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -233,7 +233,9 @@ def _passkey(client: TestClient) -> str:
         return f"/api/v1/principals/{name}/passkeys/{row.id}"
 
 
-def _deployment(client: TestClient, environment: str, repository: str) -> None:
+def _deployment(
+    client: TestClient, environment: str, repository: str, assets: Sequence[str] = ()
+) -> None:
     """Record a current deployment of a repository, as a finished deploy would.
 
     Parameters
@@ -244,7 +246,19 @@ def _deployment(client: TestClient, environment: str, repository: str) -> None:
         The environment's name.
     repository
         The repository's name.
+    assets
+        Dotted names of the tables its SQL assets build, each in its own file.
     """
+    entries = [
+        {
+            "table": dotted,
+            "kind": "sql",
+            "sql": "SELECT 1",
+            "references": [],
+            "path": "assets/" + dotted.replace(".", "/") + ".sql",
+        }
+        for dotted in assets
+    ]
     app = cast(FastAPI, client.app)
     with Session(app.state.engine) as session:
         env = session.execute(
@@ -256,7 +270,7 @@ def _deployment(client: TestClient, environment: str, repository: str) -> None:
             repository_id=repo.id,
             environment_id=env.id,
             commit_sha="a" * 40,
-            manifest_json={"version": 1, "assets": [], "edges": [], "external_inputs": []},
+            manifest_json={"version": 1, "assets": entries, "edges": [], "external_inputs": []},
             code_uri="s3://b/x.tar.gz",
             code_sha256="0" * 64,
         )
@@ -522,6 +536,31 @@ def _artifact(client: TestClient) -> str:
     name = _unique("a")
     upload_artifact(client, "dev", f"bronze.{name}", {"model.bin": name.encode()})
     return name
+
+
+def _rebuilt(client: TestClient) -> Request:
+    """Create a table in `dev.bronze` that a new repository's deployment builds.
+
+    A new repository each time, so that the run an earlier credential's rebuild queued is not
+    the active run of this one's.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    Request
+        The rebuild's path and body.
+    """
+    name = _unique("t")
+    create_table(client, "dev", "bronze", name)
+    _deployment(client, "dev", _repository(client), [f"bronze.{name}"])
+    return (
+        f"/api/v1/environments/dev/namespaces/bronze/tables/{name}/rebuild",
+        {"reason": "the source was corrected upstream"},
+    )
 
 
 @dataclass(frozen=True)
@@ -850,6 +889,9 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
     ),
     ("DELETE", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}"): Case(
         lambda c: (f"/api/v1/environments/dev/namespaces/bronze/tables/{_table(c)}", None), 204
+    ),
+    ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild"): Case(
+        _rebuilt, 202
     ),
     ("DELETE", "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}"): Case(
         lambda c: (f"/api/v1/environments/dev/namespaces/bronze/artifacts/{_artifact(c)}", None),
