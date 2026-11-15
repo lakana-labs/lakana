@@ -658,8 +658,8 @@ server's info route (`GET /api/v1/info`).
 | `POST /namespaces/{path}/artifacts/{name}/uploads/{upload_id}/commit` | Turn the complete upload into the next version. Repeating it for the same upload returns the same version (the sources of the first commit stand). | `WRITE_TABLE`, and `READ_TABLE` on each source |
 | `GET /artifacts/uploads` (optional `name`, `limit`, `cursor` queries) | List your own open uploads, newest first: `{items: [{upload_id, artifact, created_at, expires_at}], next_cursor}`. `name` is `namespace.name`; `limit` is 1 to 500 (default 100); `cursor` is the previous `next_cursor`. | `READ_ENVIRONMENT`, and `WRITE_TABLE` on each artifact |
 | `DELETE /namespaces/{path}/artifacts/{name}/uploads/{upload_id}` | Withdraw an open upload. | `WRITE_TABLE` |
-| `DELETE /namespaces/{path}/artifacts/{name}/versions/{version}` | Delete one version's files. The answer is `200` with the version and, added to its fields, `freed_files`, `freed_bytes`, `kept_files`, `kept_bytes` and `kept` (`reason`, `files`, `bytes`, `version`), as under `versions delete`. | `DROP_TABLE` |
-| `DELETE /namespaces/{path}/artifacts/{name}` | Drop the artifact. | `DROP_TABLE` |
+| `DELETE /namespaces/{path}/artifacts/{name}/versions/{version}` | Delete one version's files. The answer is `200` with the version and, added to its fields, `freed_files`, `freed_bytes`, `kept_files`, `kept_bytes` and `kept` (`reason`, `files`, `bytes`, `version`), as under `versions delete`. | `DROP_TABLE`; from the web interface also a passkey touch within the last 15 minutes (403 `StepUpRequired`) |
+| `DELETE /namespaces/{path}/artifacts/{name}` | Drop the artifact. | `DROP_TABLE`; from the web interface also a passkey touch within the last 15 minutes (403 `StepUpRequired`) |
 | `GET /artifacts` (optional `namespace` query) | List the artifacts you may read. | `READ_ENVIRONMENT`, then `READ_TABLE` for each |
 | `GET /namespaces/{path}/artifacts/{name}` | Show one artifact. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions` | List the versions, without files. | `READ_TABLE` |

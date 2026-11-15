@@ -160,6 +160,7 @@ from lakana_core.identifiers import (
     shown,
     validate_path_component,
 )
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -1774,7 +1775,9 @@ class ArtifactService:
         expired), belongs to this principal and, for a task, to this task run and claim.
         Anything else is `UPLOAD_GONE`, one text for every reason, so nothing is revealed.
         No bytes are deleted: the files the upload stored stay in storage, with their
-        `artifact_blobs` rows, until the sweep finds that nothing names them.
+        `artifact_blobs` rows, until the sweep finds that nothing names them. One
+        `ARTIFACT_UPLOAD_ABORTED` audit event, in the transaction of the delete, names the
+        artifact and the upload.
 
         There is no protected-write guard call. The abort writes no version and no bytes and
         cannot touch anything that is not the caller's own unfinished upload, so it is not a way
@@ -1803,13 +1806,20 @@ class ArtifactService:
             With `UPLOAD_GONE` if the upload does not exist, is another caller's or another
             artifact's, expired or was committed.
         """
-        self._authz.authorize(p, Action.WRITE_TABLE, self._securable(ref))
+        securable = self._securable(ref)
+        self._authz.authorize(p, Action.WRITE_TABLE, securable)
         self._require_attempt(p)
         artifact_id = self._artifact(ref).id
         try:
             if not lock_artifact(self._session, artifact_id):
                 raise self._not_found(ref)
             self._session.delete(self._open_upload(p, artifact_id, upload_id))
+            AuditService(self._session).record(
+                p.id,
+                AuditEventType.ARTIFACT_UPLOAD_ABORTED,
+                securable=securable,
+                detail={"artifact": ref.dotted(), "upload_id": str(upload_id)},
+            )
             self._session.commit()
         except BaseException:
             self._session.rollback()
@@ -2495,8 +2505,12 @@ class ArtifactService:
             If the name belongs to something that is not an artifact.
         ConflictError
             If the version is already deleted.
+        StepUpRequired
+            If a browser session's last passkey touch is older than 15 minutes; a token never
+            is asked. Checked before anything else is read.
         """
         self._authz.authorize(p, Action.DROP_TABLE, self._securable(ref))
+        require_step_up(p)
         self._refuse_run(p)
         self._guard.check(
             p, ref.environment, WriteOperation.DELETE_ARTIFACT_VERSION, table_target(ref)
@@ -2663,9 +2677,13 @@ class ArtifactService:
             (`lakana_core.catalog.git_owned.GIT_OWNED_ARTIFACT_DROP`, or the hidden copy to a
             caller who may not read it); checked before the marker, so nothing reaches storage.
             Or if storage could not be written (the drop marker); nothing was deleted.
+        StepUpRequired
+            If a browser session's last passkey touch is older than 15 minutes; a token never
+            is asked. Checked before anything else is read.
         """
         securable = self._securable(ref)
         self._authz.authorize(p, Action.DROP_TABLE, securable)
+        require_step_up(p)
         self._refuse_run(p)
         self._guard.check(p, ref.environment, WriteOperation.DROP_ARTIFACT, table_target(ref))
         artifact = self._artifact(ref)

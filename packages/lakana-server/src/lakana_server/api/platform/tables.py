@@ -2080,6 +2080,10 @@ def drop_table(
 ) -> None:
     """Drop a table.
 
+    From the web interface a drop needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does. This holds with or without
+    `purge`; undrop asks for no touch.
+
     Removes the table from the catalog at once, with its grants, row filters and column
     masks. Needs `DROP_TABLE`. A managed table keeps its files for the undo period (7 days
     unless the operator changed it), during which it can be restored, and then they are
@@ -2108,6 +2112,9 @@ def drop_table(
 
     Raises
     ------
+    lakana_core.errors.StepUpRequired
+        Mapped to 403, for a browser session whose last passkey touch is older than 15
+        minutes.
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
     lakana_core.errors.ConflictError

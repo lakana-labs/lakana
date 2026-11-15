@@ -900,6 +900,9 @@ def delete_version(
 ) -> ArtifactVersionDeletedOut:
     """Delete one version of an artifact.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Deletes the bytes of one version; its record and its lineage stay. Needs `DROP_TABLE` on
     the name; a task token is always refused, and in a protected environment a reason for
     breaking the protection is needed. The version is gone for every reader when this
@@ -938,7 +941,9 @@ def delete_version(
         artifact.
     lakana_core.errors.PermissionDenied
         Mapped to 403: no `DROP_TABLE`, a task token, or a protected environment without
-        break-glass. One text whether or not the artifact or the version exists.
+        break-glass. One text whether or not the artifact or the version exists. Also
+        `StepUpRequired`, for a browser session whose last passkey touch is older than 15
+        minutes.
     lakana_core.errors.NotFoundError
         Mapped to 404, if the caller may drop the name and the artifact or version is absent.
     lakana_core.errors.ConflictError
@@ -958,6 +963,9 @@ def drop_artifact(
     service: ArtifactService = Depends(get_artifact_service),
 ) -> None:
     """Drop an artifact.
+
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
 
     Removes the artifact with all its versions' bytes, its rows and its grants. This cannot
     be undone. Needs `DROP_TABLE` on the name; a task token is always refused, and in a
@@ -986,7 +994,8 @@ def drop_artifact(
     ------
     lakana_core.errors.PermissionDenied
         Mapped to 403: no `DROP_TABLE`, a task token, or a protected environment without
-        break-glass. One text whether or not the artifact exists.
+        break-glass. One text whether or not the artifact exists. Also `StepUpRequired`, for
+        a browser session whose last passkey touch is older than 15 minutes.
     lakana_core.errors.NotFoundError
         Mapped to 404, if the caller may drop the name and no artifact has it.
     lakana_core.errors.ValidationError

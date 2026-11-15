@@ -295,6 +295,39 @@ def test_drop_namespace(client: TestClient, storage_root: str) -> None:
     assert client.get("/v1/dev/namespaces/gold", headers=AUTH_HEADER).status_code == 404
 
 
+def test_iceberg_namespace_create_and_drop_write_the_audit_events(
+    client: TestClient, storage_root: str, settings: Settings
+) -> None:
+    """A namespace made and dropped through the Iceberg REST catalog is audited like the API's."""
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+
+    from lakana_core.models import AuditEvent, AuditEventType
+
+    _create_env_and_prefix(client, storage_root)
+    created = client.post(
+        "/v1/dev/namespaces", headers=AUTH_HEADER, json={"namespace": ["widgets"], "properties": {}}
+    )
+    assert created.status_code == 200, created.text
+    assert client.delete("/v1/dev/namespaces/widgets", headers=AUTH_HEADER).status_code == 204
+
+    engine = create_engine(settings.database.url)
+    with Session(engine) as session:
+        rows = session.execute(
+            select(AuditEvent.event_type, AuditEvent.detail).where(
+                AuditEvent.event_type.in_(
+                    [AuditEventType.NAMESPACE_CREATED, AuditEventType.NAMESPACE_DROPPED]
+                ),
+                AuditEvent.securable_namespace == "widgets",
+            )
+        ).all()
+    engine.dispose()
+    assert sorted((row.event_type, row.detail["namespace"]) for row in rows) == [
+        (AuditEventType.NAMESPACE_CREATED, "widgets"),
+        (AuditEventType.NAMESPACE_DROPPED, "widgets"),
+    ]
+
+
 def test_a_multi_part_namespace_round_trips_through_real_http(
     client: TestClient, storage_root: str
 ) -> None:

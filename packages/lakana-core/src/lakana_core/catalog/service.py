@@ -2419,6 +2419,9 @@ class CatalogService:
     ) -> Namespace:
         """Create a namespace in an environment.
 
+        One `NAMESPACE_CREATED` audit event, in the transaction of the insert, records the
+        dotted path.
+
         Parameters
         ----------
         p
@@ -2478,6 +2481,12 @@ class CatalogService:
             properties=dict(properties or {}),
         )
         self._session.add(ns)
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.NAMESPACE_CREATED,
+            securable=Securable.namespace_scope(environment, path),
+            detail={"namespace": str(path)},
+        )
         try:
             self._guard.record_pending()
             self._session.commit()
@@ -2638,7 +2647,8 @@ class CatalogService:
         """Remove a namespace.
 
         Every active NAMESPACE-kind grant bound to exactly this namespace is
-        soft-revoked first, in the same transaction. A row filter
+        soft-revoked first, in the same transaction, and one `NAMESPACE_DROPPED` audit event
+        records the dotted path and how many grants went. A row filter
         or column mask is always table-scoped, so none applies here directly;
         the `ConflictError` checks below already guarantee no table remains
         underneath to worry about.
@@ -2672,10 +2682,13 @@ class CatalogService:
             catch that at the database level either.
         PermissionDenied
             If the principal may not drop this namespace.
+        StepUpRequired
+            If a browser session's last passkey touch is older than 15 minutes; a token never
+            is asked. Checked before anything else is read.
         """
-        self._authz.authorize(
-            p, Action.DROP_NAMESPACE, Securable.namespace_scope(environment, path)
-        )
+        securable = Securable.namespace_scope(environment, path)
+        self._authz.authorize(p, Action.DROP_NAMESPACE, securable)
+        require_step_up(p)
         self._guard.check(p, environment, WriteOperation.DROP_NAMESPACE, path.parts)
         env = self._find_environment(environment)
         ns = self._find_namespace(env, path)
@@ -2701,7 +2714,13 @@ class CatalogService:
         ).scalar_one()
         if children:
             raise ConflictError(_holds(NAMESPACE_HOLDS_NAMESPACES, path, children))
-        revoke_attached(self._session, p, namespace=(env.id, path.joined()))
+        revoked = revoke_attached(self._session, p, namespace=(env.id, path.joined()))
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.NAMESPACE_DROPPED,
+            securable=securable,
+            detail={"namespace": str(path), "revoked_grants": len(revoked)},
+        )
         self._session.delete(ns)
         self._guard.record_pending()
         self._session.commit()
@@ -3242,7 +3261,9 @@ class CatalogService:
 
         Unlike `create_table`, this never writes Iceberg metadata: the table's
         location, format, and inferred schema are the whole of its catalog
-        entry. Not subject to the medallion naming rule `create_table`
+        entry. One `TABLE_CREATED` audit event, in the transaction of the insert, records the
+        table's id, its kind, its location pattern (relative to the environment's storage
+        root) and its format. Not subject to the medallion naming rule `create_table`
         enforces — raw is exempt from that convention (architecture design,
         Decision 2).
 
@@ -3375,6 +3396,17 @@ class CatalogService:
             self._session,
             row.id,
             [ColumnSpec(name=n, type=t, nullable=True) for n, t in schema.items()],
+        )
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.TABLE_CREATED,
+            securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
+            detail={
+                "table_id": str(row.id),
+                "kind": TableType.EXTERNAL.value,
+                "location": location_pattern,
+                "format": format,
+            },
         )
         try:
             self._guard.record_pending()
@@ -9533,10 +9565,14 @@ class CatalogService:
             caller who may not read it). `purge` and break-glass do not get past this.
         PermissionDenied
             If the principal may not drop this table.
+        StepUpRequired
+            If a browser session's last passkey touch is older than 15 minutes, with or without
+            `purge`; a token never is asked. Checked before anything else is read.
         """
         self._authz.authorize(
             p, Action.DROP_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
+        require_step_up(p)
         self._guard.check(p, ref.environment, WriteOperation.DROP_TABLE, table_target(ref))
         ns, row = self._find_table(ref)
         if row.table_type is TableType.ARTIFACT:

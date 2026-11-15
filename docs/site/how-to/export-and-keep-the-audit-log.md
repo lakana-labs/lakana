@@ -22,10 +22,10 @@ in the `AuditEventType` of `lakana_core.models`; in groups:
 | Access | `GRANT_CREATED`, `GRANT_REVOKED`, `GROUP_*`, `PRINCIPAL_*`, `PAT_*`, `TASK_TOKEN_*`, `ACCESS_APPLIED`, `MANAGED_SCOPE_OVERRIDDEN`, `BOOTSTRAP_ADMIN_RESTORED`, `CI_TRUST_RULE_*` |
 | Policies | `ROW_FILTER_*`, `COLUMN_MASK_*` |
 | Secrets and connections | `SECRET_*`, `CONNECTION_*`, `PACKAGE_INDEX_*`, `REPOSITORY_*` |
-| Environments and tables | `ENVIRONMENT_*`, `TABLE_WRITE`, `TABLE_APPENDED`, `TABLE_SCHEMA_CHANGED`, `TABLE_MAINTAINED`, `TABLE_DROPPED`, `TABLE_UNDROPPED`, `TABLE_PURGED`, `TABLE_ROLLED_BACK`, `TABLE_RETENTION_*`, `TABLE_KEPT*`, `TABLE_DESCRIBED`, `COLUMN_DESCRIBED`, `TABLE_LOCATION_ABANDONED`, `ORPHANED_LOCATIONS_DELETED` |
+| Environments, namespaces and tables | `ENVIRONMENT_*`, `NAMESPACE_CREATED`, `NAMESPACE_DROPPED`, `TABLE_CREATED` (an external table registered), `TABLE_WRITE`, `TABLE_APPENDED`, `TABLE_SCHEMA_CHANGED`, `TABLE_MAINTAINED`, `TABLE_DROPPED`, `TABLE_UNDROPPED`, `TABLE_REBUILT`, `TABLE_PURGED`, `TABLE_ROLLED_BACK`, `TABLE_RETENTION_*`, `TABLE_KEPT*`, `TABLE_DESCRIBED`, `COLUMN_DESCRIBED`, `TABLE_LOCATION_ABANDONED`, `ORPHANED_LOCATIONS_DELETED` |
 | Code and runs | `DEPLOYED`, `DEPLOY_DRY_RUN`, `ROLLED_BACK`, `UNDEPLOYED`, `RUN_*`, `RUN_AS_*`, `BREAK_GLASS_WRITE`, `CHECK_FAILED`, `JOB_*`, `NOTIFICATION_*` |
 | Queries | `QUERY_COMPLETED` (also for a query that failed: `detail.status` says), `QUERY_CANCELLED` |
-| Artifacts | `ARTIFACT_*` |
+| Artifacts | `ARTIFACT_*`, among them `ARTIFACT_UPLOAD_ABORTED` (an upload withdrawn before its commit) |
 | Reading the log and other people's activity | `ACTIVITY_VIEWED` |
 | Reading the file that defines a table, or a view's SQL | `SOURCE_VIEWED` (repository, path and commit; once per person, file and commit per hour. For a view's SQL, `view_sql_sha256` instead, once per person and text per hour, withheld from readers without `READ_QUERY_TEXT`) |
 

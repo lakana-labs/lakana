@@ -602,6 +602,16 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   - irreversible erasure: `POST /api/v1/environments/{name}/purge-rows` (#261), which removes a
     deleted environment's rows and with them the only record of where its files are; nothing
     restores it;
+  - dropping data (M7 part 3b): `DELETE …/namespaces/{path}/tables/{name}` with or without
+    `purge` (the undo period is no defence against a stolen browser that also purges),
+    `DELETE …/artifacts/{name}` and `DELETE …/artifacts/{name}/versions/{version}` (neither can
+    be undone), `DELETE /api/v1/environments/{env}/namespaces/{path}` (revokes the grants bound
+    to it). The check sits in core (`CatalogService.drop_table`, `drop_namespace`,
+    `ArtifactService.drop_artifact`, `delete_version`) right after `authorize`, before the guard,
+    the lookup and the git-owned refusal, so a stale session learns nothing about the object.
+    The Iceberg REST `DELETE` of a table or namespace calls the same methods, but a session
+    cookie is read below `/api/v1/` only, so its callers are always tokens and never asked.
+    Undrop and maintenance ask for no touch: they bring data back or tidy it;
   - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
     passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
     (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.
@@ -611,7 +621,8 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   token. Every other write of `/api/v1` sits in `NO_STEP_UP` with a one-line reason, so a new
   write route fails the test until it is placed. The rule: step-up when a write changes who or
   what can act or read (identities, rights, run-as, CI trust), handles credentials or secrets, or
-  changes where code or data come from or go, or irreversibly erases catalog records; none for
+  changes where code or data come from or go, irreversibly erases catalog records, or drops data
+  (a table, an artifact, an artifact version, a namespace, a rebuild); none for
   removing access (revoking a token, withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
   one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
   descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
@@ -5580,6 +5591,16 @@ already allows.
   `{"principal_id": id}` for a filter on someone else. Same dedup, exemptions (a filter on the
   reader's own id; a page of only the reader's rows), fail-closed 503 and no `ADMIN` exemption as the
   other views. A `PermissionDenied` comes before anything is read or recorded.
+- **Catalog changes without an event before M7 part 3b now have one.** Each is written in the
+  transaction of its change, with the actor and the object as securable: `NAMESPACE_CREATED`
+  (`namespace`, dotted) and `NAMESPACE_DROPPED` (`namespace`, `revoked_grants`), for the platform
+  API and the Iceberg REST catalog alike; `TABLE_CREATED` for an external table (`table_id`,
+  `kind: EXTERNAL`, `location`, the pattern relative to the environment's storage root, and
+  `format`); `ARTIFACT_UPLOAD_ABORTED` (`artifact`, `upload_id`). `TABLE_REBUILT` is the type a
+  rebuild writes. No detail names a repository or a deployed file's path: the audit log is read
+  with `READ_AUDIT_LOG` alone, and a file is named only to a caller with `READ_TABLE`. A refused
+  change rolls back and writes no event. The new fields (`namespace`, `revoked_grants`, `format`,
+  `upload_id`) are in `SHOWN_FIELDS`.
 - **Reads of a deployed file are audited (M7 part 3a).** `table_definition_file`
   (`lakana_core.projects.definition`) writes `SOURCE_VIEWED` (the table as scope; `repository`,
   `path`, `commit`) through `record_source_view` before it returns a file's text, once per reader,

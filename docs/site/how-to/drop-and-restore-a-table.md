@@ -23,6 +23,10 @@ lakana table delete silver.orders --yes
 The table is gone from `lakana table list` and from every query. The answer of the command says how
 to restore it.
 
+From the web interface, a drop asks for a recent passkey touch: one from the last 15 minutes, with
+or without purging the files. The browser asks you to touch your passkey when yours is older. The
+command line uses a token and is never asked. Restoring a table asks for no touch.
+
 ## When a project builds the table
 
 A table or view that a deployed project builds is defined in git, so it is changed in git.
@@ -235,7 +239,8 @@ reached: the clean-up deletes that one's files and then the environment, and
 ## Through the APIs
 
 - **REST.** `DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}` drops, with
-  `?purge=true` to delete the files at the next sweep.
+  `?purge=true` to delete the files at the next sweep; from the web interface it asks for a passkey
+  touch within the last 15 minutes (403 `StepUpRequired`), a token never does.
   `GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables` lists the dropped tables (`name`,
   `namespace`, `uuid`, `kind`, `dropped_at`, `purge_after`, `restorable`).
   `POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop` restores, with an optional
@@ -261,6 +266,7 @@ reached: the clean-up deletes that one's files and then the environment, and
 | ``` `silver.orders` is built by a deployed project. Defined in analytics/assets/silver/orders.sql. ...``` | A deployed project builds the table; only git may remove it. | Remove the asset in git and deploy, then drop it from `lakana orphans --env dev`. See [When a project builds the table](#when-a-project-builds-the-table). |
 | ``` `silver.orders` is declared by a deployed project. Defined in analytics/assets/silver/orders.sql. ...``` | You tried to create a table under a name a deployed project declares. | Choose another name, or remove the asset in git and deploy first. |
 | `A deployed project defines this table; change it in git.` | As the two rows above, for someone who may not read the table. | Ask someone who may read it which project defines it. |
+| `This needs a fresh passkey touch (within 15 minutes). Confirm with your passkey and try again.` | You dropped the table from the web interface, and your last passkey touch is older than 15 minutes. | Touch your passkey when the browser asks, then drop it again. Nothing was dropped. |
 | `No dropped table 'orders' in silver can be restored: ...` | Nothing of that name was dropped there, or its files are already deleted. | Check the name with `lakana table list silver --dropped`. |
 | `silver.orders cannot be restored as 'orders': a table of that name exists in silver now. ...` | A new table, view or artifact has the name. | Add `--as NEW_NAME`, or drop the new one first. |
 | `silver.orders cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the table was dropped with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |

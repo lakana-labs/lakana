@@ -6,7 +6,9 @@ storage. If your bucket keeps old object versions, a deleted file stays in the b
 bucket's own rule removes it.
 
 You need `DROP_TABLE` on the artifact. The roles `DATA_ENGINEER` and `ADMIN` have it. A task token
-never has it: a running task cannot delete anything, whatever its principal may do.
+never has it: a running task cannot delete anything, whatever its principal may do. From the web
+interface, deleting a version or dropping the artifact also asks for a recent passkey touch, one
+from the last 15 minutes; the command line uses a token and is never asked.
 
 If you only want to keep fewer versions over time, set `keep_versions` instead:
 [Limit how many versions are kept](limit-artifact-versions.md).
@@ -145,6 +147,7 @@ Dropped artifact dev/models.scratch_model; its files are removed from storage, a
 | `A task token cannot delete a version or drop an artifact, and neither can a running task or query. ...` | A task or a task token tried to delete. | Delete as a person or a service account, or set `keep_versions` on the asset. |
 | `Version 3 of dev/models.scratch_model was already deleted (<time>). Run ... to see the others.` | Someone did it already. | List the versions. |
 | `models.scratch_model has no version 9.` | No version has that number. | List the versions. |
+| `This needs a fresh passkey touch (within 15 minutes). Confirm with your passkey and try again.` | You deleted from the web interface, and your last passkey touch is older than 15 minutes. | Touch your passkey when the browser asks, then delete again. Nothing was deleted. |
 | `Environment 'prod' is protected: ...` | The environment is protected. | Use `--break-glass --reason`, or deploy a change instead. |
 | `The server did not answer the request to delete version 3 of dev/models.scratch_model (...), so the version may or may not have been deleted. ...` | The answer was lost. | List the versions. If the version is not marked deleted, run the delete again. |
 | `The server did not answer the request to drop dev/models.scratch_model (...), so it may or may not be dropped; if the server is still working, it finishes by itself. ...` | The drop takes longer than the connection. | Run the `artifact list` subcommand. If the artifact is still listed after a while, run the drop again. |

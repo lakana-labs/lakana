@@ -162,6 +162,9 @@ def drop_namespace(
 ) -> None:
     """Drop a namespace.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Needs `DROP_NAMESPACE`. Answers 404 when the namespace does not exist and 409 while it
     still holds tables or child namespaces.
 
@@ -178,6 +181,9 @@ def drop_namespace(
 
     Raises
     ------
+    lakana_core.errors.StepUpRequired
+        Mapped to 403, for a browser session whose last passkey touch is older than 15
+        minutes.
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
     lakana_core.errors.ConflictError
