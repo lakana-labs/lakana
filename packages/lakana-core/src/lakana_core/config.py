@@ -462,8 +462,10 @@ class RunConfig(BaseModel):
         Seconds between the worker's sweeps of attempt directories a dead worker left
         behind (also at worker start), and between the sweeps that the worker holding the
         scheduler role runs of the artifact store (expired uploads, files and manifest objects
-        no version names) and of table locations (the files of creates that never finished);
-        0 turns them off, and then nothing collects those leftovers.
+        no version names), of table locations (the files of creates that never finished) and of
+        local storage roots (the hidden ``.part`` files of writes a crash cut short, once nobody
+        has written to them for an hour, or for the artifact upload lifetime when that is
+        longer); 0 turns them off, and then nothing collects those leftovers.
     maintenance_timeout
         Seconds one `lakana table maintain` run may take. The worker checks the time between
         steps and between files, stops at the first safe point, and fails the run with the

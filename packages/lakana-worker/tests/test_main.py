@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 from unittest import mock
@@ -898,6 +898,7 @@ def _run_main(
         mock.patch("lakana_worker.__main__.SchedulerLoop") as scheduler_mock,
         mock.patch("lakana_worker.__main__.sweep_artifacts") as sweep_mock,
         mock.patch("lakana_worker.__main__.sweep_code_archives"),
+        mock.patch("lakana_worker.__main__.sweep_temp_files"),
         mock.patch("lakana_worker.__main__.sweep_project_file_texts"),
         mock.patch("lakana_worker.__main__.sweep_table_locations"),
         mock.patch("lakana_worker.__main__.backfill_table_columns"),
@@ -959,6 +960,7 @@ def _housekeeping(
     policies: mock.MagicMock | None = None,
     health_keys: mock.MagicMock | None = None,
     texts: mock.MagicMock | None = None,
+    temps: mock.MagicMock | None = None,
 ) -> None:
     """Run `main`, then the housekeeping callable it gave the scheduler, once.
 
@@ -990,6 +992,8 @@ def _housekeeping(
         Stands in for `backfill_health_keys`; a mock that succeeds when `None`.
     texts
         Stands in for `sweep_project_file_texts`; a mock that succeeds when `None`.
+    temps
+        Stands in for `sweep_temp_files`; a mock that succeeds when `None`.
     """
     monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/lakana.db")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
@@ -998,6 +1002,7 @@ def _housekeeping(
         mock.patch("lakana_worker.__main__.SchedulerLoop") as scheduler_mock,
         mock.patch("lakana_worker.__main__.sweep_artifacts", artifacts),
         mock.patch("lakana_worker.__main__.sweep_code_archives", code),
+        mock.patch("lakana_worker.__main__.sweep_temp_files", temps or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.sweep_project_file_texts", texts or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.sweep_job_fires", fires or mock.MagicMock()),
         mock.patch("lakana_worker.__main__.sweep_table_reads", reads or mock.MagicMock()),
@@ -1073,6 +1078,64 @@ def test_a_failing_project_file_sweep_is_logged_and_the_others_still_run(
         )
     assert artifacts.call_count == code.call_count == fires.call_count == 1
     assert "The project file sweep failed (RuntimeError)." in caplog.text
+    assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
+
+
+def test_housekeeping_also_sweeps_leftover_temporary_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same time and rotation as the artifact sweep, and at least the upload lifetime (#614)."""
+    from lakana_core.storage.resolver import StorageResolver
+
+    monkeypatch.setenv("LAKANA_ARTIFACTS__UPLOAD_TTL_SECONDS", "7200")
+    artifacts, temps = mock.MagicMock(), mock.MagicMock()
+    _housekeeping(tmp_path, monkeypatch, artifacts, mock.MagicMock(), temps=temps)
+    assert temps.call_count == 1
+    assert isinstance(temps.call_args.args[1], StorageResolver)
+    assert temps.call_args.kwargs["now"] == artifacts.call_args.kwargs["now"]
+    assert temps.call_args.kwargs["rotation"] == artifacts.call_args.kwargs["rotation"] == 0
+    assert temps.call_args.kwargs["min_age"] == timedelta(seconds=7200)
+    assert temps.call_args.kwargs["should_stop"]() is False
+
+
+def test_the_housekeeping_limit_leaves_room_for_the_temporary_file_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lakana_core.artifacts.sweep import DEFAULT_MAX_SECONDS
+    from lakana_core.catalog.health_sweep import HEALTH_SWEEP_MAX_SECONDS
+    from lakana_core.catalog.location_sweep import DEFAULT_MAX_SECONDS as LOCATIONS
+    from lakana_core.catalog.usage import MEASURE_MAX_SECONDS
+    from lakana_core.projects.code_sweep import CODE_SWEEP_MAX_SECONDS
+    from lakana_core.storage.temp_sweep import TEMP_SWEEP_MAX_SECONDS
+
+    scheduler_mock, _ = _run_main(tmp_path, monkeypatch, LAKANA_RUN__SWEEP_INTERVAL="90")
+    limit = scheduler_mock.call_args.kwargs["housekeeping_limit"]
+    assert math.isclose(
+        limit,
+        DEFAULT_MAX_SECONDS
+        + LOCATIONS
+        + CODE_SWEEP_MAX_SECONDS
+        + TEMP_SWEEP_MAX_SECONDS
+        + MEASURE_MAX_SECONDS
+        + HEALTH_SWEEP_MAX_SECONDS,
+    )
+
+
+def test_a_failing_temporary_file_sweep_is_logged_and_the_others_still_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    artifacts, code, fires = mock.MagicMock(), mock.MagicMock(), mock.MagicMock()
+    with caplog.at_level(logging.WARNING):
+        _housekeeping(
+            tmp_path,
+            monkeypatch,
+            artifacts,
+            code,
+            fires,
+            temps=mock.MagicMock(side_effect=RuntimeError("x")),
+        )
+    assert artifacts.call_count == code.call_count == fires.call_count == 1
+    assert "The temporary file sweep failed (RuntimeError)." in caplog.text
     assert "sweep_failed" in {getattr(r, "event", None) for r in caplog.records}
 
 

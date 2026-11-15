@@ -476,6 +476,18 @@ A deleted version's files are removed in the request that deletes it, up to abou
 five seconds, and the sweep removes the rest. A drop can leave the empty directories `blobs` and
 `manifests` behind, because the storage interface cannot remove a directory.
 
+**Temporary files of interrupted writes.** In a local `file://` storage root, every write first
+goes to a hidden file next to the object, named `.<name>.<16 hex digits>.part`, and is renamed
+over the name when it is complete. A process killed in between (a crash, an out-of-memory kill, a
+power cut) leaves that file. The same sweep removes such files anywhere under each local storage
+root once nobody has written to them for an hour, or for `LAKANA_ARTIFACTS__UPLOAD_TTL_SECONDS`
+when that is longer, because an upload may pause that long between two pieces. It removes only
+files and symbolic links with exactly that name; a symbolic link is removed itself, and what it
+points to is never touched. It never goes through a symbolic link into another directory, and
+leaves a directory with such a name alone. A storage root on S3 has no such files. When it
+removed something, the worker logs `Temporary file sweep: <n> leftover temporary file(s) removed
+(<bytes> bytes); …`.
+
 **Tables whose create never finished.** Every managed table's directory under `managed/` has a
 location record in the catalog, written before the first file of the table. When a create fails,
 it removes its own files at once if it knows that nothing was committed. When it cannot know (the
