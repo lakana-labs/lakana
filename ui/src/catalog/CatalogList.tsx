@@ -309,7 +309,7 @@ export function CatalogList(): JSX.Element {
                 {loading && <ListSkeleton />}
                 {!onAll && settled && root !== null && (
                   <Suspense fallback={<ListSkeleton />}>
-                    <ViewBody view={view} root={root} />
+                    <ViewBody view={view} root={root} onChanged={tree.reload} />
                   </Suspense>
                 )}
                 {onAll &&

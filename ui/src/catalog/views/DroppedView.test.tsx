@@ -229,6 +229,82 @@ describe("DroppedView", () => {
     expect(writes(server.sent)[0]?.body).toEqual({ new_name: null, break_glass_reason: null });
   });
 
+  it("keeps each row waiting while two restores run at once, and sends neither twice", async () => {
+    const first = held();
+    const second = held();
+    const { server, user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [ENVIRONMENT_LIST]: {
+          status: 200,
+          body: {
+            items: [
+              dropped({ name: "first", uuid: "u1" }),
+              dropped({ name: "second", uuid: "u2" }),
+            ],
+            next_cursor: null,
+          },
+        },
+        [`POST ${UNDROP}/first/undrop`]: first.route,
+        [`POST ${UNDROP}/second/undrop`]: second.route,
+      },
+    });
+
+    const a = await screen.findByRole("button", { name: "Undrop gold.sales.first" });
+    const b = screen.getByRole("button", { name: "Undrop gold.sales.second" });
+    await user.click(a);
+    await user.click(b);
+    first.release({ status: 200, body: table({ name: "first" }) });
+    await screen.findByText(/Restored gold.sales.first/);
+    await user.click(b);
+
+    expect(b).toHaveAttribute("aria-disabled", "true");
+    expect(writes(server.sent)).toHaveLength(2);
+    second.release({ status: 200, body: table({ name: "second" }) });
+    await screen.findByText(/Restored gold.sales.second/);
+  });
+
+  it("reads the tree's counts again after a restore", async () => {
+    const { server, user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [`POST ${UNDROP}/fact_returns/undrop`]: {
+          status: 200,
+          body: table({ name: "fact_returns" }),
+        },
+      },
+    });
+    const trees = (): number =>
+      server.sent.filter((request) => request.path === "/api/v1/tables/tree").length;
+
+    await user.click(await screen.findByRole("button", { name: "Undrop gold.sales.fact_returns" }));
+    await screen.findByText(/Restored gold.sales.fact_returns/);
+
+    await waitFor(() => {
+      expect(trees()).toBe(2);
+    });
+  });
+
+  it("forgets the result line and the refusals when another place is chosen", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [`POST ${UNDROP}/fact_returns/undrop`]: {
+          status: 200,
+          body: table({ name: "fact_returns" }),
+        },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Undrop gold.sales.fact_returns" }));
+    await screen.findByText(/Restored gold.sales.fact_returns/);
+
+    await user.click(screen.getByRole("link", { name: /^dev/ }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Restored gold.sales.fact_returns/)).not.toBeInTheDocument();
+    });
+  });
+
   it("offers Restore as only when the name is taken", async () => {
     const { server, user } = renderShell(ADDRESS, {
       routes: {

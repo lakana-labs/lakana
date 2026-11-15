@@ -83,6 +83,11 @@ export function UndropDialog({
     });
   };
 
+  const submit = (): void => {
+    if (!missing && protectedEnvironment !== undefined && !attempt.busy) {
+      restore();
+    }
+  };
   return (
     <ActionDialog onClose={onCancel}>
       <Heading slot="title">
@@ -103,7 +108,12 @@ export function UndropDialog({
         </>
       )}
       {needsReason && (
-        <ProtectedReason environment={environment} value={reason} onChange={setReason} />
+        <ProtectedReason
+          environment={environment}
+          value={reason}
+          onChange={setReason}
+          onSubmit={submit}
+        />
       )}
       <ConfirmRow
         attempt={attempt}

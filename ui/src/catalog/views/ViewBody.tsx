@@ -18,6 +18,8 @@ export interface ViewBodyProps {
   readonly view: CatalogView;
   /** The tree of places, already read. */
   readonly root: CatalogNode;
+  /** Called after a view changed what a namespace holds, so the tree's counts are read again. */
+  readonly onChanged: () => void;
 }
 
 /**
@@ -27,9 +29,10 @@ export interface ViewBodyProps {
  * @param props - The view and the tree.
  * @param props.view - The view.
  * @param props.root - The tree of places.
+ * @param props.onChanged - Called after a restore or a drop.
  * @returns The body.
  */
-export default function ViewBody({ view, root }: ViewBodyProps): JSX.Element {
+export default function ViewBody({ view, root, onChanged }: ViewBodyProps): JSX.Element {
   if (view.environment === null) {
     return <ChooseEnvironment view={view} root={root} />;
   }
@@ -37,7 +40,20 @@ export default function ViewBody({ view, root }: ViewBodyProps): JSX.Element {
     return <ExpiringView environment={view.environment} namespace={view.namespace} />;
   }
   if (view.view === "orphans") {
-    return <OrphansView environment={view.environment} namespace={view.namespace} />;
+    return (
+      <OrphansView
+        environment={view.environment}
+        namespace={view.namespace}
+        onChanged={onChanged}
+      />
+    );
   }
-  return <DroppedView environment={view.environment} namespace={view.namespace} />;
+  return (
+    <DroppedView
+      key={`${view.environment}\u0000${view.namespace ?? ""}`}
+      environment={view.environment}
+      namespace={view.namespace}
+      onChanged={onChanged}
+    />
+  );
 }

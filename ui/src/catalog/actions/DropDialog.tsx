@@ -65,6 +65,15 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
       onDone();
     });
   };
+  const submit = (): void => {
+    if (
+      !(needsReason && reason.trim() === "") &&
+      protectedEnvironment !== undefined &&
+      !attempt.busy
+    ) {
+      drop();
+    }
+  };
   return (
     <ActionDialog onClose={onCancel}>
       <Heading slot="title">
@@ -90,7 +99,12 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
         </>
       )}
       {needsReason && (
-        <ProtectedReason environment={ref.environment} value={reason} onChange={setReason} />
+        <ProtectedReason
+          environment={ref.environment}
+          value={reason}
+          onChange={setReason}
+          onSubmit={submit}
+        />
       )}
       <ConfirmRow
         attempt={attempt}

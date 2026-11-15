@@ -28,6 +28,8 @@ export interface DroppedViewProps {
   readonly environment: string;
   /** The dotted namespace; null for the whole environment. */
   readonly namespace: string | null;
+  /** Called after a table is restored, so the tree's counts can be read again. */
+  readonly onChanged: () => void;
 }
 
 /** What the result line says, and where its link goes. */
@@ -47,9 +49,10 @@ interface Result {
  * @param props - The place.
  * @param props.environment - The environment.
  * @param props.namespace - The dotted namespace; null for all.
+ * @param props.onChanged - Called after a restore.
  * @returns The view.
  */
-export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.Element {
+export function DroppedView({ environment, namespace, onChanged }: DroppedViewProps): JSX.Element {
   const { t } = useTranslation();
   const key = `${environment}\u0000${namespace ?? ""}`;
   const pages = useCursorPages(key, (cursor) => listDropped(environment, namespace, cursor));
@@ -57,7 +60,7 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
   const fromDrop = (useLocation().state as { dropped?: string } | null)?.dropped;
   const [restored, setRestored] = useState<Result | null>(null);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
-  const [working, setWorking] = useState<string | null>(null);
+  const [working, setWorking] = useState<ReadonlySet<string>>(new Set());
   const [refusals, setRefusals] = useState<Readonly<Record<string, string>>>({});
   const [dialog, setDialog] = useState<{ row: DroppedTableOut; nameTaken: string | null } | null>(
     null,
@@ -98,6 +101,7 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
       path: tablePath(environment, back.namespace, back.name),
     });
     setDialog(null);
+    onChanged();
   };
 
   const undrop = async (row: DroppedTableOut): Promise<void> => {
@@ -105,7 +109,7 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
       setDialog({ row, nameTaken: null });
       return;
     }
-    setWorking(row.uuid);
+    setWorking((previous) => new Set([...previous, row.uuid]));
     setRefusals((previous) => ({ ...previous, [row.uuid]: "" }));
     try {
       finished(
@@ -123,7 +127,7 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
         setRefusals((previous) => ({ ...previous, [row.uuid]: sentence }));
       }
     } finally {
-      setWorking(null);
+      setWorking((previous) => new Set([...previous].filter((uuid) => uuid !== row.uuid)));
     }
   };
 
@@ -202,7 +206,7 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
                   aria-label={t("table.actions.undrop.for", {
                     table: markedText(`${row.namespace}.${row.name}`),
                   })}
-                  pending={working === row.uuid || protectedEnvironment === undefined}
+                  pending={working.has(row.uuid) || protectedEnvironment === undefined}
                   onPress={() => {
                     void undrop(row);
                   }}

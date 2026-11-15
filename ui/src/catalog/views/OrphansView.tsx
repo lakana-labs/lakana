@@ -27,6 +27,8 @@ export interface OrphansViewProps {
   readonly environment: string;
   /** The dotted namespace the Catalog is on; null for the whole environment. */
   readonly namespace: string | null;
+  /** Called after an orphan is dropped, so the tree's counts can be read again. */
+  readonly onChanged: () => void;
 }
 
 /**
@@ -37,9 +39,10 @@ export interface OrphansViewProps {
  * @param props - The place.
  * @param props.environment - The environment.
  * @param props.namespace - The dotted namespace; null for all.
+ * @param props.onChanged - Called after a drop.
  * @returns The view.
  */
-export function OrphansView({ environment, namespace }: OrphansViewProps): JSX.Element {
+export function OrphansView({ environment, namespace, onChanged }: OrphansViewProps): JSX.Element {
   const { t } = useTranslation();
   const [hidden, setHidden] = useState(0);
   const pages = useCursorPages(environment, async (cursor) => {
@@ -155,6 +158,7 @@ export function OrphansView({ environment, namespace }: OrphansViewProps): JSX.E
             setDropped(dropping.row.table);
             setDropping(null);
             pages.reload();
+            onChanged();
           }}
           onCancel={() => {
             setDropping(null);

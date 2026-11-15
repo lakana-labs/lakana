@@ -4,7 +4,7 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
-import { Label, Text, TextArea, TextField } from "react-aria-components";
+import { Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import "./actionStrings";
@@ -20,6 +20,8 @@ export interface ProtectedReasonProps {
   readonly value: string;
   /** Called with the text on every change. */
   readonly onChange: (value: string) => void;
+  /** Called when Enter is pressed in the field; the field is one line, so Enter never adds one. */
+  readonly onSubmit: () => void;
 }
 
 /**
@@ -30,12 +32,14 @@ export interface ProtectedReasonProps {
  * @param props.environment - The protected environment.
  * @param props.value - What has been typed.
  * @param props.onChange - Called with the text on every change.
+ * @param props.onSubmit - Called on Enter.
  * @returns The field.
  */
 export function ProtectedReason({
   environment,
   value,
   onChange,
+  onSubmit,
 }: ProtectedReasonProps): JSX.Element {
   const { t } = useTranslation();
   return (
@@ -45,9 +49,15 @@ export function ProtectedReason({
       onChange={onChange}
       isRequired
       maxLength={REASON_MAX}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onSubmit();
+        }
+      }}
     >
       <Label>{t("table.actions.protected.label", { environment })}</Label>
-      <TextArea rows={3} />
+      <Input />
       <Text slot="description">{t("table.actions.protected.text", { environment })}</Text>
     </TextField>
   );

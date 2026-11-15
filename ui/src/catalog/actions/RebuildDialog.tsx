@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import { type JSX, useState } from "react";
-import { Button, Heading, Label, TextArea, TextField } from "react-aria-components";
+import { Button, Heading, Input, Label, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { rebuildTable, type TableRebuildOut, type TableRef } from "../../api";
@@ -64,8 +64,17 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
       setRebuilt(answer);
     });
   };
+  const ready = reason.trim() !== "" && protectedEnvironment !== undefined && !attempt.busy;
+  // While the request is open Escape does nothing: closing then would lose the run it queues.
+  const close = rebuilt === null ? onClose : toCatalog;
   return (
-    <ActionDialog onClose={rebuilt === null ? onClose : toCatalog}>
+    <ActionDialog
+      onClose={() => {
+        if (!attempt.busy) {
+          close();
+        }
+      }}
+    >
       <Heading slot="title">{t("table.actions.rebuild.title", { table })}</Heading>
       {rebuilt === null ? (
         <>
@@ -79,9 +88,17 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
             onChange={setReason}
             isRequired
             maxLength={REASON_MAX}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                if (ready) {
+                  rebuild();
+                }
+              }
+            }}
           >
             <Label>{t("table.actions.rebuild.reason")}</Label>
-            <TextArea rows={3} />
+            <Input />
           </TextField>
           <ConfirmRow
             attempt={attempt}

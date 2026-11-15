@@ -84,6 +84,38 @@ describe("UndropDialog", () => {
     });
   });
 
+  it("takes the reason on one line: Enter sends it, and sends nothing while it is empty", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: true } },
+      [UNDROP]: { status: 200, body: TABLE },
+    });
+    const onDone = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <UndropDialog
+        row={dropped()}
+        environment="prod"
+        onDone={onDone}
+        onCancel={vi.fn()}
+        nameTaken={null}
+      />,
+    );
+
+    const field = await screen.findByRole("textbox", { name: /Why you break the protection/ });
+    expect(field.tagName).toBe("INPUT");
+    await user.type(field, "{Enter}");
+    expect(onDone).not.toHaveBeenCalled();
+    await user.type(field, "Wrong data in prod{Enter}");
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledWith(TABLE);
+    });
+    expect(server.sent.at(-1)?.body).toEqual({
+      new_name: null,
+      break_glass_reason: "Wrong data in prod",
+    });
+  });
+
   it("shows the server's sentence for a refusal and keeps the dialog open", async () => {
     fakeServer({
       "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: false } },

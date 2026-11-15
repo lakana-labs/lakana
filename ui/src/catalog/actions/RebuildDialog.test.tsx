@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { TableRef } from "../../api";
 import { manageRoutes, REBUILT } from "../../test/manage";
+import { held } from "../../test/pending";
 import { fakeServer } from "../../test/server";
 import { fakeWebAuthn } from "../../test/webauthn";
 import { RebuildDialog } from "./RebuildDialog";
@@ -279,6 +280,51 @@ describe("RebuildDialog", () => {
 
     expect((await screen.findByRole("alert")).textContent).toBe(sentence);
     expect(screen.getByRole("button", { name: "Rebuild" })).toBeInTheDocument();
+  });
+
+  it("takes the reason on one line: Enter sends it and never adds a line break", async () => {
+    const server = fakeServer(manageRoutes());
+    const { user } = renderRebuild();
+
+    const field = screen.getByRole("textbox", {
+      name: "Why it is rebuilt (recorded in the audit log)",
+    });
+    expect(field.tagName).toBe("INPUT");
+    await user.type(field, `${REASON}{Enter}`);
+
+    expect(await screen.findByText(/queued run/)).toBeInTheDocument();
+    expect(rebuilds(server.sent)).toHaveLength(1);
+    expect(rebuilds(server.sent)[0]?.body).toEqual({ reason: REASON });
+  });
+
+  it("does not send on Enter while the reason is empty", async () => {
+    const server = fakeServer(manageRoutes());
+    const { user } = renderRebuild();
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Why it is rebuilt (recorded in the audit log)" }),
+      "{Enter}",
+    );
+
+    expect(rebuilds(server.sent)).toEqual([]);
+  });
+
+  it("ignores Escape while the rebuild request is open, then shows its result", async () => {
+    const pending = held();
+    fakeServer({ ...manageRoutes(), [REBUILD]: pending.route });
+    const { onClose, user } = renderRebuild();
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Why it is rebuilt (recorded in the audit log)" }),
+      REASON,
+    );
+    await user.click(await screen.findByRole("button", { name: "Rebuild" }));
+    await user.keyboard("{Escape}");
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    pending.release({ status: 202, body: REBUILT });
+    expect(await screen.findByText(/queued run/)).toBeInTheDocument();
   });
 
   it("Close goes to the catalog place of the table", async () => {

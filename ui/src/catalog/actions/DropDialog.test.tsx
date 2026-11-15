@@ -156,6 +156,39 @@ describe("DropDialog", () => {
     expect(query.get("break_glass_reason")).toBe("Wrong data in prod");
   });
 
+  it("takes the break-glass reason on one line: Enter sends it and never adds a line break", async () => {
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: true } },
+    });
+    const { onDone, user } = renderDrop();
+
+    const field = await screen.findByRole("textbox", { name: /Why/ });
+    expect(field.tagName).toBe("INPUT");
+    await user.type(field, "Wrong data in prod{Enter}");
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledTimes(1);
+    });
+    const query = new URL(
+      server.sent.find((request) => request.method === "DELETE")?.path ?? "",
+      "http://x",
+    ).searchParams;
+    expect(query.get("break_glass_reason")).toBe("Wrong data in prod");
+  });
+
+  it("does not send on Enter while the break-glass reason is empty", async () => {
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: true } },
+    });
+    const { user } = renderDrop();
+
+    await user.type(await screen.findByRole("textbox", { name: /Why/ }), "{Enter}");
+
+    expect(writes(server.sent)).toEqual([]);
+  });
+
   it("keeps the dialog open with the reason when the passkey touch fails", async () => {
     fakeWebAuthn();
     const server = fakeServer({

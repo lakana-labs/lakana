@@ -71,6 +71,21 @@ describe("OrphansView", () => {
     expect(server.sent.filter((request) => request.method === "DELETE")).toHaveLength(1);
   });
 
+  it("reads the tree's counts again after a drop", async () => {
+    const { server, user } = renderShell(ADDRESS, {
+      routes: { ...manageRoutes(), [TABLE]: { status: 204 } },
+    });
+    const trees = (): number =>
+      server.sent.filter((request) => request.path === "/api/v1/tables/tree").length;
+
+    await user.click(await screen.findByRole("button", { name: "Drop gold.sales.old_totals" }));
+    await user.click(await screen.findByRole("button", { name: "Drop the table" }));
+
+    await waitFor(() => {
+      expect(trees()).toBe(2);
+    });
+  });
+
   it("drops an artifact orphan through the artifact route", async () => {
     const { server, user } = renderShell(ADDRESS, {
       routes: {
