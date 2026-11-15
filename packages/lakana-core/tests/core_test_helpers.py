@@ -10,6 +10,7 @@ the pytest *fixtures* stay there and only the plain helpers live here.
 """
 
 import contextlib
+import dataclasses
 import enum
 import hashlib
 import json
@@ -34,6 +35,7 @@ from lakana_core.auth import (
     AllowAllAuthorization,
     AuthorizationService,
     PrincipalRef,
+    RunContext,
     Securable,
 )
 from lakana_core.bootstrap import ensure_bootstrap_principal
@@ -58,6 +60,7 @@ from lakana_core.models import (
     TableType,
     TaskRun,
     TaskStatus,
+    WriteMode,
 )
 from lakana_core.projects.source_map import ProjectFileRecord, write_source_map
 from lakana_core.secrets.crypto import EncryptedSecret
@@ -936,6 +939,39 @@ def python_task_run(
     return task
 
 
+def created_by_a_run(
+    session: Session,
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    ref: TableRef,
+    schema: Schema,
+) -> None:
+    """Create a declared table as its project's run does: a create-mode write of no rows.
+
+    A person may not create a table under a name a deployed project declares
+    (`lakana_core.catalog.git_owned`), so a test of what a table built after the deploy gets
+    creates it the way the run does, for a running task of `principal`.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    catalog
+        The catalog.
+    principal
+        The run's principal.
+    ref
+        The declared table.
+    schema
+        Its schema.
+    """
+    task = python_task_run(session, principal.id, asset=ref.dotted(), kind="sql")
+    run = dataclasses.replace(principal, run_context=RunContext(task_run_id=task.id, claim=1))
+    catalog.write_batches(
+        run, ref, mode=WriteMode.CREATE, schema=schema.as_arrow(), batches=iter(())
+    )
+
+
 ARTIFACT_REF = TableRef("dev", NamespacePath.from_parts(["models"]), "churn")
 """The artifact most artifact tests use."""
 
@@ -1098,7 +1134,9 @@ class FakeColumnCatalog(NoPolicyFields):
     field_ids: dict[str, int] | None = None
     calls: list[tuple[PrincipalRef, TableRef]] = field(default_factory=list)
 
-    def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
+    def describe_table(
+        self, p: PrincipalRef, ref: TableRef, *, with_actions: bool = True
+    ) -> TableDescription:
         """Describe a table as having `names` as its columns.
 
         Parameters
@@ -1107,6 +1145,8 @@ class FakeColumnCatalog(NoPolicyFields):
             The acting principal.
         ref
             The table reference.
+        with_actions
+            Ignored.
 
         Returns
         -------
@@ -1224,6 +1264,53 @@ def deploy_manifest(
         )
     else:
         pointer.current_job_version_id = version.id
+    session.commit()
+    return version
+
+
+def deploy_assets(
+    session: Session,
+    environment: str,
+    repository: str,
+    assets: Mapping[str, Mapping[str, object]],
+) -> JobVersion:
+    """Make a project version whose manifest declares the given assets.
+
+    Each entry is merged over the default SQL table entry
+    ``{"table": name, "kind": "sql", "path": "assets/<namespace dirs>/<name>.sql",
+    "materialize": "table"}``. The repository is registered on first use and the
+    environment's deployment of it points at the new version.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    environment
+        The environment's name; it must exist.
+    repository
+        The repository's name.
+    assets
+        Dotted table name to the entry fields that override the defaults.
+
+    Returns
+    -------
+    JobVersion
+        The new current version.
+    """
+    entries: list[dict[str, object]] = []
+    for dotted, fields in assets.items():
+        *namespace, name = dotted.split(".")
+        entries.append(
+            {
+                "table": dotted,
+                "kind": "sql",
+                "path": "/".join(["assets", *namespace, f"{name}.sql"]),
+                "materialize": "table",
+                **fields,
+            }
+        )
+    version = deploy_manifest(session, environment, repository, {})
+    version.manifest_json = {"assets": entries}
     session.commit()
     return version
 

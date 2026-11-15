@@ -523,8 +523,14 @@ def test_a_forged_path_in_project_files_is_never_opened(
 
 
 def test_definition_of_a_dropped_table_is_404_for_a_reader(defs: TestClient) -> None:
+    # A table a deployment builds cannot be dropped, so it is dropped while another version is
+    # current, and the version that defines it is deployed again after.
+    with _session(defs) as session:
+        deploy_file(session, "dev", "gold.other", "SELECT 1")
     dropped = defs.delete("/api/v1/environments/dev/namespaces/gold/tables/f", headers=AUTH_HEADER)
     assert dropped.status_code == 204, dropped.text
+    with _session(defs) as session:
+        deploy_file(session, "dev", "gold.f", F_TEXT, gate_tables=("gold.f", "silver.a"))
     for suffix in ("", "/file"):
         assert defs.get(url("gold.f") + suffix, headers=AUTH_HEADER).status_code == 404
 

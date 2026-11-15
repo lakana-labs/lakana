@@ -10,7 +10,7 @@ import typer
 
 from lakana._models import Deploy, DeployJobStart, ProjectVersion
 from lakana.cli import _output
-from lakana.cli._paging import more_results
+from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._project import find_project_root, is_dirty, project_repo
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli._waiting import WaitLine, clock
@@ -745,8 +745,35 @@ def show_project_version(ctx: typer.Context, project_version_id: str, env: _ENV 
         typer.echo(f"{hidden_edges} edge(s) hidden")
 
 
-def orphans(ctx: typer.Context, env: _ENV = None) -> None:
+@dataclass(frozen=True)
+class _OrphanRow:
+    """One line of `lakana orphans`.
+
+    Parameters
+    ----------
+    repository
+        The repository that used to produce it.
+    table
+        Dotted table name.
+    kind
+        What it is.
+    state
+        ``exists``, or ``dropped, restorable`` for a dropped table that can still be restored.
+    """
+
+    repository: str
+    table: str
+    kind: str
+    state: str
+
+
+def orphans(
+    ctx: typer.Context, env: _ENV = None, limit: LIMIT = None, cursor: CURSOR = None
+) -> None:
     """List tables earlier project versions produced that no current one does.
+
+    One page at a time; the last line names the command for the next page when there is one.
+    A dropped table that can still be restored is listed as ``dropped, restorable``.
 
     Parameters
     ----------
@@ -754,12 +781,35 @@ def orphans(ctx: typer.Context, env: _ENV = None) -> None:
         The Typer context.
     env
         Environment.
+    limit
+        `--limit`.
+    cursor
+        `--cursor`.
     """
     state = state_of(ctx)
-    report = state.client().orphans.list(resolve_environment(state, env))
+    report = state.client().orphans.list(
+        resolve_environment(state, env), limit=limit, cursor=cursor
+    )
     if state.output == "json":
         _output.print_json(report)
-        return
-    _output.emit(state, report.orphans)
-    if report.hidden:
-        typer.echo(f"{report.hidden} hidden")
+    else:
+        _output.emit(
+            state,
+            [
+                _OrphanRow(
+                    o.repository,
+                    o.table,
+                    o.kind or "",
+                    "exists" if o.exists else "dropped, restorable",
+                )
+                for o in report.orphans
+            ],
+        )
+        if report.hidden:
+            typer.echo(f"{report.hidden} hidden")
+    more_results(
+        state,
+        ["lakana", "orphans"],
+        {"--env": env, "--limit": limit},
+        report.next_cursor,
+    )

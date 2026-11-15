@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from core_test_helpers import _prepared_catalog
+from core_test_helpers import _prepared_catalog, created_by_a_run
 from pyiceberg.schema import Schema
 from pyiceberg.types import DateType, LongType, NestedField
 from sqlalchemy import event, select
@@ -189,7 +189,7 @@ def test_a_table_created_by_its_first_run_gets_its_model(
     )
     session.commit()
 
-    catalog.create_table(principal, _FACT, schema=_SCHEMA)
+    created_by_a_run(session, catalog, principal, _FACT, _SCHEMA)
 
     row = session.scalars(select(Table)).one()
     assert read_table_model(session, row) == _EXPECTED

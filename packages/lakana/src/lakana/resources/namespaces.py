@@ -6,10 +6,11 @@ Namespace paths are dot-joined strings, such as ``gold.sales``, matching
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
-from lakana._http import HttpTransport
-from lakana._models import Namespace
+from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
+from lakana._models import Namespace, NamespacePage
 from lakana._routes import ROUTES
 
 
@@ -118,28 +119,125 @@ class Namespaces:
         )
         return _namespace_from_json(response.json())
 
-    def list(self, environment: str) -> _NamespaceList:
-        """List every namespace in an environment.
+    def list(
+        self,
+        environment: str,
+        *,
+        parent: str | None = None,
+        depth: int | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> _NamespaceList:
+        """List the namespaces in an environment, in path order.
+
+        The namespaces of one page; `list_page` also returns the cursor of the next one, and
+        `iter` walks every page.
 
         Parameters
         ----------
         environment
             The environment name.
+        parent
+            Dot-joined path; only the namespaces below it, at every depth.
+        depth
+            ``1`` keeps only the direct children of `parent` (the top level without one).
+        limit
+            Most namespaces returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`. Send the same `parent` and `depth`.
 
         Returns
         -------
         list of Namespace
-            Every namespace in the environment.
+            The namespaces of this page.
 
         Raises
         ------
         lakana.errors.NotFound
             If the environment does not exist.
         """
+        return self.list_page(
+            environment, parent=parent, depth=depth, limit=limit, cursor=cursor
+        ).items
+
+    def list_page(
+        self,
+        environment: str,
+        *,
+        parent: str | None = None,
+        depth: int | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> NamespacePage:
+        """List one page of the namespaces, with the cursor of the next page.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        parent
+            Dot-joined path of a namespace: keep only what lies below it, at every depth.
+        depth
+            ``1`` keeps the direct children of `parent` only (the top level when there is no
+            `parent`).
+        limit
+            Page size, 1 to 200; `None` takes the server's default of 100.
+        cursor
+            The `next_cursor` of the page before this one, with the same `parent` and `depth`.
+
+        Returns
+        -------
+        NamespacePage
+            The namespaces, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the environment does not exist.
+        lakana.errors.ValidationError
+            If `depth` is not 1, or `cursor` is not one the server issued.
+        """
         response = self._transport.request(
-            ROUTES["namespaces.list"], path_params={"env": environment}
+            ROUTES["namespaces.list"],
+            path_params={"env": environment},
+            params=query_params(parent=parent, depth=depth, limit=limit, cursor=cursor),
         )
-        return [_namespace_from_json(item) for item in response.json()]
+        return NamespacePage(
+            items=[_namespace_from_json(item) for item in response.json()],
+            next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
+        )
+
+    def iter(
+        self,
+        environment: str,
+        *,
+        parent: str | None = None,
+        depth: int | None = None,
+        page_size: int = 100,
+    ) -> Iterator[Namespace]:
+        """Yield every matching namespace, in path order, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        parent
+            Dot-joined path; only the namespaces below it, at every depth.
+        depth
+            ``1`` keeps only the direct children of `parent` (the top level without one).
+        page_size
+            Namespaces per request (1 to 200).
+
+        Returns
+        -------
+        Iterator of Namespace
+            Each namespace, once.
+        """
+        return every_page(
+            lambda cursor: self.list_page(
+                environment, parent=parent, depth=depth, limit=page_size, cursor=cursor
+            )
+        )
 
     def delete(
         self, environment: str, namespace: str, *, break_glass_reason: str | None = None

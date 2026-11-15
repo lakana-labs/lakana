@@ -1205,6 +1205,21 @@ class TableMatchOut(BaseModel):
     # jscpd:ignore-end
 
 
+class DefinedByOut(BaseModel):
+    """The deployed project file that declares a table or an artifact.
+
+    Parameters
+    ----------
+    repository
+        The repository's name.
+    path
+        The file's path in the repository.
+    """
+
+    repository: str
+    path: str
+
+
 class TableListItemOut(BaseModel):
     """One table of the catalog list.
 
@@ -1242,6 +1257,14 @@ class TableListItemOut(BaseModel):
         Its health in one word, as the caller may see it.
     match
         With a search text, what of the table matched; `None` without one.
+    defined_by
+        The deployed project file (repository and path) that owns it, so that only git may
+        remove it: a client shows Drop disabled with "Defined in". `None` when no deployed
+        project declares it as what it is.
+    actions
+        What the caller's rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and
+        ``set_retention``: a client offers an action only when it is listed (Rebuild only then).
+        The server still decides each request. An artifact offers only ``drop``.
     """
 
     # jscpd:ignore-start
@@ -1263,6 +1286,8 @@ class TableListItemOut(BaseModel):
     readers_7d: int
     health_summary: HealthSummaryOut
     match: TableMatchOut | None
+    defined_by: DefinedByOut | None = None
+    actions: list[str] = Field(default_factory=list)
     # jscpd:ignore-end
 
     @field_validator("uuid", mode="before")
@@ -1454,6 +1479,15 @@ class TableOut(BaseModel):
         How many principals read it in the last 7 UTC days, today included; never their names.
     health_summary
         Its health in one word, as the caller may see it.
+    defined_by
+        The deployed project file (repository and path) that owns it, so that only git may
+        remove it: a client shows Drop disabled with "Defined in". `None` when no deployed
+        project declares it as what it is. In the answer of a create or a restore, also
+        `None` to a caller who may not read the table.
+    actions
+        What the caller's rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and
+        ``set_retention``: a client offers an action only when it is listed (Rebuild only then).
+        The server still decides each request. An artifact offers only ``drop``.
     """
 
     name: str
@@ -1495,6 +1529,8 @@ class TableOut(BaseModel):
     last_read_at: datetime | None = None
     readers_7d: int = 0
     health_summary: HealthSummaryOut | None = None
+    defined_by: DefinedByOut | None = None
+    actions: list[str] = Field(default_factory=list)
 
 
 class LastMaintenanceOut(BaseModel):
@@ -1907,6 +1943,10 @@ class DroppedTableOut(BaseModel):
     restorable
         Whether `POST .../tables/{name}/undrop` would still restore it: `false` once
         `purge_after` has passed or the sweep has started deleting its files.
+    actions
+        ``["undrop"]`` when the caller's rights allow a restore under its own name
+        (`DROP_TABLE` on the namespace and `CREATE_TABLE` on the name); `restorable` says
+        whether it can still be restored at all.
     """
 
     name: str
@@ -1916,6 +1956,57 @@ class DroppedTableOut(BaseModel):
     dropped_at: datetime
     purge_after: datetime
     restorable: bool
+    actions: list[str] = Field(default_factory=list)
+
+
+class DroppedTablePageOut(BaseModel):
+    """One page of the dropped tables of an environment.
+
+    Parameters
+    ----------
+    items
+        The dropped tables of this page, newest drop first.
+    next_cursor
+        The cursor of the next page; `None` on the last page.
+    """
+
+    items: list[DroppedTableOut]
+    next_cursor: str | None = None
+
+
+class TableRebuildIn(BaseModel):
+    """Request body that rebuilds a table a deployed project builds.
+
+    Parameters
+    ----------
+    reason
+        Why it is rebuilt: 10 to 500 characters on one line, recorded in the audit log.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class TableRebuildOut(BaseModel):
+    """What a rebuild did: the table it dropped and the run that builds it again.
+
+    Parameters
+    ----------
+    table
+        The table's dotted name.
+    run_id
+        The queued run; follow it with `GET /api/v1/environments/{env}/runs/{run_id}`.
+    repository
+        The repository whose asset builds the table.
+    path
+        The asset's file in the repository; `null` to a caller who may not read the table.
+    """
+
+    table: str
+    run_id: str
+    repository: str
+    path: str | None
 
 
 class LineageNodeOut(BaseModel):
@@ -4258,10 +4349,20 @@ class OrphanOut(BaseModel):
         The repository that used to produce it.
     table
         Dotted table name.
+    kind
+        What it is: ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    exists
+        `False` for a dropped orphan that can still be restored.
+    actions
+        ``["drop"]`` when the caller's rights allow dropping it; always empty for a dropped
+        orphan (restore it from the dropped tables).
     """
 
     repository: str
     table: str
+    kind: str | None
+    exists: bool
+    actions: list[str] = Field(default_factory=list)
 
 
 class OrphansOut(BaseModel):
@@ -4273,10 +4374,13 @@ class OrphansOut(BaseModel):
         Readable orphans.
     hidden
         Orphans the caller may not read.
+    next_cursor
+        Pass back as ``cursor`` for the next page; `None` on the last.
     """
 
     orphans: list[OrphanOut]
     hidden: int
+    next_cursor: str | None = None
 
 
 class RunCreate(BaseModel):
@@ -5455,6 +5559,13 @@ class ArtifactOut(BaseModel):
         The summed size of its live versions.
     created_at
         When it was created.
+    defined_by
+        The deployed project file that declares it; `None` when none does.
+    keep_versions
+        How many live versions the declaration keeps; `None` keeps all.
+    actions
+        ``["drop"]`` when the caller's rights allow dropping it. A drop of an artifact with
+        `defined_by` is still refused: only git may remove it.
     """
 
     name: str
@@ -5465,6 +5576,9 @@ class ArtifactOut(BaseModel):
     versions: int
     size_bytes: int
     created_at: datetime
+    defined_by: DefinedByOut | None = None
+    keep_versions: int | None = None
+    actions: list[str] = Field(default_factory=list)
 
 
 class ArtifactFileOut(BaseModel):
@@ -5520,6 +5634,9 @@ class ArtifactVersionOut(BaseModel):
         Its files; empty in a listing and for a deleted version.
     deleted_versions
         The numbers of the versions this commit pruned (`keep_versions`).
+    actions
+        ``["delete"]`` on a live version when the caller's rights allow deleting it; empty for
+        a deleted one and in the answer of a commit or a delete.
     """
 
     version: int
@@ -5537,6 +5654,7 @@ class ArtifactVersionOut(BaseModel):
     deleted_by: str | None
     files: list[ArtifactFileOut]
     deleted_versions: list[int] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
 
 
 class ArtifactKeptOut(BaseModel):

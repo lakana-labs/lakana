@@ -100,7 +100,9 @@ lakana table expiring --within 7d
 ```
 
 It lists the tables you may read that expire within the window, soonest first, with when, the
-rule and who set it. Without `--within` the window is the server's warning window,
+rule and who set it. `--namespace silver` keeps only that namespace and the ones beneath it. It lists
+one page; `--limit` and `--cursor` page on, and the last line names the command for the next page.
+Without `--within` the window is the server's warning window,
 `LAKANA_TABLES__EXPIRY_WARNING_DAYS` (7 days by default). Within that window, `lakana table list NAMESPACE`
 shows an `expires` column (the list across namespaces has none) and `lakana table get` says when the table expires and how to keep it.
 
@@ -157,12 +159,13 @@ clean-up; a day given with `--on` that has passed is removed by the restore.
     `kept` (`protected` or `project_asset` when a table with a retention never expires).
   - `PUT /api/v1/environments/{name}/retention` with `{"days": 30}`, or `{"days": null}` to turn it
     off; the environment shows `retention_days`.
-  - `GET /api/v1/environments/{env}/expiring-tables?within_days=7` lists what expires soon.
+  - `GET /api/v1/environments/{env}/expiring-tables?within_days=7` lists what expires soon;
+    `namespace`, `limit` and `cursor` filter and page it, and `X-Next-Cursor` carries the next page.
   - Every table in `GET .../tables` and `GET .../tables/{name}` has `expires_at` and
     `expires_soon` (within the warning window).
 - **SDK.** `client.tables.retention(env, "bronze.trial")`,
   `client.tables.set_retention(env, "bronze.trial", days=3)` (or `on=date(...)`, or `never=True`),
-  `client.tables.expiring(env, within_days=7)` and `client.environments.set_retention(env, 30)`
+  `client.tables.expiring(env, within_days=7)` (`namespace=`, `limit=` and `cursor=` narrow and page it; `iter_expiring` walks every page) and `client.environments.set_retention(env, 30)`
   (`None` turns it off).
 
 ## If it does not work

@@ -9,9 +9,11 @@ and is never asked. `NO_STEP_UP` lists, with the reason, every other write of `/
 new write route cannot skip the decision unnoticed.
 
 The rule: step-up when a write changes who or what can act or read (identities, rights,
-run-as, CI trust), handles credentials or secrets, or changes where code or data come from or
-go (repositories, package indexes, an environment's storage); none for operating on existing
-work under one's own rights, or for removing access.
+run-as, CI trust), handles credentials or secrets, changes where code or data come from or
+go (repositories, package indexes, an environment's storage), or drops data: a table, an
+artifact, an artifact version, a namespace, a rebuild (with or without `purge`); none for
+operating on existing work under one's own rights (undrop and maintenance included), or for
+removing access.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from __future__ import annotations
 import itertools
 import shutil
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -47,7 +49,14 @@ from lakana_core.models import (
 from lakana_server.app import create_app
 from lakana_server.settings import Settings, UiConfig
 from tests.conftest import _TEST_MASTER_KEY, AUTH_HEADER, PUBLIC, write_ui_dist
-from tests.server_test_helpers import create_environment, create_table, session_headers, signed_in
+from tests.server_test_helpers import (
+    create_environment,
+    create_namespace,
+    create_table,
+    session_headers,
+    signed_in,
+    upload_artifact,
+)
 from tests.test_session_parity import _all_operations, _route_app
 
 Request = tuple[str, dict[str, Any] | None]
@@ -224,7 +233,9 @@ def _passkey(client: TestClient) -> str:
         return f"/api/v1/principals/{name}/passkeys/{row.id}"
 
 
-def _deployment(client: TestClient, environment: str, repository: str) -> None:
+def _deployment(
+    client: TestClient, environment: str, repository: str, assets: Sequence[str] = ()
+) -> None:
     """Record a current deployment of a repository, as a finished deploy would.
 
     Parameters
@@ -235,7 +246,19 @@ def _deployment(client: TestClient, environment: str, repository: str) -> None:
         The environment's name.
     repository
         The repository's name.
+    assets
+        Dotted names of the tables its SQL assets build, each in its own file.
     """
+    entries = [
+        {
+            "table": dotted,
+            "kind": "sql",
+            "sql": "SELECT 1",
+            "references": [],
+            "path": "assets/" + dotted.replace(".", "/") + ".sql",
+        }
+        for dotted in assets
+    ]
     app = cast(FastAPI, client.app)
     with Session(app.state.engine) as session:
         env = session.execute(
@@ -247,7 +270,7 @@ def _deployment(client: TestClient, environment: str, repository: str) -> None:
             repository_id=repo.id,
             environment_id=env.id,
             commit_sha="a" * 40,
-            manifest_json={"version": 1, "assets": [], "edges": [], "external_inputs": []},
+            manifest_json={"version": 1, "assets": entries, "edges": [], "external_inputs": []},
             code_uri="s3://b/x.tar.gz",
             code_sha256="0" * 64,
         )
@@ -459,6 +482,85 @@ def _ssh_repository(client: TestClient) -> str:
     }
     _ok(client.post("/api/v1/repositories", headers=AUTH_HEADER, json=body))
     return str(body["name"])
+
+
+def _namespace(client: TestClient) -> str:
+    """Create an empty namespace in `dev`.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its path.
+    """
+    path = _unique("scratch")
+    create_namespace(client, "dev", path)
+    return path
+
+
+def _table(client: TestClient) -> str:
+    """Create a managed table in `dev.bronze` that no project declares.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its name.
+    """
+    name = _unique("t")
+    create_table(client, "dev", "bronze", name)
+    return name
+
+
+def _artifact(client: TestClient) -> str:
+    """Store one version of an artifact in `dev.bronze` that no project declares.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Its name, without the namespace.
+    """
+    name = _unique("a")
+    upload_artifact(client, "dev", f"bronze.{name}", {"model.bin": name.encode()})
+    return name
+
+
+def _rebuilt(client: TestClient) -> Request:
+    """Create a table in `dev.bronze` that a new repository's deployment builds.
+
+    A new repository each time, so that the run an earlier credential's rebuild queued is not
+    the active run of this one's.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    Request
+        The rebuild's path and body.
+    """
+    name = _unique("t")
+    create_table(client, "dev", "bronze", name)
+    _deployment(client, "dev", _repository(client), [f"bronze.{name}"])
+    return (
+        f"/api/v1/environments/dev/namespaces/bronze/tables/{name}/rebuild",
+        {"reason": "the source was corrected upstream"},
+    )
 
 
 @dataclass(frozen=True)
@@ -782,6 +884,29 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
     ("POST", "/api/v1/repositories/{name}/deploy-key"): Case(
         lambda c: (f"/api/v1/repositories/{_ssh_repository(c)}/deploy-key", None), 201
     ),
+    ("DELETE", "/api/v1/environments/{env}/namespaces/{path}"): Case(
+        lambda c: (f"/api/v1/environments/dev/namespaces/{_namespace(c)}", None), 204
+    ),
+    ("DELETE", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}"): Case(
+        lambda c: (f"/api/v1/environments/dev/namespaces/bronze/tables/{_table(c)}", None), 204
+    ),
+    ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild"): Case(
+        _rebuilt, 202
+    ),
+    ("DELETE", "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}"): Case(
+        lambda c: (f"/api/v1/environments/dev/namespaces/bronze/artifacts/{_artifact(c)}", None),
+        204,
+    ),
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}",
+    ): Case(
+        lambda c: (
+            f"/api/v1/environments/dev/namespaces/bronze/artifacts/{_artifact(c)}/versions/1",
+            None,
+        ),
+        200,
+    ),
 }
 """Each operation that needs a fresh passkey touch in a browser session (`require_step_up`),
 with a request it answers with success. `DELETE .../sessions` is another person's (one's own
@@ -876,10 +1001,6 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/environments/{env}/queries/{query_id}/cancel"): "operates existing work",
     ("POST", "/api/v1/environments/{env}/namespaces"): "data operation under existing rights",
     (
-        "DELETE",
-        "/api/v1/environments/{env}/namespaces/{path}",
-    ): "data operation under existing rights",
-    (
         "POST",
         "/api/v1/environments/{env}/namespaces/{path}/tables",
     ): "data operation under existing rights",
@@ -890,10 +1011,6 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
         "PATCH",
         "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
     ): "a table's description and model; data operation",
-    (
-        "DELETE",
-        "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
-    ): "data operation, undone with undrop",
     ("POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop"): "data operation",
     (
         "POST",
@@ -931,14 +1048,6 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
         "PUT",
         "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/columns/{column}/description",
     ): "a description",
-    (
-        "DELETE",
-        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}",
-    ): "data operation under existing rights",
-    (
-        "DELETE",
-        "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}",
-    ): "data operation under existing rights",
     (
         "POST",
         "/api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads",

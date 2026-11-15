@@ -314,6 +314,11 @@ def create_table(
     ------
     lakana_core.errors.ValidationError
         If `stage_create` is `True` — not implemented.
+
+    Notes
+    -----
+    A name a deployed project declares is refused with a 409 `ConflictError` in the Iceberg
+    error shape, as on every other route: only git may take it.
     """
     if body.stage_create:
         raise ValidationError("Staged table creation is not implemented.")
@@ -440,7 +445,9 @@ def drop_table(
     -----
     Views are left out: the Iceberg REST catalog exposes tables only — a view answers
     `NotFoundError` (404) here, the
-    same as `HEAD` already reports one absent.
+    same as `HEAD` already reports one absent. A table a deployed project builds answers a
+    409 `ConflictError` in the Iceberg error shape, as `lakana table delete` does: only git
+    may remove it.
     """
     ref = TableRef(environment=prefix, namespace=decode_namespace(namespace), name=table)
     catalog.drop_table(principal, ref, purge=purgeRequested, include_views=False)
@@ -474,6 +481,11 @@ def rename_table(
         (confirmed by reading `RestCatalog.rename_table`) — but an empty
         JSON object is returned rather than nothing, so a stricter client
         checking for a parseable body is not broken.
+
+    Notes
+    -----
+    Moving away a table a deployed project builds, or onto a name one declares, answers a 409
+    `ConflictError` in the Iceberg error shape: only git may change either name.
     """
     source = TableRef(
         environment=prefix,

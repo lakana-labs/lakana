@@ -14,6 +14,7 @@ import httpx
 import pytest
 from conftest import FakeApi, invoke, make_state
 from rich.console import Console
+from test_list_filters_cmd import _paged
 
 from lakana._artifact_manifest import manifest_digest
 from lakana.cli.artifacts import human_size, upload_summary
@@ -327,6 +328,33 @@ def test_artifact_list_shows_sizes_for_people(tmp_path: Path) -> None:
     api.on("GET", "/api/v1/environments/dev/artifacts", json=[])
     empty = invoke(make_state(tmp_path, api), "artifact", "list", "--env", "dev")
     assert "(none)" in empty.stdout
+
+
+def test_artifact_list_shows_keep_and_defined_in_and_pages(tmp_path: Path) -> None:
+    """`keep` and `defined in` are columns; `--limit` and `--cursor` page and name the next page."""
+    declared = {
+        **_ARTIFACT,
+        "defined_by": {"repository": "analytics", "path": "assets/models/churn.py"},
+        "keep_versions": 3,
+    }
+    api = _paged("/api/v1/environments/dev/artifacts", [declared, _ARTIFACT], "next-1")
+    result = invoke(
+        make_state(tmp_path, api),
+        "artifact",
+        "list",
+        "--env",
+        "dev",
+        "--limit",
+        "2",
+        "--cursor",
+        "c0",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"limit": "2", "cursor": "c0"}
+    text = " ".join(result.stdout.split())
+    assert "keep" in text and "defined in" in text
+    assert "analytics/assets/models/churn.py" in text
+    assert "More results: lakana artifact list --env dev --limit 2 --cursor next-1" in text
 
 
 _WIDE_RUN = "3f2c9d1e-8b7a-4c55-9e0a-1b2c3d4e5f60"

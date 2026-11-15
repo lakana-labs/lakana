@@ -338,6 +338,7 @@ def test_an_undrop_cannot_take_an_artifacts_name_and_never_lists_one(
     with pytest.raises(NotFoundError):
         catalog.undrop_table(p, _REF)
     assert [d.name for d in catalog.list_dropped_tables(p, "dev", _REF.namespace)] == ["other"]
+    assert [d.name for d in catalog.list_environment_dropped_tables(p, "dev").items] == ["other"]
 
 
 def test_an_artifact_has_no_retention_and_is_never_listed_as_expiring(
@@ -352,7 +353,7 @@ def test_an_artifact_has_no_retention_and_is_never_listed_as_expiring(
         with pytest.raises(ValidationError) as caught:
             call()
         assert "artifacts never expire" in str(caught.value)
-    assert catalog.list_expiring_tables(p, "dev", within_days=3650) == []
+    assert catalog.list_expiring_tables(p, "dev", within_days=3650).items == []
 
 
 def test_a_namespace_with_an_artifact_is_not_dropped(session: Session, tmp_path: Path) -> None:
@@ -360,7 +361,7 @@ def test_a_namespace_with_an_artifact_is_not_dropped(session: Session, tmp_path:
     with pytest.raises(ConflictError) as caught:
         catalog.drop_namespace(p, "dev", _REF.namespace)
     assert str(caught.value) == (
-        "Namespace gold still contains artifacts; drop each first (`lakana artifact drop`)."
+        "gold still holds 1 artifact; drop each first (`lakana artifact drop`)."
     )
 
 
@@ -781,6 +782,7 @@ _ARTIFACT_HANDLING = {
         "load_table_at_check": "hides",
         "commit_table": "refuses",
         "describe_table": "describes",
+        "row_actions": "describes",
         "policy_fields": "describes",
         "table_health": "describes",
         "table_health_signals": "describes",
@@ -805,6 +807,7 @@ _ARTIFACT_HANDLING = {
         "rename_table": "refuses",
         "undrop_table": "name-taken",
         "list_dropped_tables": "hides",
+        "list_environment_dropped_tables": "hides",
         "table_retention": "refuses",
         "set_table_retention": "refuses",
         "list_expiring_tables": "hides",
@@ -959,6 +962,16 @@ def test_every_operation_on_a_table_says_what_it_does_with_an_artifact(cls: type
             "remove it from _ARTIFACT_HANDLING, or fix the selection rule in _table_methods."
         )
     assert set(classified.values()) <= _KINDS_OF_HANDLING
+
+
+def test_the_actions_of_an_artifact_row_are_those_of_the_artifact_list(
+    session: Session, tmp_path: Path
+) -> None:
+    """`row_actions` describes an artifact row: only `drop` (M4), never table maintenance."""
+    catalog, p = _catalog(session, tmp_path)
+
+    assert catalog.row_actions(p, _REF) == (None, ("drop",))
+    assert catalog.describe_table(p, _REF).actions == ("drop",)
 
 
 def test_a_load_names_the_bronze_layer_and_never_the_artifact(

@@ -158,7 +158,25 @@ def test_list_and_describe(stored: TestClient) -> None:
         "versions",
         "size_bytes",
         "created_at",
+        "defined_by",
+        "keep_versions",
+        "actions",
     }
+
+
+def test_the_artifact_list_pages_and_says_what_defines_each(stored: TestClient) -> None:
+    """`limit` pages with `X-Next-Cursor`; each item has `defined_by` and `keep_versions`."""
+    first = stored.get(f"{_ENV}/artifacts", params={"limit": 1}, headers=AUTH_HEADER)
+    assert [a["name"] for a in first.json()] == ["churn"]
+    assert (first.json()[0]["defined_by"], first.json()[0]["keep_versions"]) == (None, None)
+    cursor = first.headers["X-Next-Cursor"]
+    second = stored.get(
+        f"{_ENV}/artifacts", params={"limit": 1, "cursor": cursor}, headers=AUTH_HEADER
+    )
+    assert [a["name"] for a in second.json()] == ["other"]
+    assert "X-Next-Cursor" not in second.headers
+    bad = stored.get(f"{_ENV}/artifacts", params={"cursor": "nonsense"}, headers=AUTH_HEADER)
+    assert bad.status_code == 422
 
 
 def test_versions_and_one_version(stored: TestClient) -> None:
@@ -1261,3 +1279,14 @@ def test_a_nul_character_in_a_name_is_refused_before_it_reaches_sql(
     answer = stored.get(path, headers=AUTH_HEADER)
     assert answer.status_code == 422, answer.text
     assert "NUL" in answer.json()["detail"]
+
+
+def test_an_artifact_and_its_live_versions_offer_what_the_caller_may_do(
+    stored: TestClient,
+) -> None:
+    (churn, _) = stored.get(f"{_ENV}/artifacts", headers=AUTH_HEADER).json()
+    assert churn["actions"] == ["drop"]
+    versions = stored.get(f"{_BASE}/versions", headers=AUTH_HEADER).json()
+    assert [v["actions"] for v in versions] == [["delete"], ["delete"]]
+    one = stored.get(f"{_BASE}/versions/1", headers=AUTH_HEADER).json()
+    assert one["actions"] == ["delete"]

@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from core_test_helpers import ActionAllowList, _prepared_catalog
+from core_test_helpers import ActionAllowList, _prepared_catalog, ensure_table
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from test_projects_dag import make_asset
@@ -394,9 +394,8 @@ def test_undeployed_repository_tables_are_orphans(
 ) -> None:
     """After undeploy the repository's tables show in `orphans` (every version is past)."""
     silver = NamespacePath.from_parts(["silver"])
-    _prepared_catalog(
-        session, tmp_path, AllowAllAuthorization(), tables=[TableRef("dev", silver, "clean")]
-    )
+    _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[silver])
+    ensure_table(session, "dev", "silver", "clean")
     service = DeployService(session, AllowAllAuthorization())
     assert service.orphans(principal, "dev").orphans == []
     service.undeploy(principal, "dev", "analytics")

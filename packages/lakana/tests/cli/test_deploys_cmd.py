@@ -265,8 +265,17 @@ def test_read_commands(tmp_path: Path) -> None:
         "GET",
         "/api/v1/environments/dev/orphans",
         json={
-            "orphans": [{"repository": "analytics", "table": "silver.old"}],
+            "orphans": [
+                {"repository": "analytics", "table": "silver.old", "kind": "TABLE", "exists": True},
+                {
+                    "repository": "analytics",
+                    "table": "silver.gone",
+                    "kind": "TABLE",
+                    "exists": False,
+                },
+            ],
             "hidden": 2,
+            "next_cursor": "next-1",
         },
     )
     state = make_state(tmp_path, api)
@@ -279,6 +288,12 @@ def test_read_commands(tmp_path: Path) -> None:
     assert "bronze.raw" in shown and "└─ silver.clean" in shown
     orphans = _plain(invoke(state, "orphans", "--env", "dev", env=_CI).stdout)
     assert "silver.old" in orphans and "2 hidden" in orphans
+    squeezed = " ".join(orphans.split())
+    assert "kind" in squeezed and "state" in squeezed
+    assert "exists" in squeezed and "dropped, restorable" in squeezed
+    assert "More results: lakana orphans --env dev --cursor next-1" in squeezed
+    invoke(state, "orphans", "--env", "dev", "--limit", "5", "--cursor", "c0", env=_CI)
+    assert dict(api.requests[-1].url.params) == {"limit": "5", "cursor": "c0"}
 
 
 def test_json_output(tmp_path: Path) -> None:
@@ -704,6 +719,7 @@ def test_orphans_json_and_empty(tmp_path: Path) -> None:
     assert json.loads(invoke(state, "--output", "json", "orphans", "--env", "dev").stdout) == {
         "orphans": [],
         "hidden": 0,
+        "next_cursor": None,
     }
     assert "hidden" not in invoke(state, "orphans", "--env", "dev").stdout
 

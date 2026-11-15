@@ -99,7 +99,7 @@ import time
 import unicodedata
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 
@@ -136,7 +136,13 @@ from lakana_core.artifacts.store import (
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, RunContext, Securable
 from lakana_core.catalog.connection_lineage import connection_edges, connection_sources
+from lakana_core.catalog.git_owned import (
+    GIT_OWNED_ARTIFACT_HIDDEN,
+    refuse_declared_name,
+    refuse_owned_drop,
+)
 from lakana_core.catalog.identity import resolve_environment_id, resolve_table_id
+from lakana_core.catalog.row_actions import ARTIFACT_ACTIONS, VERSION_ACTIONS, drop_actions_each
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.writes import MAX_SOURCE_NAME, MAX_SOURCE_VERSIONS
 from lakana_core.config import ArtifactsConfig
@@ -155,6 +161,7 @@ from lakana_core.identifiers import (
     shown,
     validate_path_component,
 )
+from lakana_core.identity.sessions import require_step_up
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -174,6 +181,9 @@ from lakana_core.models import (
     TaskRun,
 )
 from lakana_core.models.base import utcnow
+from lakana_core.pagination import LIST_LIMIT_DEFAULT, Page, page_in_order
+from lakana_core.projects.definition import DefiningFile, deployed_entries, owned_by_git
+from lakana_core.projects.manifest import entry_keep_versions
 from lakana_core.runs.lockdown import (
     SUPERSEDED_MESSAGE,
     ProtectedWriteGuard,
@@ -307,6 +317,16 @@ class ArtifactView:
         The summed size of its live versions.
     created_at
         When the artifact was created.
+    defined_by
+        The deployed project file that declares it; `None` for an artifact no deployed
+        project declares.
+    keep_versions
+        How many live versions that declaration keeps; `None` keeps all (also when no deployed
+        project declares it).
+    actions
+        The words of `lakana_core.catalog.row_actions.ARTIFACT_ACTIONS` the reader's rights
+        allow; the server decides each request again (a drop of one `defined_by` names is
+        refused).
     """
 
     ref: TableRef
@@ -315,6 +335,9 @@ class ArtifactView:
     versions: int
     size_bytes: int
     created_at: datetime
+    defined_by: DefiningFile | None = None
+    keep_versions: int | None = None
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -351,6 +374,10 @@ class VersionView:
         The name of the principal that deleted it.
     files
         Its files; empty in a listing and for a deleted version.
+    actions
+        The words of `lakana_core.catalog.row_actions.VERSION_ACTIONS` the reader's rights
+        allow on a live version, in a listing and when one is shown; empty for a deleted one and
+        in the answers of a commit or a delete.
     """
 
     version: int
@@ -367,6 +394,7 @@ class VersionView:
     deleted_at: datetime | None
     deleted_by: str | None
     files: tuple[ManifestFile, ...]
+    actions: tuple[str, ...] = ()
 
 
 class KeptReason(StrEnum):
@@ -998,7 +1026,12 @@ class ArtifactService:
             files=files,
         )
 
-    def _view(self, ref: TableRef, row: Table) -> ArtifactView:
+    def _view(
+        self,
+        ref: TableRef,
+        row: Table,
+        entries: Mapping[str, tuple[DefiningFile, Mapping[str, object]]],
+    ) -> ArtifactView:
         """Present an artifact.
 
         Parameters
@@ -1007,6 +1040,8 @@ class ArtifactService:
             Its name.
         row
             Its row.
+        entries
+            `deployed_entries` of the environment, read once for the whole call.
 
         Returns
         -------
@@ -1027,6 +1062,13 @@ class ArtifactService:
                 ),
             ).where(ArtifactVersion.artifact_id == row.id)
         ).one()
+        declared = entries.get(ref.dotted())
+        found = (
+            declared[0]
+            if declared and TableRef.from_dotted(ref.environment, ref.dotted()) == ref
+            else None
+        )
+        owned = owned_by_git(found, "ARTIFACT")
         return ArtifactView(
             ref=ref,
             id=row.id,
@@ -1034,6 +1076,8 @@ class ArtifactService:
             versions=int(count),
             size_bytes=int(size),
             created_at=row.created_at,
+            defined_by=found if owned else None,
+            keep_versions=entry_keep_versions(declared[1]) if declared and owned else None,
         )
 
     def _open_upload(
@@ -1091,8 +1135,14 @@ class ArtifactService:
         return upload
 
     def list_artifacts(
-        self, p: PrincipalRef, environment: str, namespace: NamespacePath | None = None
-    ) -> list[ArtifactView]:
+        self,
+        p: PrincipalRef,
+        environment: str,
+        namespace: NamespacePath | None = None,
+        *,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> Page[ArtifactView]:
         """List the artifacts of an environment that the caller may read.
 
         Parameters
@@ -1103,12 +1153,16 @@ class ArtifactService:
             The environment.
         namespace
             Only this namespace; every namespace when `None`.
+        limit
+            Most artifacts returned (1 to `LIST_LIMIT_MAX`).
+        cursor
+            The `next_cursor` of the previous page.
 
         Returns
         -------
-        list of ArtifactView
-            Ordered by namespace and name. An artifact the caller may not read
-            is left out, as if it did not exist.
+        Page of ArtifactView
+            One page, ordered by namespace parts and name. An artifact the caller may not
+            read is left out, as if it did not exist, before the cursor applies.
 
         Raises
         ------
@@ -1116,6 +1170,8 @@ class ArtifactService:
             If the caller may not read the environment.
         NotFoundError
             If the environment does not exist.
+        ValidationError
+            If `limit` is out of range, or `cursor` is not one this list issued.
         """
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
         environment_id = resolve_environment_id(self._session, environment)
@@ -1130,12 +1186,28 @@ class ArtifactService:
         )
         if namespace is not None:
             query = query.where(Namespace.path == namespace.joined())
-        listed: list[ArtifactView] = []
+        readable: list[tuple[TableRef, Table]] = []
         for row, path in self._session.execute(query).all():
             ref = TableRef(environment, NamespacePath.parse(path), row.name)
             if self._authz.permits(p, Action.READ_TABLE, self._securable(ref)):
-                listed.append(self._view(ref, row))
-        return listed
+                readable.append((ref, row))
+        page = page_in_order(
+            readable,
+            kind="artifacts",
+            key_of=lambda item: (*item[0].namespace.parts, "", item[0].name),
+            limit=limit,
+            cursor=cursor,
+        )
+        entries = deployed_entries(self._session, environment_id)
+        refs = [ref for ref, _ in page.items]
+        words = drop_actions_each(self._authz, p, refs, ARTIFACT_ACTIONS[0])
+        return Page(
+            [
+                replace(self._view(ref, row, entries), actions=actions)
+                for (ref, row), actions in zip(page.items, words, strict=True)
+            ],
+            page.next_cursor,
+        )
 
     def get_artifact(self, p: PrincipalRef, ref: TableRef) -> ArtifactView:
         """Show one artifact.
@@ -1162,7 +1234,10 @@ class ArtifactService:
             If the name belongs to something that is not an artifact.
         """
         self._authz.authorize(p, Action.READ_TABLE, self._securable(ref))
-        return self._view(ref, self._artifact(ref))
+        environment_id = resolve_environment_id(self._session, ref.environment)
+        entries = deployed_entries(self._session, environment_id) if environment_id else {}
+        (actions,) = drop_actions_each(self._authz, p, [ref], ARTIFACT_ACTIONS[0])
+        return replace(self._view(ref, self._artifact(ref), entries), actions=actions)
 
     def list_versions(self, p: PrincipalRef, ref: TableRef) -> list[VersionView]:
         """List an artifact's versions, newest first, deleted ones included.
@@ -1216,9 +1291,13 @@ class ArtifactService:
                 .where(mine)
             )
         }
+        (may_delete,) = drop_actions_each(self._authz, p, [ref], VERSION_ACTIONS[0])
         return [
-            self._version_view(
-                ref, version, with_files=False, principal_names=names, run_ids=run_ids
+            replace(
+                self._version_view(
+                    ref, version, with_files=False, principal_names=names, run_ids=run_ids
+                ),
+                actions=may_delete if version.deleted_at is None else (),
             )
             for version in rows
         ]
@@ -1261,7 +1340,11 @@ class ArtifactService:
         found = version_row(self._session, row.id, number) if _is_version(number) else None
         if found is None:
             raise self._no_version(ref, number)
-        return self._version_view(ref, found, with_files=True)
+        (may_delete,) = drop_actions_each(self._authz, p, [ref], VERSION_ACTIONS[0])
+        return replace(
+            self._version_view(ref, found, with_files=True),
+            actions=may_delete if found.deleted_at is None else (),
+        )
 
     @staticmethod
     def _require_attempt(p: PrincipalRef) -> None:
@@ -1357,9 +1440,10 @@ class ArtifactService:
         """Refuse a caller who may not begin an upload, before its manifest is read.
 
         The route runs this before it reads a request body of up to 16 MiB: authorization first
-        (write, and create when the name is new), then the protected-write guard and the kind
-        of the name, exactly as `begin_upload` does. Writes nothing and records no break-glass
-        event; `begin_upload` does that.
+        (write, and create when the name is new), then the protected-write guard, the kind of
+        the name and a person's upload under a name a deployment declares, exactly as
+        `begin_upload` does. Writes nothing and records no break-glass event; `begin_upload`
+        does that.
 
         Parameters
         ----------
@@ -1374,6 +1458,8 @@ class ArtifactService:
             If the caller may not write (or create) the name, or the guard refuses.
         ValidationError
             If the name belongs to a table, a view or an external table.
+        ConflictError
+            If a person would create an artifact under a name a deployment declares.
         """
         securable = self._securable(ref)
         self._authz.authorize(p, Action.WRITE_TABLE, securable)
@@ -1393,7 +1479,41 @@ class ArtifactService:
                 f"{ref.dotted()} is {_KIND_WORDS[row.kind]}, not an artifact; drop it first, "
                 "or choose another name."
             )
+        self._refuse_declared_upload(p, ref, row)
         self._session.rollback()
+
+    def _refuse_declared_upload(self, p: PrincipalRef, ref: TableRef, row: Table | None) -> None:
+        """Refuse a person's upload that would create an artifact under a declared name.
+
+        A run produces what its project declares; a person may not take that name.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The artifact.
+        row
+            The artifact's row, or `None` when the name is new.
+
+        Raises
+        ------
+        ConflictError
+            If the name is new, the caller is a person, and a current deployment declares it
+            (`GIT_OWNED_CREATE`, or `GIT_OWNED_ARTIFACT_HIDDEN` to a caller who may not read it).
+        """
+        if row is not None or p.run_context is not None:
+            return
+        environment_id = resolve_environment_id(self._session, ref.environment)
+        if environment_id is not None:
+            refuse_declared_name(
+                self._session,
+                self._authz,
+                p,
+                ref,
+                environment_id,
+                hidden=GIT_OWNED_ARTIFACT_HIDDEN,
+            )
 
     def begin_upload(self, p: PrincipalRef, ref: TableRef, document: object) -> UploadView:
         """Start adding a version: validate the manifest, create the artifact on first use.
@@ -1427,7 +1547,10 @@ class ArtifactService:
             If the name space does not exist.
         ConflictError
             If another request created the name at the same moment, or the
-            artifact already has `MAX_OPEN_UPLOADS` open uploads.
+            artifact already has `MAX_OPEN_UPLOADS` open uploads; or, for a person (no run),
+            if the artifact is new and a deployed project declares its name
+            (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`, or
+            `GIT_OWNED_ARTIFACT_HIDDEN` to a caller who may not read it).
         """
         securable = self._securable(ref)
         self._authz.authorize(p, Action.WRITE_TABLE, securable)
@@ -1443,6 +1566,7 @@ class ArtifactService:
                 f"{ref.dotted()} is {_KIND_WORDS[row.kind]}, not an artifact; drop it first, "
                 "or choose another name."
             )
+        self._refuse_declared_upload(p, ref, row)
         manifest = parse_manifest(document, self._limits)
         try:
             if row is None:
@@ -1754,7 +1878,9 @@ class ArtifactService:
         expired), belongs to this principal and, for a task, to this task run and claim.
         Anything else is `UPLOAD_GONE`, one text for every reason, so nothing is revealed.
         No bytes are deleted: the files the upload stored stay in storage, with their
-        `artifact_blobs` rows, until the sweep finds that nothing names them.
+        `artifact_blobs` rows, until the sweep finds that nothing names them. One
+        `ARTIFACT_UPLOAD_ABORTED` audit event, in the transaction of the delete, names the
+        artifact and the upload.
 
         There is no protected-write guard call. The abort writes no version and no bytes and
         cannot touch anything that is not the caller's own unfinished upload, so it is not a way
@@ -1783,13 +1909,20 @@ class ArtifactService:
             With `UPLOAD_GONE` if the upload does not exist, is another caller's or another
             artifact's, expired or was committed.
         """
-        self._authz.authorize(p, Action.WRITE_TABLE, self._securable(ref))
+        securable = self._securable(ref)
+        self._authz.authorize(p, Action.WRITE_TABLE, securable)
         self._require_attempt(p)
         artifact_id = self._artifact(ref).id
         try:
             if not lock_artifact(self._session, artifact_id):
                 raise self._not_found(ref)
             self._session.delete(self._open_upload(p, artifact_id, upload_id))
+            AuditService(self._session).record(
+                p.id,
+                AuditEventType.ARTIFACT_UPLOAD_ABORTED,
+                securable=securable,
+                detail={"artifact": ref.dotted(), "upload_id": str(upload_id)},
+            )
             self._session.commit()
         except BaseException:
             self._session.rollback()
@@ -2475,8 +2608,12 @@ class ArtifactService:
             If the name belongs to something that is not an artifact.
         ConflictError
             If the version is already deleted.
+        StepUpRequired
+            If a browser session's last passkey touch is older than 15 minutes; a token never
+            is asked. Checked before anything else is read.
         """
         self._authz.authorize(p, Action.DROP_TABLE, self._securable(ref))
+        require_step_up(p)
         self._refuse_run(p)
         self._guard.check(
             p, ref.environment, WriteOperation.DELETE_ARTIFACT_VERSION, table_target(ref)
@@ -2639,13 +2776,25 @@ class ArtifactService:
         ValidationError
             If the name belongs to something that is not an artifact.
         ConflictError
-            If storage could not be written (the drop marker); nothing was deleted.
+            If a deployed project produces the artifact: only git may remove it
+            (`lakana_core.catalog.git_owned.GIT_OWNED_ARTIFACT_DROP`, or the hidden copy to a
+            caller who may not read it); checked before the marker, so nothing reaches storage.
+            Or if storage could not be written (the drop marker); nothing was deleted.
+        StepUpRequired
+            If a browser session's last passkey touch is older than 15 minutes; a token never
+            is asked. Checked before anything else is read.
         """
         securable = self._securable(ref)
         self._authz.authorize(p, Action.DROP_TABLE, securable)
+        require_step_up(p)
         self._refuse_run(p)
         self._guard.check(p, ref.environment, WriteOperation.DROP_ARTIFACT, table_target(ref))
-        artifact_id = self._artifact(ref).id
+        artifact = self._artifact(ref)
+        artifact_id = artifact.id
+        # The artifact was found by its environment's name, so that environment is live.
+        environment_id = resolve_environment_id(self._session, ref.environment)
+        assert environment_id is not None  # nosec B101
+        refuse_owned_drop(self._session, self._authz, p, ref, environment_id, artifact.kind)
         storage = self._storage.for_environment(ref.environment).storage
         marker = dropped_marker_path(artifact_id)
         marked = False

@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import binascii
 import enum
+import itertools
 import json
 import unicodedata
 import uuid
@@ -712,3 +713,115 @@ def name_contains(column: InstrumentedAttribute[str], text: str) -> ColumnElemen
     """
     pattern = func.lower(literal("%" + escape_like(text) + "%", String))
     return func.lower(column).like(pattern, escape="\\")
+
+
+LIST_LIMIT_DEFAULT = 100
+"""The page size of a list sorted in Python when the caller names none."""
+
+LIST_LIMIT_MAX = 200
+"""The largest page size of a list sorted in Python."""
+
+
+def instant_key(moment: datetime) -> str:
+    """Write a time as fixed-width text whose order is the time's order.
+
+    Parameters
+    ----------
+    moment
+        A timezone-aware time.
+
+    Returns
+    -------
+    str
+        The time in UTC, ``YYYY-MM-DDTHH:MM:SS.ffffffZ``.
+    """
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def page_in_order(
+    items: Sequence[_T],
+    *,
+    kind: str,
+    key_of: Callable[[_T], tuple[str, ...]],
+    limit: int,
+    cursor: str | None,
+    descending: bool = False,
+) -> Page[_T]:
+    """Page a list that is sorted in Python, by a cursor of the last item's key.
+
+    The list is sorted here by exactly `key_of`, so the order a page resumes in is the order
+    the cursor's key means, whatever order the database returned the rows in.
+
+    Parameters
+    ----------
+    items
+        Every item of the list, in any order.
+    kind
+        The list's name in the cursor.
+    key_of
+        An item's key: a tuple of strings, unique among the items. Tuples compare part by part,
+        so ``("a",)`` comes before ``("a", "b")`` and ``("ab",)``.
+    limit
+        The page size, 1 to `LIST_LIMIT_MAX`.
+    cursor
+        The `next_cursor` of the previous page, or `None` for the first.
+    descending
+        Whether the list runs from the largest key down.
+
+    Returns
+    -------
+    Page
+        This page's items and, unless it is the last, the cursor that continues it. A cursor
+        of an item that has since gone still resumes after where that item was.
+
+    Raises
+    ------
+    ValidationError
+        If `limit` is out of range, or `cursor` is malformed or came from another list.
+    ValueError
+        If two items have the same key, which would make a page skip or repeat items.
+    """
+    if not 1 <= limit <= LIST_LIMIT_MAX:
+        raise ValidationError(f"limit must be between 1 and {LIST_LIMIT_MAX}; got {limit}.")
+    after: tuple[str, ...] | None = None
+    if cursor is not None:
+        after = _key_from_cursor(kind, cursor)
+    keyed = sorted(((key_of(item), item) for item in items), key=lambda p: p[0], reverse=descending)
+    if any(a[0] == b[0] for a, b in itertools.pairwise(keyed)):
+        raise ValueError(f"The keys of the `{kind}` list are not unique; a page would skip items.")
+    if after is not None:
+        keyed = [p for p in keyed if (p[0] < after if descending else p[0] > after)]
+    page = keyed[:limit]
+    next_cursor = None
+    if len(keyed) > limit:
+        next_cursor = encode_key_cursor(kind, json.dumps(list(page[-1][0])))
+    return Page([item for _, item in page], next_cursor)
+
+
+def _key_from_cursor(kind: str, cursor: str) -> tuple[str, ...]:
+    """Read the tuple key out of a cursor made by `page_in_order`.
+
+    Parameters
+    ----------
+    kind
+        The list being read.
+    cursor
+        The value a client sent back.
+
+    Returns
+    -------
+    tuple of str
+        The key to resume after.
+
+    Raises
+    ------
+    ValidationError
+        If `cursor` is not one this server could have issued, or belongs to another list.
+    """
+    try:
+        parts = json.loads(decode_key_cursor(kind, cursor))
+    except ValueError as exc:
+        raise ValidationError(_BAD_CURSOR) from exc
+    if not isinstance(parts, list) or not all(isinstance(p, str) for p in parts):
+        raise ValidationError(_BAD_CURSOR)
+    return tuple(_stored_text(p) for p in parts)

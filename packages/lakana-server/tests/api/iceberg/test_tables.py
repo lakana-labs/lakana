@@ -13,6 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
+from lakana_core.catalog.git_owned import GIT_OWNED_CREATE, GIT_OWNED_DROP
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.service import CatalogService
 from lakana_core.db import create_engine
@@ -29,6 +30,7 @@ from lakana_core.models import (
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.settings import Settings
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import deploy_file
 
 
 def _setup(client: TestClient, storage_root: str) -> None:
@@ -695,7 +697,9 @@ def test_the_iceberg_commit_route_refuses_to_remove_main(
     assert response.json()["error"]["type"] == "ValidationError"
     assert response.json()["error"]["message"] == (
         "A commit cannot remove a table's current snapshot: readers would see an empty table. "
-        "Drop the table, or write the rows it should hold."
+        "Write the rows it should hold, or start gold.sales again: `lakana table rebuild "
+        'gold.sales --env dev --reason "…"` if a deployed project builds it, otherwise '
+        "`lakana table delete gold.sales --env dev`."
     )
     after = client.get("/v1/dev/namespaces/gold/tables/sales", headers=AUTH_HEADER).json()
     assert after["metadata-location"] == before["metadata-location"]
@@ -1324,3 +1328,74 @@ def test_a_column_dropped_through_the_commit_route_is_audited_with_the_masks_on_
             ],
         }
     ]
+
+
+def _deploy_sales(client: TestClient) -> None:
+    """Deploy `analytics` to `dev` with the SQL asset that builds `gold.sales`.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    with Session(client.app.state.engine) as session:
+        deploy_file(session, "dev", "gold.sales", "SELECT 1")
+
+
+def test_iceberg_drop_of_a_project_table_is_409_in_the_iceberg_shape(
+    client: TestClient, storage_root: str
+) -> None:
+    _setup(client, storage_root)
+    created = client.post(
+        "/v1/dev/namespaces/gold/tables",
+        headers=AUTH_HEADER,
+        json={"name": "sales", "schema": _SCHEMA, "properties": {}},
+    )
+    assert created.status_code == 200, created.text
+    _deploy_sales(client)
+
+    response = client.delete("/v1/dev/namespaces/gold/tables/sales", headers=AUTH_HEADER)
+
+    assert response.json() == {
+        "error": {
+            "message": GIT_OWNED_DROP.format(
+                name="gold.sales",
+                repository="analytics",
+                path="assets/gold/sales.sql",
+                environment="dev",
+            ),
+            "type": "ConflictError",
+            "code": 409,
+        }
+    }
+    assert response.status_code == 409
+    assert (
+        client.get("/v1/dev/namespaces/gold/tables/sales", headers=AUTH_HEADER).status_code == 200
+    )
+
+
+def test_iceberg_create_under_a_declared_name_is_409_in_the_iceberg_shape(
+    client: TestClient, storage_root: str
+) -> None:
+    _setup(client, storage_root)
+    _deploy_sales(client)
+
+    response = client.post(
+        "/v1/dev/namespaces/gold/tables",
+        headers=AUTH_HEADER,
+        json={"name": "sales", "schema": _SCHEMA, "properties": {}},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json() == {
+        "error": {
+            "message": GIT_OWNED_CREATE.format(
+                name="gold.sales",
+                repository="analytics",
+                path="assets/gold/sales.sql",
+                environment="dev",
+            ),
+            "type": "ConflictError",
+            "code": 409,
+        }
+    }

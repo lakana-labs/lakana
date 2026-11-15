@@ -415,18 +415,26 @@ def get_project_version(
 @router.get("/orphans", response_model=OrphansOut, responses=errors(403, 404))
 def list_orphans(
     env: str,
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
 ) -> OrphansOut:
-    """List tables no project produces any more.
+    """List tables no project produces any more, one page at a time.
 
-    Lists the tables that earlier project versions produced and the current ones do not.
-    Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist.
+    Lists the tables that earlier project versions produced and the current ones do not,
+    including dropped ones that can still be restored (`exists` is false). Needs
+    `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a cursor
+    this list did not issue.
 
     Parameters
     ----------
     env
         Environment name.
+    limit
+        Most orphans returned (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
     principal
         The authenticated caller.
     service
@@ -437,8 +445,18 @@ def list_orphans(
     OrphansOut
         Readable orphans and a hidden count.
     """
-    report = service.orphans(principal, env)
+    report = service.orphans(principal, env, limit=limit, cursor=cursor)
     return OrphansOut(
-        orphans=[OrphanOut(repository=o.repository, table=o.table) for o in report.orphans],
+        orphans=[
+            OrphanOut(
+                repository=o.repository,
+                table=o.table,
+                kind=o.kind,
+                exists=o.exists,
+                actions=list(o.actions),
+            )
+            for o in report.orphans
+        ],
         hidden=report.hidden,
+        next_cursor=report.next_cursor,
     )

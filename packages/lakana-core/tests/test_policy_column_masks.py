@@ -818,7 +818,9 @@ class _GrantCheckingCatalog(NoPolicyFields):
     authz: GrantAuthorization
     names: list[str]
 
-    def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
+    def describe_table(
+        self, p: PrincipalRef, ref: TableRef, *, with_actions: bool = True
+    ) -> TableDescription:
         self.authz.authorize(
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )

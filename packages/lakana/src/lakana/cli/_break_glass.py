@@ -49,9 +49,20 @@ def break_glass_reason(break_glass: bool, reason: str | None, environment: str) 
         return None
     if reason is None:
         raise CliError('--break-glass needs --reason "<why, 10-500 characters>"')
+    warn_break_glass(environment)
+    return reason
+
+
+def warn_break_glass(environment: str) -> None:
+    """Print the warning before a break-glass write.
+
+    Parameters
+    ----------
+    environment
+        The target environment, for the warning.
+    """
     typer.echo(
         f"warning: break-glass write to {environment}: it is audited, and the next run of the "
         "deployed code may overwrite it; real fixes go through a deploy.",
         err=True,
     )
-    return reason

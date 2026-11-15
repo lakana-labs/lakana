@@ -657,6 +657,7 @@ def test_a_create_whose_claim_came_before_the_deletion_is_not_published(
         properties=None,
         location=None,
         holder_run_id=None,
+        refuse_declared_for=None,
     )
     catalog.delete_environment(principal, "dev")
     claim = session.scalars(
@@ -689,6 +690,7 @@ def test_a_claim_made_after_the_deletion_is_never_published(
             properties=None,
             location=None,
             holder_run_id=None,
+            refuse_declared_for=None,
         )
     catalog.delete_environment(principal, "dev")
     claim_location(

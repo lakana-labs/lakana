@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
+from core_test_helpers import deploy_assets
 from home_test_helpers import check_result, deployed_job, environment, person, run_of, table_read
 from sqlalchemy import Engine, delete, event, func, select
 from sqlalchemy.orm import Session
@@ -1299,3 +1300,79 @@ def test_an_integer_cursor_at_the_edge_of_its_column_is_read(
     sort_name = f"{sort.value}:{DEFAULT_ORDER[sort].value}"
     cursor = encode_sorted_cursor("tables", sort_name, (value,), uuid.uuid4())
     assert world.listing.list(world.admin, sort=sort, cursor=cursor).next_cursor is None
+
+
+def test_list_rows_carry_defined_by_and_actions(world: ListingWorld) -> None:
+    deploy_assets(world.session, "dev", "analytics", {"silver.orders": {}})
+
+    admin_page = world.listing.list(world.admin, environment="dev", limit=MAX_LIMIT)
+    orders = _item(admin_page, "dev:silver.orders")
+    assert orders.defined_by is not None
+    assert (orders.defined_by.repository, orders.defined_by.path) == (
+        "analytics",
+        "assets/silver/orders.sql",
+    )
+    assert orders.actions == ("drop", "rebuild", "maintain", "set_retention")
+    free = [i for i in admin_page.items if i.kind == "TABLE" and i.name != "orders"]
+    assert free
+    assert all(i.defined_by is None and "rebuild" not in i.actions for i in free)
+    # A reader sees the file that owns the row; alice, a viewer, may only set the retention of
+    # the table she owns.
+    (shown,) = world.listing.list(world.alice, environment="dev").items
+    assert shown.defined_by == orders.defined_by
+    assert shown.actions == ("set_retention",)
+    (tims,) = world.listing.list(world.tim, environment="dev").items
+    assert (tims.name, tims.defined_by, tims.actions) == ("orders", None, ())
+
+
+def test_a_legacy_dotted_namespace_is_not_defined_by_its_lookalike(session: Session) -> None:
+    """F9: `["le.gacy"].t` shares its dotted name with `le.gacy.t`, which is what is declared."""
+    admin, listing = _admin_listing(session, {})
+    legacy = Namespace(id=uuid.uuid4(), environment_id=environment(session, "dev"), path="le.gacy")
+    session.add(legacy)
+    session.flush()
+    _table(session, legacy.id, "t")
+    session.commit()
+    deploy_assets(session, "dev", "analytics", {"le.gacy.t": {}})
+
+    (item,) = listing.list(admin).items
+    assert item.defined_by is None
+    assert "rebuild" not in item.actions
+
+
+def test_the_definitions_are_read_once_per_environment_of_the_page(session: Session) -> None:
+    """F15: as many statements for 1 row as for 3 of one environment, one more for a second."""
+    admin = person(session, "admin")
+    GrantService(session, AllowAllAuthorization()).grant(
+        admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    for env, prefix in (("dev", "a"), ("prod", "b")):
+        silver = _namespace(session, environment(session, env), "silver")
+        for n in range(3):
+            _table(session, silver, f"{prefix}{n}", owner_id=admin.id)
+        session.commit()
+        deploy_assets(session, env, "analytics", {f"silver.{prefix}{n}": {} for n in range(3)})
+    engine = session.get_bind()
+    assert isinstance(engine, Engine)
+
+    def count(limit: int) -> int:
+        """Count the statements of the first page.
+
+        Parameters
+        ----------
+        limit
+            The page size.
+
+        Returns
+        -------
+        int
+            The statements it sent.
+        """
+        listing = TableListing(session, GrantAuthorization(session))
+        return _count_statements(engine, lambda: listing.list(admin, limit=limit))
+
+    one, three, two_environments = count(1), count(3), count(4)
+    assert one == three
+    assert two_environments == three + 1
+    page = TableListing(session, GrantAuthorization(session)).list(admin, limit=4)
+    assert all(i.defined_by is not None for i in page.items)

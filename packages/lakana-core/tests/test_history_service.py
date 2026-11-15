@@ -544,9 +544,10 @@ def test_a_table_built_another_way_is_refused(hist: Hist, make: str) -> None:
 
     assert str(info.value) == (
         "gold.dim_customer exists without the columns `write: history` adds; a history table is "
-        "created by its first history run. Drop it (`lakana table delete gold.dim_customer --env "
-        "dev`) so that the next run creates it with every row as an open version, or build the "
-        "history into a new asset."
+        "created by its first history run. Build it again from git: `lakana table rebuild "
+        'gold.dim_customer --env dev --reason "…"` (it drops the table and queues the run '
+        "that creates it, with every row as an open version), or build the history into a new "
+        "asset."
     )
 
 
@@ -596,8 +597,9 @@ def test_two_open_versions_of_a_key_are_refused(hist: Hist) -> None:
 
     assert str(info.value) == (
         "1 key of gold.dim_customer has more than one open version; there must be one per key, "
-        "so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env "
-        "dev`) and let the next run create it again (its history starts again with that run)."
+        "so nothing was written. Build it again from git: `lakana table rebuild gold.dim_customer "
+        '--env dev --reason "…"` (it drops the table and queues the run that creates it; its '
+        "history starts again with that run)."
     )
 
 
@@ -615,9 +617,9 @@ def test_open_versions_sharing_a_surrogate_key_are_refused_after_staging(hist: H
     assert str(info.value) == (
         "This write would change the number of rows in gold.dim_customer by 0, but it opens 1 "
         "version: an open version shares its surrogate key (`dim_customer_key`) with another, "
-        "so closing one would remove both. Nothing was written. Drop the table (`lakana table "
-        "delete gold.dim_customer --env dev`) and let the next run create it again (its history "
-        "starts again with that run)."
+        "so closing one would remove both. Nothing was written. Build it again from git: "
+        '`lakana table rebuild gold.dim_customer --env dev --reason "…"` (it drops the table '
+        "and queues the run that creates it; its history starts again with that run)."
     )
     assert hist.service.load_table(hist.admin, hist.ref()).metadata_location == location
     assert (hist.files(".parquet"), hist.files(".avro")) == (parquet, avro)
@@ -1411,9 +1413,10 @@ def test_a_table_with_row_level_delete_files_is_refused_with_its_cause(hist: His
     assert str(info.value) == (
         "gold.dim_customer has row-level delete files, which an Iceberg writer outside Lakana "
         "added; a history write cannot keep its versions right with them, so nothing was read or "
-        "written. Compact the table with that writer so that no delete files remain, or drop it "
-        "(`lakana table delete gold.dim_customer --env dev`) and let the next run create it "
-        "again (its history starts again with that run)."
+        "written. Compact the table with that writer so that no delete files remain, or build it "
+        'again from git (`lakana table rebuild gold.dim_customer --env dev --reason "…"`, '
+        "which drops the table and queues the run that creates it; its history starts again "
+        "with that run)."
     )
 
 

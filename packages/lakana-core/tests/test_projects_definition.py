@@ -15,9 +15,10 @@ import uuid
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
-from core_test_helpers import deploy_files, ensure_table
+from core_test_helpers import deploy_assets, deploy_files, ensure_table
 from sqlalchemy import delete, event, select, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -25,6 +26,7 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.service import AuditService
 from lakana_core.audit.views import sessions_like
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
+from lakana_core.catalog.identity import resolve_environment_id
 from lakana_core.errors import AuditUnavailableError, NotFoundError, PermissionDenied
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
@@ -50,8 +52,15 @@ from lakana_core.projects.definition import (
     NOT_RECORDED_MESSAGE,
     RESTRICTED_MESSAGE,
     TOO_LARGE_MESSAGE,
+    DefiningFile,
     DefinitionReason,
     TableDefinitionFile,
+    defining_file,
+    defining_ref,
+    definition_for,
+    deployed_definitions,
+    deployed_entries,
+    owned_by_git,
     table_definition,
     table_definition_file,
 )
@@ -1374,3 +1383,156 @@ def test_a_check_that_reads_a_file_is_withheld(session: Session) -> None:
     _with_sql(session, "SELECT * FROM 'silver.a'")
     [check] = _version(session, _analyst(session)).manifest["checks"]
     assert _content_withheld(check, DefinitionReason.RESTRICTED)
+
+
+# --- which file defines a name --------------------------------------------------------------------
+
+
+def _deploy(
+    session: Session, environment: str, repository: str, assets: dict[str, dict[str, object]]
+) -> JobVersion:
+    """Deploy manifest-only assets, making `dev` first.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment
+        The environment's name.
+    repository
+        The repository's name.
+    assets
+        See `deploy_assets`.
+
+    Returns
+    -------
+    JobVersion
+        The new current version.
+    """
+    _tables(session, "silver.seed")
+    return deploy_assets(session, environment, repository, assets)
+
+
+def _env_id(session: Session) -> uuid.UUID:
+    """Return the id of `dev`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    uuid.UUID
+        The environment's id.
+    """
+    found = resolve_environment_id(session, "dev")
+    assert found is not None
+    return found
+
+
+def test_defining_file_names_the_repository_path_and_output(session: Session) -> None:
+    _deploy(
+        session,
+        "dev",
+        "analytics",
+        {
+            "silver.clean": {},
+            "silver.v": {"materialize": "view"},
+            "models.m": {"kind": "python", "output": "artifact", "path": "assets/models/m.py"},
+        },
+    )
+    env = _env_id(session)
+    assert defining_file(session, env, "silver.clean") == DefiningFile(
+        "analytics", "assets/silver/clean.sql", "table"
+    )
+    found = defining_file(session, env, "silver.v")
+    assert found is not None and found.output == "view"
+    assert defining_file(session, env, "models.m") == DefiningFile(
+        "analytics", "assets/models/m.py", "artifact"
+    )
+    assert defining_file(session, env, "silver.none") is None
+
+
+def test_two_repositories_declaring_a_name_answer_like_defined_in(session: Session) -> None:
+    _deploy(session, "dev", "zeta", {"silver.clean": {}})
+    _deploy(session, "dev", "alpha", {"silver.clean": {}})
+    _tables(session, "silver.clean")
+    found = defining_file(session, _env_id(session), "silver.clean")
+    assert found is not None and found.repository == "alpha"
+    got = table_definition(
+        session,
+        GrantAuthorization(session),
+        _person(session, "t", "silver.clean"),
+        TableRef.from_dotted("dev", "silver.clean"),
+    )
+    assert found.repository == got.repository
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        [],
+        {"assets": {}},
+        {"assets": [{"table": "silver.clean"}]},
+        {"assets": [{"table": "silver.clean", "path": 3}]},
+    ],
+)
+def test_a_malformed_manifest_defines_nothing(session: Session, manifest: object) -> None:
+    version = _deploy(session, "dev", "analytics", {"silver.clean": {}})
+    version.manifest_json = cast("Any", manifest)
+    session.commit()
+    assert defining_file(session, _env_id(session), "silver.clean") is None
+
+
+def test_a_version_that_is_not_current_defines_nothing(session: Session) -> None:
+    _deploy(session, "dev", "analytics", {"silver.clean": {}})
+    _deploy(session, "dev", "analytics", {"silver.other": {}})
+    assert defining_file(session, _env_id(session), "silver.clean") is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "output", "expected"),
+    [
+        ("TABLE", "table", True),
+        ("TABLE", "view", True),
+        ("VIEW", "view", True),
+        ("ICEBERG", "table", True),
+        ("ARTIFACT", "artifact", True),
+        ("TABLE", "artifact", False),
+        ("ARTIFACT", "table", False),
+        ("EXTERNAL", "table", False),
+    ],
+)
+def test_owned_by_git_matches_kinds(kind: str, output: str, expected: bool) -> None:
+    assert owned_by_git(DefiningFile("r", "p", cast("Any", output)), kind) is expected
+
+
+def test_owned_by_git_is_false_for_no_file() -> None:
+    assert owned_by_git(None, "TABLE") is False
+
+
+def test_deployed_entries_carry_the_manifest_entry(session: Session) -> None:
+    _deploy(
+        session,
+        "dev",
+        "analytics",
+        {"models.m": {"kind": "python", "output": "artifact", "keep_versions": 3}},
+    )
+    env = _env_id(session)
+    [(file, entry)] = deployed_entries(session, env).values()
+    assert file == deployed_definitions(session, env)["models.m"]
+    assert entry["keep_versions"] == 3
+
+
+def test_a_legacy_dotted_name_is_defined_by_nothing(session: Session) -> None:
+    # `["a.b"].c` shares its name `a.b.c` with `["a", "b"].c`; a deploy names the latter.
+    _deploy(session, "dev", "analytics", {"a.b.c": {}})
+    env = _env_id(session)
+    legacy = TableRef("dev", NamespacePath.from_parts(["a.b"], allow_dots=True), "c")
+    plain = TableRef.from_dotted("dev", "a.b.c")
+    assert defining_ref(session, env, legacy) is None
+    assert defining_ref(session, env, plain) == defining_file(session, env, "a.b.c")
+    definitions = deployed_definitions(session, env)
+    assert definition_for(definitions, legacy) is None
+    assert definition_for(definitions, plain) == definitions["a.b.c"]

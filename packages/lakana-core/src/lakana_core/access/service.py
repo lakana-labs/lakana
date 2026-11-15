@@ -236,7 +236,9 @@ class _PlanColumns:
         self._source = source
         self._described: dict[TableRef, TableDescription] = {}
 
-    def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
+    def describe_table(
+        self, p: PrincipalRef, ref: TableRef, *, with_actions: bool = True
+    ) -> TableDescription:
         """Describe a table, reading it from the source the first time only.
 
         Parameters
@@ -245,6 +247,8 @@ class _PlanColumns:
             The acting principal; one principal makes the whole plan.
         ref
             The table reference.
+        with_actions
+            Ignored: a plan reads only the columns, so it never asks for them.
 
         Returns
         -------
@@ -252,7 +256,7 @@ class _PlanColumns:
             The table, including its columns.
         """
         if ref not in self._described:
-            self._described[ref] = self._source.describe_table(p, ref)
+            self._described[ref] = self._source.describe_table(p, ref, with_actions=False)
         return self._described[ref]
 
     def policy_fields(self, p: PrincipalRef, table_id: uuid.UUID) -> tuple[NestedField, ...] | None:

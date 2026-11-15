@@ -94,6 +94,7 @@ def test_create_returns_202_and_the_run_is_readable(client: TestClient) -> None:
     assert client.get("/api/v1/environments/dev/orphans", headers=AUTH_HEADER).json() == {
         "orphans": [],
         "hidden": 0,
+        "next_cursor": None,
     }
 
 
@@ -660,3 +661,55 @@ def test_a_deploy_with_a_free_worker_is_starting(client: TestClient) -> None:
     deploy_id = _queue_deploy(client)
     body = client.get(f"/api/v1/environments/dev/deploys/{deploy_id}", headers=AUTH_HEADER).json()
     assert body["waiting_for"]["code"] == "starting"
+
+
+def test_orphans_say_what_they_are_and_page(client: TestClient) -> None:
+    """`limit` pages the orphans in repository, table order; each says its kind and existence."""
+    _setup(client)
+    _insert_job_version(
+        client,
+        "dev",
+        {
+            "version": 1,
+            "assets": [{"table": f"silver.{n}", "references": []} for n in ("b", "a")],
+            "edges": [],
+            "external_inputs": [],
+        },
+    )
+    with Session(client.app.state.engine) as session:
+        env_id = session.execute(
+            select(Environment.id).where(Environment.name == "dev")
+        ).scalar_one()
+        namespace = session.execute(
+            select(Namespace).where(Namespace.environment_id == env_id, Namespace.path == "silver")
+        ).scalar_one_or_none()
+        if namespace is None:
+            namespace = Namespace(
+                id=uuid.uuid4(), environment_id=env_id, path="silver", properties={}
+            )
+            session.add(namespace)
+            session.flush()
+        for name in ("a", "b"):
+            session.add(
+                Table(
+                    id=uuid.uuid4(),
+                    namespace_id=namespace.id,
+                    name=name,
+                    table_type=TableType.ICEBERG,
+                )
+            )
+        session.commit()
+    url = "/api/v1/environments/dev/orphans"
+    first = client.get(url, params={"limit": 1}, headers=AUTH_HEADER).json()
+    assert first["next_cursor"] is not None
+    assert [
+        {k: o[k] for k in ("repository", "table", "kind", "exists")} for o in first["orphans"]
+    ] == [{"repository": "analytics", "table": "silver.a", "kind": "TABLE", "exists": True}]
+    assert first["orphans"][0]["actions"] == ["drop"]
+    second = client.get(
+        url, params={"limit": 1, "cursor": first["next_cursor"]}, headers=AUTH_HEADER
+    ).json()
+    assert [o["table"] for o in second["orphans"]] == ["silver.b"]
+    assert second["next_cursor"] is None
+    bad = client.get(url, params={"cursor": "nonsense"}, headers=AUTH_HEADER)
+    assert bad.status_code == 422

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from conftest import FakeApi, invoke, make_state
+from test_list_filters_cmd import _paged
 
 from lakana.cli import _profiles
 
@@ -92,3 +93,38 @@ def test_ns_create_get_and_delete(tmp_path: Path) -> None:
     assert json.loads(api.requests[0].content)["properties"] == {"o": "x"}
     assert deleted.exit_code == 0, deleted.stderr
     assert "Deleted namespace dev/bronze.eu" in deleted.stdout
+
+
+def test_ns_list_sends_parent_depth_and_pages(tmp_path: Path) -> None:
+    """`--parent`, `--depth`, `--limit` and `--cursor` reach the route; a next cursor is named."""
+    api = _paged(
+        "/api/v1/environments/dev/namespaces", [{"path": "a.b", "properties": {}}], "next-1"
+    )
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "ns",
+        "list",
+        "--env",
+        "dev",
+        "--parent",
+        "a",
+        "--depth",
+        "1",
+        "--limit",
+        "1",
+        "--cursor",
+        "c0",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {
+        "parent": "a",
+        "depth": "1",
+        "limit": "1",
+        "cursor": "c0",
+    }
+    assert (
+        "More results: lakana ns list --env dev --parent a --depth 1 --limit 1 --cursor next-1"
+        in " ".join(result.stdout.split())
+    )

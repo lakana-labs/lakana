@@ -62,7 +62,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator, Sequence
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from starlette.requests import ClientDisconnect
@@ -81,6 +81,7 @@ from lakana_core.artifacts.service import (
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ConflictError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef, shown
+from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import (
     ArtifactBlobOut,
     ArtifactCommitIn,
@@ -92,6 +93,7 @@ from lakana_server.api.platform.schemas import (
     ArtifactUploadPage,
     ArtifactVersionDeletedOut,
     ArtifactVersionOut,
+    DefinedByOut,
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -249,6 +251,13 @@ def artifact_out(view: ArtifactView) -> ArtifactOut:
         versions=view.versions,
         size_bytes=view.size_bytes,
         created_at=view.created_at,
+        defined_by=(
+            None
+            if view.defined_by is None
+            else DefinedByOut(repository=view.defined_by.repository, path=view.defined_by.path)
+        ),
+        keep_versions=view.keep_versions,
+        actions=list(view.actions),
     )
 
 
@@ -351,6 +360,7 @@ def version_out(
         deleted_by=view.deleted_by,
         files=[ArtifactFileOut(path=f.path, size=f.size, sha256=f.sha256) for f in view.files],
         deleted_versions=list(deleted_versions),
+        actions=list(view.actions),
     )
 
 
@@ -620,7 +630,8 @@ async def begin_upload(
     artifact is created on first use. The answer names the files the store does not have
     yet: send those with the blob route, then commit. Needs `WRITE_TABLE` on the name, and
     `CREATE_TABLE` as well to create the artifact. Answers 404 when the namespace does
-    not exist, 409 when the artifact has too many open uploads, 413 for a manifest over the
+    not exist, 409 when the artifact has too many open uploads or when a person would create
+    an artifact under a name a deployed project declares, 413 for a manifest over the
     server's limit, 408 when the body arrives too slowly, 503 when the server is busy (try
     again after `Retry-After`) and 422 when the body is not a manifest or breaks one of its
     rules.
@@ -899,6 +910,9 @@ def delete_version(
 ) -> ArtifactVersionDeletedOut:
     """Delete one version of an artifact.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Deletes the bytes of one version; its record and its lineage stay. Needs `DROP_TABLE` on
     the name; a task token is always refused, and in a protected environment a reason for
     breaking the protection is needed. The version is gone for every reader when this
@@ -937,7 +951,9 @@ def delete_version(
         artifact.
     lakana_core.errors.PermissionDenied
         Mapped to 403: no `DROP_TABLE`, a task token, or a protected environment without
-        break-glass. One text whether or not the artifact or the version exists.
+        break-glass. One text whether or not the artifact or the version exists. Also
+        `StepUpRequired`, for a browser session whose last passkey touch is older than 15
+        minutes.
     lakana_core.errors.NotFoundError
         Mapped to 404, if the caller may drop the name and the artifact or version is absent.
     lakana_core.errors.ConflictError
@@ -958,13 +974,18 @@ def drop_artifact(
 ) -> None:
     """Drop an artifact.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Removes the artifact with all its versions' bytes, its rows and its grants. This cannot
     be undone. Needs `DROP_TABLE` on the name; a task token is always refused, and in a
     protected environment a reason for breaking the protection is needed. An artifact with
     thousands of files takes a while; if the server fails part-way, its periodic clean-up
     finishes the job. Answers 403 with one text whether or not the artifact exists, 404 when
-    the caller may drop the name and no artifact has it, 409 when the storage could not be
-    written (nothing was deleted) and 422 when the name belongs to a table or a view.
+    the caller may drop the name and no artifact has it, 409 when a deployed project
+    produces the artifact (remove the asset in git and deploy, or delete single versions)
+    or when the storage could not be written (nothing was deleted), and 422 when the name
+    belongs to a table or a view.
 
     Parameters
     ----------
@@ -983,13 +1004,15 @@ def drop_artifact(
     ------
     lakana_core.errors.PermissionDenied
         Mapped to 403: no `DROP_TABLE`, a task token, or a protected environment without
-        break-glass. One text whether or not the artifact exists.
+        break-glass. One text whether or not the artifact exists. Also `StepUpRequired`, for
+        a browser session whose last passkey touch is older than 15 minutes.
     lakana_core.errors.NotFoundError
         Mapped to 404, if the caller may drop the name and no artifact has it.
     lakana_core.errors.ValidationError
         Mapped to 422, if the name belongs to a table or a view.
     lakana_core.errors.ConflictError
-        Mapped to 409, if the storage could not be written; nothing was deleted.
+        Mapped to 409, if a deployed project produces the artifact, or the storage could
+        not be written; nothing was deleted.
     """
     service.drop_artifact(principal, artifact_ref(env, path, name))
 
@@ -1118,23 +1141,34 @@ def list_uploads(
 @environment_router.get("", response_model=list[ArtifactOut], responses=errors(403, 404))
 def list_artifacts(
     env: str,
+    response: Response,
     namespace: str | None = Query(default=None, max_length=1024),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: ArtifactService = Depends(get_artifact_service),
 ) -> list[ArtifactOut]:
-    """List the artifacts of an environment.
+    """List the artifacts of an environment, one page at a time.
 
     Lists the artifacts of the environment that the caller may read. A caller who may read
     the environment but no artifact gets an empty list, so that an empty list reveals
     nothing. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and
-    422 when the namespace path is malformed.
+    422 when the namespace path is malformed or the cursor is not one this list issued. The
+    cursor of the next page is in the `X-Next-Cursor` response header and is absent on the
+    last page.
 
     Parameters
     ----------
     env
         Environment name.
+    response
+        The response, for the cursor header.
     namespace
         Only this dot-joined namespace path.
+    limit
+        Most artifacts returned (1 to 200).
+    cursor
+        The `X-Next-Cursor` of the previous page; send the same `namespace`.
     principal
         The authenticated caller.
     service
@@ -1143,7 +1177,7 @@ def list_artifacts(
     Returns
     -------
     list of ArtifactOut
-        Ordered by namespace and name.
+        This page, ordered by namespace and name.
 
     Raises
     ------
@@ -1152,10 +1186,12 @@ def list_artifacts(
     lakana_core.errors.NotFoundError
         Mapped to 404, if the environment does not exist.
     lakana_core.errors.ValidationError
-        Mapped to 422, if the namespace path is malformed.
+        Mapped to 422, if the namespace path is malformed or the cursor is not valid.
     """
     parsed = None if namespace is None else NamespacePath.from_parts(namespace.split("."))
-    return [artifact_out(view) for view in service.list_artifacts(principal, env, parsed)]
+    page = service.list_artifacts(principal, env, parsed, limit=limit, cursor=cursor)
+    set_next_cursor(response, page.next_cursor)
+    return [artifact_out(view) for view in page.items]
 
 
 @router.get("/{name}", response_model=ArtifactOut, responses=errors(403, 404))

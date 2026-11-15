@@ -2,7 +2,9 @@
 
 The three lists that show what happened in an environment: the filters of each, the order, the
 cursor that pages through it, who sees what, the commands, the SDK and the routes. For the steps,
-see [Find a run, a query or a deploy](../how-to/find-a-run.md).
+see [Find a run, a query or a deploy](../how-to/find-a-run.md). The dropped tables of an
+environment, its expiring tables and its namespaces are paged the same way; they are described
+under [Other paged lists](#other-paged-lists).
 
 ## The lists
 
@@ -14,6 +16,33 @@ see [Find a run, a query or a deploy](../how-to/find-a-run.md).
 
 Every filter narrows the list; filters combine with AND. A filter is never a way to see more than
 the list shows without it.
+
+## Other paged lists
+
+| List | Command | Needs | Order |
+|---|---|---|---|
+| Dropped tables of an environment | `lakana table list --dropped` | `READ_ENVIRONMENT`; a table you may not read is left out | drop time, newest first; equal times by table id |
+| Expiring tables | `lakana table expiring [--namespace NAMESPACE]` | `READ_ENVIRONMENT`; a table you may not read is left out | expiry time, soonest first; equal times by name, then id |
+| Namespaces | `lakana ns list [--parent PATH] [--depth 1]` | `READ_NAMESPACE` on the environment | the namespace's path parts, so `a`, `a.b`, then `ab` |
+| Orphans | `lakana orphans` | `READ_ENVIRONMENT`; an orphan you may not read is only counted as hidden | repository, then table name |
+| Artifacts | `lakana artifact list [--namespace NS]` | `READ_ENVIRONMENT`; an artifact you may not read is left out | namespace parts, then name |
+
+Each row of the dropped tables, the orphans and the artifacts has `actions`: what your rights
+allow on it. A dropped table has `["undrop"]` when you hold `DROP_TABLE` on its namespace and
+`CREATE_TABLE` on its name. An orphan has `["drop"]` when you hold `DROP_TABLE` on it; a dropped
+orphan (`exists: false`) has none, so restore it from the dropped tables. An artifact has
+`["drop"]` on the same right. A client offers only these actions. The server still checks every
+request. See [What you may do with a table](table-list.md#what-you-may-do-with-a-table).
+
+`--namespace` keeps that namespace and the ones beneath it. `--parent` keeps every namespace below
+the parent at every depth, and `--depth 1` keeps only its direct children (the top level without a
+parent). They take `--limit` and `--cursor` like the lists above.
+
+A script that read one of these lists in one request now reads only its first 100 rows. Follow
+`X-Next-Cursor` (the expiring tables, the namespaces and the artifacts) or `next_cursor` (the
+dropped tables of an environment and the orphans), or use `client.tables.iter_dropped(env)`,
+`client.tables.iter_expiring(env)`, `client.namespaces.iter(env)`, `client.orphans.iter(env)` and
+`client.artifacts.iter(env)`, which walk every page.
 
 ## Filters
 
@@ -149,6 +178,9 @@ How much text a new event stores is set on the server and every worker:
 | Every run that matches | `client.runs.iter(env, ...)` | the same route, page by page |
 | Queries | `client.queries.list(env, ...)`; `client.queries.list_page(env, ...)` | `GET /api/v1/environments/{env}/queries?include_ended=&status=&submitter=&limit=&cursor=` |
 | Deploys | `client.deploys.list(env, ...)`; `client.deploys.list_page(env, ...)` | `GET /api/v1/environments/{env}/deploys?repository=&limit=&cursor=` |
+| Dropped tables of an environment | `client.tables.list_dropped_page(env, ...)`; `client.tables.iter_dropped(env)` | `GET /api/v1/environments/{env}/dropped-tables?limit=&cursor=`; answers `{"items": [...], "next_cursor": ...}` |
+| Expiring tables | `client.tables.expiring(env, ...)`; `client.tables.expiring_page(env, ...)`; `client.tables.iter_expiring(env, ...)` | `GET /api/v1/environments/{env}/expiring-tables?within_days=&namespace=&limit=&cursor=` |
+| Namespaces | `client.namespaces.list(env, ...)`; `client.namespaces.list_page(env, ...)`; `client.namespaces.iter(env, ...)` | `GET /api/v1/environments/{env}/namespaces?parent=&depth=&limit=&cursor=` |
 
 The routes answer with a JSON list, as they did before they could be paged, and the cursor of the
 next page is in the `X-Next-Cursor` header (absent on the last page). `list` returns the rows of

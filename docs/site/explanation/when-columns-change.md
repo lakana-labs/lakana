@@ -53,7 +53,7 @@ everything that reads all columns quietly gets one fewer.
   after it in that run ends `upstream_failed`. A SQL asset on `SELECT *` loses the column from
   its own result; a SQL asset that replaces its table cannot change its schema, so it fails with
   ``The result does not match <table>'s schema (dropped gone …). A SQL asset that replaces its table cannot drop, rename or retype the table's columns: make its SELECT return the columns and types <table> has (list them instead of `*`), then run it again.``
-  List the columns it needs instead of `*`. Do not drop its table so that the next run creates it again: the new table has
+  List the columns it needs instead of `*`. Do not drop or rebuild its table to get past this: the new table has
   none of the old table's grants, row filters or column masks, and its readers would see every
   row and column until an administrator creates them again. A Python asset gets its
   input without the column, and code that uses the column fails in the function.

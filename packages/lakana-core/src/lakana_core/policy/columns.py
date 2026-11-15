@@ -122,7 +122,9 @@ MAX_LISTED_COLUMNS = 20
 class ColumnSource(Protocol):
     """Whatever can say which columns a table has: `CatalogService` does."""
 
-    def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
+    def describe_table(
+        self, p: PrincipalRef, ref: TableRef, *, with_actions: bool = True
+    ) -> TableDescription:
         """Describe a table, an external table or a view.
 
         Parameters
@@ -131,6 +133,9 @@ class ColumnSource(Protocol):
             The acting principal.
         ref
             The table reference.
+        with_actions
+            Whether to fill the row's `defined_by` and `actions`; a caller that needs only the
+            columns passes `False`.
 
         Returns
         -------
@@ -187,7 +192,7 @@ def read_table_description(
     """
     dotted = f"{ref.namespace}.{ref.name}"
     try:
-        return catalog.describe_table(p, ref)
+        return catalog.describe_table(p, ref, with_actions=False)
     except PermissionDenied as exc:
         raise PermissionDenied(
             f"You need READ_TABLE on {dotted!r} so that the column can be checked."

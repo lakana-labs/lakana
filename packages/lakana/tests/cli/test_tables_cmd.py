@@ -241,6 +241,23 @@ def test_table_get_prints_a_terms_section(tmp_path: Path) -> None:
     assert lines[at + 1 : at + 3] == ["orders — Orders", "order_id: order_number — Order number"]
 
 
+@pytest.mark.parametrize("kind", ["TABLE", "VIEW"])
+def test_table_get_names_the_file_that_defines_it(tmp_path: Path, kind: str) -> None:
+    """A table or view a deployed project owns says where; one it does not, says nothing."""
+    api = FakeApi()
+    owned = {"repository": "analytics", "path": "assets/bronze/sales.sql"}
+    api.on("GET", f"{_BASE}/sales", json={**_TABLE, "kind": kind, "defined_by": owned})
+    api.on("GET", f"{_BASE}/free", json={**_TABLE, "kind": kind, "name": "free"})
+
+    result = invoke(make_state(tmp_path, api), "table", "get", "bronze.sales", "--env", "dev")
+    free = invoke(make_state(tmp_path, api), "table", "get", "bronze.free", "--env", "dev")
+
+    assert result.exit_code == 0, result.stderr
+    assert "Defined in: analytics/assets/bronze/sales.sql" in result.stdout
+    assert free.exit_code == 0, free.stderr
+    assert "Defined in" not in free.stdout
+
+
 def test_table_get_without_terms_prints_no_terms_section(tmp_path: Path) -> None:
     """An older server's answer has no `terms`: no `Terms:` line."""
     api = FakeApi()
@@ -3100,7 +3117,8 @@ def test_table_list_without_tables_says_so(tmp_path: Path) -> None:
         (["silver", "--limit", "5"], "--limit"),
         (["silver", "--dropped", "--limit", "5"], "--limit"),
         (["silver", "--cursor", "c"], "--under NAMESPACE"),
-        (["--dropped"], "give NAMESPACE"),
+        (["--dropped", "--search", "x"], "--dropped without NAMESPACE"),
+        (["--dropped", "--all-environments"], "--dropped without NAMESPACE"),
         (["--all-environments", "--env", "dev"], "cannot be combined"),
     ],
 )
@@ -3119,3 +3137,249 @@ def test_a_search_result_without_a_match_shows_an_empty_match_cell(tmp_path: Pat
     result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev", "--search", "ord")
     assert result.exit_code == 0, result.output
     assert "match" in _plain(result.stdout)
+
+
+_REBUILD_URL = f"{_BASE.replace('bronze', 'silver')}/clean/rebuild"
+_REBUILT = {
+    "table": "silver.clean",
+    "run_id": "r-42",
+    "repository": "analytics",
+    "path": "assets/silver/clean.sql",
+}
+_REASON = "history columns lost after a manual replace"
+
+
+def test_table_rebuild_names_the_run_and_how_to_follow_it(tmp_path: Path) -> None:
+    """The answer names the run, the repository and the file, and the command to follow it."""
+    api = FakeApi()
+    api.on("POST", _REBUILD_URL, status=202, json=_REBUILT)
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        "--yes",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert _plain(result.stdout) == (
+        "Dropped dev/silver.clean and queued run r-42 of analytics, which builds it again "
+        "from assets/silver/clean.sql. Follow it with `lakana runs show r-42 --env dev`."
+    )
+    assert [json.loads(r.content) for r in api.requests] == [{"reason": _REASON}]
+    assert str(api.requests[0].url.query, "ascii") == ""
+
+
+def test_table_rebuild_without_a_readable_path_still_names_the_run(tmp_path: Path) -> None:
+    """A caller who may not read the table gets the run without the file."""
+    api = FakeApi()
+    api.on("POST", _REBUILD_URL, status=202, json={**_REBUILT, "path": None})
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        "--yes",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    out = _plain(result.stdout)
+    assert "queued run r-42 of analytics." in out
+    assert "None" not in out
+    assert "`lakana runs show r-42 --env dev`" in out
+
+
+def test_table_rebuild_needs_a_reason(tmp_path: Path) -> None:
+    """Without `--reason` the command stops with exit 2 and names the option."""
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api), "table", "rebuild", "silver.clean", "--env", "dev", "--yes"
+    )
+    assert result.exit_code == 2
+    assert "--reason" in _plain(result.stderr + result.stdout)
+    assert api.requests == []
+
+
+def test_table_rebuild_with_break_glass_sends_the_reason_twice(tmp_path: Path) -> None:
+    """`--break-glass` sends the same text as `break_glass_reason` and warns on stderr."""
+    api = FakeApi()
+    api.on("POST", f"{_REBUILD_URL.replace('/dev/', '/prod/')}", status=202, json=_REBUILT)
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "prod",
+        "--reason",
+        _REASON,
+        "--break-glass",
+        "--yes",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert [json.loads(r.content) for r in api.requests] == [{"reason": _REASON}]
+    assert str(api.requests[0].url.query, "ascii") == (
+        "break_glass_reason=history+columns+lost+after+a+manual+replace"
+    )
+    assert "break-glass write to prod" in _plain(result.stderr)
+
+
+def test_table_rebuild_asks_before_dropping(tmp_path: Path) -> None:
+    """Without `--yes` the question names the undo period; `n` sends nothing."""
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        input="n\n",
+    )
+    assert result.exit_code != 0
+    assert api.requests == []
+    assert "Drop table dev/silver.clean and build it again from git?" in _plain(
+        result.stdout + result.stderr
+    )
+    assert "restorable under another name during the undo period" in _plain(
+        result.stdout + result.stderr
+    )
+
+
+_HOWTO = Path(__file__).resolve().parents[4] / "docs/site/how-to/drop-and-restore-a-table.md"
+_SAMPLE_RUN = "9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10"
+
+
+def _howto_block_after(marker: str) -> str:
+    """Return the text fence that follows the first line starting with `marker`.
+
+    Parameters
+    ----------
+    marker
+        The start of the line that precedes the fence (a comment or the command).
+
+    Returns
+    -------
+    str
+        The fence's content, without its closing line.
+    """
+    lines = _HOWTO.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(marker))
+    opening = next(i for i in range(start, len(lines)) if lines[i].startswith("```text"))
+    body: list[str] = []
+    for line in lines[opening + 1 :]:
+        if line.startswith("```"):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def test_the_how_to_shows_what_table_rebuild_prints(tmp_path: Path) -> None:
+    """The output block of the how-to is the command's real output for its sample run."""
+    api = FakeApi()
+    api.on("POST", _REBUILD_URL, status=202, json={**_REBUILT, "run_id": _SAMPLE_RUN})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        "--yes",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert _plain(result.stdout) == _plain(_howto_block_after("The command asks first"))
+
+
+def test_table_rebuild_json_prints_the_answer_fields(tmp_path: Path) -> None:
+    """`--json` prints the fields of the answer."""
+    api = FakeApi()
+    api.on("POST", _REBUILD_URL, status=202, json=_REBUILT)
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        "--yes",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout) == _REBUILT
+
+
+def test_table_rebuild_break_glass_warns_before_it_asks(tmp_path: Path) -> None:
+    """Without `--yes`, a refused question sends nothing and the warning has not been shown."""
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "prod",
+        "--reason",
+        _REASON,
+        "--break-glass",
+        input="n\n",
+    )
+    assert result.exit_code != 0
+    assert api.requests == []
+    assert "break-glass write" not in _plain(result.stderr + result.stdout)
+
+
+_ENV_DROPPED = "/api/v1/environments/dev/dropped-tables"
+_DROPPED_ROW = {
+    "name": "sales",
+    "namespace": "bronze",
+    "uuid": "u1",
+    "kind": "TABLE",
+    "dropped_at": "2026-10-19T12:00:00Z",
+    "purge_after": "2026-10-26T12:00:00Z",
+    "restorable": True,
+}
+
+
+def test_table_list_dropped_without_a_namespace_lists_the_environment(tmp_path: Path) -> None:
+    """`--dropped` alone lists across namespaces, paged, with a next-page line."""
+    api = FakeApi()
+    api.on("GET", _ENV_DROPPED, json={"items": [_DROPPED_ROW], "next_cursor": "c2"})
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "list",
+        "--dropped",
+        "--env",
+        "dev",
+        "--limit",
+        "1",
+        "--cursor",
+        "c1",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    text = _plain(result.stdout)
+    assert "bronze" in text and "sales" in text and "2026-10-26" in text
+    assert dict(api.requests[0].url.params) == {"limit": "1", "cursor": "c1"}
+    assert "More results: lakana table list --env dev --dropped --limit 1 --cursor c2" in text
