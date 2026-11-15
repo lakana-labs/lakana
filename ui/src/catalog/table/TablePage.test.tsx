@@ -82,7 +82,7 @@ describe("TablePage", () => {
       expect(await screen.findByText("Sales facts")).toBeVisible();
     });
 
-    it("shows the six tabs in order, each with its own address", async () => {
+    it("shows the seven tabs in order, each with its own address", async () => {
       renderShell(PAGE);
 
       const links = await tabs();
@@ -91,6 +91,7 @@ describe("TablePage", () => {
         "Columns",
         "Preview",
         "Lineage",
+        "References",
         "Health",
         "Access",
       ]);
@@ -99,6 +100,7 @@ describe("TablePage", () => {
         `${PAGE}/columns`,
         `${PAGE}/preview`,
         `${PAGE}/lineage`,
+        `${PAGE}/references`,
         `${PAGE}/health`,
         `${PAGE}/access`,
       ]);
@@ -109,6 +111,7 @@ describe("TablePage", () => {
       ["columns", "Columns"],
       ["preview", "Preview"],
       ["lineage", "Lineage"],
+      ["references", "References"],
       ["health", "Health"],
       ["access", "Access"],
     ])("opens the %s tab at its address", async (segment, name) => {
@@ -163,17 +166,19 @@ describe("TablePage", () => {
         "Columns",
         "Preview",
         "Lineage",
+        "References",
         "Health",
         "Access",
       ]);
     });
 
-    it("offers no primary action", async () => {
+    it("offers Actions as the one thing beside the heading", async () => {
       renderShell(PAGE);
 
       await tabs();
-      const head = (await heading()).parentElement as HTMLElement;
-      expect(head.children).toHaveLength(1);
+      const title = await heading();
+      const actions = await screen.findByRole("button", { name: "Actions" });
+      expect([...(title.parentElement as HTMLElement).children]).toEqual([title, actions]);
     });
 
     it("answers an unknown tab with the not-found state", async () => {
@@ -357,6 +362,7 @@ describe("TablePage", () => {
         "Columns",
         "Preview",
         "Lineage",
+        "References",
         "Health",
         "Access",
       ]);

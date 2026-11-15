@@ -26,7 +26,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Six tabs do not fit one line at 320 px, so they wrap (WCAG 1.4.10 reflow). */
+/* Seven tabs do not fit one line at 320 px, so they wrap (WCAG 1.4.10 reflow). */
 .table-page .tabs {
   flex-wrap: wrap;
   row-gap: 0;
@@ -285,6 +285,7 @@
 .lineage a,
 .health-tab a,
 .access-tab a,
+.references-tab a,
 .source-dialog a {
   color: var(--color-accent);
 }
@@ -497,16 +498,18 @@
   }
 }
 
-/* Health and Access: flat panels (screen.css), one after the other, 24 px apart. */
+/* Health, Access and References: flat panels (screen.css), one after the other, 24 px apart. */
 .health-tab,
-.access-tab {
+.access-tab,
+.references-tab {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
 }
 
 .health-tab:focus,
-.access-tab:focus {
+.access-tab:focus,
+.references-tab:focus {
   outline: none;
 }
 
