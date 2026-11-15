@@ -3119,3 +3119,124 @@ def test_a_search_result_without_a_match_shows_an_empty_match_cell(tmp_path: Pat
     result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev", "--search", "ord")
     assert result.exit_code == 0, result.output
     assert "match" in _plain(result.stdout)
+
+
+_REBUILD_URL = f"{_BASE.replace('bronze', 'silver')}/clean/rebuild"
+_REBUILT = {
+    "table": "silver.clean",
+    "run_id": "r-42",
+    "repository": "analytics",
+    "path": "assets/silver/clean.sql",
+}
+_REASON = "history columns lost after a manual replace"
+
+
+def test_table_rebuild_names_the_run_and_how_to_follow_it(tmp_path: Path) -> None:
+    """The answer names the run, the repository and the file, and the command to follow it."""
+    api = FakeApi()
+    api.on("POST", _REBUILD_URL, status=202, json=_REBUILT)
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        "--yes",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert _plain(result.stdout) == (
+        "Dropped dev/silver.clean and queued run r-42 of analytics, which builds it again "
+        "from assets/silver/clean.sql. Follow it with `lakana runs show r-42 --env dev`."
+    )
+    assert [json.loads(r.content) for r in api.requests] == [{"reason": _REASON}]
+    assert str(api.requests[0].url.query, "ascii") == ""
+
+
+def test_table_rebuild_without_a_readable_path_still_names_the_run(tmp_path: Path) -> None:
+    """A caller who may not read the table gets the run without the file."""
+    api = FakeApi()
+    api.on("POST", _REBUILD_URL, status=202, json={**_REBUILT, "path": None})
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        "--yes",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    out = _plain(result.stdout)
+    assert "queued run r-42 of analytics." in out
+    assert "None" not in out
+    assert "`lakana runs show r-42 --env dev`" in out
+
+
+def test_table_rebuild_needs_a_reason(tmp_path: Path) -> None:
+    """Without `--reason` the command stops with exit 2 and names the option."""
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api), "table", "rebuild", "silver.clean", "--env", "dev", "--yes"
+    )
+    assert result.exit_code == 2
+    assert "--reason" in _plain(result.stderr + result.stdout)
+    assert api.requests == []
+
+
+def test_table_rebuild_with_break_glass_sends_the_reason_twice(tmp_path: Path) -> None:
+    """`--break-glass` sends the same text as `break_glass_reason` and warns on stderr."""
+    api = FakeApi()
+    api.on("POST", f"{_REBUILD_URL.replace('/dev/', '/prod/')}", status=202, json=_REBUILT)
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "prod",
+        "--reason",
+        _REASON,
+        "--break-glass",
+        "--yes",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert [json.loads(r.content) for r in api.requests] == [{"reason": _REASON}]
+    assert str(api.requests[0].url.query, "ascii") == (
+        "break_glass_reason=history+columns+lost+after+a+manual+replace"
+    )
+    assert "break-glass write to prod" in _plain(result.stderr)
+
+
+def test_table_rebuild_asks_before_dropping(tmp_path: Path) -> None:
+    """Without `--yes` the question names the undo period; `n` sends nothing."""
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        input="n\n",
+    )
+    assert result.exit_code != 0
+    assert api.requests == []
+    assert "Drop table dev/silver.clean and build it again from git?" in _plain(
+        result.stdout + result.stderr
+    )
+    assert "restorable under another name during the undo period" in _plain(
+        result.stdout + result.stderr
+    )

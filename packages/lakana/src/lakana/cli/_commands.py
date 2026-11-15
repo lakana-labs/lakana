@@ -39,6 +39,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "table get": ("tables.get",),
     "table delete": ("tables.delete",),
     "table undrop": ("tables.undrop",),
+    "table rebuild": ("tables.rebuild",),
     "table retention": ("tables.retention", "tables.set_retention"),
     "table expiring": ("tables.expiring",),
     "table describe": ("tables.describe",),

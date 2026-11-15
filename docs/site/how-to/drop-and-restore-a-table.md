@@ -38,7 +38,8 @@ A table or view that a deployed project builds is defined in git, so it is chang
 ```
 
 Neither `--purge` nor a break-glass reason gets past this, and the REST API, the UI and Iceberg
-clients refuse alike. To drop such a table:
+clients refuse alike. To build it again from git instead, see
+[Rebuild a table from git](#rebuild-a-table-from-git). To drop such a table:
 
 1. Remove its asset from the project in git and deploy. The table stays, now built by nothing.
 2. Find it among the orphans and drop it:
@@ -73,6 +74,56 @@ the same kind of object that is there.
 
 Someone who may not read the table is not told the repository or the file. They see
 `A deployed project defines this table; change it in git.`
+
+## Rebuild a table from git
+
+Rebuild when the table a project builds holds wrong data and you want it built again from its
+definition: its history columns were lost in a manual replace, a source was corrected, or a
+`replace` asset needs a clean start. Drop is for a table nobody builds; `lakana table rebuild` is
+for one a deployed project does.
+
+<!-- not tested: needs a deployed project and a running worker; the command's output line is asserted in packages/lakana/tests/cli/test_tables_cmd.py -->
+```bash
+lakana table rebuild silver.clean --env dev --reason "history columns lost after a manual replace"
+```
+
+It does two things in one step:
+
+1. **Drops the table.** The drop keeps its undo period like any other: restore the old table within
+   it with `lakana table undrop silver.clean --as clean_before`.
+2. **Queues a run** of the asset that defines the table, from the deployed version of its project.
+   The run creates the table again.
+
+The command asks first; `--yes` skips the question. It then names the run and the file that builds
+the table:
+
+<!-- not tested: output of the command above; the line is asserted in packages/lakana/tests/cli/test_tables_cmd.py -->
+```text
+Dropped dev/silver.clean and queued run 9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10 of analytics, which builds it again from assets/silver/clean.sql. Follow it with `lakana runs show 9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10 --env dev`.
+```
+
+Follow the run with the command it names. If you may not read the table, the file is left out of
+the line: the run and its repository are shown anyway.
+
+What it needs:
+
+- the right to drop the table **and** the right to run in the environment. Both are checked before
+  anything happens;
+- `--reason`, 10-500 characters on one line. It is recorded in the audit log;
+- from the web interface, a recent passkey touch, as for a drop. The command line uses a token and
+  is never asked.
+
+In a protected environment the run writes as the deployment's run principal. Rebuilding from
+outside a run needs `--break-glass`, which sends the same `--reason` as the break-glass reason and
+needs `MANAGE_ENVIRONMENT`.
+
+When it is refused, nothing was dropped:
+
+- **No project builds the table.** Drop it with `lakana table delete` instead (see above).
+- **It is an artifact.** Rebuild works on tables and views. Free space with
+  `lakana artifact versions delete NAME VERSION`.
+- **Another run of the project is active.** The message names it. Wait until it ends, then rebuild
+  again.
 
 ## See what can be restored
 

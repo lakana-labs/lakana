@@ -633,6 +633,22 @@ Works until the end of the undo period that `lakana table list NAMESPACE --dropp
 | `--break-glass` | flag | off | Write to a protected environment outside a run (needs MANAGE_ENVIRONMENT; audited). |
 | `--reason` | text | none | Why, 10-500 characters on one line (with --break-glass). |
 
+### `lakana table rebuild`
+
+Usage: `lakana table rebuild [OPTIONS] {name}`
+
+Drop table NAME and build it again from git, in one step.
+
+For a table or view that a deployed project builds. The drop keeps the undo period, so `lakana table undrop NAME --as OTHER` restores the old table; a run of the asset that defines it is queued. Needs the right to drop the table and to run in the environment; the web interface asks for a recent passkey touch. A table no project builds is refused: drop it with `lakana table delete`. While another run of the project is active nothing is dropped: wait for it, then rebuild.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--reason` | text | required | Why the table is built again, 10-500 characters on one line; recorded in the audit log. |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--yes` | flag | off | Don't ask for confirmation. |
+| `--break-glass` | flag | off | Rebuild in a protected environment outside a run (needs MANAGE_ENVIRONMENT; audited). Sends --reason as the break-glass reason too. |
+
 ### `lakana table append`
 
 Usage: `lakana table append [OPTIONS] {name} {file}`

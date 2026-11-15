@@ -29,7 +29,7 @@ from lakana._models import (
     TableListItem,
 )
 from lakana.cli import _files, _output, _retention
-from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
+from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason, warn_break_glass
 from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
@@ -1534,6 +1534,86 @@ def undrop(
     if new_name is not None:
         message += f" as {_output.inline(f'{table.namespace}.{table.name}')}"
     _output.done(state, message, table)
+
+
+@table_app.command("rebuild")
+def rebuild(
+    ctx: typer.Context,
+    name: str,
+    reason: Annotated[
+        str,
+        typer.Option(
+            "--reason",
+            help=(
+                "Why the table is built again, 10-500 characters on one line; recorded in the "
+                "audit log."
+            ),
+        ),
+    ],
+    env: _ENV = None,
+    yes: _YES = False,
+    break_glass: Annotated[
+        bool,
+        typer.Option(
+            "--break-glass",
+            help=(
+                "Rebuild in a protected environment outside a run (needs MANAGE_ENVIRONMENT; "
+                "audited). Sends --reason as the break-glass reason too."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Drop table NAME and build it again from git, in one step.
+
+    For a table or view that a deployed project builds. The drop keeps the undo period, so
+    `lakana table undrop NAME --as OTHER` restores the old table; a run of the asset that defines
+    it is queued. Needs the right to drop the table and to run in the environment; the web
+    interface asks for a recent passkey touch. A table no project builds is refused: drop it
+    with `lakana table delete`. While another run of the project is active nothing is dropped:
+    wait for it, then rebuild.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The qualified table name.
+    reason
+        `--reason`: why, recorded in the audit log.
+    env
+        The environment.
+    yes
+        Skip the confirmation prompt.
+    break_glass
+        `--break-glass`: rebuild in a protected environment; `--reason` is also the break-glass
+        reason.
+    """
+    state = state_of(ctx)
+    environment = resolve_environment(state, env)
+    target = f"{environment}/{name}"
+    confirm(
+        state,
+        f"Drop table {target} and build it again from git? It is restorable under another name "
+        "during the undo period.",
+        yes,
+    )
+    glass = None
+    if break_glass:
+        warn_break_glass(environment)
+        glass = reason
+    rebuilt = state.client().tables.rebuild(
+        environment, name, reason=reason, break_glass_reason=glass
+    )
+    where = f"{_output.inline(rebuilt.repository)}"
+    if rebuilt.path is not None:
+        where += f", which builds it again from {_output.inline(rebuilt.path)}"
+    run = _output.inline(rebuilt.run_id)
+    _output.done(
+        state,
+        f"Dropped {_output.inline(environment)}/{_output.inline(name)} and queued run {run} of "
+        f"{where}. Follow it with `lakana runs show {run} --env {_output.inline(environment)}`.",
+        rebuilt,
+    )
 
 
 def _table_columns(client: lakana.Client, environment: str, name: str) -> list[Column]:

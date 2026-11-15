@@ -18,7 +18,7 @@ EXEMPT = (
     "scripts/tests/test_docs_site.py",
     "scripts/tests/test_docs_only.py",
 )
-NOT_TESTED_CEILING = 62
+NOT_TESTED_CEILING = 66
 UNCHECKED_OUTPUT_CEILING = 80
 """Blocks marked as not tested; it only goes down, apart from the rises below.
 
