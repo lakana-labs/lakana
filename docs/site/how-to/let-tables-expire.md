@@ -45,9 +45,12 @@ has no retention does not expire.
 In the web interface, open the table's page, choose **Actions**, then **Retention…**. The dialog
 states the retention that applies in one sentence, for example "30 days after its last activity,
 set for the table by ana", and under it when the table expires and when it was last used. A table
-with no retention says "No retention: it never expires." Two tables never expire whatever their
-retention says, and the dialog says so instead of the rule: "Tables in a protected environment never
-expire." and "A deployed project declares this table, so it does not expire while it is deployed."
+with no retention says "No retention: it never expires."
+Two tables never expire whatever their retention says, and the dialog says so. In a protected
+environment it says "Tables in a protected environment never expire." For a table a deployed
+project builds it says "A deployed project declares this table, so it does not expire while it is
+deployed." and then, after "After that:", the rule that applies once the project no longer builds
+it, for example "30 days after its last activity, set for the table by ana."
 **Retention…** is in the menu only if you may change the table's retention.
 
 ## Change it
@@ -75,7 +78,9 @@ earliest.
 In the web interface, **Actions**, **Retention…** shows the three rules as options: **After days
 without activity** (1 to 3,650 days), **On a day** (a date after today, UTC) and **Never**. Choose
 one, fill in its field and press **Save**; the dialog then shows the new rule in the same sentence
-and **Close** returns you to **Actions**. It sends exactly one rule. The server judges the rule and
+and **Close** returns you to **Actions**. It sends exactly one rule. In a protected environment only **Never** can be
+chosen, and the dialog says why. A number you type is sent as you typed it, never changed to fit.
+The server judges the rule and
 who may set it: when it refuses, for example days in a protected environment or a day that is not
 after today, the dialog stays open with the server's sentence.
 

@@ -29,9 +29,7 @@ import { markedText } from "../../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "../../sign-in/Attempt";
 import { retentionWords } from "../retention";
 import "./actionStrings";
-
-/** The most days the server takes. */
-const DAYS_MAX = 3650;
+import { useProtected } from "./useProtected";
 
 /** The three rules a table can have. */
 type Choice = "days" | "on" | "never";
@@ -86,9 +84,12 @@ function ExpiryLine({ retention }: { readonly retention: TableRetentionOut }): J
 function RetentionForm({ place, onClose, current }: RetentionFormProps): JSX.Element {
   const { t } = useTranslation();
   const attempt = useAttempt();
-  const [choice, setChoice] = useState<Choice>(
+  const protectedEnvironment = useProtected(place.environment) === true;
+  const [picked, setChoice] = useState<Choice>(
     current.on !== null && current.days === null ? "on" : current.never ? "never" : "days",
   );
+  // The server refuses days and a day in a protected environment, so only Never remains.
+  const choice: Choice = protectedEnvironment ? "never" : picked;
   const [days, setDays] = useState(current.days ?? Number.NaN);
   const [day, setDay] = useState(current.on?.slice(0, 10) ?? "");
   const [saved, setSaved] = useState<TableRetentionOut | null>(null);
@@ -133,23 +134,24 @@ function RetentionForm({ place, onClose, current }: RetentionFormProps): JSX.Ele
         }}
       >
         <Label>{t("table.actions.retention.rule")}</Label>
-        <RadioField value="days">
+        <RadioField value="days" isDisabled={protectedEnvironment}>
           <RadioButton className="radio">{t("table.actions.retention.daysChoice")}</RadioButton>
         </RadioField>
-        <RadioField value="on">
+        <RadioField value="on" isDisabled={protectedEnvironment}>
           <RadioButton className="radio">{t("table.actions.retention.onChoice")}</RadioButton>
         </RadioField>
         <RadioField value="never">
           <RadioButton className="radio">{t("table.actions.retention.neverChoice")}</RadioButton>
         </RadioField>
       </RadioGroup>
+      {protectedEnvironment && (
+        <p>{t("table.actions.retention.protectedOnly", { environment: place.environment })}</p>
+      )}
       {choice === "days" && (
         <NumberField
           className="field"
           value={days}
           onChange={setDays}
-          minValue={1}
-          maxValue={DAYS_MAX}
           formatOptions={{ useGrouping: false }}
         >
           <Label>{t("table.actions.retention.days")}</Label>

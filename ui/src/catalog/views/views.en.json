@@ -27,8 +27,9 @@
     "setForEnvironment": "{{rule}}, set for the environment",
     "setForTableBy": "{{rule}}, set for the table by {{who}}",
     "setForEnvironmentBy": "{{rule}}, set for the environment by {{who}}",
-    "projectAsset": "A deployed project declares this table, so it does not expire while it is deployed.",
+    "projectAsset": "A deployed project declares this table, so it does not expire while it is deployed. After that: {{rule}}.",
     "protected": "Tables in a protected environment never expire.",
-    "none": "No retention: it never expires."
+    "none": "No retention: it never expires.",
+    "projectAssetOnly": "A deployed project declares this table, so it does not expire while it is deployed."
   }
 }

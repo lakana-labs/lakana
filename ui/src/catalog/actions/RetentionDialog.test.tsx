@@ -130,7 +130,7 @@ describe("RetentionDialog", () => {
 
     expect(
       await screen.findByText(
-        "A deployed project declares this table, so it does not expire while it is deployed.",
+        "A deployed project declares this table, so it does not expire while it is deployed. After that: 30 days after its last activity, set for the table by ana.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
@@ -216,5 +216,92 @@ describe("RetentionDialog", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     await user.type(screen.getByLabelText("Day"), "2026-12-01");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("shows the saved rule after saving on a table a deployed project builds", async () => {
+    fakeServer({
+      ...manageRoutes(),
+      [PUT]: {
+        status: 200,
+        body: retention({ kept: "project_asset", days: 45, expires_at: null }),
+      },
+    });
+    const { user } = renderRetention();
+    await screen.findByText(/30 days after/);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText(/does not expire while it is deployed\. After that: 45 days after/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the server's 403 for a shortening without the right to drop word for word", async () => {
+    const sentence = "You may make a table expire sooner only with the right to drop it.";
+    fakeServer({
+      ...manageRoutes(),
+      [PUT]: { status: 403, body: { type: "PermissionDenied", detail: sentence } },
+    });
+    const { onClose, user } = renderRetention();
+    await screen.findByText(/30 days after/);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(sentence);
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("sends a number out of range as typed, so the server's sentence shows and nothing is clamped", async () => {
+    const sentence = "Days must be between 1 and 3650.";
+    const server = fakeServer({
+      ...manageRoutes(),
+      [PUT]: { status: 422, body: { type: "ValidationError", detail: sentence } },
+    });
+    const { user } = renderRetention();
+    await screen.findByText(/30 days after/);
+
+    const field = screen.getByRole("textbox", { name: "Days" });
+    await user.clear(field);
+    await user.type(field, "5000");
+    await user.tab();
+    expect(field).toHaveValue("5000");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(sentence);
+    expect(puts(server.sent).map((request) => request.body)).toEqual([{ days: 5000 }]);
+  });
+
+  it("offers only Never in a protected environment and says why", async () => {
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: true } },
+      [GET]: {
+        status: 200,
+        body: retention({ source: null, days: null, set_by: null, expires_at: null }),
+      },
+    });
+    const { user } = renderRetention();
+
+    expect(
+      await screen.findByText(
+        "prod is protected, so its tables never expire and no days or day can be set there. Never is still accepted, to remove a rule set before the protection.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "After days without activity" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "On a day" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Never" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("button", { name: "Close" });
+    expect(puts(server.sent).map((request) => request.body)).toEqual([{ never: true }]);
+  });
+
+  it("offers every rule when the environment is not protected", async () => {
+    fakeServer(manageRoutes());
+    renderRetention();
+    await screen.findByText(/30 days after/);
+
+    expect(screen.getByRole("radio", { name: "After days without activity" })).toBeEnabled();
+    expect(screen.getByRole("radio", { name: "On a day" })).toBeEnabled();
   });
 });

@@ -122,4 +122,25 @@ describe("MaintainDialog", () => {
     expect(screen.getByRole("button", { name: "Maintain now" })).toBeEnabled();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it("sends a value out of range as typed, so the server's sentence shows and nothing is clamped", async () => {
+    const sentence = "older_than_hours must be at most 87600.";
+    const server = fakeServer({
+      ...manageRoutes(),
+      [MAINTENANCE]: { status: 422, body: { type: "ValidationError", detail: sentence } },
+    });
+    const { user } = renderMaintain();
+
+    const hours = screen.getByRole("textbox", {
+      name: "Delete unreferenced files older than (hours)",
+    });
+    await user.clear(hours);
+    await user.type(hours, "100000");
+    await user.tab();
+    expect(hours).toHaveValue("100000");
+    await user.click(screen.getByRole("button", { name: "Maintain now" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(sentence);
+    expect(maintenances(server.sent)[0]?.body).toMatchObject({ older_than_hours: 100000 });
+  });
 });

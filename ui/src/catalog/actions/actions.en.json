@@ -62,6 +62,7 @@
     "days": "Days",
     "day": "Day",
     "save": "Save",
-    "close": "Close"
+    "close": "Close",
+    "protectedOnly": "{{environment}} is protected, so its tables never expire and no days or day can be set there. Never is still accepted, to remove a rule set before the protection."
   }
 }

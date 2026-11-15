@@ -38,7 +38,7 @@ describe("retentionWords", () => {
     ],
     [{ source: null, days: null, expires_at: null } as const, "No retention: it never expires."],
     [
-      { kept: "project_asset" } as const,
+      { kept: "project_asset", source: null, days: null } as const,
       "A deployed project declares this table, so it does not expire while it is deployed.",
     ],
     [{ kept: "protected" } as const, "Tables in a protected environment never expire."],
@@ -47,8 +47,25 @@ describe("retentionWords", () => {
       "Tables in a protected environment never expire.",
     ],
     [
-      { kept: "project_asset", never: true, source: "table", set_by: "ana" } as const,
-      "A deployed project declares this table, so it does not expire while it is deployed.",
+      {
+        kept: "project_asset",
+        days: 30,
+        source: "table",
+        set_by: "ana",
+        expires_at: null,
+      } as const,
+      "A deployed project declares this table, so it does not expire while it is deployed. After that: 30 days after its last activity, set for the table by ana.",
+    ],
+    [
+      {
+        kept: "project_asset",
+        days: null,
+        never: true,
+        source: "environment",
+        set_by: null,
+        expires_at: null,
+      } as const,
+      "A deployed project declares this table, so it does not expire while it is deployed. After that: never, set for the environment.",
     ],
   ])("says %j as %s", (overrides, sentence) => {
     expect(retentionWords(t, retention(overrides))).toBe(sentence);

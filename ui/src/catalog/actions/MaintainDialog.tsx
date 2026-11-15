@@ -16,9 +16,6 @@ import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
 import { ConfirmRow } from "./ConfirmRow";
 
-/** The most hours the server takes for the age of an unreferenced file. */
-const HOURS_MAX = 87600;
-
 /** Properties of {@link MaintainDialog}. */
 export interface MaintainDialogProps {
   /** The table. */
@@ -35,31 +32,23 @@ interface CountFieldProps {
   readonly value: number;
   /** Called with the new value. */
   readonly onChange: (value: number) => void;
-  /** The smallest value the server takes. */
-  readonly min: number;
-  /** The largest value the server takes, when it has one. */
-  readonly max?: number;
 }
 
 /**
- * One number field, bounded as the server bounds it.
+ * One number field. It has no bounds of its own: a field that clamps changes what the person typed without saying so, so the server judges the number and its sentence shows.
  *
- * @param props - The label, the value and the bounds.
+ * @param props - The label and the value.
  * @param props.label - The label.
  * @param props.value - The value; NaN while the field is empty.
  * @param props.onChange - Called with the new value.
- * @param props.min - The smallest value the server takes.
- * @param props.max - The largest value the server takes, when it has one.
  * @returns The field.
  */
-function CountField({ label, value, onChange, min, max }: CountFieldProps): JSX.Element {
+function CountField({ label, value, onChange }: CountFieldProps): JSX.Element {
   return (
     <NumberField
       className="field"
       value={value}
       onChange={onChange}
-      minValue={min}
-      {...(max === undefined ? {} : { maxValue: max })}
       formatOptions={{ useGrouping: false }}
     >
       <Label>{label}</Label>
@@ -110,20 +99,16 @@ export function MaintainDialog({ place, onClose }: MaintainDialogProps): JSX.Ele
             label={t("table.actions.maintain.keepDays")}
             value={keepDays}
             onChange={setKeepDays}
-            min={0}
           />
           <CountField
             label={t("table.actions.maintain.keepLast")}
             value={keepLast}
             onChange={setKeepLast}
-            min={1}
           />
           <CountField
             label={t("table.actions.maintain.olderThanHours")}
             value={olderThanHours}
             onChange={setOlderThanHours}
-            min={1}
-            max={HOURS_MAX}
           />
           <p>
             <label>
