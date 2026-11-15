@@ -319,6 +319,17 @@ def test_fix_keeps_the_progress_lines_a_page_shows(tmp_path: Path) -> None:
     assert check(root, root / "docs/site", None, captures) == ([], 0)
 
 
+def test_fix_drops_the_lines_a_run_no_longer_prints_and_keeps_the_progress(tmp_path: Path) -> None:
+    """A page with more lines than the run: the extra ones go, the progress lines stay."""
+    page = "silver.clean  pending\nRun 22222222 failed\nold line\nanother old line\n"
+    printed = "Run 22222222 failed\n"
+    root, captures = _tree(tmp_path, BLOCK, page, printed)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "```text\nsilver.clean  pending\nRun 22222222 failed\n```" in text
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
 def test_fix_keeps_an_indented_block_indented(tmp_path: Path) -> None:
     """A block inside a list item keeps its fence's indent."""
     page = "- item\n\n  <!-- output: demo#show -->\n  ```text\n  old\n  ```\n"
