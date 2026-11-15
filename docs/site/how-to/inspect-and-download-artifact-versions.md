@@ -23,15 +23,18 @@ You see one row for each artifact:
 
 <!-- output: train-and-predict#artifact-list -->
 ```text
-┏━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
-┃ name        ┃ namespace ┃ current_version ┃ versions ┃ size  ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
-│ spend_model │ models    │ 1               │ 1        │ 639 B │
-└─────────────┴───────────┴─────────────────┴──────────┴───────┘
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name        ┃ namespace ┃ current_version ┃ versions ┃ size  ┃ keep ┃ defined in                             ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ spend_model │ models    │ 1               │ 1        │ 639 B │ 2    │ forecasts/assets/models/spend_model.py │
+└─────────────┴───────────┴─────────────────┴──────────┴───────┴──────┴────────────────────────────────────────┘
 ```
 
-Each row has the name, the namespace, the current version, how many versions the artifact has had
-and the size of the live versions. The examples on this page come from the
+Each row has the name, the namespace, the current version, how many versions the artifact has had,
+the size of the live versions, `keep` (how many live versions the project that declares it keeps;
+empty keeps all) and `defined in` (the repository and file that declare it; empty for an artifact
+you uploaded that no deployed project declares). The list shows 100 artifacts at most; a last line
+`More results: ...` names the command for the next page. The examples on this page come from the
 [tutorial](../tutorials/train-a-model.md). Add `--namespace models` to see one namespace, and `--env NAME` for an environment
 other than your profile's default. An artifact you may not read is not listed. A namespace you may
 not see gives an empty list, not an error.

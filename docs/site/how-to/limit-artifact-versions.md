@@ -59,6 +59,12 @@ The numbers are never used again. Files are removed right after the run stores i
 shortly after by Lakana's periodic clean-up (the person who runs the instance finds how it runs in
 [The sweep](deploy-with-compose.md#the-sweep)).
 
+## See which artifacts keep how many
+
+`lakana artifact list` shows `keep` for each artifact: the `keep_versions` of the asset that
+declares it, and empty for an artifact that keeps all its versions or that no deployed project
+declares. `defined in` names the file.
+
 ## See what was deleted
 
 The `artifact versions list` subcommand shows every version, with `deleted_at` on the deleted ones.

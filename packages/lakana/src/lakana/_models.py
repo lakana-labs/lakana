@@ -2997,10 +2997,17 @@ class Orphan:
         The repository that used to produce it.
     table
         Dotted table name.
+    kind
+        What it is: ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``; `None` from a server that
+        does not say.
+    exists
+        `False` for a dropped orphan that can still be restored (``lakana table undrop``).
     """
 
     repository: str
     table: str
+    kind: str | None = None
+    exists: bool = True
 
 
 @dataclass(frozen=True)
@@ -3013,10 +3020,13 @@ class Orphans:
         Readable orphans.
     hidden
         Orphans the caller may not read.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; `None` on the last page.
     """
 
     orphans: list[Orphan]
     hidden: int
+    next_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -4095,6 +4105,22 @@ class DeletedArtifactVersion(ArtifactVersion):
 
 
 @dataclass(frozen=True)
+class DefinedBy:
+    """The deployed project file that declares a table or an artifact.
+
+    Parameters
+    ----------
+    repository
+        The repository's name.
+    path
+        The file's path in the repository.
+    """
+
+    repository: str
+    path: str
+
+
+@dataclass(frozen=True)
 class Artifact:
     """One artifact, as a listing or a lookup shows it.
 
@@ -4117,6 +4143,10 @@ class Artifact:
         The summed size of its live versions.
     created_at
         When it was created, ISO 8601.
+    defined_by
+        The deployed project file that declares it; `None` when none does.
+    keep_versions
+        How many live versions the declaration keeps; `None` keeps all.
     """
 
     name: str
@@ -4127,6 +4157,24 @@ class Artifact:
     versions: int
     size_bytes: int
     created_at: str
+    defined_by: DefinedBy | None = None
+    keep_versions: int | None = None
+
+
+@dataclass(frozen=True)
+class ArtifactPage:
+    """One page of the artifacts of an environment, in namespace and name order.
+
+    Parameters
+    ----------
+    items
+        The artifacts on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[Artifact]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)

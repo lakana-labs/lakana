@@ -312,11 +312,11 @@ You will see one row for the model. The `size` is that of its live versions:
 
 <!-- output: train-and-predict#artifact-list -->
 ```text
-┏━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
-┃ name        ┃ namespace ┃ current_version ┃ versions ┃ size  ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
-│ spend_model │ models    │ 1               │ 1        │ 639 B │
-└─────────────┴───────────┴─────────────────┴──────────┴───────┘
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name        ┃ namespace ┃ current_version ┃ versions ┃ size  ┃ keep ┃ defined in                             ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ spend_model │ models    │ 1               │ 1        │ 639 B │ 2    │ forecasts/assets/models/spend_model.py │
+└─────────────┴───────────┴─────────────────┴──────────┴───────┴──────┴────────────────────────────────────────┘
 ```
 
 To get the file, download the current version into a folder that does not exist yet. The second

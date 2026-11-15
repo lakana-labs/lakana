@@ -533,6 +533,7 @@ def test_a_listing_is_readable_at_80_100_and_120_columns(
         in set(listing.items[0])
         | {"size", "subject", "age", "last_seen", "doing", "caches", "memory", "run", "rows"}
         | {"schedule", "triggers", "next_run", "last_run", "access"}
+        | {"keep", "defined in"}
         for cell in cells
     ), cells
     assert all(header in cells for header in listing.headers), (cells, listing.headers)

@@ -62,7 +62,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator, Sequence
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from starlette.requests import ClientDisconnect
@@ -81,6 +81,7 @@ from lakana_core.artifacts.service import (
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ConflictError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef, shown
+from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import (
     ArtifactBlobOut,
     ArtifactCommitIn,
@@ -92,6 +93,7 @@ from lakana_server.api.platform.schemas import (
     ArtifactUploadPage,
     ArtifactVersionDeletedOut,
     ArtifactVersionOut,
+    DefinedByOut,
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -249,6 +251,12 @@ def artifact_out(view: ArtifactView) -> ArtifactOut:
         versions=view.versions,
         size_bytes=view.size_bytes,
         created_at=view.created_at,
+        defined_by=(
+            None
+            if view.defined_by is None
+            else DefinedByOut(repository=view.defined_by.repository, path=view.defined_by.path)
+        ),
+        keep_versions=view.keep_versions,
     )
 
 
@@ -1131,23 +1139,34 @@ def list_uploads(
 @environment_router.get("", response_model=list[ArtifactOut], responses=errors(403, 404))
 def list_artifacts(
     env: str,
+    response: Response,
     namespace: str | None = Query(default=None, max_length=1024),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: ArtifactService = Depends(get_artifact_service),
 ) -> list[ArtifactOut]:
-    """List the artifacts of an environment.
+    """List the artifacts of an environment, one page at a time.
 
     Lists the artifacts of the environment that the caller may read. A caller who may read
     the environment but no artifact gets an empty list, so that an empty list reveals
     nothing. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and
-    422 when the namespace path is malformed.
+    422 when the namespace path is malformed or the cursor is not one this list issued. The
+    cursor of the next page is in the `X-Next-Cursor` response header and is absent on the
+    last page.
 
     Parameters
     ----------
     env
         Environment name.
+    response
+        The response, for the cursor header.
     namespace
         Only this dot-joined namespace path.
+    limit
+        Most artifacts returned (1 to 200).
+    cursor
+        The `X-Next-Cursor` of the previous page; send the same `namespace`.
     principal
         The authenticated caller.
     service
@@ -1156,7 +1175,7 @@ def list_artifacts(
     Returns
     -------
     list of ArtifactOut
-        Ordered by namespace and name.
+        This page, ordered by namespace and name.
 
     Raises
     ------
@@ -1165,10 +1184,12 @@ def list_artifacts(
     lakana_core.errors.NotFoundError
         Mapped to 404, if the environment does not exist.
     lakana_core.errors.ValidationError
-        Mapped to 422, if the namespace path is malformed.
+        Mapped to 422, if the namespace path is malformed or the cursor is not valid.
     """
     parsed = None if namespace is None else NamespacePath.from_parts(namespace.split("."))
-    return [artifact_out(view) for view in service.list_artifacts(principal, env, parsed)]
+    page = service.list_artifacts(principal, env, parsed, limit=limit, cursor=cursor)
+    set_next_cursor(response, page.next_cursor)
+    return [artifact_out(view) for view in page.items]
 
 
 @router.get("/{name}", response_model=ArtifactOut, responses=errors(403, 404))

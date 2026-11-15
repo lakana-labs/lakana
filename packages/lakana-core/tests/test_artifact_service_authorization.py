@@ -683,7 +683,7 @@ def test_a_listing_asks_for_the_environment_and_reads_per_artifact(
     _setup(session, tmp_path, principal)
     recording = _Recording(*Action)
     service = ArtifactService(session, StorageResolver(session), recording)
-    assert [a.ref for a in service.list_artifacts(principal, "dev")] == [ARTIFACT_REF]
+    assert [a.ref for a in service.list_artifacts(principal, "dev").items] == [ARTIFACT_REF]
     assert recording.seen == [(Action.READ_ENVIRONMENT, _ENVIRONMENT)]
     assert recording.permitted == [(Action.READ_TABLE, _table("churn"))]
 
@@ -705,8 +705,8 @@ def test_a_listing_needs_the_environment_and_hides_what_the_caller_may_not_read(
         StorageResolver(session),
         ActionAllowList(*[a for a in Action if a is not Action.READ_TABLE]),
     )
-    assert blind.list_artifacts(principal, "dev") == []
-    assert blind.list_artifacts(principal, "dev", ARTIFACT_REF.namespace) == []
+    assert blind.list_artifacts(principal, "dev").items == []
+    assert blind.list_artifacts(principal, "dev", ARTIFACT_REF.namespace).items == []
 
 
 def _runner(

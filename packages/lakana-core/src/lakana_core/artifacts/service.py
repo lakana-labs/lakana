@@ -180,6 +180,9 @@ from lakana_core.models import (
     TaskRun,
 )
 from lakana_core.models.base import utcnow
+from lakana_core.pagination import LIST_LIMIT_DEFAULT, Page, page_in_order
+from lakana_core.projects.definition import DefiningFile, deployed_entries, owned_by_git
+from lakana_core.projects.manifest import entry_keep_versions
 from lakana_core.runs.lockdown import (
     SUPERSEDED_MESSAGE,
     ProtectedWriteGuard,
@@ -313,6 +316,12 @@ class ArtifactView:
         The summed size of its live versions.
     created_at
         When the artifact was created.
+    defined_by
+        The deployed project file that declares it; `None` for an artifact no deployed
+        project declares.
+    keep_versions
+        How many live versions that declaration keeps; `None` keeps all (also when no deployed
+        project declares it).
     """
 
     ref: TableRef
@@ -321,6 +330,8 @@ class ArtifactView:
     versions: int
     size_bytes: int
     created_at: datetime
+    defined_by: DefiningFile | None = None
+    keep_versions: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1004,7 +1015,12 @@ class ArtifactService:
             files=files,
         )
 
-    def _view(self, ref: TableRef, row: Table) -> ArtifactView:
+    def _view(
+        self,
+        ref: TableRef,
+        row: Table,
+        entries: Mapping[str, tuple[DefiningFile, Mapping[str, object]]],
+    ) -> ArtifactView:
         """Present an artifact.
 
         Parameters
@@ -1013,6 +1029,8 @@ class ArtifactService:
             Its name.
         row
             Its row.
+        entries
+            `deployed_entries` of the environment, read once for the whole call.
 
         Returns
         -------
@@ -1033,6 +1051,13 @@ class ArtifactService:
                 ),
             ).where(ArtifactVersion.artifact_id == row.id)
         ).one()
+        declared = entries.get(ref.dotted())
+        found = (
+            declared[0]
+            if declared and TableRef.from_dotted(ref.environment, ref.dotted()) == ref
+            else None
+        )
+        owned = owned_by_git(found, "ARTIFACT")
         return ArtifactView(
             ref=ref,
             id=row.id,
@@ -1040,6 +1065,8 @@ class ArtifactService:
             versions=int(count),
             size_bytes=int(size),
             created_at=row.created_at,
+            defined_by=found if owned else None,
+            keep_versions=entry_keep_versions(declared[1]) if declared and owned else None,
         )
 
     def _open_upload(
@@ -1097,8 +1124,14 @@ class ArtifactService:
         return upload
 
     def list_artifacts(
-        self, p: PrincipalRef, environment: str, namespace: NamespacePath | None = None
-    ) -> list[ArtifactView]:
+        self,
+        p: PrincipalRef,
+        environment: str,
+        namespace: NamespacePath | None = None,
+        *,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> Page[ArtifactView]:
         """List the artifacts of an environment that the caller may read.
 
         Parameters
@@ -1109,12 +1142,16 @@ class ArtifactService:
             The environment.
         namespace
             Only this namespace; every namespace when `None`.
+        limit
+            Most artifacts returned (1 to `LIST_LIMIT_MAX`).
+        cursor
+            The `next_cursor` of the previous page.
 
         Returns
         -------
-        list of ArtifactView
-            Ordered by namespace and name. An artifact the caller may not read
-            is left out, as if it did not exist.
+        Page of ArtifactView
+            One page, ordered by namespace parts and name. An artifact the caller may not
+            read is left out, as if it did not exist, before the cursor applies.
 
         Raises
         ------
@@ -1122,6 +1159,8 @@ class ArtifactService:
             If the caller may not read the environment.
         NotFoundError
             If the environment does not exist.
+        ValidationError
+            If `limit` is out of range, or `cursor` is not one this list issued.
         """
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
         environment_id = resolve_environment_id(self._session, environment)
@@ -1136,12 +1175,20 @@ class ArtifactService:
         )
         if namespace is not None:
             query = query.where(Namespace.path == namespace.joined())
-        listed: list[ArtifactView] = []
+        readable: list[tuple[TableRef, Table]] = []
         for row, path in self._session.execute(query).all():
             ref = TableRef(environment, NamespacePath.parse(path), row.name)
             if self._authz.permits(p, Action.READ_TABLE, self._securable(ref)):
-                listed.append(self._view(ref, row))
-        return listed
+                readable.append((ref, row))
+        page = page_in_order(
+            readable,
+            kind="artifacts",
+            key_of=lambda item: (json.dumps(list(item[0].namespace.parts)), item[0].name),
+            limit=limit,
+            cursor=cursor,
+        )
+        entries = deployed_entries(self._session, environment_id)
+        return Page([self._view(ref, row, entries) for ref, row in page.items], page.next_cursor)
 
     def get_artifact(self, p: PrincipalRef, ref: TableRef) -> ArtifactView:
         """Show one artifact.
@@ -1168,7 +1215,9 @@ class ArtifactService:
             If the name belongs to something that is not an artifact.
         """
         self._authz.authorize(p, Action.READ_TABLE, self._securable(ref))
-        return self._view(ref, self._artifact(ref))
+        environment_id = resolve_environment_id(self._session, ref.environment)
+        entries = deployed_entries(self._session, environment_id) if environment_id else {}
+        return self._view(ref, self._artifact(ref), entries)
 
     def list_versions(self, p: PrincipalRef, ref: TableRef) -> list[VersionView]:
         """List an artifact's versions, newest first, deleted ones included.

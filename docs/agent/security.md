@@ -2605,7 +2605,8 @@ accident or believes it closed:
   storage, without a marker, so no sweep deletes them.
 - Never point two deployments at one storage root: each would see the other's artifacts as leftovers
   (the marker rule keeps the sweep from deleting them, but nothing else protects them).
-- `list_artifacts` and the version list are not paged; the download route answers `GET` only and
+- The artifact list is paged (100 by default, filtered by read right before the cursor applies); the
+  version list is not paged; the download route answers `GET` only and
   ignores `Range`.
 
 **Residuals of the harness (#67, closed by descriptors).** The harness passes the descriptor it

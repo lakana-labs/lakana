@@ -24,15 +24,18 @@ the list shows without it.
 | Dropped tables of an environment | `lakana table list --dropped` | `READ_ENVIRONMENT`; a table you may not read is left out | drop time, newest first; equal times by table id |
 | Expiring tables | `lakana table expiring [--namespace NAMESPACE]` | `READ_ENVIRONMENT`; a table you may not read is left out | expiry time, soonest first; equal times by name, then id |
 | Namespaces | `lakana ns list [--parent PATH] [--depth 1]` | `READ_NAMESPACE` on the environment | the namespace's path parts, so `a`, `a.b`, then `ab` |
+| Orphans | `lakana orphans` | `READ_ENVIRONMENT`; an orphan you may not read is only counted as hidden | repository, then table name |
+| Artifacts | `lakana artifact list [--namespace NS]` | `READ_ENVIRONMENT`; an artifact you may not read is left out | namespace parts, then name |
 
 `--namespace` keeps that namespace and the ones beneath it. `--parent` keeps every namespace below
 the parent at every depth, and `--depth 1` keeps only its direct children (the top level without a
 parent). They take `--limit` and `--cursor` like the lists above.
 
 A script that read one of these lists in one request now reads only its first 100 rows. Follow
-`X-Next-Cursor` (the expiring tables and the namespaces) or `next_cursor` (the dropped tables of
-an environment), or use `client.tables.iter_dropped(env)`, `client.tables.iter_expiring(env)` and
-`client.namespaces.iter(env)`, which walk every page.
+`X-Next-Cursor` (the expiring tables, the namespaces and the artifacts) or `next_cursor` (the
+dropped tables of an environment and the orphans), or use `client.tables.iter_dropped(env)`,
+`client.tables.iter_expiring(env)`, `client.namespaces.iter(env)`, `client.orphans.iter(env)` and
+`client.artifacts.iter(env)`, which walk every page.
 
 ## Filters
 

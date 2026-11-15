@@ -9528,8 +9528,8 @@
         "tags": [
           "artifacts"
         ],
-        "summary": "List the artifacts of an environment",
-        "description": "Lists the artifacts of the environment that the caller may read. A caller who may read the environment but no artifact gets an empty list, so that an empty list reveals nothing. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when the namespace path is malformed.",
+        "summary": "List the artifacts of an environment, one page at a time",
+        "description": "Lists the artifacts of the environment that the caller may read. A caller who may read the environment but no artifact gets an empty list, so that an empty list reveals nothing. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when the namespace path is malformed or the cursor is not one this list issued. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
         "operationId": "list_artifacts_api_v1_environments__env__artifacts_get",
         "parameters": [
           {
@@ -9559,6 +9559,37 @@
               "title": "Namespace"
             },
             "description": "Only this dot-joined namespace path."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most artifacts returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `namespace`."
           },
           {
             "name": "authorization",
@@ -16275,8 +16306,8 @@
         "tags": [
           "deploys"
         ],
-        "summary": "List tables no project produces any more",
-        "description": "Lists the tables that earlier project versions produced and the current ones do not. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist.",
+        "summary": "List tables no project produces any more, one page at a time",
+        "description": "Lists the tables that earlier project versions produced and the current ones do not, including dropped ones that can still be restored (`exists` is false). Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.",
         "operationId": "list_orphans_api_v1_environments__env__orphans_get",
         "parameters": [
           {
@@ -16288,6 +16319,37 @@
               "title": "Env"
             },
             "description": "Environment name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most orphans returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
           },
           {
             "name": "authorization",
@@ -24219,6 +24281,27 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "defined_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefinedByOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "keep_versions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Versions"
           }
         },
         "type": "object",
@@ -24233,7 +24316,7 @@
           "created_at"
         ],
         "title": "ArtifactOut",
-        "description": "One artifact, as a listing or a lookup shows it.\n\nParameters\n----------\nname\n    The artifact's name.\nnamespace\n    Dot-joined namespace path.\nuuid\n    The artifact's id.\nkind\n    Always ``ARTIFACT``.\ncurrent_version\n    The highest live version; `None` while it has none.\nversions\n    How many versions it has had, deleted ones included.\nsize_bytes\n    The summed size of its live versions.\ncreated_at\n    When it was created."
+        "description": "One artifact, as a listing or a lookup shows it.\n\nParameters\n----------\nname\n    The artifact's name.\nnamespace\n    Dot-joined namespace path.\nuuid\n    The artifact's id.\nkind\n    Always ``ARTIFACT``.\ncurrent_version\n    The highest live version; `None` while it has none.\nversions\n    How many versions it has had, deleted ones included.\nsize_bytes\n    The summed size of its live versions.\ncreated_at\n    When it was created.\ndefined_by\n    The deployed project file that declares it; `None` when none does.\nkeep_versions\n    How many live versions the declaration keeps; `None` keeps all."
       },
       "ArtifactSourceIn": {
         "properties": {
@@ -26390,6 +26473,25 @@
         ],
         "title": "DeclaringAssetOut",
         "description": "An asset whose deployed version declares a connection.\n\nParameters\n----------\nrepository\n    The repository's name.\nasset\n    The asset's name."
+      },
+      "DefinedByOut": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repository",
+          "path"
+        ],
+        "title": "DefinedByOut",
+        "description": "The deployed project file that declares a table or an artifact.\n\nParameters\n----------\nrepository\n    The repository's name.\npath\n    The file's path in the repository."
       },
       "DeliveryOut": {
         "properties": {
@@ -29835,15 +29937,32 @@
           "table": {
             "type": "string",
             "title": "Table"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "exists": {
+            "type": "boolean",
+            "title": "Exists"
           }
         },
         "type": "object",
         "required": [
           "repository",
-          "table"
+          "table",
+          "kind",
+          "exists"
         ],
         "title": "OrphanOut",
-        "description": "One orphaned table.\n\nParameters\n----------\nrepository\n    The repository that used to produce it.\ntable\n    Dotted table name."
+        "description": "One orphaned table.\n\nParameters\n----------\nrepository\n    The repository that used to produce it.\ntable\n    Dotted table name.\nkind\n    What it is: ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nexists\n    `False` for a dropped orphan that can still be restored."
       },
       "OrphanedLocationOut": {
         "properties": {
@@ -29971,6 +30090,17 @@
           "hidden": {
             "type": "integer",
             "title": "Hidden"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           }
         },
         "type": "object",
@@ -29979,7 +30109,7 @@
           "hidden"
         ],
         "title": "OrphansOut",
-        "description": "Orphans visible to the caller.\n\nParameters\n----------\norphans\n    Readable orphans.\nhidden\n    Orphans the caller may not read."
+        "description": "Orphans visible to the caller.\n\nParameters\n----------\norphans\n    Readable orphans.\nhidden\n    Orphans the caller may not read.\nnext_cursor\n    Pass back as ``cursor`` for the next page; `None` on the last."
       },
       "OwnerOut": {
         "properties": {

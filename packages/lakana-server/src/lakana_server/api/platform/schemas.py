@@ -4299,6 +4299,21 @@ class ProjectVersionOut(BaseModel):
     manifest: dict
 
 
+class DefinedByOut(BaseModel):
+    """The deployed project file that declares a table or an artifact.
+
+    Parameters
+    ----------
+    repository
+        The repository's name.
+    path
+        The file's path in the repository.
+    """
+
+    repository: str
+    path: str
+
+
 class OrphanOut(BaseModel):
     """One orphaned table.
 
@@ -4308,10 +4323,16 @@ class OrphanOut(BaseModel):
         The repository that used to produce it.
     table
         Dotted table name.
+    kind
+        What it is: ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.
+    exists
+        `False` for a dropped orphan that can still be restored.
     """
 
     repository: str
     table: str
+    kind: str | None
+    exists: bool
 
 
 class OrphansOut(BaseModel):
@@ -4323,10 +4344,13 @@ class OrphansOut(BaseModel):
         Readable orphans.
     hidden
         Orphans the caller may not read.
+    next_cursor
+        Pass back as ``cursor`` for the next page; `None` on the last.
     """
 
     orphans: list[OrphanOut]
     hidden: int
+    next_cursor: str | None = None
 
 
 class RunCreate(BaseModel):
@@ -5505,6 +5529,10 @@ class ArtifactOut(BaseModel):
         The summed size of its live versions.
     created_at
         When it was created.
+    defined_by
+        The deployed project file that declares it; `None` when none does.
+    keep_versions
+        How many live versions the declaration keeps; `None` keeps all.
     """
 
     name: str
@@ -5515,6 +5543,8 @@ class ArtifactOut(BaseModel):
     versions: int
     size_bytes: int
     created_at: datetime
+    defined_by: DefinedByOut | None = None
+    keep_versions: int | None = None
 
 
 class ArtifactFileOut(BaseModel):

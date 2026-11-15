@@ -10,7 +10,8 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param
-from lakana.resources.deploys import Deploys
+from lakana.resources.artifacts import Artifacts
+from lakana.resources.deploys import Deploys, OrphanTables
 from lakana.resources.namespaces import Namespaces
 from lakana.resources.queries import Queries
 from lakana.resources.runs import Runs
@@ -274,3 +275,56 @@ def test_namespaces_iter_sends_parent_on_every_page() -> None:
     again = Namespaces(_transport([([namespace], "n1")], []))
     assert again.list_page("dev", parent="a", limit=1).next_cursor == "n1"
     assert again.list("dev")[0].path == "a.b"
+
+
+_ORPHAN: dict[str, Any] = {"repository": "analytics", "table": "silver.old", "kind": "TABLE"}
+_ARTIFACT: dict[str, Any] = {
+    "name": "churn",
+    "namespace": "models",
+    "uuid": "u",
+    "kind": "ARTIFACT",
+    "current_version": 1,
+    "versions": 1,
+    "size_bytes": 3,
+    "created_at": "2026-10-04T12:00:00Z",
+    "defined_by": {"repository": "analytics", "path": "assets/models/churn.py"},
+    "keep_versions": 3,
+}
+
+
+def test_orphans_list_says_kind_and_existence_and_reads_the_cursor_of_the_body() -> None:
+    seen: list[httpx.Request] = []
+    body = {
+        "orphans": [{**_ORPHAN, "exists": False}],
+        "hidden": 2,
+        "next_cursor": "o1",
+    }
+    found = OrphanTables(_object_transport([body], seen)).list("dev", limit=1, cursor="o0")
+    assert (found.next_cursor, found.hidden) == ("o1", 2)
+    assert [(o.table, o.kind, o.exists) for o in found.orphans] == [("silver.old", "TABLE", False)]
+    assert dict(seen[0].url.params) == {"limit": "1", "cursor": "o0"}
+
+
+def test_orphans_iter_walks_every_page() -> None:
+    seen: list[httpx.Request] = []
+    bodies = [
+        {"orphans": [{**_ORPHAN, "exists": True}], "hidden": 0, "next_cursor": "o1"},
+        {"orphans": [{**_ORPHAN, "exists": True}], "hidden": 0, "next_cursor": None},
+    ]
+    assert len(list(OrphanTables(_object_transport(bodies, seen)).iter("dev", page_size=1))) == 2
+    assert [r.url.params.get("cursor") for r in seen] == [None, "o1"]
+
+
+def test_artifacts_list_page_sends_the_paging_and_reads_defined_by_and_keep_versions() -> None:
+    seen: list[httpx.Request] = []
+    artifacts = Artifacts(_transport([([_ARTIFACT], "a1"), ([_ARTIFACT], None)], seen))
+    page = artifacts.list_page("dev", "models", limit=1, cursor="a0")
+    assert (page.next_cursor, page.items[0].keep_versions) == ("a1", 3)
+    assert page.items[0].defined_by is not None
+    assert page.items[0].defined_by.path == "assets/models/churn.py"
+    assert dict(seen[0].url.params) == {"namespace": "models", "limit": "1", "cursor": "a0"}
+    two = Artifacts(_transport([([_ARTIFACT], "a1"), ([_ARTIFACT], None)], []))
+    assert len(list(two.iter("dev", page_size=1))) == 2
+    plain = {k: v for k, v in _ARTIFACT.items() if k not in ("defined_by", "keep_versions")}
+    one = Artifacts(_transport([([plain], None)], [])).list("dev")[0]
+    assert (one.defined_by, one.keep_versions) == (None, None)

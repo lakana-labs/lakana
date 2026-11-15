@@ -144,9 +144,13 @@ Usage: `lakana orphans [OPTIONS]`
 
 List tables earlier project versions produced that no current one does.
 
+One page at a time; the last line names the command for the next page when there is one. A dropped table that can still be restored is listed as ``dropped, restorable``.
+
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
+| `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
 
 ## `lakana run`
 
@@ -843,12 +847,16 @@ Everything in a directory is stored, including hidden files such as .env: point 
 
 Usage: `lakana artifact list [OPTIONS]`
 
-List the artifacts you may read, with their current version and size.
+List the artifacts you may read, one page at a time.
+
+Shows the current version, the size, how many versions a deployed project keeps (`keep`; empty means all) and the file that declares the artifact (`defined in`; empty for an artifact no deployed project declares). The last line names the command for the next page when there is one.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--namespace` | text | none | Only this namespace, e.g. models. |
 | `--env` | text | none | Environment (default: the profile's). |
+| `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
 
 ### `lakana artifact drop`
 

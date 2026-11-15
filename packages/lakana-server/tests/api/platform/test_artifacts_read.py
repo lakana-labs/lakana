@@ -158,7 +158,24 @@ def test_list_and_describe(stored: TestClient) -> None:
         "versions",
         "size_bytes",
         "created_at",
+        "defined_by",
+        "keep_versions",
     }
+
+
+def test_the_artifact_list_pages_and_says_what_defines_each(stored: TestClient) -> None:
+    """`limit` pages with `X-Next-Cursor`; each item has `defined_by` and `keep_versions`."""
+    first = stored.get(f"{_ENV}/artifacts", params={"limit": 1}, headers=AUTH_HEADER)
+    assert [a["name"] for a in first.json()] == ["churn"]
+    assert (first.json()[0]["defined_by"], first.json()[0]["keep_versions"]) == (None, None)
+    cursor = first.headers["X-Next-Cursor"]
+    second = stored.get(
+        f"{_ENV}/artifacts", params={"limit": 1, "cursor": cursor}, headers=AUTH_HEADER
+    )
+    assert [a["name"] for a in second.json()] == ["other"]
+    assert "X-Next-Cursor" not in second.headers
+    bad = stored.get(f"{_ENV}/artifacts", params={"cursor": "nonsense"}, headers=AUTH_HEADER)
+    assert bad.status_code == 422
 
 
 def test_versions_and_one_version(stored: TestClient) -> None:

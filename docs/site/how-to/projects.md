@@ -308,7 +308,7 @@ lakana rollback --env dev --to-previous      # or --to <full sha>
 lakana deploys list --env dev [--repo analytics] [--limit N]
 lakana deployments --env dev
 lakana project-version show <id> --env dev
-lakana orphans --env dev                     # produced earlier, by no current deploy
+lakana orphans --env dev                     # produced earlier, by no current deploy; --limit, --cursor
 ```
 
 A table, view or artifact that a current deployment builds is changed in git: `lakana table
@@ -388,9 +388,14 @@ and removes it when it ends. If the worker is killed, the directory stays; a wor
 directories that no deploy is using and that are more than 24 hours old, when it starts and then
 every `LAKANA_RUN__SWEEP_INTERVAL` (`0` turns this off).
 
-An orphan is a table that still exists, that an earlier project version in the environment produced,
-and that no repository's current deployment there produces. A table moved from one repository to
-another is therefore not an orphan once the new owner has deployed it.
+An orphan is a table that an earlier project version in the environment produced, and that no
+repository's current deployment there produces. A table moved from one repository to another is
+therefore not an orphan once the new owner has deployed it. `lakana orphans` shows each orphan's
+repository, name, `kind` and `state`: `exists`, or `dropped, restorable` for an orphan that was
+dropped and can still be restored within its undo period (see
+[Drop and restore a table](drop-and-restore-a-table.md)). Once the period ends, it leaves the list.
+The list shows 100 orphans at most; a last line `More results: ...` names the command for the next
+page.
 
 ## Run
 

@@ -299,7 +299,7 @@ that needs a name takes `NAMESPACE.NAME`, such as `models.churn_model`.
 
 | Command | What it does | Needs |
 |---|---|---|
-| `lakana artifact list [--namespace NS]` | Lists the artifacts you may read: name, namespace, current version, how many versions, size of the live versions. | `READ_TABLE` on each |
+| `lakana artifact list [--namespace NS] [--limit N] [--cursor C]` | Lists the artifacts you may read, 100 per page: name, namespace, current version, how many versions, size of the live versions, `keep` (the `keep_versions` of the project that declares it; empty keeps all) and `defined in` (the repository and file that declare it; empty for one no deployed project declares). | `READ_TABLE` on each |
 | `lakana artifact versions list NAME` | Lists the versions, newest first: number, time, size, file count, the start of the digest, the run, when deleted. The last line says how many versions have bytes and their size. A narrow window leaves columns out, least useful first, and says which. The whole digest is in `--output json`. | `READ_TABLE` |
 | `lakana artifact download NAME DIRECTORY [--version N]` | Downloads a version (the current one without `--version`) into a new or an empty directory. | `READ_TABLE` |
 | `lakana artifact upload NAME PATH` | Stores a file or directory as a new version. Creates the artifact on first use. | `WRITE_TABLE`, and `CREATE_TABLE` for a new name |
@@ -322,14 +322,17 @@ You see one row per artifact:
 
 <!-- output: train-and-predict#artifact-list -->
 ```text
-┏━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
-┃ name        ┃ namespace ┃ current_version ┃ versions ┃ size  ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
-│ spend_model │ models    │ 1               │ 1        │ 639 B │
-└─────────────┴───────────┴─────────────────┴──────────┴───────┘
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name        ┃ namespace ┃ current_version ┃ versions ┃ size  ┃ keep ┃ defined in                             ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ spend_model │ models    │ 1               │ 1        │ 639 B │ 2    │ forecasts/assets/models/spend_model.py │
+└─────────────┴───────────┴─────────────────┴──────────┴───────┴──────┴────────────────────────────────────────┘
 ```
 
 An artifact you may not read is not listed, and a namespace you may not see gives an empty list.
+The list shows at most 100 artifacts, in the order of namespace and name. When more follow, the
+last line is `More results: lakana artifact list ... --cursor ...`; run it for the next page. See
+[Lists](lists.md#other-paged-lists).
 
 ### versions list
 
@@ -660,7 +663,7 @@ server's info route (`GET /api/v1/info`).
 | `DELETE /namespaces/{path}/artifacts/{name}/uploads/{upload_id}` | Withdraw an open upload. | `WRITE_TABLE` |
 | `DELETE /namespaces/{path}/artifacts/{name}/versions/{version}` | Delete one version's files. The answer is `200` with the version and, added to its fields, `freed_files`, `freed_bytes`, `kept_files`, `kept_bytes` and `kept` (`reason`, `files`, `bytes`, `version`), as under `versions delete`. | `DROP_TABLE`; from the web interface also a passkey touch within the last 15 minutes (403 `StepUpRequired`) |
 | `DELETE /namespaces/{path}/artifacts/{name}` | Drop the artifact. | `DROP_TABLE`; from the web interface also a passkey touch within the last 15 minutes (403 `StepUpRequired`) |
-| `GET /artifacts` (optional `namespace` query) | List the artifacts you may read. | `READ_ENVIRONMENT`, then `READ_TABLE` for each |
+| `GET /artifacts` (optional `namespace`, `limit`, `cursor` queries) | List the artifacts you may read, as an array in namespace and name order. Each item has `defined_by` (`{repository, path}` or `null`) and `keep_versions` (a number or `null`). `limit` is 1 to 200 (default 100); the `X-Next-Cursor` header holds the `cursor` of the next page and is absent on the last. | `READ_ENVIRONMENT`, then `READ_TABLE` for each |
 | `GET /namespaces/{path}/artifacts/{name}` | Show one artifact. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions` | List the versions, without files. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions/{version}` | Show one version with its files; `{version}` is a number or `current`. | `READ_TABLE` |
