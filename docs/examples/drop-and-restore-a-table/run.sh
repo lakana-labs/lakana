@@ -145,3 +145,60 @@ lakana env orphaned-locations legacy --older-than 30d --delete --yes
 
 test ! -e "$leftover/data/00000.parquet"
 test -e "$fresh/data/00000.parquet"
+
+# A table that a deployed project builds: delete is refused, the orphan can be dropped after the
+# asset is removed, and a rebuild drops the table and queues a run that builds it again.
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+cd "$WORK"
+lakana init analytics --no-sample >/dev/null
+cd analytics
+mkdir -p assets/silver
+printf '%s\n' '/* lakana' 'description: A table that the project builds.' '*/' 'SELECT 1 AS id' > assets/silver/clean.sql
+printf '%s\n' '/* lakana' 'description: A table that stays.' '*/' 'SELECT 1 AS id' > assets/silver/stays.sql
+git init -q
+git add -A
+git commit -q -m "A table the project builds"
+lakana repo add analytics --kind local --url "$PWD" >/dev/null
+lakana deploy --env dev >/dev/null
+lakana run --env dev >/dev/null
+
+set +e
+lakana table delete silver.clean --env dev --yes
+status=$?
+set -e
+test "$status" -ne 0
+lakana table get silver.clean --env dev >/dev/null
+
+git rm -q assets/silver/clean.sql
+git commit -q -m "Stop building the table"
+lakana deploy --env dev >/dev/null
+
+# docs:start drop-orphan
+lakana orphans --env dev
+lakana table delete silver.clean --env dev --yes
+# docs:end drop-orphan
+
+if lakana table get silver.clean --env dev >/dev/null 2>&1; then
+  echo "the dropped orphan is still there" >&2
+  exit 1
+fi
+
+lakana table undrop silver.clean --env dev >/dev/null
+git checkout -q HEAD~1 -- assets/silver/clean.sql
+git commit -q -m "Build the table again"
+lakana deploy --env dev >/dev/null
+lakana run --env dev >/dev/null
+
+# docs:start rebuild
+lakana table rebuild silver.clean --env dev --reason "history columns lost after a manual replace" --yes
+# docs:end rebuild
+
+for _ in $(seq 1 60); do
+  if lakana runs list --env dev --status succeeded 2>/dev/null | grep -q succeeded; then
+    sleep 1
+    break
+  fi
+  sleep 1
+done
+lakana table get silver.clean --env dev >/dev/null
