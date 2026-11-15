@@ -323,7 +323,10 @@ every missing output of it means "run everything".
   `packages/*/src/` as well as for the bundle, packaging and script files in the filter of its
   "Did the bundle change?" step, and for the files and the REST stand-in of the `ingest-files`
   and `ingest-rest` examples, which its ingestion part reads (M6's exit criterion, see
-  `docs/agent/release.md`). A `unit` shard has a 25-minute timeout, `test` 15 minutes.
+  `docs/agent/release.md`). Its last step, `scripts/offline_install_test.sh`, runs the built image under
+  `docker run --network none` with `LAKANA_WORKER__EXTENSION_SOURCE=none` and checks that local mode
+  starts and answers `lakana sql` (#493, the proof for the offline install how-to); the script is in
+  the filter too. A `unit` shard has a 25-minute timeout, `test` 15 minutes.
 - **Coverage** is measured on 3.14 only, by the three 3.14 shards, and combined in exactly one
   job, `test (3.14)` (see the coverage ratchet below). That job uploads the combined report,
   `coverage.json`, as the artifact `coverage-report` (kept 7 days), also when the ratchet fails,
@@ -535,6 +538,13 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 | `size` | a number with `KiB`, `MiB`, `GiB`, `KB`, `MB`, `GB` | `<size>` |
 | `short id` | 8, 12 or 16 hex digits in a table cell (`│ `) or after the words `run`, `token` or `manifest`: a run's first eight characters, a token's key id, a manifest digest | `<short id>` |
 | `package count` | the number in uv's `Resolved 44 packages`, which follows the public index | `<count>` |
+
+After masking, in a line with a box-drawing character (`│ ┃ ┏ ┡ └` and so on) runs of spaces
+and runs of `─ ━ ═` count as one, on both sides: a table pads every cell to its widest value, so
+a masked value of another length (a 16 and a 19 digit snapshot id) would otherwise fail the
+comparison. Inside table lines, padding and in-cell alignment are therefore not compared. Only the
+comparison does this; `--fix` writes the run's real text, and when any line of a table changes it
+takes the whole table (top border to bottom border) from the run, so the widths stay consistent.
 
 A mask hides a change too, so add one only for a value that really differs per run, and
 prefer a narrow pattern. Table width depends on the terminal: an example that quotes tables
