@@ -136,6 +136,7 @@ from lakana_core.artifacts.store import (
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, RunContext, Securable
 from lakana_core.catalog.connection_lineage import connection_edges, connection_sources
+from lakana_core.catalog.git_owned import refuse_owned_drop
 from lakana_core.catalog.identity import resolve_environment_id, resolve_table_id
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.writes import MAX_SOURCE_NAME, MAX_SOURCE_VERSIONS
@@ -2639,13 +2640,20 @@ class ArtifactService:
         ValidationError
             If the name belongs to something that is not an artifact.
         ConflictError
-            If storage could not be written (the drop marker); nothing was deleted.
+            If a deployed project produces the artifact: only git may remove it
+            (`lakana_core.catalog.git_owned.GIT_OWNED_ARTIFACT_DROP`, or the hidden copy to a
+            caller who may not read it); checked before the marker, so nothing reaches storage.
+            Or if storage could not be written (the drop marker); nothing was deleted.
         """
         securable = self._securable(ref)
         self._authz.authorize(p, Action.DROP_TABLE, securable)
         self._refuse_run(p)
         self._guard.check(p, ref.environment, WriteOperation.DROP_ARTIFACT, table_target(ref))
-        artifact_id = self._artifact(ref).id
+        artifact = self._artifact(ref)
+        artifact_id = artifact.id
+        environment_id = resolve_environment_id(self._session, ref.environment)
+        if environment_id is not None:
+            refuse_owned_drop(self._session, self._authz, p, ref, environment_id, artifact.kind)
         storage = self._storage.for_environment(ref.environment).storage
         marker = dropped_marker_path(artifact_id)
         marked = False

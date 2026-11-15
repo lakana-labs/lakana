@@ -311,6 +311,12 @@ lakana project-version show <id> --env dev
 lakana orphans --env dev                     # produced earlier, by no current deploy
 ```
 
+A table, view or artifact that a current deployment builds is changed in git: `lakana table
+delete` and `lakana artifact drop` refuse it, naming the file that defines it, and nothing may be
+created under a name a deployment declares. Remove the asset and deploy; the table becomes an
+orphan, which you can then drop (see
+[Drop and restore a table](drop-and-restore-a-table.md#when-a-project-builds-the-table)).
+
 An asset file may hold tabs and line breaks but no other control characters; a deploy and a dry
 run refuse it, naming the file and the line.
 
@@ -546,7 +552,8 @@ lakana undeploy analytics --env dev --yes
 Removes the deployment pointer and the identity its runs use (needs `DEPLOY`); refused while a run
 of the repository is queued or running there. Data is untouched: the repository's tables become
 orphans (`lakana orphans`), and its project versions stay as history. Their `health:` effects go:
-every [health signal](../reference/table-health.md) of an orphan warns.
+every [health signal](../reference/table-health.md) of an orphan warns. Only now can they be
+dropped: while a deployment builds a table, `lakana table delete` refuses it.
 
 An environment cannot be deleted while a repository is deployed in it: `lakana env delete ENV`
 answers 409, naming the deployed repositories. Undeploy each one first, then delete.

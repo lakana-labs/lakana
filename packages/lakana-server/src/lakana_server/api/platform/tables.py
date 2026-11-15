@@ -1100,8 +1100,9 @@ def create_table(
 
     Creates a managed Iceberg table from the columns in the request. Needs `CREATE_TABLE` on
     the namespace. Answers 404 when the environment or namespace does not exist, 409 when a
-    table of that name exists and 422 for an unknown column type, an empty or duplicate
-    column name, or a namespace not rooted at `bronze`, `silver` or `gold`.
+    table of that name exists or a deployed project declares the name (only git may take
+    it), and 422 for an unknown column type, an empty or duplicate column name, or a
+    namespace not rooted at `bronze`, `silver` or `gold`.
 
     Parameters
     ----------
@@ -1131,6 +1132,9 @@ def create_table(
         Mapped to 404 by `install_exception_handlers`.
     lakana_core.errors.AlreadyExistsError
         Mapped to 409, if a table of that name already exists.
+    lakana_core.errors.ConflictError
+        Mapped to 409, if a deployed project declares the name; the message names its file
+        to a caller who may read the name.
     lakana_core.errors.ValidationError
         Mapped to 422: an unrecognised column type, an empty or duplicate
         column name, or a namespace not rooted at `bronze`, `silver`, or
@@ -2065,7 +2069,7 @@ def get_table_definition_file(
     return _definition_file_out(answer)
 
 
-@router.delete("/{name}", status_code=204, responses=errors(403, 404))
+@router.delete("/{name}", status_code=204, responses=errors(403, 404, 409))
 def drop_table(
     env: str,
     path: str,
@@ -2081,7 +2085,10 @@ def drop_table(
     unless the operator changed it), during which it can be restored, and then they are
     deleted; an external table's files and a view are never deleted. With `purge` set, the
     files are due at once, the next clean-up deletes them and the table cannot be restored.
-    Answers 404 when the table does not exist.
+    Answers 404 when the table does not exist, and 409 when a deployed project builds the
+    table or view: what git defines is changed in git, so remove the asset there and deploy,
+    then drop it from Orphans. The message names the file to a caller who may read the
+    table. Neither `purge` nor break-glass gets past this.
 
     Parameters
     ----------
@@ -2103,6 +2110,8 @@ def drop_table(
     ------
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
+    lakana_core.errors.ConflictError
+        Mapped to 409, if a deployed project builds the table or view.
     """
     ns = NamespacePath.from_parts(path.split("."))
     catalog.drop_table(principal, TableRef(environment=env, namespace=ns, name=name), purge=purge)
@@ -2384,7 +2393,8 @@ def create_external_table(
     """Register an external table.
 
     Registers a raw-zone table backed by files that are already in storage. Needs
-    `CREATE_TABLE`. Answers 404 when the environment or namespace does not exist and 422
+    `CREATE_TABLE`. Answers 404 when the environment or namespace does not exist, 409 when
+    the name is taken or a deployed project declares it (only git may take it), and 422
     when `location_pattern` is not shaped `raw/<directory>/<file-glob>`, claims files
     another external table in the environment claims, leaves the storage root, or the
     `format` is not supported.
@@ -2416,6 +2426,9 @@ def create_external_table(
         `"raw/<dir...>/<basename-glob>"`, its claim overlaps another active
         external table's claim in this environment, it escapes the storage
         root, or `format` is unsupported.
+    lakana_core.errors.ConflictError
+        Mapped to 409, if a deployed project declares the name; the message names its file
+        to a caller who may read the name.
     lakana_core.errors.LakanaError
         Mapped to 500: the table just registered has no `external_config`,
         which `create_external_table` always sets.

@@ -129,8 +129,9 @@ Dropped artifact dev/models.scratch_model; its files are removed from storage, a
 - The name becomes free. If you create an artifact of that name again, it starts at version 1 as a
   new artifact. Grants given on the old artifact itself are gone; grants on its namespace still apply.
 - The drop includes versions that were stored after you were asked to confirm.
-- **If the asset that produces it is still deployed, its next run creates the artifact again**,
-  owned by the run's principal, at version 1. To stop that, remove or change the asset and deploy.
+- **An artifact that a deployed project produces cannot be dropped** (409, naming the file that
+  declares it). Remove the asset in git and deploy, then drop it; or free space now by deleting
+  single versions, as above.
 - A table is not dropped with this command. For a table, use the `table delete` subcommand.
 - The server removes the files inside the request, so a very large artifact can take minutes. A
   reverse proxy in front of the server must allow a request that long, or you see a 504 for a drop

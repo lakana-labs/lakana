@@ -925,7 +925,7 @@ def test_a_namespace_drop_takes_the_lock_before_it_looks_for_artifacts(
     catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
     with (
         _right_before_the_namespace_lock(session, late),
-        pytest.raises(ConflictError, match="still contains artifacts"),
+        pytest.raises(ConflictError, match="still holds 1 artifact;"),
     ):
         catalog.drop_namespace(principal, "dev", ARTIFACT_REF.namespace)
     assert session.scalars(select(Table.name)).all() == ["late"]

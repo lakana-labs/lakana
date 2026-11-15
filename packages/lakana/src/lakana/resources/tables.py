@@ -1151,6 +1151,9 @@ class Tables:
         ------
         lakana.errors.NotFound
             If no such table exists.
+        lakana.errors.Conflict
+            If a deployed project builds the table or view: remove its asset in git and
+            deploy, then drop it. The message names the file to someone who may read it.
         """
         namespace, name = _split_namespace_table(qualified_name)
         params = {"purge": "true"} if purge else {}

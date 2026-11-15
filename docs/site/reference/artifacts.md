@@ -477,6 +477,14 @@ The server removes the files inside the request, so an artifact with thousands o
 minutes (the SDK waits up to ten). A reverse proxy in front of the server must allow a request that
 long, or you see a 504 for a drop that still finishes.
 
+An artifact that a deployed project produces is defined in git, so the drop refuses it (409) and
+nothing is deleted:
+
+| You see | What it means | What to do |
+|---|---|---|
+| ``` `models.churn` is produced by a deployed project. Defined in analytics/assets/models/churn.py. ... ``` | A current deployment declares the asset that produces this artifact. | To free space now, delete single versions (`lakana artifact versions delete models.churn VERSION --env dev`). To drop it, remove the asset in git and deploy, then drop it from `lakana orphans --env dev`. |
+| `A deployed project defines this artifact; change it in git.` | The same, for someone who may not read the artifact. | Ask someone who may read it which project produces it. |
+
 ### uploads list
 
 <!-- source: docs/examples/train-and-predict/run.sh#uploads-list -->

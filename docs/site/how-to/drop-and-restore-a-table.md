@@ -23,6 +23,41 @@ lakana table delete silver.orders --yes
 The table is gone from `lakana table list` and from every query. The answer of the command says how
 to restore it.
 
+## When a project builds the table
+
+A table or view that a deployed project builds is defined in git, so it is changed in git.
+`lakana table delete` refuses it with a 409 and names the file that defines it:
+
+<!-- not tested: the refusal's text is asserted verbatim in packages/lakana-core/tests/test_git_owned_refusals.py -->
+```text
+`silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Remove it there and deploy; then drop it from Orphans. To build it again from git instead: `lakana table rebuild silver.clean --env dev --reason "…"`.
+```
+
+Neither `--purge` nor a break-glass reason gets past this, and the REST API, the UI and Iceberg
+clients refuse alike. To drop such a table:
+
+1. Remove its asset from the project in git and deploy. The table stays, now built by nothing.
+2. Find it among the orphans and drop it:
+
+<!-- not tested: needs a deployed project whose asset was removed; the drop itself is tested in the "drop" example above -->
+```bash
+lakana orphans --env dev
+lakana table delete silver.clean --env dev --yes
+```
+
+A name that a deployed project declares cannot be taken by anything else either: `lakana table
+create`, `lakana table create-external`, a `lakana load` or `PUT …/data` that would create the
+table, and an Iceberg client's create or rename onto the name all answer 409. The project's own
+runs still create the tables it declares. Choose another name, or remove the asset and deploy
+first.
+
+Some tables carry a declared name and can still be dropped: an external table, and a table under
+the name of an asset that produces an artifact. The refusal applies only when the project builds
+the same kind of object that is there.
+
+Someone who may not read the table is not told the repository or the file. They see
+`A deployed project defines this table; change it in git.`
+
 ## See what can be restored
 
 `--dropped` lists the tables dropped from a namespace whose files are not deleted yet, newest first:
@@ -206,6 +241,9 @@ reached: the clean-up deletes that one's files and then the environment, and
 
 | Message | Why | What to do |
 |---|---|---|
+| ``` `silver.orders` is built by a deployed project. Defined in analytics/assets/silver/orders.sql. ...``` | A deployed project builds the table; only git may remove it. | Remove the asset in git and deploy, then drop it from `lakana orphans --env dev`. See [When a project builds the table](#when-a-project-builds-the-table). |
+| ``` `silver.orders` is declared by a deployed project. Defined in analytics/assets/silver/orders.sql. ...``` | You tried to create a table under a name a deployed project declares. | Choose another name, or remove the asset in git and deploy first. |
+| `A deployed project defines this table; change it in git.` | As the two rows above, for someone who may not read the table. | Ask someone who may read it which project defines it. |
 | `No dropped table 'orders' in silver can be restored: ...` | Nothing of that name was dropped there, or its files are already deleted. | Check the name with `lakana table list silver --dropped`. |
 | `silver.orders cannot be restored as 'orders': a table of that name exists in silver now. ...` | A new table, view or artifact has the name. | Add `--as NEW_NAME`, or drop the new one first. |
 | `silver.orders cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the table was dropped with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |

@@ -360,7 +360,7 @@ def test_a_namespace_with_an_artifact_is_not_dropped(session: Session, tmp_path:
     with pytest.raises(ConflictError) as caught:
         catalog.drop_namespace(p, "dev", _REF.namespace)
     assert str(caught.value) == (
-        "Namespace gold still contains artifacts; drop each first (`lakana artifact drop`)."
+        "gold still holds 1 artifact; drop each first (`lakana artifact drop`)."
     )
 
 

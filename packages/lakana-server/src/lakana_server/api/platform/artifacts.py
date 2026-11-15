@@ -963,8 +963,10 @@ def drop_artifact(
     protected environment a reason for breaking the protection is needed. An artifact with
     thousands of files takes a while; if the server fails part-way, its periodic clean-up
     finishes the job. Answers 403 with one text whether or not the artifact exists, 404 when
-    the caller may drop the name and no artifact has it, 409 when the storage could not be
-    written (nothing was deleted) and 422 when the name belongs to a table or a view.
+    the caller may drop the name and no artifact has it, 409 when a deployed project
+    produces the artifact (remove the asset in git and deploy, or delete single versions)
+    or when the storage could not be written (nothing was deleted), and 422 when the name
+    belongs to a table or a view.
 
     Parameters
     ----------
@@ -989,7 +991,8 @@ def drop_artifact(
     lakana_core.errors.ValidationError
         Mapped to 422, if the name belongs to a table or a view.
     lakana_core.errors.ConflictError
-        Mapped to 409, if the storage could not be written; nothing was deleted.
+        Mapped to 409, if a deployed project produces the artifact, or the storage could
+        not be written; nothing was deleted.
     """
     service.drop_artifact(principal, artifact_ref(env, path, name))
 

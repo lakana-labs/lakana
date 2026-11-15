@@ -49,7 +49,7 @@ from pyiceberg.table.update import (
     TableUpdate,
 )
 from pyiceberg.types import NestedField
-from sqlalchemy import String, cast, delete, event, null, or_, select, text, update
+from sqlalchemy import String, cast, delete, event, func, null, or_, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
@@ -124,6 +124,7 @@ from lakana_core.catalog.files_read import (
     forget_table_files_read,
     record_files_read,
 )
+from lakana_core.catalog.git_owned import refuse_declared_name, refuse_owned_drop
 from lakana_core.catalog.glossary_read import TableTerms, TermRef, table_terms
 from lakana_core.catalog.health import (
     TableHealth,
@@ -470,6 +471,41 @@ def _not_exposed_artifact_message(dotted: str) -> str:
         f"{dotted} is an artifact; artifacts have no Iceberg metadata and are not exposed over "
         "the Iceberg REST catalog."
     )
+
+
+NAMESPACE_HOLDS_TABLES = "{namespace} still holds {n} table{s}."
+"""A namespace drop refused for the tables (and views) it holds, to a caller who may read them."""
+
+NAMESPACE_HOLDS_ARTIFACTS = (
+    "{namespace} still holds {n} artifact{s}; drop each first (`lakana artifact drop`)."
+)
+"""A namespace drop refused for the artifacts it holds, to a caller who may read them."""
+
+NAMESPACE_HOLDS_NAMESPACES = "{namespace} still holds {n} namespace{s}."
+"""A namespace drop refused for the namespaces under it."""
+
+NAMESPACE_NOT_EMPTY = "{namespace} is not empty; drop what it holds first."
+"""A namespace drop refused to a caller who may not read everything it holds."""
+
+
+def _holds(template: str, namespace: NamespacePath, n: int) -> str:
+    """Fill one of the namespace-not-empty messages.
+
+    Parameters
+    ----------
+    template
+        `NAMESPACE_HOLDS_TABLES`, `NAMESPACE_HOLDS_ARTIFACTS` or `NAMESPACE_HOLDS_NAMESPACES`.
+    namespace
+        The namespace.
+    n
+        How many it holds.
+
+    Returns
+    -------
+    str
+        The message, with the plural ``s`` only when `n` is not 1.
+    """
+    return template.format(namespace=namespace, n=n, s="" if n == 1 else "s")
 
 
 def _name_taken_message(existing: Table, name: str, namespace: NamespacePath) -> str:
@@ -2617,8 +2653,10 @@ class CatalogService:
             If the environment or the namespace does not exist (also when a
             concurrent drop wins the row lock).
         ConflictError
-            If the namespace still contains a table, an artifact or a child
-            namespace.
+            If the namespace still holds a table, an artifact or a child
+            namespace. The message counts them ("silver still holds 2 tables.") only when
+            the caller may read every table and artifact in it; otherwise it says only that
+            the namespace is not empty (`NAMESPACE_NOT_EMPTY`).
             `Table.namespace_id` cascades on delete at the database level,
             so this check is the only thing standing between a drop and
             silently destroying every table underneath it. A namespace
@@ -2646,36 +2684,67 @@ class CatalogService:
         if locked is None:
             self._session.rollback()
             raise NotFoundError(f"Namespace {path} not found in {env.name!r}.")
-        has_table = self._session.execute(
-            select(Table.id).where(
-                Table.namespace_id == ns.id, Table.table_type != TableType.ARTIFACT
-            )
-        ).first()
-        if has_table is not None:
-            raise ConflictError(f"Namespace {path} still contains tables.")
-        has_artifact = self._session.execute(
-            select(Table.id).where(
-                Table.namespace_id == ns.id, Table.table_type == TableType.ARTIFACT
-            )
-        ).first()
-        if has_artifact is not None:
-            raise ConflictError(
-                f"Namespace {path} still contains artifacts; drop each first "
-                "(`lakana artifact drop`)."
-            )
+        self._refuse_held(p, environment, ns, path)
         prefix = escape_like(path.joined() + NAMESPACE_SEPARATOR)
-        has_child = self._session.execute(
-            select(Namespace.id).where(
+        children = self._session.execute(
+            select(func.count())
+            .select_from(Namespace)
+            .where(
                 Namespace.environment_id == env.id,
                 Namespace.path.like(prefix + "%", escape="\\"),
             )
-        ).first()
-        if has_child is not None:
-            raise ConflictError(f"Namespace {path} still contains child namespaces.")
+        ).scalar_one()
+        if children:
+            raise ConflictError(_holds(NAMESPACE_HOLDS_NAMESPACES, path, children))
         revoke_attached(self._session, p, namespace=(env.id, path.joined()))
         self._session.delete(ns)
         self._guard.record_pending()
         self._session.commit()
+
+    def _refuse_held(
+        self, p: PrincipalRef, environment: str, ns: Namespace, path: NamespacePath
+    ) -> None:
+        """Refuse to drop a namespace that holds a table or an artifact, telling what `p` may see.
+
+        The counts are named only when `p` may read every table and artifact in it (one
+        `permits_each` batch); otherwise the message says only that it is not empty, which
+        neither discloses a hidden table nor gives a number that leaves some out.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        environment
+            Environment name.
+        ns
+            The namespace, locked.
+        path
+            Its path.
+
+        Raises
+        ------
+        ConflictError
+            If the namespace holds a table, a view or an artifact.
+        """
+        held = self._session.execute(
+            select(Table.name, Table.table_type).where(Table.namespace_id == ns.id)
+        ).all()
+        if not held:
+            return
+        readable = permits_each(
+            self._authz,
+            p,
+            [
+                (Action.READ_TABLE, Securable.table_scope(environment, path, row.name))
+                for row in held
+            ],
+        )
+        if not all(readable):
+            raise ConflictError(NAMESPACE_NOT_EMPTY.format(namespace=path))
+        artifacts = sum(row.table_type is TableType.ARTIFACT for row in held)
+        if len(held) > artifacts:
+            raise ConflictError(_holds(NAMESPACE_HOLDS_TABLES, path, len(held) - artifacts))
+        raise ConflictError(_holds(NAMESPACE_HOLDS_ARTIFACTS, path, artifacts))
 
     def update_namespace_properties(
         self,
@@ -2819,6 +2888,9 @@ class CatalogService:
             inside the environment's storage root; or if `ref.namespace`'s
             top-level component is not `bronze`, `silver`, or `gold`.
         ConflictError
+            If a deployed project declares the name, whatever it declares there: only git
+            may take it (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`, or
+            `GIT_OWNED_HIDDEN` to a caller who may not read the name); nothing is claimed.
             If the insert fails for a reason other than a name collision —
             for instance, the namespace was dropped between the checks above
             and the insert — or the sweep released the claim before the
@@ -2849,6 +2921,7 @@ class CatalogService:
             properties=properties,
             location=location,
             holder_run_id=claim_holder(p, None),
+            refuse_declared_for=p,
         )
         self._commit_sent = False
         try:
@@ -2879,6 +2952,7 @@ class CatalogService:
         properties: Mapping[str, str] | None,
         location: str | None,
         holder_run_id: uuid.UUID | None,
+        refuse_declared_for: PrincipalRef | None,
     ) -> _PreparedTable:
         """Validate a new managed table, build its metadata and claim its location.
 
@@ -2906,6 +2980,10 @@ class CatalogService:
             Must be `None`; see `create_table`.
         holder_run_id
             The run that makes the create, recorded on the claim (`claim_holder`).
+        refuse_declared_for
+            The caller to refuse when a deployed project declares `ref`
+            (`refuse_declared_name`), or `None` for a project's own run, which creates the
+            tables its project declares.
 
         Returns
         -------
@@ -2920,6 +2998,9 @@ class CatalogService:
             If a table, view or artifact of that name already exists.
         ValidationError
             As `create_table` documents.
+        ConflictError
+            If `refuse_declared_for` is given and a deployed project declares the name
+            (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); nothing is claimed.
         """
         if location is not None:
             raise ValidationError("Lakana assigns table locations; do not supply one.")
@@ -2936,6 +3017,8 @@ class CatalogService:
         taken = self._lookup_table(ns, ref.name)
         if taken is not None:
             raise AlreadyExistsError(_name_taken_message(taken, ref.name, ref.namespace))
+        if refuse_declared_for is not None:
+            refuse_declared_name(self._session, self._authz, refuse_declared_for, ref, env.id)
 
         # `table_location` validates `ref.name` itself; it is now the only
         # path a location can be derived from, `location=` above having
@@ -3200,7 +3283,9 @@ class CatalogService:
             unsupported, or if a column name of the sample file holds an invisible or
             line-breaking character (`refuse_hidden_characters`).
         ConflictError
-            If the insert fails for a reason other than a name collision —
+            If a deployed project declares the name, whatever it declares there
+            (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); checked before any storage
+            is read. If the insert fails for a reason other than a name collision —
             for instance, the namespace was dropped between the checks above
             and the insert.
         PermissionDenied
@@ -3220,6 +3305,7 @@ class CatalogService:
         taken = self._lookup_table(ns, ref.name)
         if taken is not None:
             raise AlreadyExistsError(_name_taken_message(taken, ref.name, ref.namespace))
+        refuse_declared_name(self._session, self._authz, p, ref, env.id)
         loc = parse_external_location(location_pattern)
         # Checked unlocked, before any storage I/O: listing and reading the claimed directory first
         # — as
@@ -8867,6 +8953,10 @@ class CatalogService:
         ValidationError
             If the result's schema can't be stored, or the write is refused
             mid-stream.
+        ConflictError
+            If `p` acts for no run and a deployed project declares the name
+            (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); a project's run creates the
+            tables its project declares.
         """
         self._commit_sent = False
         securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
@@ -8880,6 +8970,8 @@ class CatalogService:
             properties=properties,
             location=None,
             holder_run_id=claim_holder(p, query_run_id),
+            # A project's run creates the tables its project declares; a person may not.
+            refuse_declared_for=p if p.run_context is None else None,
         )
         writer = DataFileWriter(prepared.metadata, prepared.resolved.file_io, max_rows=max_rows)
         try:
@@ -9419,6 +9511,11 @@ class CatalogService:
         ValidationError
             If it is an artifact: those are dropped with `lakana artifact
             drop`, which also deletes the bytes.
+        ConflictError
+            If a deployed project builds the table or view (the declaration and the row are
+            of the same kind): only git may remove it
+            (`lakana_core.catalog.git_owned.GIT_OWNED_DROP`, or `GIT_OWNED_HIDDEN` to a
+            caller who may not read it). `purge` and break-glass do not get past this.
         PermissionDenied
             If the principal may not drop this table.
         """
@@ -9426,7 +9523,7 @@ class CatalogService:
             p, Action.DROP_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
         self._guard.check(p, ref.environment, WriteOperation.DROP_TABLE, table_target(ref))
-        _, row = self._find_table(ref)
+        ns, row = self._find_table(ref)
         if row.table_type is TableType.ARTIFACT:
             if not include_views:
                 raise NotFoundError(_not_exposed_artifact_message(ref.dotted()))
@@ -9438,6 +9535,7 @@ class CatalogService:
             raise NotFoundError(
                 f"{ref.dotted()} is a view; views are not exposed over the Iceberg REST catalog."
             )
+        refuse_owned_drop(self._session, self._authz, p, ref, ns.environment_id, row.kind)
         row = self._lock_table_row(ref, row.id)
         now = db_now(self._session)
         drop_row(
@@ -9769,6 +9867,9 @@ class CatalogService:
             also when another writer took the name at the same moment; for an
             artifact the message says so and names how to drop it.
         ConflictError
+            If a deployed project builds the source (moving it away would drop it from the
+            project's name, `GIT_OWNED_DROP`) or declares the destination
+            (`GIT_OWNED_CREATE`); see `lakana_core.catalog.git_owned`.
             If the write failed for another reason, such as the destination
             namespace being dropped at the same moment.
         PermissionDenied
@@ -9793,11 +9894,12 @@ class CatalogService:
                 "A table cannot be renamed across environments "
                 f"({source.environment!r} to {destination.environment!r})."
             )
-        _, row = self._find_table(source)
+        source_ns, row = self._find_table(source)
         if row.table_type is TableType.VIEW:
             raise NotFoundError(f"{source.dotted()} is a view; views can't be renamed here.")
         if row.table_type is TableType.ARTIFACT:
             raise NotFoundError(f"{source.dotted()} is an artifact; artifacts can't be renamed.")
+        refuse_owned_drop(self._session, self._authz, p, source, source_ns.environment_id, row.kind)
         env = self._find_environment(destination.environment)
         target_ns = self._find_namespace(env, destination.namespace)
         taken = self._lookup_table(target_ns, destination.name)
@@ -9805,6 +9907,7 @@ class CatalogService:
             raise AlreadyExistsError(
                 _name_taken_message(taken, destination.name, destination.namespace)
             )
+        refuse_declared_name(self._session, self._authz, p, destination, env.id)
         target_namespace_id = target_ns.id
         row.namespace_id = target_namespace_id
         row.name = destination.name

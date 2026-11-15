@@ -1414,6 +1414,9 @@ class Artifacts:
             protected and no break-glass reason was given.
         lakana.errors.NotFound
             If no artifact has this name.
+        lakana.errors.Conflict
+            If a deployed project produces the artifact: remove its asset in git and deploy,
+            then drop it, or delete single versions to free space now.
         lakana.errors.LakanaConnectionError
             If the server did not answer in time; the artifact may be dropped (the message
             says how to find out). If the connection could not be opened at all, the message
