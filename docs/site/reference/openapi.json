@@ -30759,6 +30759,17 @@
               }
             ],
             "title": "Picture"
+          },
+          "held_admin": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Admin"
           }
         },
         "type": "object",
@@ -30768,7 +30779,7 @@
           "is_active"
         ],
         "title": "PrincipalOut",
-        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does."
+        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does.\nheld_admin\n    Whether the principal holds or has ever held the `ADMIN` role on the instance, directly\n    or through a group. Such a person is recovered only by the server operator. `null`\n    unless the caller is an administrator (the `ADMIN` role on the instance)."
       },
       "ProfileIn": {
         "properties": {

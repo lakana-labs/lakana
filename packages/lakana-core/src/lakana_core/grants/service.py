@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from sqlalchemy import exists, or_, select, update
@@ -810,6 +811,33 @@ def mark_admin_holders(session: Session) -> None:
             .values(held_admin=True)
             .execution_options(synchronize_session="fetch")
         )
+
+
+def held_admin_ids(session: Session, rows: Iterable[Principal]) -> set[uuid.UUID]:
+    """Say which of these principals hold instance ADMIN now or have ever held it.
+
+    `Principal.held_admin`, or ADMIN covering them now (directly or through a group): a grant
+    made before the mark existed is backfilled by migration 0070, and this is the second net.
+    The one rule for who only the server operator may recover
+    (`lakana_core.identity.links.LinkService.issue_recovery`) and for what the principal read
+    routes show.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    rows
+        The principals.
+
+    Returns
+    -------
+    set of uuid.UUID
+        The ids of those that hold or held ADMIN.
+    """
+    found = list(rows)
+    unmarked = [row.id for row in found if not row.held_admin]
+    current = active_instance_admin_ids(session) if unmarked else set()
+    return {row.id for row in found if row.held_admin or row.id in current}
 
 
 def active_instance_admin_ids(

@@ -511,9 +511,9 @@
       "confirmFirst": "Issue one only after confirming outside Lakana, in person or by phone, that the person asked for it.",
       "continue": "Continue",
       "shownOnce": "It works once, for 1 hour, until {{date}}. Using it removes the passkeys of {{name}}, ends their sessions and tells every administrator. This is the only time Lakana shows it: copy it now and send it to {{name}} yourself.",
-      "adminTitle": "{{name}} is an administrator",
-      "operatorOnly": "Only the server operator can recover an administrator: run this where the server runs, with the bootstrap token.",
-      "operatorFor": "{{name}} is an administrator, so only the server operator can recover this account: run this where the server runs, with the bootstrap token.",
+      "adminTitle": "{{name}} is or was an administrator",
+      "operatorOnly": "Only the server operator can recover someone who is or was an administrator, even after the role was taken away: run this where the server runs, with the bootstrap token.",
+      "operatorFor": "{{name}} is or was an administrator, so only the server operator can recover this account (taking the role away does not change that): run this where the server runs, with the bootstrap token.",
       "operatorForYou": "If you lose every passkey, only the server operator can let you back in, because you are an administrator: they run this where the server runs, with the bootstrap token. Add a second passkey before you need it.",
       "command": "lakana recovery create {{name}}"
     }

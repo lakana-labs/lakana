@@ -71,6 +71,12 @@ export interface PrincipalOut {
   readonly is_active: boolean;
   /** The etag of the principal's profile picture, or null without one. */
   readonly picture: string | null;
+  /**
+   * Whether the principal holds or has ever held the ADMIN role on the instance, which makes the
+   * server operator the only one who can recover them; null unless the caller is an
+   * administrator. Absent from an older server.
+   */
+  readonly held_admin?: boolean | null;
 }
 
 /** What the permissions route answers, as far as finding an administrator goes. */
