@@ -477,3 +477,12 @@ def test_fix_takes_the_whole_changed_table_from_the_run(tmp_path: Path) -> None:
     assert fix(root, root / "docs/site", None, captures) == [root / "docs/site/p.md"]
     text = (root / "docs/site/p.md").read_text(encoding="utf-8")
     assert "```text\n" + printed + "```" in text
+
+
+def test_fix_keeps_an_unchanged_table_as_the_page_shows_it(tmp_path: Path) -> None:
+    """A table that matches after masking stays as written while another line is fixed."""
+    shown = "old\n" + _table(LONG_ID)
+    root, captures = _tree(tmp_path, BLOCK, shown, "new\n" + _table(SHORT_ID, 18))
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "```text\nnew\n" + _table(LONG_ID) + "```" in text
