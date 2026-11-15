@@ -938,7 +938,7 @@ def plan_history(
 
 
 def recreate_hint(table: str, environment: str) -> str:
-    """Tell how to start a history table again: drop it, and the next run creates it.
+    """Tell how to start a history table again: rebuild it from git.
 
     Parameters
     ----------
@@ -953,8 +953,9 @@ def recreate_hint(table: str, environment: str) -> str:
         The next step, with the command and what it costs.
     """
     return (
-        f"Drop the table (`lakana table delete {table} --env {environment}`) and let the next "
-        "run create it again (its history starts again with that run)."
+        f"Build it again from git: `lakana table rebuild {table} --env {environment} "
+        '--reason "…"` (it drops the table and queues the run that creates it; its history '
+        "starts again with that run)."
     )
 
 
@@ -1185,9 +1186,10 @@ def count_open_versions(
                 f"{table} has row-level delete files, which an Iceberg writer outside Lakana "
                 "added; a history write cannot keep its versions right with them, so nothing was "
                 "read or written. Compact the table with that writer so that no delete files "
-                "remain, or drop it (`lakana table delete "
-                f"{table} --env {environment}`) and let the next run create it again (its "
-                "history starts again with that run)."
+                "remain, or build it again from git "
+                f'(`lakana table rebuild {table} --env {environment} --reason "…"`, which drops '
+                "the table and queues the run that creates it; its history starts again with "
+                "that run)."
             )
         if (data_file.lower_bounds or {}).get(field_id) == _TRUE:
             count += data_file.record_count
@@ -1217,13 +1219,14 @@ def not_history_message(table: str, environment: str) -> str:
     Returns
     -------
     str
-        The message, naming the command that drops the table.
+        The message, naming the command that rebuilds the table.
     """
     return (
         f"{table} exists without the columns `write: history` adds; a history table is created "
-        f"by its first history run. Drop it (`lakana table delete {table} --env {environment}`) "
-        "so that the next run creates it with every row as an open version, or build the history "
-        "into a new asset."
+        f"by its first history run. Build it again from git: "
+        f'`lakana table rebuild {table} --env {environment} --reason "…"` (it drops the table '
+        "and queues the run that creates it, with every row as an open version), or build the "
+        "history into a new asset."
     )
 
 

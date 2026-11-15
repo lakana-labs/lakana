@@ -78,8 +78,9 @@ KEY_FLOAT = (
 
 HISTORY_COLUMN_MISSING = (
     "`{table}` has no column `{column}`, which `write: history` adds, so it was not built by its "
-    "history asset. Drop it (`lakana table delete {table} --env {environment}`) so that the next "
-    "run creates it, and deploy again."
+    "history asset. Build it again from git: `lakana table rebuild {table} --env "
+    '{environment} --reason "…"` (it drops the table and queues the run that creates it), and '
+    "deploy again."
 )
 """A history dimension's table without one of the columns its history write adds."""
 
