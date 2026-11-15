@@ -108,6 +108,20 @@ def test_describe_shows_an_artifact_without_columns(session: Session, tmp_path: 
     assert catalog.load_table_row(p, _REF).table_type is TableType.ARTIFACT
 
 
+def test_a_list_describes_an_artifact_as_describe_does_and_leaves_it_out_unreadable(
+    session: Session, tmp_path: Path
+) -> None:
+    """`describe_tables` describes an artifact row; without READ_TABLE it is left out, unnamed."""
+    catalog, p = _catalog(session, tmp_path)
+
+    (described,) = catalog.describe_tables(p, [_REF])
+    blind = CatalogService(session, StorageResolver(session), ActionAllowList())
+
+    assert described == catalog.describe_table(p, _REF)
+    assert (described.kind, described.actions) == ("ARTIFACT", ("drop",))
+    assert blind.describe_tables(p, [_REF]) == []
+
+
 def test_the_iceberg_surface_never_sees_an_artifact(session: Session, tmp_path: Path) -> None:
     catalog, p = _catalog(session, tmp_path)
     assert catalog.table_exists(p, _REF) is False
@@ -782,6 +796,7 @@ _ARTIFACT_HANDLING = {
         "load_table_at_check": "hides",
         "commit_table": "refuses",
         "describe_table": "describes",
+        "describe_tables": "describes",
         "row_actions": "describes",
         "policy_fields": "describes",
         "table_health": "describes",

@@ -79,10 +79,39 @@ def translation_rows(session: Session, row: Table) -> list[TextTranslation]:
     list of TextTranslation
         Its rows; empty without a statement when `text_languages` is empty or the row is new.
     """
-    state = inspect(row)
-    if not row.text_languages or state.pending or state.transient:
-        return []
-    return list(session.scalars(select(TextTranslation).where(TextTranslation.table_id == row.id)))
+    return translations_of(session, [row])[row.id]
+
+
+def translations_of(
+    session: Session, rows: Sequence[Table]
+) -> dict[uuid.UUID, list[TextTranslation]]:
+    """Read the translation rows of several tables in one statement, only of those that have any.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    rows
+        The tables.
+
+    Returns
+    -------
+    dict
+        Table id → its rows, as `translation_rows` gives them; no statement when no table has
+        `text_languages` (or every such row is new).
+    """
+    found: dict[uuid.UUID, list[TextTranslation]] = {row.id: [] for row in rows}
+    wanted = [
+        row.id
+        for row in rows
+        if row.text_languages and not inspect(row).pending and not inspect(row).transient
+    ]
+    if wanted:
+        for translation in session.scalars(
+            select(TextTranslation).where(TextTranslation.table_id.in_(wanted))
+        ):
+            found[translation.table_id].append(translation)
+    return found
 
 
 def _relist(row: Table, rows: Sequence[TextTranslation]) -> None:
