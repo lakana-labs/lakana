@@ -1,13 +1,69 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { TableMatchOut } from "../api";
+import type { TableMatchOut, TableTreeOut } from "../api";
 import { item, PAGE, TREE } from "../test/catalog";
 import { manageRoutes } from "../test/manage";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
 
 const EMPTY = { items: [], next_cursor: null, capped: false };
+const ALL = ["create_namespace", "create_external_table", "drop"] as const;
+
+/**
+ * The administrator's tree with `prod` holding other namespaces.
+ *
+ * @param namespaces - The namespaces of `prod`, each with every action.
+ * @returns The tree.
+ */
+function prodTree(namespaces: readonly { path: string; count: number }[]): TableTreeOut {
+  const count = namespaces.reduce((sum, entry) => sum + entry.count, 0);
+  return {
+    count,
+    environments: [
+      {
+        name: "prod",
+        count,
+        actions: ["create_namespace"],
+        namespaces: namespaces.map((entry) => ({ ...entry, actions: ALL })),
+      },
+    ],
+  };
+}
+
+/**
+ * Answers the tree's reads in turn: the first answer, then the next one for every later read.
+ *
+ * @param first - The tree before the change.
+ * @param after - The tree after it.
+ * @returns The route.
+ */
+function treeThen(first: TableTreeOut, after: TableTreeOut) {
+  let reads = 0;
+  return () => {
+    reads += 1;
+    return { status: 200, body: reads === 1 ? first : after };
+  };
+}
+
+/**
+ * Records every text the page shows from now on, to prove a sentence never appeared.
+ *
+ * @returns The texts seen, and a stop function.
+ */
+function watchTexts(): { readonly seen: string[]; readonly stop: () => void } {
+  const seen: string[] = [];
+  const observer = new MutationObserver(() => {
+    seen.push(document.body.textContent);
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  return {
+    seen,
+    stop: () => {
+      observer.disconnect();
+    },
+  };
+}
 
 /**
  * The list's rows below the head.
@@ -258,7 +314,7 @@ describe("CatalogList", () => {
     expect(
       await screen.findByText("No tables in gold yet. Tables appear once a project is deployed."),
     ).toBeInTheDocument();
-    expect(screen.getByText("lakana deploy --env prod")).toBeInTheDocument();
+    expect(screen.getByText("lakana deploy --env 'prod'")).toBeInTheDocument();
   });
 
   it("moves focus to the first new row after Show more", async () => {
@@ -1058,6 +1114,147 @@ describe("CatalogList", () => {
         "href",
         "/catalog?env=prod&view=orphans",
       );
+    });
+  });
+  describe("the place menu", () => {
+    it("shows Actions above the tree for the chosen place only", async () => {
+      const { user } = renderShell("/catalog?env=prod&ns=gold", { routes: manageRoutes() });
+
+      const button = await screen.findByRole("button", { name: "Actions for gold" });
+      const side = button.closest("aside") as HTMLElement;
+      const tree = within(side).getByRole("treegrid");
+      expect(button.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      expect(screen.getAllByRole("button", { name: /^Actions for/ })).toHaveLength(1);
+
+      await user.click(within(tree).getByRole("link", { name: /^All tables/ }));
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: /^Actions for/ })).not.toBeInTheDocument();
+      });
+    });
+
+    it("after New namespace reloads the tree, goes to the new place and focuses Created namespace {ns}", async () => {
+      const { user, router, server } = renderShell("/catalog?env=prod&ns=gold", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": treeThen(
+            prodTree([{ path: "gold", count: 4 }]),
+            prodTree([
+              { path: "gold", count: 4 },
+              { path: "gold.finance", count: 0 },
+            ]),
+          ),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+      await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+      const texts = watchTexts();
+
+      await user.type(await screen.findByRole("textbox", { name: "Path" }), "finance{Enter}");
+
+      const note = await screen.findByText("Created namespace gold.finance.");
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      texts.stop();
+      expect(router.state.location.search).toBe("?env=prod&ns=gold.finance");
+      expect(server.sent.filter((request) => request.path === "/api/v1/tables/tree")).toHaveLength(
+        2,
+      );
+      expect(screen.getByRole("link", { name: "finance, 0 tables" })).toBeInTheDocument();
+      expect(texts.seen.some((text) => text.includes("There is no namespace"))).toBe(false);
+      expect(screen.getByRole("button", { name: "Actions for gold.finance" })).toBeInTheDocument();
+    });
+
+    it("says the new namespace is not shown when the tree leaves it out", async () => {
+      const before = prodTree([{ path: "gold", count: 4 }]);
+      const { user, router } = renderShell("/catalog?env=prod&ns=gold", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": treeThen(before, prodTree([{ path: "gold", count: 4 }])),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+      await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+      const texts = watchTexts();
+
+      await user.type(await screen.findByRole("textbox", { name: "Path" }), "finance{Enter}");
+
+      const note = await screen.findByText(
+        "Created namespace gold.finance. You may not read the namespaces of prod, so the tree does not show it while it holds no table you may read.",
+      );
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      texts.stop();
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      expect(texts.seen.some((text) => text.includes("There is no namespace"))).toBe(false);
+    });
+
+    it("after Delete namespace goes to the place above with fresh counts and focuses Deleted namespace {ns}", async () => {
+      const { user, router, server } = renderShell("/catalog?env=prod&ns=gold.archive", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": treeThen(
+            prodTree([
+              { path: "gold", count: 4 },
+              { path: "gold.archive", count: 0 },
+            ]),
+            prodTree([{ path: "gold", count: 3 }]),
+          ),
+          "DELETE /api/v1/environments/prod/namespaces/gold.archive": { status: 204 },
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold.archive" }));
+      await user.click(screen.getByRole("menuitem", { name: "Delete namespace…" }));
+      await user.click(await screen.findByRole("button", { name: "Delete the namespace" }));
+
+      const note = await screen.findByText("Deleted namespace gold.archive.");
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      expect(server.sent.filter((request) => request.path === "/api/v1/tables/tree")).toHaveLength(
+        2,
+      );
+      expect(await screen.findByRole("link", { name: "gold, 3 tables" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /archive/ })).not.toBeInTheDocument();
+    });
+
+    it("goes to the environment after deleting a namespace at its top", async () => {
+      const { user, router } = renderShell("/catalog?env=prod&ns=silver", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": treeThen(
+            prodTree([
+              { path: "gold", count: 4 },
+              { path: "silver", count: 0 },
+            ]),
+            prodTree([{ path: "gold", count: 4 }]),
+          ),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for silver" }));
+      await user.click(screen.getByRole("menuitem", { name: "Delete namespace…" }));
+      await user.click(await screen.findByRole("button", { name: "Delete the namespace" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Deleted namespace silver.")).toHaveFocus();
+      });
+      expect(router.state.location.search).toBe("?env=prod");
+    });
+
+    it("quotes the environment in the deploy command of an empty place", async () => {
+      renderShell("/catalog?env=dev's", {
+        routes: {
+          "GET /api/v1/tables/tree": {
+            status: 200,
+            body: { count: 0, environments: [{ name: "dev's", count: 0, namespaces: [] }] },
+          },
+          "GET /api/v1/tables": { status: 200, body: EMPTY },
+        },
+      });
+
+      expect(await screen.findByText("lakana deploy --env 'dev'\\''s'")).toBeInTheDocument();
     });
   });
 });

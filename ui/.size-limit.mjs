@@ -39,6 +39,9 @@ const NAMED_LIMITS = [
   // list's skeleton as a component; the limit holds.
   // Measured 30.46 kB (2026-11-16) with the table page's lazy Actions menu in the heading row; the
   // limit holds.
+  // Measured 31.05 kB (2026-11-16) with the lazy loaders of the place menu and its note, the
+  // move to a namespace once the tree read after its creation arrives, and the quoted
+  // environment of the deploy command; the limit holds.
   { name: "Catalog", prefix: "CatalogScreen-", limit: "32.6 kB" },
   // Measured 3.6 kB (2026-11-16) + 10 %: the Catalog's views other than All, loaded when one is
   // chosen: the choice of an environment, the Dropped list with its paging, Undrop and its
@@ -52,7 +55,21 @@ const NAMED_LIMITS = [
   { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.75 kB" },
   // Measured 2.29 kB (2026-11-16) + 10 %: the Drop dialog with the break-glass reason field and
   // the strings of the actions, which the table's Actions and the Catalog's views share.
-  { name: "the Drop dialog", prefix: "DropDialog-", limit: "2.52 kB" },
+  // Lowered to the measured 0.81 kB (2026-11-16) + 10 %: the reason field, the confirm row, the
+  // protection hook and the actions' strings moved into a chunk of their own (below) once the
+  // place menu became their third importer.
+  { name: "the Drop dialog", prefix: "DropDialog-", limit: "0.89 kB" },
+  // Measured 1.91 kB (2026-11-16) + 10 %: the break-glass reason field, the confirm row, the hook
+  // that reads the protection and the actions' strings, shared by the table's Actions, the
+  // Catalog's views and the place menu.
+  { name: "the reason and confirm row", prefix: "ProtectedReason-", limit: "2.1 kB" },
+  // Measured 1.94 kB (2026-11-16) + 10 %: the Catalog's place menu with New namespace and Delete
+  // namespace, their dialogs and the strings of the places, loaded once the tree is known and an
+  // environment or a namespace is chosen.
+  { name: "the place menu", prefix: "PlaceActions-", limit: "2.13 kB" },
+  // Measured 393 B (2026-11-16) + 10 %: the note after a namespace was created or deleted,
+  // loaded only when the address carries it.
+  { name: "the place note", prefix: "PlaceNote-", limit: "0.43 kB" },
   // Measured 0.94 kB (2026-11-16) + 10 %: the API calls of catalog management, shared by the
   // table's Actions and the Catalog's views.
   { name: "the calls of catalog management", prefix: "manage-", limit: "1.04 kB" },

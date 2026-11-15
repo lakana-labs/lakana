@@ -1,0 +1,26 @@
+{
+  "menu": {
+    "button": "Actions",
+    "name": "Actions for {{place}}",
+    "newNamespace": "New namespace…",
+    "newExternalTable": "New external table…",
+    "delete": "Delete namespace…",
+    "onlyEmpty": "Only an empty namespace can be deleted."
+  },
+  "create": {
+    "title": "New namespace in {{place}}",
+    "path": "Path",
+    "pathText": "Dotted, such as gold.sales.",
+    "confirm": "Create"
+  },
+  "delete": {
+    "title": "Delete namespace {{namespace}}?",
+    "text": "Only an empty namespace can be deleted. The grants given on it are revoked.",
+    "confirm": "Delete the namespace"
+  },
+  "note": {
+    "created": "Created namespace {{namespace}}.",
+    "deleted": "Deleted namespace {{namespace}}.",
+    "notShown": "Created namespace {{namespace}}. You may not read the namespaces of {{environment}}, so the tree does not show it while it holds no table you may read."
+  }
+}
