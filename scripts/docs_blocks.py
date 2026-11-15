@@ -665,6 +665,7 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
 Each rule is ``(name, pattern, replacement)``, applied in this order to the page and to the
 captured text alike, so a page that shows a real identifier and a run that prints another still
 match. A rule is one row of the table in ``docs/agent/testing.md``; keep the two equal.
+`comparable` then collapses the table padding a mask leaves behind.
 """
 
 
@@ -684,6 +685,34 @@ def mask(text: str) -> str:
     for _, pattern, replacement in MASKS:
         text = pattern.sub(replacement, text)
     return text
+
+
+_TABLE_LINE = re.compile(r"[│┃┏┓┗┛┡┩┞┦┣┫┠┨├┤┌┐└┘┬┴┼┳┻╇╈╋]")
+_PADDING = re.compile(r" {2,}")
+_RULE = re.compile(r"[─━═]{2,}")
+
+
+def comparable(line: str) -> str:
+    """Hide the padding a mask leaves behind in a table, for a comparison only.
+
+    A table pads every cell to its widest value, so after a mask the widths differ when the
+    values did (a 16-digit and a 19-digit snapshot id). In a line that holds a box-drawing
+    character, runs of spaces become one space and runs of ``─ ━ ═`` become one. A line
+    without such a character is returned unchanged. Never write the result into a page.
+
+    Parameters
+    ----------
+    line
+        One line, already masked.
+
+    Returns
+    -------
+    str
+        The line with the padding collapsed.
+    """
+    if not _TABLE_LINE.search(line):
+        return line
+    return _PADDING.sub(" ", _RULE.sub("─", line)).rstrip()
 
 
 def redact(text: str) -> str:
@@ -798,7 +827,9 @@ def _merge(shown: str, printed: str) -> str:
     page_rest = [x for x in page if not is_progress(x)]
     run_rest = [x for x in run if not is_progress(x)]
     matcher = difflib.SequenceMatcher(
-        None, [mask(x) for x in page_rest], [mask(x) for x in run_rest]
+        None,
+        [comparable(mask(x)) for x in page_rest],
+        [comparable(mask(x)) for x in run_rest],
     )
     out: list[str] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
@@ -840,8 +871,8 @@ def _output_problem(
     str or None
         The problem with a diff of the masked texts, or ``None`` if they are equal.
     """
-    page = [mask(x) for x in _lines(block.body) if not is_progress(x)]
-    run = [mask(x) for x in _lines(printed) if not is_progress(x)]
+    page = [comparable(mask(x)) for x in _lines(block.body) if not is_progress(x)]
+    run = [comparable(mask(x)) for x in _lines(printed) if not is_progress(x)]
     if page == run:
         return None
     diff = "\n".join(

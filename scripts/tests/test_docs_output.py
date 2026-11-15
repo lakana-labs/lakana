@@ -402,3 +402,79 @@ def test_every_mask_is_listed_in_the_testing_guide() -> None:
     guide = (Path(__file__).resolve().parents[2] / "docs/agent/testing.md").read_text("utf-8")
     missing = [name for name, _, _ in MASKS if f"| `{name}` |" not in guide]
     assert missing == [], f"add these rules to the masks table in docs/agent/testing.md: {missing}"
+
+
+TABLE = (
+    "┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓\n"
+    "┃ when                ┃ id     ┃\n"
+    "┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━┩\n"
+    "│ 2026-11-15T10:00:00 │ {id} │\n"
+    "└─────────────────────┴────────┘\n"
+)
+LONG_ID = "1234567890123456789"
+SHORT_ID = "123456789012345678"
+
+
+def _table(snapshot: str, width: int = 19) -> str:
+    """Build a Rich-style table whose id column is padded to `width`.
+
+    Parameters
+    ----------
+    snapshot
+        The id cell.
+    width
+        The column's width.
+
+    Returns
+    -------
+    str
+        The table.
+    """
+    text = TABLE.replace("┳━━━━━━━━┓", "┳" + "━" * (width + 2) + "┓")
+    text = text.replace("╇━━━━━━━━┩", "╇" + "━" * (width + 2) + "┩")
+    text = text.replace("┴────────┘", "┴" + "─" * (width + 2) + "┘")
+    text = text.replace("┃ id     ┃", "┃ id" + " " * (width - 2) + " ┃")
+    return text.replace("{id} │", snapshot.ljust(width) + " │")
+
+
+def test_table_padding_left_by_a_shorter_masked_value_is_ignored(tmp_path: Path) -> None:
+    """A snapshot id one digit shorter changes the padding, not the comparison."""
+    root, captures = _tree(tmp_path, BLOCK, _table(LONG_ID), _table(SHORT_ID, 18))
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+    root2, captures2 = _tree(tmp_path / "b", BLOCK, _table(LONG_ID), _table(SHORT_ID + "6"))
+    assert check(root2, root2 / "docs/site", None, captures2) == ([], 0)
+
+
+def test_a_changed_cell_in_a_table_still_fails(tmp_path: Path) -> None:
+    """Collapsing padding does not hide a changed value."""
+    shown = _table(LONG_ID)
+    root, captures = _tree(tmp_path, BLOCK, shown, shown.replace("10:00:00", "10:00:00 x"))
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_a_changed_cell_text_in_a_table_still_fails(tmp_path: Path) -> None:
+    """A different word in a cell is reported."""
+    shown = _table("ok")
+    root, captures = _tree(tmp_path, BLOCK, shown, _table("failed", 19))
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_a_changed_header_in_a_table_still_fails(tmp_path: Path) -> None:
+    """A renamed or missing column is reported."""
+    shown = _table(LONG_ID)
+    root, captures = _tree(tmp_path, BLOCK, shown, shown.replace("┃ id ", "┃ ref"))
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_fix_writes_the_real_table_not_the_collapsed_one(tmp_path: Path) -> None:
+    """A changed table is written with its padding; an equal one keeps the page's text."""
+    shown = _table(LONG_ID)
+    printed = _table(SHORT_ID, 16).replace("┃ id ", "┃ ref")
+    root, captures = _tree(tmp_path, BLOCK, shown, printed)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "┃ ref" in text
+    assert "─" * 18 in text
