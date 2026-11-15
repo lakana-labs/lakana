@@ -15,6 +15,7 @@ import tarfile
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any, NamedTuple, cast
@@ -26,7 +27,14 @@ from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 from worker_git_helpers import GitHttpServer, bare_copy, commit, git, make_repo
 
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable, SecurableKind
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    PrincipalRef,
+    RunContext,
+    Securable,
+    SecurableKind,
+)
 from lakana_core.catalog.identity import resolve_table_id
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
@@ -53,9 +61,14 @@ from lakana_core.models import (
     Repository,
     RepositoryKind,
     Run,
+    RunKind,
+    RunStatus,
     RunTrigger,
     Secret,
     SecretUseKind,
+    TaskRun,
+    TaskStatus,
+    WriteMode,
 )
 from lakana_core.models.table import Table, TableType
 from lakana_core.projects.deploys import CONFLICT_MESSAGE, DeployService
@@ -1761,6 +1774,90 @@ def _produced_by_another_repository(session: Session, admin: PrincipalRef, world
     assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
 
 
+def _created_by_a_run(
+    session: Session, principal: PrincipalRef, ref: TableRef, schema: Schema
+) -> None:
+    """Create a table the way a project's run does: a create-mode write of no rows.
+
+    A person may not create a table under a name a deployed project declares
+    (`lakana_core.catalog.git_owned`), so a test that needs the table of a declared name creates
+    it as a running task of another repository's run, which builds only this table.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    principal
+        The admin.
+    ref
+        The table.
+    schema
+        Its schema.
+    """
+    environment = session.scalars(
+        select(Environment).where(Environment.name == ref.environment)
+    ).one()
+    repository = Repository(
+        id=uuid.uuid4(),
+        name=f"builder{uuid.uuid4().hex[:6]}",
+        kind=RepositoryKind.HTTPS,
+        url="https://h/builder.git",
+    )
+    session.add(repository)
+    session.flush()
+    version = JobVersion(
+        id=uuid.uuid4(),
+        repository_id=repository.id,
+        environment_id=environment.id,
+        commit_sha="c" * 40,
+        manifest_json={
+            "version": 3,
+            "assets": [{"table": ref.dotted(), "kind": "sql", "inputs": {}, "sql": ""}],
+            "edges": [],
+        },
+        code_uri="file:///x",
+        code_sha256="0" * 64,
+    )
+    session.add(version)
+    session.flush()
+    run = Run(
+        id=uuid.uuid4(),
+        environment_id=environment.id,
+        repository_id=repository.id,
+        job_version_id=version.id,
+        run_as_principal_id=principal.id,
+        kind=RunKind.FULL,
+        status=RunStatus.RUNNING,
+        selection_json={},
+    )
+    session.add(run)
+    session.flush()
+    task = TaskRun(
+        id=uuid.uuid4(),
+        run_id=run.id,
+        asset=ref.dotted(),
+        status=TaskStatus.RUNNING,
+        claim_count=1,
+        attempt=1,
+        lease_owner="w1",
+        lease_expires_at=datetime.now(UTC) + timedelta(days=1),
+        max_attempts=3,
+        timeout_seconds=60,
+        retry_delay_seconds=0,
+        upstream_json=[],
+    )
+    session.add(task)
+    session.commit()
+    CatalogService(session, StorageResolver(session), AllowAllAuthorization()).write_batches(
+        dataclasses.replace(principal, run_context=RunContext(task_run_id=task.id, claim=1)),
+        ref,
+        mode=WriteMode.CREATE,
+        schema=schema.as_arrow(),
+        batches=iter(()),
+    )
+    session.commit()
+
+
 def _row(session: Session, namespace: str, name: str, table_type: TableType) -> None:
     """Make `dev.namespace.name` a catalog row of `table_type`.
 
@@ -1775,14 +1872,14 @@ def _row(session: Session, namespace: str, name: str, table_type: TableType) -> 
     table_type
         The type to give the row.
     """
-    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
     admin = session.execute(select(Principal).where(Principal.name == "admin")).scalar_one()
     admin_ref = PrincipalRef(id=admin.id, name=admin.name, type=admin.type)
     path = NamespacePath.from_parts([namespace])
-    catalog.create_table(
+    _created_by_a_run(
+        session,
         admin_ref,
         TableRef("dev", path, name),
-        schema=Schema(NestedField(1, "id", LongType(), required=True)),
+        Schema(NestedField(1, "id", LongType(), required=True)),
     )
     table_id = resolve_table_id(session, "dev", namespace, name)
     assert table_id is not None
@@ -3380,10 +3477,11 @@ def _build_table(session: Session, principal: PrincipalRef, dotted: str) -> None
         catalog.create_namespace(principal, "dev", path)
     except AlreadyExistsError:
         session.rollback()  # the environment created it
-    catalog.create_table(
+    _created_by_a_run(
+        session,
         principal,
         TableRef("dev", path, name),
-        schema=Schema(NestedField(1, "id", LongType(), required=True)),
+        Schema(NestedField(1, "id", LongType(), required=True)),
     )
 
 
@@ -4164,11 +4262,11 @@ def test_a_table_whose_columns_cannot_be_read_is_counted_in_its_assets_order(
     commit(world.repo_path, files)
     assert _submit_and_run(session, principal, world).status is DeployStatus.SUCCEEDED
 
-    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
-    catalog.create_table(
+    _created_by_a_run(
+        session,
         principal,
         TableRef("dev", NamespacePath.from_parts(["bronze"]), "wide"),
-        schema=Schema(NestedField(1, "x", LongType(), required=False)),
+        Schema(NestedField(1, "x", LongType(), required=False)),
     )
 
     def unreadable(*args: object, **kwargs: object) -> object:
