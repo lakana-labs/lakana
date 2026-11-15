@@ -422,3 +422,74 @@ def test_the_server_stores_what_the_setting_says(hashing_client: TestClient) -> 
     )
     assert granted.status_code == 201, granted.text
     assert _sql_seen(hashing_client) == fingerprint(_SQL)
+
+
+def _event_of_a_newer_release(client: TestClient) -> None:
+    """Store an event whose type this release does not know, as a downgrade leaves one.
+
+    Bob records a `GRANT_CREATED` with a shown field (`action`) and a field nobody classified,
+    then its stored type is rewritten to a value `AuditEventType` lacks.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    """
+    created = client.post(
+        "/api/v1/principals", headers=AUTH_HEADER, json={"name": "newer", "type": "USER"}
+    )
+    assert created.status_code == 201, created.text
+    with Session(client.app.state.engine) as session:
+        newer = session.scalars(select(Principal.id).where(Principal.name == "newer")).one()
+        with pytest.warns(UserWarning):
+            AuditService(session).record(
+                newer,
+                AuditEventType.GRANT_CREATED,
+                securable=Securable.environment_scope("dev"),
+                detail={"action": "READ_TABLE", "from_the_future": "secret value"},
+                commit=True,
+            )
+    with client.app.state.engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE audit_events SET event_type = 'WIDGET_FROBNICATED' "
+                "WHERE event_type = 'GRANT_CREATED' AND securable_environment = 'dev'"
+            )
+        )
+
+
+def test_an_event_type_this_release_does_not_know_is_listed_as_unknown(
+    client: TestClient,
+) -> None:
+    """After a downgrade, the list still answers and shows the stored type's text (#613)."""
+    _event_of_a_newer_release(client)
+
+    response = client.get("/api/v1/audit-events", headers=AUTH_HEADER)
+
+    assert response.status_code == 200, response.text
+    [event] = [e for e in response.json()["items"] if e["event_type"] == "UNKNOWN"]
+    assert event["event_type_raw"] == "WIDGET_FROBNICATED"
+    assert event["securable_environment"] == "dev"
+    assert event["detail"]["action"] == "READ_TABLE"
+    assert event["detail"]["from_the_future"] == {"hidden": True}
+    known = [e for e in response.json()["items"] if e["event_type"] != "UNKNOWN"]
+    assert known
+    assert all(e["event_type_raw"] == e["event_type"] for e in known)
+
+
+def test_a_known_type_filter_leaves_out_the_unknown_event(client: TestClient) -> None:
+    _event_of_a_newer_release(client)
+
+    response = client.get(
+        "/api/v1/audit-events", headers=AUTH_HEADER, params={"event_type": "PRINCIPAL_CREATED"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert {e["event_type"] for e in response.json()["items"]} == {"PRINCIPAL_CREATED"}
+
+
+@pytest.mark.parametrize("value", ["UNKNOWN", "WIDGET_FROBNICATED"])
+def test_the_type_filter_accepts_only_the_known_types(client: TestClient, value: str) -> None:
+    response = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params={"event_type": value})
+
+    assert response.status_code == 422, response.text

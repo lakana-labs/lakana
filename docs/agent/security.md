@@ -5550,6 +5550,17 @@ already allows.
   new instance-scoped `Action.READ_AUDIT_LOG` — the log is itself sensitive (a `WHERE`
   clause can contain a customer's name), so it sits behind its own privilege rather than
   being globally readable, exactly as planned.
+- **A stored event type this release does not know reads as `AuditEventType.UNKNOWN` (#613).**
+  A newer release can write one before a downgrade. `event_type` is a VARCHAR(64) without a check
+  constraint on SQLite and Postgres (never a native enum), read through
+  `lakana_core.models.audit_event.StoredEventType`, which maps an unknown text to `UNKNOWN` instead
+  of failing the page with a `LookupError`; `AuditService.query` reads the stored text alongside
+  (`event_type_raw` in the answer), so a downgrade hides no row and no type. `UNKNOWN` is never
+  written (`AuditService.record` and the column type refuse it) and never a filter (422). It has no
+  `CONTENT_FIELDS` entry, so of another principal's unknown event a reader without
+  `READ_QUERY_TEXT` sees only the fields in `SHOWN_FIELDS` (a field name means the same in every
+  event) and every other field withheld. Pins: `test_an_event_type_this_release_does_not_know_*`
+  (core and route).
 - **Content in other people's audit events (query text and column values) needs `READ_QUERY_TEXT`,
   which no role carries (#88, #239).**
   `ROLE_ACTIONS[ADMIN]` is `frozenset(Action) - {READ_QUERY_TEXT}`; the right is granted as a single

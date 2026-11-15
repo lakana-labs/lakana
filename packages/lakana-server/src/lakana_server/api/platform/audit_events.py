@@ -142,6 +142,7 @@ def _to_out(event: ShownAuditEvent) -> AuditEventOut:
         occurred_at=event.occurred_at,
         principal_id=event.principal_id,
         event_type=event.event_type,
+        event_type_raw=event.event_type_raw,
         securable_kind=event.securable_kind,
         securable_environment=event.securable_environment,
         securable_namespace=_joined_to_dotted(event.securable_namespace),
@@ -173,13 +174,15 @@ def list_audit_events(
     next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the
     instance. Another principal's query text and column values are hidden unless the caller
     also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than
-    `connection`, or an `event_type` that is not of `kind`, and 503 when the read
-    had to be recorded in the audit log and could not be; no events are returned then.
+    `connection`, an `event_type` that is not of `kind`, or `event_type=UNKNOWN`, and 503 when
+    the read had to be recorded in the audit log and could not be; no events are returned then.
+    An event whose type this release does not know (written by a newer release before a
+    downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.
 
     Parameters
     ----------
     event_type
-        Only return events of this type, if given.
+        Only return events of this type, if given; `UNKNOWN` is refused.
     kind
         Only return events of this kind, if given: ``connection`` is every ``CONNECTION_*``
         type. Combines with the other filters; with `event_type`, the type must be of the kind.
@@ -212,8 +215,8 @@ def list_audit_events(
     PermissionDenied
         If `p` may not read the audit log.
     ValidationError
-        If `cursor` is malformed, `kind` is not a kind, or `event_type` is not of `kind`;
-        mapped to 422.
+        If `cursor` is malformed, `kind` is not a kind, `event_type` is not of `kind`, or
+        `event_type` is `UNKNOWN`; mapped to 422.
     lakana_core.errors.AuditUnavailableError
         If the read had to be recorded in the audit log and could not be; mapped to 503 with
         `Retry-After`, and no event is returned.

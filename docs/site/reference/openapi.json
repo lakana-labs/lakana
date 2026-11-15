@@ -18749,7 +18749,7 @@
           "audit"
         ],
         "summary": "List audit events",
-        "description": "Lists one page of audit events, newest first, with optional filters. The cursor of the next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than `connection`, or an `event_type` that is not of `kind`, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then.",
+        "description": "Lists one page of audit events, newest first, with optional filters. The cursor of the next page is in the `X-Next-Cursor` response header. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than `connection`, an `event_type` that is not of `kind`, or `event_type=UNKNOWN`, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.",
         "operationId": "list_audit_events_api_v1_audit_events_get",
         "parameters": [
           {
@@ -18767,7 +18767,7 @@
               ],
               "title": "Event Type"
             },
-            "description": "Only return events of this type, if given."
+            "description": "Only return events of this type, if given; `UNKNOWN` is refused."
           },
           {
             "name": "kind",
@@ -24864,6 +24864,10 @@
           "event_type": {
             "$ref": "#/components/schemas/AuditEventType"
           },
+          "event_type_raw": {
+            "type": "string",
+            "title": "Event Type Raw"
+          },
           "securable_kind": {
             "anyOf": [
               {
@@ -24919,6 +24923,7 @@
           "occurred_at",
           "principal_id",
           "event_type",
+          "event_type_raw",
           "securable_kind",
           "securable_environment",
           "securable_namespace",
@@ -24926,7 +24931,7 @@
           "detail"
         ],
         "title": "AuditEventOut",
-        "description": "Response body for one audit event.\n\nParameters\n----------\nid\n    The event's id.\noccurred_at\n    When the event occurred.\nprincipal_id\n    The principal attributed to this event, or `None` for a failed\n    authentication.\nevent_type\n    The kind of event.\nsecurable_kind\n    Which tier of the securable hierarchy this event's target belongs\n    to, if any.\nsecurable_environment\n    The environment this event's target belongs to, if any.\nsecurable_namespace\n    The dot-joined namespace path this event's target belongs to, if\n    any.\nsecurable_table\n    The table this event's target refers to, if any.\ndetail\n    Event-specific facts not already captured by the fields above."
+        "description": "Response body for one audit event.\n\nParameters\n----------\nid\n    The event's id.\noccurred_at\n    When the event occurred.\nprincipal_id\n    The principal attributed to this event, or `None` for a failed\n    authentication.\nevent_type\n    The kind of event; `UNKNOWN` for a type this release does not know, which a newer\n    release wrote before a downgrade.\nevent_type_raw\n    The type as stored: the same as `event_type`, except for `UNKNOWN`, where it is the\n    text the newer release wrote.\nsecurable_kind\n    Which tier of the securable hierarchy this event's target belongs\n    to, if any.\nsecurable_environment\n    The environment this event's target belongs to, if any.\nsecurable_namespace\n    The dot-joined namespace path this event's target belongs to, if\n    any.\nsecurable_table\n    The table this event's target refers to, if any.\ndetail\n    Event-specific facts not already captured by the fields above."
       },
       "AuditEventPage": {
         "properties": {
@@ -25073,7 +25078,8 @@
           "PROFILE_PICTURE_SET",
           "PROFILE_PICTURE_REMOVED",
           "REPOSITORY_PROBE_REQUESTED",
-          "DEPLOY_KEY_GENERATED"
+          "DEPLOY_KEY_GENERATED",
+          "UNKNOWN"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."

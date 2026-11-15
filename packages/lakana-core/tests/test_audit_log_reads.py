@@ -810,3 +810,49 @@ def test_each_group_of_shown_fields_is_in_alphabetical_order() -> None:
         ("why", "after"),
         ("versions_opened", "approved_options"),
     ]
+
+
+# --- an event type a newer release wrote (#613) -----------------------------------------------
+
+
+def test_an_event_type_this_release_does_not_know_reads_as_unknown_with_its_text(
+    session: Session,
+) -> None:
+    """A downgrade can leave a type the enum lacks: the read maps it and keeps the stored text."""
+    admin = _person(session, "root")
+    service = AuditService(session, AllowAllAuthorization())
+    service.record(admin.id, AuditEventType.AUTHENTICATION_SUCCEEDED, commit=True)
+    service.record(admin.id, AuditEventType.GRANT_CREATED, commit=True)
+    session.execute(
+        text("UPDATE audit_events SET event_type = 'WIDGET_FROBNICATED' WHERE event_type = :t"),
+        {"t": AuditEventType.GRANT_CREATED.value},
+    )
+    session.commit()
+    session.expire_all()
+
+    page = service.query(admin)
+
+    by_raw = {item.event_type_raw: item.event_type for item in page.items}
+    assert by_raw == {
+        "WIDGET_FROBNICATED": AuditEventType.UNKNOWN,
+        "AUTHENTICATION_SUCCEEDED": AuditEventType.AUTHENTICATION_SUCCEEDED,
+    }
+
+
+def test_the_type_filter_refuses_unknown(session: Session) -> None:
+    admin = _person(session, "root")
+
+    with pytest.raises(ValidationError, match="UNKNOWN"):
+        AuditService(session, AllowAllAuthorization()).query(
+            admin, event_type=AuditEventType.UNKNOWN
+        )
+
+
+def test_no_event_is_written_as_unknown(session: Session) -> None:
+    admin = _person(session, "root")
+
+    with pytest.raises(ValueError, match="UNKNOWN"):
+        AuditService(session).record(admin.id, AuditEventType.UNKNOWN, commit=True)
+
+    session.rollback()
+    assert session.execute(select(AuditEvent)).first() is None

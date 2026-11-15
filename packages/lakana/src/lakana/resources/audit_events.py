@@ -34,6 +34,7 @@ def _audit_event_from_json(data: dict[str, Any]) -> AuditEvent:
         securable_namespace=data["securable_namespace"],
         securable_table=data["securable_table"],
         detail=data["detail"],
+        event_type_raw=data.get("event_type_raw"),
     )
 
 
