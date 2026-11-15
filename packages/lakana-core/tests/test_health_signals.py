@@ -218,6 +218,72 @@ def test_the_weekday_band_still_finds_truncated_and_duplicated_weekend_loads(
     assert (seen.state, (seen.band or {}).get("basis")) == (state, "weekday")
 
 
+def _alternating(
+    weeks: int, *, saturday: tuple[int, int], other: tuple[int, int]
+) -> list[dict[str, Any]]:
+    """Build a daily volume history before `_SATURDAY` whose loads alternate week by week.
+
+    Parameters
+    ----------
+    weeks
+        How many weeks of daily loads.
+    saturday
+        The rows of a Saturday load in even and odd weeks back.
+    other
+        The rows of any other day's load in even and odd weeks back.
+
+    Returns
+    -------
+    list of dict
+        Observed values with their commit time, newest first.
+    """
+    found = []
+    for n in range(1, 7 * weeks + 1):
+        at = _SATURDAY - timedelta(days=n)
+        pair = saturday if at.weekday() == 5 else other
+        found.append({"added": pair[(n - 1) // 7 % 2], "total": 1, "observed_at": at})
+    return found
+
+
+def test_a_rhythmless_noisy_table_widens_a_steady_weekday_to_the_pooled_spread() -> None:
+    """Saturday's own loads barely move, the other days do: their spread sets the width (#565).
+
+    Saturday alone gives 1,000 ± 100 (the 10 % floor over 4 x 20); every load's distance from its
+    own weekday's median is 50 on six days of seven, so the pooled half-width is 4 x 50.
+    """
+    history = _alternating(WEEKDAY_WEEKS, saturday=(980, 1_020), other=(950, 1_050))
+    seen = volume_signal({"added-records": "1150"}, history, at=_SATURDAY)
+    assert seen.state == "ok"
+    assert seen.band == {
+        "low": 800.0,
+        "high": 1_200.0,
+        "median": 1_000.0,
+        "basis": "weekday",
+        "weekday": "saturday",
+    }
+    assert volume_signal({"added-records": "500"}, history, at=_SATURDAY).state == "fired"
+
+
+def test_a_weekly_table_judges_a_steady_saturday_with_the_spread_of_the_week() -> None:
+    """A low, steady Saturday takes the wider pooled spread of the weekdays around it (#565).
+
+    Saturday alone gives 500 ± 50 (the floor); weekdays alternate 950 and 1,050, so the pooled
+    half-width is 4 x 50 = 200 once they are more than half of the loads.
+    """
+    history = _alternating(WEEKDAY_WEEKS, saturday=(500, 500), other=(950, 1_050))
+    seen = volume_signal({"added-records": "650"}, history, at=_SATURDAY)
+    assert seen.state == "ok"
+    assert seen.band == {
+        "low": 300.0,
+        "high": 700.0,
+        "median": 500.0,
+        "basis": "weekday",
+        "weekday": "saturday",
+    }
+    for rows in (250, 50, 1_000):
+        assert volume_signal({"added-records": str(rows)}, history, at=_SATURDAY).state == "fired"
+
+
 def test_too_few_loads_of_the_weekday_fall_back_to_the_band_of_all_loads() -> None:
     """With fewer than `WEEKDAY_MIN_LOADS` Saturdays the band of all loads judges (#565)."""
     history = _daily(WEEKDAY_MIN_LOADS - 1)

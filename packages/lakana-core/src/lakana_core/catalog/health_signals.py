@@ -348,10 +348,10 @@ def _utc(value: object) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _weekday_loads(
+def _by_weekday(
     loads: Sequence[Mapping[str, Any]], at: datetime, zone: tzinfo
-) -> list[float | int]:
-    """Collect the rows of the past loads on the weekday of a commit.
+) -> dict[int, list[float | int]]:
+    """Group the rows of the past loads within the look-back by their weekday.
 
     Parameters
     ----------
@@ -360,33 +360,59 @@ def _weekday_loads(
     at
         The commit's time.
     zone
-        The zone its weekday is taken in.
+        The zone weekdays are taken in.
 
     Returns
     -------
-    list
-        The rows of each load whose commit time, in `zone`, falls on the same weekday as `at`
-        within the last `WEEKDAY_WEEKS` weeks, newest first. A load without a commit time does
-        not count.
+    dict
+        Weekday (0 for Monday) → the rows of each load whose commit time, in `zone`, falls in
+        the last `WEEKDAY_WEEKS` weeks before the commit's date, newest first. A load without a
+        commit time does not count.
     """
     today = at.astimezone(zone).date()
     since = today - timedelta(weeks=WEEKDAY_WEEKS)
-    found: list[float | int] = []
+    found: dict[int, list[float | int]] = {}
     for item in loads:
         when = _utc(item.get("observed_at"))
         rows = _number(item.get("added"))
         if when is None or rows is None:
             continue
         day = when.astimezone(zone).date()
-        if since <= day < today and day.weekday() == today.weekday():
-            found.append(rows)
+        if since <= day < today:
+            found.setdefault(day.weekday(), []).append(rows)
     return found
+
+
+def _pooled_spread(groups: Mapping[int, Sequence[float]]) -> float:
+    """Give the spread of the loads around their own weekday's median.
+
+    Parameters
+    ----------
+    groups
+        The rows per weekday (`_by_weekday`).
+
+    Returns
+    -------
+    float
+        The median distance of every load from the median of its weekday, over the weekdays
+        with at least `WEEKDAY_MIN_LOADS` loads; such a weekday is among them.
+    """
+    distances: list[float] = []
+    for rows in groups.values():
+        if len(rows) >= WEEKDAY_MIN_LOADS:
+            middle = statistics.median(rows)
+            distances.extend(abs(value - middle) for value in rows)
+    return statistics.median(distances)
 
 
 def _volume_band(
     loads: Sequence[Mapping[str, Any]], at: datetime | None, zone: tzinfo
 ) -> dict[str, Any] | None:
     """Learn the volume band of a commit: of its weekday when the history allows, else of all.
+
+    The band of a weekday is its own (`learn_band` over its loads) widened to `MAD_FACTOR`
+    times the pooled spread (`_pooled_spread`) when that is wider: a weekday's few loads can
+    happen to lie close together, and the week's other days show how much loads really vary.
 
     Parameters
     ----------
@@ -407,15 +433,23 @@ def _volume_band(
     if band is None:
         return None
     if at is not None:
-        weekday = learn_band(
-            _weekday_loads(loads, at, zone),
+        groups = _by_weekday(loads, at, zone)
+        weekday = at.astimezone(zone).weekday()
+        own = learn_band(
+            groups.get(weekday, []),
             floor=VOLUME_FLOOR_ROWS,
             share=VOLUME_FLOOR_SHARE,
             least=WEEKDAY_MIN_LOADS,
         )
-        if weekday is not None:
-            name = WEEKDAYS[at.astimezone(zone).weekday()]
-            return {**weekday.to_json(), "basis": "weekday", "weekday": name}
+        if own is not None:
+            half = max(own.high - own.median, MAD_FACTOR * _pooled_spread(groups))
+            return {
+                "low": own.median - half,
+                "high": own.median + half,
+                "median": own.median,
+                "basis": "weekday",
+                "weekday": WEEKDAYS[weekday],
+            }
     return {**band.to_json(), "basis": "all"}
 
 
@@ -430,9 +464,10 @@ def volume_signal(
     """Compare the rows a snapshot added with the usual.
 
     The usual is the band of the past loads on the commit's weekday, in `zone`, within the last
-    `WEEKDAY_WEEKS` weeks once there are `WEEKDAY_MIN_LOADS` of them, so a weekly rhythm (fewer
-    rows at weekends) is not taken for a drop (#565); before that, the band of the newest
-    `HISTORY` loads. Either needs `MIN_HISTORY` loads in all.
+    `WEEKDAY_WEEKS` weeks once there are `WEEKDAY_MIN_LOADS` of them, at least as wide as the
+    week's pooled spread (`_volume_band`), so a weekly rhythm (fewer rows at weekends) is not
+    taken for a drop (#565); before that, the band of the newest `HISTORY` loads. Either needs
+    `MIN_HISTORY` loads in all.
 
     A commit that added no data file (a delete of whole files, a merge-on-read commit that adds
     only delete files) is not a load: it records ``ok`` with observed ``{"added": 0, "loaded":

@@ -204,8 +204,12 @@ other numbers. No signal but `schema` fires before the table has 8 snapshots.
 **The `volume` band follows the day of the week.** Many tables load fewer rows at weekends:
 orders, sales, visits. So a commit's rows are compared with the loads of the same weekday, once
 the last 8 weeks hold at least 4 of them: a Saturday with the Saturdays before it, a Monday with
-the Mondays. The band is built the same way from those loads (the median plus and minus 4 times
-their median absolute deviation, at least 10 rows and 10 %). Until there are 4 such loads (in the
+the Mondays. The band is centred on the median of those loads. Its half-width is the widest of
+4 times their median absolute deviation, 10 rows, 10 % of that median, and 4 times the pooled
+spread of the week: how far each load of the last 8 weeks lies from the median of its own
+weekday, taken over every weekday with at least 4 loads. A few loads of one weekday can happen to
+lie close together; the pooled spread keeps the band as wide as loads really vary, so a steady
+weekday does not alert on ordinary noise. Until there are 4 such loads (in the
 first weeks of a daily table, or on a table loaded on that weekday only now and then), the
 commit is compared with the band of the last 30 loads, whatever their weekday. Either way the
 table needs 8 loads in all before `volume` can fire. A table without a weekly rhythm is judged
