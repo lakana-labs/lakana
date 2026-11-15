@@ -18,8 +18,8 @@ EXEMPT = (
     "scripts/tests/test_docs_site.py",
     "scripts/tests/test_docs_only.py",
 )
-NOT_TESTED_CEILING = 64
-UNCHECKED_OUTPUT_CEILING = 82
+NOT_TESTED_CEILING = 62
+UNCHECKED_OUTPUT_CEILING = 41
 """Blocks marked as not tested; it only goes down, apart from the rises below.
 
 The artifact pages left six when they were written: the `artifact uploads abort` command,
@@ -151,6 +151,11 @@ output, and the example `see-a-tables-model` runs the command and checks the mod
 that need a deployed project and a worker, so no example can print them. `test_tables_cmd.py`
 compares the output of `lakana table rebuild` with the real command, and
 `test_git_owned_refusals.py` compares the refusal text with the core message.
+
+Tying output blocks to the regions of the examples (#265) lowered `UNCHECKED_OUTPUT_CEILING` from
+82 to 41, and the example `drop-and-restore-a-table` now deploys a project and runs the worker,
+so the orphan drop and `lakana table rebuild` of `drop-and-restore-a-table.md` are tested:
+`NOT_TESTED_CEILING` fell from 64 to 62, and the rise of 80 to 82 above no longer applies.
 """
 SECTIONS = ("tutorials", "how-to", "reference", "explanation")
 
