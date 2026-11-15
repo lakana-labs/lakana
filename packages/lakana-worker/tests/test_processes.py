@@ -1339,6 +1339,31 @@ def test_on_macos_a_lock_that_cannot_be_cleared_leaves_the_entry(
     assert (tree / "f").exists()
 
 
+def test_on_macos_an_entry_of_another_user_is_never_unlocked(
+    tmp_path: Path, mac_locks: _FakeMacLocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the worker's own files are unlocked: a root worker meets others' only on NFS."""
+    monkeypatch.setattr("lakana_worker.processes.os.geteuid", lambda: os.getuid() + 1)
+    tree = _tree_with(tmp_path, "f")
+    mac_locks.lock(tree / "f", "flags")
+
+    assert remove_private_tree(tree) is False
+    assert mac_locks.touched == []
+
+
+def test_on_macos_an_entry_still_refused_after_unlocking_is_left(
+    tmp_path: Path, mac_locks: _FakeMacLocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The calls succeed but the kernel still refuses (a lock the calls do not cover)."""
+    monkeypatch.setattr(mac_locks, "clear_flags", lambda fd, flags: None)
+    monkeypatch.setattr(mac_locks, "strip_acl", lambda fd: None)
+    tree = _tree_with(tmp_path, "f")
+    mac_locks.lock(tree / "f", "flags")
+
+    assert remove_private_tree(tree) is False
+    assert (tree / "f").exists()
+
+
 class _FakeFunction:
     """One C function of `_FakeLibc`: records its calls and takes the declared signature."""
 
