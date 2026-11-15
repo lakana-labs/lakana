@@ -94,6 +94,10 @@ It does two things in one step:
 2. **Queues a run** of the asset that defines the table, from the deployed version of its project.
    The run creates the table again.
 
+After a deploy that switches an existing table to `write: history`, its run refuses the table,
+which lacks the history columns. Run `lakana table rebuild NAME --reason "…"` then: the deploy has
+already made the new version current, so the rebuild builds the table as a history table.
+
 The command asks first; `--yes` skips the question. It then names the run and the file that builds
 the table:
 
