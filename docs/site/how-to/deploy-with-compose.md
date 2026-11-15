@@ -1288,7 +1288,8 @@ unavailable while each backup runs. The recovery time is the time to copy the tw
 start the stack and check it. It grows with the size of the archive and the speed of the disk, and
 loading the catalog grows with the number of tables, snapshots and runs. The `compose-smoke` job
 prints it as `restore took N s` for a small instance, with images already pulled and its own checks
-included; time a restore of your own backups on a spare machine to learn yours.
+included: about a minute (64 s on GitHub's runner, November 2026). Time a restore of your own
+backups on a spare machine to learn yours.
 
 The same job proves the round trip before the project ships a release: it checks that the table is
 at the same snapshot, that the grants and the secrets are the same, and that a table of a second
