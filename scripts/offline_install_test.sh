@@ -33,6 +33,6 @@ python -c "import json,sys; assert json.loads(sys.argv[1]) == [{\"id\": 1, \"nam
 echo "offline install test: passed"
 '
 
-docker run --rm --network none \
+docker run --rm --pull never --network none \
   -e LAKANA_WORKER__EXTENSION_SOURCE=none \
   --entrypoint /usr/bin/tini "$IMAGE" -- bash -c "$inner"
