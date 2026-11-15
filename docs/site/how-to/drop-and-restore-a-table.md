@@ -32,7 +32,7 @@ command line uses a token and is never asked. Restoring a table asks for no touc
 A table or view that a deployed project builds is defined in git, so it is changed in git.
 `lakana table delete` refuses it with a 409 and names the file that defines it:
 
-<!-- not tested: the refusal's text is asserted verbatim in packages/lakana-core/tests/test_git_owned_refusals.py -->
+<!-- output -->
 ```text
 `silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Remove it there and deploy; then drop it from Orphans. To build it again from git instead: `lakana table rebuild silver.clean --env dev --reason "…"`.
 ```
@@ -97,7 +97,7 @@ It does two things in one step:
 The command asks first; `--yes` skips the question. It then names the run and the file that builds
 the table:
 
-<!-- not tested: output of the command above; the line is asserted in packages/lakana/tests/cli/test_tables_cmd.py -->
+<!-- output -->
 ```text
 Dropped dev/silver.clean and queued run 9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10 of analytics, which builds it again from assets/silver/clean.sql. Follow it with `lakana runs show 9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10 --env dev`.
 ```

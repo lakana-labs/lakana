@@ -1604,7 +1604,7 @@ def rebuild(
     rebuilt = state.client().tables.rebuild(
         environment, name, reason=reason, break_glass_reason=glass
     )
-    where = f"{_output.inline(rebuilt.repository)}"
+    where = _output.inline(rebuilt.repository)
     if rebuilt.path is not None:
         where += f", which builds it again from {_output.inline(rebuilt.path)}"
     run = _output.inline(rebuilt.run_id)

@@ -3240,3 +3240,91 @@ def test_table_rebuild_asks_before_dropping(tmp_path: Path) -> None:
     assert "restorable under another name during the undo period" in _plain(
         result.stdout + result.stderr
     )
+
+
+_HOWTO = Path(__file__).resolve().parents[4] / "docs/site/how-to/drop-and-restore-a-table.md"
+_SAMPLE_RUN = "9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10"
+
+
+def _howto_block_after(marker: str) -> str:
+    """Return the text fence that follows the first line starting with `marker`.
+
+    Parameters
+    ----------
+    marker
+        The start of the line that precedes the fence (a comment or the command).
+
+    Returns
+    -------
+    str
+        The fence's content, without its closing line.
+    """
+    lines = _HOWTO.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(marker))
+    opening = next(i for i in range(start, len(lines)) if lines[i].startswith("```text"))
+    body: list[str] = []
+    for line in lines[opening + 1 :]:
+        if line.startswith("```"):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def test_the_how_to_shows_what_table_rebuild_prints(tmp_path: Path) -> None:
+    """The output block of the how-to is the command's real output for its sample run."""
+    api = FakeApi()
+    api.on("POST", _REBUILD_URL, status=202, json={**_REBUILT, "run_id": _SAMPLE_RUN})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        "--yes",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert _plain(result.stdout) == _plain(_howto_block_after("The command asks first"))
+
+
+def test_table_rebuild_json_prints_the_answer_fields(tmp_path: Path) -> None:
+    """`--json` prints the fields of the answer."""
+    api = FakeApi()
+    api.on("POST", _REBUILD_URL, status=202, json=_REBUILT)
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "dev",
+        "--reason",
+        _REASON,
+        "--yes",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout) == _REBUILT
+
+
+def test_table_rebuild_break_glass_warns_before_it_asks(tmp_path: Path) -> None:
+    """Without `--yes`, a refused question sends nothing and the warning has not been shown."""
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "rebuild",
+        "silver.clean",
+        "--env",
+        "prod",
+        "--reason",
+        _REASON,
+        "--break-glass",
+        input="n\n",
+    )
+    assert result.exit_code != 0
+    assert api.requests == []
+    assert "break-glass write" not in _plain(result.stderr + result.stdout)

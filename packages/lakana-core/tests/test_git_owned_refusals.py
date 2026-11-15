@@ -816,3 +816,16 @@ def test_a_person_may_still_replace_a_view_no_project_builds(
     row = _view(catalog, principal, "SELECT 2 AS id")
 
     assert (row.view_definition or {})["sql"] == "SELECT 2 AS id"
+
+
+def test_the_how_to_shows_the_refusal_text() -> None:
+    """The refusal block of the drop how-to is the core message for its sample names."""
+    page = Path(__file__).resolve().parents[3] / "docs/site/how-to/drop-and-restore-a-table.md"
+    text = page.read_text(encoding="utf-8")
+    expected = GIT_OWNED_DROP.format(
+        name="silver.clean",
+        repository="analytics",
+        path="assets/silver/clean.sql",
+        environment="dev",
+    )
+    assert expected in text
