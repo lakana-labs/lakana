@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import type { JSX, ReactNode, Ref } from "react";
+import { type JSX, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PendingButton } from "../../shell/PendingButton";
@@ -57,6 +57,29 @@ export function ViewList({
   regionRef,
 }: ViewListProps): JSX.Element {
   const { t } = useTranslation();
+  const own = useRef<HTMLDivElement>(null);
+  const focusFrom = useRef<number | null>(null);
+
+  // When the last page arrives, Show more unmounts with the focus on it: the focus goes to the
+  // first new row's control, or to the list when the page was empty, never to the page.
+  // A caller that passes onMore moves the focus itself.
+  useEffect(() => {
+    const from = focusFrom.current;
+    if (from === null) {
+      return;
+    }
+    if (rowCount > from) {
+      focusFrom.current = null;
+      const row = own.current?.querySelectorAll("tbody tr")[from];
+      const control = row?.querySelector<HTMLElement>("a[href], button");
+      (control ?? own.current)?.focus();
+    } else if (!pages.busy && !pages.hasMore) {
+      focusFrom.current = null;
+      own.current?.focus();
+    }
+  });
+
+  useImperativeHandle(regionRef, () => own.current as HTMLDivElement);
   return (
     <>
       {pages.items === undefined && pages.error === null && <ListSkeleton />}
@@ -76,7 +99,7 @@ export function ViewList({
           // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
           // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
           tabIndex={0}
-          ref={regionRef}
+          ref={own}
         >
           <table className="list list-static">
             <thead>{head}</thead>
@@ -94,7 +117,11 @@ export function ViewList({
           className="button"
           pending={pages.busy}
           onPress={() => {
-            onMore?.();
+            if (onMore === undefined) {
+              focusFrom.current = rowCount;
+            } else {
+              onMore();
+            }
             void pages.loadMore();
           }}
         >

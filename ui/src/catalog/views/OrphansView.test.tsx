@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { manageRoutes, orphan } from "../../test/manage";
 import { renderShell } from "../../test/render";
@@ -105,6 +105,58 @@ describe("OrphansView", () => {
     expect(
       screen.getByRole("link", { name: "Restore it from Dropped: gold.sales.old_totals" }),
     ).toHaveAttribute("href", "/catalog?env=prod&ns=gold.sales&view=dropped");
+  });
+
+  it("links a dropped orphan to Dropped in the orphan's own namespace, not the chosen one", async () => {
+    renderShell(`${ADDRESS}&ns=bronze`, {
+      routes: {
+        ...manageRoutes(),
+        [LIST]: body([orphan({ table: "gold.sales.old_totals", exists: false })]),
+      },
+    });
+
+    await screen.findByRole("region", { name: "Orphans" });
+
+    expect(
+      screen.getByRole("link", { name: "Restore it from Dropped: gold.sales.old_totals" }),
+    ).toHaveAttribute("href", "/catalog?env=prod&ns=gold.sales&view=dropped");
+  });
+
+  it("lists the same table under two repositories without a duplicate key", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [LIST]: body([orphan({ repository: "repo-a" }), orphan({ repository: "repo-b" })]),
+      },
+    });
+
+    await screen.findByRole("region", { name: "Orphans" });
+
+    expect(rows()).toHaveLength(2);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("keeps the focus in the list when Show more brings the last page", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [LIST]: (request) =>
+          request.path.includes("cursor=c1")
+            ? body([orphan({ table: "gold.sales.b" })])
+            : body([orphan({ table: "gold.sales.a" })], 0, "c1"),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+
+    await waitFor(() => {
+      expect(rows()).toHaveLength(2);
+    });
+    expect(screen.getByRole("region", { name: "Orphans" }).contains(document.activeElement)).toBe(
+      true,
+    );
   });
 
   it("says how many orphans are hidden from you", async () => {

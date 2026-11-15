@@ -72,6 +72,50 @@ describe("ExpiringView", () => {
     expect(paths.at(-1)).toContain("namespace=gold.sales");
   });
 
+  it("puts the focus on the first new row when Show more brings the last page", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [LIST]: (request) =>
+          request.path.includes("cursor=c1")
+            ? { status: 200, body: [retention({ name: "second", uuid: "u2" })] }
+            : {
+                status: 200,
+                body: [retention({ name: "first", uuid: "u1" })],
+                headers: { "X-Next-Cursor": "c1" },
+              },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "second" })).toHaveFocus();
+    });
+  });
+
+  it("puts the focus on the list when Show more brings an empty last page", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [LIST]: (request) =>
+          request.path.includes("cursor=c1")
+            ? { status: 200, body: [] }
+            : {
+                status: 200,
+                body: [retention({ name: "first", uuid: "u1" })],
+                headers: { "X-Next-Cursor": "c1" },
+              },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "Expiring tables" })).toHaveFocus();
+    });
+  });
+
   it("says nothing expires soon in the environment", async () => {
     renderShell(ADDRESS, { routes: { ...manageRoutes(), [LIST]: { status: 200, body: [] } } });
 

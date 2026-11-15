@@ -89,7 +89,7 @@ export function OrphansView({ environment, namespace }: OrphansViewProps): JSX.E
         {rows.map((row) => {
           const parts = splitDotted(row.table);
           return (
-            <tr key={row.table}>
+            <tr key={`${row.repository}\u0000${row.table}`}>
               <td>
                 <span className="row-name">
                   <VisibleText text={parts?.name ?? row.table} />
@@ -118,7 +118,7 @@ export function OrphansView({ environment, namespace }: OrphansViewProps): JSX.E
                       to={catalogPath({
                         ...DEFAULT_VIEW,
                         environment,
-                        namespace,
+                        namespace: parts?.namespace ?? null,
                         view: "dropped",
                       })}
                       aria-label={t("catalog.views.orphans.restoreFor", {
