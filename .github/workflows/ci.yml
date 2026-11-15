@@ -933,7 +933,7 @@ jobs:
           # The root commit has no parent: nothing to compare with, so everything counts as changed.
           if ! git rev-parse --verify --quiet "$base" > /dev/null; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$base" HEAD | grep -qE '^(Dockerfile|packages/[^/]+/src/|\.dockerignore|packages/[^/]+/pyproject\.toml|packages/[^/]+/hatch_build\.py|uv\.lock|scripts/(compose_smoke_test|build_wheelhouse|python_asset_project)\.sh|docs/examples/compose-[a-z-]+\.sh|docs/examples/ingest-(files|rest)/(exports/|stand_in\.py|make_certs\.py|items-)|\.github/workflows/(ci|release)\.yml)'; then
+          elif git diff --name-only "$base" HEAD | grep -qE '^(Dockerfile|packages/[^/]+/src/|\.dockerignore|packages/[^/]+/pyproject\.toml|packages/[^/]+/hatch_build\.py|uv\.lock|scripts/(compose_smoke_test|offline_install_test|build_wheelhouse|python_asset_project)\.sh|docs/examples/compose-[a-z-]+\.sh|docs/examples/ingest-(files|rest)/(exports/|stand_in\.py|make_certs\.py|items-)|\.github/workflows/(ci|release)\.yml)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.changes.outputs.run == 'true'
@@ -946,6 +946,8 @@ jobs:
           docker build -t lakana:ci .
           docker build -f Dockerfile.task --build-arg PYTHON=3.14 -t lakana-task:ci-py3.14 .
           uv run --locked bash scripts/compose_smoke_test.sh lakana:ci lakana-task:ci
+          # The same image with the network cut off (#493): the offline install how-to's claim.
+          bash scripts/offline_install_test.sh lakana:ci
 
   # Each job of this run against its budget in scripts/time-budgets.toml (a unit or integration
   # job at most 15 minutes). It waits for every other job and reads their times from the API,

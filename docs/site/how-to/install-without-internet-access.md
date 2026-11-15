@@ -272,8 +272,14 @@ under test with `unshare -rn` (a new network namespace with no route out; a requ
   the check on a lock that names an `https://` mirror, with and without that mirror as
   `LAKANA_RUN__INDEX_URL`: accepted with it, refused without.
 
+Every change to the image or the code runs one more check in CI
+(`scripts/offline_install_test.sh`): the container image runs under `docker run --network none`
+with `LAKANA_WORKER__EXTENSION_SOURCE=none`, starts local mode, creates a table, appends a file
+and answers `lakana sql`. That proves the image needs no network and no extension download.
+
 We did **not** test: saving and loading the container images, a Compose stack on a host without
 internet access, a real package mirror, or an internal git server. The Docker commands are
-Docker's own and are shown as documented there. We run no CI job with the network cut off.
+Docker's own and are shown as documented there. The Python packages and the `pip` install are
+checked by hand only, as above.
 If you find that a step fails on your network, the message of the worker or the build names the
 host it could not reach; that host is a connection this page did not list.
