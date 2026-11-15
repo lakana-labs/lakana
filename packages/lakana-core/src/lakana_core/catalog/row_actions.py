@@ -16,6 +16,11 @@ The rule the clients follow:
 - The server decides every request again: an offered action can still be refused, by git
   ownership, a protected environment, a missing step-up, or the row's state.
 
+The tree's nodes say the same, place by place: an environment and a namespace carry ``actions``,
+the words of what this reader's rights allow there (`ENVIRONMENT_ACTIONS`, `NAMESPACE_ACTIONS`).
+They are rights only, and say nothing of protection, git ownership or emptiness: the server
+decides every request again.
+
 The rights of a whole list are asked in one `permits_each` batch, never one call per row, and,
 like every visibility question, they write no audit event and no `AUTHORIZATION_DENIED`.
 """
@@ -26,7 +31,7 @@ import uuid
 from collections.abc import Sequence
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
-from lakana_core.identifiers import TableRef
+from lakana_core.identifiers import NamespacePath, TableRef
 
 TABLE_ACTIONS = ("drop", "rebuild", "maintain", "set_retention")
 """The words a table row's `actions` may hold, in this order."""
@@ -42,6 +47,12 @@ ARTIFACT_ACTIONS = ("drop",)
 
 VERSION_ACTIONS = ("delete",)
 """The words an artifact version's `actions` may hold."""
+
+ENVIRONMENT_ACTIONS = ("create_namespace",)
+"""The words an environment node of the tree may hold."""
+
+NAMESPACE_ACTIONS = ("create_namespace", "create_external_table", "drop")
+"""The words a namespace node of the tree may hold, in this order."""
 
 _DROPPABLE = frozenset({"TABLE", "EXTERNAL", "VIEW"})
 """The kinds `rebuild` applies to; `rebuild` refuses an artifact row."""
@@ -241,3 +252,55 @@ def drop_actions_each(
     """
     per_row = [[(Action.DROP_TABLE, _table(ref))] for ref in refs]
     return [(word,) if answers[0] else () for answers in _ask(authz, p, per_row)]
+
+
+def place_actions_each(
+    authz: AuthorizationService,
+    p: PrincipalRef,
+    places: Sequence[tuple[str, NamespacePath | None]],
+) -> list[tuple[str, ...]]:
+    """Say which actions the reader's rights allow on each environment or namespace.
+
+    - An environment: ``create_namespace``, from `CREATE_NAMESPACE` on the environment.
+    - A namespace: ``create_namespace`` (`CREATE_NAMESPACE` on it), ``create_external_table``
+      (`CREATE_TABLE` on it) and ``drop`` (`DROP_NAMESPACE` on it).
+
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    p
+        The reader.
+    places
+        ``(environment, namespace)`` per place; the namespace is `None` for the environment.
+
+    Returns
+    -------
+    list of tuple of str
+        Each place's actions, in `ENVIRONMENT_ACTIONS` or `NAMESPACE_ACTIONS` order.
+    """
+    per_row: list[list[_Question]] = []
+    for environment, namespace in places:
+        if namespace is None:
+            per_row.append([(Action.CREATE_NAMESPACE, Securable.environment_scope(environment))])
+        else:
+            scope = Securable.namespace_scope(environment, namespace)
+            per_row.append(
+                [
+                    (Action.CREATE_NAMESPACE, scope),
+                    (Action.CREATE_TABLE, scope),
+                    (Action.DROP_NAMESPACE, scope),
+                ]
+            )
+    return [
+        tuple(
+            word
+            for word, allowed in zip(
+                ENVIRONMENT_ACTIONS if len(answers) == 1 else NAMESPACE_ACTIONS,
+                answers,
+                strict=True,
+            )
+            if allowed
+        )
+        for answers in _ask(authz, p, per_row)
+    ]

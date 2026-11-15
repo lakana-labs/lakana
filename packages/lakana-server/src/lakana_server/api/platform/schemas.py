@@ -1335,10 +1335,16 @@ class TreeNamespaceOut(BaseModel):
         Its path, dotted.
     count
         The readable tables in it and beneath it.
+    actions
+        What the reader's rights allow on it: ``create_namespace``, ``create_external_table``,
+        ``drop``. Rights only; nothing about protection, git or emptiness.
     """
 
     path: str
     count: int
+    actions: list[Literal["create_namespace", "create_external_table", "drop"]] = Field(
+        default_factory=list
+    )
 
 
 class TreeEnvironmentOut(BaseModel):
@@ -1352,11 +1358,14 @@ class TreeEnvironmentOut(BaseModel):
         The readable tables in it.
     namespaces
         Its namespaces the caller is shown, by path.
+    actions
+        What the reader's rights allow on it: ``create_namespace``. Rights only.
     """
 
     name: str
     count: int
     namespaces: list[TreeNamespaceOut]
+    actions: list[Literal["create_namespace"]] = Field(default_factory=list)
 
 
 class TableTreeOut(BaseModel):

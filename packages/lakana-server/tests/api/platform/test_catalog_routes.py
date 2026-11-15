@@ -183,6 +183,10 @@ def test_the_tree_answers_counts_per_node(client: TestClient) -> None:
     _table(client, "a")
     _table(client, "b")
     tree = client.get("/api/v1/tables/tree", headers=AUTH_HEADER).json()
+    for env in tree["environments"]:
+        env.pop("actions")
+        for namespace in env["namespaces"]:
+            namespace.pop("actions")
     assert tree == {
         "count": 2,
         "environments": [
@@ -196,6 +200,17 @@ def test_the_tree_answers_counts_per_node(client: TestClient) -> None:
                 ],
             }
         ],
+    }
+
+
+def test_the_tree_carries_each_nodes_actions(client: TestClient) -> None:
+    _table(client, "a")
+    tree = client.get("/api/v1/tables/tree", headers=AUTH_HEADER).json()
+    (dev,) = tree["environments"]
+    assert dev["actions"] == ["create_namespace"]
+    assert {n["path"]: n["actions"] for n in dev["namespaces"]} == {
+        path: ["create_namespace", "create_external_table", "drop"]
+        for path in ("bronze", "gold", "silver")
     }
 
 

@@ -6957,7 +6957,7 @@
           "catalog"
         ],
         "summary": "Count the tables you may read, by environment and namespace",
-        "description": "A node's count is what the list answers for it without a search text: only tables you may read are counted, an environment is shown with `READ_ENVIRONMENT` or a readable table in it, a namespace with `READ_NAMESPACE` on its environment or a readable table in it or beneath it. Writes no audit event.",
+        "description": "A node's count is what the list answers for it without a search text: only tables you may read are counted, an environment is shown with `READ_ENVIRONMENT` or a readable table in it, a namespace with `READ_NAMESPACE` on its environment or a readable table in it or beneath it. Each environment and namespace also carries ``actions``: what your rights allow there (``create_namespace``, ``create_external_table``, ``drop``), asked in one batch for the whole tree. They are rights only, and say nothing about protection, git or emptiness. Writes no audit event.",
         "operationId": "table_tree_api_v1_tables_tree_get",
         "parameters": [
           {
@@ -35661,6 +35661,14 @@
             },
             "type": "array",
             "title": "Namespaces"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "const": "create_namespace"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -35670,7 +35678,7 @@
           "namespaces"
         ],
         "title": "TreeEnvironmentOut",
-        "description": "An environment of the catalog tree.\n\nParameters\n----------\nname\n    Its name.\ncount\n    The readable tables in it.\nnamespaces\n    Its namespaces the caller is shown, by path."
+        "description": "An environment of the catalog tree.\n\nParameters\n----------\nname\n    Its name.\ncount\n    The readable tables in it.\nnamespaces\n    Its namespaces the caller is shown, by path.\nactions\n    What the reader's rights allow on it: ``create_namespace``. Rights only."
       },
       "TreeNamespaceOut": {
         "properties": {
@@ -35681,6 +35689,18 @@
           "count": {
             "type": "integer",
             "title": "Count"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "create_namespace",
+                "create_external_table",
+                "drop"
+              ]
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -35689,7 +35709,7 @@
           "count"
         ],
         "title": "TreeNamespaceOut",
-        "description": "A namespace of the catalog tree.\n\nParameters\n----------\npath\n    Its path, dotted.\ncount\n    The readable tables in it and beneath it."
+        "description": "A namespace of the catalog tree.\n\nParameters\n----------\npath\n    Its path, dotted.\ncount\n    The readable tables in it and beneath it.\nactions\n    What the reader's rights allow on it: ``create_namespace``, ``create_external_table``,\n    ``drop``. Rights only; nothing about protection, git or emptiness."
       },
       "UndropIn": {
         "properties": {
