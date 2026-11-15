@@ -61,7 +61,8 @@ clients refuse alike. To build it again from git instead, see
 [Rebuild a table from git](#rebuild-a-table-from-git). To drop such a table:
 
 1. Remove its asset from the project in git and deploy. The table stays, now built by nothing.
-2. Find it among the orphans and drop it:
+2. Find it among the orphans and drop it. In the web interface, open **Catalog**, choose **Orphans**
+   and the environment, and press **Drop** beside it. On the command line:
 
 <!-- not tested: needs a deployed project whose asset was removed; the drop itself is tested in the "drop" example above -->
 ```bash

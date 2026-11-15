@@ -9,6 +9,8 @@ import type { CatalogNode } from "../tree";
 import type { CatalogView } from "../view";
 import { ChooseEnvironment } from "./ChooseEnvironment";
 import { DroppedView } from "./DroppedView";
+import { ExpiringView } from "./ExpiringView";
+import { OrphansView } from "./OrphansView";
 
 /** Properties of {@link ViewBody}. */
 export interface ViewBodyProps {
@@ -30,6 +32,12 @@ export interface ViewBodyProps {
 export default function ViewBody({ view, root }: ViewBodyProps): JSX.Element {
   if (view.environment === null) {
     return <ChooseEnvironment view={view} root={root} />;
+  }
+  if (view.view === "expiring") {
+    return <ExpiringView environment={view.environment} namespace={view.namespace} />;
+  }
+  if (view.view === "orphans") {
+    return <OrphansView environment={view.environment} namespace={view.namespace} />;
   }
   return <DroppedView environment={view.environment} namespace={view.namespace} />;
 }

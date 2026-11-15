@@ -47,7 +47,9 @@ const NAMED_LIMITS = [
   // Lowered to the measured 2.94 kB (2026-11-16) + 10 %: the API calls of catalog management,
   // the protection hook, the reason field and the actions' strings moved into a chunk the views
   // share with the table's Actions (below).
-  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.23 kB" },
+  // Raised to the measured 3.41 kB (2026-11-16) + 10 %: the list frame, the Expiring list (when, due now and the
+  // retention sentence) and the Orphans list with its Drop dialog and its sentences.
+  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.75 kB" },
   // Measured 1.82 kB (2026-11-16) + 10 %: what the Catalog's views and the table's Actions
   // share: the API calls of catalog management, the hook that reads whether an environment is
   // protected, the break-glass reason field and the strings of the actions. The chunk is named

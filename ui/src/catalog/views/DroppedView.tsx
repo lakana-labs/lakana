@@ -16,10 +16,10 @@ import { markedText, VisibleText } from "../../shell/VisibleText";
 import { problemText } from "../../sign-in/messages";
 import { UndropDialog } from "../actions/UndropDialog";
 import { useProtected } from "../actions/useProtected";
-import { ReadFailed, When } from "../cells";
-import { ListSkeleton } from "../ListSkeleton";
+import { When } from "../cells";
 import { tablePath } from "../paths";
 import { useCursorPages } from "./useCursorPages";
+import { ViewList } from "./ViewList";
 import "./viewStrings";
 
 /** Properties of {@link DroppedView}. */
@@ -128,7 +128,6 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
   };
 
   const place = namespace ?? environment;
-  const reading = pages.items === undefined && pages.error === null;
   return (
     <div className="dropped-view">
       <p className="page-purpose">
@@ -151,103 +150,70 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
           </>
         )}
       </p>
-      {reading && <ListSkeleton />}
-      {pages.items === undefined && pages.error !== null && (
-        <ReadFailed message={pages.error} onRetry={pages.reload} />
-      )}
-      {pages.items !== undefined && rows.length === 0 && !pages.busy && !pages.hasMore && (
-        <div className="empty">
-          <p>{t("catalog.views.dropped.empty", { place })}</p>
-        </div>
-      )}
-      {rows.length > 0 && (
-        <div
-          className="list-scroll dropped-scroll"
-          role="region"
-          aria-label={t("catalog.views.dropped.region")}
-          // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-          tabIndex={0}
-          ref={table}
-        >
-          <table className="list list-static">
-            <thead>
-              <tr>
-                <th scope="col">{t("catalog.views.dropped.columns.table")}</th>
-                <th scope="col">{t("catalog.views.dropped.columns.dropped")}</th>
-                <th scope="col">{t("catalog.views.dropped.columns.until")}</th>
-                <th scope="col">
-                  <span className="visually-hidden">
-                    {t("catalog.views.dropped.columns.actions")}
-                  </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.uuid}>
-                  <td>
-                    <span className="row-name" tabIndex={-1}>
-                      <VisibleText text={row.name} />
-                    </span>
-                    <span className="second">
-                      <VisibleText text={row.namespace} />
-                    </span>
-                    {(refusals[row.uuid] ?? "") !== "" && (
-                      <p className="step-error" role="alert">
-                        {refusals[row.uuid]}
-                      </p>
-                    )}
-                  </td>
-                  <td>
-                    <When iso={row.dropped_at} never={t("catalog.views.dropped.neverKnown")} />
-                  </td>
-                  <td>
-                    {row.restorable ? (
-                      <When iso={row.purge_after} never={t("catalog.views.dropped.neverKnown")} />
-                    ) : (
-                      t("catalog.views.dropped.gone")
-                    )}
-                  </td>
-                  <td>
-                    {row.restorable && row.actions.includes("undrop") && (
-                      <PendingButton
-                        className="button"
-                        aria-label={t("table.actions.undrop.for", {
-                          table: markedText(`${row.namespace}.${row.name}`),
-                        })}
-                        pending={working === row.uuid || protectedEnvironment === undefined}
-                        onPress={() => {
-                          void undrop(row);
-                        }}
-                      >
-                        {t("table.actions.undrop.button")}
-                      </PendingButton>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {pages.items !== undefined && pages.error !== null && (
-        <p className="step-error" role="alert">
-          {pages.error}
-        </p>
-      )}
-      {pages.hasMore && (
-        <PendingButton
-          className="button"
-          pending={pages.busy}
-          onPress={() => {
-            focusFrom.current = rows.length;
-            void pages.loadMore();
-          }}
-        >
-          {t("catalog.showMore")}
-        </PendingButton>
-      )}
+      <ViewList
+        pages={pages}
+        rowCount={rows.length}
+        empty={t("catalog.views.dropped.empty", { place })}
+        region={t("catalog.views.dropped.region")}
+        regionRef={table}
+        onMore={() => {
+          focusFrom.current = rows.length;
+        }}
+        head={
+          <tr>
+            <th scope="col">{t("catalog.views.dropped.columns.table")}</th>
+            <th scope="col">{t("catalog.views.dropped.columns.dropped")}</th>
+            <th scope="col">{t("catalog.views.dropped.columns.until")}</th>
+            <th scope="col">
+              <span className="visually-hidden">{t("catalog.views.dropped.columns.actions")}</span>
+            </th>
+          </tr>
+        }
+      >
+        {rows.map((row) => (
+          <tr key={row.uuid}>
+            <td>
+              <span className="row-name" tabIndex={-1}>
+                <VisibleText text={row.name} />
+              </span>
+              <span className="second">
+                <VisibleText text={row.namespace} />
+              </span>
+              {(refusals[row.uuid] ?? "") !== "" && (
+                <p className="step-error" role="alert">
+                  {refusals[row.uuid]}
+                </p>
+              )}
+            </td>
+            <td>
+              <When iso={row.dropped_at} never={t("catalog.views.dropped.neverKnown")} />
+            </td>
+            <td>
+              {row.restorable ? (
+                <When iso={row.purge_after} never={t("catalog.views.dropped.neverKnown")} />
+              ) : (
+                t("catalog.views.dropped.gone")
+              )}
+            </td>
+            <td>
+              {row.restorable && row.actions.includes("undrop") && (
+                <PendingButton
+                  className="button"
+                  aria-label={t("table.actions.undrop.for", {
+                    table: markedText(`${row.namespace}.${row.name}`),
+                  })}
+                  pending={working === row.uuid || protectedEnvironment === undefined}
+                  onPress={() => {
+                    void undrop(row);
+                  }}
+                >
+                  {t("table.actions.undrop.button")}
+                </PendingButton>
+              )}
+            </td>
+          </tr>
+        ))}
+      </ViewList>
       {dialog !== null && (
         <UndropDialog
           row={dialog.row}

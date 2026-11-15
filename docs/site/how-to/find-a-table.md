@@ -133,8 +133,21 @@ shares it.
 Above the search, a row of links switches the Catalog between **All tables**, **Dropped**,
 **Expiring** and **Orphans**. The current one is marked. Dropped lists the tables dropped from an
 environment that can still be restored and lets you restore them
-(see [Drop and restore a table](drop-and-restore-a-table.md#see-what-can-be-restored)). Expiring
-and Orphans are listed per environment too.
+(see [Drop and restore a table](drop-and-restore-a-table.md#see-what-can-be-restored)).
+
+**Expiring** lists the tables you may read that expire within the server's warning window (7 days
+unless your operator changed it), the soonest first. Each row links to the table and shows when it
+expires, or "Due now" when the time has passed, and why: the same
+sentence as the table's **Retention…** dialog, for example "30 days after its last activity, set
+for the table by ana". A namespace in the tree narrows it to that namespace and the ones beneath
+it. See [Let tables expire](let-tables-expire.md#see-what-expires-soon).
+
+**Orphans** lists the tables no project builds any more: their name, kind and the repository that
+last built them, with **Drop** where you may drop them (see
+[Deploy, dry-run, roll back](projects.md#deploy-dry-run-roll-back)). It always lists the whole environment, even when a namespace is
+chosen, and says so. A line says how many orphans are not shown because you may not read them. An
+orphan that was dropped and can still be restored says so and links to **Dropped**, where you
+restore it.
 
 Only All tables has the search and the sort. The other views list one
 environment, or one namespace of it, so they start by asking you to choose an environment when the

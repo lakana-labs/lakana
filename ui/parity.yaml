@@ -94,7 +94,7 @@
 "ns delete": { class: ui, part: 3 }
 "ns get": { class: read, part: 3 }
 "ns list": { class: read, part: 3 }
-"orphans": { class: ui, part: 3 }
+"orphans": { class: ui, part: 3, done: true }
 "passkey list": { class: ui, part: 1 }
 "passkey remove": { class: ui, part: 1 }
 "principal create": { class: ui, part: 7 }
@@ -164,7 +164,7 @@
 "table definition": { class: read, part: 3, done: true }
 "table delete": { class: ui, part: 3, done: true }
 "table describe": { class: ui, part: 3, done: true }
-"table expiring": { class: ui, part: 3 }
+"table expiring": { class: ui, part: 3, done: true }
 "table get": { class: read, part: 3, done: true }
 "table health": { class: read, part: 3, done: true }
 "table lineage": { class: read, part: 3, note: "run lineage is not shown on the table page" }
@@ -249,7 +249,7 @@
 "GET /api/v1/environments/{env}/deployments": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deploys": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deploys/{deploy_id}": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/graph/impact": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/graph/join-path": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/graph/lineage": { class: read, part: 3, done: true }
@@ -290,7 +290,7 @@
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
   { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }
-"GET /api/v1/environments/{env}/orphans": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/orphans": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/project-versions/{project_version_id}": { class: ui, part: 5 }
 "GET /api/v1/environments/{env}/queries": { class: ui, part: 4 }
 "GET /api/v1/environments/{env}/queries/{query_id}": { class: ui, part: 4 }

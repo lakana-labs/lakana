@@ -126,6 +126,13 @@ Without `--within` the window is the server's warning window,
 `LAKANA_TABLES__EXPIRY_WARNING_DAYS` (7 days by default). Within that window, `lakana table list NAMESPACE`
 shows an `expires` column (the list across namespaces has none) and `lakana table get` says when the table expires and how to keep it.
 
+In the web interface, open **Catalog**, choose **Expiring** and an environment. The list has one row
+per table: its name and namespace (a link to its page), **Expires** (how long until it, with the
+exact time on hover, or "Due now" once the time has passed) and **Why**, the sentence of the
+**Retention…** dialog. Choosing a namespace in the tree keeps only that namespace and the ones
+beneath it. **Show more** reads the next page. When nothing expires within the window, the page
+says "Nothing expires soon in" the place.
+
 ## What counts as activity
 
 A table's last activity is the latest of:

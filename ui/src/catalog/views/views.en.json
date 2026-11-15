@@ -31,5 +31,35 @@
     "protected": "Tables in a protected environment never expire.",
     "none": "No retention: it never expires.",
     "projectAssetOnly": "A deployed project declares this table, so it does not expire while it is deployed."
+  },
+  "expiring": {
+    "region": "Expiring tables",
+    "purpose": "Tables in {{place}} that expire soon, the soonest first.",
+    "empty": "Nothing expires soon in {{place}}.",
+    "columns": {
+      "table": "Table",
+      "when": "Expires",
+      "why": "Why"
+    },
+    "dueNow": "Due now"
+  },
+  "orphans": {
+    "region": "Orphans",
+    "inEnvironment": "Orphans are listed for the whole of {{environment}}.",
+    "wholeEnvironment": "Orphans are listed for the whole of {{environment}}, not only {{namespace}}.",
+    "empty": "No project left an orphan in {{environment}}.",
+    "hidden_one": "{{count}} more orphan is not shown: you may not read it.",
+    "hidden_other": "{{count}} more orphans are not shown: you may not read them.",
+    "columns": {
+      "table": "Table",
+      "kind": "Kind",
+      "repository": "Last built by"
+    },
+    "drop": "Drop",
+    "dropFor": "Drop {{table}}",
+    "droppedAlready": "Dropped; it can still be restored.",
+    "restore": "Restore it from Dropped",
+    "restoreFor": "Restore {{table}} from Dropped",
+    "purpose": "Tables no project in {{environment}} builds any more."
   }
 }
