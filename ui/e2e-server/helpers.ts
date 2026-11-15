@@ -4,7 +4,9 @@
  *
  * @packageDocumentation
  */
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import AxeBuilder from "@axe-core/playwright";
 import {
@@ -427,4 +429,78 @@ export async function administrator(browser: Browser, request: APIRequestContext
   const page = await freshPage(browser);
   await signInLocally(page, request);
   return page;
+}
+
+/**
+ * Reads a table's status as the bootstrap administrator, to see whether it is still there.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param namespace - The dotted namespace.
+ * @param name - The table's name.
+ * @returns The HTTP status: 200 when the table exists, 404 when it does not.
+ */
+export async function tableStatus(
+  request: APIRequestContext,
+  environment: string,
+  namespace: string,
+  name: string,
+): Promise<number> {
+  const path = `/api/v1/environments/${environment}/namespaces/${namespace}/tables/${name}`;
+  const response = await request.get(path, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  return response.status();
+}
+
+/**
+ * Registers a repository through the API and records a project version of it that produced
+ * tables, with no deployment after it, so those tables are orphans. A deploy needs a git host
+ * and a worker, which this suite has neither of; the version row is the one thing written
+ * straight into the server's SQLite file (`ui/.e2e-server/lakana.db`), and the API reads it
+ * back as it would a deployed one.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param repository - The repository's name; unique in the run.
+ * @param tables - The dotted names of the tables the project version produced.
+ * @returns Resolves once the version is recorded.
+ */
+export async function recordOrphanedVersion(
+  request: APIRequestContext,
+  environment: string,
+  repository: string,
+  tables: readonly string[],
+): Promise<void> {
+  await create(request, "/api/v1/repositories", {
+    name: repository,
+    kind: "https",
+    url: `https://github.com/acme/${repository}.git`,
+  });
+  const database = new DatabaseSync(resolve(import.meta.dirname, "..", ".e2e-server", "lakana.db"));
+  try {
+    const ids = (sql: string, name: string): string =>
+      (database.prepare(sql).get(name) as { id: string }).id;
+    database
+      .prepare(
+        `INSERT INTO job_versions (id, repository_id, environment_id, commit_sha, manifest_json,
+           code_uri, code_sha256, created_at)
+         VALUES (?, ?, ?, ?, ?, 's3://bucket/code.tar.gz', ?, '2026-11-01 08:00:00.000000')`,
+      )
+      .run(
+        randomUUID().replaceAll("-", ""),
+        ids("SELECT id FROM repositories WHERE name = ?", repository),
+        ids("SELECT id FROM environments WHERE name = ?", environment),
+        "a".repeat(40),
+        JSON.stringify({
+          version: 1,
+          assets: tables.map((table) => ({ table, references: [] })),
+          edges: [],
+          external_inputs: [],
+        }),
+        "0".repeat(64),
+      );
+  } finally {
+    database.close();
+  }
 }

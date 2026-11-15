@@ -1,13 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
-
-import {
-  type BrowserContext,
-  expect,
-  type Locator,
-  type Page,
-  type Request,
-  test,
-} from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import { consoleErrors, signInAsAdmin, STUBBED, tabTo, violations } from "./session";
 
@@ -221,7 +212,7 @@ for (const theme of ["light", "dark"] as const) {
         }
       });
 
-      test("the sections of Overview, Lineage, Health and Access are flat panels; Columns has none", async ({
+      test("the sections of Overview, Lineage, References, Health and Access are flat panels; Columns has none", async ({
         page,
       }) => {
         await page.setViewportSize({ width: 1920, height: 1080 });
@@ -1158,122 +1149,6 @@ test.describe("the table page in real Chromium", () => {
     await page.getByRole("link", { name: "Lineage ›" }).click();
     await expect(page).toHaveURL(/\/fact_sales\/lineage$/);
     await expect(page.getByRole("region", { name: "Lineage of fact_sales" })).toBeVisible();
-  });
-});
-
-/**
- * Gives the browser a virtual authenticator holding the administrator's passkey, so a step-up
- * touch answers without a person.
- *
- * @param context - The browser context.
- * @param page - The page.
- */
-async function addAdminPasskey(context: BrowserContext, page: Page): Promise<void> {
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("WebAuthn.enable");
-  const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
-    options: {
-      protocol: "ctap2",
-      transport: "internal",
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
-    },
-  });
-  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-  await cdp.send("WebAuthn.addCredential", {
-    authenticatorId,
-    credential: {
-      credentialId: Buffer.from("admin-passkey").toString("base64"),
-      isResidentCredential: true,
-      rpId: "localhost",
-      userHandle: Buffer.from("admin-handle").toString("base64"),
-      privateKey: privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
-      signCount: 0,
-    },
-  });
-}
-
-test.describe("the table's Actions in real Chromium", () => {
-  test.skip(({ browserName }) => browserName !== "chromium", "the virtual authenticator is CDP");
-
-  test("Drop asks for a passkey touch when the server needs one, drops on the retry and opens Dropped", async ({
-    page,
-    context,
-  }) => {
-    // Passkeys need a domain as relying-party id, never an IP address.
-    const origin = "http://localhost:4173";
-    const table = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
-    await signInAsAdmin(page);
-    await addAdminPasskey(context, page);
-    const sent: Request[] = [];
-    page.on("request", (request) => {
-      const path = new URL(request.url()).pathname;
-      // The drop and the touch; opening the table also records it as opened (a POST).
-      if (path === table || path.startsWith("/api/v1/sign-in/step-up")) {
-        if (request.method() !== "GET") {
-          sent.push(request);
-        }
-      }
-    });
-    let touched = false;
-    await page.route(
-      (url) => url.pathname === table,
-      (route) =>
-        route.request().method() !== "DELETE"
-          ? route.fallback()
-          : touched
-            ? route.fulfill({ status: 204 })
-            : route.fulfill({
-                status: 403,
-                json: { type: "StepUpRequired", detail: "Confirm with your passkey." },
-              }),
-    );
-    await page.route("**/api/v1/sign-in/step-up/options", (route) =>
-      route.fulfill({
-        json: {
-          ceremony_id: "up-1",
-          public_key: {
-            challenge: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString(
-              "base64url",
-            ),
-            rpId: "localhost",
-            allowCredentials: [],
-            userVerification: "required",
-            timeout: 60000,
-          },
-        },
-      }),
-    );
-    await page.route("**/api/v1/sign-in/step-up", (route) => {
-      touched = true;
-      return route.fulfill({ status: 204 });
-    });
-    await page.route("**/api/v1/environments/prod/namespaces/gold.sales/dropped-tables", (route) =>
-      route.fulfill({ json: [] }),
-    );
-
-    await page.goto(`${origin}${TABLE}`);
-    await page.getByRole("button", { name: "Actions" }).click();
-    await expect(page.getByRole("menu")).toBeVisible();
-    expect(await violations(page), "the Actions menu").toEqual([]);
-    await page.getByRole("menuitem", { name: "Drop…" }).click();
-    const dialog = page.getByRole("dialog", { name: "Drop gold.sales.fact_sales?" });
-    await expect(dialog.getByRole("button", { name: "Drop the table" })).toBeEnabled();
-    expect(await violations(page), "the Drop dialog").toEqual([]);
-    await dialog.getByRole("button", { name: "Drop the table" }).click();
-
-    await expect(page).toHaveURL(`${origin}/catalog?env=prod&ns=gold.sales&view=dropped`);
-    await expect(page.getByText("Dropped gold.sales.fact_sales.")).toBeVisible();
-    expect(sent.map((request) => `${request.method()} ${new URL(request.url()).pathname}`)).toEqual(
-      [
-        `DELETE ${table}`,
-        "POST /api/v1/sign-in/step-up/options",
-        "POST /api/v1/sign-in/step-up",
-        `DELETE ${table}`,
-      ],
-    );
   });
 });
 

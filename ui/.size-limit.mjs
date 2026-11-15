@@ -107,9 +107,9 @@ const NAMED_LIMITS = [
   // an administrator the grants level by level, the row filters and the column masks. It loads
   // only when the Access tab is opened.
   { name: "the Access tab", prefix: "AccessTab-", limit: "2.46 kB" },
-  // Measured 1.15 kB (2026-11-16) + 10 %: the References tab, its two flat panels of references,
+  // Measured 1.01 kB (2026-11-16, `npm run size`) + 10 %: the References tab, its two flat panels of references,
   // the hidden counts and the focus after Try again. It loads only when the tab is opened.
-  { name: "the References tab", prefix: "ReferencesTab-", limit: "1.27 kB" },
+  { name: "the References tab", prefix: "ReferencesTab-", limit: "1.11 kB" },
   // Measured 3.83 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
   // included. The page and the two tabs share them, so the bundler gave them a chunk of their own,
   // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.

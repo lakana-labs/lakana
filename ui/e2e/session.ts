@@ -269,7 +269,7 @@ function tablesAnswer(url: URL): { status: number; json: unknown } {
 }
 
 /** The path of the table page's table, `prod/gold.sales/fact_sales`. */
-const TABLE_PATH = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
+export const TABLE_PATH = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
 
 /** The path of what the administrator may do with a table. */
 const PERMISSIONS_PATH = "/api/v1/principals/admin/permissions";
@@ -640,7 +640,7 @@ const COLUMN_MASKS = [
 ];
 
 /** The table `fact_sales` as its page reads it. */
-const TABLE_DETAIL = {
+export const TABLE_DETAIL = {
   name: "fact_sales",
   namespace: "gold.sales",
   uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
