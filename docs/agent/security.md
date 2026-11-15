@@ -4541,6 +4541,21 @@ user documentation promises (`test_a_tilde_runs_as_a_whole_text_match`,
 `test_a_keyword_lambda_outside_a_lambda_function_is_refused_by_duckdb`). A new parse site that
 calls `sqlglot.parse_one` directly gets the other reading; use the module.
 
+**The ambiguity gate qualifies tables, not columns.** `_require_unambiguous_references` runs
+`qualify(..., qualify_columns=False)`: from 30.25 the column step refuses every unqualified
+column it cannot place without a schema (a correlated subquery, a bare `VALUES` list's subquery,
+a `SELECT` alias in `WHERE`), and the platform passes none. The gate's subject, one name for two
+sources, is decided by the table step and `Scope.selected_sources`, which the flag leaves alone.
+Over the guard-fuzzing corpus plus the guard's test statements (26,819) the gate's verdict with
+and without the column step differed on sqlglot 30.24 only for twelve statements: eleven read a
+column a `WITH` or a derived table lacks (DuckDB's Binder refuses them; checked by executing the
+rewrites), and one was a `JOIN` without a `FROM`, which `_reject_joins_without_from` now refuses
+explicitly (sqlglot renders the joined table as a column there). Diffing the guard's verdicts on
+that corpus between sqlglot 30.24 on the old code and 30.31 on the adapted code found no
+statement newly allowed that reaches data: `TABLE t` now parses as `SELECT * FROM t` and is
+rewritten like it (row filter and masks applied; `TABLE fn()` refused as a table function), and
+`SORT BY`, which 30.24 dropped silently, no longer parses.
+
 **User SQL cannot reach the values the platform sets, and may not contain a placeholder
 (`?`, `$1`, `$name`).** The rewriter reads each table's resolved file list — on S3, presigned
 URLs of the raw files — through `getvariable('v_<n>_files')`; the query child sets each value

@@ -578,6 +578,11 @@ list gets each of them exactly as a `SELECT` list does.
 _VALUES_ALIAS = "__lakana_values"
 """The alias a bare `VALUES` list takes when `_parse_checked` makes it a `SELECT` of it."""
 
+_JOIN_WITHOUT_FROM_MESSAGE = (
+    "A JOIN needs a FROM before it: write SELECT ... FROM a JOIN b ON ... and submit it again."
+)
+"""Why a `SELECT` that joins a table to nothing is refused."""
+
 _ALIASED_VALUES_MESSAGE = (
     "A VALUES list on its own takes no alias; to name its columns, write "
     "SELECT * FROM (VALUES ...) AS t(a, b)."
@@ -1396,6 +1401,29 @@ def _reject_statements_inside(parsed: exp.Expr, dialect: str) -> None:
             )
 
 
+def _reject_joins_without_from(parsed: exp.Expr) -> None:
+    """Refuse a `SELECT` anywhere in the statement that has a `JOIN` but no `FROM`.
+
+    sqlglot parses `SELECT * JOIN t ON true` and renders the joined table as a column of the
+    `SELECT` list; DuckDB cannot parse the text either way. The column step of `qualify`
+    refused it ("Joins ... missing source table") until `_require_unambiguous_references`
+    stopped running that step for sqlglot 30.25 (#415); this keeps the refusal explicit.
+
+    Parameters
+    ----------
+    parsed
+        The parsed statement. Not modified.
+
+    Raises
+    ------
+    ValidationError
+        If a `SELECT` carries a join and no `FROM` (`_JOIN_WITHOUT_FROM_MESSAGE`).
+    """
+    for select in parsed.find_all(exp.Select):
+        if select.args.get("joins") and select.args.get("from_") is None:
+            raise ValidationError(_JOIN_WITHOUT_FROM_MESSAGE)
+
+
 def _require_unambiguous_references(parsed: exp.Expr, dialect: str) -> None:
     """Refuse a query whose own references sqlglot cannot resolve unambiguously.
 
@@ -1418,12 +1446,17 @@ def _require_unambiguous_references(parsed: exp.Expr, dialect: str) -> None:
     (which renames a `COUNT(*)` result column to `_col_0`, among other
     surprises).
 
-    `validate_qualify_columns` is off deliberately. With it on, `qualify`
-    also demands that every *column* resolve to a known source, which no
-    caller here can satisfy: the platform passes no schema, so an ordinary
-    `SELECT id FROM bronze.a JOIN gold.b ON ...` — legal SQL DuckDB runs
-    fine — would be refused. Table and alias resolution, which is what this
-    gate is for, is unaffected by the flag.
+    Columns are not qualified (`qualify_columns=False`, and so nothing to
+    validate). The platform passes no schema, and from sqlglot 30.25 the column
+    step refuses any unqualified column it cannot place without one: one in a
+    correlated subquery, in a bare `VALUES` list's subquery, or a `SELECT`
+    alias used in `WHERE` ("Cannot resolve 'a' due to missing source schemas"),
+    all legal SQL DuckDB runs. Table and alias resolution, which is what this
+    gate is for, is done by the table step and `Scope.selected_sources`, which
+    the flag does not touch: over the guard-fuzzing corpus (26,819 statements)
+    the gate decides every statement the same with and without the column step
+    on sqlglot 30.24, except twelve whose only fault was a column a `WITH` or a
+    derived table does not have (`Unknown column`), which DuckDB refuses itself.
 
     Reading `Scope.selected_sources` is what raises on two sources of one
     scope sharing a name, so every scope's is read here explicitly rather
@@ -1447,7 +1480,12 @@ def _require_unambiguous_references(parsed: exp.Expr, dialect: str) -> None:
         legitimately run is lost.
     """
     try:
-        qualified = qualify(parsed.copy(), dialect=dialect, validate_qualify_columns=False)
+        qualified = qualify(
+            parsed.copy(),
+            dialect=dialect,
+            qualify_columns=False,
+            validate_qualify_columns=False,
+        )
         root = build_scope(qualified)
         for scope in root.traverse() if root is not None else ():
             _ = scope.selected_sources
@@ -1562,7 +1600,8 @@ def _parse_checked(sql: str, dialect: str) -> exp.Expr:
         `_reject_placeholders`. Or if it contains a `WITH RECURSIVE` clause, whose scope
         bindings `_cte_reference_ids` cannot classify soundly, or a `CONNECT BY`, which
         renders as one — see `_reject_recursive_ctes`. Or if it holds a statement that is not a read
-        anywhere, see `_reject_statements_inside`. Or if it is a bare `VALUES` list with an
+        anywhere, see `_reject_statements_inside`. Or if a `SELECT` has a `JOIN` and no
+        `FROM`, see `_reject_joins_without_from`. Or if it is a bare `VALUES` list with an
         alias or a clause other than `ORDER BY`, `LIMIT` and `OFFSET`, see
         `_reject_values_clauses`. `check_blacklist` already refuses these
         first in `lakana_worker.pipeline.run_one`, so this is defence in
@@ -1578,6 +1617,7 @@ def _parse_checked(sql: str, dialect: str) -> exp.Expr:
     _reject_statements_inside(parsed, dialect)
     _reject_recursive_ctes(parsed)
     _reject_pivot_without_values(parsed)
+    _reject_joins_without_from(parsed)
     _require_unambiguous_references(parsed, dialect)
     return parsed
 

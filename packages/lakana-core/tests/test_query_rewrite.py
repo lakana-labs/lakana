@@ -185,6 +185,80 @@ def test_rewrite_refuses_a_table_alias_that_reuses_a_cte_name() -> None:
         rewrite_query(sql, sources={"raw.events": _parquet("a.parquet")})
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a FROM bronze.x WHERE a IN (SELECT a FROM silver.y)",
+        "SELECT a FROM bronze.x WHERE EXISTS (SELECT 1 FROM silver.y WHERE y.b = a)",
+        "SELECT a, (SELECT count(*) FROM silver.y WHERE y.a = a) AS n FROM bronze.x",
+        "SELECT a AS b FROM bronze.x, silver.y WHERE b > 1",
+    ],
+)
+def test_an_unqualified_column_no_schema_places_is_not_an_ambiguity(sql: str) -> None:
+    """A column only a schema could place is ordinary SQL; the gate is about table names.
+
+    From sqlglot 30.25 its column qualifier refuses such a column when no schema is given
+    (a correlated subquery, a `SELECT` alias in `WHERE`), so the gate no longer runs it (#415).
+
+    Parameters
+    ----------
+    sql
+        A query whose tables are unambiguous and whose columns are not qualified.
+    """
+    assert sorted(extract_table_refs(sql)) == ["bronze.x", "silver.y"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a FROM bronze.x WHERE a IN "
+        "(WITH t AS (SELECT 1 AS a) SELECT a FROM bronze.t JOIN t ON true)",
+        "SELECT a FROM bronze.x WHERE EXISTS "
+        "(WITH c AS (SELECT 1 AS a) SELECT a FROM c, silver.y AS c WHERE a = 1)",
+        "SELECT a, (SELECT count(*) FROM (SELECT 1 AS a) AS y, silver.y AS y WHERE y.a = a) AS n "
+        "FROM bronze.x",
+    ],
+)
+def test_a_name_that_means_two_tables_is_refused_beside_unqualified_columns(sql: str) -> None:
+    """Without the column step, a name for two sources in a correlated scope is still refused.
+
+    Parameters
+    ----------
+    sql
+        A query with one name for two sources inside a subquery that reads outer columns.
+    """
+    with pytest.raises(ValidationError, match="unambiguously"):
+        extract_table_refs(sql)
+    with pytest.raises(ValidationError, match="unambiguously"):
+        rewrite_query(sql, sources={"silver.y": _parquet("a.parquet")})
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * JOIN bronze.canary ON true",
+        "SELECT val JOIN bronze.canary AS c USING (id)",
+        "SELECT *, val JOIN bronze.canary",
+        "SELECT (SELECT 1 JOIN bronze.canary ON true) AS x FROM silver.y",
+        "SELECT * JOIN gfrom read_json_auto('s3://other-bucket/x.json')",
+    ],
+)
+def test_a_join_without_a_from_is_refused(sql: str) -> None:
+    """A `JOIN` with no `FROM` before it is refused, as sqlglot's column step refused it up to #415.
+
+    DuckDB cannot parse it either; refused by the guard, it never reaches DuckDB in the shape
+    sqlglot renders it (the joined table as a column of the `SELECT`).
+
+    Parameters
+    ----------
+    sql
+        A `SELECT` that joins a table to nothing.
+    """
+    for check in (extract_table_refs, lambda text: rewrite_query(text, {})):
+        with pytest.raises(ValidationError, match="A JOIN needs a FROM"):
+            check(sql)
+
+
 def test_extract_table_refs_reports_both_tables_of_an_unqualified_column_join() -> None:
     """An unqualified column over two sources is ordinary SQL, not an ambiguity to refuse.
 
@@ -2633,7 +2707,6 @@ _SELECT_FORM = (
 """The refusal for a clause DuckDB takes in a `SELECT` but not on a bare `VALUES`."""
 
 _VALUES_CLAUSES_DUCKDB_REFUSES = [
-    pytest.param("SORT BY 1", "DuckDB has no SORT BY; use ORDER BY.", id="sort-by"),
     pytest.param("CLUSTER BY 1", "DuckDB has no CLUSTER BY; use ORDER BY.", id="cluster-by"),
     pytest.param("DISTRIBUTE BY 1", "DuckDB has no DISTRIBUTE BY; remove it.", id="distribute-by"),
     pytest.param(
@@ -2672,6 +2745,22 @@ def test_a_clause_duckdb_does_not_take_on_a_bare_values_list_is_refused(
         with pytest.raises(ValidationError) as caught:
             check(sql)
         assert str(caught.value) == message
+
+
+@pytest.mark.parametrize("sql", ["VALUES (1) SORT BY 1", "SELECT 1 AS a SORT BY 1"])
+def test_a_sort_by_is_refused_as_a_syntax_error(sql: str) -> None:
+    """A `SORT BY`, which sqlglot dropped from its rendering up to 30.24, no longer parses.
+
+    DuckDB has no `SORT BY` either, so it is never run without the clause the caller wrote.
+
+    Parameters
+    ----------
+    sql
+        A query with a `SORT BY`.
+    """
+    for check in (check_blacklist, extract_table_refs, lambda text: rewrite_query(text, {})):
+        with pytest.raises(sqlglot.errors.ParseError):
+            check(sql)
 
 
 def test_every_argument_sqlglot_can_set_on_values_is_allowed_or_refused_by_name() -> None:
