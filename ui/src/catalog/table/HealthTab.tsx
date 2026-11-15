@@ -18,14 +18,13 @@ import { personPath } from "../../access/personPath";
 import { CopyLine } from "../../shell/CopyLine";
 import { shellQuote } from "../../shell/shellQuote";
 import { useMe } from "../../shell/me";
-import { useFocusAfter } from "../../shell/useFocusAfter";
-import { useResource } from "../../shell/useResource";
 import { VisibleText } from "../../shell/VisibleText";
 import { StatusGlyph } from "../../status/StatusGlyph";
 import type { StatusKind } from "../../status/status";
-import { ReadFailed, When } from "../cells";
+import { When } from "../cells";
 import { formatBytes } from "../format";
 import { bandWords, effectWord, firedLines, judged, observedWords } from "./health";
+import { TabBody } from "./TabBody";
 import { useTableData } from "./TableContext";
 
 type Check = TableHealthOut["checks"][number];
@@ -440,37 +439,17 @@ export default function HealthTab(): JSX.Element {
     () => readHealth({ environment, namespace, name }, me.admin),
     [environment, namespace, name, me.admin],
   );
-  const resource = useResource(load);
-  const { target, arm } = useFocusAfter<HTMLDivElement>(resource.data);
-  const read = resource.data;
-  let shown: ReactNode;
-  if (resource.error !== null) {
-    shown = (
-      <ReadFailed
-        message={resource.error}
-        onRetry={() => {
-          arm();
-          resource.reload();
-        }}
-      />
-    );
-  } else if (read === undefined) {
-    shown = <p role="status">{t("table.healthTab.reading")}</p>;
-  } else {
-    const { health } = read;
-    shown = (
-      <>
-        {!judged(health) && <p>{t("table.healthTab.notJudged")}</p>}
-        <Checks health={health} />
-        <Signals health={health} />
-        <Maintenance health={health} />
-        <Readers health={health} refused={read.readersRefused} />
-      </>
-    );
-  }
   return (
-    <div className="health-tab" ref={target} tabIndex={-1}>
-      {shown}
-    </div>
+    <TabBody className="health-tab" load={load} reading={t("table.healthTab.reading")}>
+      {({ health, readersRefused }) => (
+        <>
+          {!judged(health) && <p>{t("table.healthTab.notJudged")}</p>}
+          <Checks health={health} />
+          <Signals health={health} />
+          <Maintenance health={health} />
+          <Readers health={health} refused={readersRefused} />
+        </>
+      )}
+    </TabBody>
   );
 }

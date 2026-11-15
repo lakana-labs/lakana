@@ -18,7 +18,7 @@ The page has:
 - **The table's name** as the heading, with its label under it when the table has one.
 - **A line under the name** with what the table is and where it lives, such as `Fact · gold.sales`,
   and the environment's label.
-- **Tabs**: Overview, Columns, Preview, Lineage, Health and Access. Every tab has its own
+- **Tabs**: Overview, Columns, Preview, Lineage, References, Health and Access. Every tab has its own
   address, so a link opens the tab you were looking at. Everyone sees the same tabs.
 - **Actions** beside the name, once the table is read, when there is something you may do to the
   table (see [Actions](#actions)).
@@ -177,6 +177,24 @@ you may not read, are not drawn, and nothing counts them. If you see only the ta
 tab says "Nothing upstream or downstream." A very large lineage shows its first 500 nodes each way
 and says "Showing the first 500 nodes each way." If lineage cannot be read, the tab says why and
 offers **Try again**.
+
+## References
+
+References are what the table's header declares it points at, such as a `store_id` that must
+match `dim_store.store_id`. They are not lineage: lineage is how data flowed, references are
+what the model says relates. The tab shows the same as `lakana table references`. Its address
+ends in `/references`.
+
+- **This table references** lists each reference as `column → table.column`. The target table is
+  a link to its page. A target that does not exist says "This table does not exist." and is not a
+  link. A target that keeps history says "valid at" and the time column the reference follows.
+- **Referenced by** lists the tables whose headers point at this one, each a link, with the column
+  they reference and the column of this table it must match.
+
+References to or from a table you may not read are counted and never named: the tab says, for
+example, "2 more from tables you may not read" or "1 more points at a table you may not read".
+When the header declares no references and no table points at this one, the tab says so. If the
+references cannot be read, it says why and offers **Try again**.
 
 ## Health
 

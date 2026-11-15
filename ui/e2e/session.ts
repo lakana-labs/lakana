@@ -277,6 +277,38 @@ const PERMISSIONS_PATH = "/api/v1/principals/admin/permissions";
 /** The path of the table's health, which Overview reads without the readers. */
 const HEALTH_PATH = `${TABLE_PATH}/health`;
 
+/** The path of the table's references, which the References tab reads. */
+const REFERENCES_PATH = `${TABLE_PATH}/references`;
+
+/** What the References tab reads: one reference each way and one hidden each way. */
+const REFERENCES = {
+  table: "gold.sales.fact_sales",
+  outgoing: [
+    {
+      id: "gold.sales.fact_sales/ref_store_id",
+      table: "gold.sales.fact_sales",
+      column: "store_id",
+      target: "gold.dim_store",
+      target_column: "store_id",
+      target_exists: true,
+      at: null,
+    },
+  ],
+  hidden_outgoing: 1,
+  incoming: [
+    {
+      id: "gold.sales.fact_returns/ref_sale_id",
+      table: "gold.sales.fact_returns",
+      column: "sale_id",
+      target: "gold.sales.fact_sales",
+      target_column: "id",
+      target_exists: true,
+      at: "sold_at",
+    },
+  ],
+  hidden_incoming: 2,
+};
+
 /** The path of where the table is defined, which Overview reads for its Defined in fact. */
 const DEFINITION_PATH = `${TABLE_PATH}/definition`;
 
@@ -719,6 +751,7 @@ export const STUBBED = [
   TABLES,
   TABLE_PATH,
   HEALTH_PATH,
+  REFERENCES_PATH,
   LINEAGE_PATH,
   PERMISSIONS_PATH,
   "/api/v1/grants",
@@ -789,6 +822,10 @@ export async function signInAsAdmin(page: Page): Promise<void> {
             ? HEALTH
             : { ...HEALTH, readers: READERS },
       }),
+  );
+  await page.route(
+    (url) => url.pathname === REFERENCES_PATH,
+    (route) => route.fulfill({ json: REFERENCES }),
   );
   await page.route(
     (url) => url.pathname === DEFINITION_PATH,

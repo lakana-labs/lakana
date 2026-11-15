@@ -107,6 +107,9 @@ const NAMED_LIMITS = [
   // an administrator the grants level by level, the row filters and the column masks. It loads
   // only when the Access tab is opened.
   { name: "the Access tab", prefix: "AccessTab-", limit: "2.46 kB" },
+  // Measured 1.15 kB (2026-11-16) + 10 %: the References tab, its two flat panels of references,
+  // the hidden counts and the focus after Try again. It loads only when the tab is opened.
+  { name: "the References tab", prefix: "ReferencesTab-", limit: "1.27 kB" },
   // Measured 3.83 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
   // included. The page and the two tabs share them, so the bundler gave them a chunk of their own,
   // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.
@@ -218,7 +221,7 @@ export default [
   ...onDemandChunks(INITIAL).map(onDemandCheck),
   // Raised from 8.03 kB: measured 7.42 kB with the Health and Access tabs' rules (their sections,
   // lists whose rows open nothing, a glyph beside its word, policy expressions in the monospace
-  // face, the maintenance facts, and the table page's six tabs wrapping at 320 px) (2026-11-13)
+  // face, the maintenance facts, and the table page's tabs wrapping at 320 px) (2026-11-13)
   // + 10 %.
   // Raised from 7.21 kB: measured 7.3 kB with the Lineage tab's rules (the step buttons, the
   // drawing's scrolling region, its boxes, lines and marks in light, dark and forced colours, the

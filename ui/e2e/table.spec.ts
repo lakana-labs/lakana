@@ -27,11 +27,12 @@ async function openTable(page: Page, tab = ""): Promise<void> {
   await expect(page.getByRole("navigation", { name: "Sections of the table" })).toBeVisible();
 }
 
-/** The tabs after Preview, with what shows once each has read its data. */
+/** The tabs after Preview (References last, so the indices of the others hold), with what shows once each has read its data. */
 const NEW_TABS = [
   ["/lineage", "region", "Lineage of fact_sales"],
   ["/health", "heading", "Checks"],
   ["/access", "heading", "Column masks"],
+  ["/references", "heading", "This table references"],
 ] as const;
 
 /**
@@ -45,7 +46,7 @@ function tabName(entry: (typeof NEW_TABS)[number]): string {
 }
 
 /**
- * Opens one of the Lineage, Health and Access tabs and waits until it shows what it read.
+ * Opens one of the Lineage, Health, Access and References tabs and waits until it shows what it read.
  *
  * @param page - The page.
  * @param entry - The tab, the role of what to wait for and its name.
@@ -201,14 +202,14 @@ for (const theme of ["light", "dark"] as const) {
         await expect(path).toBeFocused();
       });
 
-      test("the six tabs wrap at 320 px and every tab fits and passes axe", async ({ page }) => {
+      test("the seven tabs wrap at 320 px and every tab fits and passes axe", async ({ page }) => {
         await page.setViewportSize({ width: 320, height: 640 });
         await openTable(page);
         const tabs = page.getByRole("navigation", { name: "Sections of the table" });
         const boxes = await tabs
           .getByRole("link")
           .evaluateAll((links) => links.map((link) => link.getBoundingClientRect()));
-        expect(boxes).toHaveLength(6);
+        expect(boxes).toHaveLength(7);
         // Wrapped: more than one line, and every tab inside the window.
         expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBeGreaterThan(1);
         expect(Math.max(...boxes.map((box) => box.right))).toBeLessThanOrEqual(320);
@@ -698,7 +699,7 @@ test.describe("the table page in real Chromium", () => {
       await openTable(page, "/columns");
       await expect(page.locator("html")).toHaveAttribute("data-density", density);
       await measure("Columns");
-      for (const entry of NEW_TABS.slice(1)) {
+      for (const entry of NEW_TABS.slice(1, 3)) {
         await openNewTab(page, entry);
         await measure(entry[0]);
       }
@@ -713,7 +714,7 @@ test.describe("the table page in real Chromium", () => {
 
   test("at 320 px a status word in Health and Access stays on one line", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
-    for (const entry of NEW_TABS.slice(1)) {
+    for (const entry of NEW_TABS.slice(1, 3)) {
       await openNewTab(page, entry);
       const words = page.locator(".table-tab .glyph-word");
       await expect(words.first()).toBeVisible();

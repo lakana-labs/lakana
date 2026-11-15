@@ -176,7 +176,7 @@
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
 "table preview": { class: read, part: 3, done: true }
-"table references": { class: ui, part: 3 }
+"table references": { class: ui, part: 3, done: true }
 "table replace":
   {
     class: git,
@@ -286,7 +286,8 @@
   }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage":
   { class: read, part: 3, note: "run lineage is not shown on the table page" }
-"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references":
+  { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
   { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }

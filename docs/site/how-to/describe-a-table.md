@@ -178,7 +178,8 @@ currency and its label ([Declare the measures](declare-a-tables-model.md#declare
 
 `lakana table references` shows both directions: what the table references, and which tables
 reference it. These are the references the model declares, not lineage: lineage is how data
-flowed, references are what the model says relates.
+flowed, references are what the model says relates. The table page's References tab shows the
+same (see [Open a table](open-a-table.md#references)).
 
 <!-- source: docs/examples/see-a-tables-model/run.sh#references -->
 ```bash

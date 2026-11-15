@@ -229,7 +229,8 @@ lakana table get gold.fact_sales --env dev
 ```
 
 `lakana table references` shows the references in both directions: what a table points at, and
-which tables point at it.
+which tables point at it. The table page's References tab shows the same (see
+[Open a table](open-a-table.md#references)).
 
 <!-- source: docs/examples/see-a-tables-model/run.sh#references -->
 ```bash

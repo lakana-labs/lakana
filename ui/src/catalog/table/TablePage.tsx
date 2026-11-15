@@ -30,9 +30,10 @@ const PreviewTab = lazy(async () => {
 // The drawing, its layout and its strings load only when the Lineage tab is opened.
 const LineageTab = lazy(() => import("./LineageTab"));
 
-// Health and Access load only when their tab is opened.
+// References, Health and Access load only when their tab is opened.
 const HealthTab = lazy(() => import("./HealthTab"));
 const AccessTab = lazy(() => import("./AccessTab"));
+const ReferencesTab = lazy(() => import("./ReferencesTab"));
 
 /** Properties of {@link TablePage}. */
 export interface TablePageProps {
@@ -169,6 +170,11 @@ export function TablePage({
         {tab === "lineage" && (
           <Suspense fallback={<p role="status">{t("table.loadingTab")}</p>}>
             <LineageTab />
+          </Suspense>
+        )}
+        {tab === "references" && (
+          <Suspense fallback={<p role="status">{t("table.loadingTab")}</p>}>
+            <ReferencesTab />
           </Suspense>
         )}
         {tab === "health" && (
