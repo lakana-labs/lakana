@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import enum
+import json
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -17,6 +19,7 @@ from lakana_core.pagination import (
     SMALLINT_KEY,
     CursorValue,
     KeyType,
+    Page,
     Position,
     SortedPosition,
     decode_cursor,
@@ -25,6 +28,8 @@ from lakana_core.pagination import (
     encode_cursor,
     encode_key_cursor,
     encode_sorted_cursor,
+    instant_key,
+    page_in_order,
     parse_choices,
 )
 
@@ -303,3 +308,133 @@ def test_both_cursor_decoders_refuse_the_same_characters(character: str) -> None
         decode_sorted_cursor(
             "tables", "name:asc", encode_sorted_cursor("tables", "name:asc", (text,), ID), (str,)
         )
+
+
+def _page(
+    items: Sequence[str],
+    *,
+    cursor: str | None = None,
+    limit: int = 2,
+    descending: bool = False,
+    kind: str = "things",
+) -> Page[str]:
+    return page_in_order(
+        items,
+        kind=kind,
+        key_of=lambda s: (s,),
+        limit=limit,
+        cursor=cursor,
+        descending=descending,
+    )
+
+
+def test_page_in_order_pages_one_by_one_without_repeating_or_skipping() -> None:
+    items = ["a", "b", "c", "d", "e"]
+    seen, cursor, sizes = [], None, []
+    while True:
+        page = _page(items, cursor=cursor)
+        sizes.append(len(page.items))
+        seen += page.items
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert sizes == [2, 2, 1]
+    assert seen == items
+
+
+def test_page_in_order_empty_exact_and_boundary() -> None:
+    assert _page([]) == ([], None)
+    assert _page(["a", "b"]) == (["a", "b"], None)
+    page = _page(["a", "b", "c"])
+    assert page.items == ["a", "b"]
+    assert page.next_cursor is not None
+
+
+def test_page_in_order_cursor_past_the_end() -> None:
+    cursor = _page(["a", "b", "c"]).next_cursor
+    assert _page(["a"], cursor=cursor) == ([], None)
+
+
+def test_page_in_order_neither_repeats_nor_skips_when_the_last_row_vanishes() -> None:
+    cursor = _page(["a", "b", "c", "d"]).next_cursor
+    assert _page(["a", "c", "d"], cursor=cursor) == (["c", "d"], None)
+
+
+def test_page_in_order_descending() -> None:
+    first = _page(["a", "b", "c", "d"], descending=True)
+    assert first.items == ["d", "c"]
+    second = _page(["a", "b", "c", "d"], descending=True, cursor=first.next_cursor)
+    assert second == (["b", "a"], None)
+
+
+def test_page_in_order_sorts_by_the_key_itself() -> None:
+    first = _page(["c", "a", "d", "b"])
+    assert first.items == ["a", "b"]
+    assert _page(["c", "a", "d", "b"], cursor=first.next_cursor).items == ["c", "d"]
+
+
+def test_page_in_order_breaks_equal_primary_keys_by_the_tiebreak() -> None:
+    rows = [("t1", "b"), ("t1", "a"), ("t1", "c")]
+    first = page_in_order(rows, kind="k", key_of=lambda r: r, limit=2, cursor=None)
+    assert first.items == [("t1", "a"), ("t1", "b")]
+    second = page_in_order(rows, kind="k", key_of=lambda r: r, limit=2, cursor=first.next_cursor)
+    assert second == ([("t1", "c")], None)
+
+
+def test_page_in_order_refuses_a_key_that_is_not_unique() -> None:
+    with pytest.raises(ValueError, match="unique"):
+        _page(["a", "a"])
+
+
+@pytest.mark.parametrize("limit", [0, -1, 201])
+def test_page_in_order_refuses_a_limit_out_of_range(limit: int) -> None:
+    with pytest.raises(ValidationError, match=rf"limit must be between 1 and 200; got {limit}\."):
+        _page(["a"], limit=limit)
+
+
+def test_a_cursor_of_another_list_is_refused() -> None:
+    cursor = _page(["a", "b", "c"], kind="orphans").next_cursor
+    with pytest.raises(ValidationError) as exc:
+        _page(["a"], cursor=cursor, kind="artifacts")
+    assert str(exc.value) == _OTHER_LIST.format(expected="artifacts", actual="orphans")
+
+
+def _forged(body: object) -> str:
+    return base64.urlsafe_b64encode(json.dumps(body).encode()).rstrip(b"=").decode()
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        base64.urlsafe_b64encode(b"x").decode(),
+        _forged({"k": "things", "n": "[1]"}),
+        _forged({"k": "things", "n": "not json"}),
+        _forged({"k": "things", "n": '{"a": "b"}'}),
+        "%%%",
+    ],
+)
+def test_a_forged_cursor_is_refused(cursor: str) -> None:
+    with pytest.raises(ValidationError) as exc:
+        _page(["a"], cursor=cursor)
+    assert str(exc.value) == _BAD_CURSOR
+    assert "without `cursor`" in str(exc.value)
+
+
+def test_a_variable_length_key_orders_like_its_tuple() -> None:
+    rows = [("ab",), ("a", "b"), ("a",)]
+    first = page_in_order(rows, kind="k", key_of=lambda r: r, limit=2, cursor=None)
+    assert first.items == [("a",), ("a", "b")]
+    second = page_in_order(rows, kind="k", key_of=lambda r: r, limit=2, cursor=first.next_cursor)
+    assert second == ([("ab",)], None)
+
+
+def test_instant_key_orders_like_the_times() -> None:
+    plus2 = timezone(timedelta(hours=2))
+    times = [
+        datetime(2026, 1, 1, 10, 0, 0, 5, tzinfo=UTC),
+        datetime(2026, 1, 1, 10, 0, 0, tzinfo=UTC),
+        datetime(2026, 1, 1, 11, 0, 0, 1, tzinfo=plus2),
+        datetime(2026, 1, 1, 12, 0, 0, tzinfo=plus2),
+    ]
+    assert sorted(times, key=instant_key) == sorted(times)
+    assert instant_key(times[2]) == "2026-01-01T09:00:00.000001Z"
