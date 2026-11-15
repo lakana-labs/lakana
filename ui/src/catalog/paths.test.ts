@@ -35,7 +35,15 @@ describe("catalog paths", () => {
   });
 
   it("has Lineage, Health and Access after Preview", () => {
-    expect(TABLE_TABS).toEqual(["overview", "columns", "preview", "lineage", "health", "access"]);
+    expect(TABLE_TABS).toEqual([
+      "overview",
+      "columns",
+      "preview",
+      "lineage",
+      "references",
+      "health",
+      "access",
+    ]);
     expect(tablePath("prod", "gold.sales", "fact_sales", "lineage")).toBe(
       "/catalog/prod/gold.sales/fact_sales/lineage",
     );

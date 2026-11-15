@@ -34,3 +34,19 @@ it("says the table is loading once, in one status that stays through the chunk a
     expect(screen.queryByText("Loading the table…")).not.toBeInTheDocument();
   });
 }, 10000);
+
+it("shows Actions beside the heading once the table is read, and no Actions while it is read", async () => {
+  const slow = held();
+  renderShell("/catalog/prod/gold.sales/fact_sales", {
+    routes: { [`GET ${TABLE_PATH}`]: slow.route },
+  });
+
+  const heading = await screen.findByRole("heading", { level: 1, name: "fact_sales" });
+  expect(await screen.findByText("Loading the table…", {}, { timeout: 2500 })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Actions" })).not.toBeInTheDocument();
+
+  slow.release({ status: 200, body: table({ actions: ["drop"] }) });
+
+  const actions = await screen.findByRole("button", { name: "Actions" }, { timeout: 3000 });
+  expect(heading.parentElement).toContainElement(actions);
+}, 10000);

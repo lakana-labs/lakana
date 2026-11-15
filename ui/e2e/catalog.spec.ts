@@ -86,6 +86,47 @@ for (const theme of ["light", "dark"] as const) {
         expect(await violations(page), "an empty namespace").toEqual([]);
       });
 
+      test("axe finds nothing on the Dropped view, with the choice of an environment, and on the Undrop dialog", async ({
+        page,
+      }) => {
+        await openCatalog(page, "/catalog?view=dropped", page.getByText(/listed per environment/));
+        expect(await violations(page), "no environment chosen").toEqual([]);
+
+        await openCatalog(
+          page,
+          "/catalog?view=dropped&env=prod",
+          page.getByRole("region", { name: "Dropped tables" }),
+        );
+        await expect(page.getByText("No longer restorable")).toBeVisible();
+        expect(await violations(page), "the Dropped view").toEqual([]);
+
+        await page.route("**/tables/fact_returns/undrop", (route) =>
+          route.fulfill({
+            status: 409,
+            json: {
+              type: "AlreadyExistsError",
+              detail: "A table fact_returns already exists in gold.sales. Choose another name.",
+            },
+          }),
+        );
+        await page.getByRole("button", { name: "Undrop gold.sales.fact_returns" }).click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Restore as" })).toBeVisible();
+        expect(await violations(page), "the Undrop dialog").toEqual([]);
+
+        await page.keyboard.press("Escape");
+        await page.route("**/api/v1/environments/prod", (route) =>
+          route.fulfill({ json: { name: "prod", is_protected: true } }),
+        );
+        await page.reload();
+        await expect(page.getByRole("region", { name: "Dropped tables" })).toBeVisible();
+        await page.getByRole("button", { name: /^Undrop gold\.sales\.fact_returns/ }).click();
+        await expect(
+          page.getByRole("textbox", { name: /Why you break the protection of prod/ }),
+        ).toBeVisible();
+        expect(await violations(page), "the reason dialog of a protected environment").toEqual([]);
+      });
+
       test("at least 24 px between the content of every two neighbouring cells", async ({
         page,
       }) => {
@@ -183,9 +224,11 @@ test.describe("the Catalog in real Chromium", () => {
     await expect(gold).toBeFocused();
     await expect(page.getByRole("heading", { level: 1, name: "Catalog" })).not.toBeFocused();
 
-    // One Tab leaves the tree for the search field.
+    // One Tab leaves the tree for the views' links; the search field follows them.
     await page.keyboard.press("Tab");
-    await expect(page.getByRole("searchbox")).toBeFocused();
+    await expect(
+      page.getByRole("navigation", { name: "Views of the catalog" }).getByRole("link").first(),
+    ).toBeFocused();
   });
 
   test("the list, Sort by, the search field and Show more work by keyboard alone", async ({

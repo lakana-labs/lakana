@@ -5,6 +5,7 @@ import {
   createEnvironment,
   createNamespace,
   createTable,
+  dropTable,
   freshPage,
   grantTableRead,
   invitedPerson,
@@ -264,3 +265,27 @@ for (const scheme of ["light", "dark"] as const) {
     });
   }
 }
+
+test("the Dropped view lists a dropped table, and Undrop restores it", async ({
+  browser,
+  request,
+}) => {
+  const environment = await lake(request);
+  await dropTable(request, environment, "gold", "dim_store");
+  const page = await administrator(browser, request);
+
+  await page.goto(`/catalog?view=dropped&env=${environment}`);
+  const list = page.getByRole("region", { name: "Dropped tables" });
+  await expect(list.getByRole("row").filter({ hasText: "dim_store" })).toBeVisible();
+  await expect(list.getByRole("row").filter({ hasText: "dim_store" })).toContainText("gold");
+  expect(await violations(page), "the Dropped view").toEqual([]);
+
+  await page.getByRole("button", { name: "Undrop gold.dim_store" }).click();
+  const done = page.getByText("Restored gold.dim_store.");
+  await expect(done).toBeVisible();
+  await expect(done).toBeFocused();
+  await expect(page.getByText(/Nothing was dropped in/)).toBeVisible();
+  await page.getByRole("link", { name: "Open the table" }).click();
+  await expect(page).toHaveURL(new RegExp(`/catalog/${environment}/gold/dim_store$`));
+  await page.context().close();
+});

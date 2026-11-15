@@ -48,7 +48,10 @@ Literal values the merged stylesheets use, and which stay allowed:
   running pulse (whose lowest point is tested at 3:1 in `colour-vision.test.ts`).
 
 Anything else that needs a new value: add a token in its own reviewed step, with its test.
-Light and dark are equals: check both, every time.
+Light and dark are equals: check both, every time. The documentation site wears the same colour
+tokens (`docs/site/assets/stylesheets/still-water.css`): a changed colour in `tokens.css` is
+copied into both of its schemes in the same change, or `scripts/tests/test_docs_look.py` fails
+(`docs/agent/testing.md`, "The documentation site").
 
 ## Components and patterns
 

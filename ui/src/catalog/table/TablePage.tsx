@@ -30,9 +30,10 @@ const PreviewTab = lazy(async () => {
 // The drawing, its layout and its strings load only when the Lineage tab is opened.
 const LineageTab = lazy(() => import("./LineageTab"));
 
-// Health and Access load only when their tab is opened.
+// References, Health and Access load only when their tab is opened.
 const HealthTab = lazy(() => import("./HealthTab"));
 const AccessTab = lazy(() => import("./AccessTab"));
+const ReferencesTab = lazy(() => import("./ReferencesTab"));
 
 /** Properties of {@link TablePage}. */
 export interface TablePageProps {
@@ -44,6 +45,8 @@ export interface TablePageProps {
   readonly headingRef: RefObject<HTMLHeadingElement | null>;
   /** Told whether the table is still being read, so the frame can say it is loading once. */
   readonly onWaiting: (waiting: boolean) => void;
+  /** Told the table once it is read, and null while it is read or cannot be shown. */
+  readonly onLoaded: (table: TableOut | null) => void;
 }
 
 /** Properties of {@link Problem}. */
@@ -109,9 +112,16 @@ function Problem({ place, resource, headingRef }: ProblemProps): JSX.Element {
  * @param props.tab - The tab the address names.
  * @param props.headingRef - The page's heading.
  * @param props.onWaiting - Told whether the table is still being read.
+ * @param props.onLoaded - Told the table once it is read.
  * @returns The page's content.
  */
-export function TablePage({ place, tab, headingRef, onWaiting }: TablePageProps): JSX.Element {
+export function TablePage({
+  place,
+  tab,
+  headingRef,
+  onWaiting,
+  onLoaded,
+}: TablePageProps): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
   const { environment, namespace, name } = place;
@@ -125,6 +135,9 @@ export function TablePage({ place, tab, headingRef, onWaiting }: TablePageProps)
   useEffect(() => {
     onWaiting(waiting);
   }, [waiting, onWaiting]);
+  useEffect(() => {
+    onLoaded(loaded ?? null);
+  }, [loaded, onLoaded]);
   const recorded = useRef(false);
   useEffect(() => {
     if (loaded !== undefined && !recorded.current) {
@@ -157,6 +170,11 @@ export function TablePage({ place, tab, headingRef, onWaiting }: TablePageProps)
         {tab === "lineage" && (
           <Suspense fallback={<p role="status">{t("table.loadingTab")}</p>}>
             <LineageTab />
+          </Suspense>
+        )}
+        {tab === "references" && (
+          <Suspense fallback={<p role="status">{t("table.loadingTab")}</p>}>
+            <ReferencesTab />
           </Suspense>
         )}
         {tab === "health" && (
