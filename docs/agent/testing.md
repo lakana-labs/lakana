@@ -465,6 +465,20 @@ the strict build fails on a broken link or anchor.
   that loads from another host, on a CSS `url()` or `@import` that does, and on a local `src`
   or `href` of those elements whose file is not in the build (a missing image builds clean).
   Plain `<a href>` links to other sites are fine.
+- **The look is Still Water, in light and dark.** `theme.palette` in `mkdocs.yml` has a light
+  (`default`) and a dark (`slate`) scheme: a first visit follows the system setting, the toggle
+  in the header switches and Zensical keeps the choice. `docs/site/assets/stylesheets/still-water.css`
+  holds the interface's colour tokens (the values of `ui/src/styles/tokens.css`) per scheme
+  and maps them onto Zensical's `--md-*` variables; the reading type sizes and the code colours
+  are the project website's, so the two read alike. IBM Plex is served from
+  `docs/site/assets/fonts/` (the complete woff2 files from the npm packages, unmodified, with
+  `OFL.txt`); the header shows the brand logo, the tab the interface's favicon.
+  `scripts/tests/test_docs_look.py` fails when a colour differs from `tokens.css`, when a text
+  pair falls below WCAG AA (body text 7:1, other text and code colours 4.5:1) in either scheme,
+  when the schemes define different colours, or when a variable or font file is missing. So a
+  change to a colour token in `tokens.css` copies the new value into both schemes of the
+  stylesheet in the same change. Zensical's search dialog lives in a shadow root and keeps its
+  own translucent, blurred panel; it takes our colours, not our panel style.
 - **The count of unchecked output blocks only goes down.** An output block is *unchecked* when it
   is plain `<!-- output -->`: no example prints it, so nothing notices when the CLI's output
   changes. The checker prints the number it compares and the number it does not;
