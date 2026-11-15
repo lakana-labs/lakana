@@ -122,6 +122,37 @@ describe("OrphansView", () => {
     ).toHaveAttribute("href", "/catalog?env=prod&ns=gold.sales&view=dropped");
   });
 
+  it("links a dropped orphan whose name has no namespace to the whole environment's Dropped", async () => {
+    renderShell(`${ADDRESS}&ns=bronze`, {
+      routes: { ...manageRoutes(), [LIST]: body([orphan({ table: "loose", exists: false })]) },
+    });
+
+    await screen.findByRole("region", { name: "Orphans" });
+
+    expect(screen.getByRole("link", { name: "Restore it from Dropped: loose" })).toHaveAttribute(
+      "href",
+      "/catalog?env=prod&view=dropped",
+    );
+  });
+
+  it("puts the focus on the list when the first new orphan has no control", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [LIST]: (request) =>
+          request.path.includes("cursor=c1")
+            ? body([orphan({ table: "gold.sales.b", actions: [] })])
+            : body([orphan({ table: "gold.sales.a" })], 0, "c1"),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "Orphans" })).toHaveFocus();
+    });
+  });
+
   it("lists the same table under two repositories without a duplicate key", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     renderShell(ADDRESS, {

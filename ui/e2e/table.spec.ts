@@ -1174,7 +1174,7 @@ test.describe("Maintain now and Retention in Chromium", () => {
     await dialog.getByRole("button", { name: "Maintain now" }).click();
 
     await expect(dialog.getByText("Maintenance is queued as query q-77.")).toBeVisible();
-    await expect(dialog.getByText("lakana query status q-77 --env prod")).toBeVisible();
+    await expect(dialog.getByText("lakana query status 'q-77' --env 'prod'")).toBeVisible();
     expect(await violations(page), "the queued dialog").toEqual([]);
     await dialog.getByRole("button", { name: "Close" }).click();
     await expect(page.getByRole("button", { name: "Actions" })).toBeFocused();
