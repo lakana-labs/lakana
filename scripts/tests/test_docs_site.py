@@ -147,10 +147,10 @@ in the example `connect-a-repository`.
 "See a table's model" (`describe-a-table.md`): the page shows that block only, not the whole
 output, and the example `see-a-tables-model` runs the command and checks the model in its JSON.
 
-`UNCHECKED_OUTPUT_CEILING` rose from 80 to 82 with the two blocks of `drop-and-restore-a-table.md`
-that need a deployed project and a worker, so no example can print them: the output of `lakana table
-rebuild` is compared with the real command in `test_tables_cmd.py`, and the refusal text with the core
-message in `test_git_owned_refusals.py`.
+`UNCHECKED_OUTPUT_CEILING` rose from 80 to 82 with two blocks of `drop-and-restore-a-table.md`
+that need a deployed project and a worker, so no example can print them. `test_tables_cmd.py`
+compares the output of `lakana table rebuild` with the real command, and
+`test_git_owned_refusals.py` compares the refusal text with the core message.
 """
 SECTIONS = ("tutorials", "how-to", "reference", "explanation")
 
