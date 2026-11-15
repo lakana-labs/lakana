@@ -2601,7 +2601,7 @@ Usage: `lakana audit list [OPTIONS]`
 
 List audit events, newest first.
 
-`--output json` shows each event's `detail`. Query text and column values in someone else's events are hidden unless you hold READ_QUERY_TEXT: a query's SQL text shows as its SHA-256 and length, an incremental write's watermark as {"hidden": true}. Your own events show in full. A page that shows other people's events, or `--principal-id` of someone else, is itself recorded in the audit log (ACTIVITY_VIEWED).
+`--output json` shows each event's `detail`. Query text and column values in someone else's events are hidden unless you hold READ_QUERY_TEXT: a query's SQL text shows as its SHA-256 and length, an incremental write's watermark as {"hidden": true}. Your own events show in full. A page that shows other people's events, or `--principal-id` of someone else, is itself recorded in the audit log (ACTIVITY_VIEWED). An event of a type this release does not know shows as `UNKNOWN (<type as stored>)`.
 
 | Name | Type | Default | Description |
 |---|---|---|---|

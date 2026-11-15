@@ -9,6 +9,7 @@ from typing import Annotated
 
 import typer
 
+from lakana._models import AuditEvent
 from lakana.cli import _output
 from lakana.cli._state import CliError, state_of
 
@@ -35,6 +36,27 @@ class EventKind(StrEnum):
     """The values `--kind` accepts: a group of event types."""
 
     connection = "connection"
+
+
+def _event_type_cell(event: AuditEvent) -> str:
+    """Name an event's type for the table, with the stored type of an unknown one.
+
+    Parameters
+    ----------
+    event
+        The audit event.
+
+    Returns
+    -------
+    str
+        `event_type`, or `UNKNOWN (<raw>)` when the server did not know the stored type.
+    """
+    if event.event_type == "UNKNOWN" and event.event_type_raw:
+        return f"UNKNOWN ({event.event_type_raw})"
+    return event.event_type
+
+
+_EVENT_DERIVED = {"event_type": _event_type_cell}
 
 
 def parse_timestamp(value: str | None, flag: str) -> datetime | None:
@@ -98,7 +120,8 @@ def list_events(
     events are hidden unless you hold READ_QUERY_TEXT: a query's SQL text shows as its SHA-256
     and length, an incremental write's watermark as {"hidden": true}. Your own events show in
     full. A page that shows other people's events, or `--principal-id` of someone else, is
-    itself recorded in the audit log (ACTIVITY_VIEWED).
+    itself recorded in the audit log (ACTIVITY_VIEWED). An event of a type this release does not
+    know shows as `UNKNOWN (<type as stored>)`.
 
     Parameters
     ----------
@@ -146,13 +169,20 @@ def list_events(
             list(events.iter(**filters, page_size=limit)),
             columns=_EVENT_COLUMNS,
             droppable=_EVENT_DROPPABLE,
+            derived=_EVENT_DERIVED,
         )
         return
     page = events.list(**filters, limit=limit, cursor=cursor)
     if state.output == "json":
         _output.print_json(page)
         return
-    _output.emit(state, page.items, columns=_EVENT_COLUMNS, droppable=_EVENT_DROPPABLE)
+    _output.emit(
+        state,
+        page.items,
+        columns=_EVENT_COLUMNS,
+        droppable=_EVENT_DROPPABLE,
+        derived=_EVENT_DERIVED,
+    )
     if page.next_cursor:
         sys.stdout.write(f"More: --cursor {page.next_cursor}\n")
 
