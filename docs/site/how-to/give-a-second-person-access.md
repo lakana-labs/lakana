@@ -84,12 +84,12 @@ lakana token issue alice alice-laptop
 The secret is printed once and cannot be shown again; the two notices go to the error output: one
 says so, one says whom to give the token to and what they type. Here the secret is shortened:
 
-<!-- output -->
+<!-- output: give-access#token -->
 ```text
-Issued token 634fb88f45cabc42 (alice-laptop) for alice
-Token: lakana_pat_634fb88f45cabc42_<secret>
 Store this token now: it can't be shown again.
 Give this token to alice over a trusted channel; they run `lakana login`.
+Issued token a445f5d891704fbb (alice-laptop) for alice
+Token: lakana_pat_a445f5d891704fbb_3PbYjzc3e989pc43e-Z2kG6Zdap2QtaroAchHZdZtEU
 ```
 
 Hand over three things: the token, the address of the instance (the URL that the person passes to
@@ -173,7 +173,7 @@ of `token list` shows whether a token is in use. To see what one person may do a
 grant, read [Why may (or may not) someone do this?](why-may-someone-do-this.md). Every filter and
 option is in [Grants, permissions, principals and groups](../reference/access.md).
 
-<!-- output -->
+<!-- output: give-access#who -->
 ```text
 ┏━━━━━━━┳━━━━━━┳━━━━━━━━━━━┓
 ┃ name  ┃ type ┃ is_active ┃
@@ -182,14 +182,14 @@ option is in [Grants, permissions, principals and groups](../reference/access.md
 │ admin │ USER │ True      │
 └───────┴──────┴───────────┘
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━┓
-┃ id                                   ┃ subject    ┃ role    ┃ environment ┃
+┃ id                                   ┃ subject    ┃ access  ┃ environment ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━┩
 │ c913f5e7-8bf0-4b21-9630-46de66a0082d │ user alice │ ANALYST │ dev         │
 └──────────────────────────────────────┴────────────┴─────────┴─────────────┘
 Not shown: kind. Use --output json to see it.
 Revoke it with: lakana grant revoke c913f5e7-8bf0-4b21-9630-46de66a0082d
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━┓
-┃ id                                   ┃ subject    ┃ role    ┃ environment ┃
+┃ id                                   ┃ subject    ┃ access  ┃ environment ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━┩
 │ c913f5e7-8bf0-4b21-9630-46de66a0082d │ user alice │ ANALYST │ dev         │
 └──────────────────────────────────────┴────────────┴─────────┴─────────────┘
@@ -213,7 +213,7 @@ There are three commands, from the smallest step to the largest.
 lakana token revoke alice "$KEY_ID" --yes
 ```
 
-<!-- output -->
+<!-- output: give-access#revoke-token -->
 ```text
 Revoked token 634fb88f45cabc42
 ```

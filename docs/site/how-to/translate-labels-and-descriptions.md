@@ -104,7 +104,7 @@ lakana table get gold.sales --env dev --lang fr
 │ kind              │ TABLE                                                                        │
 │ state             │ published                                                                    │
 │ uuid              │ 0a36b6b8-248f-44b2-8c80-d42c0af870ca                                         │
-│ metadata_location │ file:///tmp/tmp.DDpC2meKAW/home/data/lakana/local/lake/dev/managed/gold/sal… │
+│ metadata_location │ file:///home/you/data/lakana/local/lake/dev/managed/gold/sal… │
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────┘
 Defined in: shop/assets/gold/sales.sql
 Label: Ventes par magasin
@@ -163,7 +163,7 @@ Your language is now fr
 │ kind              │ TABLE                                                                        │
 │ state             │ published                                                                    │
 │ uuid              │ 0a36b6b8-248f-44b2-8c80-d42c0af870ca                                         │
-│ metadata_location │ file:///tmp/tmp.DDpC2meKAW/home/data/lakana/local/lake/dev/managed/gold/sal… │
+│ metadata_location │ file:///home/you/data/lakana/local/lake/dev/managed/gold/sal… │
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────┘
 Defined in: shop/assets/gold/sales.sql
 Label: Ventes par magasin

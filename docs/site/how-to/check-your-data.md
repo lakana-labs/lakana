@@ -181,8 +181,15 @@ lakana run --env dev
 The command prints a line each time a task changes state, and ends with a summary. The run failed,
 so the command exits with status 1. The summary of this run, on a terminal 120 columns wide:
 
-<!-- output -->
+<!-- output: check-your-data#run-failing -->
 ```text
+a873a794-e7ea-4caa-9627-5b7ec1ec1715
+bronze.readings  pending
+silver.station_temperatures  pending
+bronze.readings  running  attempt 1/3
+bronze.readings  succeeded  attempt 1/3  1.0s
+silver.station_temperatures  running  attempt 1/3
+silver.station_temperatures  failed  attempt 1/3  1.0s  failed: check_blocked. Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
 Run 941ef675-0bb6-497a-8bd5-8bfd22d7d2ae failed
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ asset                       ┃ status    ┃ attempt ┃ error                                                            ┃
@@ -199,6 +206,10 @@ Run 941ef675-0bb6-497a-8bd5-8bfd22d7d2ae failed
 │                             │           │         │ dev`.                                                            │
 └─────────────────────────────┴───────────┴─────────┴──────────────────────────────────────────────────────────────────┘
 Not shown: duration, rows. Use --output json to see them.
+
+silver.station_temperatures failed: check_blocked
+  A check of the table failed, so the data was not published.
+  Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
 
 silver.station_temperatures   FAILED   2 of 3 checks passed, not published
   has_rows                    passed
@@ -325,14 +336,14 @@ silver.station_temperatures/no_missing_station --env dev`. It is published by th
 ```
 
 `lakana table get` and `lakana table list NAMESPACE` show the state in a column named `state`. (The
-`metadata_location` row of `table get` is left out below; it holds a path of your machine.)
+`metadata_location` row of `table get` holds a path of your machine; yours differs.)
 
 <!-- source: docs/examples/check-your-data/run.sh#table-get -->
 ```bash
 lakana table get silver.station_temperatures --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#table-get -->
 ```text
 ┌───────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ name              │ station_temperatures                                                                             │
@@ -340,10 +351,19 @@ lakana table get silver.station_temperatures --env dev
 │ kind              │ TABLE                                                                                            │
 │ state             │ not published                                                                                    │
 │ uuid              │ 57b357f1-0228-44a2-b704-f346e298c63e                                                             │
+│ metadata_location │ file:///home/you/data/lakana/local/lake/dev/managed/silver/station_temperatures-… │
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────┘
 `silver.station_temperatures` has not been published: its first build failed the check `no_missing_station` (run
 941ef675-0bb6-497a-8bd5-8bfd22d7d2ae). Look at the rows: `lakana check rows 941ef675-0bb6-497a-8bd5-8bfd22d7d2ae
 silver.station_temperatures/no_missing_station --env dev`. It is published by the next run in which its checks pass.
+Defined in: readings/assets/silver/station_temperatures.sql
+Description (from the project): The average temperature of each station.
+┏━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name       ┃ type   ┃ nullable ┃ description                                 ┃
+┡━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ station_id │ string │ True     │ The station that took the readings.         │
+│ avg_temp_c │ double │ True     │ The average temperature in degrees Celsius. │
+└────────────┴────────┴──────────┴─────────────────────────────────────────────┘
 ```
 
 The next run in which the table's checks pass publishes it, and `state` reads `published` again.
@@ -374,7 +394,7 @@ identifier itself. The checks of this run:
 lakana check list --env dev --run "$RUN_ID"
 ```
 
-<!-- output -->
+<!-- output: check-your-data#check-list -->
 ```text
 ┏━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ run      ┃ table                       ┃ check              ┃ outcome ┃ rows ┃ finished_at               ┃
@@ -561,8 +581,10 @@ git commit -m "Give every reading a station"
 lakana deploy --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#fix-deploy -->
 ```text
+[master 889386e] Give every reading a station
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 Queued deploy bf2db33d-d673-4643-b218-0b9db857f442
 Deployed readings in dev at 63c594f30bb5da48a5736724ffe731bcc85fdde6
 ┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
@@ -580,8 +602,13 @@ Hint: run 'lakana run --env dev' to run what you just deployed.
 lakana run --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#run-fixed -->
 ```text
+b9904e87-e141-463e-867e-5901eaf6a6a2
+bronze.readings  pending
+silver.station_temperatures  pending
+bronze.readings  succeeded  attempt 1/3  1.0s
+silver.station_temperatures  succeeded  attempt 1/3  0.0s
 Run 2b8a18cd-b434-41c5-8d77-2d075cde3b9d succeeded
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ asset                       ┃ status    ┃ attempt ┃ rows ┃ error                                            ┃
@@ -621,7 +648,7 @@ git commit -m "Break the data again"
 lakana deploy --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#break-deploy -->
 ```text
 [master 9445d5e] Break the data again
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -642,8 +669,13 @@ Hint: run 'lakana run --env dev' to run what you just deployed.
 lakana run --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#run-rolled-back -->
 ```text
+7a303a0c-758c-46ce-ab33-188bede2970c
+bronze.readings  pending
+silver.station_temperatures  pending
+bronze.readings  succeeded  attempt 1/3  0.0s
+silver.station_temperatures  failed  attempt 1/3  1.0s  failed: check_blocked. Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
 Run 18a4496e-4cda-4786-9589-0086621190e0 failed
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ asset                       ┃ status    ┃ attempt ┃ error                                                            ┃
@@ -660,6 +692,10 @@ Run 18a4496e-4cda-4786-9589-0086621190e0 failed
 │                             │           │         │ dev`.                                                            │
 └─────────────────────────────┴───────────┴─────────┴──────────────────────────────────────────────────────────────────┘
 Not shown: duration, rows. Use --output json to see them.
+
+silver.station_temperatures failed: check_blocked
+  A check of the table failed, so the data was not published.
+  Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
 
 silver.station_temperatures   FAILED   2 of 3 checks passed, rolled back
   has_rows                    passed
@@ -830,7 +866,7 @@ git commit -m "Five more checks"
 lakana deploy --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#patterns-deploy -->
 ```text
 [master 4cbf9ca] Five more checks
  8 files changed, 47 insertions(+), 5 deletions(-)
@@ -862,8 +898,16 @@ lakana run --env dev
 
 The table has eight checks now, and all of them pass or warn:
 
-<!-- output -->
+<!-- output: check-your-data#run-patterns -->
 ```text
+f93d1040-550a-4e66-83bc-eae92f45ed8f
+bronze.readings  pending
+bronze.stations  pending
+silver.station_temperatures  pending
+bronze.readings  succeeded  attempt 1/3  0.0s
+bronze.stations  succeeded  attempt 1/3  0.0s
+silver.station_temperatures  running  attempt 1/3
+silver.station_temperatures  succeeded  attempt 1/3  2.0s
 Run 41df4888-7a57-42c0-b124-233b64856963 succeeded
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ asset                       ┃ status    ┃ attempt ┃ rows ┃ error                                            ┃
@@ -1025,7 +1069,7 @@ git commit -m "Keep the battery levels when they fail"
 lakana deploy --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#keep-deploy -->
 ```text
 [master 79a8960] Keep the battery levels when they fail
  3 files changed, 25 insertions(+)
@@ -1053,14 +1097,21 @@ Run the new table and what reads it:
 lakana run --select bronze.sensor_log --downstream --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#keep-run -->
 ```text
+dfa51512-d38d-4c56-8083-f0ffc88276c6
+bronze.sensor_log  pending
+silver.battery_report  pending
+bronze.sensor_log  failed  attempt 1/3  0.0s  failed: check_blocked. Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
+silver.battery_report  upstream_failed
 Run 8b0403e4-d4a8-41f0-a686-5580aa0d048d failed
 ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ asset                 ┃ status          ┃ attempt ┃ error                                                            ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ bronze.sensor_log     │ failed          │ 1/3     │ Check `bronze.sensor_log/battery_in_range` failed: 1 row         │
-│                       │                 │         │ (checks/bronze/sensor_log/battery_in_range.sql). The table keeps │
+│                       │                 │         │ (checks/bronze/sensor_log/battery_in_range.sql). Look at the     │
+│                       │                 │         │ rows: `lakana check rows dfa51512-d38d-4c56-8083-f0ffc88276c6    │
+│                       │                 │         │ bronze.sensor_log/battery_in_range --env dev`. The table keeps   │
 │                       │                 │         │ this run's data (`on_failure: keep`), and nothing that reads it  │
 │                       │                 │         │ was built. Repair the data or the asset; after a fix, deploy and │
 │                       │                 │         │ run again; if the project did not change: `lakana runs resume    │
@@ -1068,6 +1119,10 @@ Run 8b0403e4-d4a8-41f0-a686-5580aa0d048d failed
 │ silver.battery_report │ upstream_failed │         │                                                                  │
 └───────────────────────┴─────────────────┴─────────┴──────────────────────────────────────────────────────────────────┘
 Not shown: duration, rows. Use --output json to see them.
+
+bronze.sensor_log failed: check_blocked
+  A check of the table failed, so the data was not published.
+  Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
 
 bronze.sensor_log   FAILED         0 of 1 checks passed
   battery_in_range  failed (kept)  1 row
@@ -1078,15 +1133,15 @@ Read it as you read a blocking failure, with these differences:
 - The message says `The table keeps this run's data (`on_failure: keep`), and nothing that reads
   it was built.` Nothing was set back, and the check reads `failed (kept)`.
 - `silver.battery_report` is `upstream_failed`, as after any failed table.
-- The table now has the state `kept`, and says why (the `metadata_location` row is left out below,
-  as above; the table of columns that follows it is what `table get` always prints):
+- The table now has the state `kept`, and says why (the `metadata_location` row holds a path of
+  your machine, as above; the table of columns that follows it is what `table get` always prints):
 
 <!-- source: docs/examples/check-your-data/run.sh#keep-table-get -->
 ```bash
 lakana table get bronze.sensor_log --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#keep-table-get -->
 ```text
 ┌───────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ name              │ sensor_log                                                                                       │
@@ -1094,15 +1149,18 @@ lakana table get bronze.sensor_log --env dev
 │ kind              │ TABLE                                                                                            │
 │ state             │ kept                                                                                             │
 │ uuid              │ 02266596-b764-47de-831e-21eb057d59d4                                                             │
+│ metadata_location │ file:///home/you/data/lakana/local/lake/dev/managed/bronze/sensor_log-57a99239e7… │
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────┘
-Kept after a failed check (`bronze.sensor_log/battery_in_range`, run 8b0403e4-d4a8-41f0-a686-5580aa0d048d): the table 
+Kept after a failed check (`bronze.sensor_log/battery_in_range`, run 8b0403e4-d4a8-41f0-a686-5580aa0d048d): the table
 holds the data that failed. Tasks do not read it until its checks pass.
-┏━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┓
-┃ name        ┃ type   ┃ nullable ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━┩
-│ sensor_id   │ string │ True     │
-│ battery_pct │ int    │ True     │
-└─────────────┴────────┴──────────┘
+Defined in: readings/assets/bronze/sensor_log.sql
+Description (from the project): The battery level of three sensors, written by hand.
+┏━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name        ┃ type   ┃ nullable ┃ description                   ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ sensor_id   │ string │ True     │ The sensor.                   │
+│ battery_pct │ int    │ True     │ The battery level in percent. │
+└─────────────┴────────┴──────────┴───────────────────────────────┘
 ```
 
 - **Anyone can still read the table**, with the failing row in it. `kept` stops tasks, not people:
@@ -1136,8 +1194,14 @@ the table that reads it:
 lakana run --select silver.battery_report --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#keep-run-reader -->
 ```text
+6d5a2f2e-969c-4ed5-bdb0-88dc26841102
+bronze.sensor_log  pending
+silver.battery_report  pending
+bronze.sensor_log  ready
+bronze.sensor_log  failed  attempt 1/3  0.0s  failed: check_blocked. Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
+silver.battery_report  upstream_failed
 Run 3f06fc30-1a1c-4ab7-8310-0d6575672bf6 failed
 ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ asset                 ┃ status          ┃ attempt ┃ error                                                            ┃
@@ -1154,6 +1218,10 @@ Run 3f06fc30-1a1c-4ab7-8310-0d6575672bf6 failed
 │ silver.battery_report │ upstream_failed │         │                                                                  │
 └───────────────────────┴─────────────────┴─────────┴──────────────────────────────────────────────────────────────────┘
 Not shown: duration, rows. Use --output json to see them.
+
+bronze.sensor_log failed: check_blocked
+  A check of the table failed, so the data was not published.
+  Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
 
 bronze.sensor_log   FAILED         0 of 1 checks passed, kept after a failed check
   battery_in_range  failed (kept)  1 row
@@ -1216,7 +1284,7 @@ git commit -m "Cap the battery level at 100"
 lakana deploy --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#keep-repair-deploy -->
 ```text
 [master 9bb452d] Cap the battery level at 100
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -1238,8 +1306,13 @@ Hint: run 'lakana run --env dev' to run what you just deployed.
 lakana run --select bronze.sensor_log --downstream --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#keep-run-repaired -->
 ```text
+f8335be8-9235-4071-b8cf-d51716677347
+bronze.sensor_log  pending
+silver.battery_report  pending
+bronze.sensor_log  succeeded  attempt 1/3  0.0s
+silver.battery_report  succeeded  attempt 1/3  1.0s
 Run 62b6f24b-9ce4-4c5e-9a1e-1a040b081f3c succeeded
 ┏━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━┓
 ┃ asset                 ┃ status    ┃ attempt ┃ duration ┃ rows ┃ error ┃
@@ -1257,7 +1330,7 @@ bronze.sensor_log   passed   1 of 1 checks passed
 lakana table get bronze.sensor_log --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#keep-published -->
 ```text
 ┌───────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ name              │ sensor_log                                                                                       │
@@ -1265,13 +1338,16 @@ lakana table get bronze.sensor_log --env dev
 │ kind              │ TABLE                                                                                            │
 │ state             │ published                                                                                        │
 │ uuid              │ 02266596-b764-47de-831e-21eb057d59d4                                                             │
+│ metadata_location │ file:///home/you/data/lakana/local/lake/dev/managed/bronze/sensor_log-57a99239e7… │
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────┘
-┏━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┓
-┃ name        ┃ type   ┃ nullable ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━┩
-│ sensor_id   │ string │ True     │
-│ battery_pct │ int    │ True     │
-└─────────────┴────────┴──────────┘
+Defined in: readings/assets/bronze/sensor_log.sql
+Description (from the project): The battery level of three sensors, written by hand.
+┏━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name        ┃ type   ┃ nullable ┃ description                   ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ sensor_id   │ string │ True     │ The sensor.                   │
+│ battery_pct │ int    │ True     │ The battery level in percent. │
+└─────────────┴────────┴──────────┴───────────────────────────────┘
 ```
 
 - If the project did not change, because the cause was in data that it only reads, use
@@ -1322,8 +1398,27 @@ did not write the table:
 lakana run --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#run-source -->
 ```text
+f56464ab-e229-41be-b5ac-c454fa75c3dc
+bronze.readings  pending
+bronze.sensor_log  pending
+bronze.sensors  pending
+bronze.stations  pending
+silver.battery_report  pending
+silver.sensor_summary  pending
+silver.station_temperatures  pending
+bronze.readings  succeeded  attempt 1/3  0.0s
+bronze.sensor_log  ready  Ready, and the only worker is busy. Queued queries and deploys are served first.
+bronze.sensors  running  attempt 1/3
+bronze.stations  succeeded  attempt 1/3  1.0s
+bronze.sensor_log  succeeded  attempt 1/3  0.0s
+bronze.sensors  failed  attempt 1/3  0.0s  failed: check_blocked. Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
+silver.battery_report  ready  Ready, and the only worker is busy. Queued queries and deploys are served first.
+silver.sensor_summary  upstream_failed
+silver.station_temperatures  running  attempt 1/3
+silver.battery_report  succeeded  attempt 1/3  0.0s
+silver.station_temperatures  succeeded  attempt 1/3  2.0s
 Run 2ca967e5-9c41-481d-bef6-47daa8a3da19 failed
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ asset                       ┃ status          ┃ attempt ┃ error                                                      ┃
@@ -1334,8 +1429,11 @@ Run 2ca967e5-9c41-481d-bef6-47daa8a3da19 failed
 │                             │                 │         │ 1 row                                                      │
 │                             │                 │         │ (checks/bronze/sensors/every_sensor_has_a_station.sql).    │
 │                             │                 │         │ This project does not build `bronze.sensors`, so it was    │
-│                             │                 │         │ not changed; the assets that read it were not built. After │
-│                             │                 │         │ a fix, deploy and run again; if the project did not        │
+│                             │                 │         │ not changed; the assets that read it were not built. Look  │
+│                             │                 │         │ at the rows: `lakana check rows                            │
+│                             │                 │         │ f56464ab-e229-41be-b5ac-c454fa75c3dc                       │
+│                             │                 │         │ bronze.sensors/every_sensor_has_a_station --env dev`.      │
+│                             │                 │         │ After a fix, deploy and run again; if the project did not  │
 │                             │                 │         │ change: `lakana runs resume                                │
 │                             │                 │         │ 2ca967e5-9c41-481d-bef6-47daa8a3da19 --env dev`.           │
 │ bronze.stations             │ succeeded       │ 1/3     │                                                            │
@@ -1344,6 +1442,10 @@ Run 2ca967e5-9c41-481d-bef6-47daa8a3da19 failed
 │ silver.station_temperatures │ succeeded       │ 1/3     │ note: 1 check warned: `plausible_range` (1 row).           │
 └─────────────────────────────┴─────────────────┴─────────┴────────────────────────────────────────────────────────────┘
 Not shown: duration, rows. Use --output json to see them.
+
+bronze.sensors failed: check_blocked
+  A check of the table failed, so the data was not published.
+  Next: Read the failed checks with 'lakana runs show RUN_ID', fix the data or the check, then run again.
 
 bronze.sensor_log   passed   1 of 1 checks passed
   battery_in_range  passed
@@ -1382,7 +1484,7 @@ git commit -m "Warn by default"
 lakana deploy --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#default-deploy -->
 ```text
 [master a354b40] Warn by default
  1 file changed, 2 insertions(+)
@@ -1405,8 +1507,30 @@ asset that reads that table is built:
 lakana run --env dev
 ```
 
-<!-- output -->
+<!-- output: check-your-data#default-run -->
 ```text
+9f7d32f4-e4dc-4bd1-bd85-ace04e84d236
+bronze.readings  pending
+bronze.sensor_log  pending
+bronze.sensors  pending
+bronze.stations  pending
+silver.battery_report  pending
+silver.sensor_summary  pending
+silver.station_temperatures  pending
+bronze.readings  ready
+bronze.sensor_log  ready
+bronze.sensors  ready
+bronze.stations  ready
+bronze.readings  succeeded  attempt 1/3  1.0s
+bronze.sensor_log  succeeded  attempt 1/3  0.0s
+bronze.sensors  succeeded  attempt 1/3  0.0s
+bronze.stations  succeeded  attempt 1/3  0.0s
+silver.battery_report  ready
+silver.sensor_summary  ready
+silver.station_temperatures  ready
+silver.battery_report  succeeded  attempt 1/3  0.0s
+silver.sensor_summary  succeeded  attempt 1/3  0.0s
+silver.station_temperatures  succeeded  attempt 1/3  2.0s
 Run e80eeb75-4b08-410c-ab78-0d7fc551093f succeeded
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ asset                       ┃ status    ┃ attempt ┃ error                                                       ┃
