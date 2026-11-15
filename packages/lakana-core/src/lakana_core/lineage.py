@@ -12,6 +12,7 @@ import sqlglot
 import sqlglot.errors
 import sqlglot.lineage
 
+from lakana_core import sql_dialect
 from lakana_core.query_rewrite import _dotted_table_name
 
 
@@ -38,7 +39,7 @@ def extract_lineage(sql: str, dialect: str = "duckdb") -> dict[str, list[dict[st
     # only defined on the Query subtype, which a SELECT statement always
     # parses to. The cast tells the type checker what sqlglot guarantees at
     # runtime but does not encode in parse_one's own signature.
-    parsed = cast("sqlglot.expressions.Query", sqlglot.parse_one(sql, dialect=dialect))
+    parsed = cast("sqlglot.expressions.Query", sql_dialect.parse_one(sql, dialect=dialect))
     result: dict[str, list[dict[str, str]]] = {}
     for projection in parsed.selects:
         column_name = projection.alias_or_name

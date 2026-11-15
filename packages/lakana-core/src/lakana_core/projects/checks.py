@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import pydantic
-import sqlglot
 import sqlglot.errors
 from sqlglot import exp
 
+from lakana_core import sql_dialect
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown, validate_path_component
@@ -443,7 +443,7 @@ def _one_select(sql: str) -> exp.Query:
     ValidationError
         If there is no SQL, more than one statement, or a statement that is not a query.
     """
-    trees = [tree for tree in sqlglot.parse(sql, dialect=_DIALECT) if tree is not None]
+    trees = [tree for tree in sql_dialect.parse(sql, dialect=_DIALECT) if tree is not None]
     if not trees:
         raise ValidationError("the check has no SQL")
     if len(trees) != 1:

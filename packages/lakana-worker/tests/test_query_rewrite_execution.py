@@ -284,6 +284,51 @@ def test_a_lambda_runs_as_the_guard_parsed_it(sql: str, expected: list[object]) 
 
 
 @pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT 'abc' ~ 'b'", False),
+        ("SELECT 'abc' !~ 'b'", True),
+        ("SELECT 'abc' ~ '.*b.*'", True),
+        ("SELECT regexp_matches('abc', 'b')", True),
+    ],
+)
+def test_a_tilde_runs_as_a_whole_text_match(sql: str, expected: bool) -> None:
+    """`~` matches the whole text, as documented, though DuckDB 2.0 alone matches a part (#415).
+
+    Parameters
+    ----------
+    sql
+        The query as the caller wrote it.
+    expected
+        The single value it returns.
+    """
+    check_blacklist(sql)
+
+    assert _run(sql, {}) == [(expected,)]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT upper(lambda j: 'a') FROM (SELECT '{\"a\": 1}' AS j) AS d",
+        "SELECT upper(LAMBDA j : 'a') FROM (SELECT '{\"a\": 1}' AS j) AS d",
+    ],
+)
+def test_a_keyword_lambda_outside_a_lambda_function_is_refused_by_duckdb(sql: str) -> None:
+    """A keyword lambda is never read as the JSON extract `j -> 'a'`; DuckDB refuses it (#415).
+
+    Parameters
+    ----------
+    sql
+        A query passing a keyword lambda to a function that takes none.
+    """
+    check_blacklist(sql)
+
+    with pytest.raises(duckdb.Error):
+        _run(sql, {})
+
+
+@pytest.mark.parametrize(
     ("expression", "expected"),
     [
         ("upper(j -> '$.a')", '"B"'),

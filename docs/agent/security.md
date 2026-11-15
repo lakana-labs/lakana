@@ -4530,6 +4530,17 @@ as an arrow again. A lambda-taking function a later DuckDB adds and the list mis
 to bind (its lambda reaches DuckDB as JSON); it never runs anything the guard did not see
 (review of #284).
 
+**Lakana reads DuckDB SQL with its own parser, not sqlglot's newest reading (#415).** From
+sqlglot 30.25 the DuckDB parser no longer records that a lambda was written with `LAMBDA`
+(`upper(lambda j: 'a')` and `upper(j -> 'a')` became one tree, and the first ran as the JSON
+extract) and reads `~`/`!~` as DuckDB 2.0's partial match. Every parse in `lakana-core` goes
+through `lakana_core.sql_dialect` (`parse_one`, `parse`), whose parser marks a keyword lambda
+(`KEYWORD_LAMBDA` in its `meta`, which `_json_arrows_outside_lambda_functions` reads) and reads
+`~` as `RegexpFullMatch`, so a query, a check and a deployed asset keep the whole-text match the
+user documentation promises (`test_a_tilde_runs_as_a_whole_text_match`,
+`test_a_keyword_lambda_outside_a_lambda_function_is_refused_by_duckdb`). A new parse site that
+calls `sqlglot.parse_one` directly gets the other reading; use the module.
+
 **User SQL cannot reach the values the platform sets, and may not contain a placeholder
 (`?`, `$1`, `$name`).** The rewriter reads each table's resolved file list — on S3, presigned
 URLs of the raw files — through `getvariable('v_<n>_files')`; the query child sets each value

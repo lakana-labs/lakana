@@ -476,6 +476,37 @@ def test_columns_a_keyword_lambda_and_two_parameters_stay_lambdas(sql: str) -> N
     assert "LAMBDA" in rewrite_query(sql, {}).sql
 
 
+@pytest.mark.parametrize(
+    ("sql", "rendered"),
+    [
+        ("SELECT a ~ 'b' AS m FROM (SELECT 'abc' AS a) AS d", "REGEXP_FULL_MATCH(a, 'b')"),
+        ("SELECT a !~ 'b' AS m FROM (SELECT 'abc' AS a) AS d", "NOT REGEXP_FULL_MATCH(a, 'b')"),
+        (
+            "SELECT regexp_matches(a, 'b') AS m FROM (SELECT 'abc' AS a) AS d",
+            "REGEXP_MATCHES(a, 'b')",
+        ),
+    ],
+)
+def test_a_tilde_matches_the_whole_text_as_documented(sql: str, rendered: str) -> None:
+    """`~` and `!~` stay a whole-text match; sqlglot 30.25 reads them as DuckDB 2.0's partial one.
+
+    Parameters
+    ----------
+    sql
+        A query with a regular-expression match.
+    rendered
+        The match as the rewrite must hand it to DuckDB.
+    """
+    assert rendered in rewrite_query(sql, {}).sql
+
+
+def test_a_keyword_lambda_inside_a_keyword_lambda_stays_a_lambda() -> None:
+    """Every keyword lambda is marked, a nested one too, so neither becomes a JSON extract."""
+    sql = "SELECT upper(lambda j: upper(lambda k: 'a')) FROM (SELECT 1 AS j, 2 AS k) AS d"
+
+    assert rewrite_query(sql, {}).sql.count("LAMBDA") == 2
+
+
 def test_the_lambda_functions_sqlglot_gives_a_class_are_matched_by_that_class() -> None:
     """`list_transform`, `list_filter` and `reduce` parse to classes; `COLUMNS` is one too."""
     assert set(query_rewrite._LAMBDA_FUNCTION_TYPES) == {

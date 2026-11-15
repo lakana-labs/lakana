@@ -155,6 +155,11 @@ def _messages(issues: list) -> list[str]:
             "GROUP BY id) SELECT * FROM d WHERE n > 1) AS lakana_check",
         ),
         (
+            "SELECT id FROM silver.t WHERE code !~ '[A-Z]{3}'",
+            "SELECT COUNT(*) AS failing FROM (SELECT id FROM silver.t WHERE NOT "
+            "REGEXP_FULL_MATCH(code, '[A-Z]{3}')) AS lakana_check",
+        ),
+        (
             "SELECT id FROM silver.t EXCEPT SELECT id FROM dim.keys",
             "SELECT COUNT(*) AS failing FROM (SELECT id FROM silver.t EXCEPT SELECT id FROM "
             "dim.keys) AS lakana_check",

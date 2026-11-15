@@ -53,7 +53,9 @@ import sqlglot.expressions as exp
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, build_scope, traverse_scope
 
+from lakana_core import sql_dialect
 from lakana_core.errors import LakanaError, ValidationError
+from lakana_core.sql_dialect import KEYWORD_LAMBDA
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
 
 _BLACKLISTED_FUNCTIONS = frozenset(
@@ -312,7 +314,7 @@ def _lambda_function_types() -> tuple[type[exp.Expr], ...]:
     for name in _LAMBDA_FUNCTIONS:
         for arguments in ("x -> x", "(x, y) -> x, 0"):
             try:
-                parsed = sqlglot.parse_one(f"SELECT {name}(l, {arguments})", dialect="duckdb")
+                parsed = sql_dialect.parse_one(f"SELECT {name}(l, {arguments})", dialect="duckdb")
             except sqlglot.errors.SqlglotError:
                 continue
             node = parsed.find(exp.Lambda)
@@ -992,7 +994,7 @@ def _parse_sql(sql: str, dialect: str) -> exp.Expr:
         that names a broken stored view, treats it as the syntax error it is.
     """
     try:
-        parsed = sqlglot.parse_one(sql, dialect=dialect)
+        parsed = sql_dialect.parse_one(sql, dialect=dialect)
     except _PARSER_FAULTS as exc:
         raise sqlglot.errors.ParseError("the text could not be read") from exc
     return _json_arrows_outside_lambda_functions(parsed)
@@ -1003,7 +1005,8 @@ def _render(parsed: exp.Expr, dialect: str) -> str:
 
     DuckDB 2.0 refuses the arrow lambda (`x -> x + 1` is a Binder Error) and DuckDB 1.5
     accepts both forms, so every `exp.Lambda` is rendered `LAMBDA x : x + 1` (`LAMBDA x, y :
-    …` for two parameters) whichever form the caller wrote. Only the spelling of the node
+    …` for two parameters) whichever form the caller wrote; sqlglot's DuckDB generator writes
+    the keyword form for every lambda since 30.25. Only the spelling of the node
     changes: its parameters and body are the subtrees the guard already checked, rendered by
     sqlglot as any other expression, so no text reaches DuckDB that the guard did not see.
     The keyword form is also the one DuckDB parses as sqlglot does: `x -> x -> '$.a'` (a
@@ -1020,8 +1023,7 @@ def _render(parsed: exp.Expr, dialect: str) -> str:
     Parameters
     ----------
     parsed
-        The tree to render; its lambdas are marked for the keyword form, and an operand lambda
-        wrapped in parentheses, in place.
+        The tree to render; an operand lambda is wrapped in parentheses, in place.
     dialect
         The SQL dialect to render in.
 
@@ -1031,7 +1033,6 @@ def _render(parsed: exp.Expr, dialect: str) -> str:
         The SQL text.
     """
     for node in list(parsed.find_all(exp.Lambda)):
-        node.set("colon", True)
         if not isinstance(node.parent, exp.Paren) and not _takes_a_lambda(node.parent):
             wrapper = exp.Paren()
             node.replace(wrapper)
@@ -1105,7 +1106,8 @@ def _json_arrows_outside_lambda_functions(parsed: exp.Expr) -> exp.Expr:
     extract `j -> 'a'` everywhere else. Done right after parsing, so the guard checks, and the
     rewrite renders, what DuckDB runs: `_render` gives a real lambda the keyword form, and the
     extract renders as an arrow again. A lambda of two parameters, or one written with the
-    keyword, is never JSON.
+    keyword (marked `KEYWORD_LAMBDA` by `lakana_core.sql_dialect`, since sqlglot no longer
+    records the spelling), is never JSON.
 
     Parameters
     ----------
@@ -1120,7 +1122,7 @@ def _json_arrows_outside_lambda_functions(parsed: exp.Expr) -> exp.Expr:
     for node in list(parsed.find_all(exp.Lambda, bfs=False))[::-1]:
         parameters = node.expressions
         if (
-            node.args.get("colon")
+            node.meta.get(KEYWORD_LAMBDA)
             or len(parameters) != 1
             or not isinstance(node.parent, exp.Func)
             or _takes_a_lambda(node.parent)
@@ -1911,7 +1913,7 @@ def _compiled_row_filter(expression: str, types: Mapping[str, exp.DataType], dia
         The filter, with `TRY_CAST(<date side> AS <timestamp type>)` where a date is compared
         with a timestamp.
     """
-    parsed = sqlglot.parse_one(expression, dialect=dialect)
+    parsed = sql_dialect.parse_one(expression, dialect=dialect)
     changed = False
     for comparison in list(parsed.find_all(*_FILTER_COMPARISONS)):
         left, right = comparison.left, comparison.right
@@ -1962,7 +1964,7 @@ def _masked_projection(mask: str, name: str, target: exp.DataType | None, dialec
     alias = _quoted_identifier(name, dialect)
     if target is None:
         return f"{mask} AS {alias}"
-    value = exp.TryCast(this=sqlglot.parse_one(mask, dialect=dialect), to=target.copy())
+    value = exp.TryCast(this=sql_dialect.parse_one(mask, dialect=dialect), to=target.copy())
     return f"{value.sql(dialect=dialect)} AS {alias}"
 
 
@@ -2485,7 +2487,7 @@ def rewrite_query(
                 index = reads
                 reads += 1
                 try:
-                    ctes[alias] = sqlglot.parse_one(
+                    ctes[alias] = sql_dialect.parse_one(
                         _reader_select_sql(source, index, dialect), dialect=dialect
                     )
                 except SQL_SYNTAX_ERRORS as exc:
