@@ -65,7 +65,7 @@ jobs:
 
   # The npm locks of the interface (ui/) and of the duplication check (tools/jscpd), audited by
   # npm and by osv-scanner at the lowest level: a finding of any severity fails. The last step
-  # proves both tools fail on a lock with a known advisory, generated here and never committed.
+  # proves both tools fail on a lock with a known advisory, written here and never committed.
   npm-audit:
     name: npm audit
     needs: changes
@@ -101,12 +101,14 @@ jobs:
       - name: osv-scanner
         run: |
           "$RUNNER_TEMP/osv-scanner" scan source --lockfile ui/package-lock.json --lockfile tools/jscpd/package-lock.json
+      # The probe's lock is written out with the registry's integrity hash rather than resolved
+      # by `npm install`, so every npm command of this job reads a pinned lock.
       - name: Prove the audit fails on a known advisory
         run: |
           mkdir -p "$RUNNER_TEMP/audit-probe"
           cd "$RUNNER_TEMP/audit-probe"
-          echo '{"name": "audit-probe", "private": true}' > package.json
-          npm install --package-lock-only --ignore-scripts lodash@4.17.20
+          echo '{"name": "audit-probe", "private": true, "dependencies": {"lodash": "4.17.20"}}' > package.json
+          echo '{"name": "audit-probe", "lockfileVersion": 3, "requires": true, "packages": {"": {"name": "audit-probe", "dependencies": {"lodash": "4.17.20"}}, "node_modules/lodash": {"version": "4.17.20", "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz", "integrity": "sha512-PlhdFcillOINfeV7Ni6oF1TAEayyZBoZ8bcshTHqOYJYlrqzRK5hagpagky5o4HfCzzd1TRkXPMFq6cKk9rGmA=="}}}' > package-lock.json
           if npm audit --audit-level=low; then
             echo "npm audit passed a lock with lodash 4.17.20, which has known advisories." >&2
             exit 1

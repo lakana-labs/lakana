@@ -943,11 +943,20 @@ def test_lint_measures_duplication_in_ui_too() -> None:
     assert (ROOT / "scripts" / "duplication-baseline-ui.json").is_file()
 
 
+_LODASH_4_17_20_INTEGRITY = (
+    "sha512-PlhdFcillOINfeV7Ni6oF1TAEayyZBoZ8bcshTHqOYJYlrqzRK5hagpag"
+    "ky5o4HfCzzd1TRkXPMFq6cKk9rGmA=="
+)
+"""The registry's integrity hash of lodash 4.17.20 (`npm view lodash@4.17.20 dist.integrity`)."""
+
+
 def test_the_npm_audit_job_audits_both_locks_and_proves_it_fails() -> None:
     """Both npm locks are audited at the lowest level, and the audit is proved to fail.
 
     ``npm audit`` and osv-scanner read the locks of ``ui/`` and ``tools/jscpd``; the last step
-    generates a lock with a known advisory at run time (never committed) and requires both to fail.
+    writes a lock with a known advisory at run time (never committed) and requires both to fail.
+    The probe's lock is written out with its integrity hash, never resolved by ``npm install``, so
+    no npm command of the job is left unpinned (Scorecard's Pinned-Dependencies).
     """
     job = _jobs("security.yml")["npm-audit"]
     assert job["name"] == "npm audit"
@@ -961,7 +970,9 @@ def test_the_npm_audit_job_audits_both_locks_and_proves_it_fails() -> None:
     assert "--lockfile ui/package-lock.json" in scan
     assert "--lockfile tools/jscpd/package-lock.json" in scan
     probe = next(s for s in job["steps"] if "known advisory" in s.get("name", ""))
-    assert "npm install --package-lock-only --ignore-scripts lodash@4.17.20" in probe["run"]
+    assert "npm install" not in text
+    assert '"node_modules/lodash": {"version": "4.17.20"' in probe["run"]
+    assert f'"integrity": "{_LODASH_4_17_20_INTEGRITY}"' in probe["run"]
     assert "$RUNNER_TEMP/audit-probe" in probe["run"]
     assert probe is job["steps"][-1]
     node = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-node"))
