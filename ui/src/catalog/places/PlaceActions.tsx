@@ -38,6 +38,11 @@ export interface PlaceActionsProps {
    * catalog changed, but the page has moved on, so it only reads the tree again.
    */
   readonly onChanged: () => void;
+  /**
+   * Called when a change of place removed the menu while one of its dialogs was open: the focus
+   * that dialog held is gone, and the page puts it somewhere that stays.
+   */
+  readonly onFocusLost: () => void;
 }
 
 /**
@@ -47,14 +52,15 @@ export interface PlaceActionsProps {
  * readable tables, so the server may still refuse; its sentence then shows in the dialog.
  *
  * The caller keys the menu by the place, so a change of place closes an open dialog. A request
- * still open then only calls `onChanged` when it succeeds, and the focus that the dialog held
- * goes to the menu of the new place rather than to the page.
+ * still open then only calls `onChanged` when it succeeds, and `onFocusLost` tells the page that
+ * the focus the dialog held is gone.
  *
  * @param props - The place and the handlers.
  * @param props.node - The chosen place.
  * @param props.onCreated - Called with the created path.
  * @param props.onDeleted - Called with the deleted path.
  * @param props.onChanged - Called when a request outlived its place.
+ * @param props.onFocusLost - Called when a change of place closed an open dialog.
  * @returns The menu and its open dialog, or nothing.
  */
 export default function PlaceActions({
@@ -62,6 +68,7 @@ export default function PlaceActions({
   onCreated,
   onDeleted,
   onChanged,
+  onFocusLost,
 }: PlaceActionsProps): JSX.Element | null {
   const { t } = useTranslation();
   const note = useId();
@@ -72,24 +79,20 @@ export default function PlaceActions({
   useEffect(() => {
     dialogOpen.current = open !== null;
   }, [open]);
-  // The element around the menu outlives it: when a change of place removes the menu with its
-  // dialog, the focus goes to the button that the new place's menu put there.
-  const around = useRef<HTMLElement | null | undefined>(null);
+  // The latest handler, for the clean-up when the menu goes with its place.
+  const focusLost = useRef(onFocusLost);
+  useEffect(() => {
+    focusLost.current = onFocusLost;
+  }, [onFocusLost]);
   useEffect(() => {
     mounted.current = true;
-    around.current = actionsButton.current?.parentElement;
     return () => {
       mounted.current = false;
-      const container = around.current;
-      if (dialogOpen.current && container) {
-        requestAnimationFrame(() => {
-          if (document.activeElement === document.body) {
-            container.querySelector<HTMLElement>("button")?.focus();
-          }
-        });
+      if (dialogOpen.current) {
+        focusLost.current();
       }
     };
-  }, [actionsButton]);
+  }, []);
   const { environment, namespace } = node;
   if (environment === null) {
     return null;

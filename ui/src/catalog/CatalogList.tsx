@@ -187,8 +187,11 @@ export function CatalogList(): JSX.Element {
     }
   }, [root, allTablesAddress, environment, namespace, fromMemory, me.name, navigate]);
 
+  // A new address forgets what the old one waited for: the rows to focus after Show more, and
+  // a creation whose tree never arrived, so a later read does not move the page.
   useEffect(() => {
     focusFrom.current = null;
+    created.current = null;
   }, [address]);
 
   // The tree read after a creation has arrived: go to the new place, or, when the tree leaves it
@@ -351,6 +354,18 @@ export function CatalogList(): JSX.Element {
                         onDeleted(chosen, path);
                       }}
                       onChanged={tree.reload}
+                      onFocusLost={() => {
+                        // After React Aria's own attempt, which finds the old button gone.
+                        requestAnimationFrame(() => {
+                          if (document.activeElement === document.body) {
+                            const aside = side.current;
+                            (
+                              aside?.querySelector<HTMLElement>(".catalog-place-actions button") ??
+                              aside?.querySelector<HTMLElement>('[role="treegrid"]')
+                            )?.focus();
+                          }
+                        });
+                      }}
                     />
                   </Suspense>
                 </div>

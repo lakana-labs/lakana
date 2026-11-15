@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TableMatchOut, TableTreeOut } from "../api";
@@ -1241,6 +1241,126 @@ describe("CatalogList", () => {
         expect(screen.getByText("Deleted namespace silver.")).toHaveFocus();
       });
       expect(router.state.location.search).toBe("?env=prod");
+    });
+
+    it.each([
+      ["All tables", "/catalog", null],
+      ["an unknown place", "/catalog?env=prod&ns=platinum", null],
+      ["a place with no actions", "/catalog?env=prod", null],
+      ["a place with its own menu", "/catalog?env=prod&ns=silver", "Actions for silver"],
+    ])(
+      "keeps the focus on the page when the place changes to %s under an open dialog",
+      async (_name, address, menu) => {
+        const tree = prodTree([
+          { path: "gold", count: 4 },
+          { path: "silver", count: 0 },
+        ]);
+        const { user, router } = renderShell("/catalog?env=prod&ns=gold", {
+          routes: {
+            ...manageRoutes(),
+            "GET /api/v1/tables/tree": {
+              status: 200,
+              body: {
+                ...tree,
+                environments: tree.environments.map((e) => ({ ...e, actions: [] })),
+              },
+            },
+          },
+        });
+        await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+        await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+        expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+        await act(async () => {
+          await router.navigate(address);
+        });
+
+        await waitFor(() => {
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+          expect(document.activeElement).not.toBe(document.body);
+        });
+        const focused = document.activeElement as HTMLElement;
+        if (menu === null) {
+          expect(screen.getByRole("treegrid").contains(focused)).toBe(true);
+        } else {
+          expect(screen.getByRole("button", { name: menu })).toHaveFocus();
+        }
+      },
+    );
+
+    it("leaves the focus on a note that took it when the place changes under an open dialog", async () => {
+      const { user, router } = renderShell("/catalog?env=prod&ns=gold", { routes: manageRoutes() });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+      await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=silver", {
+          state: { placeNote: "deleted", namespace: "silver.old" },
+        });
+      });
+
+      const note = await screen.findByText("Deleted namespace silver.old.");
+      await act(async () => {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+      expect(note).toHaveFocus();
+    });
+
+    it("forgets a creation whose tree did not arrive once the address changes", async () => {
+      let reads = 0;
+      const { user, router } = renderShell("/catalog?env=prod&ns=gold", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": () => {
+            reads += 1;
+            if (reads === 2) {
+              return { status: 500, body: { detail: "The catalog is down." } };
+            }
+            return {
+              status: 200,
+              body: prodTree(
+                reads === 1
+                  ? [
+                      { path: "gold", count: 4 },
+                      { path: "silver", count: 0 },
+                    ]
+                  : [
+                      { path: "gold", count: 4 },
+                      { path: "gold.finance", count: 0 },
+                    ],
+              ),
+            };
+          },
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+      await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+      await user.type(await screen.findByRole("textbox", { name: "Path" }), "finance{Enter}");
+      await waitFor(() => {
+        expect(reads).toBe(2);
+      });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=silver");
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for silver" }));
+      await user.click(screen.getByRole("menuitem", { name: "Delete namespace…" }));
+      await user.click(await screen.findByRole("button", { name: "Delete the namespace" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Deleted namespace silver.")).toHaveFocus();
+      });
+      await waitFor(() => {
+        expect(reads).toBe(3);
+      });
+      // The tree after the deletion has arrived: it holds gold.finance and no longer silver.
+      await waitFor(() => {
+        expect(screen.queryByRole("link", { name: /^silver/ })).not.toBeInTheDocument();
+      });
+      expect(router.state.location.search).toBe("?env=prod");
+      expect(screen.queryByText(/Created namespace/)).not.toBeInTheDocument();
     });
 
     it("quotes the environment in the deploy command of an empty place", async () => {

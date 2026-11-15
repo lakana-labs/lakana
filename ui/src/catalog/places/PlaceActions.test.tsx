@@ -45,6 +45,7 @@ function renderMenu(node: CatalogNode) {
   const onCreated = vi.fn();
   const onDeleted = vi.fn();
   const onChanged = vi.fn();
+  const onFocusLost = vi.fn();
   const user = userEvent.setup();
   const rendered = render(
     <PlaceActions
@@ -53,9 +54,10 @@ function renderMenu(node: CatalogNode) {
       onCreated={onCreated}
       onDeleted={onDeleted}
       onChanged={onChanged}
+      onFocusLost={onFocusLost}
     />,
   );
-  return { onCreated, onDeleted, onChanged, user, ...rendered };
+  return { onCreated, onDeleted, onChanged, onFocusLost, user, ...rendered };
 }
 
 /**
@@ -181,7 +183,7 @@ describe("PlaceActions", () => {
   it("closes the dialog when the place changes and does not navigate on a late answer", async () => {
     const slow = held();
     fakeServer({ ...manageRoutes(), "POST /api/v1/environments/prod/namespaces": slow.route });
-    const { onCreated, onChanged, user, rerender } = renderMenu(EMPTY);
+    const { onCreated, onChanged, onFocusLost, user, rerender } = renderMenu(EMPTY);
 
     await user.click(screen.getByRole("button", { name: "Actions for silver" }));
     await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
@@ -196,46 +198,69 @@ describe("PlaceActions", () => {
         onCreated={onCreated}
         onDeleted={vi.fn()}
         onChanged={onChanged}
+        onFocusLost={onFocusLost}
       />,
     );
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // The page puts the focus somewhere that stays (CatalogList's tests follow it there).
+    expect(onFocusLost).toHaveBeenCalledTimes(1);
     slow.release({ status: 201, body: { path: "silver.raw", properties: {} } });
     await waitFor(() => {
       expect(onChanged).toHaveBeenCalledTimes(1);
     });
     expect(onCreated).not.toHaveBeenCalled();
-    await waitFor(() => {
-      expect(document.activeElement).not.toBe(document.body);
-    });
-    expect(screen.getByRole("button", { name: "Actions for gold" })).toHaveFocus();
   });
-  it("leaves the focus where the page put it when the place changes under an open dialog", async () => {
+  it("tells the page it lost the focus only when a change of place closed an open dialog", async () => {
     fakeServer(manageRoutes());
-    const { onCreated, onChanged, user, rerender } = renderMenu(EMPTY);
-
-    await user.click(screen.getByRole("button", { name: "Actions for silver" }));
-    await user.click(screen.getByRole("menuitem", { name: "Delete namespace…" }));
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-
+    const { onFocusLost, user, rerender } = renderMenu(EMPTY);
     const other = place("prod", "gold");
-    rerender(
-      <>
-        {/* eslint-disable-next-line jsx-a11y/no-autofocus -- stands for the page's own focus */}
-        <input aria-label="Search tables" autoFocus />
+    const again = (node: CatalogNode) => {
+      rerender(
         <PlaceActions
-          key={other.id}
-          node={other}
-          onCreated={onCreated}
+          key={node.id}
+          node={node}
+          onCreated={vi.fn()}
           onDeleted={vi.fn()}
-          onChanged={onChanged}
-        />
-      </>,
-    );
+          onChanged={vi.fn()}
+          onFocusLost={onFocusLost}
+        />,
+      );
+    };
 
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    again(other);
+    expect(onFocusLost).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Actions for gold" }));
+    await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    again(EMPTY);
+
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Search tables" })).toHaveFocus();
+    expect(onFocusLost).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the focus to Actions on Cancel after a refusal", async () => {
+    fakeServer({
+      ...manageRoutes(),
+      "DELETE /api/v1/environments/prod/namespaces/silver": {
+        status: 409,
+        body: { type: "ConflictError", detail: "silver is not empty; drop what it holds first." },
+      },
+    });
+    const { user } = renderMenu(EMPTY);
+    const button = screen.getByRole("button", { name: "Actions for silver" });
+
+    await user.click(button);
+    await user.click(screen.getByRole("menuitem", { name: "Delete namespace…" }));
+    await user.click(await screen.findByRole("button", { name: "Delete the namespace" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "silver is not empty; drop what it holds first.",
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(button).toHaveFocus();
+    });
   });
 });
