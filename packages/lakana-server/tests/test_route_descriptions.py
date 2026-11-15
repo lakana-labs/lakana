@@ -325,6 +325,6 @@ def test_only_a_route_that_sets_the_next_cursor_header_documents_it() -> None:
         if isinstance(route, APIRoute)
         and "X-Next-Cursor" in (inspect.getdoc(route.endpoint) or "")
         and "set_next_cursor(" not in inspect.getsource(route.endpoint)
-        for method in sorted(route.methods)
+        for method in sorted(route.methods or ())
     ]
     assert wrong == []
