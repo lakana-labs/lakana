@@ -215,6 +215,30 @@ def test_the_code_colours_meet_aa_on_the_code_background(theme: str) -> None:
         assert ratio >= 4.5, f"{theme}: --{name} {values[name]} is {ratio:.2f} on --color-sunk"
 
 
+CODE_COLOURS = {
+    "tok-keyword": "color-accent",
+    "tok-builtin": "color-accent-hover",
+    "tok-function": "color-text",
+    "tok-string": "color-ok",
+    "tok-number": "color-text-muted",
+    "tok-comment": "color-text-faint",
+    "tok-deleted": "color-bad",
+    "tok-inserted": "color-ok",
+}
+"""The interface token each syntax colour stands for."""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_each_code_colour_is_the_token_it_stands_for(theme: str) -> None:
+    """A ``--tok-*`` keeps the value of its interface token, so a token change reaches the code."""
+    values = _scheme(theme)
+    assert sorted(name for name in values if name.startswith("tok-")) == sorted(CODE_COLOURS)
+    for name, token in CODE_COLOURS.items():
+        assert values[name] == values[token], (
+            f"{theme}: --{name} is {values[name]}, --{token} is {values[token]}; copy the token"
+        )
+
+
 def test_every_variable_the_stylesheet_uses_is_defined() -> None:
     """A ``var(--…)`` of our own that is not defined would silently fall back.
 
