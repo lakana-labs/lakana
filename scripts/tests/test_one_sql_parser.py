@@ -8,6 +8,7 @@ anywhere would let the checked tree and the run tree drift apart, so a source sc
 from __future__ import annotations
 
 import ast
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -217,8 +218,9 @@ def second_parsers(source: str, lineage_allowed: set[str] | None = None) -> list
     list of str
         One `line N: what` entry per finding.
     """
-    scan = _Scan(_sqlglot_names(ast.parse(source)), lineage_allowed or set())
-    scan.visit(ast.parse(source))
+    tree = ast.parse(source)
+    scan = _Scan(_sqlglot_names(tree), lineage_allowed or set())
+    scan.visit(tree)
     return sorted(set(scan.found))
 
 
@@ -231,6 +233,26 @@ def _sources() -> list[Path]:
         Every `.py` under `packages/*/src`, except `sql_dialect.py`.
     """
     return sorted(p for p in PACKAGES.glob("*/src/**/*.py") if p != ALLOWED)
+
+
+def _mentions_sqlglot(text: str) -> bool:
+    """Say whether a source file can bind a sqlglot name, so a file that cannot is not parsed.
+
+    Every way the scan recognises sqlglot is an `import sqlglot...` or `from sqlglot... import`
+    statement, and both spell the module name in the file text. Python reads an identifier in
+    NFKC form (`import ｓqlglot` binds sqlglot), so the text is normalised the same way first.
+
+    Parameters
+    ----------
+    text
+        A Python source file.
+
+    Returns
+    -------
+    bool
+        Whether `sqlglot` appears in the text after NFKC normalisation.
+    """
+    return "sqlglot" in unicodedata.normalize("NFKC", text)
 
 
 def test_the_scan_covers_the_package_sources() -> None:
@@ -247,7 +269,8 @@ def test_no_package_parses_sql_text_outside_sql_dialect() -> None:
     for path in _sources():
         relative = path.relative_to(PACKAGES).as_posix()
         allowed = {e.split(":")[1] for e in LINEAGE_ALLOWED if e.split(":")[0] == relative}
-        if hits := second_parsers(path.read_text(encoding="utf-8"), allowed):
+        text = path.read_text(encoding="utf-8")
+        if _mentions_sqlglot(text) and (hits := second_parsers(text, allowed)):
             findings[relative] = hits
 
     assert findings == {}, (
@@ -371,3 +394,11 @@ def test_every_allowed_lineage_call_exists() -> None:
 
         assert second_parsers(source) == second_parsers(source, lineage_allowed=set()) != [], entry
         assert second_parsers(source, lineage_allowed={function}) == [], entry
+
+
+def test_the_text_check_keeps_every_form_of_the_import() -> None:
+    """A file that binds sqlglot under another name, or spells it oddly, is still parsed."""
+    assert _mentions_sqlglot("from sqlglot import parse_one as p\n")
+    assert _mentions_sqlglot("import sqlglot as s\n")
+    assert _mentions_sqlglot("import \uff53qlglot\n")
+    assert not _mentions_sqlglot("import argparse\n")
