@@ -325,7 +325,7 @@ class AuditService:
                 )
             )
         stmt = stmt.order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc()).limit(limit + 1)
-        found = [(row, str(raw)) for row, raw in self._session.execute(stmt).tuples().all()]
+        found = [(row, str(raw)) for row, raw in self._session.execute(stmt).all()]
         rows = [row for row, _ in found[:limit]]
         raw_types = {row.id: raw for row, raw in found[:limit]}
         self._record_read(
