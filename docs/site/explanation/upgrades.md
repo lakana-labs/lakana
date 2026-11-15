@@ -135,6 +135,93 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### What a project defines can be changed only in git (breaking)
+
+A table, view or artifact that a deployed project builds is owned by its file in git. Every way in
+now refuses to change that ownership by hand, with 409 and the file named (`Defined in
+REPOSITORY/PATH`), through the CLI, REST, the SDK and the Iceberg REST catalog alike, and
+break-glass does not get past it. These are refused:
+
+- dropping a table or view a deployment builds (`lakana table delete`, with or without `--purge`),
+  and dropping an artifact a deployment produces (`lakana artifact drop`);
+- creating a table under a declared name: `lakana table create`, `create-external` and the Iceberg
+  `createTable`;
+- a person's data write (`PUT …/data`, `lakana load`) that would create a declared table;
+- an Iceberg rename that moves a project-built table away or onto a declared name;
+- a person's `lakana artifact upload` that would create a new artifact under a declared name;
+- `lakana table undrop` as a different kind than the name is now declared as, and `--as` onto any
+  declared name;
+- a person's `lakana sql --mode view` that creates a view under a declared name or replaces a
+  project-built view.
+
+A run still creates and replaces what its project declares, an external table or a table under an
+artifact asset's name can still be dropped, and a table no deployment declares any more can still be
+dropped.
+
+The file is named only to a caller who may read the table (`READ_TABLE`); anyone else gets "A
+deployed project defines this table; change it in git." and nothing more. The rule sits in core, so
+no route or client skips it.
+
+To migrate, pick one:
+
+- Remove the asset in git and deploy, then drop the table from Orphans.
+- Build the table again from git: `lakana table rebuild NAME --env ENV --reason "…"` drops it and
+  queues the run of its asset in one step (see the next note).
+- For a name you create by hand, choose another name, or remove it in git first.
+
+A script that dropped a table and waited for the next run to create it switches to `lakana table
+rebuild`. A script that restored a name with `undrop --as` onto a declared name picks another name.
+
+### Rebuild a table from git
+
+`lakana table rebuild NAME --env ENV --reason "…"` drops a table a deployed project builds, keeps it
+restorable for the undo period, and queues a run of its asset, all in one transaction. It is also
+`POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild` and
+`client.tables.rebuild(environment, "namespace.table", reason=…)`. It needs `DROP_TABLE` on the table
+and `RUN` on the environment, asks a browser for a passkey touch, and refuses while a run of the
+asset is active. A deploy that switches a table to `write: history` fails the table's precheck
+until the table is built again (`HISTORY_COLUMN_MISSING`): deploy, then rebuild. See [Drop and
+restore a table](../how-to/drop-and-restore-a-table.md).
+
+### A browser asks for a passkey touch before a drop
+
+A signed-in browser now asks for a passkey touch before it drops a table, drops an artifact, deletes
+an artifact version, deletes a namespace, or rebuilds a table. A token, the CLI and the SDK are not
+asked, so no script changes.
+
+### Expiring tables, namespaces, artifacts and orphans come in pages (breaking)
+
+These lists return at most 100 rows per request: the dropped tables of an environment, expiring
+tables, namespaces, orphans and artifacts. A script that reads one request now reads only the
+first page, as the lists of 0.16.0 did. Follow the cursor, which is the `X-Next-Cursor` header
+(absent on the last page) or, for orphans and the dropped-tables list, `next_cursor` in the body; send it back as
+`cursor`, with the same filters. In Python, `client.tables.iter_expiring`, `iter_dropped`,
+`client.namespaces.iter`, `client.orphans.iter` and `client.artifacts.iter` follow it for you. The CLI
+prints "More results" with the flag to continue.
+
+New filters: `namespace` on expiring tables; `parent` and `depth=1` (direct children only; any other
+depth is 422) on namespaces; `lakana table list --dropped` without a namespace lists the whole
+environment. New fields: an orphan has `kind` and `exists`, an artifact has `keep_versions`, and
+a table, view or artifact row has `defined_by` (`{repository, path}`) and `actions` (the actions
+your rights allow; the server still decides each request).
+
+The orphans list now includes dropped tables that can still be restored, with `exists: false`. Its
+hidden count includes dropped tables you may not read.
+
+### New audit events
+
+`NAMESPACE_CREATED`, `NAMESPACE_DROPPED` (with `revoked_grants`), `TABLE_CREATED` (an external table
+registered), `ARTIFACT_UPLOAD_ABORTED` and `TABLE_REBUILT` are written now, in the transaction of
+their change. A consumer of the audit log that handles every event type must accept them ([Export and
+keep the audit log](../how-to/export-and-keep-the-audit-log.md)).
+
+### Messages that name Rebuild
+
+A refusal that told you to drop a table and wait for the next run now names the rebuild:
+`HISTORY_COLUMN_MISSING` (no longer "and deploy again"), the refusal of a commit that would leave a
+table with no current snapshot, and the history refusals (two open versions of a key, a surrogate key
+shared, delete files from another writer, a table its first history run did not create). A script that matches those texts must change.
+
 ### A lock's files need a strong hash and an http URL (breaking)
 
 A deploy, and every run of a deployed version, now refuses a `uv.lock` in which a file of a package
