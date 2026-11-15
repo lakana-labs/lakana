@@ -6953,8 +6953,8 @@ results at <https://scorecard.dev/viewer/?uri=github.com/lakana-labs/lakana>.
 
 ### Image scan
 
-`security-deep.yml` also builds the server image (`Dockerfile`) as the release does and runs
-Trivy over it every Monday (HIGH and CRITICAL, `ignore-unfixed`): a fixed vulnerability in any
+`security-deep.yml` also builds the server image (`Dockerfile`) and the four task images
+(`Dockerfile.task`, job `trivy-task`) as the release does and runs Trivy over them every Monday (HIGH and CRITICAL, `ignore-unfixed`): a fixed vulnerability in any
 layer fails the run. Fix it at the root, strictest first:
 
 - **Debian packages:** Dependabot's weekly `docker` update moves the `python:*-slim` digests in
@@ -6977,7 +6977,11 @@ layer fails the run. Fix it at the root, strictest first:
   `/usr/local` pip vendored msgpack, urllib3 and setuptools, listed in
   `pip/_vendor/bom.cdx.json`, and they lagged their fixes. The Python assets' venvs are uv's,
   so the final stage uninstalls pip, deletes `ensurepip/_bundled` and fails the build if
-  `import pip` still works. The task image keeps its pip. Ignore a finding (`.trivyignore`,
+  `import pip` still works. The task images do the same since #515 (a test in
+  `test_dockerfile.py` keeps the step): they also uninstall `setuptools` and `wheel`, because
+  python:3.11's base ships setuptools 79.0.1, which vendors jaraco.context 5.3.0 and wheel 0.45.1
+  (CVE-2026-23949, CVE-2026-24049, HIGH, fixed). A second job, `trivy-task`, builds and scans the
+  four task images (3.11 to 3.14) with the same rules. Ignore a finding (`.trivyignore`,
   with the file, the reason and a review date per entry) only when the code it names is not in
   the image or cannot be reached; there is no such entry today.
 

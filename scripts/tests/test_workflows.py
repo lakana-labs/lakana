@@ -2233,6 +2233,35 @@ def test_the_semgrep_scan_holds_no_write_scope_and_the_upload_runs_nothing_else(
     assert sarif["category"] == "semgrep"
 
 
+def test_the_weekly_scan_covers_each_task_image_with_the_server_image_s_rules() -> None:
+    """Trivy scans the four task images as it scans the server image (#515).
+
+    Each is built from `Dockerfile.task` the way the release builds it (the check environment's
+    requirements first), with the same action, pin and severity rules, so a fixed HIGH in a
+    task image fails the weekly run too.
+    """
+    jobs = _jobs("security-deep.yml")
+    server, task = jobs["trivy"], jobs["trivy-task"]
+    assert task["strategy"]["matrix"]["python"] == ["3.11", "3.12", "3.13", "3.14"]
+    assert task["strategy"]["fail-fast"] is False
+    assert task["timeout-minutes"] == server["timeout-minutes"]
+    runs = [s.get("run", "") for s in task["steps"]]
+    export = runs.index(
+        "uv export --frozen --only-group check --no-emit-workspace -o dist/check-requirements.txt"
+    )
+    build = runs.index(
+        "docker build -f Dockerfile.task --build-arg PYTHON=${{ matrix.python }}"
+        " -t lakana-task:scan ."
+    )
+    assert export < build
+
+    def scan(job: dict) -> dict:
+        return next(s for s in job["steps"] if "trivy-action" in str(s.get("uses")))
+
+    assert scan(task)["uses"] == scan(server)["uses"]
+    assert scan(task)["with"] == {**scan(server)["with"], "image-ref": "lakana-task:scan"}
+
+
 def test_codeql_analyses_python_on_pull_requests_main_and_weekly() -> None:
     """The CodeQL workflow is read-only except for the job that uploads to code scanning."""
     workflow = yaml.safe_load((WORKFLOWS / "codeql.yml").read_text())

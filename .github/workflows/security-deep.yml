@@ -69,3 +69,27 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: 1
+
+  # The task images (one per supported Python), built as the release builds them and scanned
+  # with the same rules as the server image above.
+  trivy-task:
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - name: Generate the check environment's pinned requirements (with hashes) for the image build
+        run: uv export --frozen --only-group check --no-emit-workspace -o dist/check-requirements.txt
+      - name: Build the task image to scan
+        run: docker build -f Dockerfile.task --build-arg PYTHON=${{ matrix.python }} -t lakana-task:scan .
+      # Pinned by commit SHA, as in the job above.
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: lakana-task:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1

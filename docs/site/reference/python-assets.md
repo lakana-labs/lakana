@@ -477,6 +477,10 @@ platform. With the local runner, projects whose lock and `pyproject.toml` are bo
 share the environment; with the docker runner an environment belongs to one project in one
 environment. A change to either file builds a new one.
 
+The environment holds only what the lock names: `uv sync` adds no `pip`. With the docker runner the task
+image has none either (nor `setuptools` or `wheel`): a task that runs `pip install` at run time
+fails. Name every package in `[project] dependencies` and lock it instead.
+
 Put a Python asset's dependencies in `[project] dependencies`. Packages in a dependency group
 (`[dependency-groups]`, including `dev`, and `[tool.uv] default-groups`) are not installed for a
 task. After a platform upgrade that changes the compatible `lakana`

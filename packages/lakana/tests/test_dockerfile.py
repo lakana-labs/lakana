@@ -494,7 +494,7 @@ def test_final_stage_drops_the_base_images_pip_and_its_bundled_wheel() -> None:
     fixed HIGH vulnerabilities (CVE-2026-114613, CVE-2025-47273, CVE-2026-97687). The Python
     assets' venvs are uv's, and the venv in `/opt/lakana` already lost its pip in the builder.
     `ensurepip`'s bundled wheel holds the same copies, so it goes too, and the build fails if
-    `import pip` still works. The task image keeps its pip: a task's environment may use it.
+    `import pip` still works. The task images drop theirs the same way (the test below).
     """
     final = _final_stage()
     (step,) = [ln for ln in final if "pip uninstall" in ln]
@@ -503,3 +503,29 @@ def test_final_stage_drops_the_base_images_pip_and_its_bundled_wheel() -> None:
     assert "rm -rf /usr/local/lib/python3.14/ensurepip/_bundled /usr/local/bin/pip " in step
     assert "! python -I -c 'import pip'" in step
     assert final.index(step) < final.index("USER 10001:10001")
+
+
+def test_the_task_image_drops_the_base_images_pip_and_its_bundled_wheels() -> None:
+    """No task image ships the base image's pip, setuptools, wheel or ensurepip's wheels (#515).
+
+    Nothing in a task image installs with pip: `build.py` and the check environment use uv, and
+    a task runs in the environment `uv sync` made, which has no pip and does not see the base
+    image's site-packages. The base pip vendors msgpack, urllib3 and setuptools that lagged their
+    fixes (Trivy reads `pip/_vendor/bom.cdx.json`), and python:3.11's own setuptools 79.0.1
+    vendors jaraco.context 5.3.0 and wheel 0.45.1 (CVE-2026-23949, CVE-2026-24049, both HIGH and
+    fixed, 2026-11-15); ensurepip's wheels hold the same copies. The path of ensurepip depends on
+    the Python, so the stage names its `PYTHON` again.
+    """
+    text = _TASK_DOCKERFILE.read_text(encoding="utf-8")
+    (step,) = [s for s in _task_run_steps() if "pip uninstall" in s]
+    assert step.startswith("RUN python -m pip uninstall -y")
+    assert step.split("&&")[0].split()[-3:] == ["setuptools", "wheel", "pip"]
+    assert (
+        "rm -rf /usr/local/lib/python${PYTHON}/ensurepip/_bundled /usr/local/bin/pip"
+        " /usr/local/bin/pip3 /usr/local/bin/pip${PYTHON} " in step
+    )
+    assert "! python -I -c 'import pip'" in step
+    assert "! command -v pip >/dev/null && ! command -v pip3 >/dev/null" in step
+    final = text[text.index("FROM py${PYTHON}") :]
+    assert final.index("ARG PYTHON") < final.index(step.split(" && ")[0])
+    assert text.index(step.split(" && ")[0]) < text.index("USER 10001:10003")
