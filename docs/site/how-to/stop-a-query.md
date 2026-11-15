@@ -26,7 +26,7 @@ started with `lakana query submit`, or one whose `lakana sql` you closed before 
 lakana query list --env dev --all
 ```
 
-<!-- output -->
+<!-- output: getting-started#query-list -->
 ```text
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┓
 ┃ id                                   ┃ submitter ┃ status    ┃ waiting_for ┃
@@ -35,6 +35,9 @@ lakana query list --env dev --all
 │ 9de2a82e-3dab-4d57-ac4b-eb248bebf45b │ admin     │ SUCCEEDED │             │
 │ e4277608-b5f7-41cd-8997-085a40319d3a │ admin     │ SUCCEEDED │             │
 │ b4658e0c-78de-4bd8-93c2-4904c76688b9 │ admin     │ SUCCEEDED │             │
+│ 2cf4d34e-4cdc-416b-92c4-c31fc0180252 │ admin     │ SUCCEEDED │             │
+│ 4ffc1e7e-ecb0-457f-855c-c9aaeed71f9c │ admin     │ SUCCEEDED │             │
+│ 92c16407-7725-4762-a358-d4f1b4bde4fb │ admin     │ SUCCEEDED │             │
 └──────────────────────────────────────┴───────────┴───────────┴─────────────┘
 Not shown: age, kind. Use --output json to see them.
 ```

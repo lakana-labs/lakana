@@ -6,7 +6,9 @@ from datetime import datetime
 
 from sqlalchemy import JSON, ForeignKey, Index, String, Uuid
 from sqlalchemy import Enum as SAEnum
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator
 
 from lakana_core.auth import SecurableKind
 from lakana_core.models.base import Base, UTCDateTime
@@ -129,6 +131,86 @@ class AuditEventType(enum.StrEnum):
     PROFILE_PICTURE_REMOVED = "PROFILE_PICTURE_REMOVED"
     REPOSITORY_PROBE_REQUESTED = "REPOSITORY_PROBE_REQUESTED"
     DEPLOY_KEY_GENERATED = "DEPLOY_KEY_GENERATED"
+    UNKNOWN = "UNKNOWN"
+    """Read only: a stored type this release does not know, which a newer release wrote before a
+    downgrade (#613). Never written (`StoredEventType` refuses it); the stored text is read
+    alongside (`AuditService.query`, `event_type_raw`)."""
+
+
+AuditEventFilter = enum.StrEnum(
+    "AuditEventFilter",
+    {t.name: t.value for t in AuditEventType if t is not AuditEventType.UNKNOWN},
+)
+"""The values the `event_type` filter of the audit log accepts: every `AuditEventType` but
+`UNKNOWN`, which stands for a stored type this release does not know and is never a filter
+(#613). Its own enum, so the API's schema never offers `UNKNOWN`."""
+
+
+class StoredEventType(TypeDecorator[AuditEventType]):
+    """`audit_events.event_type`: an `AuditEventType` stored as its text in a VARCHAR(64).
+
+    A stored text this release does not know reads as `AuditEventType.UNKNOWN` instead of
+    failing the whole read; `UNKNOWN` itself is never written. The column has always been a
+    VARCHAR(64) with no check constraint (`native_enum=False` since migration 0010), on SQLite
+    and Postgres alike, so this changes no schema.
+    """
+
+    impl = String(64)
+    cache_ok = True
+
+    def process_bind_param(
+        self, value: AuditEventType | str | None, dialect: Dialect
+    ) -> str | None:
+        """Give the text to store or compare for a type.
+
+        Parameters
+        ----------
+        value
+            The type, or its text.
+        dialect
+            The database dialect (unused).
+
+        Returns
+        -------
+        str or None
+            The type's text.
+
+        Raises
+        ------
+        ValueError
+            If `value` is `UNKNOWN` or names no type: neither is ever written or filtered on.
+        """
+        if value is None:
+            return None
+        known = AuditEventType(value)
+        if known is AuditEventType.UNKNOWN:
+            raise ValueError(
+                "The audit event type UNKNOWN only stands for a stored type this release does not "
+                "know; it is never written or filtered on."
+            )
+        return known.value
+
+    def process_result_value(self, value: str | None, dialect: Dialect) -> AuditEventType | None:
+        """Read a stored text as its type, or as `UNKNOWN` when this release lacks it.
+
+        Parameters
+        ----------
+        value
+            The stored text.
+        dialect
+            The database dialect (unused).
+
+        Returns
+        -------
+        AuditEventType or None
+            The type, `UNKNOWN` for a text no member has.
+        """
+        if value is None:
+            return None
+        try:
+            return AuditEventType(value)
+        except ValueError:
+            return AuditEventType.UNKNOWN
 
 
 class AuditEvent(Base):
@@ -178,9 +260,7 @@ class AuditEvent(Base):
     principal_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("principals.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    event_type: Mapped[AuditEventType] = mapped_column(
-        SAEnum(AuditEventType, native_enum=False, length=64), index=True
-    )
+    event_type: Mapped[AuditEventType] = mapped_column(StoredEventType(), index=True)
     securable_kind: Mapped[SecurableKind | None] = mapped_column(
         SAEnum(SecurableKind, native_enum=False), nullable=True
     )

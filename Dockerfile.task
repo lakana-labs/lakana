@@ -19,6 +19,8 @@ FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf107
 FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS py3.14
 
 FROM py${PYTHON}
+# Named again: an ARG before the first FROM is visible only to the FROM lines.
+ARG PYTHON
 # zlib1g: the security fix (CVE-2026-85091, CVE-2026-76844) is newer than the base digests
 # above, as in Dockerfile; only the named package, and the build fails below the fixed version.
 RUN apt-get update \
@@ -53,6 +55,17 @@ RUN UV_NO_CACHE=1 UV_PYTHON_DOWNLOADS=never uv venv --python /usr/local/bin/pyth
  && /opt/lakana-check-env/bin/python -I -B -c 'import adbc_driver_postgresql.dbapi, adbc_driver_sqlite.dbapi, cryptography, pymysql' \
  && echo '{"connection": {"kind": "none"}}' | /opt/lakana-check-env/bin/python -I -B /opt/lakana-check/check.py \
   | grep -q 'does not know the kind'
+# No pip, setuptools or wheel in the image: nothing here installs or builds with them (build.py
+# and the check environment use uv, which builds a source distribution in an isolated build
+# environment of its own, and a task runs in the environment uv made, which does not see the base
+# image's site-packages). The base image's pip vendors msgpack, urllib3 and setuptools (listed in
+# pip/_vendor/bom.cdx.json, which Trivy reads), and python:3.11's setuptools vendors
+# jaraco.context and wheel; both lagged their security fixes. ensurepip's bundled wheels hold the
+# same copies. Only 3.11's base has setuptools and wheel; pip skips them elsewhere. As in Dockerfile.
+RUN python -m pip uninstall -y --disable-pip-version-check --root-user-action=ignore setuptools wheel pip \
+ && rm -rf /usr/local/lib/python${PYTHON}/ensurepip/_bundled /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip${PYTHON} \
+ && ! python -I -c 'import pip' 2>/dev/null \
+ && ! command -v pip >/dev/null && ! command -v pip3 >/dev/null
 # No file keeps a setuid or setgid bit: where Docker refuses no-new-privileges (snap), `su` or
 # `mount` would make a task's process uid 0 again. Last, so nothing installed above keeps one.
 RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +

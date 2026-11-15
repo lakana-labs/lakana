@@ -21,7 +21,8 @@ from datetime import UTC, datetime, timedelta
 
 import pydantic
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import cast, delete, null, select, text
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit import content
@@ -53,6 +54,7 @@ from lakana_core.models import (
     QueryRun,
     QueryRunStatus,
 )
+from lakana_core.models.audit_event import StoredEventType
 from lakana_core.runs.store import query_completed_detail
 
 _SQL = "SELECT email FROM customers WHERE name = 'Alice Example'"
@@ -810,3 +812,77 @@ def test_each_group_of_shown_fields_is_in_alphabetical_order() -> None:
         ("why", "after"),
         ("versions_opened", "approved_options"),
     ]
+
+
+# --- an event type a newer release wrote (#613) -----------------------------------------------
+
+
+def test_an_event_type_this_release_does_not_know_reads_as_unknown_with_its_text(
+    session: Session,
+) -> None:
+    """A downgrade can leave a type the enum lacks: the read maps it and keeps the stored text."""
+    admin = _person(session, "root")
+    service = AuditService(session, AllowAllAuthorization())
+    service.record(admin.id, AuditEventType.AUTHENTICATION_SUCCEEDED, commit=True)
+    service.record(admin.id, AuditEventType.GRANT_CREATED, commit=True)
+    session.execute(
+        text("UPDATE audit_events SET event_type = 'WIDGET_FROBNICATED' WHERE event_type = :t"),
+        {"t": AuditEventType.GRANT_CREATED.value},
+    )
+    session.commit()
+    session.expire_all()
+
+    page = service.query(admin)
+
+    by_raw = {item.event_type_raw: item.event_type for item in page.items}
+    assert by_raw == {
+        "WIDGET_FROBNICATED": AuditEventType.UNKNOWN,
+        "AUTHENTICATION_SUCCEEDED": AuditEventType.AUTHENTICATION_SUCCEEDED,
+    }
+
+
+def test_the_type_filter_refuses_unknown(session: Session) -> None:
+    admin = _person(session, "root")
+
+    with pytest.raises(ValidationError, match="UNKNOWN"):
+        AuditService(session, AllowAllAuthorization()).query(
+            admin, event_type=AuditEventType.UNKNOWN
+        )
+
+
+def test_no_event_is_written_as_unknown(session: Session) -> None:
+    admin = _person(session, "root")
+
+    with pytest.raises(ValueError, match="UNKNOWN"):
+        AuditService(session).record(admin.id, AuditEventType.UNKNOWN, commit=True)
+
+    session.rollback()
+    assert session.execute(select(AuditEvent)).first() is None
+
+
+def test_the_stored_type_column_refuses_unknown_even_past_the_service(session: Session) -> None:
+    """A row added without `AuditService.record` cannot store UNKNOWN either."""
+    admin = _person(session, "root")
+    session.add(
+        AuditEvent(
+            id=uuid.uuid4(),
+            occurred_at=datetime.now(UTC),
+            principal_id=admin.id,
+            event_type=AuditEventType.UNKNOWN,
+            detail={},
+        )
+    )
+
+    with pytest.raises(StatementError, match="UNKNOWN"):
+        session.flush()
+
+    session.rollback()
+    assert session.execute(select(AuditEvent)).first() is None
+
+
+def test_the_stored_type_column_passes_null_both_ways(session: Session) -> None:
+    """NULL stays NULL, as an outer join or a missing value gives it, in either direction."""
+    stored = StoredEventType()
+
+    assert session.execute(select(cast(null(), stored))).scalar_one() is None
+    assert stored.process_bind_param(None, session.get_bind().dialect) is None

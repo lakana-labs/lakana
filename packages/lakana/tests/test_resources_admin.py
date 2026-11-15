@@ -844,6 +844,18 @@ def test_audit_events_iter_follows_next_cursor_until_exhausted() -> None:
     ]
 
 
+def test_audit_events_keep_the_stored_type_of_an_unknown_event() -> None:
+    """A type the server does not know reads as UNKNOWN with its stored text (#613)."""
+    body = {**_event_json("e1"), "event_type": "UNKNOWN", "event_type_raw": "WIDGET_FROBNICATED"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"items": [body], "next_cursor": None})
+
+    [event] = AuditEvents(_transport(handler)).list().items
+
+    assert (event.event_type, event.event_type_raw) == ("UNKNOWN", "WIDGET_FROBNICATED")
+
+
 # --- Client wiring -----------------------------------------------------
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import ctypes
 import errno
 import itertools
 import logging
@@ -15,6 +16,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -1118,3 +1120,420 @@ def test_prepare_private_directory_refuses_a_directory_others_can_use(tmp_path: 
     with pytest.raises(UnsafeDirectory):
         prepare_private_directory(target)
     assert stat.S_IMODE(os.lstat(target).st_mode) == 0o755
+
+
+# macOS: a task can lock its own files with user flags (`chflags uchg`, `uappnd`) or an ACL entry
+# that denies their deletion (#166). Linux has neither for a non-root user, so the tests below
+# replace macOS at its boundary: `_FakeMacLocks` stands in for the libc calls that clear a lock,
+# and `os.unlink`, `os.rmdir` and `os.fchmod` refuse a locked inode as macOS's kernel does. The
+# last tests run the real calls, on macOS only.
+
+
+def _key(info: os.stat_result) -> tuple[int, int]:
+    """Name an inode.
+
+    Parameters
+    ----------
+    info
+        Its status.
+
+    Returns
+    -------
+    tuple of int
+        Device and inode number.
+    """
+    return (info.st_dev, info.st_ino)
+
+
+class _FakeMacLocks:
+    """The locks a task set, by inode, and the calls that clear them through a descriptor."""
+
+    def __init__(self) -> None:
+        """Start with nothing locked."""
+        self.flagged: set[tuple[int, int]] = set()
+        self.denied: set[tuple[int, int]] = set()
+        self.touched: list[tuple[int, int]] = []
+
+    def lock(self, path: Path, how: str) -> None:
+        """Lock one entry, as the task would.
+
+        Parameters
+        ----------
+        path
+            The entry; a link is locked itself, not its target.
+        how
+            ``flags`` (`chflags uchg`) or ``acl`` (`chmod +a "everyone deny delete"`, or
+            ``delete_child`` on a directory).
+        """
+        (self.flagged if how == "flags" else self.denied).add(_key(path.lstat()))
+
+    def clear_flags(self, fd: int, flags: int) -> None:
+        """Clear the flags of the inode behind `fd`.
+
+        Parameters
+        ----------
+        fd
+            An open descriptor.
+        flags
+            Its current flags, unused: Linux has none to read.
+        """
+        key = _key(os.fstat(fd))
+        self.touched.append(key)
+        self.flagged.discard(key)
+
+    def strip_acl(self, fd: int) -> None:
+        """Remove the ACL of the inode behind `fd`.
+
+        Parameters
+        ----------
+        fd
+            An open descriptor.
+        """
+        key = _key(os.fstat(fd))
+        self.touched.append(key)
+        self.denied.discard(key)
+
+
+@pytest.fixture
+def mac_locks(monkeypatch: pytest.MonkeyPatch) -> _FakeMacLocks:
+    """Run the cleanup as on macOS, with a kernel that enforces the fake's locks.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch.
+
+    Returns
+    -------
+    _FakeMacLocks
+        The locks, for the test to set and inspect.
+    """
+    locks = _FakeMacLocks()
+    monkeypatch.setattr("lakana_worker.processes._DARWIN", True)
+    monkeypatch.setattr("lakana_worker.processes._mac_locks", locks)
+    real_unlink, real_rmdir, real_fchmod = os.unlink, os.rmdir, os.fchmod
+
+    def refuse(name: str, dir_fd: int | None) -> None:
+        target = _key(os.lstat(name, dir_fd=dir_fd))
+        parent = _key(os.fstat(dir_fd)) if dir_fd is not None else None
+        if target in locks.flagged | locks.denied or parent in locks.flagged | locks.denied:
+            raise PermissionError(errno.EPERM, "Operation not permitted", name)
+
+    def unlink(name: str, *, dir_fd: int | None = None) -> None:
+        refuse(name, dir_fd)
+        real_unlink(name, dir_fd=dir_fd)
+
+    def rmdir(name: str, *, dir_fd: int | None = None) -> None:
+        refuse(name, dir_fd)
+        real_rmdir(name, dir_fd=dir_fd)
+
+    def fchmod(fd: int, mode: int) -> None:
+        if _key(os.fstat(fd)) in locks.flagged:
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+        real_fchmod(fd, mode)
+
+    monkeypatch.setattr("lakana_worker.processes.os.unlink", unlink)
+    monkeypatch.setattr("lakana_worker.processes.os.rmdir", rmdir)
+    monkeypatch.setattr("lakana_worker.processes.os.fchmod", fchmod)
+    return locks
+
+
+@pytest.mark.parametrize("how", ["flags", "acl"])
+@pytest.mark.parametrize("where", ["root", "sub", "sub/f", "sub/nested/g", "fifo"])
+def test_on_macos_a_tree_the_task_locked_is_removed(
+    tmp_path: Path, mac_locks: _FakeMacLocks, where: str, how: str
+) -> None:
+    """A locked file or directory anywhere in the tree is unlocked, then removed (#166)."""
+    tree = _tree_with(tmp_path, "sub/f", "sub/nested/g")
+    os.mkfifo(tree / "fifo")
+    mac_locks.lock(tree if where == "root" else tree / where, how)
+
+    assert remove_private_tree(tree) is True
+    assert not tree.exists()
+
+
+def test_without_macos_a_locked_file_is_left_and_nothing_is_unlocked(
+    tmp_path: Path, mac_locks: _FakeMacLocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unlocking runs on macOS only: elsewhere the kernel has no such locks to clear."""
+    monkeypatch.setattr("lakana_worker.processes._DARWIN", False)
+    tree = _tree_with(tmp_path, "f")
+    mac_locks.lock(tree / "f", "flags")
+
+    assert remove_private_tree(tree) is False
+    assert (tree / "f").exists()
+    assert mac_locks.touched == []
+
+
+def test_on_macos_a_locked_hard_link_is_left_and_the_file_outside_untouched(
+    tmp_path: Path, mac_locks: _FakeMacLocks, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A hard link shares the inode of a file outside the tree: unlocking it would unlock that.
+
+    The tree stays; the operator gets the path and the manual fix, once per path.
+    """
+    outside = tmp_path / "outside"
+    outside.write_text("the worker's own file")
+    tree = _tree_with(tmp_path, "f")
+    os.link(outside, tree / "linked")
+    mac_locks.lock(outside, "flags")
+
+    with caplog.at_level(logging.WARNING):
+        assert remove_private_tree(tree) is False
+        assert remove_private_tree(tree) is False
+    assert _key(outside.lstat()) not in mac_locks.touched
+    assert _key(outside.lstat()) in mac_locks.flagged
+    assert (tree / "linked").exists()
+    assert not (tree / "f").exists()
+    fixes = [m for m in caplog.messages if "chflags -R nouchg,nouappnd" in m]
+    assert len(fixes) == 1
+    assert str(tree) in fixes[0]
+
+
+def test_on_macos_a_link_to_a_locked_file_outside_is_unlinked_and_its_target_untouched(
+    tmp_path: Path, mac_locks: _FakeMacLocks
+) -> None:
+    """A symlink is removed as itself; the lock of what it points to is never cleared."""
+    outside = tmp_path / "outside"
+    outside.write_text("the worker's own file")
+    tree = _tree_with(tmp_path, "f")
+    (tree / "link").symlink_to(outside)
+    mac_locks.lock(outside, "flags")
+    mac_locks.lock(tree / "f", "flags")
+
+    assert remove_private_tree(tree) is True
+    assert _key(outside.lstat()) not in mac_locks.touched
+    assert _key(outside.lstat()) in mac_locks.flagged
+
+
+def test_on_macos_a_locked_link_is_never_opened_through(
+    tmp_path: Path, mac_locks: _FakeMacLocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without `O_SYMLINK` (Linux) a locked link cannot be opened as itself, so it is left."""
+    monkeypatch.delattr(os, "O_SYMLINK", raising=False)
+    outside = tmp_path / "outside"
+    outside.write_text("the worker's own file")
+    tree = _tree_with(tmp_path)
+    (tree / "link").symlink_to(outside)
+    mac_locks.lock(tree / "link", "flags")
+
+    assert remove_private_tree(tree) is False
+    assert (tree / "link").is_symlink()
+    assert _key(outside.lstat()) not in mac_locks.touched
+
+
+def test_on_macos_a_lock_that_cannot_be_cleared_leaves_the_entry(
+    tmp_path: Path, mac_locks: _FakeMacLocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failing libc call (a file system without ACLs, a denied right) is not fatal."""
+
+    def refuse(fd: int, *args: object) -> None:
+        raise OSError(errno.ENOTSUP, "Operation not supported")
+
+    monkeypatch.setattr(mac_locks, "clear_flags", refuse)
+    monkeypatch.setattr(mac_locks, "strip_acl", refuse)
+    tree = _tree_with(tmp_path, "f")
+    mac_locks.lock(tree / "f", "acl")
+
+    assert remove_private_tree(tree) is False
+    assert (tree / "f").exists()
+
+
+def test_on_macos_an_entry_of_another_user_is_never_unlocked(
+    tmp_path: Path, mac_locks: _FakeMacLocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the worker's own files are unlocked: a root worker meets others' only on NFS."""
+    monkeypatch.setattr("lakana_worker.processes.os.geteuid", lambda: os.getuid() + 1)
+    tree = _tree_with(tmp_path, "f")
+    mac_locks.lock(tree / "f", "flags")
+
+    assert remove_private_tree(tree) is False
+    assert mac_locks.touched == []
+
+
+def test_on_macos_an_entry_still_refused_after_unlocking_is_left(
+    tmp_path: Path, mac_locks: _FakeMacLocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The calls succeed but the kernel still refuses (a lock the calls do not cover)."""
+    monkeypatch.setattr(mac_locks, "clear_flags", lambda fd, flags: None)
+    monkeypatch.setattr(mac_locks, "strip_acl", lambda fd: None)
+    tree = _tree_with(tmp_path, "f")
+    mac_locks.lock(tree / "f", "flags")
+
+    assert remove_private_tree(tree) is False
+    assert (tree / "f").exists()
+
+
+class _FakeFunction:
+    """One C function of `_FakeLibc`: records its calls and takes the declared signature."""
+
+    def __init__(self, calls: list[tuple[object, ...]], name: str, result: object) -> None:
+        """Prepare the function.
+
+        Parameters
+        ----------
+        calls
+            The list every call is appended to.
+        name
+            The function's name.
+        result
+            What each call returns.
+        """
+        self.calls, self.name, self.result = calls, name, result
+        self.argtypes: object = None
+        self.restype: object = None
+
+    def __call__(self, *args: object) -> object:
+        """Record the call.
+
+        Parameters
+        ----------
+        *args
+            The arguments.
+
+        Returns
+        -------
+        object
+            The result chosen at construction.
+        """
+        self.calls.append((self.name, *args))
+        return self.result
+
+
+class _FakeLibc:
+    """macOS's libc as `_MacLocks` calls it: records each call, fails where told."""
+
+    def __init__(self, fail: str = "") -> None:
+        """Prepare the functions.
+
+        Parameters
+        ----------
+        fail
+            The name of the call that returns failure, if any.
+        """
+        self.calls: list[tuple[object, ...]] = []
+        results = {"fchflags": (0, -1), "acl_init": (4096, None), "acl_set_fd_np": (0, -1)}
+        results["acl_free"] = (0, -1)
+        for name, (ok, failed) in results.items():
+            setattr(self, name, _FakeFunction(self.calls, name, failed if name == fail else ok))
+
+
+def _locks_over(libc: _FakeLibc) -> object:
+    """Build the real `_MacLocks` over a fake library.
+
+    Parameters
+    ----------
+    libc
+        The fake.
+
+    Returns
+    -------
+    object
+        The `_MacLocks`.
+    """
+    from lakana_worker.processes import _MacLocks
+
+    return _MacLocks(lambda: cast("ctypes.CDLL", libc))
+
+
+def test_the_libc_calls_clear_only_the_lock_flags_and_set_an_empty_acl() -> None:
+    """`fchflags` keeps every other flag; the ACL is replaced by an empty extended one."""
+    from lakana_worker.processes import _MacLocks
+
+    libc = _FakeLibc()
+    locks = cast("_MacLocks", _locks_over(libc))
+    hidden = stat.UF_HIDDEN
+    locks.clear_flags(7, stat.UF_IMMUTABLE | stat.UF_APPEND | hidden)
+    locks.clear_flags(7, hidden)  # nothing locked: no call
+    locks.strip_acl(7)
+
+    assert libc.calls == [
+        ("fchflags", 7, hidden),
+        ("acl_init", 1),
+        ("acl_set_fd_np", 7, 4096, 0x100),
+        ("acl_free", 4096),
+    ]
+    fchflags = cast("_FakeFunction", vars(libc)["fchflags"])
+    assert fchflags.restype is not None  # the signatures are declared on first use
+
+
+@pytest.mark.parametrize("fail", ["fchflags", "acl_init", "acl_set_fd_np"])
+def test_a_failing_libc_call_raises_an_os_error(fail: str) -> None:
+    """The caller decides what a failure means; an ACL made is freed either way."""
+    from lakana_worker.processes import _MacLocks
+
+    libc = _FakeLibc(fail)
+    locks = cast("_MacLocks", _locks_over(libc))
+    with pytest.raises(OSError, match=fail):
+        locks.clear_flags(7, stat.UF_IMMUTABLE)
+        locks.strip_acl(7)
+    assert (("acl_free", 4096) in libc.calls) is (fail == "acl_set_fd_np")
+
+
+_DARWIN_ONLY = pytest.mark.skipif(
+    sys.platform != "darwin", reason="user flags and ACLs exist on macOS only"
+)
+
+
+def _unlock_by_hand(path: Path) -> None:
+    """Clear what a failed test may have left locked, so pytest can remove its directory.
+
+    Parameters
+    ----------
+    path
+        A tree or file; missing is fine.
+    """
+    if os.path.lexists(path):
+        subprocess.run(["/usr/bin/chflags", "-R", "nouchg,nouappnd", str(path)], check=False)
+        subprocess.run(["/bin/chmod", "-R", "-N", str(path)], check=False)
+
+
+@_DARWIN_ONLY
+@pytest.mark.parametrize("flag", ["uchg", "uappnd"])
+def test_on_real_macos_flags_on_files_and_directories_are_cleared(
+    tmp_path: Path, flag: str
+) -> None:
+    """The real `fchflags` through ctypes: a locked file in a locked directory goes."""
+    tree = _tree_with(tmp_path, "sub/f")
+    try:
+        subprocess.run(["/usr/bin/chflags", flag, str(tree / "sub" / "f")], check=True)
+        subprocess.run(["/usr/bin/chflags", flag, str(tree / "sub")], check=True)
+        assert remove_private_tree(tree) is True
+        assert not tree.exists()
+    finally:
+        _unlock_by_hand(tree)
+
+
+@_DARWIN_ONLY
+def test_on_real_macos_a_deny_delete_acl_is_stripped(tmp_path: Path) -> None:
+    """The real `acl_set_fd_np`: deny-delete on a file and deny-delete_child on its directory."""
+    tree = _tree_with(tmp_path, "sub/f")
+    try:
+        subprocess.run(
+            ["/bin/chmod", "+a", "everyone deny delete", str(tree / "sub" / "f")], check=True
+        )
+        subprocess.run(
+            ["/bin/chmod", "+a", "everyone deny delete_child", str(tree / "sub")], check=True
+        )
+        assert remove_private_tree(tree) is True
+        assert not tree.exists()
+    finally:
+        _unlock_by_hand(tree)
+
+
+@_DARWIN_ONLY
+def test_on_real_macos_a_locked_file_outside_stays_locked(tmp_path: Path) -> None:
+    """Neither a symlink nor a hard link in the tree unlocks the file outside it."""
+    outside = tmp_path / "outside"
+    outside.write_text("x")
+    tree = _tree_with(tmp_path)
+    (tree / "symlink").symlink_to(outside)
+    os.link(outside, tree / "hardlink")
+    try:
+        subprocess.run(["/usr/bin/chflags", "uchg", str(outside)], check=True)
+        assert remove_private_tree(tree) is False
+        assert outside.lstat().st_flags & stat.UF_IMMUTABLE  # ty: ignore[missing-attribute]
+        assert not (tree / "symlink").exists() and (tree / "hardlink").exists()
+    finally:
+        _unlock_by_hand(outside)
+        _unlock_by_hand(tree)

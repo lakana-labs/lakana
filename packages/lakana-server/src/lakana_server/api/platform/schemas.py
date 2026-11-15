@@ -2819,7 +2819,11 @@ class AuditEventOut(BaseModel):
         The principal attributed to this event, or `None` for a failed
         authentication.
     event_type
-        The kind of event.
+        The kind of event; `UNKNOWN` for a type this release does not know, which a newer
+        release wrote before a downgrade.
+    event_type_raw
+        The type as stored: the same as `event_type`, except for `UNKNOWN`, where it is the
+        text the newer release wrote.
     securable_kind
         Which tier of the securable hierarchy this event's target belongs
         to, if any.
@@ -2838,6 +2842,7 @@ class AuditEventOut(BaseModel):
     occurred_at: datetime
     principal_id: uuid.UUID | None
     event_type: AuditEventType
+    event_type_raw: str
     securable_kind: SecurableKind | None
     securable_environment: str | None
     securable_namespace: str | None

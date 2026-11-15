@@ -57,7 +57,7 @@ widen it or use `--output json`; where the output is not a terminal, it tells yo
 `--output json`, as in the output below, which was made in a window of 120 characters and written
 to a file:
 
-<!-- output -->
+<!-- output: train-and-predict#artifact-versions -->
 ```text
 ┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
 ┃ version ┃ created_at                  ┃ size  ┃ manifest_sha256 ┃ run_id                               ┃ deleted_at ┃

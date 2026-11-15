@@ -4,7 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from scripts.docs_blocks import MASKS, BlockError, check, find_blocks, fix, main, mask
+from scripts.docs_blocks import (
+    MASKS,
+    BlockError,
+    check,
+    find_blocks,
+    fix,
+    is_progress,
+    main,
+    mask,
+)
 
 RUN_SH = "#!/usr/bin/env bash\n# docs:start show\necho hi\n# docs:end show\n"
 BLOCK = "<!-- output: demo#show -->\n```text\n{}```\n"
@@ -37,6 +46,14 @@ BLOCK = "<!-- output: demo#show -->\n```text\n{}```\n"
         ("lakana_ci_Ab12Cd34_s3cr3t-value", "lakana_ci_<key id>_<secret>"),
         ("(snapshot 5033228317085625887, 05 Nov 00:33 UTC)", "(snapshot <snapshot>, <alert time>)"),
         ("│ 503322831708562588 │", "│ <snapshot> │"),
+        ("[master 9445d5e] Break the data", "[master <short hash>] Break the data"),
+        ("[main (root-commit) 1a2b3c4] First", "[main (root-commit) <short hash>] First"),
+        ("Run 941ef675 failed, token 634fb88f45cabc42", "Run <short id> failed, token <short id>"),
+        ("manifest 420bf73218ec", "manifest <short id>"),
+        ("Issued token 634fb88f45cabc42 (x)", "Issued token <short id> (x)"),
+        ("Revoked token 634fb88f45cabc42", "Revoked token <short id>"),
+        ("│ 941ef675 │ silver.x │", "│ <short id> │ silver.x │"),
+        ("│ 420bf73218ec    │", "│ <short id>    │"),
     ],
 )
 def test_each_mask_hides_the_part_that_differs_per_run(text: str, expected: str) -> None:
@@ -55,6 +72,16 @@ def test_each_mask_hides_the_part_that_differs_per_run(text: str, expected: str)
         "v1.2",
         "1234567 rows on 05 Nov",
         "44 packages",
+        "[master] no hash",
+        "rows 12345678 in 2 files",
+        "revision c9f3d6a8b2e5 applied",
+        "a 10-digit word 0123456789 and abcdef0123",
+        "a 14-hex word 0123456789abcd here",
+        "the file /opt/ab12cd34/x and ab12cd34/y",
+        "│ 1234567 │ 12345678901 │",
+        "Run id 941ef675abc",
+        "a 9-digit 123456789 and 1234567",
+        "silver.station_temperatures/no_missing_station",
     ],
 )
 def test_text_that_is_the_same_on_every_run_is_left_alone(text: str) -> None:
@@ -195,6 +222,112 @@ def test_fix_replaces_only_the_lines_that_changed(tmp_path: Path) -> None:
     assert "untouched" in text
     assert check(root, root / "docs/site", None, captures) == ([], 0)
     assert fix(root, root / "docs/site", None, captures) == []
+
+
+def test_fix_never_writes_the_secret_of_a_token(tmp_path: Path) -> None:
+    """A token in a run reaches the page as `<secret>`, whether or not the page had the line."""
+    secret = "x" * 24
+    printed = f"Token: lakana_pat_a445f5d891704fbb_{secret}\nlakana_ci_Ab12Cd34_{secret}\n"
+    root, captures = _tree(tmp_path, BLOCK, "old\nold2\n", printed)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert secret not in text
+    assert "lakana_pat_a445f5d891704fbb_<secret>" in text
+    assert "lakana_ci_Ab12Cd34_<secret>" in text
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+    assert fix(root, root / "docs/site", None, captures) == []
+
+
+RUN_PAGE = (
+    "a873a794-e7ea-4caa-9627-5b7ec1ec1715\n"
+    "bronze.readings  pending\n"
+    "silver.clean  pending\n"
+    "bronze.readings  succeeded  attempt 1/3  1.0s\n"
+    "silver.clean  succeeded  attempt 1/3  0.0s\n"
+    "Run a873a794-e7ea-4caa-9627-5b7ec1ec1715 succeeded\n"
+    "silver.clean   passed   2 of 2 checks passed\n"
+)
+
+
+def test_progress_lines_are_not_compared(tmp_path: Path) -> None:
+    """A run prints a line when a poll sees a change: which lines, and their order, vary."""
+    printed = (
+        "11111111-e7ea-4caa-9627-5b7ec1ec1715\n"
+        "silver.clean  pending\n"
+        "bronze.readings  pending\n"
+        "bronze.readings  running  attempt 1/3\n"
+        "bronze.readings  ready  Ready, and the only worker is busy.\n"
+        "silver.clean  succeeded  attempt 1/3  0.0s\n"
+        "bronze.readings  succeeded  attempt 1/3  1.0s\n"
+        "silver.clean  setting the table back  attempt 1/3\n"
+        "Run 11111111-e7ea-4caa-9627-5b7ec1ec1715 succeeded\n"
+        "silver.clean   passed   2 of 2 checks passed\n"
+    )
+    root, captures = _tree(tmp_path, BLOCK, RUN_PAGE, printed)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_a_difference_outside_the_progress_lines_is_still_found(tmp_path: Path) -> None:
+    """Only the progress lines are left out; the summary after them counts."""
+    printed = RUN_PAGE.replace("2 of 2", "1 of 2")
+    root, captures = _tree(tmp_path, BLOCK, RUN_PAGE, printed)
+    (problem,), _ = check(root, root / "docs/site", None, captures)
+    assert "1 of 2" in problem
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "silver.clean   passed   2 of 2 checks passed",
+        "silver.clean failed: check_blocked",
+        "silver.clean  warned note",
+        "│ silver.clean  │ succeeded │",
+        "Run 1 succeeded",
+    ],
+)
+def test_only_a_task_line_is_progress(line: str) -> None:
+    """The status must follow the asset after exactly two spaces."""
+    assert not is_progress(line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "silver.clean  pending",
+        "silver.clean  ready  Ready, and the only worker is busy.",
+        "silver.clean  running  attempt 1/3",
+        "silver.clean  succeeded  attempt 1/3  1.0s",
+        "silver.clean  failed  attempt 1/3  0.0s  failed: check_blocked. Next: x",
+        "silver.clean  upstream_failed",
+        "silver.clean  cancelled",
+        "silver.clean  setting the table back  attempt 1/3",
+    ],
+)
+def test_a_line_of_a_task_that_changed_state_is_progress(line: str) -> None:
+    """The lines `_Progress` of the CLI prints."""
+    assert is_progress(line)
+
+
+def test_fix_keeps_the_progress_lines_a_page_shows(tmp_path: Path) -> None:
+    """The page shows what a reader sees; fix changes the rest and leaves its progress lines."""
+    printed = "silver.clean  running  attempt 1/3\nRun 22222222 failed\n"
+    page = "silver.clean  pending\nRun 22222222 succeeded\n"
+    root, captures = _tree(tmp_path, BLOCK, page, printed)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "silver.clean  pending\nRun 22222222 failed\n" in text
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_fix_drops_the_lines_a_run_no_longer_prints_and_keeps_the_progress(tmp_path: Path) -> None:
+    """A page with more lines than the run: the extra ones go, the progress lines stay."""
+    page = "silver.clean  pending\nRun 22222222 failed\nold line\nanother old line\n"
+    printed = "Run 22222222 failed\n"
+    root, captures = _tree(tmp_path, BLOCK, page, printed)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "```text\nsilver.clean  pending\nRun 22222222 failed\n```" in text
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
 
 
 def test_fix_keeps_an_indented_block_indented(tmp_path: Path) -> None:

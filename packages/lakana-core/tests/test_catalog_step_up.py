@@ -1,9 +1,10 @@
 """A browser session needs a fresh passkey touch before it drops data; a token never does.
 
-Dropping a table, a namespace, an artifact or one artifact version, and rebuilding a table,
-cannot be undone from the browser the way an ordinary edit can, so each asks a browser session
-for a passkey touch no older than 15 minutes (`lakana_core.identity.sessions.require_step_up`),
-as an environment purge already does. A token caller (the CLI, an agent) has no session and is
+Dropping a table, a namespace, an artifact or one artifact version, rebuilding a table, and
+deleting an environment with `purge`, cannot be undone from the browser the way an ordinary edit
+can, so each asks a browser session for a passkey touch no older than 15 minutes
+(`lakana_core.identity.sessions.require_step_up`), as the purge of a deleted environment's rows
+already does. A token caller (the CLI, an agent) has no session and is
 never asked.
 """
 
@@ -31,7 +32,7 @@ from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SessionContext
 from lakana_core.catalog.rebuild import TableRebuild
 from lakana_core.errors import ConflictError, StepUpRequired
 from lakana_core.identifiers import NamespacePath, TableRef
-from lakana_core.models import ArtifactVersion, AuditEvent, Namespace, Table
+from lakana_core.models import ArtifactVersion, AuditEvent, Environment, Namespace, Table
 from lakana_core.runs.service import RunService
 
 _SILVER = NamespacePath.from_parts(["silver"])
@@ -215,12 +216,85 @@ def _table_rebuild(session: Session, tmp_path: Path, p: PrincipalRef) -> Drop:
     )
 
 
+def _environment_purge(session: Session, tmp_path: Path, p: PrincipalRef) -> Drop:
+    """Create the `dev` environment with a table and offer its delete with `purge`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        The environment's storage root.
+    p
+        The principal that creates the table.
+
+    Returns
+    -------
+    Drop
+        The purge, and a check that the environment is not deleted.
+    """
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    catalog.create_table(p, _CLEAN, schema=_minimal_schema())
+
+    def intact() -> bool:
+        """Tell whether `dev` is still live.
+
+        Returns
+        -------
+        bool
+            Whether its row exists and is not marked deleted.
+        """
+        session.expire_all()
+        row = session.execute(select(Environment).where(Environment.name == "dev")).scalar_one()
+        return row.deleted_at is None
+
+    return Drop(run=lambda who: catalog.delete_environment(who, "dev", purge=True), intact=intact)
+
+
+def _deleted_environment_purge(session: Session, tmp_path: Path, p: PrincipalRef) -> Drop:
+    """Delete the `dev` environment within its undo period and offer its purge.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        The environment's storage root.
+    p
+        The principal that deletes the environment (a token: no step-up).
+
+    Returns
+    -------
+    Drop
+        The purge, and a check that the environment can still be restored.
+    """
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    catalog.create_table(p, _CLEAN, schema=_minimal_schema())
+    due = catalog.delete_environment(p, "dev").purge_after
+
+    def intact() -> bool:
+        """Tell whether `dev` keeps its undo period.
+
+        Returns
+        -------
+        bool
+            Whether its `purge_after` is the one the deletion set.
+        """
+        session.expire_all()
+        row = session.execute(select(Environment).where(Environment.name == "dev")).scalar_one()
+        return row.purge_after == due
+
+    return Drop(run=lambda who: catalog.delete_environment(who, "dev", purge=True), intact=intact)
+
+
 DROPS: dict[str, Callable[[Session, Path, PrincipalRef], Drop]] = {
     "catalog.drop_table": _table_drop,
     "catalog.drop_namespace": _namespace_drop,
     "artifacts.drop_artifact": _artifact_drop,
     "artifacts.delete_version": _version_delete,
     "rebuild.rebuild": _table_rebuild,
+    "catalog.delete_environment(purge)": _environment_purge,
+    "catalog.delete_environment(purge, deleted)": _deleted_environment_purge,
 }
 """Every call that asks a browser session for a fresh touch, by name."""
 
@@ -327,3 +401,15 @@ def test_a_stale_session_learns_nothing_of_the_file_that_defines_a_table(
     with pytest.raises(ConflictError) as owned:
         catalog.drop_table(principal, _CLEAN)
     assert "analytics/assets/silver/clean.sql" in str(owned.value)
+
+
+def test_a_stale_session_deletes_an_environment_without_purge(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """Without `purge` a deletion is undone with restore, so it asks for no touch."""
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+
+    deleted = catalog.delete_environment(_with_touch(principal, minutes_ago=16), "dev")
+
+    assert deleted.deleted_at is not None
+    assert deleted.purge_after is not None

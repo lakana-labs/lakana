@@ -27,7 +27,7 @@ from lakana_core.models.incremental_file_read import IncrementalFileRead
 from lakana_core.models.artifact import ArtifactBlob, ArtifactUpload, ArtifactVersion
 from lakana_core.models.row_filter import RowFilter
 from lakana_core.models.secret import Secret, SecretUseKind
-from lakana_core.models.audit_event import AuditEvent, AuditEventType
+from lakana_core.models.audit_event import AuditEvent, AuditEventFilter, AuditEventType
 from lakana_core.models.lineage_edge import LineageEdge
 from lakana_core.models.repository import Repository, RepositoryKind
 from lakana_core.models.glossary_term import (
@@ -96,6 +96,7 @@ __all__ = [
     "ArtifactVersion",
     "AttemptOutcome",
     "AuditEvent",
+    "AuditEventFilter",
     "AuditEventType",
     "Base",
     "BrowserSession",

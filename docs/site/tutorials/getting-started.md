@@ -192,7 +192,7 @@ cd analytics
 `lakana init` writes a small sample, and lists what to do next. Yours shows your own folder, and
 a note about the development build if you installed from a checkout:
 
-<!-- output -->
+<!-- output: getting-started#init -->
 ```text
 Created a Lakana project in /home/you/analytics, with a small sample: generated readings from three weather stations, three SQL assets built from them, and one check.
 Next:
@@ -205,8 +205,9 @@ Then the two commands that build the sample:
 Then look at the result:
   lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 Local repositories must lie under LAKANA_REPO_ROOTS (local mode allows your home directory).
+The CI files deploy without a stored Lakana token: the comment at the top of each says what to set up once (--ci-auth pat writes files that use a stored token).
 If 'git commit' says it does not know who you are, set a name and email first: git config --global user.name 'Your Name' && git config --global user.email you@example.com
-Note: lakana 0.8.1.dev6+g6af3c5d2a is a development build, so the CI install `lakana==0.8.1.dev6+g6af3c5d2a` can't be installed from the index. Ignore this until you use CI; then edit the pinned version in .github/workflows/lakana-deploy.yml and .gitlab-ci.yml.
+Note: lakana 0.22.1.dev70+ga2057228a is a development build, so the CI install `lakana==0.22.1.dev70+ga2057228a` can't be installed from PyPI. Ignore this until you use CI; then edit the pinned version in .github/workflows/lakana-deploy.yml and .gitlab-ci.yml, or set LAKANA_INDEX_URL to an index that has it.
 ```
 
 You now have a folder `analytics` with a `lakana.yaml` file, which holds the project's settings.
@@ -359,8 +360,9 @@ You will see `Registered repository analytics`, then the deploy: its identifier,
 deployed, a table of what changed and, last, a hint that names the next step. Yours looks like
 this, with a different identifier and commit:
 
-<!-- output -->
+<!-- output: getting-started#deploy -->
 ```text
+Registered repository analytics
 Queued deploy 71ddefdc-6a57-4c5b-bac3-cbacc2fb4759
 Deployed analytics in dev at ca36c93fe2337b324df3ab8d03cac9b9d1ed1420
 ┏━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -392,8 +394,17 @@ The command prints one line each time an asset changes state and waits until the
 It ends with a summary like this one. The run identifier above it differs on your machine, and
 so may the durations:
 
-<!-- output -->
+<!-- output: getting-started#run -->
 ```text
+d82c4b7c-eb81-4580-8d3a-3270e2aae8b3
+bronze.readings  pending
+gold.station_ranking  pending
+silver.station_temperatures  pending
+bronze.readings  ready
+bronze.readings  succeeded  attempt 1/3  1.0s
+silver.station_temperatures  running  attempt 1/3
+gold.station_ranking  succeeded  attempt 1/3  0.0s
+silver.station_temperatures  succeeded  attempt 1/3  0.0s
 Run e6c654de-926d-4941-896d-909ead7cd45d succeeded
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━┓
 ┃ asset                       ┃ status    ┃ attempt ┃ duration ┃ rows ┃ error ┃

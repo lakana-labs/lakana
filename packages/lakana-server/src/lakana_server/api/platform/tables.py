@@ -1249,7 +1249,7 @@ def list_tables(
     -------
     list of TableOut
         Every table, external table, view and artifact in the namespace that
-        the caller may read, each described individually. One the
+        the caller may read, described in one batch. One the
         caller may not read is left out, as if it did not exist, so a token
         that declares one asset gets a listing of that one instead of a
         refusal that names another.
@@ -1259,21 +1259,13 @@ def list_tables(
     languages = reader_languages(request, lang, principal, main_language)
     ns = NamespacePath.from_parts(path.split("."))
     refs = catalog.list_tables(principal, env, ns)
-    # Every row is described without its actions, then all are filled at once: one read of
-    # the deployed definitions and one rights batch per request, not per row.
-    described = catalog.with_row_actions(
+    # One batch for every row: the rights, the deployed manifests and definitions, the texts
+    # and the facts are read once per request, not per row (#622).
+    described = catalog.describe_tables(
         principal,
-        [
-            catalog.describe_table(
-                principal,
-                ref,
-                languages=languages,
-                view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
-                with_actions=False,
-            )
-            for ref in refs
-            if catalog.can_read_table(principal, ref)
-        ],
+        refs,
+        languages=languages,
+        view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
     )
     return [
         _describe_out(path, d)

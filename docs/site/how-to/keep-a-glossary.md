@@ -138,7 +138,7 @@ lakana table get gold.fact_sales --env dev
 │ kind              │ TABLE                                                                        │
 │ state             │ published                                                                    │
 │ uuid              │ bfd137b2-fee3-4c93-9464-859dbaa74390                                         │
-│ metadata_location │ file:///tmp/tmp.4HnnoT34zt/home/data/lakana/local/lake/dev/managed/gold/fac… │
+│ metadata_location │ file:///home/you/.local/share/lakana/local/lake/dev/managed/gold/fact_sales… │
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────┘
 Defined in: shop/assets/gold/fact_sales.sql
 Description (from the project): Sales per store and day.

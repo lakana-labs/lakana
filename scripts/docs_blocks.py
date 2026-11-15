@@ -600,6 +600,8 @@ def _region(name: str, region: str, lines: list[str]) -> str:
 
 
 _HEX = r"[0-9a-f]"
+_SECRET = r"(?:[A-Za-z0-9_-]{8,}|<secret>)"
+_TOKEN_SECRET = re.compile(rf"(\blakana_(?:pat|ci|task)_[A-Za-z0-9]{{6,}}_){_SECRET}")
 MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
     (name, re.compile(pattern), replacement)
     for name, pattern, replacement in (
@@ -619,10 +621,15 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
             r"\b\d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2}:\d{2} UTC\b",
             "<alert time>",
         ),
+        (
+            "short hash",
+            rf"(?<=\[)([\w./-]+(?: \([\w -]+\))? ){_HEX}{{7,12}}(?=\])",
+            r"\1<short hash>",
+        ),
         ("snapshot", r"(?<![\w.])\d{16,19}(?![\w.])", "<snapshot>"),
         (
             "token",
-            r"\b(lakana_(?:pat|ci|task)_)[A-Za-z0-9]{6,}_[A-Za-z0-9_-]{8,}",
+            rf"\b(lakana_(?:pat|ci|task)_)(?:[A-Za-z0-9]{{6,}}|<key id>)_{_SECRET}",
             r"\1<key id>_<secret>",
         ),
         ("port", r"\b(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{2,5}\b", r"\1:<port>"),
@@ -644,6 +651,12 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
             "<duration>",
         ),
         ("size", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:KiB|MiB|GiB|KB|MB|GB)\b", "<size>"),
+        (
+            "short id",
+            r"(?:(?<=│ )|(?<=\b[Rr]un )|(?<=\btoken )|(?<=\bmanifest ))"
+            rf"(?:{_HEX}{{16}}|{_HEX}{{12}}|{_HEX}{{8}})(?=\s|$)",
+            "<short id>",
+        ),
         ("package count", r"(?<=\bResolved )\d+(?= packages?\b)", "<count>"),
     )
 )
@@ -671,6 +684,53 @@ def mask(text: str) -> str:
     for _, pattern, replacement in MASKS:
         text = pattern.sub(replacement, text)
     return text
+
+
+def redact(text: str) -> str:
+    """Replace the secret part of every token in `text` with ``<secret>``.
+
+    A page never holds a real secret, so `fix` passes everything it copies from a run through
+    this.
+
+    Parameters
+    ----------
+    text
+        Output as an example printed it.
+
+    Returns
+    -------
+    str
+        `text` with each ``lakana_pat_<key id>_<secret>`` token's secret replaced.
+    """
+    return _TOKEN_SECRET.sub(r"\1<secret>", text)
+
+
+_PROGRESS = re.compile(
+    r"^[A-Za-z_]\w*\.[\w.]+  "
+    r"(?:pending|ready|running|succeeded|failed|cancelled|upstream_failed|setting the table back)"
+    r"(?:  |$)"
+)
+
+
+def is_progress(line: str) -> bool:
+    """Say whether a line is one `lakana run` printed when a task changed state.
+
+    The CLI prints ``ASSET  STATUS`` (two spaces), then the attempt, the duration or the reason
+    the task waits, when a poll sees a task in another status. Whether a poll sees ``running``
+    or ``ready`` and in which order the tasks finish depends on timing, so these lines are not
+    compared with a run. The summary after them uses three spaces or a table.
+
+    Parameters
+    ----------
+    line
+        One line of an output.
+
+    Returns
+    -------
+    bool
+        ``True`` for a progress line.
+    """
+    return _PROGRESS.match(line) is not None
 
 
 def _lines(text: str) -> list[str]:
@@ -734,12 +794,27 @@ def _merge(shown: str, printed: str) -> str:
     str
         The new body, each line ending in a newline.
     """
-    page, run = _lines(shown), _lines(printed)
-    matcher = difflib.SequenceMatcher(None, [mask(x) for x in page], [mask(x) for x in run])
+    page, run = _lines(shown), _lines(redact(printed))
+    page_rest = [x for x in page if not is_progress(x)]
+    run_rest = [x for x in run if not is_progress(x)]
+    matcher = difflib.SequenceMatcher(
+        None, [mask(x) for x in page_rest], [mask(x) for x in run_rest]
+    )
     out: list[str] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        out += page[i1:i2] if tag == "equal" else run[j1:j2]
-    return "".join(line + "\n" for line in out)
+        out += page_rest[i1:i2] if tag == "equal" else run_rest[j1:j2]
+    source = page if any(is_progress(x) for x in page) else run
+    merged: list[str] = []
+    taken = 0
+    for line in source:
+        if is_progress(line):
+            merged.append(line)
+        else:
+            if taken < len(out):
+                merged.append(out[taken])
+            taken += 1
+    merged += out[taken:]
+    return "".join(line + "\n" for line in merged)
 
 
 def _output_problem(
@@ -765,8 +840,8 @@ def _output_problem(
     str or None
         The problem with a diff of the masked texts, or ``None`` if they are equal.
     """
-    page = [mask(x) for x in _lines(block.body)]
-    run = [mask(x) for x in _lines(printed)]
+    page = [mask(x) for x in _lines(block.body) if not is_progress(x)]
+    run = [mask(x) for x in _lines(printed) if not is_progress(x)]
     if page == run:
         return None
     diff = "\n".join(
@@ -774,7 +849,8 @@ def _output_problem(
     )
     return (
         f"{where}: this output block differs from what {value} printed "
-        f"(parts that differ per run are masked):\n{diff}\nRun the examples with "
+        f"(parts that differ per run are masked, progress lines left out):\n{diff}\n"
+        "Run the examples with "
         f"LAKANA_DOCS_CAPTURE={captured} and `uv run python scripts/docs_blocks.py --fix "
         f"--captured {captured}` to copy the run into the page, or change the CLI back."
     )

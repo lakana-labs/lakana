@@ -501,6 +501,7 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
   `DIR/EXAMPLE/NAME.txt` for each region it runs (a region that runs twice keeps its last run) and
   still shows the output in the log. Unset, nothing is captured; there is no default directory.
   The example's own `capture_start`/`capture_end` redirects nest inside and are unaffected.
+- **Progress lines are not compared.** `lakana run` prints `ASSET  STATUS ...` (two spaces; the status one of `pending`, `ready`, `running`, `succeeded`, `failed`, `cancelled`, `upstream_failed`, `setting the table back`) whenever a poll sees a task change, so which lines appear and in what order depends on timing. `is_progress` in `scripts/docs_blocks.py` drops them from both sides; a page still shows the ones a reader sees, and `--fix` keeps the page's. The summary after them (three spaces, or a table) is compared.
 - **The checker compares.** `scripts/docs_blocks.py --captured DIR` (or the same variable)
   compares each tied block with its file after both are masked (below); a mismatch names the
   page and line and prints a diff of the masked texts. Without a capture it checks only that the
@@ -524,13 +525,15 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 | `timestamp` | ISO 8601 date and time, with or without seconds and zone | `<timestamp>` |
 | `hash` | 40 to 64 hexadecimal digits: commits, SHA-256 digests | `<hash>` |
 | `alert time` | the time of a health alert, `05 Nov 00:33 UTC` | `<alert time>` |
+| `short hash` | the abbreviated commit id in `git commit`'s `[master 9445d5e]` | `[master <short hash>]` |
 | `snapshot` | an Iceberg snapshot id, 16 to 19 digits | `<snapshot>` |
-| `token` | `lakana_pat_`, `lakana_ci_` and `lakana_task_` tokens | `lakana_pat_<key id>_<secret>` |
+| `token` | `lakana_pat_`, `lakana_ci_` and `lakana_task_` tokens; a page shows `<secret>` for the secret part, and `--fix` writes it that way, never the real value | `lakana_pat_<key id>_<secret>` |
 | `port` | the port after `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]` | `host:<port>` |
 | `path` | absolute paths under `/tmp`, `/var/tmp`, `/var/folders`, `/home`, `/Users`, `/root`, `/run/user`, also after `file://` | `<path>` |
 | `version` | `1.2.3`, with `.dev4`, `rc1`, `+g1a2b3c` | `<version>` |
 | `duration` | a number with `ms`, `s`, `sec`, `seconds`, `min`, `minutes` | `<duration>` |
 | `size` | a number with `KiB`, `MiB`, `GiB`, `KB`, `MB`, `GB` | `<size>` |
+| `short id` | 8, 12 or 16 hex digits in a table cell (`│ `) or after the words `run`, `token` or `manifest`: a run's first eight characters, a token's key id, a manifest digest | `<short id>` |
 | `package count` | the number in uv's `Resolved 44 packages`, which follows the public index | `<count>` |
 
 A mask hides a change too, so add one only for a value that really differs per run, and

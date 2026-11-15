@@ -544,6 +544,8 @@ def test_secret_values_are_never_echoed_or_logged(
     assert all(
         _VALUE not in json.dumps(detail) and rotated not in json.dumps(detail)
         for event_type in AuditEventType
+        # UNKNOWN stands for a type a newer release wrote and is no filter (#613).
+        if event_type is not AuditEventType.UNKNOWN
         for detail in _details(client, event_type)
     )
 

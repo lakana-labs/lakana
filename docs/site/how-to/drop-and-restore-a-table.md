@@ -64,10 +64,20 @@ clients refuse alike. To build it again from git instead, see
 2. Find it among the orphans and drop it. In the web interface, open **Catalog**, choose **Orphans**
    and the environment, and press **Drop** beside it. On the command line:
 
-<!-- not tested: needs a deployed project whose asset was removed; the drop itself is tested in the "drop" example above -->
+<!-- source: docs/examples/drop-and-restore-a-table/run.sh#drop-orphan -->
 ```bash
 lakana orphans --env dev
 lakana table delete silver.clean --env dev --yes
+```
+
+<!-- output: drop-and-restore-a-table#drop-orphan -->
+```text
+┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┓
+┃ repository ┃ table        ┃ kind  ┃ state  ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━┩
+│ analytics  │ silver.clean │ TABLE │ exists │
+└────────────┴──────────────┴───────┴────────┘
+Deleted table dev/silver.clean. Restore it during the undo period with `lakana table undrop silver.clean --env dev`; `lakana table list silver --env dev --dropped` shows until when.
 ```
 
 Only the project's own runs create what it declares. These refuse a declared name with a 409,
@@ -102,9 +112,9 @@ definition: its history columns were lost in a manual replace, a source was corr
 `replace` asset needs a clean start. Drop is for a table nobody builds; `lakana table rebuild` is
 for one a deployed project does.
 
-<!-- not tested: needs a deployed project and a running worker; the command's output line is asserted in packages/lakana/tests/cli/test_tables_cmd.py -->
+<!-- source: docs/examples/drop-and-restore-a-table/run.sh#rebuild -->
 ```bash
-lakana table rebuild silver.clean --env dev --reason "history columns lost after a manual replace"
+lakana table rebuild silver.clean --env dev --reason "history columns lost after a manual replace" --yes
 ```
 
 It does two things in one step:
@@ -118,10 +128,10 @@ After a deploy that switches an existing table to `write: history`, its run refu
 which lacks the history columns. Run `lakana table rebuild NAME --reason "…"` then: the deploy has
 already made the new version current, so the rebuild builds the table as a history table.
 
-The command asks first; `--yes` skips the question. It then names the run and the file that builds
+The command asks first; `--yes` (used above) skips the question. It then names the run and the file that builds
 the table:
 
-<!-- output -->
+<!-- output: drop-and-restore-a-table#rebuild -->
 ```text
 Dropped dev/silver.clean and queued run 9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10 of analytics, which builds it again from assets/silver/clean.sql. Follow it with `lakana runs show 9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10 --env dev`.
 ```
@@ -360,7 +370,9 @@ reached: the clean-up deletes that one's files and then the environment, and
   `POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop` restores, with an optional
   body `{"new_name": "..."}`, and answers with the table.
   For an environment: `DELETE /api/v1/environments/{name}` (with `?purge=true`) answers with the
-  environment and its `deleted_at` and `purge_after`; `GET /api/v1/environments?deleted=true` lists
+  environment and its `deleted_at` and `purge_after`; with `?purge=true`, from the web interface it
+  asks for a passkey touch within the last 15 minutes (403 `StepUpRequired`, nothing deleted), a
+  token never does; `GET /api/v1/environments?deleted=true` lists
   the deleted ones; `POST /api/v1/environments/{name}/restore` restores one;
   `POST /api/v1/environments/{name}/purge-rows` removes a deleted environment whose storage cannot
   be reached from the catalog (204, no body); from the web interface it asks for a passkey touch

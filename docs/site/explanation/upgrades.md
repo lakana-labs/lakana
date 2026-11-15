@@ -105,6 +105,10 @@ loses everything changed since. For the release with artifacts, a manual downgra
 migration also exists, and its page says what it loses: see
 [Going back](../how-to/upgrade-to-artifacts.md#going-back).
 
+After going back to an older release, the audit log can hold events of a type that only the newer
+release knows. The older release still lists them: `event_type` is `UNKNOWN` and `event_type_raw`
+holds the newer release's name for the type (from the release that added `event_type_raw` on).
+
 ## What v1.0.0 changes
 
 v1.0.0 is the API freeze, planned for the hardening milestone of the
@@ -187,8 +191,9 @@ restore a table](../how-to/drop-and-restore-a-table.md).
 ### A browser asks for a passkey touch before a drop
 
 A signed-in browser now asks for a passkey touch before it drops a table, drops an artifact, deletes
-an artifact version, deletes a namespace, or rebuilds a table. A token, the CLI and the SDK are not
-asked, so no script changes.
+an artifact version, deletes a namespace, rebuilds a table, or deletes an environment with purge
+(`DELETE /api/v1/environments/{name}?purge=true`). Deleting an environment without purge still asks
+for no touch: restore undoes it. A token, the CLI and the SDK are not asked, so no script changes.
 
 ### Expiring tables, namespaces, artifacts and orphans come in pages (breaking)
 
@@ -209,6 +214,15 @@ your rights allow; the server still decides each request).
 
 The orphans list now includes dropped tables that can still be restored, with `exists: false`. Its
 hidden count includes dropped tables you may not read.
+
+### An audit event shows its stored type
+
+Each audit event has a new field, `event_type_raw`: the type as stored, the same as `event_type`.
+An event whose type the running release does not know, which a newer release wrote before you
+went back, is listed with `event_type` `UNKNOWN` and that release's name in `event_type_raw`,
+where older releases failed the whole list with a 500 ([Going back](#going-back)). The
+`event_type` filter refuses `UNKNOWN` with a 422. A consumer that handles every event type must
+accept `UNKNOWN`.
 
 ### New audit events
 
@@ -543,6 +557,16 @@ destination, and a webhook or a connection that names one is refused the way one
 - Runs from before the upgrade show masks as "not recorded" (`masked_columns` is `null` in the
   result page), which is different from "no column was masked" (an empty list). Only runs after
   the upgrade record the masks ([Preview a table](../how-to/preview-a-table.md)).
+
+### Task images ship no pip, setuptools or wheel
+
+The task images (`lakana-task:<version>-py3.11` to `-py3.14`) no longer contain the base image's
+`pip`, nor `setuptools` and `wheel` (only the Python 3.11 image had those two). Their bundled copies
+lagged security fixes, and nothing in the image uses them: the environment of a Python asset is
+built by uv from the project's lock. A task that calls the system `pip` (for example `pip install`
+at run time) now fails. Declare every package the task needs in `[project] dependencies`, run
+`uv lock` and deploy ([Dependencies](../reference/python-assets.md#dependencies)). Pull the task
+images of the new version together with the others.
 
 ## Notes for 0.22.0
 
