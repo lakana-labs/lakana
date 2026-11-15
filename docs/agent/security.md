@@ -5556,7 +5556,9 @@ already allows.
   `lakana_core.models.audit_event.StoredEventType`, which maps an unknown text to `UNKNOWN` instead
   of failing the page with a `LookupError`; `AuditService.query` reads the stored text alongside
   (`event_type_raw` in the answer), so a downgrade hides no row and no type. `UNKNOWN` is never
-  written (`AuditService.record` and the column type refuse it) and never a filter (422). It has no
+  written (`AuditService.record` and the column type refuse it) and never a filter: the route's parameter is
+  `AuditEventFilter` (every type but `UNKNOWN`, so OpenAPI never offers it; 422), and
+  `AuditService.query` refuses it too. It has no
   `CONTENT_FIELDS` entry, so of another principal's unknown event a reader without
   `READ_QUERY_TEXT` sees only the fields in `SHOWN_FIELDS` (a field name means the same in every
   event) and every other field withheld. Pins: `test_an_event_type_this_release_does_not_know_*`

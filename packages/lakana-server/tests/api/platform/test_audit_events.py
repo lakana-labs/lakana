@@ -493,3 +493,17 @@ def test_the_type_filter_accepts_only_the_known_types(client: TestClient, value:
     response = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params={"event_type": value})
 
     assert response.status_code == 422, response.text
+
+
+def test_the_type_filter_offers_every_known_type_and_never_unknown(client: TestClient) -> None:
+    """OpenAPI lists the filter's values: every type this release writes, not UNKNOWN (#613)."""
+    schema = client.app.openapi()
+    [parameter] = [
+        p
+        for p in schema["paths"]["/api/v1/audit-events"]["get"]["parameters"]
+        if p["name"] == "event_type"
+    ]
+    [choice] = [s for s in parameter["schema"]["anyOf"] if "$ref" in s]
+    offered = schema["components"]["schemas"][choice["$ref"].rpartition("/")[2]]["enum"]
+
+    assert set(offered) == {t.value for t in AuditEventType} - {"UNKNOWN"}

@@ -24,7 +24,7 @@ from lakana_core.audit.service import AuditCursor, AuditService, ShownAuditEvent
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import NamespacePath
-from lakana_core.models import AuditEventType
+from lakana_core.models import AuditEventFilter, AuditEventType
 from lakana_server.api.platform.schemas import AuditEventOut, AuditEventPage
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -153,7 +153,7 @@ def _to_out(event: ShownAuditEvent) -> AuditEventOut:
 
 @router.get("", response_model=AuditEventPage, responses=errors(403, 503))
 def list_audit_events(
-    event_type: AuditEventType | None = None,
+    event_type: AuditEventFilter | None = None,
     kind: str | None = Query(
         default=None,
         max_length=64,
@@ -174,7 +174,7 @@ def list_audit_events(
     next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the
     instance. Another principal's query text and column values are hidden unless the caller
     also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than
-    `connection`, an `event_type` that is not of `kind`, or `event_type=UNKNOWN`, and 503 when
+    `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when
     the read had to be recorded in the audit log and could not be; no events are returned then.
     An event whose type this release does not know (written by a newer release before a
     downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.
@@ -182,7 +182,7 @@ def list_audit_events(
     Parameters
     ----------
     event_type
-        Only return events of this type, if given; `UNKNOWN` is refused.
+        Only return events of this type, if given: any known type, never `UNKNOWN`.
     kind
         Only return events of this kind, if given: ``connection`` is every ``CONNECTION_*``
         type. Combines with the other filters; with `event_type`, the type must be of the kind.
@@ -215,8 +215,9 @@ def list_audit_events(
     PermissionDenied
         If `p` may not read the audit log.
     ValidationError
-        If `cursor` is malformed, `kind` is not a kind, `event_type` is not of `kind`, or
-        `event_type` is `UNKNOWN`; mapped to 422.
+        If `cursor` is malformed, `kind` is not a kind, or `event_type` is not of `kind`;
+        mapped to 422. An `event_type` that is no `AuditEventFilter` value (`UNKNOWN` among
+        them) is refused with 422 before this function runs.
     lakana_core.errors.AuditUnavailableError
         If the read had to be recorded in the audit log and could not be; mapped to 503 with
         `Retry-After`, and no event is returned.
@@ -232,7 +233,7 @@ def list_audit_events(
     position = None if cursor is None else _decode_cursor(cursor)
     page = audit.query(
         p,
-        event_type=event_type,
+        event_type=None if event_type is None else AuditEventType(event_type.value),
         kind=kind,
         environment=environment,
         principal_id=principal_id,

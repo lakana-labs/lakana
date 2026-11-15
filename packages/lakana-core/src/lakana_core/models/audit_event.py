@@ -137,6 +137,15 @@ class AuditEventType(enum.StrEnum):
     alongside (`AuditService.query`, `event_type_raw`)."""
 
 
+AuditEventFilter = enum.StrEnum(
+    "AuditEventFilter",
+    {t.name: t.value for t in AuditEventType if t is not AuditEventType.UNKNOWN},
+)
+"""The values the `event_type` filter of the audit log accepts: every `AuditEventType` but
+`UNKNOWN`, which stands for a stored type this release does not know and is never a filter
+(#613). Its own enum, so the API's schema never offers `UNKNOWN`."""
+
+
 class StoredEventType(TypeDecorator[AuditEventType]):
     """`audit_events.event_type`: an `AuditEventType` stored as its text in a VARCHAR(64).
 
