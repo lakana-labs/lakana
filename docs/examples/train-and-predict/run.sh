@@ -129,6 +129,7 @@ capture_end
 out=$(lakana --output json sql "SELECT customer_id, predicted_spend FROM gold.spend_predictions ORDER BY customer_id")
 python3 -c 'import json,sys; rows=json.loads(sys.argv[1]); assert [(r["customer_id"], round(r["predicted_spend"], 6)) for r in rows] == [(1, 12.0), (2, 22.0), (3, 32.0), (4, 42.0)], rows' "$out"
 
+export COLUMNS=120
 capture_start
 # docs:start artifact-list
 lakana artifact list --env dev
@@ -154,7 +155,6 @@ lakana run --env dev
 capture_end
 grep -Eq '^Run [0-9a-f-]{36} succeeded$' "$captured"
 
-export COLUMNS=120
 capture_start
 # docs:start artifact-versions
 lakana artifact versions list models.spend_model --env dev

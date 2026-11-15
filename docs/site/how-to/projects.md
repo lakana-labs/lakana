@@ -393,7 +393,8 @@ repository's current deployment there produces. A table moved from one repositor
 therefore not an orphan once the new owner has deployed it. `lakana orphans` shows each orphan's
 repository, name, `kind` and `state`: `exists`, or `dropped, restorable` for an orphan that was
 dropped and can still be restored within its undo period (see
-[Drop and restore a table](drop-and-restore-a-table.md)). Once the period ends, it leaves the list.
+[Drop and restore a table](drop-and-restore-a-table.md)). Once the period ends, it leaves the list. The count of hidden orphans includes dropped
+tables you may not read.
 The list shows 100 orphans at most; a last line `More results: ...` names the command for the next
 page.
 

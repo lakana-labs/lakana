@@ -47,7 +47,7 @@ from lakana_core.catalog.graph_model import NodeKind, parse_node
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.identity import live_table, resolve_table_id
 from lakana_core.catalog.model_metadata import clear_health_effects, clear_removed_models
-from lakana_core.catalog.tombstones import list_environment_tombstones
+from lakana_core.catalog.tombstones import DroppedTable, list_environment_tombstones
 from lakana_core.catalog.warning_text import named as _named
 from lakana_core.catalog.warning_text import typed as _typed
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
@@ -2895,12 +2895,7 @@ class DeployService:
             If `limit` is out of range, or `cursor` is not one this list issued.
         """
         env = self._authorize_read(p, environment)
-        restorable = {
-            (d.namespace.parts, d.name): d
-            for d in reversed(
-                list_environment_tombstones(self._session, env.id, now=db_now(self._session))
-            )
-        }
+        restorable: dict[tuple[tuple[str, ...], str], DroppedTable] | None = None
         orphans: list[OrphanView] = []
         hidden = 0
         current = {
@@ -2949,6 +2944,11 @@ class DeployService:
                 if live_type is not None:
                     kind, exists = table_kind(live_type), True
                 else:
+                    if restorable is None:
+                        tombstones = list_environment_tombstones(
+                            self._session, env.id, now=db_now(self._session)
+                        )
+                        restorable = {(d.namespace.parts, d.name): d for d in reversed(tombstones)}
                     dropped = restorable.get((ref.namespace.parts, ref.name))
                     if dropped is None or not dropped.restorable:
                         continue

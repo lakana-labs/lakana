@@ -203,12 +203,11 @@ def test_artifacts_carry_their_producer_and_keep_versions(
     other = TableRef("dev", NamespacePath.from_parts(["models"]), "uploaded")
     store_version(service, principal, ARTIFACT_REF, _FILES)
     store_version(service, principal, other, _FILES)
+    zeta = TableRef("dev", NamespacePath.from_parts(["models"]), "zeta")
+    store_version(service, principal, zeta, _FILES)
     assert [
         (a.defined_by, a.keep_versions) for a in service.list_artifacts(principal, "dev").items
-    ] == [
-        (None, None),
-        (None, None),
-    ]
+    ] == [(None, None)] * 3
     deploy_assets(
         session,
         "dev",
@@ -219,7 +218,13 @@ def test_artifacts_carry_their_producer_and_keep_versions(
                 "output": "artifact",
                 "keep_versions": 3,
                 "path": "assets/models/m.py",
-            }
+            },
+            "models.zeta": {
+                "kind": "python",
+                "output": "artifact",
+                "keep_versions": 5,
+                "path": "assets/models/z.py",
+            },
         },
     )
     by_name = {a.ref.name: a for a in service.list_artifacts(principal, "dev").items}
@@ -227,6 +232,8 @@ def test_artifacts_carry_their_producer_and_keep_versions(
         "analytics", "assets/models/m.py", "artifact"
     )
     assert by_name["churn"].keep_versions == 3
+    assert by_name["zeta"].defined_by == DefiningFile("analytics", "assets/models/z.py", "artifact")
+    assert by_name["zeta"].keep_versions == 5
     assert (by_name["uploaded"].defined_by, by_name["uploaded"].keep_versions) == (None, None)
 
 
@@ -271,6 +278,25 @@ def test_a_forged_artifact_cursor_reveals_nothing(
     forged = encode_key_cursor("artifacts", json.dumps(['["a"]', "a"]))
     page = blind.list_artifacts(principal, "dev", limit=1, cursor=forged)
     assert page.items == [] and page.next_cursor is None
+
+
+def test_an_unreadable_artifact_sorting_first_does_not_cost_the_reader_a_page(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """The read filter runs before paging: page 1 at limit=1 holds the first readable one."""
+    service = artifact_service(session, tmp_path)
+    other = TableRef("dev", ARTIFACT_REF.namespace, "other")
+    store_version(service, principal, ARTIFACT_REF, _FILES)
+    store_version(service, principal, other, {"w": b"w"}, is_directory=False)
+
+    class OnlyOther(ActionAllowList):
+        def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+            return securable.table == "other" or action is Action.READ_ENVIRONMENT
+
+    narrow = ArtifactService(session, StorageResolver(session), OnlyOther(Action.READ_ENVIRONMENT))
+    page = narrow.list_artifacts(principal, "dev", limit=1)
+    assert [a.ref.name for a in page.items] == ["other"]
+    assert page.next_cursor is None
 
 
 def test_a_second_version_uploads_only_what_the_store_lacks(
