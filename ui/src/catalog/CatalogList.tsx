@@ -27,6 +27,7 @@ import { PendingButton } from "../shell/PendingButton";
 import { useResource } from "../shell/useResource";
 import { CatalogSearch } from "./CatalogSearch";
 import { CatalogTree } from "./CatalogTree";
+import { ListSkeleton } from "./ListSkeleton";
 import { catalogPath } from "./paths";
 import { readChoice, writeChoice } from "./remember";
 import { SortControl } from "./SortControl";
@@ -43,22 +44,6 @@ const ViewBody = lazy(() => import("./views/ViewBody"));
 const SAY_LOADING_AFTER_MS = 1000;
 // How many tables the server looks at in a search before it stops.
 const SEARCH_CAP = 5000;
-const SKELETON_ROWS = 5;
-
-/**
- * The skeleton rows shown while a list is read.
- *
- * @returns The rows, hidden from assistive technology.
- */
-function ListSkeleton(): JSX.Element {
-  return (
-    <div className="skeleton" aria-hidden="true">
-      {Array.from({ length: SKELETON_ROWS }, (_row, index) => (
-        <div className="skeleton-row" key={index} />
-      ))}
-    </div>
-  );
-}
 
 /**
  * Whether something has lasted longer than a delay.

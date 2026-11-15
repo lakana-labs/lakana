@@ -2,6 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { dropped, manageRoutes } from "../../test/manage";
+import { held } from "../../test/pending";
 import { renderShell } from "../../test/render";
 import { table } from "../../test/table";
 
@@ -72,8 +73,74 @@ describe("DroppedView", () => {
       expect(rows()).toHaveLength(2);
     });
     expect(server.sent.at(-1)?.path).toContain("cursor=c1");
-    expect(document.activeElement).toHaveTextContent("second");
+    expect(screen.getByText("second")).toHaveFocus();
     expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+  });
+
+  it("moves the focus to the result line when Show more brings an empty last page", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [ENVIRONMENT_LIST]: (request) =>
+          request.path.includes("cursor=c1")
+            ? { status: 200, body: { items: [], next_cursor: null } }
+            : {
+                status: 200,
+                body: { items: [dropped({ name: "first", uuid: "u1" })], next_cursor: "c1" },
+              },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.querySelector(".dropped-view .catalog-result")).toHaveFocus();
+    });
+  });
+
+  it("does not say nothing is left while more pages exist after the last row is undropped", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [ENVIRONMENT_LIST]: {
+          status: 200,
+          body: { items: [dropped({ name: "first", uuid: "u1" })], next_cursor: "c1" },
+        },
+        [`POST ${UNDROP}/first/undrop`]: { status: 200, body: table({ name: "first" }) },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Undrop gold.sales.first" }));
+
+    await screen.findByText(/Restored gold.sales.first/);
+    expect(screen.getByRole("button", { name: "Show more" })).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing was dropped/)).not.toBeInTheDocument();
+  });
+
+  it("keeps Undrop waiting while the environment's protection is read", async () => {
+    const protection = held();
+    const { server, user } = renderShell(ADDRESS, {
+      routes: { ...manageRoutes(), "GET /api/v1/environments/prod": protection.route },
+    });
+    const button = await screen.findByRole("button", {
+      name: /^Undrop gold\.sales\.fact_returns/,
+    });
+
+    await user.click(button);
+
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(writes(server.sent)).toHaveLength(0);
+    protection.release({ status: 200, body: { name: "prod", is_protected: true } });
+    await waitFor(() => {
+      expect(button).not.toHaveAttribute("aria-disabled", "true");
+    });
+    await user.click(button);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(writes(server.sent)).toHaveLength(0);
   });
 
   it("says when a table can no longer be restored and offers no Undrop", async () => {

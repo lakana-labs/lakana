@@ -17,6 +17,7 @@ import { problemText } from "../../sign-in/messages";
 import { UndropDialog } from "../actions/UndropDialog";
 import { useProtected } from "../actions/useProtected";
 import { ReadFailed, When } from "../cells";
+import { ListSkeleton } from "../ListSkeleton";
 import { tablePath } from "../paths";
 import { useCursorPages } from "./useCursorPages";
 import "./viewStrings";
@@ -38,8 +39,6 @@ interface Result {
   /** The restored table's page. */
   readonly path?: string;
 }
-
-const SKELETON_ROWS = 3;
 
 /**
  * Renders the list. Undrop acts at once; a protected environment asks for a reason first, and a
@@ -84,6 +83,10 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
     if (from !== null && rows.length > from) {
       focusFrom.current = null;
       table.current?.querySelectorAll<HTMLElement>("tbody .row-name")[from]?.focus();
+    } else if (from !== null && !pages.busy && !pages.hasMore) {
+      // Show more came back empty and is gone: the focus goes to the result line, not the page.
+      focusFrom.current = null;
+      status.current?.focus();
     }
   });
 
@@ -148,17 +151,11 @@ export function DroppedView({ environment, namespace }: DroppedViewProps): JSX.E
           </>
         )}
       </p>
-      {reading && (
-        <div className="skeleton" aria-hidden="true">
-          {Array.from({ length: SKELETON_ROWS }, (_row, index) => (
-            <div className="skeleton-row" key={index} />
-          ))}
-        </div>
-      )}
+      {reading && <ListSkeleton />}
       {pages.items === undefined && pages.error !== null && (
         <ReadFailed message={pages.error} onRetry={pages.reload} />
       )}
-      {pages.items !== undefined && rows.length === 0 && !pages.busy && (
+      {pages.items !== undefined && rows.length === 0 && !pages.busy && !pages.hasMore && (
         <div className="empty">
           <p>{t("catalog.views.dropped.empty", { place })}</p>
         </div>

@@ -113,6 +113,18 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.getByRole("dialog")).toBeVisible();
         await expect(page.getByRole("textbox", { name: "Restore as" })).toBeVisible();
         expect(await violations(page), "the Undrop dialog").toEqual([]);
+
+        await page.keyboard.press("Escape");
+        await page.route("**/api/v1/environments/prod", (route) =>
+          route.fulfill({ json: { name: "prod", is_protected: true } }),
+        );
+        await page.reload();
+        await expect(page.getByRole("region", { name: "Dropped tables" })).toBeVisible();
+        await page.getByRole("button", { name: /^Undrop gold\.sales\.fact_returns/ }).click();
+        await expect(
+          page.getByRole("textbox", { name: /Why you break the protection of prod/ }),
+        ).toBeVisible();
+        expect(await violations(page), "the reason dialog of a protected environment").toEqual([]);
       });
 
       test("at least 24 px between the content of every two neighbouring cells", async ({
