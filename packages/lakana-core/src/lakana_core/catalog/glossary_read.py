@@ -810,8 +810,6 @@ def tables_terms(
         Each dotted name → its terms, as `table_terms` gives them (empty for a table without).
     """
     wanted = list(dict.fromkeys(dotted_names))
-    if not wanted:
-        return {}
     links = session.execute(
         select(GlossaryTermLink.table_name, GlossaryTermLink.column_name, GlossaryTerm)
         .join(GlossaryTerm, GlossaryTerm.id == GlossaryTermLink.term_id)

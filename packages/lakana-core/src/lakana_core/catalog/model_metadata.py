@@ -389,15 +389,14 @@ def read_table_models(
         Table id → its model as `read_table_model` gives it.
     """
     references: dict[uuid.UUID, list[ResolvedReference]] = {row.id: [] for row in rows}
-    if references:
-        for r in session.scalars(
-            select(DeclaredReference)
-            .where(DeclaredReference.source_table_id.in_(list(references)))
-            .order_by(DeclaredReference.source_table_id, DeclaredReference.source_column)
-        ):
-            references[r.source_table_id].append(
-                ResolvedReference(r.source_column, r.target_name, r.target_column, r.at_column)
-            )
+    for r in session.scalars(
+        select(DeclaredReference)
+        .where(DeclaredReference.source_table_id.in_(list(references)))
+        .order_by(DeclaredReference.source_table_id, DeclaredReference.source_column)
+    ):
+        references[r.source_table_id].append(
+            ResolvedReference(r.source_column, r.target_name, r.target_column, r.at_column)
+        )
     measured = [row.id for row in rows if row.model_kind in MEASURED_KINDS]
     measures: dict[uuid.UUID, list[MeasureEntry]] = {table_id: [] for table_id in measured}
     if measured:

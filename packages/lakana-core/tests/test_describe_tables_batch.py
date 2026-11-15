@@ -180,3 +180,7 @@ def test_a_row_dropped_after_the_listing_is_left_out(world: Star) -> None:
     described = catalog.describe_tables(world.admin, refs)
 
     assert [d.ref.name for d in described] == ["dim_store", "v"]
+
+
+def test_an_empty_list_reads_nothing(world: Star) -> None:
+    assert world.catalog(AllowAllAuthorization()).describe_tables(world.admin, []) == []

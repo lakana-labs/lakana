@@ -179,11 +179,10 @@ def stored_column_texts(
         Table id → column name → its stored row; every table is present, empty without texts.
     """
     found: dict[uuid.UUID, dict[str, ColumnDescription]] = {table_id: {} for table_id in table_ids}
-    if found:
-        for row in session.scalars(
-            select(ColumnDescription).where(ColumnDescription.table_id.in_(list(found)))
-        ):
-            found[row.table_id][row.column] = row
+    for row in session.scalars(
+        select(ColumnDescription).where(ColumnDescription.table_id.in_(list(found)))
+    ):
+        found[row.table_id][row.column] = row
     return found
 
 

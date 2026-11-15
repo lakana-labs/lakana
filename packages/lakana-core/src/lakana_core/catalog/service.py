@@ -4461,8 +4461,6 @@ class CatalogService:
             The same descriptions, filled, in order. A table dropped since it was described is
             returned as it was, without `defined_by` and `actions`.
         """
-        if not described:
-            return []
         rows = {
             table_id: (owner_id, environment_id)
             for table_id, owner_id, environment_id in self._session.execute(
@@ -5131,7 +5129,7 @@ class CatalogService:
         row: Table,
         *,
         resolved: ResolvedStorage | None = None,
-        hides: Callable[[CheckResult], bool] | None = None,
+        hides: Callable[[CheckResult], bool],
     ) -> TableDescription:
         """Describe a table row by kind, without its descriptions.
 
@@ -5146,7 +5144,7 @@ class CatalogService:
         resolved
             Its environment's storage, already resolved for a batch; `None` resolves it.
         hides
-            The environment's `result_hider` for `p`, shared by a batch; `None` builds it.
+            The environment's `result_hider` for `p`, shared by the rows of a batch.
 
         Returns
         -------
@@ -5197,8 +5195,6 @@ class CatalogService:
         unpublished = row.unpublished_run_id
         state: Literal["published", "not_published", "kept"] = "published"
         message = None
-        if hides is None:
-            hides = result_hider(self._session, self._authz, p, ref.environment)
         if unpublished is not None:
             state = "not_published"
             message = not_published_message(

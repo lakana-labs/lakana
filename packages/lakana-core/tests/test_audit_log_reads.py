@@ -21,7 +21,8 @@ from datetime import UTC, datetime, timedelta
 
 import pydantic
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import cast, delete, null, select, text
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit import content
@@ -53,6 +54,7 @@ from lakana_core.models import (
     QueryRun,
     QueryRunStatus,
 )
+from lakana_core.models.audit_event import StoredEventType
 from lakana_core.runs.store import query_completed_detail
 
 _SQL = "SELECT email FROM customers WHERE name = 'Alice Example'"
@@ -856,3 +858,31 @@ def test_no_event_is_written_as_unknown(session: Session) -> None:
 
     session.rollback()
     assert session.execute(select(AuditEvent)).first() is None
+
+
+def test_the_stored_type_column_refuses_unknown_even_past_the_service(session: Session) -> None:
+    """A row added without `AuditService.record` cannot store UNKNOWN either."""
+    admin = _person(session, "root")
+    session.add(
+        AuditEvent(
+            id=uuid.uuid4(),
+            occurred_at=datetime.now(UTC),
+            principal_id=admin.id,
+            event_type=AuditEventType.UNKNOWN,
+            detail={},
+        )
+    )
+
+    with pytest.raises(StatementError, match="UNKNOWN"):
+        session.flush()
+
+    session.rollback()
+    assert session.execute(select(AuditEvent)).first() is None
+
+
+def test_the_stored_type_column_passes_null_both_ways(session: Session) -> None:
+    """NULL stays NULL, as an outer join or a missing value gives it, in either direction."""
+    stored = StoredEventType()
+
+    assert session.execute(select(cast(null(), stored))).scalar_one() is None
+    assert stored.process_bind_param(None, session.get_bind().dialect) is None
