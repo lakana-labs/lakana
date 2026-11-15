@@ -323,7 +323,12 @@ every missing output of it means "run everything".
   `packages/*/src/` as well as for the bundle, packaging and script files in the filter of its
   "Did the bundle change?" step, and for the files and the REST stand-in of the `ingest-files`
   and `ingest-rest` examples, which its ingestion part reads (M6's exit criterion, see
-  `docs/agent/release.md`). A `unit` shard has a 25-minute timeout, `test` 15 minutes.
+  `docs/agent/release.md`). It also runs the backup and restore drill (#389,
+  `docs/examples/compose-restore.sh`, which the how-to "Deploying with Compose" shows): back up the
+  catalog and the storage, change a table, lose the instance, restore into a new directory, and
+  compare rows, snapshot id, runs, grants, secrets, an artifact and a table of a second environment;
+  it prints `restore took N s` (the RTO). `scripts/tests/test_compose_restore_drill.py` pins what the
+  script must check. A `unit` shard has a 25-minute timeout, `test` 15 minutes.
 - **Coverage** is measured on 3.14 only, by the three 3.14 shards, and combined in exactly one
   job, `test (3.14)` (see the coverage ratchet below). That job uploads the combined report,
   `coverage.json`, as the artifact `coverage-report` (kept 7 days), also when the ratchet fails,
