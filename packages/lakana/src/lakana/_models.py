@@ -1849,6 +1849,54 @@ class GroupPage:
     next_cursor: str | None
 
 
+@dataclass(frozen=True)
+class DroppedTablePage:
+    """One page of the dropped tables of an environment, newest drop first.
+
+    Parameters
+    ----------
+    items
+        The dropped tables on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[DroppedTable]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class TableRetentionPage:
+    """One page of the expiring tables of an environment, soonest first.
+
+    Parameters
+    ----------
+    items
+        The tables on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[TableRetention]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class NamespacePage:
+    """One page of the namespaces of an environment, in path order.
+
+    Parameters
+    ----------
+    items
+        The namespaces on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[Namespace]
+    next_cursor: str | None
+
+
 # jscpd:ignore-start
 # The SDK depends on no other package, so these mirror the server's response models.
 @dataclass(frozen=True)

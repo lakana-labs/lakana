@@ -142,6 +142,12 @@ lakana table list silver --dropped
 once it has passed or the worker has started to delete the files. You see the dropped tables of a
 namespace if you may read the tables in it.
 
+To see the tables dropped from every namespace of the environment, leave out the namespace:
+`lakana table list --dropped`. It lists one page, newest drop first, with each table's namespace;
+`--limit` and `--cursor` page on, and the last line names the command for the next page. The route is
+`GET /api/v1/environments/{env}/dropped-tables`, and the SDK's `client.tables.iter_dropped(env)`
+walks every page.
+
 ## Restore a table
 
 <!-- source: docs/examples/drop-and-restore-a-table/run.sh#undrop -->

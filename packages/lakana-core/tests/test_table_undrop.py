@@ -10,6 +10,7 @@ SQLite file.
 from __future__ import annotations
 
 import dataclasses
+import json
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -83,6 +84,7 @@ from lakana_core.models import (
     TextTranslation,
     WriteMode,
 )
+from lakana_core.pagination import encode_key_cursor, instant_key
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.projects.manifest import EntryText
@@ -1495,3 +1497,81 @@ def test_undrop_of_a_tombstone_from_before_measures_restores_the_model_without_t
     assert model is not None
     assert (model.kind, model.measures) == ("fact", ())
     assert session.scalars(select(DeclaredMeasure.id)).all() == []
+
+
+def _dropped_in_two_namespaces(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> list[uuid.UUID]:
+    """Drop `gold.orders`, `silver.x.daily` and `gold.late`, at known minutes, oldest first.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    catalog
+        The catalog.
+    principal
+        The acting principal.
+
+    Returns
+    -------
+    list of uuid.UUID
+        The table ids, oldest drop first.
+    """
+    catalog.create_namespace(principal, "dev", NamespacePath.from_parts(["silver", "x"]))
+    ids = [
+        _orders_table(catalog, principal),
+        _write(
+            catalog, principal, "silver.x.daily", WriteMode.CREATE, _orders([1], ["eu"])
+        ).table_id,
+        _write(catalog, principal, "gold.late", WriteMode.CREATE, _orders([1], ["eu"])).table_id,
+    ]
+    for ref in ("gold.orders", "silver.x.daily", "gold.late"):
+        catalog.drop_table(principal, _ref(ref))
+    base = datetime.now(UTC) - timedelta(hours=1)
+    for minute, table_id in enumerate(ids):
+        session.execute(
+            update(TableLocation)
+            .where(TableLocation.table_id == table_id)
+            .values(dropped_at=base + timedelta(minutes=minute))
+        )
+    session.commit()
+    return ids
+
+
+def test_dropped_tables_across_the_environment_newest_first_and_paged(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """Every namespace, newest drop first, two to a page, each row with its namespace."""
+    t1, t2, t3 = _dropped_in_two_namespaces(session, catalog, principal)
+
+    first = catalog.list_environment_dropped_tables(principal, "dev", limit=2)
+    assert [d.table_id for d in first.items] == [t3, t2]
+    assert [str(d.namespace) for d in first.items] == ["gold", "silver.x"]
+    assert first.next_cursor is not None
+
+    second = catalog.list_environment_dropped_tables(
+        principal, "dev", limit=2, cursor=first.next_cursor
+    )
+    assert [d.table_id for d in second.items] == [t1]
+    assert second.next_cursor is None
+
+
+def test_dropped_tables_across_the_environment_leave_out_what_the_caller_may_not_read(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """A table the caller may not read is not listed, and a forged cursor reveals none."""
+    _dropped_in_two_namespaces(session, catalog, principal)
+    hidden = _catalog(session, _HidesOneName())
+    # `daily` (the middle drop) is hidden; a cursor forged just before it must not reveal it.
+    newest = catalog.list_environment_dropped_tables(principal, "dev", limit=1).items[0]
+    forged = encode_key_cursor(
+        "dropped_tables",
+        json.dumps([instant_key(newest.dropped_at), str(newest.table_id)]),
+    )
+
+    listed = hidden.list_environment_dropped_tables(principal, "dev")
+    after = hidden.list_environment_dropped_tables(principal, "dev", cursor=forged)
+
+    assert [d.name for d in listed.items] == ["late", "orders"]
+    assert [d.name for d in after.items] == ["orders"]

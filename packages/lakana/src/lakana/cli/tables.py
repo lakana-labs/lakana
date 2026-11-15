@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -272,6 +272,60 @@ def _restorable_cell(dropped: DroppedTable) -> str:
     return "yes" if dropped.restorable else "no"
 
 
+def _list_dropped_across(
+    state: CliState,
+    *,
+    narrowed: Sequence[str | None],
+    all_environments: bool,
+    limit: int | None,
+    cursor: str | None,
+    env: str | None,
+) -> None:
+    """List one page of the dropped tables of every namespace of an environment.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    narrowed
+        `--search`, `--under`, `--model-kind`, `--sort` and `--order`, which do not apply.
+    all_environments
+        `--all-environments`, which does not apply.
+    limit
+        `--limit`.
+    cursor
+        `--cursor`.
+    env
+        `--env` as typed, for the next-page line.
+
+    Raises
+    ------
+    CliError
+        Exit 2, when an option that does not apply to this list was given.
+    """
+    if all_environments or any(option is not None for option in narrowed):
+        raise CliError(
+            "--search, --under, --model-kind, --all-environments, --sort and --order do not "
+            "apply to --dropped without NAMESPACE: leave them out, or give NAMESPACE."
+        )
+    page = state.client().tables.list_dropped_page(
+        resolve_environment(state, env), limit=limit, cursor=cursor
+    )
+    _output.emit(
+        state,
+        page.items,
+        columns=["name", "namespace", "dropped_at", "purge_after", "restorable", "uuid"],
+        droppable=["uuid", "namespace"],
+        derived={"restorable": _restorable_cell},
+    )
+    more_results(
+        state,
+        ["lakana", "table", "list"],
+        {"--env": env, "--dropped": True, "--limit": limit},
+        page.next_cursor,
+    )
+
+
 @table_app.command("list")
 def list_tables(
     ctx: typer.Context,
@@ -283,8 +337,8 @@ def list_tables(
         bool,
         typer.Option(
             "--dropped",
-            help="With NAMESPACE: list the dropped tables that can still be restored, and "
-            "until when.",
+            help="List the dropped tables that can still be restored, and until when: those of "
+            "NAMESPACE, or without it those of every namespace.",
         ),
     ] = False,
     model_kind: Annotated[
@@ -342,7 +396,9 @@ def list_tables(
 ) -> None:
     """List the tables in NAMESPACE, or with no NAMESPACE every table you may read.
 
-    With NAMESPACE: the tables in it, or with --dropped the tables dropped from it. A dropped
+    With NAMESPACE: the tables in it, or with --dropped the tables dropped from it. With
+    --dropped and no NAMESPACE: one page of the tables dropped from any namespace of the
+    environment, newest first, paged with --limit and --cursor. A dropped
     table keeps its files until `purge_after` (the server's undo period, 7 days by default);
     until then `lakana table undrop` restores it. A table that its retention lets expire within
     the server's warning window (7 days by default) shows when, in `expires`. With
@@ -392,7 +448,15 @@ def list_tables(
     state = state_of(ctx)
     if namespace is None:
         if dropped:
-            raise CliError("--dropped lists one namespace: give NAMESPACE.")
+            _list_dropped_across(
+                state,
+                narrowed=(search, under, model_kind, sort, order),
+                all_environments=all_environments,
+                limit=limit,
+                cursor=cursor,
+                env=env,
+            )
+            return
         if all_environments and env:
             raise CliError(
                 "--env and --all-environments cannot be combined: leave out --env to list every "
@@ -2413,12 +2477,21 @@ def expiring(
             "server's warning window, 7 days).",
         ),
     ] = None,
+    namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--namespace", help="Only this namespace and the ones beneath it, such as silver."
+        ),
+    ] = None,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
     env: _ENV = None,
 ) -> None:
     """List the managed tables that their retention lets expire soon, soonest first.
 
     Each row says when, the rule (and whether the table or its environment sets it) and who set
-    it. Keep a table with `lakana table retention NAME --never`, or give it more days.
+    it. Keep a table with `lakana table retention NAME --never`, or give it more days. One
+    page is listed; the last line names the command for the next.
 
     Parameters
     ----------
@@ -2426,13 +2499,22 @@ def expiring(
         The Typer context.
     within
         `--within`.
+    namespace
+        `--namespace`.
+    limit
+        `--limit`.
+    cursor
+        `--cursor`.
     env
         The environment.
     """
     state = state_of(ctx)
     environment = resolve_environment(state, env)
     days = None if within is None else _retention.parse_within(within)
-    found = state.client().tables.expiring(environment, within_days=days)
+    page = state.client().tables.expiring_page(
+        environment, within_days=days, namespace=namespace, limit=limit, cursor=cursor
+    )
+    found = page.items
     if not found and state.output != "json":
         window = "the warning window" if days is None else f"{days} days"
         typer.echo(f"No table in {_output.inline(environment)} expires within {window}.")
@@ -2447,6 +2529,12 @@ def expiring(
             "rule": _retention.rule_text,
         },
         flexible=["rule"],
+    )
+    more_results(
+        state,
+        ["lakana", "table", "expiring"],
+        {"--env": env, "--within": within, "--namespace": namespace, "--limit": limit},
+        page.next_cursor,
     )
 
 

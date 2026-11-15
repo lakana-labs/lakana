@@ -26,7 +26,7 @@ from typing import Literal, TypeVar
 
 import pyarrow as pa
 import pyarrow.ipc
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
@@ -60,12 +60,15 @@ from lakana_core.projects.definition import (
     table_definition,
     table_definition_file,
 )
+from lakana_server.api.platform.catalog import _no_nul
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
+from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import (
     AppendOut,
     ColumnOut,
     DescriptionIn,
     DroppedTableOut,
+    DroppedTablePageOut,
     ExternalTableCreate,
     ExternalTableOut,
     HealthSignalOut,
@@ -133,6 +136,13 @@ dropped_router = APIRouter(
     responses=errors(401),
 )
 """The dropped tables of a namespace: a path of its own, so no table name can shadow it."""
+environment_dropped_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/environments/{env}/dropped-tables",
+    tags=["tables"],
+    responses=errors(401),
+)
+"""The dropped tables of every namespace of an environment."""
 expiring_router = APIRouter(
     route_class=AuthenticateFirstRoute,
     prefix="/api/v1/environments/{env}/expiring-tables",
@@ -2373,7 +2383,11 @@ def set_table_retention(
 def list_expiring_tables(
     env: str,
     request: Request,
+    response: Response,
     within_days: int | None = Query(default=None),
+    namespace: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> list[TableRetentionOut]:
@@ -2381,7 +2395,8 @@ def list_expiring_tables(
 
     Lists the managed tables of the environment that expire within `within_days`, soonest
     first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422
-    when `within_days` is out of range.
+    when `within_days` is out of range or the cursor is not one this list issued. The cursor of
+    the next page is in the `X-Next-Cursor` response header and is absent on the last page.
 
     Parameters
     ----------
@@ -2389,9 +2404,17 @@ def list_expiring_tables(
         Environment name.
     request
         The current request, for `LAKANA_TABLES__EXPIRY_WARNING_DAYS`.
+    response
+        The response, for the cursor header.
     within_days
         The window, 1 to 3,650 days; the server's warning window (7 days by default), or 1
         when that is 0, when absent.
+    namespace
+        Only the tables of this dot-joined namespace and of the ones beneath it.
+    limit
+        Most tables returned (1 to 200).
+    cursor
+        The `X-Next-Cursor` of the previous page; send the same `within_days` and `namespace`.
     principal
         The authenticated caller; needs `READ_ENVIRONMENT`, and sees the tables it may read.
     catalog
@@ -2407,14 +2430,79 @@ def list_expiring_tables(
     lakana_core.errors.NotFoundError
         Mapped to 404, if the environment does not exist.
     lakana_core.errors.ValidationError
-        Mapped to 422 when `within_days` is out of range.
+        Mapped to 422 when `within_days`, `limit`, `namespace` or `cursor` is invalid.
     """
+    _no_nul("namespace", namespace)
     if within_days is None:
         within_days = max(request.app.state.settings.tables.expiry_warning_days, 1)
-    return [
-        _retention_out(entry)
-        for entry in catalog.list_expiring_tables(principal, env, within_days=within_days)
-    ]
+    page = catalog.list_expiring_tables(
+        principal,
+        env,
+        within_days=within_days,
+        namespace=NamespacePath.from_parts(namespace.split(".")) if namespace else None,
+        limit=limit,
+        cursor=cursor,
+    )
+    set_next_cursor(response, page.next_cursor)
+    return [_retention_out(entry) for entry in page.items]
+
+
+@environment_dropped_router.get("", response_model=DroppedTablePageOut, responses=errors(403, 404))
+def list_environment_dropped_tables(
+    env: str,
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    catalog: CatalogService = Depends(get_catalog),
+) -> DroppedTablePageOut:
+    """List the dropped tables of an environment.
+
+    Lists the tables dropped from any namespace of the environment whose files are not deleted
+    yet, newest drop first. Needs `READ_ENVIRONMENT`; a table the caller may not read is left
+    out. Answers 404 when the environment does not exist and 422 when the cursor is not one
+    this list issued.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    limit
+        Most tables returned (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    catalog
+        The catalog service for this request.
+
+    Returns
+    -------
+    DroppedTablePageOut
+        The tables of this page, each with its namespace, and the cursor of the next page.
+
+    Raises
+    ------
+    lakana_core.errors.NotFoundError
+        Mapped to 404, if the environment does not exist.
+    lakana_core.errors.ValidationError
+        Mapped to 422 for a cursor this list did not issue.
+    """
+    page = catalog.list_environment_dropped_tables(principal, env, limit=limit, cursor=cursor)
+    return DroppedTablePageOut(
+        items=[
+            DroppedTableOut(
+                name=dropped.name,
+                namespace=str(dropped.namespace),
+                uuid=str(dropped.table_id),
+                kind=dropped.kind,
+                dropped_at=dropped.dropped_at,
+                purge_after=dropped.purge_after,
+                restorable=dropped.restorable,
+            )
+            for dropped in page.items
+        ],
+        next_cursor=page.next_cursor,
+    )
 
 
 @dropped_router.get("", response_model=list[DroppedTableOut], responses=errors(403, 404))

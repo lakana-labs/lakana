@@ -3100,7 +3100,8 @@ def test_table_list_without_tables_says_so(tmp_path: Path) -> None:
         (["silver", "--limit", "5"], "--limit"),
         (["silver", "--dropped", "--limit", "5"], "--limit"),
         (["silver", "--cursor", "c"], "--under NAMESPACE"),
-        (["--dropped"], "give NAMESPACE"),
+        (["--dropped", "--search", "x"], "--dropped without NAMESPACE"),
+        (["--dropped", "--all-environments"], "--dropped without NAMESPACE"),
         (["--all-environments", "--env", "dev"], "cannot be combined"),
     ],
 )
@@ -3328,3 +3329,40 @@ def test_table_rebuild_break_glass_warns_before_it_asks(tmp_path: Path) -> None:
     assert result.exit_code != 0
     assert api.requests == []
     assert "break-glass write" not in _plain(result.stderr + result.stdout)
+
+
+_ENV_DROPPED = "/api/v1/environments/dev/dropped-tables"
+_DROPPED_ROW = {
+    "name": "sales",
+    "namespace": "bronze",
+    "uuid": "u1",
+    "kind": "TABLE",
+    "dropped_at": "2026-10-19T12:00:00Z",
+    "purge_after": "2026-10-26T12:00:00Z",
+    "restorable": True,
+}
+
+
+def test_table_list_dropped_without_a_namespace_lists_the_environment(tmp_path: Path) -> None:
+    """`--dropped` alone lists across namespaces, paged, with a next-page line."""
+    api = FakeApi()
+    api.on("GET", _ENV_DROPPED, json={"items": [_DROPPED_ROW], "next_cursor": "c2"})
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "list",
+        "--dropped",
+        "--env",
+        "dev",
+        "--limit",
+        "1",
+        "--cursor",
+        "c1",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    text = _plain(result.stdout)
+    assert "bronze" in text and "sales" in text and "2026-10-26" in text
+    assert dict(api.requests[0].url.params) == {"limit": "1", "cursor": "c1"}
+    assert "More results: lakana table list --env dev --dropped --limit 1 --cursor c2" in text

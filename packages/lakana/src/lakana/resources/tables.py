@@ -26,12 +26,13 @@ from lakana._arrow import (
     normalize_view_columns,
     schema_to_columns,
 )
-from lakana._http import HttpTransport, every_page, query_params
+from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
 from lakana._models import (
     AppendResult,
     CheckHealth,
     Column,
     DroppedTable,
+    DroppedTablePage,
     ExternalTable,
     HealthSignal,
     HealthSignalPage,
@@ -56,6 +57,7 @@ from lakana._models import (
     TableReference,
     TableReferences,
     TableRetention,
+    TableRetentionPage,
     TermRef,
     TranslationCoverage,
     WriteResult,
@@ -639,6 +641,30 @@ def _write_result_from_json(data: dict[str, Any]) -> WriteResult:
         files=data["files"],
         snapshot_id=data["snapshot_id"],
         schema_diff=data.get("schema_diff"),
+    )
+
+
+def _dropped_from_json(item: dict[str, Any]) -> DroppedTable:
+    """Build a `DroppedTable` from the platform API's JSON response body.
+
+    Parameters
+    ----------
+    item
+        The decoded `DroppedTableOut` JSON body.
+
+    Returns
+    -------
+    DroppedTable
+        The parsed dropped table.
+    """
+    return DroppedTable(
+        name=item["name"],
+        namespace=item["namespace"],
+        uuid=item["uuid"],
+        kind=item["kind"],
+        dropped_at=datetime.fromisoformat(item["dropped_at"]),
+        purge_after=datetime.fromisoformat(item["purge_after"]),
+        restorable=item["restorable"],
     )
 
 
@@ -1352,8 +1378,19 @@ class Tables:
         )
         return _retention_from_json(response.json())
 
-    def expiring(self, environment: str, *, within_days: int | None = None) -> _RetentionList:
+    def expiring(
+        self,
+        environment: str,
+        *,
+        within_days: int | None = None,
+        namespace: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> _RetentionList:
         """List the managed tables of an environment that expire soon, soonest first.
+
+        The tables of one page; `expiring_page` also returns the cursor of the next one, and
+        `iter_expiring` walks every page.
 
         Parameters
         ----------
@@ -1362,6 +1399,12 @@ class Tables:
         within_days
             The window, 1 to 3,650 days; the server's warning window (7 days by default) when
             `None`.
+        namespace
+            Only the tables of this dot-joined namespace and of the ones beneath it.
+        limit
+            Most tables returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`. Send the same `within_days` and `namespace`.
 
         Returns
         -------
@@ -1375,12 +1418,93 @@ class Tables:
         lakana.errors.ValidationError
             If `within_days` is out of range.
         """
+        return self.expiring_page(
+            environment, within_days=within_days, namespace=namespace, limit=limit, cursor=cursor
+        ).items
+
+    def expiring_page(
+        self,
+        environment: str,
+        *,
+        within_days: int | None = None,
+        namespace: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> TableRetentionPage:
+        """List one page of the expiring tables, soonest first, with the next cursor.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        within_days
+            The window, 1 to 3,650 days; the server's warning window when `None`.
+        namespace
+            Only the tables of this dot-joined namespace and of the ones beneath it.
+        limit
+            Most tables returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`. Send the same `within_days` and `namespace`.
+
+        Returns
+        -------
+        TableRetentionPage
+            The tables, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the environment does not exist.
+        lakana.errors.ValidationError
+            If `within_days` is out of range, or `cursor` is not one the server issued.
+        """
         response = self._transport.request(
             ROUTES["tables.expiring"],
             path_params={"env": environment},
-            params=None if within_days is None else {"within_days": within_days},
+            params=query_params(
+                within_days=within_days, namespace=namespace, limit=limit, cursor=cursor
+            ),
         )
-        return [_retention_from_json(item) for item in response.json()]
+        return TableRetentionPage(
+            items=[_retention_from_json(item) for item in response.json()],
+            next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
+        )
+
+    def iter_expiring(
+        self,
+        environment: str,
+        *,
+        within_days: int | None = None,
+        namespace: str | None = None,
+        page_size: int = 100,
+    ) -> Iterator[TableRetention]:
+        """Yield every expiring table, soonest first, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        within_days
+            The window, 1 to 3,650 days; the server's warning window when `None`.
+        namespace
+            Only the tables of this dot-joined namespace and of the ones beneath it.
+        page_size
+            Tables per request (1 to 200).
+
+        Returns
+        -------
+        Iterator of TableRetention
+            Each table, once.
+        """
+        return every_page(
+            lambda cursor: self.expiring_page(
+                environment,
+                within_days=within_days,
+                namespace=namespace,
+                limit=page_size,
+                cursor=cursor,
+            )
+        )
 
     def list_dropped(self, environment: str, namespace: str) -> _DroppedList:
         """List the dropped tables of a namespace whose files are not deleted yet.
@@ -1405,18 +1529,64 @@ class Tables:
         response = self._transport.request(
             ROUTES["tables.list_dropped"], path_params={"env": environment, "path": namespace}
         )
-        return [
-            DroppedTable(
-                name=item["name"],
-                namespace=item["namespace"],
-                uuid=item["uuid"],
-                kind=item["kind"],
-                dropped_at=datetime.fromisoformat(item["dropped_at"]),
-                purge_after=datetime.fromisoformat(item["purge_after"]),
-                restorable=item["restorable"],
-            )
-            for item in response.json()
-        ]
+        return [_dropped_from_json(item) for item in response.json()]
+
+    def list_dropped_page(
+        self, environment: str, *, limit: int | None = None, cursor: str | None = None
+    ) -> DroppedTablePage:
+        """List one page of the dropped tables of every namespace of an environment.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        limit
+            Most tables returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`.
+
+        Returns
+        -------
+        DroppedTablePage
+            Newest drop first, each with its namespace and the time its files are deleted, and
+            the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the environment does not exist.
+        lakana.errors.ValidationError
+            If `cursor` is not one the server issued.
+        """
+        response = self._transport.request(
+            ROUTES["tables.list_dropped_in_environment"],
+            path_params={"env": environment},
+            params=query_params(limit=limit, cursor=cursor),
+        )
+        body = response.json()
+        return DroppedTablePage(
+            items=[_dropped_from_json(item) for item in body["items"]],
+            next_cursor=body.get("next_cursor"),
+        )
+
+    def iter_dropped(self, environment: str, *, page_size: int = 100) -> Iterator[DroppedTable]:
+        """Yield every dropped table of an environment, newest drop first.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        page_size
+            Tables per request (1 to 200).
+
+        Returns
+        -------
+        Iterator of DroppedTable
+            Each dropped table, once.
+        """
+        return every_page(
+            lambda cursor: self.list_dropped_page(environment, limit=page_size, cursor=cursor)
+        )
 
     def create(
         self,

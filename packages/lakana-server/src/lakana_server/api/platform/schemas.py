@@ -1918,6 +1918,21 @@ class DroppedTableOut(BaseModel):
     restorable: bool
 
 
+class DroppedTablePageOut(BaseModel):
+    """One page of the dropped tables of an environment.
+
+    Parameters
+    ----------
+    items
+        The dropped tables of this page, newest drop first.
+    next_cursor
+        The cursor of the next page; `None` on the last page.
+    """
+
+    items: list[DroppedTableOut]
+    next_cursor: str | None = None
+
+
 class TableRebuildIn(BaseModel):
     """Request body that rebuilds a table a deployed project builds.
 

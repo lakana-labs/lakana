@@ -9,6 +9,7 @@ external tables and views never expire. These tests run on a SQLite file.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -21,7 +22,7 @@ from pyiceberg.types import LongType, NestedField
 from sqlalchemy import ColumnElement, select, update
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable
 from lakana_core.catalog import retention as retention_module
 from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.location_sweep import LocationSweepReport, sweep_table_locations
@@ -60,6 +61,7 @@ from lakana_core.models import (
     TaskStatus,
     WriteMode,
 )
+from lakana_core.pagination import encode_key_cursor
 from lakana_core.storage.resolver import StorageResolver
 
 _GOLD = NamespacePath.from_parts(["gold"])
@@ -719,7 +721,7 @@ def test_the_expiring_listing_names_what_is_due_and_who_set_it(
     catalog.set_table_retention(principal, TableRef("dev", _GOLD, "kept"), days=1)
     _deploy(session, principal, "gold.kept")
 
-    listed = catalog.list_expiring_tables(principal, "dev", within_days=7)
+    listed = catalog.list_expiring_tables(principal, "dev", within_days=7).items
     assert [entry.ref.name for entry in listed] == ["b", "a"]
     assert listed[0].set_by == principal.name
     assert listed[0].source == "table"
@@ -732,9 +734,9 @@ def test_the_expiring_listing_leaves_out_what_the_caller_may_not_read(
     catalog.set_table_retention(principal, _ORDERS, days=2)
     reader = _user(session, "reader")
     assert (
-        _catalog(session, ActionAllowList(Action.READ_ENVIRONMENT)).list_expiring_tables(
-            reader, "dev", within_days=7
-        )
+        _catalog(session, ActionAllowList(Action.READ_ENVIRONMENT))
+        .list_expiring_tables(reader, "dev", within_days=7)
+        .items
         == []
     )
 
@@ -744,9 +746,9 @@ def test_the_expiring_listing_counts_the_environment_default(
 ) -> None:
     """Tables that set nothing appear once the default makes them due within the window."""
     catalog.set_environment_retention(principal, "dev", 3)
-    (entry,) = catalog.list_expiring_tables(principal, "dev", within_days=7)
+    (entry,) = catalog.list_expiring_tables(principal, "dev", within_days=7).items
     assert (entry.ref, entry.source, entry.days) == (_ORDERS, "environment", 3)
-    assert catalog.list_expiring_tables(principal, "dev", within_days=1) == []
+    assert catalog.list_expiring_tables(principal, "dev", within_days=1).items == []
 
 
 def test_the_expiring_window_is_bounded(catalog: CatalogService, principal: PrincipalRef) -> None:
@@ -1049,3 +1051,101 @@ def test_namespaces_of_other_environments_are_not_mixed_up(
     _due(session, catalog, principal)
     assert _sweep(session).tables_expired == 1
     assert _row(session, namesake).name == "orders"
+
+
+class _ReadsOnlyOrders(AllowAllAuthorization):
+    """Allows everything except reading a table that is not named `orders`."""
+
+    def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+        """Refuse `READ_TABLE` on every table but `orders`.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Returns
+        -------
+        bool
+            `False` only for another table's read.
+        """
+        return not (action is Action.READ_TABLE and securable.table not in (None, "orders"))
+
+
+def _expiring_catalog(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> CatalogService:
+    """Give `silver.a.t1`, `silver.a.x.t2`, `silver.ab.t3` and `gold.orders` 2, 3, 1 and 4 days.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The acting principal.
+    catalog
+        The catalog.
+
+    Returns
+    -------
+    CatalogService
+        The catalog.
+    """
+    for parts, name, days in (
+        (["silver", "a"], "t1", 2),
+        (["silver", "a", "x"], "t2", 3),
+        (["silver", "ab"], "t3", 1),
+    ):
+        ns = NamespacePath.from_parts(parts)
+        catalog.create_namespace(principal, "dev", ns)
+        catalog.create_table(principal, TableRef("dev", ns, name), schema=_schema())
+        catalog.set_table_retention(principal, TableRef("dev", ns, name), days=days)
+    catalog.set_table_retention(principal, _ORDERS, days=4)
+    return catalog
+
+
+def test_the_expiring_list_filters_by_namespace_and_beneath(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """`silver.a` keeps `silver.a.t1` and `silver.a.x.t2` and leaves out `silver.ab.t3`."""
+    _expiring_catalog(session, principal, catalog)
+
+    listed = catalog.list_expiring_tables(
+        principal, "dev", within_days=7, namespace=NamespacePath.from_parts(["silver", "a"])
+    )
+
+    assert [entry.ref.dotted() for entry in listed.items] == ["silver.a.t1", "silver.a.x.t2"]
+
+
+def test_the_expiring_list_pages_soonest_first(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """Soonest expiry first, one to a page, the cursor continues."""
+    _expiring_catalog(session, principal, catalog)
+    seen = []
+    cursor = None
+    while True:
+        page = catalog.list_expiring_tables(principal, "dev", within_days=7, limit=1, cursor=cursor)
+        seen += [entry.ref.dotted() for entry in page.items]
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert seen == ["silver.ab.t3", "silver.a.t1", "silver.a.x.t2", "gold.orders"]
+
+
+def test_the_expiring_list_forged_cursor_reveals_nothing_unreadable(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """The caller's readable tables are filtered before the cursor applies."""
+    _expiring_catalog(session, principal, catalog)
+    reader = _user(session, "reader")
+    only_orders = _catalog(session, _ReadsOnlyOrders())
+    forged = encode_key_cursor("expiring_tables", json.dumps(["0000", "", ""]))
+
+    page = only_orders.list_expiring_tables(reader, "dev", within_days=7, cursor=forged)
+
+    assert [entry.ref.dotted() for entry in page.items] == ["gold.orders"]

@@ -71,6 +71,9 @@ from lakana_server.api.platform.sign_in_notices import router as sign_in_notices
 from lakana_server.api.platform.sign_in_settings import router as sign_in_settings_router
 from lakana_server.api.platform.status import router as status_router
 from lakana_server.api.platform.tables import dropped_router as dropped_tables_router
+from lakana_server.api.platform.tables import (
+    environment_dropped_router as environment_dropped_tables_router,
+)
 from lakana_server.api.platform.tables import expiring_router as expiring_tables_router
 from lakana_server.api.platform.tables import router as tables_router
 from lakana_server.api.platform.task_connections import router as task_connections_router
@@ -102,6 +105,7 @@ ROUTERS = (
     queries_router,
     tables_router,
     dropped_tables_router,
+    environment_dropped_tables_router,
     expiring_tables_router,
     search_router,
     catalog_router,

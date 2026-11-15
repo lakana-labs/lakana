@@ -947,6 +947,10 @@ _NOTHING_OF_A_KEPT_TABLE = {
         "from every task's run context, since creating a table is not what a task may do"
     ),
     "list_dropped_tables": "names and dates of dropped tables; no rows, no file locations",
+    "list_environment_dropped_tables": (
+        "names, namespaces and dates of dropped tables; no rows, no file locations"
+    ),
+    "list_namespace_page": "namespace paths; no rows, no file locations",
     "table_retention": "a table's retention rule and dates; no rows, no file locations",
     "set_table_retention": "a write of a retention rule; returns the rule and dates",
     "set_environment_retention": "a write of an environment's retention; returns the environment",

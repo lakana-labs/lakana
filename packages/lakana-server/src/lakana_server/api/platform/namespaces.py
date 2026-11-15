@@ -7,11 +7,13 @@ different, spec-mandated encoding for the same underlying value.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.service import CatalogService
 from lakana_core.identifiers import NamespacePath
+from lakana_server.api.platform.catalog import _no_nul
+from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import NamespaceCreate, NamespaceOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -125,18 +127,38 @@ def get_namespace(
 @router.get("", response_model=list[NamespaceOut], responses=errors(403, 404))
 def list_namespaces(
     env: str,
+    response: Response,
+    parent: str | None = Query(default=None, max_length=255),
+    depth: int | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> list[NamespaceOut]:
     """List the namespaces of an environment.
 
-    Lists every namespace of the environment at every depth, not only the top level. Needs
-    `READ_NAMESPACE` on the environment. Answers 404 when the environment does not exist.
+    Lists the namespaces of the environment at every depth, not only the top level, in the
+    order of their path parts. Needs `READ_NAMESPACE` on the environment. Answers 404 when the
+    environment does not exist and 422 for a `depth` other than 1 or a cursor this list did not
+    issue. The cursor of the next page is in the `X-Next-Cursor` response header and is absent
+    on the last page.
 
     Parameters
     ----------
     env
         Environment name.
+    response
+        The response, for the cursor header.
+    parent
+        Dot-joined path; only the namespaces below it, at every depth (the parent itself is
+        left out).
+    depth
+        ``1`` keeps only the direct children of `parent`, or the top-level namespaces without
+        one.
+    limit
+        Most namespaces returned (1 to 200).
+    cursor
+        The `X-Next-Cursor` of the previous page; send the same `parent` and `depth`.
     principal
         The authenticated caller.
     catalog
@@ -145,11 +167,21 @@ def list_namespaces(
     Returns
     -------
     list of NamespaceOut
-        Every namespace, each with its own properties fetched individually.
+        The namespaces of this page, each with its own properties fetched individually.
     """
-    paths = catalog.list_namespaces(principal, env)
+    _no_nul("parent", parent)
+    page = catalog.list_namespace_page(
+        principal,
+        env,
+        NamespacePath.from_parts(parent.split(".")) if parent else None,
+        depth=depth,
+        limit=limit,
+        cursor=cursor,
+    )
+    set_next_cursor(response, page.next_cursor)
     return [
-        _to_out(path, catalog.load_namespace(principal, env, path).properties) for path in paths
+        _to_out(path, catalog.load_namespace(principal, env, path).properties)
+        for path in page.items
     ]
 
 

@@ -572,6 +572,7 @@ def test_every_public_catalog_method_calls_authorize() -> None:
     `history` to `check_can_history`), and those to `_check_can_write_or_create`, which
     authorizes (`check_can_merge` and `check_can_history` through `_check_can_compare`).
     `commit_answer` asks
+    `list_namespace_page` delegates to `list_namespaces`, which authorizes before it lists.
     `_may_see_state`, which calls `permits` for READ_TABLE. `set_table_description` and
     `set_column_description` ask `_find_table_to_describe`, which authorizes (the owner, or
     `DROP_TABLE`) before it says anything.
@@ -587,6 +588,7 @@ def test_every_public_catalog_method_calls_authorize() -> None:
             or "self.check_can_replace(" in source
             or "self.check_can_merge(" in source
             or "self.check_can_history(" in source
+            or "self.list_namespaces(" in source
             or "self._check_can_compare(" in source
             or "self._check_can_write_or_create(" in source
             or "self._may_see_state(" in source

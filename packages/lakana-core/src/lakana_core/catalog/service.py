@@ -272,6 +272,7 @@ from lakana_core.catalog.tombstones import (
     DroppedTable,
     drop_row,
     find_tombstone,
+    list_environment_tombstones,
     list_tombstones,
     name_holder,
     refresh_restored,
@@ -360,7 +361,13 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.models.run import TERMINAL_TASK_STATUSES
-from lakana_core.pagination import Page, escape_like
+from lakana_core.pagination import (
+    LIST_LIMIT_DEFAULT,
+    Page,
+    escape_like,
+    instant_key,
+    page_in_order,
+)
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.policy.schema_change import (
     REPLACED,
@@ -2646,6 +2653,60 @@ class CatalogService:
         paths = [NamespacePath.parse(row.path) for row in rows]
         return sorted(paths, key=lambda ns: ns.parts)
 
+    def list_namespace_page(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        parent: NamespacePath | None = None,
+        *,
+        depth: int | None = None,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> Page[NamespacePath]:
+        """List one page of the namespaces, optionally only those below a parent.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Environment name.
+        parent
+            When given, only strict descendants of this path, at every depth (as
+            `list_namespaces`); the parent itself is left out.
+        depth
+            ``1`` keeps only the direct children of `parent`, or the top-level namespaces
+            when there is no `parent`; `None` keeps every depth.
+        limit
+            The page size, 1 to 200.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        Page of NamespacePath
+            In the order of `parts`, which is also the cursor's key; two namespaces never share
+            a key, a legacy name with a dot in a part included.
+
+        Raises
+        ------
+        NotFoundError
+            If the environment does not exist.
+        PermissionDenied
+            If the principal may not read namespaces in this environment.
+        ValidationError
+            If `depth` is not 1, `limit` is out of range, or `cursor` is not one this list issued.
+        """
+        if depth is not None and depth != 1:
+            raise ValidationError(f"depth must be 1 (direct children only); got {depth}.")
+        found = self.list_namespaces(p, environment, parent)
+        if depth == 1:
+            wanted = (len(parent.parts) if parent is not None else 0) + 1
+            found = [ns for ns in found if len(ns.parts) == wanted]
+        return page_in_order(
+            found, kind="namespaces", key_of=lambda ns: ns.parts, limit=limit, cursor=cursor
+        )
+
     def drop_namespace(self, p: PrincipalRef, environment: str, path: NamespacePath) -> None:
         """Remove a namespace.
 
@@ -4233,8 +4294,15 @@ class CatalogService:
         return env
 
     def list_expiring_tables(
-        self, p: PrincipalRef, environment: str, *, within_days: int
-    ) -> list[TableRetention]:
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        within_days: int,
+        namespace: NamespacePath | None = None,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> Page[TableRetention]:
         """List the managed tables of an environment that expire within some days, soonest first.
 
         Parameters
@@ -4245,12 +4313,20 @@ class CatalogService:
             Environment name.
         within_days
             The window, 1 to 3,650 days from now; a table already due is listed too.
+        namespace
+            When given, only the tables of this namespace and of the ones beneath it.
+        limit
+            The page size, 1 to 200.
+        cursor
+            The `next_cursor` of the previous page.
 
         Returns
         -------
-        list of TableRetention
+        Page of TableRetention
             The tables `p` may read whose expiry falls within the window; a table that never
-            expires (a protected environment, a deployed project's asset) is not listed.
+            expires (a protected environment, a deployed project's asset) is not listed. What
+            `p` may not read is left out before the cursor applies, so a forged cursor reveals
+            nothing more.
 
         Raises
         ------
@@ -4259,7 +4335,7 @@ class CatalogService:
         PermissionDenied
             Without `READ_ENVIRONMENT` on it.
         ValidationError
-            If `within_days` is out of range.
+            If `within_days` or `limit` is out of range, or `cursor` is not one this list issued.
         """
         check_days(within_days, "The window")
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
@@ -4271,9 +4347,23 @@ class CatalogService:
             for entry in found
             if entry.expires_at is not None
             and entry.expires_at <= until
+            and (
+                namespace is None
+                or entry.ref.namespace.parts[: len(namespace.parts)] == namespace.parts
+            )
             and self.can_read_table(p, entry.ref)
         ]
-        return sorted(due, key=lambda entry: (entry.expires_at, entry.ref.dotted()))
+        return page_in_order(
+            due,
+            kind="expiring_tables",
+            key_of=lambda entry: (
+                instant_key(entry.expires_at),  # ty: ignore[invalid-argument-type]
+                entry.ref.dotted(),
+                str(entry.table_id),
+            ),
+            limit=limit,
+            cursor=cursor,
+        )
 
     def table_health(
         self,
@@ -9880,6 +9970,60 @@ class CatalogService:
             for entry in dropped
             if self.can_read_table(p, TableRef(environment, namespace, entry.name))
         ]
+
+    def list_environment_dropped_tables(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> Page[DroppedTable]:
+        """List the dropped tables of every namespace of an environment, newest drop first.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Environment name.
+        limit
+            The page size, 1 to 200.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        Page of DroppedTable
+            Each with its namespace, purge date and whether it can still be restored. A table
+            the caller may not read by its name is left out before the cursor applies, so a
+            forged cursor reveals nothing more.
+
+        Raises
+        ------
+        NotFoundError
+            If the environment does not exist.
+        PermissionDenied
+            Without `READ_ENVIRONMENT` on it.
+        ValidationError
+            If `limit` is out of range, or `cursor` is not one this list issued.
+        """
+        self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
+        env = self._find_environment(environment)
+        dropped = list_environment_tombstones(self._session, env.id, now=db_now(self._session))
+        readable = [
+            entry
+            for entry in dropped
+            if self.can_read_table(p, TableRef(environment, entry.namespace, entry.name))
+        ]
+        return page_in_order(
+            readable,
+            kind="dropped_tables",
+            key_of=lambda d: (instant_key(d.dropped_at), str(d.table_id)),
+            limit=limit,
+            cursor=cursor,
+            descending=True,
+        )
 
     def rename_table(self, p: PrincipalRef, source: TableRef, destination: TableRef) -> LoadedTable:
         """Move a table to a new namespace or name.

@@ -170,3 +170,29 @@ def test_the_dropped_listing_of_an_unknown_namespace_is_404(client: TestClient) 
         "/api/v1/environments/dev/namespaces/nope/dropped-tables", headers=AUTH_HEADER
     )
     assert response.status_code == 404
+
+
+def test_dropped_tables_across_the_environment_are_paged(client: TestClient) -> None:
+    """One route lists every namespace's tombstones, newest first, as items and a cursor."""
+    create_environment(client)
+    for namespace in ("gold", "silver"):
+        create_table(client, "dev", namespace, "sales")
+        url = f"/api/v1/environments/dev/namespaces/{namespace}/tables/sales"
+        assert client.delete(url, headers=AUTH_HEADER).status_code == 204
+    url = "/api/v1/environments/dev/dropped-tables"
+
+    first = client.get(f"{url}?limit=1", headers=AUTH_HEADER)
+
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert len(body["items"]) == 1 and isinstance(body["next_cursor"], str)
+    second = client.get(f"{url}?limit=1&cursor={body['next_cursor']}", headers=AUTH_HEADER).json()
+    assert second["next_cursor"] is None
+    seen = {(e["namespace"], e["name"]) for e in body["items"] + second["items"]}
+    assert seen == {("gold", "sales"), ("silver", "sales")}
+    assert client.get(f"{url}?cursor=forged", headers=AUTH_HEADER).status_code == 422
+    assert client.get(f"{url}?limit=201", headers=AUTH_HEADER).status_code == 422
+    assert (
+        client.get("/api/v1/environments/nope/dropped-tables", headers=AUTH_HEADER).status_code
+        == 404
+    )

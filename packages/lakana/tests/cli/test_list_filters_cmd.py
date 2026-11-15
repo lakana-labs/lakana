@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,7 +20,7 @@ _RUNS = "/api/v1/environments/dev/runs"
 _DEPLOYS = "/api/v1/environments/dev/deploys"
 
 
-def _paged(path: str, body: list[dict[str, object]], cursor: str | None) -> FakeApi:
+def _paged(path: str, body: Sequence[Mapping[str, object]], cursor: str | None) -> FakeApi:
     """Build a fake whose list route answers with `body` and, if given, a next cursor.
 
     Parameters

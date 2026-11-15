@@ -1330,7 +1330,7 @@
           "namespaces"
         ],
         "summary": "List the namespaces of an environment",
-        "description": "Lists every namespace of the environment at every depth, not only the top level. Needs `READ_NAMESPACE` on the environment. Answers 404 when the environment does not exist.",
+        "description": "Lists the namespaces of the environment at every depth, not only the top level, in the order of their path parts. Needs `READ_NAMESPACE` on the environment. Answers 404 when the environment does not exist and 422 for a `depth` other than 1 or a cursor this list did not issue. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
         "operationId": "list_namespaces_api_v1_environments__env__namespaces_get",
         "parameters": [
           {
@@ -1342,6 +1342,72 @@
               "title": "Env"
             },
             "description": "Environment name."
+          },
+          {
+            "name": "parent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent"
+            },
+            "description": "Dot-joined path; only the namespaces below it, at every depth (the parent itself is left out)."
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Depth"
+            },
+            "description": "``1`` keeps only the direct children of `parent`, or the top-level namespaces without one."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most namespaces returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `parent` and `depth`."
           },
           {
             "name": "authorization",
@@ -6197,13 +6263,136 @@
         }
       }
     },
+    "/api/v1/environments/{env}/dropped-tables": {
+      "get": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "List the dropped tables of an environment",
+        "description": "Lists the tables dropped from any namespace of the environment whose files are not deleted yet, newest drop first. Needs `READ_ENVIRONMENT`; a table the caller may not read is left out. Answers 404 when the environment does not exist and 422 when the cursor is not one this list issued.",
+        "operationId": "list_environment_dropped_tables_api_v1_environments__env__dropped_tables_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most tables returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DroppedTablePageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/expiring-tables": {
       "get": {
         "tags": [
           "tables"
         ],
         "summary": "List the tables about to expire",
-        "description": "Lists the managed tables of the environment that expire within `within_days`, soonest first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when `within_days` is out of range.",
+        "description": "Lists the managed tables of the environment that expire within `within_days`, soonest first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when `within_days` is out of range or the cursor is not one this list issued. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
         "operationId": "list_expiring_tables_api_v1_environments__env__expiring_tables_get",
         "parameters": [
           {
@@ -6232,6 +6421,55 @@
               "title": "Within Days"
             },
             "description": "The window, 1 to 3,650 days; the server's warning window (7 days by default), or 1 when that is 0, when absent."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Namespace"
+            },
+            "description": "Only the tables of this dot-joined namespace and of the ones beneath it."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most tables returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `within_days` and `namespace`."
           },
           {
             "name": "authorization",
@@ -26835,6 +27073,34 @@
         ],
         "title": "DroppedTableOut",
         "description": "One dropped table whose files are not deleted yet.\n\nParameters\n----------\nname\n    The table's name when it was dropped.\nnamespace\n    Dot-joined namespace path it was dropped from.\nuuid\n    The table's id, which a restore keeps.\nkind\n    ``TABLE``: only managed tables can be restored.\ndropped_at\n    When it was dropped.\npurge_after\n    From when on the worker's sweep deletes its files; it can be restored until then.\nrestorable\n    Whether `POST .../tables/{name}/undrop` would still restore it: `false` once\n    `purge_after` has passed or the sweep has started deleting its files."
+      },
+      "DroppedTablePageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DroppedTableOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "DroppedTablePageOut",
+        "description": "One page of the dropped tables of an environment.\n\nParameters\n----------\nitems\n    The dropped tables of this page, newest drop first.\nnext_cursor\n    The cursor of the next page; `None` on the last page."
       },
       "EndpointOut": {
         "properties": {

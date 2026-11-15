@@ -454,11 +454,17 @@ Create namespace PATH (dotted, e.g. bronze.eu).
 
 Usage: `lakana ns list [OPTIONS]`
 
-List namespaces.
+List namespaces, one page at a time, in path order.
+
+The last line names the command for the next page when there is one.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
+| `--parent` | text | none | Only the namespaces below this one, such as gold. |
+| `--depth` | whole number, 1 to 1 | none | 1 lists only the direct children of --parent (the top level without it). |
+| `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
 
 ### `lakana ns get`
 
@@ -530,14 +536,14 @@ Usage: `lakana table list [OPTIONS] [namespace]`
 
 List the tables in NAMESPACE, or with no NAMESPACE every table you may read.
 
-With NAMESPACE: the tables in it, or with --dropped the tables dropped from it. A dropped table keeps its files until `purge_after` (the server's undo period, 7 days by default); until then `lakana table undrop` restores it. A table that its retention lets expire within the server's warning window (7 days by default) shows when, in `expires`. With --model-kind, only the tables whose asset header says `kind: <that kind>`.
+With NAMESPACE: the tables in it, or with --dropped the tables dropped from it. With --dropped and no NAMESPACE: one page of the tables dropped from any namespace of the environment, newest first, paged with --limit and --cursor. A dropped table keeps its files until `purge_after` (the server's undo period, 7 days by default); until then `lakana table undrop` restores it. A table that its retention lets expire within the server's warning window (7 days by default) shows when, in `expires`. With --model-kind, only the tables whose asset header says `kind: <that kind>`.
 
 Without NAMESPACE: one page of the tables you may read in the environment (or in every environment with --all-environments), each with its owner, health in one word, rows, size, and when it was last written and read. Narrow it with --search, --under and --model-kind, order it with --sort and --order, and page on with --cursor; --lang is the language in which --search matches translated texts. A line on stderr says when a search stopped early.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `NAMESPACE` | text | none | List this namespace's tables; leave out to list across namespaces. |
-| `--dropped` | flag | off | With NAMESPACE: list the dropped tables that can still be restored, and until when. |
+| `--dropped` | flag | off | List the dropped tables that can still be restored, and until when: those of NAMESPACE, or without it those of every namespace. |
 | `--model-kind` | text | none | Only tables whose asset header declares this kind: fact, dimension, wide or staging. |
 | `--search` | text | none | Only tables whose name, label, description or grain, or a column's name, label, description or measure, contains this text (1 to 200 characters). |
 | `--under` | text | none | Only this namespace and the ones beneath it, dotted (no NAMESPACE). |
@@ -801,11 +807,14 @@ Usage: `lakana table expiring [OPTIONS]`
 
 List the managed tables that their retention lets expire soon, soonest first.
 
-Each row says when, the rule (and whether the table or its environment sets it) and who set it. Keep a table with `lakana table retention NAME --never`, or give it more days.
+Each row says when, the rule (and whether the table or its environment sets it) and who set it. Keep a table with `lakana table retention NAME --never`, or give it more days. One page is listed; the last line names the command for the next.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--within` | text | none | List what expires within this many days, such as 7d (default: the server's warning window, 7 days). |
+| `--namespace` | text | none | Only this namespace and the ones beneath it, such as silver. |
+| `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
 | `--env` | text | none | Environment (default: the profile's). |
 
 ## `lakana artifact`

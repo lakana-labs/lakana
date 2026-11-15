@@ -114,3 +114,33 @@ def test_drop_a_namespace_containing_tables_is_a_conflict(
     )
     response = client.delete("/api/v1/environments/dev/namespaces/gold", headers=AUTH_HEADER)
     assert response.status_code == 409
+
+
+def test_list_filters_by_parent_pages_and_takes_depth(
+    client: TestClient, storage_root: str
+) -> None:
+    """`parent` keeps every depth below it, `depth=1` the direct children, `limit` pages."""
+    _create_env(client, storage_root)
+    for path in ("a", "a.b", "a.b.c", "ab"):
+        response = client.post(
+            "/api/v1/environments/dev/namespaces", headers=AUTH_HEADER, json={"path": path}
+        )
+        assert response.status_code == 201, response.text
+    url = "/api/v1/environments/dev/namespaces"
+
+    first = client.get(f"{url}?parent=a&limit=1", headers=AUTH_HEADER)
+
+    assert first.status_code == 200, first.text
+    assert [ns["path"] for ns in first.json()] == ["a.b"]
+    second = client.get(
+        f"{url}?parent=a&limit=1&cursor={first.headers['x-next-cursor']}", headers=AUTH_HEADER
+    )
+    assert [ns["path"] for ns in second.json()] == ["a.b.c"]
+    assert "x-next-cursor" not in second.headers
+    direct = client.get(f"{url}?parent=a&depth=1", headers=AUTH_HEADER)
+    assert [ns["path"] for ns in direct.json()] == ["a.b"]
+    top = client.get(f"{url}?depth=1", headers=AUTH_HEADER)
+    assert [ns["path"] for ns in top.json()] == ["a", "ab", "bronze", "gold", "silver"]
+    assert client.get(f"{url}?depth=2", headers=AUTH_HEADER).status_code == 422
+    assert client.get(f"{url}?cursor=forged", headers=AUTH_HEADER).status_code == 422
+    assert client.get(f"{url}?parent=a%00", headers=AUTH_HEADER).status_code == 422

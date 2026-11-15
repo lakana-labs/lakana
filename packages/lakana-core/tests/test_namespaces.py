@@ -6,6 +6,7 @@ from unittest import mock
 
 import pytest
 from core_test_helpers import ActionAllowList, _config, _prepared_catalog, _RecordThenDeny
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -682,3 +683,82 @@ def test_a_namespace_with_a_table_the_caller_may_not_read_says_only_that_it_is_n
         dropper.drop_namespace(principal, "dev", NamespacePath.from_parts(["widgets"]))
 
     assert str(refused.value) == "widgets is not empty; drop what it holds first."
+
+
+def _ns_tree(catalog: CatalogService, principal: PrincipalRef, tmp_path: Path) -> None:
+    """Create `a`, `a.b`, `a.b.c` and `ab` in `dev`.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The acting principal.
+    tmp_path
+        Holds the storage root.
+    """
+    catalog.create_environment(principal, name="dev", storage=_config(tmp_path))
+    for parts in (["a"], ["a", "b"], ["a", "b", "c"], ["ab"]):
+        catalog.create_namespace(principal, "dev", NamespacePath.from_parts(parts))
+
+
+def test_namespaces_page_by_parts_under_a_parent(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """`a.b` and `a.b.c` lie under `a`; `ab` does not. One to a page makes two pages."""
+    _ns_tree(catalog, principal, tmp_path)
+    parent = NamespacePath.from_parts(["a"])
+
+    whole = catalog.list_namespace_page(principal, "dev", parent)
+    first = catalog.list_namespace_page(principal, "dev", parent, limit=1)
+    second = catalog.list_namespace_page(
+        principal, "dev", parent, limit=1, cursor=first.next_cursor
+    )
+
+    assert [ns.parts for ns in whole.items] == [("a", "b"), ("a", "b", "c")]
+    assert [ns.parts for ns in first.items] == [("a", "b")]
+    assert [ns.parts for ns in second.items] == [("a", "b", "c")]
+    assert second.next_cursor is None
+
+
+def test_namespaces_depth_one_keeps_only_direct_children(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """With `depth=1`, the children of `a` are `a.b` alone; with no parent, the top level."""
+    _ns_tree(catalog, principal, tmp_path)
+
+    under_a = catalog.list_namespace_page(
+        principal, "dev", NamespacePath.from_parts(["a"]), depth=1
+    )
+    top = catalog.list_namespace_page(principal, "dev", None, depth=1)
+
+    assert [ns.parts for ns in under_a.items] == [("a", "b")]
+    assert [ns.parts for ns in top.items] == [
+        ("a",),
+        ("ab",),
+        ("bronze",),
+        ("gold",),
+        ("silver",),
+    ]
+
+
+def test_namespaces_page_with_a_legacy_dotted_part_has_unique_keys(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """`["a.b"]` and `["a", "b"]` both dot to `a.b`; paging still skips and repeats nothing."""
+    _ns_tree(catalog, principal, tmp_path)
+    env_id = session.scalars(select(Namespace.environment_id)).first()
+    session.add(Namespace(id=uuid.uuid4(), environment_id=env_id, path="a.b", properties={}))
+    session.commit()
+
+    seen = []
+    cursor = None
+    while True:
+        page = catalog.list_namespace_page(principal, "dev", None, limit=1, cursor=cursor)
+        seen += [ns.parts for ns in page.items]
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+
+    assert len(seen) == len(set(seen)) == 8  # the 5 here and the scaffolded bronze, silver, gold
+    assert seen == sorted(seen)
