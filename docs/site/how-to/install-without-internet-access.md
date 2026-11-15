@@ -275,7 +275,8 @@ under test with `unshare -rn` (a new network namespace with no route out; a requ
 Every change to the image or the code runs one more check in CI
 (`scripts/offline_install_test.sh`): the container image runs under `docker run --network none`
 with `LAKANA_WORKER__EXTENSION_SOURCE=none`, starts local mode, creates a table, appends a file
-and answers `lakana sql`. That proves the image needs no network and no extension download.
+and answers `lakana sql`. That proves local mode in the image needs no network and no extension
+download. It does not cover Compose, the task images or the environments of Python assets.
 
 We did **not** test: saving and loading the container images, a Compose stack on a host without
 internet access, a real package mirror, or an internal git server. The Docker commands are

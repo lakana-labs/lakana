@@ -15,16 +15,17 @@ export NO_COLOR=1
 log=$(mktemp)
 lakana server start --local > "$log" 2>&1 &
 pid=$!
-trap "kill -INT $pid 2>/dev/null || true; wait $pid 2>/dev/null || true" EXIT
+# On any failure, show the server log; then stop the server and keep the exit status.
+trap "rc=\$?; [ \$rc -eq 0 ] || cat $log; kill -INT $pid 2>/dev/null || true; wait $pid 2>/dev/null || true; exit \$rc" EXIT
 for _ in $(seq 1 120); do
   grep -q "Lakana is running" "$log" && break
-  kill -0 "$pid" 2>/dev/null || { cat "$log"; exit 1; }
+  kill -0 "$pid" 2>/dev/null || exit 1
   sleep 0.5
 done
-grep -q "Lakana is running" "$log" || { cat "$log"; exit 1; }
+grep -q "Lakana is running" "$log" || exit 1
 out=$(lakana --output json sql "SELECT 42 AS answer")
 python -c "import json,sys; assert json.loads(sys.argv[1]) == [{\"answer\": 42}], sys.argv[1]" "$out"
-lakana table create bronze.demo --column id:long --column name:string?
+lakana table create bronze.demo --column id:long --column "name:string?"
 printf "id,name\n1,alpha\n2,beta\n" > /var/tmp/lakana/demo.csv
 lakana table append bronze.demo /var/tmp/lakana/demo.csv
 out=$(lakana --output json sql "SELECT id, name FROM bronze.demo ORDER BY id")
