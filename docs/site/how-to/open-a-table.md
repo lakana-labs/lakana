@@ -46,7 +46,9 @@ git, or use **Rebuild from git…**.
 Drop and Rebuild from git ask for a recent passkey touch: one from the last 15 minutes. When yours
 is older, the browser asks you to touch your passkey and the action is sent again. If the touch
 fails, the dialog stays open with the reason, nothing is dropped, and **Cancel** closes it. In a
-protected environment both also ask why you break the protection, which the audit log records.
+protected environment Drop also asks why you break the protection, which the audit log records.
+Rebuild from git asks for no second reason: the one reason it asks for is also sent as the reason
+you break the protection, as `--break-glass` does.
 
 ## Overview
 

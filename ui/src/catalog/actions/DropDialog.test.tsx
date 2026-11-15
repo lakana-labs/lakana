@@ -116,6 +116,46 @@ describe("DropDialog", () => {
     ]);
   });
 
+  it("sends the drop again after the touch exactly as before, with purge and the reason", async () => {
+    fakeWebAuthn();
+    let tries = 0;
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: true } },
+      [DROP]: () => {
+        tries += 1;
+        return tries === 1 ? STEP_UP_REQUIRED : { status: 204 };
+      },
+      "POST /api/v1/sign-in/step-up/options": {
+        status: 200,
+        body: { ceremony_id: "c-1", public_key: {} },
+      },
+      "POST /api/v1/sign-in/step-up": { status: 204 },
+    });
+    const { onDone, user } = renderDrop();
+
+    await user.type(
+      await screen.findByRole("textbox", { name: /Why you break the protection of prod/ }),
+      "Wrong data in prod",
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Delete the files now: the table cannot be restored" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Drop the table" }));
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledTimes(1);
+    });
+    const drops = server.sent.filter((request) => request.method === "DELETE");
+    expect(drops).toHaveLength(2);
+    const [first, retry] = drops;
+    expect(retry?.path).toBe(first?.path);
+    expect(retry?.body).toEqual(first?.body);
+    const query = new URL(first?.path ?? "", "http://x").searchParams;
+    expect(query.get("purge")).toBe("true");
+    expect(query.get("break_glass_reason")).toBe("Wrong data in prod");
+  });
+
   it("keeps the dialog open with the reason when the passkey touch fails", async () => {
     fakeWebAuthn();
     const server = fakeServer({

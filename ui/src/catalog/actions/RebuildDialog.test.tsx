@@ -168,6 +168,45 @@ describe("RebuildDialog", () => {
     ]);
   });
 
+  it("rebuilds again after the touch exactly as before, with the reason in the body and the query", async () => {
+    fakeWebAuthn();
+    let tries = 0;
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: true } },
+      [REBUILD]: () => {
+        tries += 1;
+        return tries === 1
+          ? { status: 403, body: { type: "StepUpRequired", detail: "Confirm with your passkey." } }
+          : { status: 202, body: REBUILT };
+      },
+      "POST /api/v1/sign-in/step-up/options": {
+        status: 200,
+        body: { ceremony_id: "c-1", public_key: {} },
+      },
+      "POST /api/v1/sign-in/step-up": { status: 204 },
+    });
+    const { user } = renderRebuild();
+
+    await screen.findByText(/prod is protected/);
+    await user.type(
+      screen.getByRole("textbox", { name: "Why it is rebuilt (recorded in the audit log)" }),
+      REASON,
+    );
+    await user.click(screen.getByRole("button", { name: "Rebuild" }));
+
+    expect(await screen.findByText(/queued run/)).toBeInTheDocument();
+    const sent = rebuilds(server.sent);
+    expect(sent).toHaveLength(2);
+    const [first, retry] = sent;
+    expect(retry?.path).toBe(first?.path);
+    expect(first?.body).toEqual({ reason: REASON });
+    expect(retry?.body).toEqual({ reason: REASON });
+    expect(new URL(retry?.path ?? "", "http://x").searchParams.get("break_glass_reason")).toBe(
+      REASON,
+    );
+  });
+
   it("in a protected environment sends the reason as break_glass_reason too and says so", async () => {
     const server = fakeServer({
       ...manageRoutes(),
