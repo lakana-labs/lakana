@@ -21,14 +21,14 @@ import { getRetention, type RetentionRule, setRetention, type TableRef } from ".
 import type { TableRetentionOut } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
 import { Loaded } from "../../shell/Loaded";
-import { PendingButton } from "../../shell/PendingButton";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { useResource } from "../../shell/useResource";
 import { useWhen } from "../../shell/useWhen";
 import { markedText } from "../../shell/VisibleText";
-import { AttemptStatus, useAttempt } from "../../sign-in/Attempt";
+import { useAttempt } from "../../sign-in/Attempt";
 import { retentionWords } from "../retention";
 import "./actionStrings";
+import { ConfirmRow } from "./ConfirmRow";
 import { useProtected } from "./useProtected";
 
 /** The three rules a table can have. */
@@ -164,27 +164,15 @@ function RetentionForm({ place, onClose, current }: RetentionFormProps): JSX.Ele
           <Input />
         </TextField>
       )}
-      <div className="step-actions">
-        {rule === null ? (
-          <Button className="button button-primary" isDisabled>
-            {t("table.actions.retention.save")}
-          </Button>
-        ) : (
-          <PendingButton
-            className="button button-primary"
-            pending={attempt.busy}
-            onPress={() => {
-              save(rule);
-            }}
-          >
-            {t("table.actions.retention.save")}
-          </PendingButton>
-        )}
-        <Button className="button" onPress={onClose}>
-          {t("dialog.cancel")}
-        </Button>
-      </div>
-      <AttemptStatus attempt={attempt} waiting={t("common.working")} />
+      <ConfirmRow
+        attempt={attempt}
+        label={t("table.actions.retention.save")}
+        disabled={rule === null}
+        onConfirm={() => {
+          save(rule as RetentionRule);
+        }}
+        onCancel={onClose}
+      />
     </>
   );
 }

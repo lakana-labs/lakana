@@ -5,16 +5,16 @@
  * @packageDocumentation
  */
 import { type JSX, useState } from "react";
-import { Button, Heading, Input, Label, Text, TextField } from "react-aria-components";
+import { Heading, Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, type TableOut } from "../../api";
 import { type DroppedTableOut, undropTable } from "../../api/manage";
 import { ActionDialog } from "../../shell/ActionDialog";
-import { PendingButton } from "../../shell/PendingButton";
 import { markedText } from "../../shell/VisibleText";
-import { AttemptStatus, useAttempt } from "../../sign-in/Attempt";
+import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
+import { ConfirmRow } from "./ConfirmRow";
 import { ProtectedReason } from "./ProtectedReason";
 import { useProtected } from "./useProtected";
 
@@ -105,20 +105,14 @@ export function UndropDialog({
       {needsReason && (
         <ProtectedReason environment={environment} value={reason} onChange={setReason} />
       )}
-      <div className="step-actions">
-        <PendingButton
-          className="button button-primary"
-          pending={attempt.busy || protectedEnvironment === undefined}
-          isDisabled={missing}
-          onPress={restore}
-        >
-          {t("table.actions.undrop.confirm")}
-        </PendingButton>
-        <Button className="button" onPress={onCancel}>
-          {t("dialog.cancel")}
-        </Button>
-      </div>
-      <AttemptStatus attempt={attempt} waiting={t("common.working")} />
+      <ConfirmRow
+        attempt={attempt}
+        label={t("table.actions.undrop.confirm")}
+        waiting={protectedEnvironment === undefined}
+        disabled={missing}
+        onConfirm={restore}
+        onCancel={onCancel}
+      />
     </ActionDialog>
   );
 }

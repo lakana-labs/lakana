@@ -4,14 +4,14 @@
  * @packageDocumentation
  */
 import { type JSX, useState } from "react";
-import { Button, Heading } from "react-aria-components";
+import { Heading } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { dropArtifact, dropTable, type OrphanOut, type TableOut, type TableRef } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
-import { PendingButton } from "../../shell/PendingButton";
 import { markedText } from "../../shell/VisibleText";
-import { AttemptStatus, useAttempt } from "../../sign-in/Attempt";
+import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
+import { ConfirmRow } from "./ConfirmRow";
 import { ProtectedReason } from "./ProtectedReason";
 import { useProtected } from "./useProtected";
 
@@ -92,20 +92,14 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
       {needsReason && (
         <ProtectedReason environment={ref.environment} value={reason} onChange={setReason} />
       )}
-      <div className="step-actions">
-        <PendingButton
-          className="button button-primary"
-          pending={attempt.busy || protectedEnvironment === undefined}
-          isDisabled={needsReason && reason.trim() === ""}
-          onPress={drop}
-        >
-          {t(artifact ? "table.actions.drop.artifactConfirm" : "table.actions.drop.confirm")}
-        </PendingButton>
-        <Button className="button" onPress={onCancel}>
-          {t("dialog.cancel")}
-        </Button>
-      </div>
-      <AttemptStatus attempt={attempt} waiting={t("common.working")} />
+      <ConfirmRow
+        attempt={attempt}
+        label={t(artifact ? "table.actions.drop.artifactConfirm" : "table.actions.drop.confirm")}
+        waiting={protectedEnvironment === undefined}
+        disabled={needsReason && reason.trim() === ""}
+        onConfirm={drop}
+        onCancel={onCancel}
+      />
     </ActionDialog>
   );
 }
