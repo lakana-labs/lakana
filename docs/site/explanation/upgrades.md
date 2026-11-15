@@ -149,8 +149,9 @@ break-glass does not get past it. These are refused:
 - a person's data write (`PUT …/data`, `lakana load`) that would create a declared table;
 - an Iceberg rename that moves a project-built table away or onto a declared name;
 - a person's `lakana artifact upload` that would create a new artifact under a declared name;
-- `lakana table undrop` as a different kind than the name is now declared as, and `--as` onto any
-  declared name;
+- `lakana table undrop` of a table under a name now declared as a view or an artifact (or of a view
+  under a name declared as a table or an artifact), and `--as` onto any declared name; an undrop under
+  a name declared as the same kind still works;
 - a person's `lakana sql --mode view` that creates a view under a declared name or replaces a
   project-built view.
 
@@ -191,8 +192,9 @@ asked, so no script changes.
 
 ### Expiring tables, namespaces, artifacts and orphans come in pages (breaking)
 
-These lists return at most 100 rows per request: the dropped tables of an environment, expiring
-tables, namespaces, orphans and artifacts. A script that reads one request now reads only the
+These lists return at most 100 rows per request: expiring tables, namespaces, orphans and artifacts,
+and the new list of an environment's dropped tables (`lakana table list --dropped` without a
+namespace). A script that reads one request now reads only the
 first page, as the lists of 0.16.0 did. Follow the cursor, which is the `X-Next-Cursor` header
 (absent on the last page) or, for orphans and the dropped-tables list, `next_cursor` in the body; send it back as
 `cursor`, with the same filters. In Python, `client.tables.iter_expiring`, `iter_dropped`,
