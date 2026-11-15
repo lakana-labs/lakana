@@ -218,6 +218,11 @@ the same way; its weekdays simply look alike. `band.basis` says which band judge
 names the day, as in `usually 450–550 on Saturdays`. A band recorded by an earlier version has
 no `basis`: it was the band of all loads. There is no setting: it is always on.
 
+A lasting change in a table's volume (a new source, a load that now runs twice as often) keeps
+`volume` firing until the band has learned the new level: about three weeks for a daily table,
+since each weekday needs its own new loads. If the change is expected, set `health: {volume: off}`
+(or `warn`, if it blocks) in the asset header for that time.
+
 The weekday is taken in the time zone of the job that writes the table, the `timezone:` of its
 schedule (see [lakana.yaml](lakana-yaml.md)), so a job that runs at 01:00 in Berlin loads
 "Monday" all year, whatever the date in UTC. A table that no deployed job builds, or whose
