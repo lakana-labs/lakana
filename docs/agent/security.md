@@ -4533,13 +4533,16 @@ to bind (its lambda reaches DuckDB as JSON); it never runs anything the guard di
 **Lakana reads DuckDB SQL with its own parser, not sqlglot's newest reading (#415).** From
 sqlglot 30.25 the DuckDB parser no longer records that a lambda was written with `LAMBDA`
 (`upper(lambda j: 'a')` and `upper(j -> 'a')` became one tree, and the first ran as the JSON
-extract) and reads `~`/`!~` as DuckDB 2.0's partial match. Every parse in `lakana-core` goes
+extract) and reads `~`/`!~` as DuckDB 2.0's partial match. Every parse in the packages goes
 through `lakana_core.sql_dialect` (`parse_one`, `parse`), whose parser marks a keyword lambda
 (`KEYWORD_LAMBDA` in its `meta`, which `_json_arrows_outside_lambda_functions` reads) and reads
 `~` as `RegexpFullMatch`, so a query, a check and a deployed asset keep the whole-text match the
 user documentation promises (`test_a_tilde_runs_as_a_whole_text_match`,
 `test_a_keyword_lambda_outside_a_lambda_function_is_refused_by_duckdb`). A new parse site that
-calls `sqlglot.parse_one` directly gets the other reading; use the module.
+calls `sqlglot.parse_one` directly gets the other reading; use the module. sqlglot's
+`lineage` is handed the parsed tree, never the text (`lineage.extract_lineage`), and
+`scripts/tests/test_one_sql_parser.py` scans `packages/*/src` for a second parser
+(`sqlglot.parse_one`, `parse`, `transpile`, `maybe_parse`, `lineage` on text).
 
 **The ambiguity gate qualifies tables, not columns.** `_require_unambiguous_references` runs
 `qualify(..., qualify_columns=False)`: from 30.25 the column step refuses every unqualified
