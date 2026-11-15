@@ -539,6 +539,13 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 | `short id` | 8, 12 or 16 hex digits in a table cell (`│ `) or after the words `run`, `token` or `manifest`: a run's first eight characters, a token's key id, a manifest digest | `<short id>` |
 | `package count` | the number in uv's `Resolved 44 packages`, which follows the public index | `<count>` |
 
+After masking, in a line with a box-drawing character (`│ ┃ ┏ ┡ └` and so on) runs of spaces
+and runs of `─ ━ ═` count as one, on both sides: a table pads every cell to its widest value, so
+a masked value of another length (a 16 and a 19 digit snapshot id) would otherwise fail the
+comparison. Inside table lines, padding and in-cell alignment are therefore not compared. Only the
+comparison does this; `--fix` writes the run's real text, and when any line of a table changes it
+takes the whole table (top border to bottom border) from the run, so the widths stay consistent.
+
 A mask hides a change too, so add one only for a value that really differs per run, and
 prefer a narrow pattern. Table width depends on the terminal: an example that quotes tables
 sets `COLUMNS` as the page shows them (`export COLUMNS=120`).
