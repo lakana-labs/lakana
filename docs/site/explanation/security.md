@@ -62,14 +62,16 @@ passkey ([Invite your team](../how-to/invite-your-team.md),
   (an administrator may change both in **Settings → Sign-in**, up to 24 hours and 30 days), when the
   person signs out here or everywhere, when an administrator ends it, and when the account is
   deactivated. Background refreshes of a page never keep it alive.
-- **Sensitive actions need a fresh touch.** In a browser, actions that change who may do what or
-  hand out credentials need a passkey touch from the last 15 minutes; the browser asks for one when
+- **Sensitive actions need a fresh touch.** In a browser, actions that change who may do what,
+  hand out credentials or drop data need a passkey touch from the last 15 minutes; the browser asks for one when
   it is older. They are: adding or removing a passkey; issuing an invite or a recovery link;
   creating an API token; creating or deactivating a person; granting or revoking rights, group
   memberships, row filters and column masks, and applying an access file; ending another person's
   sessions; changing the session lengths; creating or changing secrets, connections, CI trust
   rules, repositories and package indexes; creating an environment or changing its protection or
-  storage; and binding a run-as account to a deploy. A stolen session cookie alone is therefore
+  storage; binding a run-as account to a deploy; and dropping a table (with or without purging
+  its files), a namespace, an artifact or one artifact version. Restoring a dropped table needs
+  no touch. A stolen session cookie alone is therefore
   not enough for any of them. A request with an API token needs no touch: the token is what the
   command line uses.
 - **A passkey is bound to the address.** The browser offers a passkey only to the site it was made

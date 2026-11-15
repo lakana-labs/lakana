@@ -8,6 +8,7 @@ import typer
 
 from lakana.cli import _output
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
+from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import confirm, parse_key_values, resolve_environment, state_of
 
 ns_app = typer.Typer(help="Manage namespaces.", no_args_is_help=True)
@@ -59,8 +60,28 @@ def create(
 
 
 @ns_app.command("list")
-def list_namespaces(ctx: typer.Context, env: _ENV = None) -> None:
-    """List namespaces.
+def list_namespaces(
+    ctx: typer.Context,
+    env: _ENV = None,
+    parent: Annotated[
+        str | None,
+        typer.Option("--parent", help="Only the namespaces below this one, such as gold."),
+    ] = None,
+    depth: Annotated[
+        int | None,
+        typer.Option(
+            "--depth",
+            min=1,
+            max=1,
+            help="1 lists only the direct children of --parent (the top level without it).",
+        ),
+    ] = None,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
+) -> None:
+    """List namespaces, one page at a time, in path order.
+
+    The last line names the command for the next page when there is one.
 
     Parameters
     ----------
@@ -68,12 +89,25 @@ def list_namespaces(ctx: typer.Context, env: _ENV = None) -> None:
         The Typer context.
     env
         The environment.
+    parent
+        `--parent`.
+    depth
+        `--depth`.
+    limit
+        `--limit`.
+    cursor
+        `--cursor`.
     """
     state = state_of(ctx)
-    _output.emit(
+    page = state.client().namespaces.list_page(
+        resolve_environment(state, env), parent=parent, depth=depth, limit=limit, cursor=cursor
+    )
+    _output.emit(state, page.items, droppable=["properties"])
+    more_results(
         state,
-        state.client().namespaces.list(resolve_environment(state, env)),
-        droppable=["properties"],
+        ["lakana", "ns", "list"],
+        {"--env": env, "--parent": parent, "--depth": depth, "--limit": limit},
+        page.next_cursor,
     )
 
 

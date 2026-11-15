@@ -648,6 +648,7 @@ def _deploy(
     lock_credential: tuple[str, str] | None = None,
     private_package: str = "team-utils",
     index_url_after_lock: str | None = None,
+    existing: dict[str, list[int]] | None = None,
 ) -> _Project:
     """Create an environment with its source tables; register, lock and deploy a project.
 
@@ -681,6 +682,10 @@ def _deploy(
     index_url_after_lock
         After the lock, rewrite the private index's URL in `pyproject.toml` and `uv.lock` to
         this one (another host), so the committed project names an index nobody registered.
+    existing
+        Tables a person creates before the deploy, dotted name to the ids they hold: the project
+        then takes each over, as a deploy of a table a person built does. After the deploy a
+        person may no longer create a name the project declares.
 
     Returns
     -------
@@ -701,6 +706,9 @@ def _deploy(
             ("bronze.dials", [1]),
             ("bronze.staging.fresh", [3, 4]),
         ):
+            admin.tables.create(env, table, schema=ids)
+            admin.tables.append(env, table, pa.table({"id": pa.array(values, pa.int64())}))
+        for table, values in (existing or {}).items():
             admin.tables.create(env, table, schema=ids)
             admin.tables.append(env, table, pa.table({"id": pa.array(values, pa.int64())}))
     path = stack.services.roots / repo
@@ -919,9 +927,8 @@ def test_a_concurrent_write_fails_the_attempt_with_a_conflict(
 ) -> None:
     """Exit criterion: the 409. The one uncounted conflict retry then succeeds on fresh state."""
     admin, env = stack.admin, project.environment
-    admin.tables.replace(
-        env, "gold.racy", pa.table({"id": pa.array([0], pa.int64())}), expected_snapshot_id="none"
-    )
+    # The project's own first run creates the table: a person may not create a declared name.
+    stack.succeed(env, admin.runs.start(env, project.repository, select=["gold.racy"]).id)
     run = admin.runs.start(env, project.repository, select=["gold.racy"])
     wrote = threading.Event()
     errors: list[BaseException] = []
@@ -2395,12 +2402,10 @@ def test_a_second_attempts_failed_check_sets_the_table_back_to_before_the_first_
             "assets/gold/after_wide.sql": "SELECT count(*) AS n FROM silver.wide\n",
             "checks/silver/wide/no_twos.sql": "SELECT id FROM silver.wide WHERE id = 2\n",
         },
+        existing={"silver.wide": [7, 8]},
     )
     admin, env = stack.admin, project.environment
-    admin.tables.create(env, "silver.wide", schema=pa.schema([pa.field("id", pa.int64())]))
-    before = admin.tables.append(
-        env, "silver.wide", pa.table({"id": pa.array([7, 8], pa.int64())})
-    ).snapshot_id
+    before = admin.tables.get(env, "silver.wide").snapshot_id
     assert before is not None
     stack.hold.arm("wide", seconds=_WIDE_TIMEOUT + 30)
     run = admin.runs.start(env, project.repository)

@@ -10,6 +10,7 @@ import httpx
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
 from lakana._models import (
+    DefinedBy,
     HealthSummary,
     TableListItem,
     TableMatch,
@@ -18,8 +19,10 @@ from lakana._models import (
     TreeEnvironment,
     TreeNamespace,
 )
+from lakana.resources.artifacts import artifact_from_json, version_from_json
 from lakana.resources.catalog import Catalog
-from lakana.resources.tables import Tables
+from lakana.resources.deploys import OrphanTables
+from lakana.resources.tables import Tables, _dropped_from_json
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
 
@@ -204,3 +207,75 @@ def test_get_table_reads_owner_and_health_summary_and_tolerates_their_absence() 
     old = tables.get("dev", "gold.old")
     assert old.health_summary is None and old.owner is None
     assert (old.created_at, old.last_read_at, old.readers_7d) == (None, None, 0)
+
+
+_FILE = {"repository": "analytics", "path": "assets/gold/t.sql"}
+
+
+def test_a_table_without_the_new_fields_still_reads() -> None:
+    sent: list[httpx.Request] = []
+    base = {"name": "t", "namespace": "gold", "uuid": "u", "metadata_location": None, "schema": []}
+    new = {**base, "defined_by": _FILE, "actions": ["drop", "rebuild"]}
+    tables = Tables(_transport([new, base], sent))
+
+    table = tables.get("dev", "gold.t")
+    assert table.defined_by == DefinedBy("analytics", "assets/gold/t.sql")
+    assert table.actions == ("drop", "rebuild")
+    old = tables.get("dev", "gold.t")
+    assert (old.defined_by, old.actions) == (None, ())
+
+
+def test_a_list_item_reads_defined_by_and_actions_and_tolerates_their_absence() -> None:
+    sent: list[httpx.Request] = []
+    body = {
+        "items": [_item("a", defined_by=_FILE, actions=["drop"]), _item("b")],
+        "next_cursor": None,
+        "capped": False,
+    }
+    first, second = Catalog(_transport([body], sent)).list().items
+    assert (first.defined_by, first.actions) == (
+        DefinedBy("analytics", "assets/gold/t.sql"),
+        ("drop",),
+    )
+    assert (second.defined_by, second.actions) == (None, ())
+
+
+def test_the_other_rows_read_their_actions_and_tolerate_their_absence() -> None:
+    dropped = {
+        "name": "t",
+        "namespace": "gold",
+        "uuid": "u",
+        "kind": "TABLE",
+        "dropped_at": "2026-11-01T12:00:00+00:00",
+        "purge_after": "2026-11-08T12:00:00+00:00",
+        "restorable": True,
+    }
+    assert _dropped_from_json({**dropped, "actions": ["undrop"]}).actions == ("undrop",)
+    assert _dropped_from_json(dropped).actions == ()
+    artifact = {
+        "name": "churn",
+        "namespace": "models",
+        "uuid": "u",
+        "kind": "ARTIFACT",
+        "current_version": 1,
+        "versions": 1,
+        "size_bytes": 3,
+        "created_at": "2026-11-01T12:00:00+00:00",
+    }
+    assert artifact_from_json({**artifact, "actions": ["drop"]}).actions == ("drop",)
+    assert artifact_from_json(artifact).actions == ()
+    version = {
+        "version": 1,
+        "manifest_sha256": "0" * 64,
+        "size_bytes": 3,
+        "file_count": 1,
+        "is_directory": False,
+        "created_at": "2026-11-01T12:00:00+00:00",
+    }
+    assert version_from_json({**version, "actions": ["delete"]}).actions == ("delete",)
+    assert version_from_json(version).actions == ()
+    sent: list[httpx.Request] = []
+    orphan = {"repository": "analytics", "table": "silver.old"}
+    body = {"orphans": [{**orphan, "actions": ["drop"]}, orphan], "hidden": 0}
+    report = OrphanTables(_transport([body], sent)).list("dev")
+    assert [o.actions for o in report.orphans] == [("drop",), ()]

@@ -876,8 +876,9 @@ def test_two_open_versions_of_one_key_are_refused() -> None:
         _plan(_batch([("A", "south", 1.0)]), twice)
     assert str(info.value) == (
         "1 key of gold.dim_customer has more than one open version; there must be one per key, "
-        "so nothing was written. Drop the table (`lakana table delete gold.dim_customer --env "
-        "dev`) and let the next run create it again (its history starts again with that run)."
+        "so nothing was written. Build it again from git: `lakana table rebuild gold.dim_customer "
+        '--env dev --reason "…"` (it drops the table and queues the run that creates it; its '
+        "history starts again with that run)."
     )
     thrice = pa.concat_tables([twice, _open([("B", "n", 1.0)]), _open([("B", "n", 1.0)])])
     with pytest.raises(ValidationError, match=r"2 keys of gold\.dim_customer have more than one"):

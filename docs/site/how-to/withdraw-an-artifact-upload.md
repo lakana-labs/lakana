@@ -66,7 +66,8 @@ Withdrew upload a8906dd2-aca6-46da-88cb-d8368776a48e of dev/models.abandoned_mod
 ```
 
 The place is free at once. Files the upload had already stored stay until Lakana's periodic
-clean-up finds that no version and no open upload needs them. The list is now empty:
+clean-up finds that no version and no open upload needs them. The audit log records the withdrawal
+as `ARTIFACT_UPLOAD_ABORTED`, with the artifact's name and the upload's id. The list is now empty:
 
 <!-- source: docs/examples/train-and-predict/run.sh#uploads-list-empty -->
 ```bash

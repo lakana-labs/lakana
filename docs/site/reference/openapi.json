@@ -1330,7 +1330,7 @@
           "namespaces"
         ],
         "summary": "List the namespaces of an environment",
-        "description": "Lists every namespace of the environment at every depth, not only the top level. Needs `READ_NAMESPACE` on the environment. Answers 404 when the environment does not exist.",
+        "description": "Lists the namespaces of the environment at every depth, not only the top level, in the order of their path parts. Needs `READ_NAMESPACE` on the environment. Answers 404 when the environment does not exist and 422 for a `depth` other than 1 or a cursor this list did not issue. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
         "operationId": "list_namespaces_api_v1_environments__env__namespaces_get",
         "parameters": [
           {
@@ -1342,6 +1342,72 @@
               "title": "Env"
             },
             "description": "Environment name."
+          },
+          {
+            "name": "parent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent"
+            },
+            "description": "Dot-joined path; only the namespaces below it, at every depth (the parent itself is left out)."
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Depth"
+            },
+            "description": "``1`` keeps only the direct children of `parent`, or the top-level namespaces without one."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most namespaces returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `parent` and `depth`."
           },
           {
             "name": "authorization",
@@ -1526,7 +1592,7 @@
           "namespaces"
         ],
         "summary": "Drop a namespace",
-        "description": "Needs `DROP_NAMESPACE`. Answers 404 when the namespace does not exist and 409 while it still holds tables or child namespaces.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nNeeds `DROP_NAMESPACE`. Answers 404 when the namespace does not exist and 409 while it still holds tables or child namespaces.",
         "operationId": "drop_namespace_api_v1_environments__env__namespaces__path__delete",
         "parameters": [
           {
@@ -2326,7 +2392,7 @@
           "tables"
         ],
         "summary": "Create a table",
-        "description": "Creates a managed Iceberg table from the columns in the request. Needs `CREATE_TABLE` on the namespace. Answers 404 when the environment or namespace does not exist, 409 when a table of that name exists and 422 for an unknown column type, an empty or duplicate column name, or a namespace not rooted at `bronze`, `silver` or `gold`.",
+        "description": "Creates a managed Iceberg table from the columns in the request. Needs `CREATE_TABLE` on the namespace. Answers 404 when the environment or namespace does not exist, 409 when a table of that name exists or a deployed project declares the name (only git may take it), and 422 for an unknown column type, an empty or duplicate column name, or a namespace not rooted at `bronze`, `silver` or `gold`.",
         "operationId": "create_table_api_v1_environments__env__namespaces__path__tables_post",
         "parameters": [
           {
@@ -2884,7 +2950,7 @@
           "tables"
         ],
         "summary": "Drop a table",
-        "description": "Removes the table from the catalog at once, with its grants, row filters and column masks. Needs `DROP_TABLE`. A managed table keeps its files for the undo period (7 days unless the operator changed it), during which it can be restored, and then they are deleted; an external table's files and a view are never deleted. With `purge` set, the files are due at once, the next clean-up deletes them and the table cannot be restored. Answers 404 when the table does not exist.",
+        "description": "From the web interface a drop needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does. This holds with or without `purge`; undrop asks for no touch.\n\nRemoves the table from the catalog at once, with its grants, row filters and column masks. Needs `DROP_TABLE`. A managed table keeps its files for the undo period (7 days unless the operator changed it), during which it can be restored, and then they are deleted; an external table's files and a view are never deleted. With `purge` set, the files are due at once, the next clean-up deletes them and the table cannot be restored. Answers 404 when the table does not exist, and 409 when a deployed project builds the table or view: what git defines is changed in git, so remove the asset there and deploy, then drop it from Orphans. The message names the file to a caller who may read the table. Neither `purge` nor break-glass gets past this.",
         "operationId": "drop_table_api_v1_environments__env__namespaces__path__tables__name__delete",
         "parameters": [
           {
@@ -2992,6 +3058,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4379,6 +4455,157 @@
         }
       }
     },
+    "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild": {
+      "post": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "Rebuild a table a deployed project builds: drop it and queue a run of its asset",
+        "description": "For a table that has to be built again from scratch from git. In one transaction it drops the table, which stays restorable with undrop for the undo period like any drop, and queues a run of exactly the asset that declares it; the answer names that run. Needs `DROP_TABLE` on the table and `RUN` on the environment. From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does. In a protected environment it needs `?break_glass_reason=`, and the deployment's run principal writes the table. The repository's file is named only to a caller who may read the table (`path` is `null` otherwise). Answers 404 when the table does not exist, 409 when it is an artifact, when no deployed project declares it (drop it instead), when another run of the project is active (nothing is dropped; wait for it and rebuild again) or when a protected environment has no run principal, and 422 when the reason is not 10 to 500 characters on one line.",
+        "operationId": "rebuild_table_api_v1_environments__env__namespaces__path__tables__name__rebuild_post",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            },
+            "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Table name."
+          },
+          {
+            "name": "break_glass_reason",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why the protection of a protected environment is broken, up to 500 characters; recorded in the audit log. Only a protected environment needs it.",
+              "title": "Break Glass Reason"
+            },
+            "description": "Why the protection of a protected environment is broken, up to 500 characters; recorded in the audit log. Only a protected environment needs it."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TableRebuildIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableRebuildOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": {
       "get": {
         "tags": [
@@ -4617,7 +4844,7 @@
           "tables"
         ],
         "summary": "Register an external table",
-        "description": "Registers a raw-zone table backed by files that are already in storage. Needs `CREATE_TABLE`. Answers 404 when the environment or namespace does not exist and 422 when `location_pattern` is not shaped `raw/<directory>/<file-glob>`, claims files another external table in the environment claims, leaves the storage root, or the `format` is not supported.",
+        "description": "Registers a raw-zone table backed by files that are already in storage. Needs `CREATE_TABLE`. Answers 404 when the environment or namespace does not exist, 409 when the name is taken or a deployed project declares it (only git may take it), and 422 when `location_pattern` is not shaped `raw/<directory>/<file-glob>`, claims files another external table in the environment claims, leaves the storage root, or the `format` is not supported.",
         "operationId": "create_external_table_api_v1_environments__env__namespaces__path__tables_external_post",
         "parameters": [
           {
@@ -6036,13 +6263,136 @@
         }
       }
     },
+    "/api/v1/environments/{env}/dropped-tables": {
+      "get": {
+        "tags": [
+          "tables"
+        ],
+        "summary": "List the dropped tables of an environment",
+        "description": "Lists the tables dropped from any namespace of the environment whose files are not deleted yet, newest drop first. Needs `READ_ENVIRONMENT`; a table the caller may not read is left out. Answers 404 when the environment does not exist and 422 when the cursor is not one this list issued.",
+        "operationId": "list_environment_dropped_tables_api_v1_environments__env__dropped_tables_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most tables returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DroppedTablePageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/expiring-tables": {
       "get": {
         "tags": [
           "tables"
         ],
         "summary": "List the tables about to expire",
-        "description": "Lists the managed tables of the environment that expire within `within_days`, soonest first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when `within_days` is out of range.",
+        "description": "Lists the managed tables of the environment that expire within `within_days`, soonest first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when `within_days` is out of range or the cursor is not one this list issued. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
         "operationId": "list_expiring_tables_api_v1_environments__env__expiring_tables_get",
         "parameters": [
           {
@@ -6071,6 +6421,55 @@
               "title": "Within Days"
             },
             "description": "The window, 1 to 3,650 days; the server's warning window (7 days by default), or 1 when that is 0, when absent."
+          },
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Namespace"
+            },
+            "description": "Only the tables of this dot-joined namespace and of the ones beneath it."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most tables returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `within_days` and `namespace`."
           },
           {
             "name": "authorization",
@@ -7567,7 +7966,7 @@
           "artifacts"
         ],
         "summary": "Begin an artifact upload",
-        "description": "Checks a manifest of files and opens an upload for the next version of an artifact; the artifact is created on first use. The answer names the files the store does not have yet: send those with the blob route, then commit. Needs `WRITE_TABLE` on the name, and `CREATE_TABLE` as well to create the artifact. Answers 404 when the namespace does not exist, 409 when the artifact has too many open uploads, 413 for a manifest over the server's limit, 408 when the body arrives too slowly, 503 when the server is busy (try again after `Retry-After`) and 422 when the body is not a manifest or breaks one of its rules.",
+        "description": "Checks a manifest of files and opens an upload for the next version of an artifact; the artifact is created on first use. The answer names the files the store does not have yet: send those with the blob route, then commit. Needs `WRITE_TABLE` on the name, and `CREATE_TABLE` as well to create the artifact. Answers 404 when the namespace does not exist, 409 when the artifact has too many open uploads or when a person would create an artifact under a name a deployed project declares, 413 for a manifest over the server's limit, 408 when the body arrives too slowly, 503 when the server is busy (try again after `Retry-After`) and 422 when the body is not a manifest or breaks one of its rules.",
         "operationId": "begin_upload_api_v1_environments__env__namespaces__path__artifacts__name__uploads_post",
         "parameters": [
           {
@@ -8219,7 +8618,7 @@
           "artifacts"
         ],
         "summary": "Delete one version of an artifact",
-        "description": "Deletes the bytes of one version; its record and its lineage stay. Needs `DROP_TABLE` on the name; a task token is always refused, and in a protected environment a reason for breaking the protection is needed. The version is gone for every reader when this answers. Large versions are removed in part by this request and in part by the server's periodic clean-up. The answer says how many files and bytes were freed and how many stayed, with the reason. Answers 403 with one text whether or not the artifact or version exists, 404 when the caller may drop the name and the artifact or version is absent, 409 when the version is deleted already and 422 when the version is not a positive number or the name is not an artifact.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nDeletes the bytes of one version; its record and its lineage stay. Needs `DROP_TABLE` on the name; a task token is always refused, and in a protected environment a reason for breaking the protection is needed. The version is gone for every reader when this answers. Large versions are removed in part by this request and in part by the server's periodic clean-up. The answer says how many files and bytes were freed and how many stayed, with the reason. Answers 403 with one text whether or not the artifact or version exists, 404 when the caller may drop the name and the artifact or version is absent, 409 when the version is deleted already and 422 when the version is not a positive number or the name is not an artifact.",
         "operationId": "delete_version_api_v1_environments__env__namespaces__path__artifacts__name__versions__version__delete",
         "parameters": [
           {
@@ -8490,7 +8889,7 @@
           "artifacts"
         ],
         "summary": "Drop an artifact",
-        "description": "Removes the artifact with all its versions' bytes, its rows and its grants. This cannot be undone. Needs `DROP_TABLE` on the name; a task token is always refused, and in a protected environment a reason for breaking the protection is needed. An artifact with thousands of files takes a while; if the server fails part-way, its periodic clean-up finishes the job. Answers 403 with one text whether or not the artifact exists, 404 when the caller may drop the name and no artifact has it, 409 when the storage could not be written (nothing was deleted) and 422 when the name belongs to a table or a view.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nRemoves the artifact with all its versions' bytes, its rows and its grants. This cannot be undone. Needs `DROP_TABLE` on the name; a task token is always refused, and in a protected environment a reason for breaking the protection is needed. An artifact with thousands of files takes a while; if the server fails part-way, its periodic clean-up finishes the job. Answers 403 with one text whether or not the artifact exists, 404 when the caller may drop the name and no artifact has it, 409 when a deployed project produces the artifact (remove the asset in git and deploy, or delete single versions) or when the storage could not be written (nothing was deleted), and 422 when the name belongs to a table or a view.",
         "operationId": "drop_artifact_api_v1_environments__env__namespaces__path__artifacts__name__delete",
         "parameters": [
           {
@@ -9129,8 +9528,8 @@
         "tags": [
           "artifacts"
         ],
-        "summary": "List the artifacts of an environment",
-        "description": "Lists the artifacts of the environment that the caller may read. A caller who may read the environment but no artifact gets an empty list, so that an empty list reveals nothing. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when the namespace path is malformed.",
+        "summary": "List the artifacts of an environment, one page at a time",
+        "description": "Lists the artifacts of the environment that the caller may read. A caller who may read the environment but no artifact gets an empty list, so that an empty list reveals nothing. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when the namespace path is malformed or the cursor is not one this list issued. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
         "operationId": "list_artifacts_api_v1_environments__env__artifacts_get",
         "parameters": [
           {
@@ -9160,6 +9559,37 @@
               "title": "Namespace"
             },
             "description": "Only this dot-joined namespace path."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most artifacts returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `namespace`."
           },
           {
             "name": "authorization",
@@ -15876,8 +16306,8 @@
         "tags": [
           "deploys"
         ],
-        "summary": "List tables no project produces any more",
-        "description": "Lists the tables that earlier project versions produced and the current ones do not. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist.",
+        "summary": "List tables no project produces any more, one page at a time",
+        "description": "Lists the tables that earlier project versions produced and the current ones do not, including dropped ones that can still be restored (`exists` is false). Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.",
         "operationId": "list_orphans_api_v1_environments__env__orphans_get",
         "parameters": [
           {
@@ -15889,6 +16319,37 @@
               "title": "Env"
             },
             "description": "Environment name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most orphans returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
           },
           {
             "name": "authorization",
@@ -23820,6 +24281,34 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "defined_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefinedByOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "keep_versions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Versions"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -23834,7 +24323,7 @@
           "created_at"
         ],
         "title": "ArtifactOut",
-        "description": "One artifact, as a listing or a lookup shows it.\n\nParameters\n----------\nname\n    The artifact's name.\nnamespace\n    Dot-joined namespace path.\nuuid\n    The artifact's id.\nkind\n    Always ``ARTIFACT``.\ncurrent_version\n    The highest live version; `None` while it has none.\nversions\n    How many versions it has had, deleted ones included.\nsize_bytes\n    The summed size of its live versions.\ncreated_at\n    When it was created."
+        "description": "One artifact, as a listing or a lookup shows it.\n\nParameters\n----------\nname\n    The artifact's name.\nnamespace\n    Dot-joined namespace path.\nuuid\n    The artifact's id.\nkind\n    Always ``ARTIFACT``.\ncurrent_version\n    The highest live version; `None` while it has none.\nversions\n    How many versions it has had, deleted ones included.\nsize_bytes\n    The summed size of its live versions.\ncreated_at\n    When it was created.\ndefined_by\n    The deployed project file that declares it; `None` when none does.\nkeep_versions\n    How many live versions the declaration keeps; `None` keeps all.\nactions\n    ``[\"drop\"]`` when the caller's rights allow dropping it. A drop of an artifact with\n    `defined_by` is still refused: only git may remove it."
       },
       "ArtifactSourceIn": {
         "properties": {
@@ -24073,6 +24562,13 @@
             "type": "array",
             "title": "Deleted Versions"
           },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
+          },
           "freed_files": {
             "type": "integer",
             "title": "Freed Files"
@@ -24240,6 +24736,13 @@
             },
             "type": "array",
             "title": "Deleted Versions"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -24260,7 +24763,7 @@
           "files"
         ],
         "title": "ArtifactVersionOut",
-        "description": "One version of an artifact.\n\nParameters\n----------\nversion\n    The number; versions can have gaps, since a number is never reused.\nmanifest_sha256\n    The digest of the canonical manifest: the identity of the content.\nsize_bytes\n    The summed size of its files.\nfile_count\n    The number of its files.\nis_directory\n    Whether it is a directory (otherwise one file).\ntask_run_id\n    The task run that committed it, if one did.\nrun_id\n    That task run's run.\nproject_version_id\n    The project version the run executed.\ncommit_sha\n    The commit of that project version.\ncreated_by\n    The name of the principal that committed it.\ncreated_at\n    When it was committed.\ndeleted_at\n    When it was deleted; `None` while it is live.\ndeleted_by\n    The name of the principal that deleted it.\nfiles\n    Its files; empty in a listing and for a deleted version.\ndeleted_versions\n    The numbers of the versions this commit pruned (`keep_versions`)."
+        "description": "One version of an artifact.\n\nParameters\n----------\nversion\n    The number; versions can have gaps, since a number is never reused.\nmanifest_sha256\n    The digest of the canonical manifest: the identity of the content.\nsize_bytes\n    The summed size of its files.\nfile_count\n    The number of its files.\nis_directory\n    Whether it is a directory (otherwise one file).\ntask_run_id\n    The task run that committed it, if one did.\nrun_id\n    That task run's run.\nproject_version_id\n    The project version the run executed.\ncommit_sha\n    The commit of that project version.\ncreated_by\n    The name of the principal that committed it.\ncreated_at\n    When it was committed.\ndeleted_at\n    When it was deleted; `None` while it is live.\ndeleted_by\n    The name of the principal that deleted it.\nfiles\n    Its files; empty in a listing and for a deleted version.\ndeleted_versions\n    The numbers of the versions this commit pruned (`keep_versions`).\nactions\n    ``[\"delete\"]`` on a live version when the caller's rights allow deleting it; empty for\n    a deleted one and in the answer of a commit or a delete."
       },
       "AttentionItemOut": {
         "properties": {
@@ -24520,6 +25023,7 @@
           "ARTIFACT_DOWNLOADED",
           "ARTIFACT_VERSION_DELETED",
           "ARTIFACT_DROPPED",
+          "ARTIFACT_UPLOAD_ABORTED",
           "CHECK_FAILED",
           "TABLE_ROLLED_BACK",
           "TABLE_KEPT",
@@ -24536,6 +25040,10 @@
           "TABLE_PURGED",
           "TABLE_DROPPED",
           "TABLE_UNDROPPED",
+          "TABLE_CREATED",
+          "TABLE_REBUILT",
+          "NAMESPACE_CREATED",
+          "NAMESPACE_DROPPED",
           "TABLE_RETENTION_SET",
           "TABLE_RETENTION_CLEARED",
           "ENVIRONMENT_RETENTION_SET",
@@ -25987,6 +26495,25 @@
         "title": "DeclaringAssetOut",
         "description": "An asset whose deployed version declares a connection.\n\nParameters\n----------\nrepository\n    The repository's name.\nasset\n    The asset's name."
       },
+      "DefinedByOut": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repository",
+          "path"
+        ],
+        "title": "DefinedByOut",
+        "description": "The deployed project file that declares a table or an artifact.\n\nParameters\n----------\nrepository\n    The repository's name.\npath\n    The file's path in the repository."
+      },
       "DeliveryOut": {
         "properties": {
           "id": {
@@ -26655,6 +27182,13 @@
           "restorable": {
             "type": "boolean",
             "title": "Restorable"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -26668,7 +27202,35 @@
           "restorable"
         ],
         "title": "DroppedTableOut",
-        "description": "One dropped table whose files are not deleted yet.\n\nParameters\n----------\nname\n    The table's name when it was dropped.\nnamespace\n    Dot-joined namespace path it was dropped from.\nuuid\n    The table's id, which a restore keeps.\nkind\n    ``TABLE``: only managed tables can be restored.\ndropped_at\n    When it was dropped.\npurge_after\n    From when on the worker's sweep deletes its files; it can be restored until then.\nrestorable\n    Whether `POST .../tables/{name}/undrop` would still restore it: `false` once\n    `purge_after` has passed or the sweep has started deleting its files."
+        "description": "One dropped table whose files are not deleted yet.\n\nParameters\n----------\nname\n    The table's name when it was dropped.\nnamespace\n    Dot-joined namespace path it was dropped from.\nuuid\n    The table's id, which a restore keeps.\nkind\n    ``TABLE``: only managed tables can be restored.\ndropped_at\n    When it was dropped.\npurge_after\n    From when on the worker's sweep deletes its files; it can be restored until then.\nrestorable\n    Whether `POST .../tables/{name}/undrop` would still restore it: `false` once\n    `purge_after` has passed or the sweep has started deleting its files.\nactions\n    ``[\"undrop\"]`` when the caller's rights allow a restore under its own name\n    (`DROP_TABLE` on the namespace and `CREATE_TABLE` on the name); `restorable` says\n    whether it can still be restored at all."
+      },
+      "DroppedTablePageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DroppedTableOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "DroppedTablePageOut",
+        "description": "One page of the dropped tables of an environment.\n\nParameters\n----------\nitems\n    The dropped tables of this page, newest drop first.\nnext_cursor\n    The cursor of the next page; `None` on the last page."
       },
       "EndpointOut": {
         "properties": {
@@ -29403,15 +29965,39 @@
           "table": {
             "type": "string",
             "title": "Table"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "exists": {
+            "type": "boolean",
+            "title": "Exists"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
         "required": [
           "repository",
-          "table"
+          "table",
+          "kind",
+          "exists"
         ],
         "title": "OrphanOut",
-        "description": "One orphaned table.\n\nParameters\n----------\nrepository\n    The repository that used to produce it.\ntable\n    Dotted table name."
+        "description": "One orphaned table.\n\nParameters\n----------\nrepository\n    The repository that used to produce it.\ntable\n    Dotted table name.\nkind\n    What it is: ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nexists\n    `False` for a dropped orphan that can still be restored.\nactions\n    ``[\"drop\"]`` when the caller's rights allow dropping it; always empty for a dropped\n    orphan (restore it from the dropped tables)."
       },
       "OrphanedLocationOut": {
         "properties": {
@@ -29539,6 +30125,17 @@
           "hidden": {
             "type": "integer",
             "title": "Hidden"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           }
         },
         "type": "object",
@@ -29547,7 +30144,7 @@
           "hidden"
         ],
         "title": "OrphansOut",
-        "description": "Orphans visible to the caller.\n\nParameters\n----------\norphans\n    Readable orphans.\nhidden\n    Orphans the caller may not read."
+        "description": "Orphans visible to the caller.\n\nParameters\n----------\norphans\n    Readable orphans.\nhidden\n    Orphans the caller may not read.\nnext_cursor\n    Pass back as ``cursor`` for the next page; `None` on the last."
       },
       "OwnerOut": {
         "properties": {
@@ -33047,6 +33644,23 @@
                 "type": "null"
               }
             ]
+          },
+          "defined_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefinedByOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -33069,7 +33683,7 @@
           "match"
         ],
         "title": "TableListItemOut",
-        "description": "One table of the catalog list.\n\nParameters\n----------\nenvironment\n    Its environment.\nnamespace\n    Its namespace, dotted.\nname\n    Its name.\nuuid\n    Its id.\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    The ``kind`` its asset header declares, if any.\nstate\n    ``not_published`` or ``kept`` for a managed table so marked; ``published`` otherwise.\nowner\n    Its owner; `None` when the owner was deleted.\ncreated_at\n    When it was created.\nrow_count\n    Its rows, as stored; `None` when not known.\nsize_bytes\n    The size of its data files; `None` when not known, and whenever `last_write_at` is.\nlast_write_at\n    When its current snapshot was committed; `None` without one.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included.\nhealth_summary\n    Its health in one word, as the caller may see it.\nmatch\n    With a search text, what of the table matched; `None` without one."
+        "description": "One table of the catalog list.\n\nParameters\n----------\nenvironment\n    Its environment.\nnamespace\n    Its namespace, dotted.\nname\n    Its name.\nuuid\n    Its id.\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    The ``kind`` its asset header declares, if any.\nstate\n    ``not_published`` or ``kept`` for a managed table so marked; ``published`` otherwise.\nowner\n    Its owner; `None` when the owner was deleted.\ncreated_at\n    When it was created.\nrow_count\n    Its rows, as stored; `None` when not known.\nsize_bytes\n    The size of its data files; `None` when not known, and whenever `last_write_at` is.\nlast_write_at\n    When its current snapshot was committed; `None` without one.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included.\nhealth_summary\n    Its health in one word, as the caller may see it.\nmatch\n    With a search text, what of the table matched; `None` without one.\ndefined_by\n    The deployed project file (repository and path) that owns it, so that only git may\n    remove it: a client shows Drop disabled with \"Defined in\". `None` when no deployed\n    project declares it as what it is.\nactions\n    What the caller's rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and\n    ``set_retention``: a client offers an action only when it is listed (Rebuild only then).\n    The server still decides each request. An artifact offers only ``drop``."
       },
       "TableListPageOut": {
         "properties": {
@@ -33634,6 +34248,23 @@
                 "type": "null"
               }
             ]
+          },
+          "defined_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefinedByOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -33645,7 +34276,60 @@
           "schema"
         ],
         "title": "TableOut",
-        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference, or fails the\n    content gate of \"Defined in\" (`content_reason`).\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\ncontent_reason\n    ``restricted`` when a view's `sql` is withheld because the caller lacks\n    READ_ENVIRONMENT, a referenced table is a view, the SQL reads a file, or a row filter\n    or column mask applies to the caller on a referenced table; `None` otherwise.\ncontent_message\n    What `content_reason` means and what to do, in one sentence; `None` when it is `None`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has.\nterms\n    The glossary terms that link the table itself, in the reader's language; empty without\n    ``READ_ENVIRONMENT`` on the environment.\nhealth\n    The effects of the asset's `health:` that differ from `warn`, by ``signal`` or\n    ``signal.column`` (``range.price``), sorted by key; empty when every signal warns, and\n    for every kind but a managed table.\nhealth_missing\n    The keys of `health` whose column the table does not have: the deploy cannot check the\n    columns of a ``SELECT *`` or Python asset. Such an entry has no effect.\nhealth_never_judged\n    The ``block`` column entries of `health` that no commit can judge, by key, with the\n    reason (``a string column has no range``, ``only the first 200 columns are judged``): a\n    run warns on such an entry instead of blocking.\nowner\n    Who owns the table; `None` when the owner was deleted, and for an answer that does not\n    look it up (a create or a commit).\ncreated_at\n    When the table was created.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included; never their names.\nhealth_summary\n    Its health in one word, as the caller may see it."
+        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference, or fails the\n    content gate of \"Defined in\" (`content_reason`).\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\ncontent_reason\n    ``restricted`` when a view's `sql` is withheld because the caller lacks\n    READ_ENVIRONMENT, a referenced table is a view, the SQL reads a file, or a row filter\n    or column mask applies to the caller on a referenced table; `None` otherwise.\ncontent_message\n    What `content_reason` means and what to do, in one sentence; `None` when it is `None`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has.\nterms\n    The glossary terms that link the table itself, in the reader's language; empty without\n    ``READ_ENVIRONMENT`` on the environment.\nhealth\n    The effects of the asset's `health:` that differ from `warn`, by ``signal`` or\n    ``signal.column`` (``range.price``), sorted by key; empty when every signal warns, and\n    for every kind but a managed table.\nhealth_missing\n    The keys of `health` whose column the table does not have: the deploy cannot check the\n    columns of a ``SELECT *`` or Python asset. Such an entry has no effect.\nhealth_never_judged\n    The ``block`` column entries of `health` that no commit can judge, by key, with the\n    reason (``a string column has no range``, ``only the first 200 columns are judged``): a\n    run warns on such an entry instead of blocking.\nowner\n    Who owns the table; `None` when the owner was deleted, and for an answer that does not\n    look it up (a create or a commit).\ncreated_at\n    When the table was created.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included; never their names.\nhealth_summary\n    Its health in one word, as the caller may see it.\ndefined_by\n    The deployed project file (repository and path) that owns it, so that only git may\n    remove it: a client shows Drop disabled with \"Defined in\". `None` when no deployed\n    project declares it as what it is. In the answer of a create or a restore, also\n    `None` to a caller who may not read the table.\nactions\n    What the caller's rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and\n    ``set_retention``: a client offers an action only when it is listed (Rebuild only then).\n    The server still decides each request. An artifact offers only ``drop``."
+      },
+      "TableRebuildIn": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "TableRebuildIn",
+        "description": "Request body that rebuilds a table a deployed project builds.\n\nParameters\n----------\nreason\n    Why it is rebuilt: 10 to 500 characters on one line, recorded in the audit log."
+      },
+      "TableRebuildOut": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table",
+          "run_id",
+          "repository",
+          "path"
+        ],
+        "title": "TableRebuildOut",
+        "description": "What a rebuild did: the table it dropped and the run that builds it again.\n\nParameters\n----------\ntable\n    The table's dotted name.\nrun_id\n    The queued run; follow it with `GET /api/v1/environments/{env}/runs/{run_id}`.\nrepository\n    The repository whose asset builds the table.\npath\n    The asset's file in the repository; `null` to a caller who may not read the table."
       },
       "TableReferenceOut": {
         "properties": {

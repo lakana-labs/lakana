@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +29,7 @@ from lakana._models import (
     TableListItem,
 )
 from lakana.cli import _files, _output, _retention
-from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
+from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason, warn_break_glass
 from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
@@ -272,6 +272,60 @@ def _restorable_cell(dropped: DroppedTable) -> str:
     return "yes" if dropped.restorable else "no"
 
 
+def _list_dropped_across(
+    state: CliState,
+    *,
+    narrowed: Sequence[str | None],
+    all_environments: bool,
+    limit: int | None,
+    cursor: str | None,
+    env: str | None,
+) -> None:
+    """List one page of the dropped tables of every namespace of an environment.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    narrowed
+        `--search`, `--under`, `--model-kind`, `--sort` and `--order`, which do not apply.
+    all_environments
+        `--all-environments`, which does not apply.
+    limit
+        `--limit`.
+    cursor
+        `--cursor`.
+    env
+        `--env` as typed, for the next-page line.
+
+    Raises
+    ------
+    CliError
+        Exit 2, when an option that does not apply to this list was given.
+    """
+    if all_environments or any(option is not None for option in narrowed):
+        raise CliError(
+            "--search, --under, --model-kind, --all-environments, --sort and --order do not "
+            "apply to --dropped without NAMESPACE: leave them out, or give NAMESPACE."
+        )
+    page = state.client().tables.list_dropped_page(
+        resolve_environment(state, env), limit=limit, cursor=cursor
+    )
+    _output.emit(
+        state,
+        page.items,
+        columns=["name", "namespace", "dropped_at", "purge_after", "restorable", "uuid"],
+        droppable=["uuid", "namespace"],
+        derived={"restorable": _restorable_cell},
+    )
+    more_results(
+        state,
+        ["lakana", "table", "list"],
+        {"--env": env, "--dropped": True, "--limit": limit},
+        page.next_cursor,
+    )
+
+
 @table_app.command("list")
 def list_tables(
     ctx: typer.Context,
@@ -283,8 +337,8 @@ def list_tables(
         bool,
         typer.Option(
             "--dropped",
-            help="With NAMESPACE: list the dropped tables that can still be restored, and "
-            "until when.",
+            help="List the dropped tables that can still be restored, and until when: those of "
+            "NAMESPACE, or without it those of every namespace.",
         ),
     ] = False,
     model_kind: Annotated[
@@ -342,7 +396,9 @@ def list_tables(
 ) -> None:
     """List the tables in NAMESPACE, or with no NAMESPACE every table you may read.
 
-    With NAMESPACE: the tables in it, or with --dropped the tables dropped from it. A dropped
+    With NAMESPACE: the tables in it, or with --dropped the tables dropped from it. With
+    --dropped and no NAMESPACE: one page of the tables dropped from any namespace of the
+    environment, newest first, paged with --limit and --cursor. A dropped
     table keeps its files until `purge_after` (the server's undo period, 7 days by default);
     until then `lakana table undrop` restores it. A table that its retention lets expire within
     the server's warning window (7 days by default) shows when, in `expires`. With
@@ -392,7 +448,15 @@ def list_tables(
     state = state_of(ctx)
     if namespace is None:
         if dropped:
-            raise CliError("--dropped lists one namespace: give NAMESPACE.")
+            _list_dropped_across(
+                state,
+                narrowed=(search, under, model_kind, sort, order),
+                all_environments=all_environments,
+                limit=limit,
+                cursor=cursor,
+                env=env,
+            )
+            return
         if all_environments and env:
             raise CliError(
                 "--env and --all-environments cannot be combined: leave out --env to list every "
@@ -707,6 +771,21 @@ def _marker(language: str | None, table: Table) -> str:
     return f" [{language}]" if language and language != table.language else ""
 
 
+def _emit_defined_by(state: CliState, table: Table) -> None:
+    """Print the deployed project file that owns a table or view, when one does.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    table
+        The table.
+    """
+    if table.defined_by is not None:
+        found = table.defined_by
+        _output.emit(state, _output.inline(f"Defined in: {found.repository}/{found.path}"))
+
+
 def _emit_texts(state: CliState, table: Table) -> None:
     """Print a table's label, description and translation coverage, when it has them.
 
@@ -825,6 +904,7 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
         else:
             _output.emit(state, table.sql or "")
         _output.emit(state, table.references)
+        _emit_defined_by(state, table)
         _emit_texts(state, table)
         _emit_columns(state, table)
         _emit_terms(state, table)
@@ -848,6 +928,7 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
             f"retention {shlex.quote(_output.inline(name))} --env "
             f"{shlex.quote(_output.inline(environment))} --never",
         )
+    _emit_defined_by(state, table)
     _emit_texts(state, table)
     _emit_columns(state, table)
     _emit_terms(state, table)
@@ -1534,6 +1615,86 @@ def undrop(
     if new_name is not None:
         message += f" as {_output.inline(f'{table.namespace}.{table.name}')}"
     _output.done(state, message, table)
+
+
+@table_app.command("rebuild")
+def rebuild(
+    ctx: typer.Context,
+    name: str,
+    reason: Annotated[
+        str,
+        typer.Option(
+            "--reason",
+            help=(
+                "Why the table is built again, 10-500 characters on one line; recorded in the "
+                "audit log."
+            ),
+        ),
+    ],
+    env: _ENV = None,
+    yes: _YES = False,
+    break_glass: Annotated[
+        bool,
+        typer.Option(
+            "--break-glass",
+            help=(
+                "Rebuild in a protected environment outside a run (needs MANAGE_ENVIRONMENT; "
+                "audited). Sends --reason as the break-glass reason too."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Drop table NAME and build it again from git, in one step.
+
+    For a table or view that a deployed project builds. The drop keeps the undo period, so
+    `lakana table undrop NAME --as OTHER` restores the old table; a run of the asset that defines
+    it is queued. Needs the right to drop the table and to run in the environment; the web
+    interface asks for a recent passkey touch. A table no project builds is refused: drop it
+    with `lakana table delete`. While another run of the project is active nothing is dropped:
+    wait for it, then rebuild.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The qualified table name.
+    reason
+        `--reason`: why, recorded in the audit log.
+    env
+        The environment.
+    yes
+        Skip the confirmation prompt.
+    break_glass
+        `--break-glass`: rebuild in a protected environment; `--reason` is also the break-glass
+        reason.
+    """
+    state = state_of(ctx)
+    environment = resolve_environment(state, env)
+    target = f"{environment}/{name}"
+    confirm(
+        state,
+        f"Drop table {target} and build it again from git? It is restorable under another name "
+        "during the undo period.",
+        yes,
+    )
+    glass = None
+    if break_glass:
+        warn_break_glass(environment)
+        glass = reason
+    rebuilt = state.client().tables.rebuild(
+        environment, name, reason=reason, break_glass_reason=glass
+    )
+    where = _output.inline(rebuilt.repository)
+    if rebuilt.path is not None:
+        where += f", which builds it again from {_output.inline(rebuilt.path)}"
+    run = _output.inline(rebuilt.run_id)
+    _output.done(
+        state,
+        f"Dropped {_output.inline(environment)}/{_output.inline(name)} and queued run {run} of "
+        f"{where}. Follow it with `lakana runs show {run} --env {_output.inline(environment)}`.",
+        rebuilt,
+    )
 
 
 def _table_columns(client: lakana.Client, environment: str, name: str) -> list[Column]:
@@ -2333,12 +2494,21 @@ def expiring(
             "server's warning window, 7 days).",
         ),
     ] = None,
+    namespace: Annotated[
+        str | None,
+        typer.Option(
+            "--namespace", help="Only this namespace and the ones beneath it, such as silver."
+        ),
+    ] = None,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
     env: _ENV = None,
 ) -> None:
     """List the managed tables that their retention lets expire soon, soonest first.
 
     Each row says when, the rule (and whether the table or its environment sets it) and who set
-    it. Keep a table with `lakana table retention NAME --never`, or give it more days.
+    it. Keep a table with `lakana table retention NAME --never`, or give it more days. One
+    page is listed; the last line names the command for the next.
 
     Parameters
     ----------
@@ -2346,13 +2516,22 @@ def expiring(
         The Typer context.
     within
         `--within`.
+    namespace
+        `--namespace`.
+    limit
+        `--limit`.
+    cursor
+        `--cursor`.
     env
         The environment.
     """
     state = state_of(ctx)
     environment = resolve_environment(state, env)
     days = None if within is None else _retention.parse_within(within)
-    found = state.client().tables.expiring(environment, within_days=days)
+    page = state.client().tables.expiring_page(
+        environment, within_days=days, namespace=namespace, limit=limit, cursor=cursor
+    )
+    found = page.items
     if not found and state.output != "json":
         window = "the warning window" if days is None else f"{days} days"
         typer.echo(f"No table in {_output.inline(environment)} expires within {window}.")
@@ -2367,6 +2546,12 @@ def expiring(
             "rule": _retention.rule_text,
         },
         flexible=["rule"],
+    )
+    more_results(
+        state,
+        ["lakana", "table", "expiring"],
+        {"--env": env, "--within": within, "--namespace": namespace, "--limit": limit},
+        page.next_cursor,
     )
 
 

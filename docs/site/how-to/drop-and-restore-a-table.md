@@ -23,6 +23,112 @@ lakana table delete silver.orders --yes
 The table is gone from `lakana table list` and from every query. The answer of the command says how
 to restore it.
 
+From the web interface, a drop asks for a recent passkey touch: one from the last 15 minutes, with
+or without purging the files. The browser asks you to touch your passkey when yours is older. The
+command line uses a token and is never asked. Restoring a table asks for no touch.
+
+## When a project builds the table
+
+A table or view that a deployed project builds is defined in git, so it is changed in git.
+`lakana table delete` refuses it with a 409 and names the file that defines it:
+
+<!-- output -->
+```text
+`silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Remove it there and deploy; then drop it from Orphans. To build it again from git instead: `lakana table rebuild silver.clean --env dev --reason "…"`.
+```
+
+Neither `--purge` nor a break-glass reason gets past this, and the REST API, the UI and Iceberg
+clients refuse alike. To build it again from git instead, see
+[Rebuild a table from git](#rebuild-a-table-from-git). To drop such a table:
+
+1. Remove its asset from the project in git and deploy. The table stays, now built by nothing.
+2. Find it among the orphans and drop it:
+
+<!-- not tested: needs a deployed project whose asset was removed; the drop itself is tested in the "drop" example above -->
+```bash
+lakana orphans --env dev
+lakana table delete silver.clean --env dev --yes
+```
+
+Only the project's own runs create what it declares. These refuse a declared name with a 409,
+whatever the project declares there (a table, a view or an artifact):
+
+- `lakana table create` and `lakana table create-external`;
+- a `lakana load` or `PUT …/data` that would create the table;
+- a `lakana sql … --into NAME --mode view` of yours that would create the view;
+- a `lakana artifact upload` that would create a new artifact;
+- `lakana table undrop OLD --as NAME`;
+- an Iceberg client's create, or its rename onto the name.
+
+A `--mode view` query of yours cannot replace the SQL of a view the project builds either:
+change the view in git and deploy. Choose another name, or remove the asset and deploy first.
+
+An Iceberg client cannot rename a table the project builds either. The answer is
+``` `silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Rename it there and deploy.```
+(or, to someone who may not read the table,
+`A deployed project defines this table; rename it in git and deploy.`).
+
+Some tables carry a declared name and can still be dropped: an external table, and a table under
+the name of an asset that produces an artifact. The refusal applies only when the project builds
+the same kind of object that is there.
+
+Someone who may not read the table is not told the repository or the file. They see
+`A deployed project defines this table; change it in git.`
+
+## Rebuild a table from git
+
+Rebuild when the table a project builds holds wrong data and you want it built again from its
+definition: its history columns were lost in a manual replace, a source was corrected, or a
+`replace` asset needs a clean start. Drop is for a table nobody builds; `lakana table rebuild` is
+for one a deployed project does.
+
+<!-- not tested: needs a deployed project and a running worker; the command's output line is asserted in packages/lakana/tests/cli/test_tables_cmd.py -->
+```bash
+lakana table rebuild silver.clean --env dev --reason "history columns lost after a manual replace"
+```
+
+It does two things in one step:
+
+1. **Drops the table.** The drop keeps its undo period like any other: restore the old table within
+   it with `lakana table undrop silver.clean --as clean_before`.
+2. **Queues a run** of the asset that defines the table, from the deployed version of its project.
+   The run creates the table again.
+
+After a deploy that switches an existing table to `write: history`, its run refuses the table,
+which lacks the history columns. Run `lakana table rebuild NAME --reason "…"` then: the deploy has
+already made the new version current, so the rebuild builds the table as a history table.
+
+The command asks first; `--yes` skips the question. It then names the run and the file that builds
+the table:
+
+<!-- output -->
+```text
+Dropped dev/silver.clean and queued run 9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10 of analytics, which builds it again from assets/silver/clean.sql. Follow it with `lakana runs show 9f1c2d3e-5a47-4b8e-9c0d-7e61a2b34f10 --env dev`.
+```
+
+Follow the run with the command it names. If you may not read the table, the file is left out of
+the line: the run and its repository are shown anyway.
+
+What it needs:
+
+- the right to drop the table **and** the right to run in the environment. Both are checked before
+  anything happens;
+- `--reason`, 10-500 characters on one line. It is recorded in the audit log;
+- from the web interface, a recent passkey touch, as for a drop. The command line uses a token and
+  is never asked.
+
+In a protected environment the run writes as the deployment's run principal. Rebuilding from
+outside a run needs `--break-glass`, which sends the same `--reason` as the break-glass reason and
+needs `MANAGE_ENVIRONMENT`.
+
+When it is refused, nothing was dropped:
+
+- **No project builds the table.** Drop it with `lakana table delete` instead (see above).
+- **It is an artifact.** Rebuild works on tables and views. Free space with
+  `lakana artifact versions delete NAME VERSION`.
+- **Another run of the project is active.** The message names it. Wait until it ends, then rebuild
+  again.
+
 ## See what can be restored
 
 `--dropped` lists the tables dropped from a namespace whose files are not deleted yet, newest first:
@@ -35,6 +141,12 @@ lakana table list silver --dropped
 `purge_after` is the moment the undo period ends (UTC). `restorable` is `yes` until then, and `no`
 once it has passed or the worker has started to delete the files. You see the dropped tables of a
 namespace if you may read the tables in it.
+
+To see the tables dropped from every namespace of the environment, leave out the namespace:
+`lakana table list --dropped`. It lists one page, newest drop first, with each table's namespace;
+`--limit` and `--cursor` page on, and the last line names the command for the next page. The route is
+`GET /api/v1/environments/{env}/dropped-tables`, and the SDK's `client.tables.iter_dropped(env)`
+walks every page.
 
 ## Restore a table
 
@@ -55,6 +167,11 @@ The table comes back as it was when it was dropped:
 
 What does not come back is the record of who read the table: [table health](../reference/table-health.md)
 counts readers again from the restore on.
+
+A table can be restored under its own name when a deployed project declares that name as a
+table or a view: that is the table the project builds. When the project declares its name as an
+artifact, the restore is refused with the `is declared by a deployed project` message; restore it
+under another name with `--as`, one that no deployed project declares.
 
 Restoring needs the right to drop tables and the right to create tables in the namespace. In a
 protected environment it is refused like any other change outside a run; add `--break-glass` with a
@@ -183,7 +300,8 @@ reached: the clean-up deletes that one's files and then the environment, and
 ## Through the APIs
 
 - **REST.** `DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}` drops, with
-  `?purge=true` to delete the files at the next sweep.
+  `?purge=true` to delete the files at the next sweep; from the web interface it asks for a passkey
+  touch within the last 15 minutes (403 `StepUpRequired`), a token never does.
   `GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables` lists the dropped tables (`name`,
   `namespace`, `uuid`, `kind`, `dropped_at`, `purge_after`, `restorable`).
   `POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop` restores, with an optional
@@ -206,6 +324,10 @@ reached: the clean-up deletes that one's files and then the environment, and
 
 | Message | Why | What to do |
 |---|---|---|
+| ``` `silver.orders` is built by a deployed project. Defined in analytics/assets/silver/orders.sql. ...``` | A deployed project builds the table; only git may remove it. | Remove the asset in git and deploy, then drop it from `lakana orphans --env dev`. See [When a project builds the table](#when-a-project-builds-the-table). |
+| ``` `silver.orders` is declared by a deployed project. Defined in analytics/assets/silver/orders.sql. ...``` | You tried to create a table under a name a deployed project declares. | Choose another name, or remove the asset in git and deploy first. |
+| `A deployed project defines this table; change it in git.` | As the two rows above, for someone who may not read the table. | Ask someone who may read it which project defines it. |
+| `This needs a fresh passkey touch (within 15 minutes). Confirm with your passkey and try again.` | You dropped the table from the web interface, and your last passkey touch is older than 15 minutes. | Touch your passkey when the browser asks, then drop it again. Nothing was dropped. |
 | `No dropped table 'orders' in silver can be restored: ...` | Nothing of that name was dropped there, or its files are already deleted. | Check the name with `lakana table list silver --dropped`. |
 | `silver.orders cannot be restored as 'orders': a table of that name exists in silver now. ...` | A new table, view or artifact has the name. | Add `--as NEW_NAME`, or drop the new one first. |
 | `silver.orders cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the table was dropped with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |

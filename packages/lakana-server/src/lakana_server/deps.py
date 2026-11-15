@@ -21,6 +21,7 @@ from lakana_core.catalog.glossary_read import GlossaryService
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.lineage_graph import LineageService
 from lakana_core.catalog.query_service import QueryService
+from lakana_core.catalog.rebuild import TableRebuild
 from lakana_core.catalog.search import CatalogSearch
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.table_listing import TableListing
@@ -1615,6 +1616,36 @@ def get_run_service(
         caps=RunCaps.from_config(settings.query_limits, settings.run),
         lease_seconds=settings.run.lease_seconds,
     )
+
+
+def get_table_rebuild(
+    session: Session = Depends(get_session),
+    catalog: CatalogService = Depends(get_catalog),
+    runs: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+    undo_days: int = Depends(get_undo_days),
+) -> TableRebuild:
+    """Build a TableRebuild for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session, shared with `catalog` and `runs`.
+    catalog
+        The catalog service, which finds and locks the table.
+    runs
+        The run service, which queues the run.
+    authz
+        The real, grant-backed authorization service.
+    undo_days
+        How long the dropped table stays restorable.
+
+    Returns
+    -------
+    TableRebuild
+        The service.
+    """
+    return TableRebuild(session, catalog, runs, authz, undo_days=undo_days)
 
 
 def get_job_service(

@@ -627,6 +627,12 @@ class Table:
         from an older server.
     health_summary
         Its health in one word, as you may see it; `None` from an older server.
+    defined_by
+        The deployed project file that owns it, so that only git may remove it (a drop is
+        refused); `None` when none does, and from an older server.
+    actions
+        What your rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and
+        ``set_retention``; the server still decides each request. Empty from an older server.
     """
 
     name: str
@@ -668,6 +674,8 @@ class Table:
     last_read_at: datetime | None = None
     readers_7d: int = 0
     health_summary: HealthSummary | None = None
+    defined_by: DefinedBy | None = None
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -941,6 +949,9 @@ class DroppedTable:
     restorable
         Whether `Tables.undrop` would still restore it: `False` once `purge_after` has passed
         or the deletion has started.
+    actions
+        ``("undrop",)`` when your rights allow restoring it under its own name; empty from an
+        older server.
     """
 
     name: str
@@ -950,6 +961,29 @@ class DroppedTable:
     dropped_at: datetime
     purge_after: datetime
     restorable: bool
+    actions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TableRebuild:
+    """What `Tables.rebuild` did: the table it dropped and the run that builds it again.
+
+    Parameters
+    ----------
+    table
+        The table's dotted ``"namespace.table"`` name.
+    run_id
+        The queued run; follow it with `Runs.get`.
+    repository
+        The repository whose asset builds the table.
+    path
+        The asset's file in the repository; `None` to someone who may not read the table.
+    """
+
+    table: str
+    run_id: str
+    repository: str
+    path: str | None
 
 
 @dataclass(frozen=True)
@@ -1824,6 +1858,54 @@ class GroupPage:
     """
 
     items: list[Group]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class DroppedTablePage:
+    """One page of the dropped tables of an environment, newest drop first.
+
+    Parameters
+    ----------
+    items
+        The dropped tables on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[DroppedTable]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class TableRetentionPage:
+    """One page of the expiring tables of an environment, soonest first.
+
+    Parameters
+    ----------
+    items
+        The tables on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[TableRetention]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class NamespacePage:
+    """One page of the namespaces of an environment, in path order.
+
+    Parameters
+    ----------
+    items
+        The namespaces on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[Namespace]
     next_cursor: str | None
 
 
@@ -2927,10 +3009,21 @@ class Orphan:
         The repository that used to produce it.
     table
         Dotted table name.
+    kind
+        What it is: ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``; `None` from a server that
+        does not say.
+    exists
+        `False` for a dropped orphan that can still be restored (``lakana table undrop``).
+    actions
+        ``("drop",)`` when your rights allow dropping it; empty for a dropped orphan and from
+        an older server.
     """
 
     repository: str
     table: str
+    kind: str | None = None
+    exists: bool = True
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2943,10 +3036,13 @@ class Orphans:
         Readable orphans.
     hidden
         Orphans the caller may not read.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; `None` on the last page.
     """
 
     orphans: list[Orphan]
     hidden: int
+    next_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3949,6 +4045,9 @@ class ArtifactVersion:
     files_reused
         After an upload: how many files the store already had. `None` as for `files_sent`.
         Not part of equality.
+    actions
+        ``("delete",)`` on a live version when your rights allow deleting it; empty for a
+        deleted one, in the answer of a store or a delete, and from an older server.
     """
 
     version: int
@@ -3968,6 +4067,7 @@ class ArtifactVersion:
     deleted_versions: list[int] = field(default_factory=list)
     files_sent: int | None = field(default=None, compare=False)
     files_reused: int | None = field(default=None, compare=False)
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -4025,6 +4125,22 @@ class DeletedArtifactVersion(ArtifactVersion):
 
 
 @dataclass(frozen=True)
+class DefinedBy:
+    """The deployed project file that declares a table or an artifact.
+
+    Parameters
+    ----------
+    repository
+        The repository's name.
+    path
+        The file's path in the repository.
+    """
+
+    repository: str
+    path: str
+
+
+@dataclass(frozen=True)
 class Artifact:
     """One artifact, as a listing or a lookup shows it.
 
@@ -4047,6 +4163,13 @@ class Artifact:
         The summed size of its live versions.
     created_at
         When it was created, ISO 8601.
+    defined_by
+        The deployed project file that declares it; `None` when none does.
+    keep_versions
+        How many live versions the declaration keeps; `None` keeps all.
+    actions
+        ``("drop",)`` when your rights allow dropping it (a drop of one with `defined_by` is
+        still refused); empty from an older server.
     """
 
     name: str
@@ -4057,6 +4180,25 @@ class Artifact:
     versions: int
     size_bytes: int
     created_at: str
+    defined_by: DefinedBy | None = None
+    keep_versions: int | None = None
+    actions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ArtifactPage:
+    """One page of the artifacts of an environment, in namespace and name order.
+
+    Parameters
+    ----------
+    items
+        The artifacts on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[Artifact]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)
@@ -4657,6 +4799,12 @@ class TableListItem:
         Its health in one word, as you may see it.
     match
         With a search text, what of the table matched; `None` without one.
+    defined_by
+        The deployed project file that owns it, so that only git may remove it (a drop is
+        refused); `None` when none does, and from an older server.
+    actions
+        What your rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and
+        ``set_retention``; the server still decides each request. Empty from an older server.
     """
 
     environment: str
@@ -4675,6 +4823,8 @@ class TableListItem:
     readers_7d: int
     health_summary: HealthSummary
     match: TableMatch | None
+    defined_by: DefinedBy | None = None
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

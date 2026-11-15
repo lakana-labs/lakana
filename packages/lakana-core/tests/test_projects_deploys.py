@@ -5,8 +5,9 @@ from __future__ import annotations
 import base64
 import copy
 import dataclasses
+import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -52,8 +53,11 @@ from lakana_core.models import (
     SecretUseKind,
     Table,
     TableHealthSignal,
+    TableLocation,
+    TableLocationState,
     TableType,
 )
+from lakana_core.pagination import encode_key_cursor
 from lakana_core.projects.asset_model import ResolvedReference
 from lakana_core.projects.checks import ParsedCheck, checks_listing
 from lakana_core.projects.dag import build_graph
@@ -816,6 +820,144 @@ def test_orphans_after_removing_an_asset(
     report = DeployService(session, AllowAllAuthorization()).orphans(principal, "dev")
     assert [(o.repository, o.table) for o in report.orphans] == [("analytics", "silver.old")]
     assert report.hidden == 0
+
+
+def test_an_orphan_says_its_kind_and_that_it_exists(
+    session: Session, env: None, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A listed orphan carries the API kind of its object and `exists=True`."""
+    repo = _repo(session)
+    _prepared_catalog(
+        session, tmp_path, AllowAllAuthorization(), tables=[TableRef("dev", _SILVER, "old")]
+    )
+    _deployed(session, principal, repo, "a" * 40, make_asset("silver.old"), make_asset("silver.k"))
+    _deployed(session, principal, repo, "b" * 40, make_asset("silver.k"))
+    (orphan,) = DeployService(session, AllowAllAuthorization()).orphans(principal, "dev").orphans
+    assert (orphan.table, orphan.kind, orphan.exists) == ("silver.old", "TABLE", True)
+
+
+def test_a_dropped_orphan_stays_listed_as_restorable_until_its_purge(
+    session: Session, env: None, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A dropped orphan is listed with `exists=False` while its undo period lasts."""
+    repo = _repo(session)
+    catalog = _prepared_catalog(
+        session, tmp_path, AllowAllAuthorization(), tables=[TableRef("dev", _SILVER, "old")]
+    )
+    _deployed(session, principal, repo, "a" * 40, make_asset("silver.old"), make_asset("silver.k"))
+    _deployed(session, principal, repo, "b" * 40, make_asset("silver.k"))
+    catalog.drop_table(principal, TableRef("dev", _SILVER, "old"))
+    service = DeployService(session, AllowAllAuthorization())
+    (orphan,) = service.orphans(principal, "dev").orphans
+    assert (orphan.table, orphan.kind, orphan.exists) == ("silver.old", "TABLE", False)
+    session.rollback()
+    record = session.scalars(
+        select(TableLocation).where(TableLocation.state == TableLocationState.DROPPED)
+    ).one()
+    assert record.dropped_at is not None
+    record.purge_after = record.dropped_at - timedelta(seconds=1)
+    session.commit()
+    assert service.orphans(principal, "dev").orphans == []
+
+
+def test_two_dropped_orphans_are_listed_from_one_read_of_the_tombstones(
+    session: Session, env: None, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The dropped tables are read once and answer for every dropped orphan of the list."""
+    repo = _repo(session)
+    names = ("old", "older")
+    catalog = _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        tables=[TableRef("dev", _SILVER, n) for n in names],
+    )
+    _deployed(
+        session,
+        principal,
+        repo,
+        "a" * 40,
+        *(make_asset(f"silver.{n}") for n in names),
+        make_asset("silver.k"),
+    )
+    _deployed(session, principal, repo, "b" * 40, make_asset("silver.k"))
+    for n in names:
+        catalog.drop_table(principal, TableRef("dev", _SILVER, n))
+    orphans = DeployService(session, AllowAllAuthorization()).orphans(principal, "dev").orphans
+    assert [(o.table, o.exists) for o in orphans] == [
+        ("silver.old", False),
+        ("silver.older", False),
+    ]
+
+
+def _orphans_of_two_repositories(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> DeployService:
+    """Leave `silver.x` and `silver.y` orphaned by `repo_a`, and `silver.x` by `repo_b`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The deployer.
+    tmp_path
+        Directory backing the environment's storage.
+
+    Returns
+    -------
+    DeployService
+        A deploy service with allow-all authorization.
+    """
+    _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        tables=[TableRef("dev", _SILVER, "x"), TableRef("dev", _SILVER, "y")],
+    )
+    for name in ("repo_b", "repo_a"):
+        repo = _repo(session, name)
+        assets = [make_asset("silver.x")] + ([make_asset("silver.y")] if name == "repo_a" else [])
+        _deployed(session, principal, repo, "a" * 40, *assets)
+        _deployed(session, principal, repo, "b" * 40, make_asset(f"silver.keep_{name}"))
+    return DeployService(session, AllowAllAuthorization())
+
+
+def test_orphans_page_by_repository_then_table(
+    session: Session, env: None, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The same table orphaned by two repositories pages without a skip or a repeat."""
+    service = _orphans_of_two_repositories(session, principal, tmp_path)
+    seen: list[tuple[str, str]] = []
+    cursor = None
+    while True:
+        report = service.orphans(principal, "dev", limit=1, cursor=cursor)
+        assert len(report.orphans) == 1
+        seen.append((report.orphans[0].repository, report.orphans[0].table))
+        cursor = report.next_cursor
+        if cursor is None:
+            break
+    assert seen == [("repo_a", "silver.x"), ("repo_a", "silver.y"), ("repo_b", "silver.x")]
+
+
+def test_a_forged_orphan_cursor_reveals_nothing(
+    session: Session, env: None, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """Unreadable orphans are filtered out before the cursor applies, and only counted."""
+    _orphans_of_two_repositories(session, principal, tmp_path)
+    reader = _principal(session, "reader")
+    GrantService(session, AllowAllAuthorization()).grant(
+        principal,
+        principal="reader",
+        action=Action.READ_ENVIRONMENT,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="dev",
+    )
+    forged = encode_key_cursor("orphans", json.dumps(["", ""]))
+    report = DeployService(session, GrantAuthorization(session)).orphans(
+        reader, "dev", limit=1, cursor=forged
+    )
+    assert (report.orphans, report.next_cursor, report.hidden) == ([], None, 3)
 
 
 def test_a_table_moved_to_another_repository_is_not_an_orphan(

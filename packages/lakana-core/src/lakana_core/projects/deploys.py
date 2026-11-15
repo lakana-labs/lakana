@@ -45,8 +45,10 @@ from lakana_core.catalog.glossary import (
 )
 from lakana_core.catalog.graph_model import NodeKind, parse_node
 from lakana_core.catalog.graph_service import GraphService
-from lakana_core.catalog.identity import resolve_table_id
+from lakana_core.catalog.identity import live_table, resolve_table_id
 from lakana_core.catalog.model_metadata import clear_health_effects, clear_removed_models
+from lakana_core.catalog.row_actions import ORPHAN_ACTIONS, drop_actions_each
+from lakana_core.catalog.tombstones import DroppedTable, list_environment_tombstones
 from lakana_core.catalog.warning_text import named as _named
 from lakana_core.catalog.warning_text import typed as _typed
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
@@ -86,7 +88,13 @@ from lakana_core.models import (
     TableType,
 )
 from lakana_core.models.run import ACTIVE_RUN_STATUSES
-from lakana_core.pagination import decode_cursor, encode_cursor
+from lakana_core.models.table import table_kind
+from lakana_core.pagination import (
+    LIST_LIMIT_DEFAULT,
+    decode_cursor,
+    encode_cursor,
+    page_in_order,
+)
 from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference, key_columns
 from lakana_core.projects.checks import ParsedCheck, check_sql_references, may_read_every
 from lakana_core.projects.dag import ProjectGraph
@@ -942,10 +950,22 @@ class OrphanView:
         The repository that used to produce it.
     table
         Dotted table name.
+    kind
+        The API kind of the object (``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``), or of the
+        dropped table's snapshot when it no longer exists.
+    exists
+        Whether the object is still in the catalog; `False` for a dropped orphan that can still
+        be restored.
+    actions
+        The words of `lakana_core.catalog.row_actions.ORPHAN_ACTIONS` the reader's rights allow;
+        always empty for a dropped orphan (`undrop` it from the dropped tables).
     """
 
     repository: str
     table: str
+    kind: str | None = None
+    exists: bool = True
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -958,10 +978,13 @@ class OrphanReport:
         Readable orphans, sorted.
     hidden
         Orphans that exist but the reader may not read.
+    next_cursor
+        The cursor of the next page, or `None` on the last.
     """
 
     orphans: list[OrphanView]
     hidden: int
+    next_cursor: str | None = None
 
 
 class DeploymentMoved(ConflictError):
@@ -2834,7 +2857,14 @@ class DeployService:
             manifest=manifest,
         )
 
-    def orphans(self, p: PrincipalRef, environment: str) -> OrphanReport:
+    def orphans(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> OrphanReport:
         """Compute tables earlier project versions produced that no current one does.
 
         A repository with no current deployment (undeployed) has every project version past.
@@ -2848,11 +2878,17 @@ class DeployService:
             The acting principal.
         environment
             Environment name.
+        limit
+            Most orphans returned (1 to `LIST_LIMIT_MAX`).
+        cursor
+            The `next_cursor` of the previous page.
 
         Returns
         -------
         OrphanReport
-            Readable orphans and a count of hidden ones.
+            One page of the readable orphans, sorted by repository and table, and a count of
+            hidden ones (all pages). A table that was dropped and can still be restored is
+            listed with `exists=False`.
 
         Raises
         ------
@@ -2860,8 +2896,11 @@ class DeployService:
             Without READ_ENVIRONMENT.
         NotFoundError
             If the environment does not exist.
+        ValidationError
+            If `limit` is out of range, or `cursor` is not one this list issued.
         """
         env = self._authorize_read(p, environment)
+        restorable: dict[tuple[tuple[str, ...], str], DroppedTable] | None = None
         orphans: list[OrphanView] = []
         hidden = 0
         current = {
@@ -2902,18 +2941,45 @@ class DeployService:
                     ref = TableRef.from_dotted(environment, table)
                 except ValidationError:
                     continue
-                if (
-                    resolve_table_id(self._session, environment, ref.namespace.joined(), ref.name)
-                    is None
-                ):
-                    continue
+                live_type = self._session.execute(
+                    live_table(
+                        select(Table.table_type), environment, ref.namespace.joined(), ref.name
+                    )
+                ).scalar_one_or_none()
+                if live_type is not None:
+                    kind, exists = table_kind(live_type), True
+                else:
+                    if restorable is None:
+                        tombstones = list_environment_tombstones(
+                            self._session, env.id, now=db_now(self._session)
+                        )
+                        restorable = {(d.namespace.parts, d.name): d for d in reversed(tombstones)}
+                    dropped = restorable.get((ref.namespace.parts, ref.name))
+                    if dropped is None or not dropped.restorable:
+                        continue
+                    kind, exists = dropped.kind, False
                 if self._may_read(p, environment, table):
-                    orphans.append(OrphanView(repository=repository_name, table=table))
+                    orphans.append(
+                        OrphanView(
+                            repository=repository_name, table=table, kind=kind, exists=exists
+                        )
+                    )
                 else:
                     hidden += 1
-        return OrphanReport(
-            orphans=sorted(orphans, key=lambda o: (o.repository, o.table)), hidden=hidden
+        page = page_in_order(
+            orphans,
+            kind="orphans",
+            key_of=lambda o: (o.repository, o.table),
+            limit=limit,
+            cursor=cursor,
         )
+        alive = [o for o in page.items if o.exists]
+        refs = [TableRef.from_dotted(environment, o.table) for o in alive]
+        words = iter(drop_actions_each(self._authz, p, refs, ORPHAN_ACTIONS[0]))
+        listed = [
+            dataclasses.replace(o, actions=next(words) if o.exists else ()) for o in page.items
+        ]
+        return OrphanReport(orphans=listed, hidden=hidden, next_cursor=page.next_cursor)
 
     # -- worker side -----------------------------------------------------
 

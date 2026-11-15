@@ -183,8 +183,8 @@ def deny_target() -> AuthorizationService:
             {"id": "long", "valid_from": "timestamptz"},
             GeneratedFrom("key", ("id",), history=True),
             "`gold.f` has no column `f_key`, which `write: history` adds, so it was not built by "
-            "its history asset. Drop it (`lakana table delete gold.f --env dev`) so that the "
-            "next run creates it, and deploy again.",
+            "its history asset. Build it again from git: `lakana table rebuild gold.f --env dev "
+            '--reason "…"` (it drops the table and queues the run that creates it).',
         ),
         (
             {"amount": "double"},

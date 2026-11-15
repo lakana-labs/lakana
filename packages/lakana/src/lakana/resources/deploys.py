@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
-from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, query_params
+from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
 from lakana._models import (
     Deploy,
     DeployAccepted,
@@ -21,6 +21,7 @@ from lakana._models import (
 from lakana._routes import ROUTES
 from lakana.errors import DeployFailed, JobStartsNotRecorded
 from lakana.resources.queries import waiting_for_from_json
+from lakana.resources.tables import actions_from_json
 
 
 def _when(value: str | None) -> datetime | None:
@@ -513,22 +514,82 @@ class OrphanTables:
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
-    def list(self, environment: str) -> Orphans:
-        """List orphans visible to the caller.
+    def list(
+        self, environment: str, *, limit: int | None = None, cursor: str | None = None
+    ) -> Orphans:
+        """List one page of the orphans visible to the caller.
+
+        An orphan that was dropped and can still be restored is listed with ``exists=False``.
+        `iter` walks every page.
 
         Parameters
         ----------
         environment
             Environment name.
+        limit
+            Most orphans returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`.
 
         Returns
         -------
         Orphans
-            Readable orphans and a hidden count.
+            Readable orphans, a hidden count and the cursor of the next page.
         """
-        response = self._transport.request(ROUTES["orphans.list"], path_params={"env": environment})
+        response = self._transport.request(
+            ROUTES["orphans.list"],
+            path_params={"env": environment},
+            params=query_params(limit=limit, cursor=cursor),
+        )
         data = response.json()
         return Orphans(
-            orphans=[Orphan(repository=o["repository"], table=o["table"]) for o in data["orphans"]],
+            orphans=[
+                Orphan(
+                    repository=o["repository"],
+                    table=o["table"],
+                    kind=o.get("kind"),
+                    exists=o.get("exists", True),
+                    actions=actions_from_json(o.get("actions")),
+                )
+                for o in data["orphans"]
+            ],
             hidden=data["hidden"],
+            next_cursor=data.get("next_cursor"),
         )
+
+    def iter(self, environment: str, *, page_size: int = 100) -> Iterator[Orphan]:
+        """Yield every orphan visible to the caller, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            Environment name.
+        page_size
+            Orphans per request (1 to 200).
+
+        Returns
+        -------
+        Iterator of Orphan
+            Each orphan, once, in repository and table order.
+        """
+        return every_page(
+            lambda cursor: _OrphanPage(
+                (page := self.list(environment, limit=page_size, cursor=cursor)).orphans,
+                page.next_cursor,
+            )
+        )
+
+
+class _OrphanPage(NamedTuple):
+    """The rows and next cursor of one orphans page, in the shape `every_page` reads.
+
+    Attributes
+    ----------
+    items
+        The orphans of the page.
+    next_cursor
+        The cursor of the next page, or `None`.
+    """
+
+    items: list[Orphan]
+    next_cursor: str | None

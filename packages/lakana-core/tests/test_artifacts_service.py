@@ -17,8 +17,10 @@ import pytest
 from core_test_helpers import (
     ARTIFACT_REF,
     ActionAllowList,
+    _prepared_catalog,
     artifact_document,
     artifact_service,
+    deploy_assets,
     ensure_table,
     python_task_run,
     store_version,
@@ -80,6 +82,8 @@ from lakana_core.models import (
     TableType,
     TaskRun,
 )
+from lakana_core.pagination import encode_key_cursor
+from lakana_core.projects.definition import DefiningFile
 from lakana_core.runs.lockdown import SUPERSEDED_MESSAGE, TABLE_TASK_MESSAGE
 from lakana_core.storage.base import StoredObject, StreamWriter
 from lakana_core.storage.fsspec_storage import FsspecStorage
@@ -183,12 +187,139 @@ def test_three_steps_store_version_one(
 
     view = service.get_artifact(principal, ARTIFACT_REF)
     assert (view.current_version, view.versions, view.size_bytes) == (1, 1, version.size_bytes)
-    assert [a.ref for a in service.list_artifacts(principal, "dev")] == [ARTIFACT_REF]
-    assert service.list_artifacts(principal, "dev", NamespacePath.from_parts(["gold"])) == []
-    assert service.get_version(principal, ARTIFACT_REF) == version
-    assert service.get_version(principal, ARTIFACT_REF, 1) == version
+    assert [a.ref for a in service.list_artifacts(principal, "dev").items] == [ARTIFACT_REF]
+    assert service.list_artifacts(principal, "dev", NamespacePath.from_parts(["gold"])).items == []
+    # The commit's answer carries no actions; a read offers what the reader may do.
+    shown = dataclasses.replace(version, actions=("delete",))
+    assert service.get_version(principal, ARTIFACT_REF) == shown
+    assert service.get_version(principal, ARTIFACT_REF, 1) == shown
     listed = service.list_versions(principal, ARTIFACT_REF)
     assert [(v.version, v.files) for v in listed] == [(1, ())]
+
+
+def test_artifacts_carry_their_producer_and_keep_versions(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A declared artifact names its file and its retention; an uploaded one has neither."""
+    service = artifact_service(session, tmp_path)
+    other = TableRef("dev", NamespacePath.from_parts(["models"]), "uploaded")
+    store_version(service, principal, ARTIFACT_REF, _FILES)
+    store_version(service, principal, other, _FILES)
+    zeta = TableRef("dev", NamespacePath.from_parts(["models"]), "zeta")
+    store_version(service, principal, zeta, _FILES)
+    assert [
+        (a.defined_by, a.keep_versions) for a in service.list_artifacts(principal, "dev").items
+    ] == [(None, None)] * 3
+    deploy_assets(
+        session,
+        "dev",
+        "analytics",
+        {
+            "models.churn": {
+                "kind": "python",
+                "output": "artifact",
+                "keep_versions": 3,
+                "path": "assets/models/m.py",
+            },
+            "models.zeta": {
+                "kind": "python",
+                "output": "artifact",
+                "keep_versions": 5,
+                "path": "assets/models/z.py",
+            },
+        },
+    )
+    by_name = {a.ref.name: a for a in service.list_artifacts(principal, "dev").items}
+    assert by_name["churn"].defined_by == DefiningFile(
+        "analytics", "assets/models/m.py", "artifact"
+    )
+    assert by_name["churn"].keep_versions == 3
+    assert by_name["zeta"].defined_by == DefiningFile("analytics", "assets/models/z.py", "artifact")
+    assert by_name["zeta"].keep_versions == 5
+    assert (by_name["uploaded"].defined_by, by_name["uploaded"].keep_versions) == (None, None)
+
+
+def test_artifacts_page_by_namespace_then_name(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """One page at a time, in (namespace, name) order, with no skip and no repeat."""
+    service = artifact_service(session, tmp_path)
+    refs = [
+        TableRef("dev", NamespacePath.from_parts(parts), name)
+        for parts, name in [(["models"], "b"), (["models"], "a"), (["gold"], "z"), (["gold"], "a")]
+    ]
+    _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        namespaces=[NamespacePath.from_parts(["gold"])],
+    )
+    for ref in refs:
+        store_version(service, principal, ref, _FILES)
+    seen: list[str] = []
+    cursor = None
+    while True:
+        page = service.list_artifacts(principal, "dev", limit=1, cursor=cursor)
+        assert len(page.items) == 1
+        seen.append(f"{page.items[0].ref.namespace}.{page.items[0].ref.name}")
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert seen == ["gold.a", "gold.z", "models.a", "models.b"]
+
+
+def test_a_parent_namespace_lists_its_artifacts_before_its_childs(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """`gold` comes before `gold.sub` whatever the names are, and a page resumes in that order."""
+    service = artifact_service(session, tmp_path)
+    parent = NamespacePath.from_parts(["gold"])
+    child = NamespacePath.from_parts(["gold", "sub"])
+    _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[parent, child])
+    for ref in (TableRef("dev", child, "a"), TableRef("dev", parent, "z")):
+        store_version(service, principal, ref, _FILES)
+    seen: list[str] = []
+    cursor = None
+    while True:
+        page = service.list_artifacts(principal, "dev", limit=1, cursor=cursor)
+        seen.append(f"{page.items[0].ref.namespace}.{page.items[0].ref.name}")
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert seen == ["gold.z", "gold.sub.a"]
+
+
+def test_a_forged_artifact_cursor_reveals_nothing(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """The listing is filtered by what the caller may read before the cursor applies."""
+    service = artifact_service(session, tmp_path)
+    store_version(service, principal, ARTIFACT_REF, _FILES)
+    blind = ArtifactService(
+        session, StorageResolver(session), ActionAllowList(Action.READ_ENVIRONMENT)
+    )
+    forged = encode_key_cursor("artifacts", json.dumps(['["a"]', "a"]))
+    page = blind.list_artifacts(principal, "dev", limit=1, cursor=forged)
+    assert page.items == [] and page.next_cursor is None
+
+
+def test_an_unreadable_artifact_sorting_first_does_not_cost_the_reader_a_page(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """The read filter runs before paging: page 1 at limit=1 holds the first readable one."""
+    service = artifact_service(session, tmp_path)
+    other = TableRef("dev", ARTIFACT_REF.namespace, "other")
+    store_version(service, principal, ARTIFACT_REF, _FILES)
+    store_version(service, principal, other, {"w": b"w"}, is_directory=False)
+
+    class OnlyOther(ActionAllowList):
+        def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+            return securable.table == "other" or action is Action.READ_ENVIRONMENT
+
+    narrow = ArtifactService(session, StorageResolver(session), OnlyOther(Action.READ_ENVIRONMENT))
+    page = narrow.list_artifacts(principal, "dev", limit=1)
+    assert [a.ref.name for a in page.items] == ["other"]
+    assert page.next_cursor is None
 
 
 def test_a_second_version_uploads_only_what_the_store_lacks(
@@ -535,7 +666,7 @@ def test_an_unreadable_artifact_and_a_missing_one_are_refused_alike(
     blind = ArtifactService(
         session, StorageResolver(session), ActionAllowList(Action.READ_ENVIRONMENT)
     )
-    assert blind.list_artifacts(principal, "dev") == []
+    assert blind.list_artifacts(principal, "dev").items == []
     calls = (
         lambda ref: blind.get_artifact(principal, ref),
         lambda ref: blind.list_versions(principal, ref),
@@ -925,7 +1056,7 @@ def test_a_namespace_drop_takes_the_lock_before_it_looks_for_artifacts(
     catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
     with (
         _right_before_the_namespace_lock(session, late),
-        pytest.raises(ConflictError, match="still contains artifacts"),
+        pytest.raises(ConflictError, match="still holds 1 artifact;"),
     ):
         catalog.drop_namespace(principal, "dev", ARTIFACT_REF.namespace)
     assert session.scalars(select(Table.name)).all() == ["late"]
@@ -984,8 +1115,11 @@ def test_a_listing_shows_only_artifacts_the_caller_may_read(
             return securable.table == "other" or action is Action.READ_ENVIRONMENT
 
     narrow = ArtifactService(session, StorageResolver(session), OnlyOther(Action.READ_ENVIRONMENT))
-    assert [a.ref.name for a in narrow.list_artifacts(principal, "dev")] == ["other"]
-    assert [a.ref.name for a in service.list_artifacts(principal, "dev")] == ["churn", "other"]
+    assert [a.ref.name for a in narrow.list_artifacts(principal, "dev").items] == ["other"]
+    assert [a.ref.name for a in service.list_artifacts(principal, "dev").items] == [
+        "churn",
+        "other",
+    ]
 
 
 def test_a_version_number_nobody_could_have_is_refused_with_a_bounded_message(

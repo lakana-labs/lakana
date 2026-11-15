@@ -110,9 +110,13 @@ ROUTES: dict[str, Route] = {
     "tables.undrop": Route(
         "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop"
     ),
+    "tables.rebuild": Route(
+        "POST", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild"
+    ),
     "tables.list_dropped": Route(
         "GET", "/api/v1/environments/{env}/namespaces/{path}/dropped-tables"
     ),
+    "tables.list_dropped_in_environment": Route("GET", "/api/v1/environments/{env}/dropped-tables"),
     "tables.health": Route(
         "GET", "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/health"
     ),

@@ -290,6 +290,7 @@ What a version records:
 | `commit_sha`, `project_version_id`, `run_id`, `task_run_id` | For a version a run stored: the git commit of the deployed code, the deploy (project version), the run and the task. `null` for a version a person uploaded (see [upload](#upload)). A task token sees `null` for `project_version_id`, `run_id` and `task_run_id`: it reads what it consumes, not the identifiers of other runs. |
 | `deleted_at`, `deleted_by` | For a deleted version: when, and by whom (for a version removed by `keep_versions`, the principal that stored the newer one). |
 | `files` | Path, size and SHA-256 of each file. Shown for one version, empty for a deleted one. |
+| `actions` | `["delete"]` on a live version when your rights allow deleting it (`DROP_TABLE`). Empty for a deleted version, and in the answer of a store or a delete. |
 
 ## Commands
 
@@ -299,7 +300,7 @@ that needs a name takes `NAMESPACE.NAME`, such as `models.churn_model`.
 
 | Command | What it does | Needs |
 |---|---|---|
-| `lakana artifact list [--namespace NS]` | Lists the artifacts you may read: name, namespace, current version, how many versions, size of the live versions. | `READ_TABLE` on each |
+| `lakana artifact list [--namespace NS] [--limit N] [--cursor C]` | Lists the artifacts you may read, 100 per page: name, namespace, current version, how many versions, size of the live versions, `keep` (the `keep_versions` of the project that declares it; empty keeps all) and `defined in` (the repository and file that declare it; empty for one no deployed project declares). | `READ_TABLE` on each |
 | `lakana artifact versions list NAME` | Lists the versions, newest first: number, time, size, file count, the start of the digest, the run, when deleted. The last line says how many versions have bytes and their size. A narrow window leaves columns out, least useful first, and says which. The whole digest is in `--output json`. | `READ_TABLE` |
 | `lakana artifact download NAME DIRECTORY [--version N]` | Downloads a version (the current one without `--version`) into a new or an empty directory. | `READ_TABLE` |
 | `lakana artifact upload NAME PATH` | Stores a file or directory as a new version. Creates the artifact on first use. | `WRITE_TABLE`, and `CREATE_TABLE` for a new name |
@@ -322,14 +323,17 @@ You see one row per artifact:
 
 <!-- output: train-and-predict#artifact-list -->
 ```text
-┏━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
-┃ name        ┃ namespace ┃ current_version ┃ versions ┃ size  ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
-│ spend_model │ models    │ 1               │ 1        │ 639 B │
-└─────────────┴───────────┴─────────────────┴──────────┴───────┘
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name        ┃ namespace ┃ current_version ┃ versions ┃ size  ┃ keep ┃ defined in                             ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ spend_model │ models    │ 1               │ 1        │ 639 B │ 2    │ forecasts/assets/models/spend_model.py │
+└─────────────┴───────────┴─────────────────┴──────────┴───────┴──────┴────────────────────────────────────────┘
 ```
 
 An artifact you may not read is not listed, and a namespace you may not see gives an empty list.
+The list shows at most 100 artifacts, in the order of namespace and name. When more follow, the
+last line is `More results: lakana artifact list ... --cursor ...`; run it for the next page. See
+[Lists](lists.md#other-paged-lists).
 
 ### versions list
 
@@ -427,6 +431,11 @@ name may not hold a control character, a format character (such as U+202E or a z
 or a line or paragraph separator, as for a table: the refusal names the character as `U+XXXX`. An
 artifact that already has such a name keeps working.
 
+A new artifact cannot be uploaded under a name a deployed project declares: the upload answers
+``` `models.churn` is declared by a deployed project. Defined in analytics/assets/models/churn.py. Choose another name, or remove it there and deploy first.```
+(or `A deployed project defines this artifact; change it in git.` to someone who may not read the
+name). The project's run produces that artifact; choose another name for an upload.
+
 If the upload fails, or the server refuses the commit, the command withdraws its upload, so it does
 not keep one of the artifact's 16 places. If the server's answer to the last request is lost,
 the command says that the version may or may not exist, and names the `manifest_sha256` to look
@@ -476,6 +485,14 @@ Enter. See
 The server removes the files inside the request, so an artifact with thousands of files can take
 minutes (the SDK waits up to ten). A reverse proxy in front of the server must allow a request that
 long, or you see a 504 for a drop that still finishes.
+
+An artifact that a deployed project produces is defined in git, so the drop refuses it (409) and
+nothing is deleted:
+
+| You see | What it means | What to do |
+|---|---|---|
+| ``` `models.churn` is produced by a deployed project. Defined in analytics/assets/models/churn.py. ... ``` | A current deployment declares the asset that produces this artifact. | To free space now, delete single versions (`lakana artifact versions delete models.churn VERSION --env dev`). To drop it, remove the asset in git and deploy, then drop it from `lakana orphans --env dev`. |
+| `A deployed project defines this artifact; change it in git.` | The same, for someone who may not read the artifact. | Ask someone who may read it which project produces it. |
 
 ### uploads list
 
@@ -645,17 +662,24 @@ server's info route (`GET /api/v1/info`).
 | `POST /namespaces/{path}/artifacts/{name}/uploads/{upload_id}/commit` | Turn the complete upload into the next version. Repeating it for the same upload returns the same version (the sources of the first commit stand). | `WRITE_TABLE`, and `READ_TABLE` on each source |
 | `GET /artifacts/uploads` (optional `name`, `limit`, `cursor` queries) | List your own open uploads, newest first: `{items: [{upload_id, artifact, created_at, expires_at}], next_cursor}`. `name` is `namespace.name`; `limit` is 1 to 500 (default 100); `cursor` is the previous `next_cursor`. | `READ_ENVIRONMENT`, and `WRITE_TABLE` on each artifact |
 | `DELETE /namespaces/{path}/artifacts/{name}/uploads/{upload_id}` | Withdraw an open upload. | `WRITE_TABLE` |
-| `DELETE /namespaces/{path}/artifacts/{name}/versions/{version}` | Delete one version's files. The answer is `200` with the version and, added to its fields, `freed_files`, `freed_bytes`, `kept_files`, `kept_bytes` and `kept` (`reason`, `files`, `bytes`, `version`), as under `versions delete`. | `DROP_TABLE` |
-| `DELETE /namespaces/{path}/artifacts/{name}` | Drop the artifact. | `DROP_TABLE` |
-| `GET /artifacts` (optional `namespace` query) | List the artifacts you may read. | `READ_ENVIRONMENT`, then `READ_TABLE` for each |
+| `DELETE /namespaces/{path}/artifacts/{name}/versions/{version}` | Delete one version's files. The answer is `200` with the version and, added to its fields, `freed_files`, `freed_bytes`, `kept_files`, `kept_bytes` and `kept` (`reason`, `files`, `bytes`, `version`), as under `versions delete`. | `DROP_TABLE`; from the web interface also a passkey touch within the last 15 minutes (403 `StepUpRequired`) |
+| `DELETE /namespaces/{path}/artifacts/{name}` | Drop the artifact. | `DROP_TABLE`; from the web interface also a passkey touch within the last 15 minutes (403 `StepUpRequired`) |
+| `GET /artifacts` (optional `namespace`, `limit`, `cursor` queries) | List the artifacts you may read, as an array in namespace and name order. Each item has `defined_by` (`{repository, path}` or `null`), `keep_versions` (a number or `null`) and `actions` (see below). `limit` is 1 to 200 (default 100); the `X-Next-Cursor` header holds the `cursor` of the next page and is absent on the last. | `READ_ENVIRONMENT`, then `READ_TABLE` for each |
 | `GET /namespaces/{path}/artifacts/{name}` | Show one artifact. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions` | List the versions, without files. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions/{version}` | Show one version with its files; `{version}` is a number or `current`. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions/{version}/blobs/{sha256}` | Download one file. | `READ_TABLE` |
 
+An artifact, in the list and when shown alone, has `actions`: `["drop"]` when your rights allow
+dropping it (`DROP_TABLE`), else `[]`. The same holds for a version and `["delete"]`. A client
+offers an action only when its word is listed. The server still checks every request: a drop of
+an artifact with `defined_by` is refused, because only git may remove it. In the SDK, both
+`Artifact.actions` and `ArtifactVersion.actions` are tuples; an older server sends no `actions`,
+and you get `()`.
+
 The routes that begin an upload, send a file, commit and delete (a version or the artifact) take
-`break_glass_reason` as a query parameter; withdrawing an upload does not, because it writes
-nothing. In the blob download route `{version}` must be a number, not `current`. A caller who may
+`break_glass_reason` as a query parameter; withdrawing an upload does not, because it writes no
+version and no file (only its `ARTIFACT_UPLOAD_ABORTED` audit event). In the blob download route `{version}` must be a number, not `current`. A caller who may
 not use a name gets the same 403 whether or not the artifact, the version or the file exists, and a list shows only
 what the caller may read. The download route answers `GET` only, ignores a `Range` header and
 sends the whole file with its size as `Content-Length`.

@@ -49,7 +49,7 @@ from pyiceberg.table.update import (
     TableUpdate,
 )
 from pyiceberg.types import NestedField
-from sqlalchemy import String, cast, delete, event, null, or_, select, text, update
+from sqlalchemy import String, cast, delete, event, func, null, or_, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
 
@@ -123,6 +123,12 @@ from lakana_core.catalog.files_read import (
     forget_files_read,
     forget_table_files_read,
     record_files_read,
+)
+from lakana_core.catalog.git_owned import (
+    refuse_declared_name,
+    refuse_owned_drop,
+    refuse_owned_replace,
+    undrop_refusal,
 )
 from lakana_core.catalog.glossary_read import TableTerms, TermRef, table_terms
 from lakana_core.catalog.health import (
@@ -251,6 +257,10 @@ from lakana_core.catalog.retention import (
     planned_expiry,
     retention_candidates,
 )
+from lakana_core.catalog.row_actions import (
+    dropped_actions_each,
+    readable_table_actions_each,
+)
 from lakana_core.catalog.schema_compat import SchemaDiff, arrow_to_iceberg_schema, plan_schema
 from lakana_core.catalog.schema_inference import infer_schema
 from lakana_core.catalog.table_listing import TableOwner, table_facts
@@ -266,6 +276,7 @@ from lakana_core.catalog.tombstones import (
     DroppedTable,
     drop_row,
     find_tombstone,
+    list_environment_tombstones,
     list_tombstones,
     name_holder,
     refresh_restored,
@@ -354,7 +365,14 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.models.run import TERMINAL_TASK_STATUSES
-from lakana_core.pagination import Page, escape_like
+from lakana_core.models.table import table_kind
+from lakana_core.pagination import (
+    LIST_LIMIT_DEFAULT,
+    Page,
+    escape_like,
+    instant_key,
+    page_in_order,
+)
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.policy.schema_change import (
     REPLACED,
@@ -364,7 +382,11 @@ from lakana_core.policy.schema_change import (
 )
 from lakana_core.projects.definition import (
     REASON_MESSAGES,
+    DefiningFile,
     DefinitionReason,
+    definition_for,
+    deployed_definitions,
+    owned_by_git,
     passes_content_gate,
 )
 from lakana_core.projects.layers import LAYERS
@@ -470,6 +492,41 @@ def _not_exposed_artifact_message(dotted: str) -> str:
         f"{dotted} is an artifact; artifacts have no Iceberg metadata and are not exposed over "
         "the Iceberg REST catalog."
     )
+
+
+NAMESPACE_HOLDS_TABLES = "{namespace} still holds {n} table{s}."
+"""A namespace drop refused for the tables (and views) it holds, to a caller who may read them."""
+
+NAMESPACE_HOLDS_ARTIFACTS = (
+    "{namespace} still holds {n} artifact{s}; drop each first (`lakana artifact drop`)."
+)
+"""A namespace drop refused for the artifacts it holds, to a caller who may read them."""
+
+NAMESPACE_HOLDS_NAMESPACES = "{namespace} still holds {n} namespace{s}."
+"""A namespace drop refused for the namespaces under it."""
+
+NAMESPACE_NOT_EMPTY = "{namespace} is not empty; drop what it holds first."
+"""A namespace drop refused to a caller who may not read everything it holds."""
+
+
+def _holds(template: str, namespace: NamespacePath, n: int) -> str:
+    """Fill one of the namespace-not-empty messages.
+
+    Parameters
+    ----------
+    template
+        `NAMESPACE_HOLDS_TABLES`, `NAMESPACE_HOLDS_ARTIFACTS` or `NAMESPACE_HOLDS_NAMESPACES`.
+    namespace
+        The namespace.
+    n
+        How many it holds.
+
+    Returns
+    -------
+    str
+        The message, with the plural ``s`` only when `n` is not 1.
+    """
+    return template.format(namespace=namespace, n=n, s="" if n == 1 else "s")
 
 
 def _name_taken_message(existing: Table, name: str, namespace: NamespacePath) -> str:
@@ -816,6 +873,13 @@ class TableDescription:
         How many distinct principals read it in the last 7 UTC days, today included; never who.
     health_summary
         Its health in one word, with the reference checks the reader may see.
+    defined_by
+        The deployed project file that owns it (`owned_by_git`: declared as a table or view,
+        and it is one), so that only git may remove it; `None` otherwise. Shown to every reader
+        of the row, without the file's text.
+    actions
+        The words of `lakana_core.catalog.row_actions.TABLE_ACTIONS` the reader's rights allow
+        on it; the server decides each request again.
     """
 
     ref: TableRef
@@ -862,6 +926,8 @@ class TableDescription:
     last_read_at: datetime | None = None
     readers_7d: int = 0
     health_summary: HealthSummary | None = None
+    defined_by: DefiningFile | None = None
+    actions: tuple[str, ...] = ()
 
 
 def _stored_effects(row: Table, dotted: str) -> HealthEffects:
@@ -892,9 +958,12 @@ def _stored_effects(row: Table, dotted: str) -> HealthEffects:
 
 _NO_UNPUBLISHING = (
     "A commit cannot remove a table's current snapshot: readers would see an empty table. "
-    "Drop the table, or write the rows it should hold."
+    "Write the rows it should hold, or start {table} again: `lakana table rebuild {table} --env "
+    '{environment} --reason "…"` if a deployed project builds it, otherwise `lakana table delete '
+    "{table} --env {environment}`."
 )
-"""Why a commit may not leave a table with no current snapshot."""
+"""Why a commit may not leave a table with no current snapshot. A table a deployed project
+builds cannot be dropped by a person (`git_owned`), so the text names a rebuild for it."""
 
 _NO_SIDE_DOOR = (
     "{table} is not published: its first build did not finish, or failed a check. A commit can "
@@ -2378,6 +2447,9 @@ class CatalogService:
     ) -> Namespace:
         """Create a namespace in an environment.
 
+        One `NAMESPACE_CREATED` audit event, in the transaction of the insert, records the
+        dotted path.
+
         Parameters
         ----------
         p
@@ -2437,6 +2509,12 @@ class CatalogService:
             properties=dict(properties or {}),
         )
         self._session.add(ns)
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.NAMESPACE_CREATED,
+            securable=Securable.namespace_scope(environment, path),
+            detail={"namespace": str(path)},
+        )
         try:
             self._guard.record_pending()
             self._session.commit()
@@ -2593,11 +2671,66 @@ class CatalogService:
         paths = [NamespacePath.parse(row.path) for row in rows]
         return sorted(paths, key=lambda ns: ns.parts)
 
+    def list_namespace_page(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        parent: NamespacePath | None = None,
+        *,
+        depth: int | None = None,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> Page[NamespacePath]:
+        """List one page of the namespaces, optionally only those below a parent.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Environment name.
+        parent
+            When given, only strict descendants of this path, at every depth (as
+            `list_namespaces`); the parent itself is left out.
+        depth
+            ``1`` keeps only the direct children of `parent`, or the top-level namespaces
+            when there is no `parent`; `None` keeps every depth.
+        limit
+            The page size, 1 to 200.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        Page of NamespacePath
+            In the order of `parts`, which is also the cursor's key; two namespaces never share
+            a key, a legacy name with a dot in a part included.
+
+        Raises
+        ------
+        NotFoundError
+            If the environment does not exist.
+        PermissionDenied
+            If the principal may not read namespaces in this environment.
+        ValidationError
+            If `depth` is not 1, `limit` is out of range, or `cursor` is not one this list issued.
+        """
+        if depth is not None and depth != 1:
+            raise ValidationError(f"depth must be 1 (direct children only); got {depth}.")
+        found = self.list_namespaces(p, environment, parent)
+        if depth == 1:
+            wanted = (len(parent.parts) if parent is not None else 0) + 1
+            found = [ns for ns in found if len(ns.parts) == wanted]
+        return page_in_order(
+            found, kind="namespaces", key_of=lambda ns: ns.parts, limit=limit, cursor=cursor
+        )
+
     def drop_namespace(self, p: PrincipalRef, environment: str, path: NamespacePath) -> None:
         """Remove a namespace.
 
         Every active NAMESPACE-kind grant bound to exactly this namespace is
-        soft-revoked first, in the same transaction. A row filter
+        soft-revoked first, in the same transaction, and one `NAMESPACE_DROPPED` audit event
+        records the dotted path and how many grants went. A row filter
         or column mask is always table-scoped, so none applies here directly;
         the `ConflictError` checks below already guarantee no table remains
         underneath to worry about.
@@ -2617,8 +2750,10 @@ class CatalogService:
             If the environment or the namespace does not exist (also when a
             concurrent drop wins the row lock).
         ConflictError
-            If the namespace still contains a table, an artifact or a child
-            namespace.
+            If the namespace still holds a table, an artifact or a child
+            namespace. The message counts them ("silver still holds 2 tables.") only when
+            the caller may read every table and artifact in it; otherwise it says only that
+            the namespace is not empty (`NAMESPACE_NOT_EMPTY`).
             `Table.namespace_id` cascades on delete at the database level,
             so this check is the only thing standing between a drop and
             silently destroying every table underneath it. A namespace
@@ -2629,10 +2764,13 @@ class CatalogService:
             catch that at the database level either.
         PermissionDenied
             If the principal may not drop this namespace.
+        StepUpRequired
+            If a browser session's last passkey touch is older than 15 minutes; a token never
+            is asked. Checked before anything else is read.
         """
-        self._authz.authorize(
-            p, Action.DROP_NAMESPACE, Securable.namespace_scope(environment, path)
-        )
+        securable = Securable.namespace_scope(environment, path)
+        self._authz.authorize(p, Action.DROP_NAMESPACE, securable)
+        require_step_up(p)
         self._guard.check(p, environment, WriteOperation.DROP_NAMESPACE, path.parts)
         env = self._find_environment(environment)
         ns = self._find_namespace(env, path)
@@ -2646,36 +2784,73 @@ class CatalogService:
         if locked is None:
             self._session.rollback()
             raise NotFoundError(f"Namespace {path} not found in {env.name!r}.")
-        has_table = self._session.execute(
-            select(Table.id).where(
-                Table.namespace_id == ns.id, Table.table_type != TableType.ARTIFACT
-            )
-        ).first()
-        if has_table is not None:
-            raise ConflictError(f"Namespace {path} still contains tables.")
-        has_artifact = self._session.execute(
-            select(Table.id).where(
-                Table.namespace_id == ns.id, Table.table_type == TableType.ARTIFACT
-            )
-        ).first()
-        if has_artifact is not None:
-            raise ConflictError(
-                f"Namespace {path} still contains artifacts; drop each first "
-                "(`lakana artifact drop`)."
-            )
+        self._refuse_held(p, environment, ns, path)
         prefix = escape_like(path.joined() + NAMESPACE_SEPARATOR)
-        has_child = self._session.execute(
-            select(Namespace.id).where(
+        children = self._session.execute(
+            select(func.count())
+            .select_from(Namespace)
+            .where(
                 Namespace.environment_id == env.id,
                 Namespace.path.like(prefix + "%", escape="\\"),
             )
-        ).first()
-        if has_child is not None:
-            raise ConflictError(f"Namespace {path} still contains child namespaces.")
-        revoke_attached(self._session, p, namespace=(env.id, path.joined()))
+        ).scalar_one()
+        if children:
+            raise ConflictError(_holds(NAMESPACE_HOLDS_NAMESPACES, path, children))
+        revoked = revoke_attached(self._session, p, namespace=(env.id, path.joined()))
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.NAMESPACE_DROPPED,
+            securable=securable,
+            detail={"namespace": str(path), "revoked_grants": len(revoked)},
+        )
         self._session.delete(ns)
         self._guard.record_pending()
         self._session.commit()
+
+    def _refuse_held(
+        self, p: PrincipalRef, environment: str, ns: Namespace, path: NamespacePath
+    ) -> None:
+        """Refuse to drop a namespace that holds a table or an artifact, telling what `p` may see.
+
+        The counts are named only when `p` may read every table and artifact in it (one
+        `permits_each` batch); otherwise the message says only that it is not empty, which
+        neither discloses a hidden table nor gives a number that leaves some out.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        environment
+            Environment name.
+        ns
+            The namespace, locked.
+        path
+            Its path.
+
+        Raises
+        ------
+        ConflictError
+            If the namespace holds a table, a view or an artifact.
+        """
+        held = self._session.execute(
+            select(Table.name, Table.table_type).where(Table.namespace_id == ns.id)
+        ).all()
+        if not held:
+            return
+        readable = permits_each(
+            self._authz,
+            p,
+            [
+                (Action.READ_TABLE, Securable.table_scope(environment, path, row.name))
+                for row in held
+            ],
+        )
+        if not all(readable):
+            raise ConflictError(NAMESPACE_NOT_EMPTY.format(namespace=path))
+        artifacts = sum(row.table_type is TableType.ARTIFACT for row in held)
+        if len(held) > artifacts:
+            raise ConflictError(_holds(NAMESPACE_HOLDS_TABLES, path, len(held) - artifacts))
+        raise ConflictError(_holds(NAMESPACE_HOLDS_ARTIFACTS, path, artifacts))
 
     def update_namespace_properties(
         self,
@@ -2819,6 +2994,9 @@ class CatalogService:
             inside the environment's storage root; or if `ref.namespace`'s
             top-level component is not `bronze`, `silver`, or `gold`.
         ConflictError
+            If a deployed project declares the name, whatever it declares there: only git
+            may take it (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`, or
+            `GIT_OWNED_HIDDEN` to a caller who may not read the name); nothing is claimed.
             If the insert fails for a reason other than a name collision —
             for instance, the namespace was dropped between the checks above
             and the insert — or the sweep released the claim before the
@@ -2849,6 +3027,7 @@ class CatalogService:
             properties=properties,
             location=location,
             holder_run_id=claim_holder(p, None),
+            refuse_declared_for=p,
         )
         self._commit_sent = False
         try:
@@ -2879,6 +3058,7 @@ class CatalogService:
         properties: Mapping[str, str] | None,
         location: str | None,
         holder_run_id: uuid.UUID | None,
+        refuse_declared_for: PrincipalRef | None,
     ) -> _PreparedTable:
         """Validate a new managed table, build its metadata and claim its location.
 
@@ -2906,6 +3086,10 @@ class CatalogService:
             Must be `None`; see `create_table`.
         holder_run_id
             The run that makes the create, recorded on the claim (`claim_holder`).
+        refuse_declared_for
+            The caller to refuse when a deployed project declares `ref`
+            (`refuse_declared_name`), or `None` for a project's own run, which creates the
+            tables its project declares.
 
         Returns
         -------
@@ -2920,6 +3104,9 @@ class CatalogService:
             If a table, view or artifact of that name already exists.
         ValidationError
             As `create_table` documents.
+        ConflictError
+            If `refuse_declared_for` is given and a deployed project declares the name
+            (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); nothing is claimed.
         """
         if location is not None:
             raise ValidationError("Lakana assigns table locations; do not supply one.")
@@ -2936,6 +3123,8 @@ class CatalogService:
         taken = self._lookup_table(ns, ref.name)
         if taken is not None:
             raise AlreadyExistsError(_name_taken_message(taken, ref.name, ref.namespace))
+        if refuse_declared_for is not None:
+            refuse_declared_name(self._session, self._authz, refuse_declared_for, ref, env.id)
 
         # `table_location` validates `ref.name` itself; it is now the only
         # path a location can be derived from, `location=` above having
@@ -3154,7 +3343,9 @@ class CatalogService:
 
         Unlike `create_table`, this never writes Iceberg metadata: the table's
         location, format, and inferred schema are the whole of its catalog
-        entry. Not subject to the medallion naming rule `create_table`
+        entry. One `TABLE_CREATED` audit event, in the transaction of the insert, records the
+        table's id, its kind, its location pattern (relative to the environment's storage
+        root) and its format. Not subject to the medallion naming rule `create_table`
         enforces — raw is exempt from that convention (architecture design,
         Decision 2).
 
@@ -3200,7 +3391,9 @@ class CatalogService:
             unsupported, or if a column name of the sample file holds an invisible or
             line-breaking character (`refuse_hidden_characters`).
         ConflictError
-            If the insert fails for a reason other than a name collision —
+            If a deployed project declares the name, whatever it declares there
+            (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); checked before any storage
+            is read. If the insert fails for a reason other than a name collision —
             for instance, the namespace was dropped between the checks above
             and the insert.
         PermissionDenied
@@ -3220,6 +3413,7 @@ class CatalogService:
         taken = self._lookup_table(ns, ref.name)
         if taken is not None:
             raise AlreadyExistsError(_name_taken_message(taken, ref.name, ref.namespace))
+        refuse_declared_name(self._session, self._authz, p, ref, env.id)
         loc = parse_external_location(location_pattern)
         # Checked unlocked, before any storage I/O: listing and reading the claimed directory first
         # — as
@@ -3284,6 +3478,17 @@ class CatalogService:
             self._session,
             row.id,
             [ColumnSpec(name=n, type=t, nullable=True) for n, t in schema.items()],
+        )
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.TABLE_CREATED,
+            securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
+            detail={
+                "table_id": str(row.id),
+                "kind": TableType.EXTERNAL.value,
+                "location": location_pattern,
+                "format": format,
+            },
         )
         try:
             self._guard.record_pending()
@@ -3762,6 +3967,7 @@ class CatalogService:
         *,
         languages: Sequence[str] = (),
         view_sql_window_minutes: int | None = None,
+        with_actions: bool = True,
     ) -> TableDescription:
         """Describe a table, an external table or a view for the platform API.
 
@@ -3777,6 +3983,10 @@ class CatalogService:
             `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`, from a route that shows a view's SQL. `None`
             (an internal caller that needs only the columns) never returns a view's SQL and
             records nothing.
+        with_actions
+            Fill `defined_by` and `actions` (one read of the deployed definitions, one rights
+            batch). `False` leaves them empty: for a caller that needs only the columns, and for
+            a list that fills every row at once with `with_row_actions`.
 
         Returns
         -------
@@ -3875,8 +4085,16 @@ class CatalogService:
         facts = table_facts(self._session, self._authz, p, [(ref.environment, row)], now=now)[
             row.id
         ]
+        defined_by: DefiningFile | None = None
+        actions: tuple[str, ...] = ()
+        if with_actions:
+            ((defined_by, actions),) = self._row_actions(
+                p, [(ref, described.kind, row.owner_id, namespace.environment_id)]
+            )
         return replace(
             described,
+            defined_by=defined_by,
+            actions=actions,
             owner=facts.owner,
             created_at=row.created_at,
             last_read_at=facts.last_read_at,
@@ -3901,6 +4119,121 @@ class CatalogService:
             expires_soon=expires_soon,
             model=model,
         )
+
+    def with_row_actions(
+        self, p: PrincipalRef, described: Sequence[TableDescription]
+    ) -> list[TableDescription]:
+        """Fill `defined_by` and `actions` of many descriptions at once.
+
+        For a list that describes its rows with ``with_actions=False``: one read of the rows'
+        owners, one read of the deployed definitions per environment, and one rights batch,
+        however many rows there are.
+
+        Parameters
+        ----------
+        p
+            The reader; each description must be one `describe_table` gave `p`.
+        described
+            The descriptions.
+
+        Returns
+        -------
+        list of TableDescription
+            The same descriptions, filled, in order. A table dropped since it was described is
+            returned as it was, without `defined_by` and `actions`.
+        """
+        if not described:
+            return []
+        rows = {
+            table_id: (owner_id, environment_id)
+            for table_id, owner_id, environment_id in self._session.execute(
+                select(Table.id, Table.owner_id, Namespace.environment_id)
+                .join(Namespace, Namespace.id == Table.namespace_id)
+                .where(Table.id.in_([d.id for d in described]))
+            )
+        }
+        present = [d for d in described if d.id in rows]
+        filled = self._row_actions(
+            p, [(d.ref, d.kind, rows[d.id][0], rows[d.id][1]) for d in present]
+        )
+        fill = {
+            d.id: (defined_by, actions)
+            for d, (defined_by, actions) in zip(present, filled, strict=True)
+        }
+        # A table dropped since it was described keeps its bare row: nothing to offer on it.
+        return [
+            replace(d, defined_by=fill[d.id][0], actions=fill[d.id][1]) if d.id in fill else d
+            for d in described
+        ]
+
+    def row_actions(
+        self, p: PrincipalRef, ref: TableRef
+    ) -> tuple[DefiningFile | None, tuple[str, ...]]:
+        """Say which file owns a table and what `p` may do with it, for a create or a restore.
+
+        The answer of a create or an undrop is the only one given to a caller who may not read
+        the table, so the file is left out unless `p` holds `READ_TABLE` on it (ruling 2).
+
+        Parameters
+        ----------
+        p
+            The caller.
+        ref
+            The table, as it is now.
+
+        Returns
+        -------
+        tuple
+            The owning file (or `None`) and the action words.
+
+        Raises
+        ------
+        NotFoundError
+            If the table does not exist.
+        """
+        namespace, row = self._find_table(ref)
+        ((defined_by, actions),) = self._row_actions(
+            p, [(ref, table_kind(row.table_type), row.owner_id, namespace.environment_id)]
+        )
+        return defined_by, actions
+
+    def _row_actions(
+        self,
+        p: PrincipalRef,
+        rows: Sequence[tuple[TableRef, str, uuid.UUID | None, uuid.UUID]],
+    ) -> list[tuple[DefiningFile | None, tuple[str, ...]]]:
+        """Read the definitions once per environment and ask every row's rights in one batch.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        rows
+            ``(ref, kind, owner_id, environment_id)`` per row.
+
+        Returns
+        -------
+        list of tuple
+            Per row, the owning file (`owned_by_git`, else `None`) and the action words.
+        """
+        definitions = {
+            environment_id: deployed_definitions(self._session, environment_id)
+            for environment_id in dict.fromkeys(env for *_, env in rows)
+        }
+        found = [definition_for(definitions[env], ref) for ref, _, _, env in rows]
+        answers = readable_table_actions_each(
+            self._authz,
+            p,
+            [
+                (ref, kind, owner_id, file is not None)
+                for (ref, kind, owner_id, _), file in zip(rows, found, strict=True)
+            ],
+        )
+        # The file is named only to a reader of the row (ruling 2), whoever calls this.
+        return [
+            (file if readable and owned_by_git(file, kind) else None, allowed)
+            for (_, kind, _, _), file, (readable, allowed) in zip(rows, found, answers, strict=True)
+        ]
 
     def table_references(self, p: PrincipalRef, ref: TableRef) -> TableReferences:
         """Show what a table's header says it references, and which tables reference it.
@@ -4107,8 +4440,15 @@ class CatalogService:
         return env
 
     def list_expiring_tables(
-        self, p: PrincipalRef, environment: str, *, within_days: int
-    ) -> list[TableRetention]:
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        within_days: int,
+        namespace: NamespacePath | None = None,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> Page[TableRetention]:
         """List the managed tables of an environment that expire within some days, soonest first.
 
         Parameters
@@ -4119,12 +4459,20 @@ class CatalogService:
             Environment name.
         within_days
             The window, 1 to 3,650 days from now; a table already due is listed too.
+        namespace
+            When given, only the tables of this namespace and of the ones beneath it.
+        limit
+            The page size, 1 to 200.
+        cursor
+            The `next_cursor` of the previous page.
 
         Returns
         -------
-        list of TableRetention
+        Page of TableRetention
             The tables `p` may read whose expiry falls within the window; a table that never
-            expires (a protected environment, a deployed project's asset) is not listed.
+            expires (a protected environment, a deployed project's asset) is not listed. What
+            `p` may not read is left out before the cursor applies, so a forged cursor reveals
+            nothing more.
 
         Raises
         ------
@@ -4133,7 +4481,7 @@ class CatalogService:
         PermissionDenied
             Without `READ_ENVIRONMENT` on it.
         ValidationError
-            If `within_days` is out of range.
+            If `within_days` or `limit` is out of range, or `cursor` is not one this list issued.
         """
         check_days(within_days, "The window")
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
@@ -4145,9 +4493,23 @@ class CatalogService:
             for entry in found
             if entry.expires_at is not None
             and entry.expires_at <= until
+            and (
+                namespace is None
+                or entry.ref.namespace.parts[: len(namespace.parts)] == namespace.parts
+            )
             and self.can_read_table(p, entry.ref)
         ]
-        return sorted(due, key=lambda entry: (entry.expires_at, entry.ref.dotted()))
+        return page_in_order(
+            due,
+            kind="expiring_tables",
+            key_of=lambda entry: (
+                instant_key(entry.expires_at),  # ty: ignore[invalid-argument-type]
+                entry.ref.dotted(),
+                str(entry.table_id),
+            ),
+            limit=limit,
+            cursor=cursor,
+        )
 
     def table_health(
         self,
@@ -4704,7 +5066,7 @@ class CatalogService:
             `MAX_EDIT_LANGUAGES`.
         """
         row = self._find_table_to_describe(p, ref)
-        names = [c.name for c in self.describe_table(p, ref).columns]
+        names = [c.name for c in self.describe_table(p, ref, with_actions=False).columns]
         if column not in names:
             have = ", ".join(names) if names else "none"
             raise NotFoundError(
@@ -5430,7 +5792,9 @@ class CatalogService:
             p, ref, ValidationError, _UPDATE_DOES_NOT_FIT, publication_only=True
         ):
             if had is not None and has is None and not internal_rollback:
-                raise ValidationError(_NO_UNPUBLISHING)
+                raise ValidationError(
+                    _NO_UNPUBLISHING.format(table=ref.dotted(), environment=ref.environment)
+                )
             if not maintenance and unpublished and has is not None and has not in added:
                 raise ValidationError(_NO_SIDE_DOOR.format(table=ref.dotted()))
 
@@ -8287,6 +8651,10 @@ class CatalogService:
         ValidationError
             If the namespace is not under bronze, silver or gold, or a new
             view's name contains a ``.``.
+        ConflictError
+            If `p` acts for no run and a deployed project declares the name of a new view
+            (`GIT_OWNED_CREATE`), or builds the view being replaced (`GIT_OWNED_REPLACE`);
+            see `lakana_core.catalog.git_owned`.
         """
         securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
         # Which action applies depends on what is there, so the target is
@@ -8334,6 +8702,12 @@ class CatalogService:
             )
         if existing is not None and existing.table_type is not TableType.VIEW:
             raise AlreadyExistsError(f"{ref.dotted()} is a table; a view can't replace it.")
+        if p.run_context is None:
+            # A person's view run: a project's run builds what its project declares.
+            if existing is None:
+                refuse_declared_name(self._session, self._authz, p, ref, env.id)
+            else:
+                refuse_owned_replace(self._session, self._authz, p, ref, env.id, existing.kind)
         stored_columns = (
             {c.get("name") for c in (existing.view_definition or {}).get("columns", [])}
             if existing is not None
@@ -8867,6 +9241,10 @@ class CatalogService:
         ValidationError
             If the result's schema can't be stored, or the write is refused
             mid-stream.
+        ConflictError
+            If `p` acts for no run and a deployed project declares the name
+            (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); a project's run creates the
+            tables its project declares.
         """
         self._commit_sent = False
         securable = Securable.table_scope(ref.environment, ref.namespace, ref.name)
@@ -8880,6 +9258,8 @@ class CatalogService:
             properties=properties,
             location=None,
             holder_run_id=claim_holder(p, query_run_id),
+            # A project's run creates the tables its project declares; a person may not.
+            refuse_declared_for=p if p.run_context is None else None,
         )
         writer = DataFileWriter(prepared.metadata, prepared.resolved.file_io, max_rows=max_rows)
         try:
@@ -9419,14 +9799,23 @@ class CatalogService:
         ValidationError
             If it is an artifact: those are dropped with `lakana artifact
             drop`, which also deletes the bytes.
+        ConflictError
+            If a deployed project builds the table or view (the declaration and the row are
+            of the same kind): only git may remove it
+            (`lakana_core.catalog.git_owned.GIT_OWNED_DROP`, or `GIT_OWNED_HIDDEN` to a
+            caller who may not read it). `purge` and break-glass do not get past this.
         PermissionDenied
             If the principal may not drop this table.
+        StepUpRequired
+            If a browser session's last passkey touch is older than 15 minutes, with or without
+            `purge`; a token never is asked. Checked before anything else is read.
         """
         self._authz.authorize(
             p, Action.DROP_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
+        require_step_up(p)
         self._guard.check(p, ref.environment, WriteOperation.DROP_TABLE, table_target(ref))
-        _, row = self._find_table(ref)
+        ns, row = self._find_table(ref)
         if row.table_type is TableType.ARTIFACT:
             if not include_views:
                 raise NotFoundError(_not_exposed_artifact_message(ref.dotted()))
@@ -9438,6 +9827,7 @@ class CatalogService:
             raise NotFoundError(
                 f"{ref.dotted()} is a view; views are not exposed over the Iceberg REST catalog."
             )
+        refuse_owned_drop(self._session, self._authz, p, ref, ns.environment_id, row.kind)
         row = self._lock_table_row(ref, row.id)
         now = db_now(self._session)
         drop_row(
@@ -9526,8 +9916,10 @@ class CatalogService:
             If a table of the name exists now (`NAME_TAKEN_MESSAGE` names `--as`).
         ConflictError
             If the undo period has ended or the purge has started, the table's metadata file is
-            gone, or the write failed for another reason (the namespace dropped at the same
-            moment).
+            gone, a deployed project now declares the name as an artifact, or `new_name` is a
+            name it declares, whatever as (`lakana_core.catalog.git_owned.undrop_refusal`; the
+            table's own name declared as a table or view is restored), or the write failed
+            for another reason (the namespace dropped at the same moment).
         """
         target = ref if new_name is None else replace(ref, name=new_name)
         if new_name is not None:
@@ -9579,6 +9971,18 @@ class CatalogService:
             holder = taken.table_type
             self._session.rollback()
             raise AlreadyExistsError(self._undrop_taken_message(ref, target, holder))
+        refusal = undrop_refusal(
+            self._session,
+            self._authz,
+            p,
+            target,
+            env.id,
+            renamed=new_name is not None,
+            kind=str(snapshot["row"]["table_type"]),
+        )
+        if refusal is not None:
+            self._session.rollback()
+            raise refusal
         if not self._metadata_file_exists(ref.environment, snapshot["row"]["metadata_location"]):
             self._session.rollback()
             raise ConflictError(FILES_GONE_MESSAGE.format(table=shown(ref.dotted())))
@@ -9713,10 +10117,91 @@ class CatalogService:
         env = self._find_environment(environment)
         self._find_namespace(env, namespace)
         dropped = list_tombstones(self._session, env.id, namespace, now=db_now(self._session))
-        return [
+        readable = [
             entry
             for entry in dropped
             if self.can_read_table(p, TableRef(environment, namespace, entry.name))
+        ]
+        return self._with_undrop(p, environment, readable)
+
+    def list_environment_dropped_tables(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        limit: int = LIST_LIMIT_DEFAULT,
+        cursor: str | None = None,
+    ) -> Page[DroppedTable]:
+        """List the dropped tables of every namespace of an environment, newest drop first.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Environment name.
+        limit
+            The page size, 1 to 200.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        Page of DroppedTable
+            Each with its namespace, purge date and whether it can still be restored. A table
+            the caller may not read by its name is left out before the cursor applies, so a
+            forged cursor reveals nothing more.
+
+        Raises
+        ------
+        NotFoundError
+            If the environment does not exist.
+        PermissionDenied
+            Without `READ_ENVIRONMENT` on it.
+        ValidationError
+            If `limit` is out of range, or `cursor` is not one this list issued.
+        """
+        self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
+        env = self._find_environment(environment)
+        dropped = list_environment_tombstones(self._session, env.id, now=db_now(self._session))
+        readable = [
+            entry
+            for entry in dropped
+            if self.can_read_table(p, TableRef(environment, entry.namespace, entry.name))
+        ]
+        page = page_in_order(
+            readable,
+            kind="dropped_tables",
+            key_of=lambda d: (instant_key(d.dropped_at), str(d.table_id)),
+            limit=limit,
+            cursor=cursor,
+            descending=True,
+        )
+        return Page(self._with_undrop(p, environment, page.items), page.next_cursor)
+
+    def _with_undrop(
+        self, p: PrincipalRef, environment: str, dropped: Sequence[DroppedTable]
+    ) -> list[DroppedTable]:
+        """Fill each dropped table's `actions` for its reader, in one batch.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            Their environment.
+        dropped
+            The dropped tables the reader may read.
+
+        Returns
+        -------
+        list of DroppedTable
+            The same tables, each with its `actions`.
+        """
+        refs = [TableRef(environment, d.namespace, d.name) for d in dropped]
+        return [
+            replace(d, actions=actions)
+            for d, actions in zip(dropped, dropped_actions_each(self._authz, p, refs), strict=True)
         ]
 
     def rename_table(self, p: PrincipalRef, source: TableRef, destination: TableRef) -> LoadedTable:
@@ -9769,6 +10254,9 @@ class CatalogService:
             also when another writer took the name at the same moment; for an
             artifact the message says so and names how to drop it.
         ConflictError
+            If a deployed project builds the source (moving it away would take it from the
+            project's name, `GIT_OWNED_RENAME`) or declares the destination
+            (`GIT_OWNED_CREATE`); see `lakana_core.catalog.git_owned`.
             If the write failed for another reason, such as the destination
             namespace being dropped at the same moment.
         PermissionDenied
@@ -9793,11 +10281,14 @@ class CatalogService:
                 "A table cannot be renamed across environments "
                 f"({source.environment!r} to {destination.environment!r})."
             )
-        _, row = self._find_table(source)
+        source_ns, row = self._find_table(source)
         if row.table_type is TableType.VIEW:
             raise NotFoundError(f"{source.dotted()} is a view; views can't be renamed here.")
         if row.table_type is TableType.ARTIFACT:
             raise NotFoundError(f"{source.dotted()} is an artifact; artifacts can't be renamed.")
+        refuse_owned_drop(
+            self._session, self._authz, p, source, source_ns.environment_id, row.kind, rename=True
+        )
         env = self._find_environment(destination.environment)
         target_ns = self._find_namespace(env, destination.namespace)
         taken = self._lookup_table(target_ns, destination.name)
@@ -9805,6 +10296,7 @@ class CatalogService:
             raise AlreadyExistsError(
                 _name_taken_message(taken, destination.name, destination.namespace)
             )
+        refuse_declared_name(self._session, self._authz, p, destination, env.id)
         target_namespace_id = target_ns.id
         row.namespace_id = target_namespace_id
         row.name = destination.name

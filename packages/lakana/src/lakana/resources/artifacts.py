@@ -69,7 +69,9 @@ from lakana._artifact_tree import TreeWriter, check_manifest, check_target_name
 from lakana._http import (
     BUSY_ATTEMPTS,
     BUSY_BACKOFF_SECONDS,
+    NEXT_CURSOR_HEADER,
     HttpTransport,
+    every_page,
     query_params,
     retry_wait,
 )
@@ -78,6 +80,7 @@ from lakana._models import (
     ArtifactDownload,
     ArtifactFile,
     ArtifactKept,
+    ArtifactPage,
     ArtifactUpload,
     ArtifactUploadPage,
     ArtifactVersion,
@@ -93,7 +96,11 @@ from lakana.errors import (
     ServerError,
     ValidationError,
 )
-from lakana.resources.tables import _split_namespace_table
+from lakana.resources.tables import (
+    _split_namespace_table,
+    actions_from_json,
+    defined_by_from_json,
+)
 
 _BLOB_TIMEOUT_SECONDS = 300.0
 """Per-operation timeout for one file's upload.
@@ -342,6 +349,9 @@ def artifact_from_json(data: object) -> Artifact:
             versions=int(data["versions"]),
             size_bytes=int(data["size_bytes"]),
             created_at=str(data["created_at"]),
+            defined_by=defined_by_from_json(data.get("defined_by")),
+            keep_versions=data.get("keep_versions"),
+            actions=actions_from_json(data.get("actions")),
         )
     except (AssertionError, KeyError, TypeError, ValueError):
         raise InvalidResponse(_ODD_ANSWER.format(what="an artifact")) from None
@@ -453,6 +463,7 @@ def _version(data: dict[str, Any]) -> ArtifactVersion:
         deleted_by=data.get("deleted_by"),
         files=[ArtifactFile(f["path"], f["size"], f["sha256"]) for f in data.get("files", [])],
         deleted_versions=list(data.get("deleted_versions", [])),
+        actions=actions_from_json(data.get("actions")),
     )
 
 
@@ -1414,6 +1425,9 @@ class Artifacts:
             protected and no break-glass reason was given.
         lakana.errors.NotFound
             If no artifact has this name.
+        lakana.errors.Conflict
+            If a deployed project produces the artifact: remove its asset in git and deploy,
+            then drop it, or delete single versions to free space now.
         lakana.errors.LakanaConnectionError
             If the server did not answer in time; the artifact may be dropped (the message
             says how to find out). If the connection could not be opened at all, the message
@@ -1769,8 +1783,17 @@ class Artifacts:
         namespace, name = _split_namespace_table(qualified_name)
         return {"env": environment, "path": namespace, "name": name}
 
-    def list(self, environment: str, namespace: str | None = None) -> builtins.list[Artifact]:
-        """List the artifacts of an environment that you may read.
+    def list(
+        self,
+        environment: str,
+        namespace: str | None = None,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> builtins.list[Artifact]:
+        """List one page of the artifacts of an environment that you may read.
+
+        `list_page` also returns the cursor of the next page, and `iter` walks every page.
 
         Parameters
         ----------
@@ -1778,6 +1801,10 @@ class Artifacts:
             The environment name.
         namespace
             Only this dot-joined namespace path; every namespace when `None`.
+        limit
+            Most artifacts returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`. Send the same `namespace`.
 
         Returns
         -------
@@ -1790,11 +1817,79 @@ class Artifacts:
             If you may not read the environment.
         lakana.errors.NotFound
             If the environment does not exist.
+        lakana.errors.ValidationError
+            If `cursor` is not one the server issued.
         lakana.errors.InvalidResponse
             If the server's answer is not what a Lakana server sends.
         """
-        params = {"namespace": namespace} if namespace is not None else None
+        return self.list_page(environment, namespace, limit=limit, cursor=cursor).items
+
+    def list_page(
+        self,
+        environment: str,
+        namespace: str | None = None,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> ArtifactPage:
+        """List one page of the artifacts, with the cursor of the next page.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        namespace
+            Only this dot-joined namespace path; every namespace when `None`.
+        limit
+            Most artifacts returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`. Send the same `namespace`.
+
+        Returns
+        -------
+        ArtifactPage
+            The artifacts, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            If you may not read the environment.
+        lakana.errors.NotFound
+            If the environment does not exist.
+        lakana.errors.ValidationError
+            If `cursor` is not one the server issued.
+        lakana.errors.InvalidResponse
+            If the server's answer is not what a Lakana server sends.
+        """
         response = self._transport.request(
-            ROUTES["artifacts.list"], path_params={"env": environment}, params=params
+            ROUTES["artifacts.list"],
+            path_params={"env": environment},
+            params=query_params(namespace=namespace, limit=limit, cursor=cursor),
         )
-        return [artifact_from_json(item) for item in _array(response, "the list of artifacts")]
+        return ArtifactPage(
+            items=[artifact_from_json(item) for item in _array(response, "the list of artifacts")],
+            next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
+        )
+
+    def iter(
+        self, environment: str, namespace: str | None = None, *, page_size: int = 100
+    ) -> Iterator[Artifact]:
+        """Yield every artifact you may read, in namespace and name order, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        namespace
+            Only this dot-joined namespace path; every namespace when `None`.
+        page_size
+            Artifacts per request (1 to 200).
+
+        Returns
+        -------
+        Iterator of Artifact
+            Each artifact, once.
+        """
+        return every_page(
+            lambda cursor: self.list_page(environment, namespace, limit=page_size, cursor=cursor)
+        )

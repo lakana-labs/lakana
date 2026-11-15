@@ -81,11 +81,12 @@ from lakana_core.catalog.json_schema import ColumnSpec
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.catalog.query_service import QueryService
 from lakana_core.catalog.service import ROLLBACK_NOT_KNOWN_REASON, CatalogService, Rollback
+from lakana_core.catalog.tombstones import drop_row
 from lakana_core.catalog.writes import ExpectedSnapshot, WriteResult
 from lakana_core.config import DatabaseConfig, StorageConfig
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import ConnectionService
-from lakana_core.db import create_engine
+from lakana_core.db import create_engine, db_now
 from lakana_core.errors import (
     ConflictError,
     LakanaError,
@@ -122,6 +123,8 @@ from lakana_core.models import (
     RepositoryKind,
     RollbackOutcome,
     Run,
+    RunKind,
+    RunStatus,
     Secret,
     SecretUseKind,
     Table,
@@ -1156,6 +1159,126 @@ def test_a_first_write_of_zero_rows_counts_as_written(py: PyWorld) -> None:
     assert "snapshot:" not in _log(py.world, claimed.run_id, "gold.scores")
 
 
+def _drop_as_a_rebuild_does(session: Session, world: World, ref: TableRef) -> None:
+    """Drop a table a deployed project builds, which only a rebuild may do.
+
+    A person's drop of it is refused (`lakana_core.catalog.git_owned`), and a rebuild refuses
+    while a run of the project is active, so a test of a table that vanishes under a running
+    task drops the row the way a rebuild does.
+
+    Parameters
+    ----------
+    session
+        The session; commits.
+    world
+        The world.
+    ref
+        The table.
+    """
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    _, row = catalog._find_table(ref)
+    row = catalog._lock_table_row(ref, row.id)
+    now = db_now(session)
+    drop_row(
+        session,
+        world.admin,
+        ref,
+        row,
+        now=now,
+        purge_after=now + timedelta(days=1),
+        reason="rebuild",
+    )
+    session.commit()
+
+
+def _another_run(
+    world: World, asset: str = "gold.scores", *, artifact: bool = False
+) -> PrincipalRef:
+    """Name the administrator as the running task of a run of another repository.
+
+    A person may not create what a deployed project declares (`lakana_core.catalog.git_owned`),
+    so a table or artifact that "somebody else" creates under the declared name is created the
+    way a project's run does: by a running task of a run that is not the attempt under test.
+    That run's project has only this asset, so the scheduler has nothing to add to it.
+
+    Parameters
+    ----------
+    world
+        The world.
+    asset
+        The asset the other run's task builds.
+    artifact
+        The asset produces an artifact in that project, not a table.
+
+    Returns
+    -------
+    PrincipalRef
+        The administrator with the run context of that task.
+    """
+    with world.session() as session:
+        current = session.get(JobVersion, world.version_id)
+        assert current is not None
+        repository = Repository(
+            id=uuid.uuid4(),
+            name=f"other{uuid.uuid4().hex[:6]}",
+            kind=RepositoryKind.HTTPS,
+            url="https://h/other.git",
+        )
+        session.add(repository)
+        session.flush()
+        version = JobVersion(
+            id=uuid.uuid4(),
+            repository_id=repository.id,
+            environment_id=current.environment_id,
+            commit_sha="b" * 40,
+            manifest_json={
+                **current.manifest_json,
+                "assets": [
+                    {**entry, **({"output": "artifact"} if artifact else {})}
+                    for entry in current.manifest_json["assets"]
+                    if entry["table"] == asset
+                ],
+                "edges": [],
+            },
+            code_uri=current.code_uri,
+            code_sha256=current.code_sha256,
+        )
+        session.add(version)
+        session.flush()
+        run = Run(
+            id=uuid.uuid4(),
+            environment_id=version.environment_id,
+            repository_id=repository.id,
+            job_version_id=version.id,
+            run_as_principal_id=world.admin.id,
+            kind=RunKind.FULL,
+            status=RunStatus.RUNNING,
+            selection_json={},
+            created_at=datetime.now(UTC) - timedelta(days=1),
+        )
+        session.add(run)
+        session.flush()
+        task = TaskRun(
+            id=uuid.uuid4(),
+            run_id=run.id,
+            asset=asset,
+            status=TaskStatus.RUNNING,
+            claim_count=1,
+            attempt=1,
+            lease_owner="other",
+            lease_expires_at=datetime.now(UTC) + timedelta(days=1),
+            max_attempts=3,
+            timeout_seconds=60,
+            retry_delay_seconds=0,
+            upstream_json=[],
+        )
+        session.add(task)
+        session.commit()
+        return dataclasses.replace(
+            world.admin, run_context=RunContext(task_run_id=task.id, claim=1)
+        )
+
+
 def _write_as_admin(world: World, rows: int = 1, *, append: bool = False) -> None:
     """Write `gold.scores` as the administrator, without the task's token: another writer.
 
@@ -1177,7 +1300,7 @@ def _write_as_admin(world: World, rows: int = 1, *, append: bool = False) -> Non
         elif catalog.table_exists(world.admin, ref):
             catalog.replace(world.admin, ref, data)
         else:
-            catalog.replace(world.admin, ref, data, expected_snapshot_id="none")
+            catalog.replace(_another_run(world), ref, data, expected_snapshot_id="none")
 
 
 _NOT_ITS_WRITE = (
@@ -1235,9 +1358,7 @@ def test_an_empty_table_somebody_else_put_in_place_of_the_old_one_is_not_a_write
 
     def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
         with py.world.session() as session:
-            CatalogService(session, StorageResolver(session), AllowAllAuthorization()).drop_table(
-                py.world.admin, TableRef.from_dotted("dev", "gold.scores")
-            )
+            _drop_as_a_rebuild_does(session, py.world, TableRef.from_dotted("dev", "gold.scores"))
         _write_as_admin(py.world, 0)
         return RunOutcome(succeeded=True, snapshot_id=None, rows=0)
 
@@ -2024,7 +2145,7 @@ def test_a_target_that_is_a_view_fails_permanently(py: PyWorld) -> None:
     with world.session() as session:
         catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
         catalog.create_or_replace_view(
-            world.admin,
+            _another_run(world),
             TableRef.from_dotted("dev", "gold.scores"),
             sql="SELECT id FROM silver.clean",
             references=catalog.resolve_lineage_sources(world.admin, "dev", ["silver.clean"]),
@@ -3039,9 +3160,7 @@ def test_a_forged_success_with_the_table_dropped_meanwhile_is_not_a_success(py: 
 
     def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
         with py.world.session() as session:
-            CatalogService(session, StorageResolver(session), AllowAllAuthorization()).drop_table(
-                py.world.admin, TableRef.from_dotted("dev", task.table)
-            )
+            _drop_as_a_rebuild_does(session, py.world, TableRef.from_dotted("dev", task.table))
         return _forged(task, on_log, stop)
 
     task, message = _fails(py, py.engine(script))
@@ -3323,7 +3442,7 @@ def _claims_a_version(
     return RunOutcome(succeeded=True)
 
 
-def _commit_as_admin(world: World, dotted: str, body: bytes) -> int:
+def _commit_as_admin(world: World, dotted: str, body: bytes, *, as_a_run: bool = False) -> int:
     """Commit a version of an artifact as a user, with no task behind it.
 
     Parameters
@@ -3334,14 +3453,17 @@ def _commit_as_admin(world: World, dotted: str, body: bytes) -> int:
         The artifact's dotted name.
     body
         The one file's contents.
+    as_a_run
+        Commit as the running task of another run (`_another_run`): the only way to create an
+        artifact under a name a deployed project declares.
 
     Returns
     -------
     int
         The committed version number.
     """
+    admin = _another_run(world, dotted, artifact=True) if as_a_run else world.admin
     with world.session() as session:
-        admin = world.admin
         service = ArtifactService(session, StorageResolver(session), AllowAllAuthorization())
         ref = TableRef.from_dotted("dev", dotted)
         document = {
@@ -3414,7 +3536,7 @@ def test_a_version_of_another_attempt_does_not_make_this_attempt_succeed(py: PyW
             Namespace(id=uuid.uuid4(), environment_id=environment_id, path="models", properties={})
         )
         session.commit()
-    _commit_as_admin(py.world, "models.churn", b"x")
+    _commit_as_admin(py.world, "models.churn", b"x", as_a_run=True)
     task, message = _fails(py, py.engine(_claims_a_version))
     assert (task.status, task.attempt) == (TaskStatus.FAILED, 1)
     assert message.startswith(_NO_VERSION)
@@ -3607,15 +3729,18 @@ def test_a_table_input_that_is_an_artifact_now_fails_permanently(py: PyWorld) ->
 
 
 def test_an_artifact_name_taken_by_a_table_fails_permanently(py: PyWorld) -> None:
-    py.deploy(table="gold.scores", entry=_ARTIFACT_ENTRY)
-    first = py.engine(_writer(py.world))
+    # The table exists before the project declares the name as an artifact: a project's run
+    # built it as a table, then the deploy changed the asset to an artifact.
+    py.deploy(table="gold.scores")
     with py.world.session() as session:
         CatalogService(session, StorageResolver(session), AllowAllAuthorization()).replace(
-            py.world.admin,
+            _another_run(py.world),
             TableRef.from_dotted("dev", "gold.scores"),
             pa.table({"id": pa.array([1], pa.int64())}),
             expected_snapshot_id="none",
         )
+    py.deploy(table="gold.scores", entry=_ARTIFACT_ENTRY)
+    first = py.engine(_writer(py.world))
     task, text = _fails(py, first)
     assert text == (
         "gold.scores is a table, not an artifact. Drop it (`lakana table delete "
@@ -3769,7 +3894,7 @@ def test_a_table_target_that_is_an_artifact_names_it_and_the_way_out(py: PyWorld
     """Point 8: the Python path says artifact, and names `lakana artifact drop`."""
     engine = py.engine(_writer(py.world))
     claimed = py.claim_python(engine)
-    _commit_as_admin(py.world, "gold.scores", b"x")
+    _commit_as_admin(py.world, "gold.scores", b"x", as_a_run=True)
     run_claimed(engine, claimed)
     message = _attempts(py.world, claimed.task_run_id)[0].error_message
     assert message is not None
@@ -4338,7 +4463,7 @@ def test_an_artifact_asset_that_reads_itself_is_refused_in_artifact_words(
         )
         session.commit()
     if prior:
-        _commit_as_admin(py.world, "models.churn", b"earlier")
+        _commit_as_admin(py.world, "models.churn", b"earlier", as_a_run=True)
     run_claimed(engine, claimed)
     message = _attempts(py.world, claimed.task_run_id)[0].error_message
     assert message == (
@@ -4348,7 +4473,8 @@ def test_an_artifact_asset_that_reads_itself_is_refused_in_artifact_words(
     task = _task(py.world, "models.churn")
     assert (task.status, task.attempt) == (TaskStatus.FAILED, 1)
     assert py.runner.tasks == []
-    assert _versions(py) == ([(1, None)] if prior else [])
+    # The earlier version is another run's, so it carries that task's claim.
+    assert _versions(py) == ([(1, 1)] if prior else [])
 
 
 @pytest.mark.parametrize("how", ["timeout", "stop"])
@@ -6244,11 +6370,12 @@ def test_a_table_somebody_else_created_meanwhile_stays_published_and_untouched(
 
     def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
         data = pa.table({"id": pa.array([7], pa.int64())})
+        somebody_else = _another_run(py.world)
         with py.world.session() as session:
             CatalogService(
                 session, StorageResolver(session), AllowAllAuthorization()
             ).write_batches(
-                py.world.admin,
+                somebody_else,
                 TableRef.from_dotted("dev", "gold.scores"),
                 mode=WriteMode.CREATE,
                 schema=data.schema,
@@ -6466,11 +6593,12 @@ def test_an_empty_table_somebody_else_created_is_not_taken_for_the_runs_first_bu
 
     def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
         empty = pa.table({"id": pa.array([], pa.int64())})
+        somebody_else = _another_run(py.world)
         with py.world.session() as session:
             CatalogService(
                 session, StorageResolver(session), AllowAllAuthorization()
             ).write_batches(
-                py.world.admin,
+                somebody_else,
                 TableRef.from_dotted("dev", "gold.scores"),
                 mode=WriteMode.CREATE,
                 schema=empty.schema,

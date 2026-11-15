@@ -29,6 +29,7 @@ from lakana_core.models import (
     ArtifactBlob,
     ArtifactUpload,
     AuditEvent,
+    AuditEventType,
     Environment,
     Principal,
     PrincipalType,
@@ -300,16 +301,19 @@ def test_an_artifact_dropped_before_the_lock_is_reported_as_gone(
 def test_a_protected_environment_does_not_stand_in_the_way_of_withdrawing_ones_own_upload(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:
-    """No guard: the abort writes no version, no bytes and no audit row of its own."""
+    """No guard: the abort writes no version, no bytes and no guard event, only its own record."""
     service = artifact_service(session, tmp_path)
     glass = dataclasses.replace(principal, break_glass_reason="INC-1 repair by hand")
     upload = service.begin_upload(glass, ARTIFACT_REF, artifact_document(_FILES)).upload_id
     session.execute(update(Environment).where(Environment.name == "dev").values(is_protected=True))
     session.commit()
-    events = session.scalars(select(func.count()).select_from(AuditEvent)).one()
+    before = set(session.scalars(select(AuditEvent.id)).all())
     service.abort_upload(principal, ARTIFACT_REF, upload)
     assert _uploads(session) == []
-    assert session.scalars(select(func.count()).select_from(AuditEvent)).one() == events
+    written = session.scalars(
+        select(AuditEvent.event_type).where(AuditEvent.id.not_in(before))
+    ).all()
+    assert written == [AuditEventType.ARTIFACT_UPLOAD_ABORTED]
 
 
 def test_a_file_that_arrives_after_its_upload_was_withdrawn_is_refused(

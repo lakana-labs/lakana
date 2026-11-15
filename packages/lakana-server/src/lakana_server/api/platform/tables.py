@@ -26,7 +26,7 @@ from typing import Literal, TypeVar
 
 import pyarrow as pa
 import pyarrow.ipc
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
@@ -41,6 +41,7 @@ from lakana_core.catalog.lineage_graph import LineageDirection, LineageService
 from lakana_core.catalog.loads import require_bronze
 from lakana_core.catalog.preview import submit_preview
 from lakana_core.catalog.query_service import QueryService
+from lakana_core.catalog.rebuild import TableRebuild
 from lakana_core.catalog.retention import TableRetention
 from lakana_core.catalog.service import CatalogService, LoadedTable, TableDescription
 from lakana_core.catalog.writes import (
@@ -54,17 +55,22 @@ from lakana_core.heap import trim_heap
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.projects.asset_model import require_model_kind
 from lakana_core.projects.definition import (
+    DefiningFile,
     TableDefinition,
     TableDefinitionFile,
     table_definition,
     table_definition_file,
 )
+from lakana_server.api.platform.catalog import _no_nul
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
+from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import (
     AppendOut,
     ColumnOut,
+    DefinedByOut,
     DescriptionIn,
     DroppedTableOut,
+    DroppedTablePageOut,
     ExternalTableCreate,
     ExternalTableOut,
     HealthSignalOut,
@@ -86,6 +92,8 @@ from lakana_server.api.platform.schemas import (
     TableHealthOut,
     TableModelOut,
     TableOut,
+    TableRebuildIn,
+    TableRebuildOut,
     TableReferenceOut,
     TableReferencesOut,
     TableRetentionIn,
@@ -106,6 +114,7 @@ from lakana_server.deps import (
     get_principal,
     get_query_service,
     get_session,
+    get_table_rebuild,
     get_write_principal,
     with_break_glass,
 )
@@ -129,6 +138,13 @@ dropped_router = APIRouter(
     responses=errors(401),
 )
 """The dropped tables of a namespace: a path of its own, so no table name can shadow it."""
+environment_dropped_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/environments/{env}/dropped-tables",
+    tags=["tables"],
+    responses=errors(401),
+)
+"""The dropped tables of every namespace of an environment."""
 expiring_router = APIRouter(
     route_class=AuthenticateFirstRoute,
     prefix="/api/v1/environments/{env}/expiring-tables",
@@ -564,7 +580,14 @@ def _decode_arrow_stream(payload: pa.Buffer, max_bytes: int, max_arrays: int) ->
     return data
 
 
-def _to_out(namespace: str, loaded: LoadedTable, *, language: str, main_language: str) -> TableOut:
+def _to_out(
+    namespace: str,
+    loaded: LoadedTable,
+    *,
+    language: str,
+    main_language: str,
+    row: tuple[DefiningFile | None, tuple[str, ...]] = (None, ()),
+) -> TableOut:
     """Build a response body from a loaded table.
 
     Parameters
@@ -577,6 +600,8 @@ def _to_out(namespace: str, loaded: LoadedTable, *, language: str, main_language
         The reader's first language, for `TableOut.language`.
     main_language
         `LAKANA_MAIN_LANGUAGE`; the table's main language unless its project declares one.
+    row
+        `CatalogService.row_actions` of the table: its owning file and the caller's actions.
 
     Returns
     -------
@@ -596,7 +621,25 @@ def _to_out(namespace: str, loaded: LoadedTable, *, language: str, main_language
         snapshot_id=loaded.metadata.current_snapshot_id,
         language=language,
         main_language=loaded.text_language or main_language,
+        defined_by=_defined_by_out(row[0]),
+        actions=list(row[1]),
     )
+
+
+def _defined_by_out(found: DefiningFile | None) -> DefinedByOut | None:
+    """Show the file that owns a table.
+
+    Parameters
+    ----------
+    found
+        The file, or `None`.
+
+    Returns
+    -------
+    DefinedByOut or None
+        Its repository and path.
+    """
+    return None if found is None else DefinedByOut(repository=found.repository, path=found.path)
 
 
 def _column_out(column: ColumnSpec, description: TableDescription) -> ColumnOut:
@@ -699,6 +742,8 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         health=description.health,
         health_missing=list(description.health_missing),
         health_never_judged=dict(description.health_never_judged),
+        defined_by=_defined_by_out(description.defined_by),
+        actions=list(description.actions),
     )
 
 
@@ -1100,8 +1145,9 @@ def create_table(
 
     Creates a managed Iceberg table from the columns in the request. Needs `CREATE_TABLE` on
     the namespace. Answers 404 when the environment or namespace does not exist, 409 when a
-    table of that name exists and 422 for an unknown column type, an empty or duplicate
-    column name, or a namespace not rooted at `bronze`, `silver` or `gold`.
+    table of that name exists or a deployed project declares the name (only git may take
+    it), and 422 for an unknown column type, an empty or duplicate column name, or a
+    namespace not rooted at `bronze`, `silver` or `gold`.
 
     Parameters
     ----------
@@ -1131,6 +1177,9 @@ def create_table(
         Mapped to 404 by `install_exception_handlers`.
     lakana_core.errors.AlreadyExistsError
         Mapped to 409, if a table of that name already exists.
+    lakana_core.errors.ConflictError
+        Mapped to 409, if a deployed project declares the name; the message names its file
+        to a caller who may read the name.
     lakana_core.errors.ValidationError
         Mapped to 422: an unrecognised column type, an empty or duplicate
         column name, or a namespace not rooted at `bronze`, `silver`, or
@@ -1149,6 +1198,7 @@ def create_table(
         loaded,
         language=reader_languages(request, None, principal, main_language)[0],
         main_language=main_language,
+        row=catalog.row_actions(principal, loaded.ref),
     )
 
 
@@ -1209,16 +1259,22 @@ def list_tables(
     languages = reader_languages(request, lang, principal, main_language)
     ns = NamespacePath.from_parts(path.split("."))
     refs = catalog.list_tables(principal, env, ns)
-    described = [
-        catalog.describe_table(
-            principal,
-            ref,
-            languages=languages,
-            view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
-        )
-        for ref in refs
-        if catalog.can_read_table(principal, ref)
-    ]
+    # Every row is described without its actions, then all are filled at once: one read of
+    # the deployed definitions and one rights batch per request, not per row.
+    described = catalog.with_row_actions(
+        principal,
+        [
+            catalog.describe_table(
+                principal,
+                ref,
+                languages=languages,
+                view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
+                with_actions=False,
+            )
+            for ref in refs
+            if catalog.can_read_table(principal, ref)
+        ],
+    )
     return [
         _describe_out(path, d)
         for d in described
@@ -2065,7 +2121,7 @@ def get_table_definition_file(
     return _definition_file_out(answer)
 
 
-@router.delete("/{name}", status_code=204, responses=errors(403, 404))
+@router.delete("/{name}", status_code=204, responses=errors(403, 404, 409))
 def drop_table(
     env: str,
     path: str,
@@ -2076,12 +2132,19 @@ def drop_table(
 ) -> None:
     """Drop a table.
 
+    From the web interface a drop needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does. This holds with or without
+    `purge`; undrop asks for no touch.
+
     Removes the table from the catalog at once, with its grants, row filters and column
     masks. Needs `DROP_TABLE`. A managed table keeps its files for the undo period (7 days
     unless the operator changed it), during which it can be restored, and then they are
     deleted; an external table's files and a view are never deleted. With `purge` set, the
     files are due at once, the next clean-up deletes them and the table cannot be restored.
-    Answers 404 when the table does not exist.
+    Answers 404 when the table does not exist, and 409 when a deployed project builds the
+    table or view: what git defines is changed in git, so remove the asset there and deploy,
+    then drop it from Orphans. The message names the file to a caller who may read the
+    table. Neither `purge` nor break-glass gets past this.
 
     Parameters
     ----------
@@ -2101,8 +2164,13 @@ def drop_table(
 
     Raises
     ------
+    lakana_core.errors.StepUpRequired
+        Mapped to 403, for a browser session whose last passkey touch is older than 15
+        minutes.
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
+    lakana_core.errors.ConflictError
+        Mapped to 409, if a deployed project builds the table or view.
     """
     ns = NamespacePath.from_parts(path.split("."))
     catalog.drop_table(principal, TableRef(environment=env, namespace=ns, name=name), purge=purge)
@@ -2173,6 +2241,82 @@ def undrop_table(
         loaded,
         language=reader_languages(request, None, principal, main_language)[0],
         main_language=main_language,
+        row=catalog.row_actions(principal, loaded.ref),
+    )
+
+
+@router.post(
+    "/{name}/rebuild",
+    response_model=TableRebuildOut,
+    status_code=202,
+    responses=errors(403, 404, 409),
+)
+def rebuild_table(
+    env: str,
+    path: str,
+    name: str,
+    body: TableRebuildIn,
+    principal: PrincipalRef = Depends(get_write_principal),
+    rebuild: TableRebuild = Depends(get_table_rebuild),
+) -> TableRebuildOut:
+    """Rebuild a table a deployed project builds: drop it and queue a run of its asset.
+
+    For a table that has to be built again from scratch from git. In one transaction it drops
+    the table, which stays restorable with undrop for the undo period like any drop, and
+    queues a run of exactly the asset that declares it; the answer names that run. Needs
+    `DROP_TABLE` on the table and `RUN` on the environment. From the web interface it needs a
+    passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does. In a
+    protected environment it needs `?break_glass_reason=`, and the deployment's run principal
+    writes the table. The repository's file is named only to a caller who may read the
+    table (`path` is `null` otherwise). Answers 404 when the table does not exist, 409 when it
+    is an artifact, when no deployed project declares it (drop it instead), when another run
+    of the project is active (nothing is dropped; wait for it and rebuild again) or when a
+    protected environment has no run principal, and 422 when the reason is not 10 to 500
+    characters on one line.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        Dot-joined namespace path.
+    name
+        Table name.
+    body
+        Why the table is rebuilt.
+    principal
+        The authenticated caller, with any `?break_glass_reason=` attached.
+    rebuild
+        The rebuild service for this request.
+
+    Returns
+    -------
+    TableRebuildOut
+        The table, the queued run and the file that builds it.
+
+    Raises
+    ------
+    lakana_core.errors.PermissionDenied
+        Mapped to 403: without `DROP_TABLE` on the table or `RUN` on the environment, or in a
+        protected environment without a break-glass reason.
+    lakana_core.errors.StepUpRequired
+        Mapped to 403, for a browser session whose last passkey touch is older than 15
+        minutes.
+    lakana_core.errors.NotFoundError
+        Mapped to 404, if the table does not exist.
+    lakana_core.errors.ConflictError
+        Mapped to 409: an artifact, a table no deployed project builds, another active run of
+        the project, or no run principal in a protected environment. Nothing is dropped.
+    lakana_core.errors.ValidationError
+        Mapped to 422, if the reason is not 10 to 500 characters on one line.
+    """
+    ref = TableRef(environment=env, namespace=NamespacePath.from_parts(path.split(".")), name=name)
+    result = rebuild.rebuild(principal, ref, reason=body.reason)
+    return TableRebuildOut(
+        table=result.ref.dotted(),
+        run_id=str(result.run_id),
+        repository=result.repository,
+        path=result.path,
     )
 
 
@@ -2278,7 +2422,11 @@ def set_table_retention(
 def list_expiring_tables(
     env: str,
     request: Request,
+    response: Response,
     within_days: int | None = Query(default=None),
+    namespace: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> list[TableRetentionOut]:
@@ -2286,7 +2434,8 @@ def list_expiring_tables(
 
     Lists the managed tables of the environment that expire within `within_days`, soonest
     first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422
-    when `within_days` is out of range.
+    when `within_days` is out of range or the cursor is not one this list issued. The cursor of
+    the next page is in the `X-Next-Cursor` response header and is absent on the last page.
 
     Parameters
     ----------
@@ -2294,9 +2443,17 @@ def list_expiring_tables(
         Environment name.
     request
         The current request, for `LAKANA_TABLES__EXPIRY_WARNING_DAYS`.
+    response
+        The response, for the cursor header.
     within_days
         The window, 1 to 3,650 days; the server's warning window (7 days by default), or 1
         when that is 0, when absent.
+    namespace
+        Only the tables of this dot-joined namespace and of the ones beneath it.
+    limit
+        Most tables returned (1 to 200).
+    cursor
+        The `X-Next-Cursor` of the previous page; send the same `within_days` and `namespace`.
     principal
         The authenticated caller; needs `READ_ENVIRONMENT`, and sees the tables it may read.
     catalog
@@ -2312,14 +2469,80 @@ def list_expiring_tables(
     lakana_core.errors.NotFoundError
         Mapped to 404, if the environment does not exist.
     lakana_core.errors.ValidationError
-        Mapped to 422 when `within_days` is out of range.
+        Mapped to 422 when `within_days`, `limit`, `namespace` or `cursor` is invalid.
     """
+    _no_nul("namespace", namespace)
     if within_days is None:
         within_days = max(request.app.state.settings.tables.expiry_warning_days, 1)
-    return [
-        _retention_out(entry)
-        for entry in catalog.list_expiring_tables(principal, env, within_days=within_days)
-    ]
+    page = catalog.list_expiring_tables(
+        principal,
+        env,
+        within_days=within_days,
+        namespace=NamespacePath.from_parts(namespace.split(".")) if namespace else None,
+        limit=limit,
+        cursor=cursor,
+    )
+    set_next_cursor(response, page.next_cursor)
+    return [_retention_out(entry) for entry in page.items]
+
+
+@environment_dropped_router.get("", response_model=DroppedTablePageOut, responses=errors(403, 404))
+def list_environment_dropped_tables(
+    env: str,
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    catalog: CatalogService = Depends(get_catalog),
+) -> DroppedTablePageOut:
+    """List the dropped tables of an environment.
+
+    Lists the tables dropped from any namespace of the environment whose files are not deleted
+    yet, newest drop first. Needs `READ_ENVIRONMENT`; a table the caller may not read is left
+    out. Answers 404 when the environment does not exist and 422 when the cursor is not one
+    this list issued.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    limit
+        Most tables returned (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    catalog
+        The catalog service for this request.
+
+    Returns
+    -------
+    DroppedTablePageOut
+        The tables of this page, each with its namespace, and the cursor of the next page.
+
+    Raises
+    ------
+    lakana_core.errors.NotFoundError
+        Mapped to 404, if the environment does not exist.
+    lakana_core.errors.ValidationError
+        Mapped to 422 for a cursor this list did not issue.
+    """
+    page = catalog.list_environment_dropped_tables(principal, env, limit=limit, cursor=cursor)
+    return DroppedTablePageOut(
+        items=[
+            DroppedTableOut(
+                name=dropped.name,
+                namespace=str(dropped.namespace),
+                uuid=str(dropped.table_id),
+                kind=dropped.kind,
+                dropped_at=dropped.dropped_at,
+                purge_after=dropped.purge_after,
+                restorable=dropped.restorable,
+                actions=list(dropped.actions),
+            )
+            for dropped in page.items
+        ],
+        next_cursor=page.next_cursor,
+    )
 
 
 @dropped_router.get("", response_model=list[DroppedTableOut], responses=errors(403, 404))
@@ -2366,6 +2589,7 @@ def list_dropped_tables(
             dropped_at=dropped.dropped_at,
             purge_after=dropped.purge_after,
             restorable=dropped.restorable,
+            actions=list(dropped.actions),
         )
         for dropped in catalog.list_dropped_tables(principal, env, ns)
     ]
@@ -2384,7 +2608,8 @@ def create_external_table(
     """Register an external table.
 
     Registers a raw-zone table backed by files that are already in storage. Needs
-    `CREATE_TABLE`. Answers 404 when the environment or namespace does not exist and 422
+    `CREATE_TABLE`. Answers 404 when the environment or namespace does not exist, 409 when
+    the name is taken or a deployed project declares it (only git may take it), and 422
     when `location_pattern` is not shaped `raw/<directory>/<file-glob>`, claims files
     another external table in the environment claims, leaves the storage root, or the
     `format` is not supported.
@@ -2416,6 +2641,9 @@ def create_external_table(
         `"raw/<dir...>/<basename-glob>"`, its claim overlaps another active
         external table's claim in this environment, it escapes the storage
         root, or `format` is unsupported.
+    lakana_core.errors.ConflictError
+        Mapped to 409, if a deployed project declares the name; the message names its file
+        to a caller who may read the name.
     lakana_core.errors.LakanaError
         Mapped to 500: the table just registered has no `external_config`,
         which `create_external_table` always sets.

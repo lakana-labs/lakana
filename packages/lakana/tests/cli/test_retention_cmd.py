@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from conftest import FakeApi, invoke, make_state
+from test_list_filters_cmd import _paged
 
 from lakana.cli import _retention
 
@@ -461,3 +462,26 @@ def test_table_get_says_nothing_of_an_expiry_outside_the_window(tmp_path: Path) 
     result = invoke(make_state(tmp_path, api), "table", "get", "gold.orders", "--env", "dev")
     assert result.exit_code == 0, result.stderr
     assert "expires" not in _plain(result.stdout)
+
+
+def test_table_expiring_sends_namespace_and_pages(tmp_path: Path) -> None:
+    api = _paged("/api/v1/environments/dev/expiring-tables", [_RETENTION], "e2")
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "expiring",
+        "--env",
+        "dev",
+        "--namespace",
+        "gold",
+        "--limit",
+        "1",
+        "--cursor",
+        "e1",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"namespace": "gold", "limit": "1", "cursor": "e1"}
+    assert (
+        "More results: lakana table expiring --env dev --namespace gold --limit 1 --cursor e2"
+        in _plain(result.stdout)
+    )

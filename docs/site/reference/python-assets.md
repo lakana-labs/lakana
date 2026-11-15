@@ -196,7 +196,7 @@ def order_totals(orders: pl.DataFrame) -> pl.DataFrame:
 - It must be `True`, `False` or `None`, written out; `None` means `False`, the default.
   `evolve_schema=False` is accepted with every `write`, and on an artifact asset.
 - Without it, add `evolve_schema=True`, or restore the columns and types the table has. Do not
-  drop the table so that the next run creates it: the new table has none of the old table's
+  drop or rebuild the table to get past this: the new table has none of the old table's
   grants, row filters or column masks, and its readers would see every row and column until an
   administrator creates them again.
 - The harness that reads the option is the `lakana` package in the project's own environment.

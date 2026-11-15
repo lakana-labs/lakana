@@ -18,7 +18,7 @@ import enum
 import uuid
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -32,10 +32,11 @@ from lakana_core.catalog.health_summary import (
     reference_checks,
     shown_health,
 )
+from lakana_core.catalog.row_actions import table_actions_each
 from lakana_core.catalog.search import CatalogSearch, SearchHit, _normalized_query
 from lakana_core.db import db_now
 from lakana_core.errors import NotFoundError, ValidationError
-from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath
+from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath, TableRef
 from lakana_core.languages import DEFAULT_MAIN_LANGUAGE
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -59,6 +60,12 @@ from lakana_core.pagination import (
     sorted_order,
 )
 from lakana_core.projects.asset_model import require_model_kind
+from lakana_core.projects.definition import (
+    DefiningFile,
+    definition_for,
+    deployed_definitions,
+    owned_by_git,
+)
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 
 __all__ = [
@@ -233,6 +240,12 @@ class TableListItem:
         Its health in one word, as the caller may see it.
     match
         With a search text, what of the table matched; `None` without one.
+    defined_by
+        The deployed project file that owns it (`owned_by_git`), so that only git may remove
+        it; `None` otherwise. Shown to every reader of the row, without the file's text.
+    actions
+        The words of `lakana_core.catalog.row_actions.TABLE_ACTIONS` the reader's rights allow
+        on it; the server decides each request again.
     """
 
     environment: str
@@ -251,6 +264,8 @@ class TableListItem:
     readers_7d: int
     health_summary: HealthSummary
     match: TableMatch | None
+    defined_by: DefiningFile | None = None
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -681,7 +696,9 @@ class TableListing:
             now=db_now(self._session),
         )
         items = [_item(r, facts[r.Table.id], _match(hits.get(r.Table.id))) for r in page]
-        return TableListPage(items, next_cursor, capped)
+        return TableListPage(
+            _with_actions(self._session, self._authz, p, page, items), next_cursor, capped
+        )
 
     def tree(self, p: PrincipalRef) -> TableTree:
         """Count the tables `p` may read, by environment and namespace.
@@ -843,6 +860,7 @@ class TableListing:
                 Table,
                 Environment.name.label("environment"),
                 Namespace.path.label("path"),
+                Namespace.environment_id.label("environment_id"),
                 *(key.label(f"k{i}") for i, key in enumerate(keys)),
             )
             .join(Namespace, Namespace.id == Table.namespace_id)
@@ -865,6 +883,70 @@ class TableListing:
             if len(chunk) < SCAN_CHUNK:
                 return kept
             at = SortedPosition(_values(chunk[-1], len(keys)), chunk[-1].Table.id)
+
+
+def _with_actions(
+    session: Session,
+    authz: AuthorizationService,
+    p: PrincipalRef,
+    page: Sequence[Row[*tuple[Any, ...]]],
+    items: list[TableListItem],
+) -> list[TableListItem]:
+    """Fill each item's `defined_by` and `actions`.
+
+    The deployed definitions are read once per environment on the page, and the rights of
+    every row are asked in one batch (`table_actions_each`).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    authz
+        The authorization service.
+    p
+        The reader.
+    page
+        The scanned rows of the page.
+    items
+        Their items, in the same order.
+
+    Returns
+    -------
+    list of TableListItem
+        The items, filled.
+    """
+    definitions = {
+        environment_id: deployed_definitions(session, environment_id)
+        for environment_id in dict.fromkeys(r.environment_id for r in page)
+    }
+    found = [
+        definition_for(
+            definitions[r.environment_id],
+            TableRef(r.environment, NamespacePath.parse(r.path), r.Table.name),
+        )
+        for r in page
+    ]
+    actions = table_actions_each(
+        authz,
+        p,
+        [
+            (
+                TableRef(item.environment, NamespacePath.parse(r.path), item.name),
+                item.kind,
+                r.Table.owner_id,
+                file is not None,
+            )
+            for r, item, file in zip(page, items, found, strict=True)
+        ],
+    )
+    return [
+        replace(
+            item,
+            defined_by=file if owned_by_git(file, item.kind) else None,
+            actions=allowed,
+        )
+        for item, file, allowed in zip(items, found, actions, strict=True)
+    ]
 
 
 def _values(row: Row[*tuple[Any, ...]], count: int) -> tuple[CursorValue, ...]:

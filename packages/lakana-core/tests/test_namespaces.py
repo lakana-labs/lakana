@@ -5,11 +5,12 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from core_test_helpers import _config, _prepared_catalog, _RecordThenDeny
+from core_test_helpers import ActionAllowList, _config, _prepared_catalog, _RecordThenDeny
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, PrincipalRef, Securable
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import (
     AlreadyExistsError,
@@ -20,6 +21,7 @@ from lakana_core.errors import (
 )
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import Namespace, Table, TableType
+from lakana_core.storage.resolver import StorageResolver
 
 
 def test_create_then_load_round_trips(
@@ -622,3 +624,141 @@ def test_an_existing_dotted_namespace_stays_listable_loadable_and_droppable(
     catalog.drop_namespace(principal, "dev", path)
 
     assert path not in catalog.list_namespaces(principal, "dev")
+
+
+def _rows_in(session: Session, ns: Namespace, *names: str, kind: TableType) -> None:
+    """Insert bare table rows of one kind into a namespace.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    ns
+        The namespace.
+    *names
+        The rows' names.
+    kind
+        Their type.
+    """
+    for name in names:
+        session.add(Table(id=uuid.uuid4(), namespace_id=ns.id, name=name, table_type=kind))
+    session.commit()
+
+
+def test_a_namespace_that_is_not_empty_says_how_many_it_holds(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, session: Session
+) -> None:
+    catalog.create_environment(principal, name="dev", storage=_config(tmp_path))
+    tables = catalog.create_namespace(principal, "dev", NamespacePath.from_parts(["widgets"]))
+    _rows_in(session, tables, "a", "b", kind=TableType.ICEBERG)
+    models = catalog.create_namespace(principal, "dev", NamespacePath.from_parts(["models"]))
+    _rows_in(session, models, "churn", kind=TableType.ARTIFACT)
+    catalog.create_namespace(principal, "dev", NamespacePath.from_parts(["parent"]))
+    catalog.create_namespace(principal, "dev", NamespacePath.from_parts(["parent", "child"]))
+
+    said = []
+    for path in ("widgets", "models", "parent"):
+        with pytest.raises(ConflictError) as refused:
+            catalog.drop_namespace(principal, "dev", NamespacePath.from_parts([path]))
+        said.append(str(refused.value))
+
+    assert said == [
+        "widgets still holds 2 tables.",
+        "models still holds 1 artifact; drop each first (`lakana artifact drop`).",
+        "parent still holds 1 namespace.",
+    ]
+
+
+def test_a_namespace_with_a_table_the_caller_may_not_read_says_only_that_it_is_not_empty(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    setup = _prepared_catalog(session, tmp_path, AllowAllAuthorization())
+    ns = setup.create_namespace(principal, "dev", NamespacePath.from_parts(["widgets"]))
+    _rows_in(session, ns, "a", "b", "c", kind=TableType.ICEBERG)
+    dropper = CatalogService(
+        session, StorageResolver(session), ActionAllowList(Action.DROP_NAMESPACE)
+    )
+
+    with pytest.raises(ConflictError) as refused:
+        dropper.drop_namespace(principal, "dev", NamespacePath.from_parts(["widgets"]))
+
+    assert str(refused.value) == "widgets is not empty; drop what it holds first."
+
+
+def _ns_tree(catalog: CatalogService, principal: PrincipalRef, tmp_path: Path) -> None:
+    """Create `a`, `a.b`, `a.b.c` and `ab` in `dev`.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    principal
+        The acting principal.
+    tmp_path
+        Holds the storage root.
+    """
+    catalog.create_environment(principal, name="dev", storage=_config(tmp_path))
+    for parts in (["a"], ["a", "b"], ["a", "b", "c"], ["ab"]):
+        catalog.create_namespace(principal, "dev", NamespacePath.from_parts(parts))
+
+
+def test_namespaces_page_by_parts_under_a_parent(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """`a.b` and `a.b.c` lie under `a`; `ab` does not. One to a page makes two pages."""
+    _ns_tree(catalog, principal, tmp_path)
+    parent = NamespacePath.from_parts(["a"])
+
+    whole = catalog.list_namespace_page(principal, "dev", parent)
+    first = catalog.list_namespace_page(principal, "dev", parent, limit=1)
+    second = catalog.list_namespace_page(
+        principal, "dev", parent, limit=1, cursor=first.next_cursor
+    )
+
+    assert [ns.parts for ns in whole.items] == [("a", "b"), ("a", "b", "c")]
+    assert [ns.parts for ns in first.items] == [("a", "b")]
+    assert [ns.parts for ns in second.items] == [("a", "b", "c")]
+    assert second.next_cursor is None
+
+
+def test_namespaces_depth_one_keeps_only_direct_children(
+    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """With `depth=1`, the children of `a` are `a.b` alone; with no parent, the top level."""
+    _ns_tree(catalog, principal, tmp_path)
+
+    under_a = catalog.list_namespace_page(
+        principal, "dev", NamespacePath.from_parts(["a"]), depth=1
+    )
+    top = catalog.list_namespace_page(principal, "dev", None, depth=1)
+
+    assert [ns.parts for ns in under_a.items] == [("a", "b")]
+    assert [ns.parts for ns in top.items] == [
+        ("a",),
+        ("ab",),
+        ("bronze",),
+        ("gold",),
+        ("silver",),
+    ]
+
+
+def test_namespaces_page_with_a_legacy_dotted_part_has_unique_keys(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """`["a.b"]` and `["a", "b"]` both dot to `a.b`; paging still skips and repeats nothing."""
+    _ns_tree(catalog, principal, tmp_path)
+    env_id = session.scalars(select(Namespace.environment_id)).first()
+    session.add(Namespace(id=uuid.uuid4(), environment_id=env_id, path="a.b", properties={}))
+    session.commit()
+
+    seen = []
+    cursor = None
+    while True:
+        page = catalog.list_namespace_page(principal, "dev", None, limit=1, cursor=cursor)
+        seen += [ns.parts for ns in page.items]
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+
+    assert len(seen) == len(set(seen)) == 8  # the 5 here and the scaffolded bronze, silver, gold
+    assert seen == sorted(seen)

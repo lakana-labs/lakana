@@ -26,7 +26,7 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 from sqlalchemy import Row, select, tuple_
 from sqlalchemy.orm import Session
@@ -51,6 +51,7 @@ from lakana_core.models import (
 from lakana_core.policy.field_binding import UnreadablePolicyError
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.projects.browse import browse_url
+from lakana_core.projects.manifest import entry_output, manifest_assets
 from lakana_core.projects.source_map import (
     GATE_VERSION,
     SOURCE_FILE_MAX_BYTES,
@@ -279,6 +280,174 @@ def _manifest_path(manifest: object, dotted: str) -> str | None:
             path = entry.get("path")
             return path if isinstance(path, str) else None
     return None
+
+
+class DefiningFile(NamedTuple):
+    """The deployed project file that declares a table or an artifact.
+
+    Attributes
+    ----------
+    repository
+        The repository's name.
+    path
+        The file's path in the repository.
+    output
+        What the declaring asset produces: a ``table``, a ``view`` or an ``artifact``.
+    """
+
+    repository: str
+    path: str
+    output: Literal["table", "view", "artifact"]
+
+
+def deployed_entries(
+    session: Session, environment_id: uuid.UUID
+) -> dict[str, tuple[DefiningFile, Mapping[str, object]]]:
+    """Index every asset the environment's current deployments declare, in one read.
+
+    Repositories are walked by name and the first to name a table wins, as in `_locate`. An
+    entry counts only with a string `path`; a malformed manifest declares nothing.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+
+    Returns
+    -------
+    dict
+        Dotted asset name to its `DefiningFile` and the manifest entry it came from.
+    """
+    versions = session.execute(
+        select(JobVersion.manifest_json, Repository.name)
+        .join(EnvironmentDeployment, EnvironmentDeployment.current_job_version_id == JobVersion.id)
+        .join(Repository, Repository.id == EnvironmentDeployment.repository_id)
+        .where(EnvironmentDeployment.environment_id == environment_id)
+        .order_by(Repository.name)
+    ).all()
+    found: dict[str, tuple[DefiningFile, Mapping[str, object]]] = {}
+    for version in versions:
+        for dotted, entry in manifest_assets(version.manifest_json).items():
+            path = entry.get("path")
+            if dotted in found or not isinstance(path, str):
+                continue
+            output: Literal["table", "view", "artifact"] = (
+                "artifact"
+                if entry_output(entry) == "artifact"
+                else "view"
+                if entry.get("materialize") == "view"
+                else "table"
+            )
+            found[dotted] = (DefiningFile(version.name, path, output), entry)
+    return found
+
+
+def deployed_definitions(session: Session, environment_id: uuid.UUID) -> dict[str, DefiningFile]:
+    """Map every declared asset name to the file that declares it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+
+    Returns
+    -------
+    dict
+        Dotted asset name to its `DefiningFile`.
+    """
+    return {name: file for name, (file, _) in deployed_entries(session, environment_id).items()}
+
+
+def defining_file(session: Session, environment_id: uuid.UUID, dotted: str) -> DefiningFile | None:
+    """Find the file that declares one asset name.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    dotted
+        The dotted asset name.
+
+    Returns
+    -------
+    DefiningFile or None
+        The file, or `None` when no current deployment declares the name.
+    """
+    return deployed_definitions(session, environment_id).get(dotted)
+
+
+def definition_for(definitions: Mapping[str, DefiningFile], ref: TableRef) -> DefiningFile | None:
+    """Look a table up in a pre-read `deployed_definitions` map, with the legacy-name guard.
+
+    A namespace part from before dots were refused would share its dotted name with another
+    table (`["a.b"].c` and `["a", "b"].c`); a deploy only ever names the second, so the first
+    is defined by nothing. This is the one place the guard lives.
+
+    Parameters
+    ----------
+    definitions
+        The map from `deployed_definitions`.
+    ref
+        The table.
+
+    Returns
+    -------
+    DefiningFile or None
+        The declaring file, or `None` when none declares this exact table.
+    """
+    dotted = ref.dotted()
+    if TableRef.from_dotted(ref.environment, dotted) != ref:
+        return None
+    return definitions.get(dotted)
+
+
+def defining_ref(session: Session, environment_id: uuid.UUID, ref: TableRef) -> DefiningFile | None:
+    """Find the file that declares a table, with the legacy-name guard of `definition_for`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    ref
+        The table.
+
+    Returns
+    -------
+    DefiningFile or None
+        The declaring file, or `None` when none declares this exact table.
+    """
+    return definition_for(deployed_definitions(session, environment_id), ref)
+
+
+def owned_by_git(found: DefiningFile | None, kind: str) -> bool:
+    """Tell whether a deployed project owns a catalog row, so only git may change it.
+
+    Parameters
+    ----------
+    found
+        The declaring file, or `None`.
+    kind
+        The row's type name (`TableType`), such as ``TABLE``, ``VIEW`` or ``ARTIFACT``.
+
+    Returns
+    -------
+    bool
+        True for a table or view row declared as a table or view, and for an artifact row
+        declared as an artifact. False for an external table and when nothing declares it.
+    """
+    if found is None:
+        return False
+    if kind in ("TABLE", "ICEBERG", "VIEW"):
+        return found.output in ("table", "view")
+    return kind == "ARTIFACT" and found.output == "artifact"
 
 
 def _locate(

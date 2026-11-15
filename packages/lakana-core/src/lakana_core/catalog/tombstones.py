@@ -143,6 +143,8 @@ class DroppedTable:
     ----------
     name
         The table's name when it was dropped.
+    namespace
+        The namespace it was dropped from.
     table_id
         Its id, which an undrop keeps.
     kind
@@ -154,14 +156,19 @@ class DroppedTable:
     restorable
         Whether an undrop would still be accepted: the undo period has not ended and the purge
         has not started.
+    actions
+        The words of `lakana_core.catalog.row_actions.DROPPED_ACTIONS` the reader's rights
+        allow; empty until a listing fills it for its reader.
     """
 
     name: str
+    namespace: NamespacePath
     table_id: uuid.UUID
     kind: str
     dropped_at: datetime
     purge_after: datetime
     restorable: bool
+    actions: tuple[str, ...] = ()
 
 
 def _encode(value: object) -> object:
@@ -517,6 +524,36 @@ def _tombstones(
     return found
 
 
+def _described(record: TableLocation, snapshot: Mapping[str, Any], now: datetime) -> DroppedTable:
+    """Describe one tombstone.
+
+    Parameters
+    ----------
+    record
+        The `DROPPED` location record.
+    snapshot
+        Its snapshot.
+    now
+        The database's time, for `DroppedTable.restorable`.
+
+    Returns
+    -------
+    DroppedTable
+        The tombstone's description.
+    """
+    row = snapshot["row"]
+    assert record.dropped_at is not None and record.purge_after is not None  # nosec B101
+    return DroppedTable(
+        name=row["name"],
+        namespace=NamespacePath.from_parts(snapshot["namespace"], allow_dots=True),
+        table_id=uuid.UUID(row["id"]),
+        kind=table_kind(TableType(row["table_type"])),
+        dropped_at=record.dropped_at,
+        purge_after=record.purge_after,
+        restorable=record.purge_started_at is None and now < record.purge_after,
+    )
+
+
 def list_tombstones(
     session: Session, environment_id: uuid.UUID, namespace: NamespacePath, *, now: datetime
 ) -> list[DroppedTable]:
@@ -538,21 +575,43 @@ def list_tombstones(
     list of DroppedTable
         Newest drop first.
     """
-    listed = []
-    for record, snapshot in _tombstones(session, environment_id, namespace):
-        row = snapshot["row"]
-        assert record.dropped_at is not None and record.purge_after is not None  # nosec B101
-        listed.append(
-            DroppedTable(
-                name=row["name"],
-                table_id=uuid.UUID(row["id"]),
-                kind=table_kind(TableType(row["table_type"])),
-                dropped_at=record.dropped_at,
-                purge_after=record.purge_after,
-                restorable=record.purge_started_at is None and now < record.purge_after,
-            )
+    return [
+        _described(record, snapshot, now)
+        for record, snapshot in _tombstones(session, environment_id, namespace)
+    ]
+
+
+def list_environment_tombstones(
+    session: Session, environment_id: uuid.UUID, *, now: datetime
+) -> list[DroppedTable]:
+    """Describe the dropped tables of every namespace of an environment.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    now
+        The database's time, for `DroppedTable.restorable`.
+
+    Returns
+    -------
+    list of DroppedTable
+        Newest drop first, ties by table id, descending.
+    """
+    records = session.scalars(
+        select(TableLocation).where(
+            TableLocation.environment_id == environment_id,
+            TableLocation.state == TableLocationState.DROPPED,
         )
-    return listed
+    ).all()
+    found = [
+        _described(record, snapshot, now)
+        for record in records
+        if (snapshot := _snapshot_of(record)) is not None
+    ]
+    return sorted(found, key=lambda d: (d.dropped_at, str(d.table_id)), reverse=True)
 
 
 def find_tombstone(

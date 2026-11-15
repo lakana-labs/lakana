@@ -219,3 +219,25 @@ def test_the_warning_window_is_the_servers_setting(settings: Settings) -> None:
         client.put(f"{_TABLES}/sales/retention", headers=AUTH_HEADER, json={"days": 3})
         assert client.get(f"{_TABLES}/sales", headers=AUTH_HEADER).json()["expires_soon"] is False
         assert client.get(_EXPIRING, headers=AUTH_HEADER).json() == []
+
+
+def test_the_expiring_listing_filters_by_namespace_and_pages(client: TestClient) -> None:
+    """`namespace` keeps that namespace and the ones beneath; `limit` pages with a header."""
+    create_environment(client)
+    for namespace in ("gold", "silver"):
+        create_table(client, "dev", namespace, "t")
+        url = f"/api/v1/environments/dev/namespaces/{namespace}/tables/t/retention"
+        assert client.put(url, headers=AUTH_HEADER, json={"days": 2}).status_code == 200
+
+    only = client.get(f"{_EXPIRING}?namespace=silver&limit=1", headers=AUTH_HEADER)
+    assert only.status_code == 200, only.text
+    assert [(e["namespace"], e["name"]) for e in only.json()] == [("silver", "t")]
+    assert "x-next-cursor" not in only.headers
+
+    both = client.get(f"{_EXPIRING}?limit=1", headers=AUTH_HEADER)
+    assert len(both.json()) == 1
+    cursor = both.headers["x-next-cursor"]
+    rest = client.get(f"{_EXPIRING}?limit=1&cursor={cursor}", headers=AUTH_HEADER)
+    assert len(rest.json()) == 1 and "x-next-cursor" not in rest.headers
+    assert client.get(f"{_EXPIRING}?cursor=forged", headers=AUTH_HEADER).status_code == 422
+    assert client.get(f"{_EXPIRING}?namespace=a%00b", headers=AUTH_HEADER).status_code == 422

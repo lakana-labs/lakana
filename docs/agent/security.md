@@ -41,6 +41,9 @@ query path sit relative to `lakana-core`/`lakana-server`, see `docs/agent/archit
   `Action.MANAGE_ENVIRONMENT` at instance scope; do not change either to authorize against
   the target environment's own name, which would let a grant for a not-yet-existing name
   create or re-root it.
+- **A write that removes or takes a name a deployed project owns asks `defining_file` in core;
+  never add such a check in a route only.** The Iceberg REST catalog, the CLI and the SDK reach
+  the same core methods, so a check in core covers them all ("Catalog management (M7 part 3b)").
 - **Every identity or policy mutation records an audit event, in the same transaction as
   the change.** Adding a new mutation to `GrantService`, `SecretService`,
   `CatalogService`, `PatService`, `TaskTokenService`, `GroupService`,
@@ -602,6 +605,16 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   - irreversible erasure: `POST /api/v1/environments/{name}/purge-rows` (#261), which removes a
     deleted environment's rows and with them the only record of where its files are; nothing
     restores it;
+  - dropping data (M7 part 3b): `DELETE …/namespaces/{path}/tables/{name}` with or without
+    `purge` (the undo period is no defence against a stolen browser that also purges),
+    `DELETE …/artifacts/{name}` and `DELETE …/artifacts/{name}/versions/{version}` (neither can
+    be undone), `DELETE /api/v1/environments/{env}/namespaces/{path}` (revokes the grants bound
+    to it). The check sits in core (`CatalogService.drop_table`, `drop_namespace`,
+    `ArtifactService.drop_artifact`, `delete_version`) right after `authorize`, before the guard,
+    the lookup and the git-owned refusal, so a stale session learns nothing about the object.
+    The Iceberg REST `DELETE` of a table or namespace calls the same methods, but a session
+    cookie is read below `/api/v1/` only, so its callers are always tokens and never asked.
+    Undrop and maintenance ask for no touch: they bring data back or tidy it;
   - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
     passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
     (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.
@@ -611,7 +624,8 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   token. Every other write of `/api/v1` sits in `NO_STEP_UP` with a one-line reason, so a new
   write route fails the test until it is placed. The rule: step-up when a write changes who or
   what can act or read (identities, rights, run-as, CI trust), handles credentials or secrets, or
-  changes where code or data come from or go, or irreversibly erases catalog records; none for
+  changes where code or data come from or go, irreversibly erases catalog records, or drops data
+  (a table, an artifact, an artifact version, a namespace, a rebuild); none for
   removing access (revoking a token, withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
   one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
   descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
@@ -1109,6 +1123,8 @@ names, as `table get` does. Pins: `test_catalog_search.py`, `test_search.py`.
 | `q` | `READ_TABLE` on the table | The search arms of `catalog/search.py` through the walk shared with `CatalogSearch.search`; a text is read only for a readable table, and `capped` counts readable matches only (pins: `test_capped_counts_only_readable_matches`, `test_q_matches_a_column_description_and_carries_the_matching_part`). The arms keep only the readable ids in their SQL (written as literals, so no bound-parameter limit), so an unreadable row is never sorted or streamed, and the walk stops after `MAX_SCANNED` (5,000) readable candidates with `capped` set: one request costs at most one sort of the caller's own matches and 5,000 rows read (pins: `test_a_search_stops_after_max_scanned_candidates_and_says_so`, `test_unreadable_candidates_never_use_up_the_scan`). |
 | `owner` | `READ_TABLE` on the table | A principal's name and kind to anyone who may read the table (the maintainer's decision: whom to contact); `null` when the owner was deleted. The second loosening, beside the readers' time and count above. Pin: `test_the_owner_is_shown_to_anyone_who_may_read_the_table`. |
 | `health_summary` | `READ_TABLE` on the table | The stored word, merged per reader: a generated reference check whose target the reader may not read is left out of the word (pin: `test_a_hidden_reference_check_is_not_in_a_readers_word`). No signal value, band or message is in it. |
+| `defined_by` | `READ_TABLE` on the table | `{repository, path}` of the deployed file that owns the row (`owned_by_git`, with the legacy-dotted guard `definition_for`), never the file's text: the "Defined in" location, shown to every reader of the row (ruling 2: a refusal names the file only to a `READ_TABLE` holder, and a row reaches only those). The definitions are read once per environment on the page (pins: `test_list_rows_carry_defined_by_and_actions`, `test_a_legacy_dotted_namespace_is_not_defined_by_its_lookalike`, `test_the_definitions_are_read_once_per_environment_of_the_page`). |
+| `actions` | `READ_TABLE` on the table | The words of `catalog/row_actions.py` the reader's rights allow, asked in one `permits_each` batch per list, no audit event. Rights only: the server decides each request again, and git ownership, protection, step-up and state still refuse. An artifact row offers `drop` as the artifact list does (controller ruling M4). The namespace table list fills every row with `with_row_actions` (one definitions read, one batch; pin: `test_the_namespace_list_reads_the_definitions_once_however_many_tables`); column-only callers pass `with_actions=False`. The create and undrop answers fill both through `row_actions`. `_row_actions` asks `READ_TABLE` in the same batch and names the file only to a reader of the row, whatever calls it (pin: `test_the_row_fill_names_no_file_to_a_caller_who_may_not_read_the_row`). The same module fills `actions` on `describe_table`, both dropped-table lists, the orphans, the artifacts and their versions; each row type is pinned against the service's own refusal (`test_row_actions.py`, the `..._actions_are_what_its_rights_allow` cases). |
 | `GET /api/v1/tables/tree` | `READ_TABLE` per counted table | A node counts only readable tables. An environment is shown with `READ_ENVIRONMENT` or a readable table in it; a namespace with `READ_NAMESPACE` on its environment or a readable table in or beneath it (pins: `test_the_tree_counts_equal_the_list_for_each_node`, `test_the_tree_shows_empty_namespaces_only_to_a_reader_of_namespaces`, `test_the_tree_answers_counts_per_node`). |
 | a missing `environment` | `READ_ENVIRONMENT` | `404` naming `lakana env list` only for a caller who may read environments; anyone else gets an empty page, as for one that exists (pins: `test_a_missing_environment_is_404_for_an_administrator`, `test_a_missing_environment_is_404_only_for_a_reader_of_environments`). |
 
@@ -2594,7 +2610,8 @@ accident or believes it closed:
   storage, without a marker, so no sweep deletes them.
 - Never point two deployments at one storage root: each would see the other's artifacts as leftovers
   (the marker rule keeps the sweep from deleting them, but nothing else protects them).
-- `list_artifacts` and the version list are not paged; the download route answers `GET` only and
+- The artifact list is paged (100 by default, filtered by read right before the cursor applies); the
+  version list is not paged; the download route answers `GET` only and
   ignores `Range`.
 
 **Residuals of the harness (#67, closed by descriptors).** The harness passes the descriptor it
@@ -5580,6 +5597,18 @@ already allows.
   `{"principal_id": id}` for a filter on someone else. Same dedup, exemptions (a filter on the
   reader's own id; a page of only the reader's rows), fail-closed 503 and no `ADMIN` exemption as the
   other views. A `PermissionDenied` comes before anything is read or recorded.
+- **Catalog changes without an event before M7 part 3b now have one.** Each is written in the
+  transaction of its change, with the actor and the object as securable: `NAMESPACE_CREATED`
+  (`namespace`, dotted) and `NAMESPACE_DROPPED` (`namespace`, `revoked_grants`), for the platform
+  API and the Iceberg REST catalog alike; `TABLE_CREATED` for an external table (`table_id`,
+  `kind: EXTERNAL`, `location`, the pattern relative to the environment's storage root, and
+  `format`); `ARTIFACT_UPLOAD_ABORTED` (`artifact`, `upload_id`). A rebuild
+  (`lakana_core.catalog.rebuild`) writes `TABLE_DROPPED` (`reason: rebuild`, `rebuild_reason`) and
+  `TABLE_REBUILT` (`table_id`, `reason`, `run_id`) next to its run's `RUN_STARTED`. No detail names
+  a repository or a deployed file's path: the audit log is read with `READ_AUDIT_LOG` alone, and
+  a file is named only to a caller with `READ_TABLE` (the rebuild's answer has `path: null`
+  otherwise). A refused change rolls back and writes no event. The new fields (`namespace`,
+  `revoked_grants`, `format`, `upload_id`, `rebuild_reason`) are in `SHOWN_FIELDS`.
 - **Reads of a deployed file are audited (M7 part 3a).** `table_definition_file`
   (`lakana_core.projects.definition`) writes `SOURCE_VIEWED` (the table as scope; `repository`,
   `path`, `commit`) through `record_source_view` before it returns a file's text, once per reader,
@@ -5737,6 +5766,23 @@ exit criterion is being re-run after the M3f fixes above — see
 | Residuals | — | (a) "Defined" is bound by the table's current name, as descriptions are; the content gate makes this no wider than `DeployService.job_version`. (b) Closed by #560: `DeployService.job_version` applies the same gate and audit. Left: a version is judged under today's grants and policies, so an old version's SQL is shown to whoever passes the gate now; `lakana check rows` no longer puts a check's SQL into the caller's query text or error messages (#588; the worker reads it by the result). A view's SQL in `table get` follows the gate since #587. (c) A credential typed into a project file is visible to callers who pass the content gate (user docs; deploy warning issue after 3a). (d) Comments and literals in a shown file are shown. |
 
 The preview route asks for no step-up: it is a read under the caller's own rights, like `POST …/queries` (`NO_STEP_UP` in `test_step_up_routes.py`). The conversion slot (`ThreadSafeConcurrencyLimiter`, one `threading.Lock` over the total and the count per principal, because the route runs in the thread pool) is given back once the page's bytes are built, before they are sent, and also when the conversion fails.
+
+## Catalog management (M7 part 3b)
+
+What a deployed project defines is owned by its file in git; the catalog's own writes may not take
+it over, and a rebuild is the one way to start such a table again. The entries below point to the
+fuller text of each part where it already lives.
+
+| Part | Rule | Where it is enforced and pinned |
+|---|---|---|
+| The git-owned rule | A table or view a current deployment builds, and an artifact it produces, cannot be dropped, renamed away or replaced by a person; a name a deployment declares cannot be created (managed, external, Iceberg `createTable`, a person's create-mode write, an upload, an undrop `--as`, a person's view). Runs still create what their project declares. Purge and break-glass do not get past it. | `lakana_core.catalog.git_owned` (`refuse_owned_drop`, `refuse_declared_name`, `refuse_owned_replace`, `undrop_refusal`, and the copy), asking `defining_file` / `defining_ref` / `owned_by_git` in `lakana_core.projects.definition` over the current manifests of the environment (one read, `deployed_definitions`, one legacy-dotted-name guard). It sits in the core services (`CatalogService`, `ArtifactService`, the write and view paths), never only in a route, so the Iceberg REST catalog is covered. Pins: `test_git_owned_refusals.py` (every refusal, the run exemptions, `test_break_glass_does_not_get_past_the_refusal`, `test_purge_does_not_get_past_the_refusal`, `test_a_legacy_dotted_namespace_is_not_taken_for_another_declaration`, `test_a_run_of_one_repository_cannot_create_a_table_another_declares`). |
+| Naming the file | The repository and path are named only to a caller with `READ_TABLE` on the object (`GIT_OWNED_DROP`, `GIT_OWNED_CREATE`, `GIT_OWNED_RENAME`, `GIT_OWNED_REPLACE`, `GIT_OWNED_ARTIFACT_DROP`). Everyone else gets a fixed text (`GIT_OWNED_HIDDEN`, `GIT_OWNED_RENAME_HIDDEN`, `GIT_OWNED_ARTIFACT_HIDDEN`) that reveals neither that the name exists nor where it is defined. The same rule governs the rebuild's answer (`path` is `null` without `READ_TABLE`) and `defined_by`. | `git_owned_refusal` asks `READ_TABLE` once the name is found to be declared. Pins: `test_a_caller_who_may_not_read_the_table_is_not_told_the_file`, `test_a_create_under_a_declared_name_hides_the_file_from_a_caller_who_may_not_read_it`, `test_a_rename_away_hides_the_file_from_a_caller_who_may_not_read_the_table`, `test_an_upload_hides_the_file_from_a_caller_who_may_not_read_the_name`, `test_a_person_replacing_a_project_view_without_read_is_not_told_the_file`, `test_rebuild_names_the_file_only_to_a_caller_who_may_read_the_table`, `test_a_read_granted_on_the_table_itself_names_the_file`. |
+| Rebuild | `TableRebuild.rebuild`: `DROP_TABLE` on the table, then `RUN` on the environment, then step-up, the reason (10 to 500 characters, one line), the protected-environment guard (`DROP_TABLE`, break-glass in a protected environment), then the lookup. Only a table a deployment builds (or a table under an artifact asset's name) is rebuilt; an artifact is refused. The drop, the run's insert and `TABLE_REBUILT` are one transaction: an active run of the project (any run of its repository in the environment) means nothing is dropped, and a failure rolls back the run as well. The selection names exactly the table's asset (a glob character in a name is matched literally). The drop keeps the undo period, so `undrop` restores the old table. | `lakana_core.catalog.rebuild`. Pins: `test_rebuild_needs_drop_table_and_run`, `test_rebuild_while_a_run_is_active_drops_nothing`, `test_rebuild_in_a_protected_environment_needs_break_glass`, `test_rebuild_in_a_protected_environment_without_a_run_principal_drops_nothing`, `test_a_name_with_a_glob_character_queues_only_its_own_asset`, `test_a_selection_of_more_than_its_asset_drops_nothing`, `test_a_row_gone_after_the_run_is_inserted_leaves_no_run`, `test_rebuild_of_an_artifact_is_refused`. |
+| Step-up | A signed-in browser needs a recent passkey touch to drop a table (with or without `purge`), drop an artifact, delete an artifact version, delete a namespace, and rebuild. The check is the first thing after `authorize`, before the guard, the lookup and the git-owned refusal, so a stale session learns nothing, not even the file. Tokens are never asked. | Detail and the list of routes: "Passkeys (WebAuthn) and step-up". Pins: `test_catalog_step_up.py` (`test_a_stale_session_is_asked_for_a_touch_and_nothing_changes`, `test_a_stale_session_learns_nothing_of_the_file_that_defines_a_table`), `test_step_up_routes.py`. |
+| `defined_by` | **Loosening:** a row of a table, view or artifact names the deployed file that owns it (`{repository, path}`, never the text) to every reader of the row, which is the "Defined in" location. A caller without `READ_TABLE` never receives the row. | "The catalog list (M7 part 3a)", the `defined_by` row. |
+| `actions` | The words (`drop`, `rebuild`, …) the reader's rights allow, from one `permits_each` batch per list, no audit event. Rights only: the server decides each request again, and git ownership, protection, step-up and state still refuse. The batch asks `READ_TABLE` too, and the file is named only to a reader. | The `actions` row of the same table. Pins: `test_row_actions.py`. |
+| Audit events | `NAMESPACE_CREATED`, `NAMESPACE_DROPPED`, `TABLE_CREATED` (external), `ARTIFACT_UPLOAD_ABORTED`, `TABLE_REBUILT` (with a `TABLE_DROPPED` of `reason: rebuild`), each in the transaction of its change. No detail names a repository or a deployed file's path, because the log is read with `READ_AUDIT_LOG` alone. A refused change writes no event. | "Audit log": the part 3b bullet. |
+| Paged lists | Dropped tables, expiring tables, namespaces, orphans and artifacts return 100 rows by default. A row the caller may not read is filtered out before the page is cut (`page_in_order` takes only readable rows), and a forged cursor reveals nothing a plain list would not. | `lakana_core.pagination.page_in_order`. Pins: the forged-cursor tests of each list, `test_an_unreadable_artifact_sorting_first_does_not_cost_the_reader_a_page`. |
 
 ## Governed table creation and append (M4a)
 

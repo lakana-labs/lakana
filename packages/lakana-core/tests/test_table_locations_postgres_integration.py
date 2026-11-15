@@ -251,6 +251,7 @@ def test_a_sweep_that_takes_the_lock_first_abandons_and_the_create_rolls_back(
             properties=None,
             location=None,
             holder_run_id=uuid.uuid4(),  # a run the catalog does not know: the grace decides
+            refuse_declared_for=None,
         )
         with mock.patch.object(sweep_module, "abandon_claim", abandon_then_let_the_create_try):
             report = _sweep(engine)

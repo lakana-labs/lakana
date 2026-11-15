@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import uuid
 from collections.abc import Mapping
@@ -11,7 +12,7 @@ from unittest import mock
 
 import pyarrow as pa
 import pytest
-from core_test_helpers import ActionAllowList, _prepared_catalog
+from core_test_helpers import ActionAllowList, _prepared_catalog, created_by_a_run, python_task_run
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
 from sqlalchemy import event, select, update
@@ -19,7 +20,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import ORMExecuteState, Session
 from test_projects_dag import make_asset
 
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunContext
 from lakana_core.catalog import service as service_module
 from lakana_core.catalog.descriptions import (
     MAX_DESCRIPTION_LENGTH,
@@ -358,7 +359,7 @@ def test_a_table_created_after_the_deploy_gets_the_projects_text(
     catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
     _deploy(session, principal, _manifest())
 
-    catalog.create_table(principal, _ORDERS, schema=_SCHEMA)
+    created_by_a_run(session, catalog, principal, _ORDERS, _SCHEMA)
 
     shown = _described(catalog, principal)
     assert (shown.description, shown.description_source) == ("From the project", "project")
@@ -368,13 +369,13 @@ def test_a_table_created_after_the_deploy_gets_the_projects_text(
 def test_a_created_table_says_its_projects_main_language(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:
-    """The create's answer carries the `main_language:` the deployed project declares."""
+    """The table its run creates carries the `main_language:` the deployed project declares."""
     catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
     _deploy(session, principal, {**_manifest(), "main_language": "de"})
 
-    loaded = catalog.create_table(principal, _ORDERS, schema=_SCHEMA)
+    created_by_a_run(session, catalog, principal, _ORDERS, _SCHEMA)
 
-    assert loaded.text_language == "de"
+    assert session.scalars(select(Table.text_language)).one() == "de"
 
 
 def _events(session: Session, kind: AuditEventType) -> list[AuditEvent]:
@@ -1100,8 +1101,10 @@ def test_a_table_created_after_the_deploy_gets_its_effects_and_its_first_signals
             [pa.field("id", pa.int64(), nullable=False), pa.field("status", pa.string())]
         ),
     )
+    task = python_task_run(session, principal.id, asset="silver.orders", kind="sql")
+    run = dataclasses.replace(principal, run_context=RunContext(task_run_id=task.id, claim=1))
     catalog.write_batches(
-        principal, _ORDERS, mode=WriteMode.CREATE, schema=data.schema, batches=data.to_batches()
+        run, _ORDERS, mode=WriteMode.CREATE, schema=data.schema, batches=data.to_batches()
     )
     assert session.scalars(select(Table)).one().health_effects == {
         "null_rate": "off",

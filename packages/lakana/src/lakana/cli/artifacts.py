@@ -18,6 +18,7 @@ from lakana._models import (
 )
 from lakana.cli import _output
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
+from lakana.cli._paging import CURSOR, LIMIT, more_results
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 
 artifact_app = typer.Typer(
@@ -177,6 +178,10 @@ class _ArtifactRow:
         How many versions it has had.
     size
         The size of its live versions, for people.
+    keep
+        How many live versions the declaring project keeps; empty keeps all.
+    defined_in
+        ``repository/path`` of the declaring file; empty when no deployed project declares it.
     """
 
     name: str
@@ -184,6 +189,8 @@ class _ArtifactRow:
     current_version: int | None
     versions: int
     size: str
+    keep: str
+    defined_in: str
 
 
 @dataclass(frozen=True)
@@ -224,8 +231,15 @@ def list_artifacts(
         str | None, typer.Option("--namespace", help="Only this namespace, e.g. models.")
     ] = None,
     env: _ENV = None,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
 ) -> None:
-    """List the artifacts you may read, with their current version and size.
+    """List the artifacts you may read, one page at a time.
+
+    Shows the current version, the size, how many versions a deployed project keeps (`keep`;
+    empty means all) and the file that declares the artifact (`defined in`; empty for an
+    artifact no deployed project declares). The last line names the command for the next page
+    when there is one.
 
     Parameters
     ----------
@@ -235,21 +249,50 @@ def list_artifacts(
         Only this namespace.
     env
         The environment.
+    limit
+        `--limit`.
+    cursor
+        `--cursor`.
     """
     state = state_of(ctx)
-    artifacts = state.client().artifacts.list(resolve_environment(state, env), namespace)
+    page = state.client().artifacts.list_page(
+        resolve_environment(state, env), namespace, limit=limit, cursor=cursor
+    )
     if state.output == "json":
-        _output.emit(state, artifacts)
-        return
-    rows = [
-        _ArtifactRow(a.name, a.namespace, a.current_version, a.versions, human_size(a.size_bytes))
-        for a in artifacts
-    ]
-    _output.emit(
+        _output.emit(state, page.items)
+    else:
+        rows = [
+            _ArtifactRow(
+                a.name,
+                a.namespace,
+                a.current_version,
+                a.versions,
+                human_size(a.size_bytes),
+                "" if a.keep_versions is None else str(a.keep_versions),
+                "" if a.defined_by is None else f"{a.defined_by.repository}/{a.defined_by.path}",
+            )
+            for a in page.items
+        ]
+        _output.emit(
+            state,
+            rows,
+            columns=[
+                "name",
+                "namespace",
+                "current_version",
+                "versions",
+                "size",
+                "keep",
+                "defined in",
+            ],
+            derived={"defined in": lambda row: row.defined_in},
+            droppable=["defined in", "keep", "size", "versions"],
+        )
+    more_results(
         state,
-        rows,
-        columns=["name", "namespace", "current_version", "versions", "size"],
-        droppable=["size", "versions"],
+        ["lakana", "artifact", "list"],
+        {"--env": env, "--namespace": namespace, "--limit": limit},
+        page.next_cursor,
     )
 
 

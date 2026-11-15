@@ -149,6 +149,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "manifest_sha256",
         "mode",
         "name",
+        # a namespace's dotted path (`NAMESPACE_CREATED`, `NAMESPACE_DROPPED`)
+        "namespace",
         "operation",
         # a passkey's id (`lakana_core.identity.passkeys`), never its key or credential id
         "passkey_id",
@@ -188,6 +190,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "task_run_id",
         "test_id",
         "type",
+        # an artifact upload's id, withdrawn before its commit (`ARTIFACT_UPLOAD_ABORTED`)
+        "upload_id",
         "url",
         "use",
         "user_agent",
@@ -214,6 +218,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "protected",
         "purge",
         "reason",
+        # why a person rebuilt a table (`lakana_core.catalog.rebuild`), on its `TABLE_DROPPED`:
+        # one line written for the reviewer of the log, like a break-glass reason
+        "rebuild_reason",
         # the scopes an access apply stopped managing
         "released",
         "replaced",
@@ -277,6 +284,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "restored_policies",
         "retention",
         "retention_cleared",
+        "revoked_grants",
         "revoked_policies",
         "row_count",
         "rows",
@@ -305,6 +313,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "broken_policies",
         "changed",
         "filters",
+        # an external table's file format: parquet, csv or json
+        "format",
         "options_keys",
         "schema_after",
         "schema_before",
