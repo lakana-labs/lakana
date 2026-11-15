@@ -201,6 +201,25 @@ each side, 1 % of the learned span (for integers and other numbers, of the large
 magnitude) and at least one unit: 1 for integers, 1 day for dates, 1 hour for timestamps, none for
 other numbers. No signal but `schema` fires before the table has 8 snapshots.
 
+**The `volume` band follows the day of the week.** Many tables load fewer rows at weekends:
+orders, sales, visits. So a commit's rows are compared with the loads of the same weekday, once
+the last 8 weeks hold at least 4 of them: a Saturday with the Saturdays before it, a Monday with
+the Mondays. The band is built the same way from those loads (the median plus and minus 4 times
+their median absolute deviation, at least 10 rows and 10 %). Until there are 4 such loads (in the
+first weeks of a daily table, or on a table loaded on that weekday only now and then), the
+commit is compared with the band of the last 30 loads, whatever their weekday. Either way the
+table needs 8 loads in all before `volume` can fire. A table without a weekly rhythm is judged
+the same way; its weekdays simply look alike. `band.basis` says which band judged a commit:
+`weekday` (with `band.weekday`, such as `saturday`) or `all`, and the alert of a weekday band
+names the day, as in `usually 450–550 on Saturdays`. A band recorded by an earlier version has
+no `basis`: it was the band of all loads. There is no setting: it is always on.
+
+The weekday is taken in the time zone of the job that writes the table, the `timezone:` of its
+schedule (see [lakana.yaml](lakana-yaml.md)), so a job that runs at 01:00 in Berlin loads
+"Monday" all year, whatever the date in UTC. A table that no deployed job builds, or whose
+building jobs have different zones, takes the weekday in UTC; a building job without a schedule
+counts as UTC. A load counts by the time Lakana recorded its commit.
+
 **States.** `ok`: inside the band. `fired`: outside it (`alert` says how). `no_history`: fewer than
 8 snapshots, so there is no band yet. `no_metrics`: nothing can be said, and the observation never
 guesses; `observed.reason` tells why (`not_recorded`: Iceberg did not record the column's metrics,
@@ -223,7 +242,7 @@ entry adds no row of its own. `volume` and `schema` are judged as before.
 
 | Signal | `observed` | `band` |
 |---|---|---|
-| `volume` | `added`, `total`, and `loaded` `false` for a delete-only commit | `low`, `high`, `median` |
+| `volume` | `added`, `total`, and `loaded` `false` for a delete-only commit | `low`, `high`, `median`, `basis` (`weekday` or `all`), and `weekday` (`monday` to `sunday`) when `basis` is `weekday` |
 | `null_rate` | `nulls`, `values`, `rate` | `low`, `high`, `median` |
 | `range` | `lower`, `upper`, `kind` | `min`, `max` (learned), `low`, `high` (the limits) |
 | `schema` | `columns`, `added`, `dropped`, `retyped` | none |
@@ -359,8 +378,9 @@ are not counted as unjudged. It still counts as a write for freshness. Lakana ta
 delete-only when it read the commit's added files and none was a data file, or when the snapshot
 says `added-data-files` is 0, whatever `added-records` says (a writer that records explicit zeros
 is treated the same); a summary without any counts is `not_recorded`. The band is learnt from the
-newest 30 loads among the table's last 60 commits: a delete-only commit counts toward those 60 but
-does not teach the band, so a table whose recent commits are mostly deletes can stay `no_history` (fewer than 8
+loads among the table's last 60 commits (the newest 30 of them, or those of the commit's weekday
+in the last 8 weeks, see "The `volume` band follows the day of the week"): a delete-only commit
+counts toward those 60 but does not teach the band, so a table whose recent commits are mostly deletes can stay `no_history` (fewer than 8
 loads in the window) until more loads arrive. A column
 that never records a value can never be judged: `range` of a column without a range (text,
 boolean, a nested type) and any column past the 200th. A deploy that knows the columns refuses

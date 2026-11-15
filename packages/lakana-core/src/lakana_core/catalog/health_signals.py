@@ -3,7 +3,8 @@
 Pure: nothing here reads storage or the database. `health_record` gathers the inputs when a
 snapshot is committed, `health_sweep` for freshness, and both store what these functions return
 in `table_health_signals`. A band is learned from the last `HISTORY` observations of the same
-signal and column; no signal but `schema` fires with fewer than `MIN_HISTORY`.
+signal and column (volume's, once there are enough, from the loads on the commit's weekday, #565);
+no signal but `schema` fires with fewer than `MIN_HISTORY`.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import statistics
 import struct
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import Any
 
@@ -52,6 +53,12 @@ MIN_HISTORY = 8
 MAD_FACTOR = 4.0
 VOLUME_FLOOR_ROWS = 10.0
 VOLUME_FLOOR_SHARE = 0.10
+WEEKDAY_MIN_LOADS = 4
+"""The fewest past loads on a commit's weekday that give the volume band of that weekday (#565)."""
+WEEKDAY_WEEKS = 8
+"""How many weeks back the loads of a commit's weekday are looked for."""
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+"""The names of the weekdays as a volume band stores them, Monday first."""
 NULL_RATE_FLOOR = 0.02
 RANGE_FLOOR_SHARE = 0.01
 MAX_HEALTH_COLUMNS = 200
@@ -164,7 +171,9 @@ def _not_finite(signal: str, column: str | None) -> Observation:
     return Observation(signal, column, "no_metrics", {"reason": "not_finite"}, None)
 
 
-def learn_band(history: Sequence[float], *, floor: float, share: float) -> Band | None:
+def learn_band(
+    history: Sequence[float], *, floor: float, share: float, least: int = MIN_HISTORY
+) -> Band | None:
     """Learn the band of a history.
 
     Parameters
@@ -175,15 +184,17 @@ def learn_band(history: Sequence[float], *, floor: float, share: float) -> Band 
         The least half-width.
     share
         The least half-width as a share of the median's size.
+    least
+        The fewest values that give a band.
 
     Returns
     -------
     Band or None
-        `None` with fewer than `MIN_HISTORY` values. Its values may be infinite when the
-        history is extreme; the signals check them (`_finite`).
+        `None` with fewer than `least` values. Its values may be infinite when the history is
+        extreme; the signals check them (`_finite`).
     """
     values = list(history)[:HISTORY]
-    if len(values) < MIN_HISTORY:
+    if len(values) < least:
         return None
     middle = statistics.median(values)
     spread = statistics.median(abs(value - middle) for value in values)
@@ -318,13 +329,110 @@ def _mad(values: Sequence[float]) -> float:
     return statistics.median(abs(value - middle) for value in values)
 
 
+def _utc(value: object) -> datetime | None:
+    """Read a history item's commit time.
+
+    Parameters
+    ----------
+    value
+        What the item holds under ``observed_at``.
+
+    Returns
+    -------
+    datetime or None
+        The time, a time without a zone read as UTC (SQLite stores them so); `None` for
+        anything that is not a time.
+    """
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _weekday_loads(
+    loads: Sequence[Mapping[str, Any]], at: datetime, zone: tzinfo
+) -> list[float | int]:
+    """Collect the rows of the past loads on the weekday of a commit.
+
+    Parameters
+    ----------
+    loads
+        Past loads, newest first.
+    at
+        The commit's time.
+    zone
+        The zone its weekday is taken in.
+
+    Returns
+    -------
+    list
+        The rows of each load whose commit time, in `zone`, falls on the same weekday as `at`
+        within the last `WEEKDAY_WEEKS` weeks, newest first. A load without a commit time does
+        not count.
+    """
+    today = at.astimezone(zone).date()
+    since = today - timedelta(weeks=WEEKDAY_WEEKS)
+    found: list[float | int] = []
+    for item in loads:
+        when = _utc(item.get("observed_at"))
+        rows = _number(item.get("added"))
+        if when is None or rows is None:
+            continue
+        day = when.astimezone(zone).date()
+        if since <= day < today and day.weekday() == today.weekday():
+            found.append(rows)
+    return found
+
+
+def _volume_band(
+    loads: Sequence[Mapping[str, Any]], at: datetime | None, zone: tzinfo
+) -> dict[str, Any] | None:
+    """Learn the volume band of a commit: of its weekday when the history allows, else of all.
+
+    Parameters
+    ----------
+    loads
+        Past loads, newest first.
+    at
+        The commit's time; `None` judges against all loads.
+    zone
+        The zone the weekday is taken in.
+
+    Returns
+    -------
+    dict or None
+        The band as stored, with ``basis`` ``weekday`` (and ``weekday``, its name) or ``all``;
+        `None` with fewer than `MIN_HISTORY` loads. Its values may be infinite.
+    """
+    band = learn_band(_numbers(loads, "added"), floor=VOLUME_FLOOR_ROWS, share=VOLUME_FLOOR_SHARE)
+    if band is None:
+        return None
+    if at is not None:
+        weekday = learn_band(
+            _weekday_loads(loads, at, zone),
+            floor=VOLUME_FLOOR_ROWS,
+            share=VOLUME_FLOOR_SHARE,
+            least=WEEKDAY_MIN_LOADS,
+        )
+        if weekday is not None:
+            name = WEEKDAYS[at.astimezone(zone).weekday()]
+            return {**weekday.to_json(), "basis": "weekday", "weekday": name}
+    return {**band.to_json(), "basis": "all"}
+
+
 def volume_signal(
     summary: Mapping[str, Any] | None,
     history: Sequence[Mapping[str, Any]],
     *,
     no_data_files: bool = False,
+    at: datetime | None = None,
+    zone: tzinfo = UTC,
 ) -> Observation:
     """Compare the rows a snapshot added with the usual.
+
+    The usual is the band of the past loads on the commit's weekday, in `zone`, within the last
+    `WEEKDAY_WEEKS` weeks once there are `WEEKDAY_MIN_LOADS` of them, so a weekly rhythm (fewer
+    rows at weekends) is not taken for a drop (#565); before that, the band of the newest
+    `HISTORY` loads. Either needs `MIN_HISTORY` loads in all.
 
     A commit that added no data file (a delete of whole files, a merge-on-read commit that adds
     only delete files) is not a load: it records ``ok`` with observed ``{"added": 0, "loaded":
@@ -340,9 +448,14 @@ def volume_signal(
         The snapshot's summary.
     history
         Past observed values of this signal, newest first; a commit that loaded nothing does not
-        count.
+        count. An item's ``observed_at`` (its commit time) lets it count for its weekday; one
+        without counts only for the band of all loads.
     no_data_files
         Whether the commit's added files were read and none was a data file.
+    at
+        The commit's time; `None` judges against the band of all loads.
+    zone
+        The zone a commit's weekday is taken in: that of the job that writes the table.
 
     Returns
     -------
@@ -362,12 +475,14 @@ def volume_signal(
     if added is None:
         return Observation("volume", None, "no_metrics", {"reason": "not_recorded"}, None)
     loads = [h for h in history if h.get("loaded") is not False]
-    band = learn_band(_numbers(loads, "added"), floor=VOLUME_FLOOR_ROWS, share=VOLUME_FLOOR_SHARE)
-    if band is not None and not _finite(band.low, band.high, band.median):
+    band = _volume_band(loads, at, zone)
+    if band is not None and not _finite(band["low"], band["high"], band["median"]):
         return _not_finite("volume", None)
-    state = "no_history" if band is None else "ok" if band.holds(added) else "fired"
+    state = (
+        "no_history" if band is None else "ok" if band["low"] <= added <= band["high"] else "fired"
+    )
     observed = {"added": added, "total": total}
-    return Observation("volume", None, state, observed, band.to_json() if band else None)
+    return Observation("volume", None, state, observed, band)
 
 
 def _kind(field_type: object) -> str | None:
@@ -1122,9 +1237,11 @@ def alert_text(
     at = f"snapshot {snapshot_id}, {observed_at.astimezone(UTC):%d %b %H:%M} UTC"
     if signal == "volume":
         direction = "less" if observed["added"] < usual["low"] else "more"
+        weekday = usual.get("weekday") if usual.get("basis") == "weekday" else None
+        on = f" on {weekday.capitalize()}s" if weekday in WEEKDAYS else ""
         return (
             f"{name}: volume {_count(observed['added'])} rows, usually "
-            f"{_count(usual['low'])}{_DASH}{_count(usual['high'])} ({at}); "
+            f"{_count(usual['low'])}{_DASH}{_count(usual['high'])}{on} ({at}); "
             f"check the source extract, "
             f"or set health: {{volume: off}} if this table now loads {direction}"
         )
