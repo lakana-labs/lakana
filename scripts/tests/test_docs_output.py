@@ -469,12 +469,11 @@ def test_a_changed_header_in_a_table_still_fails(tmp_path: Path) -> None:
     assert problems
 
 
-def test_fix_writes_the_real_table_not_the_collapsed_one(tmp_path: Path) -> None:
-    """A changed table is written with its padding; an equal one keeps the page's text."""
+def test_fix_takes_the_whole_changed_table_from_the_run(tmp_path: Path) -> None:
+    """A changed header brings the run's borders and rows too, so the widths stay equal."""
     shown = _table(LONG_ID)
-    printed = _table(SHORT_ID, 16).replace("┃ id ", "┃ ref")
+    printed = _table(SHORT_ID, 18).replace("┃ id ", "┃ ref")
     root, captures = _tree(tmp_path, BLOCK, shown, printed)
-    fix(root, root / "docs/site", None, captures)
+    assert fix(root, root / "docs/site", None, captures) == [root / "docs/site/p.md"]
     text = (root / "docs/site/p.md").read_text(encoding="utf-8")
-    assert "┃ ref" in text
-    assert "─" * 18 in text
+    assert "```text\n" + printed + "```" in text

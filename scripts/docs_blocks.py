@@ -809,7 +809,9 @@ def _merge(shown: str, printed: str) -> str:
     """Bring a block up to date with a run, keeping the page's own values.
 
     A line that equals the printed one after masking stays as the page has it, so a fixed
-    block keeps the identifiers a page chose to show; every other line comes from the run.
+    block keeps the identifiers a page chose to show; every other line comes from the run. When
+    any line of a box-drawn table changes, the whole table (every contiguous line with a
+    box-drawing character) comes from the run, so the widths stay consistent.
 
     Parameters
     ----------
@@ -831,9 +833,25 @@ def _merge(shown: str, printed: str) -> str:
         [comparable(mask(x)) for x in page_rest],
         [comparable(mask(x)) for x in run_rest],
     )
-    out: list[str] = []
+    entries: list[tuple[str, int, bool]] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        out += page_rest[i1:i2] if tag == "equal" else run_rest[j1:j2]
+        if tag == "equal":
+            entries += [(page_rest[i1 + k], j1 + k, False) for k in range(i2 - i1)]
+        else:
+            entries += [(run_rest[j], j, True) for j in range(j1, j2)]
+    changed_table: set[int] = set()
+    start = 0
+    while start < len(run_rest):
+        if not _TABLE_LINE.search(run_rest[start]):
+            start += 1
+            continue
+        end = start
+        while end < len(run_rest) and _TABLE_LINE.search(run_rest[end]):
+            end += 1
+        if any(c for _, j, c in entries if start <= j < end):
+            changed_table.update(range(start, end))
+        start = end
+    out = [run_rest[j] if j in changed_table else text for text, j, _ in entries]
     source = page if any(is_progress(x) for x in page) else run
     merged: list[str] = []
     taken = 0
