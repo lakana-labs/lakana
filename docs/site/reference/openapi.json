@@ -471,7 +471,7 @@
           "environments"
         ],
         "summary": "Delete an environment",
-        "description": "Deletes the environment. Its tables can be restored until the `purge_after` time in the answer. Needs `MANAGE_ENVIRONMENT`. Answers 404 when there is no such environment (or it is already deleted and `purge` is not set), 409 while a repository is still deployed in it and 422 when it is protected.",
+        "description": "Deletes the environment. Its tables can be restored until the `purge_after` time in the answer. Needs `MANAGE_ENVIRONMENT`. Answers 404 when there is no such environment (or it is already deleted and `purge` is not set), 409 while a repository is still deployed in it and 422 when it is protected. With `purge`, a signed-in browser needs a passkey touch within the last 15 minutes (403 `StepUpRequired`, nothing deleted); a token is never asked.",
         "operationId": "delete_environment_api_v1_environments__name__delete",
         "parameters": [
           {
@@ -18749,7 +18749,7 @@
           "audit"
         ],
         "summary": "List audit events",
-        "description": "Lists one page of audit events, newest first, with optional filters. The cursor of the next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than `connection`, or an `event_type` that is not of `kind`, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then.",
+        "description": "Lists one page of audit events, newest first, with optional filters. The cursor of the next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.",
         "operationId": "list_audit_events_api_v1_audit_events_get",
         "parameters": [
           {
@@ -18759,7 +18759,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/AuditEventType"
+                  "$ref": "#/components/schemas/AuditEventFilter"
                 },
                 {
                   "type": "null"
@@ -18767,7 +18767,7 @@
               ],
               "title": "Event Type"
             },
-            "description": "Only return events of this type, if given."
+            "description": "Only return events of this type, if given: any known type, never `UNKNOWN`."
           },
           {
             "name": "kind",
@@ -24837,6 +24837,126 @@
         "title": "AttentionOut",
         "description": "Needs your attention on Home.\n\nParameters\n----------\nitems\n    At most 50 rows, newest first; empty when nothing needs you.\ntruncated\n    Whether more rows were left out."
       },
+      "AuditEventFilter": {
+        "type": "string",
+        "enum": [
+          "AUTHENTICATION_SUCCEEDED",
+          "AUTHENTICATION_FAILED",
+          "AUTHORIZATION_DENIED",
+          "GRANT_CREATED",
+          "GRANT_REVOKED",
+          "SECRET_CREATED",
+          "SECRET_ROTATED",
+          "SECRET_REVOKED",
+          "SECRET_BOUND",
+          "CONNECTION_CREATED",
+          "CONNECTION_UPDATED",
+          "CONNECTION_DELETED",
+          "CONNECTION_TESTED",
+          "CONNECTION_CREDENTIAL_FETCHED",
+          "CONNECTION_CREDENTIAL_REFUSED",
+          "QUERY_COMPLETED",
+          "QUERY_CANCELLED",
+          "ROW_FILTER_CREATED",
+          "ROW_FILTER_REVOKED",
+          "COLUMN_MASK_CREATED",
+          "COLUMN_MASK_REVOKED",
+          "GROUP_CREATED",
+          "GROUP_DELETED",
+          "GROUP_MEMBER_ADDED",
+          "GROUP_MEMBER_REMOVED",
+          "PAT_ISSUED",
+          "PAT_REVOKED",
+          "TASK_TOKEN_MINTED",
+          "TASK_TOKEN_REVOKED",
+          "PRINCIPAL_CREATED",
+          "PRINCIPAL_DEACTIVATED",
+          "ENVIRONMENT_CREATED",
+          "ENVIRONMENT_DELETED",
+          "ENVIRONMENT_STORAGE_UPDATED",
+          "ENVIRONMENT_PROTECTION_CHANGED",
+          "BOOTSTRAP_ADMIN_RESTORED",
+          "TABLE_APPENDED",
+          "TABLE_WRITE",
+          "TABLE_SCHEMA_CHANGED",
+          "TABLE_MAINTAINED",
+          "REPOSITORY_CREATED",
+          "REPOSITORY_UPDATED",
+          "REPOSITORY_DELETED",
+          "PACKAGE_INDEX_CREATED",
+          "PACKAGE_INDEX_UPDATED",
+          "PACKAGE_INDEX_DELETED",
+          "DEPLOYED",
+          "DEPLOY_DRY_RUN",
+          "ROLLED_BACK",
+          "RUN_STARTED",
+          "RUN_FINISHED",
+          "RUN_CANCEL_REQUESTED",
+          "CODE_INTEGRITY_FAILED",
+          "PROTECTED_WRITE_DENIED",
+          "BREAK_GLASS_WRITE",
+          "RUN_AS_BOUND",
+          "RUN_AS_CLEARED",
+          "UNDEPLOYED",
+          "ARTIFACT_CREATED",
+          "ARTIFACT_VERSION_ADDED",
+          "ARTIFACT_DOWNLOADED",
+          "ARTIFACT_VERSION_DELETED",
+          "ARTIFACT_DROPPED",
+          "ARTIFACT_UPLOAD_ABORTED",
+          "CHECK_FAILED",
+          "TABLE_ROLLED_BACK",
+          "TABLE_KEPT",
+          "TABLE_KEPT_CLEARED",
+          "JOB_PAUSED",
+          "JOB_RESUMED",
+          "JOB_START_WAITING",
+          "JOB_START_DROPPED",
+          "NOTIFICATION_FAILED",
+          "NOTIFICATION_TESTED",
+          "TABLE_DESCRIBED",
+          "COLUMN_DESCRIBED",
+          "TABLE_LOCATION_ABANDONED",
+          "TABLE_PURGED",
+          "TABLE_DROPPED",
+          "TABLE_UNDROPPED",
+          "TABLE_CREATED",
+          "TABLE_REBUILT",
+          "NAMESPACE_CREATED",
+          "NAMESPACE_DROPPED",
+          "TABLE_RETENTION_SET",
+          "TABLE_RETENTION_CLEARED",
+          "ENVIRONMENT_RETENTION_SET",
+          "ENVIRONMENT_RESTORED",
+          "ENVIRONMENT_PURGED",
+          "ORPHANED_LOCATIONS_DELETED",
+          "ACTIVITY_VIEWED",
+          "SOURCE_VIEWED",
+          "CI_TRUST_RULE_CREATED",
+          "CI_TRUST_RULE_UPDATED",
+          "CI_TRUST_RULE_DELETED",
+          "CI_TRUST_RULE_ENABLED",
+          "CI_TRUST_RULE_DISABLED",
+          "OIDC_TOKEN_EXCHANGED",
+          "OIDC_EXCHANGE_REFUSED",
+          "ACCESS_APPLIED",
+          "MANAGED_SCOPE_OVERRIDDEN",
+          "SESSION_STARTED",
+          "SESSION_ENDED",
+          "SIGN_IN_SETTINGS_CHANGED",
+          "SIGN_IN_LINK_ISSUED",
+          "SIGN_IN_LINK_WITHDRAWN",
+          "SIGN_IN_LINK_USED",
+          "PASSKEY_ADDED",
+          "PASSKEY_REMOVED",
+          "PASSKEY_DISABLED",
+          "PROFILE_PICTURE_SET",
+          "PROFILE_PICTURE_REMOVED",
+          "REPOSITORY_PROBE_REQUESTED",
+          "DEPLOY_KEY_GENERATED"
+        ],
+        "title": "AuditEventFilter"
+      },
       "AuditEventOut": {
         "properties": {
           "id": {
@@ -24863,6 +24983,10 @@
           },
           "event_type": {
             "$ref": "#/components/schemas/AuditEventType"
+          },
+          "event_type_raw": {
+            "type": "string",
+            "title": "Event Type Raw"
           },
           "securable_kind": {
             "anyOf": [
@@ -24919,6 +25043,7 @@
           "occurred_at",
           "principal_id",
           "event_type",
+          "event_type_raw",
           "securable_kind",
           "securable_environment",
           "securable_namespace",
@@ -24926,7 +25051,7 @@
           "detail"
         ],
         "title": "AuditEventOut",
-        "description": "Response body for one audit event.\n\nParameters\n----------\nid\n    The event's id.\noccurred_at\n    When the event occurred.\nprincipal_id\n    The principal attributed to this event, or `None` for a failed\n    authentication.\nevent_type\n    The kind of event.\nsecurable_kind\n    Which tier of the securable hierarchy this event's target belongs\n    to, if any.\nsecurable_environment\n    The environment this event's target belongs to, if any.\nsecurable_namespace\n    The dot-joined namespace path this event's target belongs to, if\n    any.\nsecurable_table\n    The table this event's target refers to, if any.\ndetail\n    Event-specific facts not already captured by the fields above."
+        "description": "Response body for one audit event.\n\nParameters\n----------\nid\n    The event's id.\noccurred_at\n    When the event occurred.\nprincipal_id\n    The principal attributed to this event, or `None` for a failed\n    authentication.\nevent_type\n    The kind of event; `UNKNOWN` for a type this release does not know, which a newer\n    release wrote before a downgrade.\nevent_type_raw\n    The type as stored: the same as `event_type`, except for `UNKNOWN`, where it is the\n    text the newer release wrote.\nsecurable_kind\n    Which tier of the securable hierarchy this event's target belongs\n    to, if any.\nsecurable_environment\n    The environment this event's target belongs to, if any.\nsecurable_namespace\n    The dot-joined namespace path this event's target belongs to, if\n    any.\nsecurable_table\n    The table this event's target refers to, if any.\ndetail\n    Event-specific facts not already captured by the fields above."
       },
       "AuditEventPage": {
         "properties": {
@@ -25073,7 +25198,8 @@
           "PROFILE_PICTURE_SET",
           "PROFILE_PICTURE_REMOVED",
           "REPOSITORY_PROBE_REQUESTED",
-          "DEPLOY_KEY_GENERATED"
+          "DEPLOY_KEY_GENERATED",
+          "UNKNOWN"
         ],
         "title": "AuditEventType",
         "description": "The kind of event one `AuditEvent` row records."

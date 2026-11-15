@@ -105,6 +105,10 @@ loses everything changed since. For the release with artifacts, a manual downgra
 migration also exists, and its page says what it loses: see
 [Going back](../how-to/upgrade-to-artifacts.md#going-back).
 
+After going back to an older release, the audit log can hold events of a type that only the newer
+release knows. The older release still lists them: `event_type` is `UNKNOWN` and `event_type_raw`
+holds the newer release's name for the type (from the release that added `event_type_raw` on).
+
 ## What v1.0.0 changes
 
 v1.0.0 is the API freeze, planned for the hardening milestone of the
@@ -187,8 +191,9 @@ restore a table](../how-to/drop-and-restore-a-table.md).
 ### A browser asks for a passkey touch before a drop
 
 A signed-in browser now asks for a passkey touch before it drops a table, drops an artifact, deletes
-an artifact version, deletes a namespace, or rebuilds a table. A token, the CLI and the SDK are not
-asked, so no script changes.
+an artifact version, deletes a namespace, rebuilds a table, or deletes an environment with purge
+(`DELETE /api/v1/environments/{name}?purge=true`). Deleting an environment without purge still asks
+for no touch: restore undoes it. A token, the CLI and the SDK are not asked, so no script changes.
 
 ### Expiring tables, namespaces, artifacts and orphans come in pages (breaking)
 
@@ -209,6 +214,15 @@ your rights allow; the server still decides each request).
 
 The orphans list now includes dropped tables that can still be restored, with `exists: false`. Its
 hidden count includes dropped tables you may not read.
+
+### An audit event shows its stored type
+
+Each audit event has a new field, `event_type_raw`: the type as stored, the same as `event_type`.
+An event whose type the running release does not know, which a newer release wrote before you
+went back, is listed with `event_type` `UNKNOWN` and that release's name in `event_type_raw`,
+where older releases failed the whole list with a 500 ([Going back](#going-back)). The
+`event_type` filter refuses `UNKNOWN` with a 422. A consumer that handles every event type must
+accept `UNKNOWN`.
 
 ### New audit events
 

@@ -130,7 +130,7 @@ from lakana_core.catalog.git_owned import (
     refuse_owned_replace,
     undrop_refusal,
 )
-from lakana_core.catalog.glossary_read import TableTerms, TermRef, table_terms
+from lakana_core.catalog.glossary_read import TableTerms, TermRef, tables_terms
 from lakana_core.catalog.health import (
     TableHealth,
     last_maintenance,
@@ -228,9 +228,11 @@ from lakana_core.catalog.metadata import (
     write_metadata,
 )
 from lakana_core.catalog.model_metadata import (
+    TableModel,
     TableModelView,
     TableReferences,
-    model_view,
+    model_view_of,
+    read_table_models,
     references_view,
 )
 from lakana_core.catalog.orphaned_locations import (
@@ -263,8 +265,13 @@ from lakana_core.catalog.row_actions import (
 )
 from lakana_core.catalog.schema_compat import SchemaDiff, arrow_to_iceberg_schema, plan_schema
 from lakana_core.catalog.schema_inference import infer_schema
-from lakana_core.catalog.table_listing import TableOwner, table_facts
-from lakana_core.catalog.texts import LanguageCoverage, TextChooser, column_texts
+from lakana_core.catalog.table_listing import TableFacts, TableOwner, table_facts
+from lakana_core.catalog.texts import (
+    LanguageCoverage,
+    TextChooser,
+    column_texts,
+    stored_column_texts,
+)
 from lakana_core.catalog.tombstones import (
     DEFAULT_UNDO_DAYS,
     FILES_GONE_MESSAGE,
@@ -284,7 +291,11 @@ from lakana_core.catalog.tombstones import (
     restore_table,
     revive,
 )
-from lakana_core.catalog.translations import edit_translation, lock_table, translation_rows
+from lakana_core.catalog.translations import (
+    edit_translation,
+    lock_table,
+    translations_of,
+)
 from lakana_core.catalog.usage import EnvironmentUsage, environment_usage
 from lakana_core.catalog.watermark import Watermark, check_incremental_key, compute_watermark
 from lakana_core.catalog.writes import (
@@ -345,6 +356,7 @@ from lakana_core.models import (
     AuditEventType,
     CheckOutcome,
     CheckResult,
+    ColumnDescription,
     ColumnMask,
     Environment,
     EnvironmentDeployment,
@@ -1786,6 +1798,11 @@ class CatalogService:
 
         A protected environment (`Environment.is_protected`) refuses deletion outright.
 
+        With `purge`, a browser session needs a fresh passkey touch (`require_step_up`), checked
+        right after the authorization and before the row is locked or read, so a stale session
+        changes and learns nothing; the purge cannot be undone. A token is never asked, and a
+        deletion without `purge` is undone with `restore_environment`, so it asks no session.
+
         An environment that still has a deployed repository refuses deletion: a run start locks
         the deployment pointer and then the environment row, and a deletion locks the row
         first, so the two could deadlock. The environment row is locked first (and re-read, so
@@ -1819,8 +1836,12 @@ class CatalogService:
             If a repository is still deployed to the environment; the message names them.
         PermissionDenied
             If the principal may not manage environments.
+        StepUpRequired
+            If `purge` is set and a browser session's last passkey touch is not fresh.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.environment_scope(name))
+        if purge:
+            require_step_up(p)
         env = self._lock_environment_row(name)
         if env is None:
             self._session.rollback()
@@ -3642,6 +3663,27 @@ class CatalogService:
         NotFoundError
             If the environment, namespace or table does not exist.
         """
+        _, ns, row = self._find_table_in(ref)
+        return ns, row
+
+    def _find_table_in(self, ref: TableRef) -> tuple[Environment, Namespace, Table]:
+        """Resolve a table row and its environment from a reference, without authorizing.
+
+        Parameters
+        ----------
+        ref
+            The table reference.
+
+        Returns
+        -------
+        tuple of (Environment, Namespace, Table)
+            The environment, the owning namespace and the table row.
+
+        Raises
+        ------
+        NotFoundError
+            If the environment, namespace or table does not exist.
+        """
         env = self._find_environment(ref.environment)
         ns = self._find_namespace(env, ref.namespace)
         row = self._lookup_table(ns, ref.name)
@@ -3649,7 +3691,56 @@ class CatalogService:
             raise NotFoundError(
                 f"Table '{shown(ref.name)}' not found in {shown(str(ref.namespace))}."
             )
-        return ns, row
+        return env, ns, row
+
+    def _find_tables(
+        self, refs: Sequence[TableRef]
+    ) -> list[tuple[TableRef, Environment, Namespace, Table]]:
+        """Resolve many table rows: one lookup per environment and namespace, one per namespace.
+
+        Parameters
+        ----------
+        refs
+            The table references.
+
+        Returns
+        -------
+        list of tuple
+            ``(ref, environment, namespace, row)`` per reference that names a table, in order;
+            a name that holds no table (dropped since it was listed) is left out.
+
+        Raises
+        ------
+        NotFoundError
+            If an environment or a namespace does not exist.
+        """
+        environments: dict[str, Environment] = {}
+        namespaces: dict[tuple[str, NamespacePath], Namespace] = {}
+        for ref in refs:
+            if ref.environment not in environments:
+                environments[ref.environment] = self._find_environment(ref.environment)
+            key = (ref.environment, ref.namespace)
+            if key not in namespaces:
+                namespaces[key] = self._find_namespace(environments[ref.environment], ref.namespace)
+        rows: dict[tuple[str, NamespacePath, str], Table] = {}
+        for (environment, path), ns in namespaces.items():
+            names = [
+                ref.name for ref in refs if (ref.environment, ref.namespace) == (environment, path)
+            ]
+            for row in self._session.scalars(
+                select(Table).where(Table.namespace_id == ns.id, Table.name.in_(names))
+            ):
+                rows[environment, path, row.name] = row
+        return [
+            (
+                ref,
+                environments[ref.environment],
+                namespaces[ref.environment, ref.namespace],
+                rows[ref.environment, ref.namespace, ref.name],
+            )
+            for ref in refs
+            if (ref.environment, ref.namespace, ref.name) in rows
+        ]
 
     def load_table(self, p: PrincipalRef, ref: TableRef) -> LoadedTable:
         """Load a table and its current Iceberg metadata.
@@ -4030,26 +4121,280 @@ class CatalogService:
         self._authz.authorize(
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
-        namespace, row = self._find_table(ref)
-        described = self._gate_view_sql(
-            p, ref, row, self._describe_row(p, ref, row), view_sql_window_minutes
+        env, namespace, row = self._find_table_in(ref)
+        (described,) = self._describe_found(
+            p,
+            [(ref, env, namespace, row)],
+            languages=languages,
+            view_sql_window_minutes=view_sql_window_minutes,
         )
-        chooser = TextChooser(
-            row.text_language or self._main_language,
-            languages,
-            translation_rows(self._session, row),
+        if not with_actions:
+            return described
+        ((defined_by, actions),) = self._row_actions(
+            p, [(ref, described.kind, row.owner_id, namespace.environment_id)]
         )
+        return replace(described, defined_by=defined_by, actions=actions)
+
+    def describe_tables(
+        self,
+        p: PrincipalRef,
+        refs: Sequence[TableRef],
+        *,
+        languages: Sequence[str] = (),
+        view_sql_window_minutes: int | None = None,
+    ) -> list[TableDescription]:
+        """Describe the rows of a list at once: what `describe_table` gives each, in a batch.
+
+        The rights (`READ_TABLE` per row, `READ_ENVIRONMENT` per environment) are asked in one
+        `permits_each` batch each, without an audit event, and a row `p` may not read is left
+        out, as if it did not exist. The rows, their texts, translations, models, glossary terms,
+        facts, retentions (one read of the deployed manifests per environment) and actions (one
+        read of the definitions and one rights batch) are read once per request, so the
+        statements of a list of plain tables do not grow with its rows (#622). What still costs
+        per row: a view's references and its content gate, the message of a table that is not
+        published or kept, and the read rights and newest checks of a table that declares a
+        model.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        refs
+            The rows, as the list names them.
+        languages
+            The reader's languages, most wanted first; empty: the main language.
+        view_sql_window_minutes
+            As for `describe_table`.
+
+        Returns
+        -------
+        list of TableDescription
+            One per row `p` may read that still exists, in order, with `defined_by` and
+            `actions`; equal to what `describe_table` gives each.
+
+        Raises
+        ------
+        NotFoundError
+            If an environment or a namespace of `refs` does not exist.
+        AuditUnavailableError
+            If a view's SQL passed the content gate but its `SOURCE_VIEWED` row could not be
+            written; nothing is returned.
+        """
+        if not refs:
+            return []
+        readable = permits_each(
+            self._authz,
+            p,
+            [
+                (Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name))
+                for ref in refs
+            ],
+        )
+        found = self._find_tables([ref for ref, ok in zip(refs, readable, strict=True) if ok])
+        described = self._describe_found(
+            p, found, languages=languages, view_sql_window_minutes=view_sql_window_minutes
+        )
+        filled = self._row_actions(
+            p,
+            [
+                (d.ref, d.kind, row.owner_id, ns.environment_id)
+                for d, (_, _, ns, row) in zip(described, found, strict=True)
+            ],
+        )
+        return [
+            replace(d, defined_by=defined_by, actions=actions)
+            for d, (defined_by, actions) in zip(described, filled, strict=True)
+        ]
+
+    def _describe_found(
+        self,
+        p: PrincipalRef,
+        found: Sequence[tuple[TableRef, Environment, Namespace, Table]],
+        *,
+        languages: Sequence[str],
+        view_sql_window_minutes: int | None,
+    ) -> list[TableDescription]:
+        """Describe rows `p` may read, without their actions, reading what they share once.
+
+        Parameters
+        ----------
+        p
+            The reader, who may read every row.
+        found
+            ``(ref, environment, namespace, row)`` per row.
+        languages
+            The reader's languages, most wanted first.
+        view_sql_window_minutes
+            As for `describe_table`.
+
+        Returns
+        -------
+        list of TableDescription
+            In order, with `defined_by` and `actions` empty.
+        """
+        if not found:
+            return []
+        session = self._session
+        now = db_now(session)
+        environments = {env.name: env for _, env, _, _ in found}
+        storages: dict[str, ResolvedStorage] = {}
+        hiders = {name: result_hider(session, self._authz, p, name) for name in environments}
+        withheld = {
+            name: ReferenceCheckFilter(session, self._authz, p, name) for name in environments
+        }
+        sees_terms = dict(
+            zip(
+                environments,
+                permits_each(
+                    self._authz,
+                    p,
+                    [
+                        (Action.READ_ENVIRONMENT, Securable.environment_scope(name))
+                        for name in environments
+                    ],
+                ),
+                strict=True,
+            )
+        )
+        rows = [row for *_, row in found]
+        translations = translations_of(session, rows)
+        stored_columns = stored_column_texts(session, [row.id for row in rows])
+        models = read_table_models(session, rows)
+        expiries: dict[uuid.UUID, datetime | None] = {}
+        terms: dict[tuple[str, str], TableTerms] = {}
+        for name, env in environments.items():
+            managed = [
+                (row, ref)
+                for ref, _, _, row in found
+                if ref.environment == name and row.table_type is TableType.ICEBERG
+            ]
+            if managed:
+                for (row, _), retention in zip(
+                    managed, describe_retentions(session, env, managed), strict=True
+                ):
+                    expiries[row.id] = retention.expires_at
+            if sees_terms[name]:
+                dotted = [
+                    ".".join((*ref.namespace.parts, ref.name))
+                    for ref, *_ in found
+                    if ref.environment == name
+                ]
+                for key, value in tables_terms(
+                    session, env.id, dotted, languages, self._main_language
+                ).items():
+                    terms[name, key] = value
+        facts = table_facts(
+            session, self._authz, p, [(ref.environment, row) for ref, _, _, row in found], now=now
+        )
+        warning = now + timedelta(days=self._expiry_warning_days)
+        described_rows: list[TableDescription] = []
+        for ref, _, _, row in found:
+            if row.table_type is TableType.ICEBERG and ref.environment not in storages:
+                storages[ref.environment] = self._storage.for_environment(ref.environment)
+            described = self._gate_view_sql(
+                p,
+                ref,
+                row,
+                self._describe_row(
+                    p,
+                    ref,
+                    row,
+                    resolved=storages.get(ref.environment),
+                    hides=hiders[ref.environment],
+                ),
+                view_sql_window_minutes,
+            )
+            described_rows.append(
+                self._assemble_description(
+                    p,
+                    ref,
+                    row,
+                    described,
+                    chooser=TextChooser(
+                        row.text_language or self._main_language, languages, translations[row.id]
+                    ),
+                    stored_columns=stored_columns[row.id],
+                    model=models[row.id],
+                    withheld=withheld[ref.environment],
+                    expires_at=expiries.get(row.id),
+                    warning=warning,
+                    terms=terms.get(
+                        (ref.environment, ".".join((*ref.namespace.parts, ref.name))),
+                        TableTerms(),
+                    ),
+                    facts=facts[row.id],
+                )
+            )
+        return described_rows
+
+    def _assemble_description(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        row: Table,
+        described: TableDescription,
+        *,
+        chooser: TextChooser,
+        stored_columns: Mapping[str, ColumnDescription],
+        model: TableModel | None,
+        withheld: ReferenceCheckFilter,
+        expires_at: datetime | None,
+        warning: datetime,
+        terms: TableTerms,
+        facts: TableFacts,
+    ) -> TableDescription:
+        """Complete one row's description from what `_describe_found` read for every row.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        ref
+            The table reference.
+        row
+            Its row.
+        described
+            What `_describe_row` gave, after the view's content gate.
+        chooser
+            The reader's chooser over the row's own texts.
+        stored_columns
+            The row's stored column texts.
+        model
+            Its model, or `None`.
+        withheld
+            The reference check filter of its environment.
+        expires_at
+            When a managed table expires, or `None`.
+        warning
+            The end of the expiry warning window.
+        terms
+            Its glossary terms; empty for a reader without `READ_ENVIRONMENT`.
+        facts
+            Its owner, readers and health word.
+
+        Returns
+        -------
+        TableDescription
+            The description, with `defined_by` and `actions` empty.
+        """
         description = chooser.choose(
             "table", "", "description", row.description_project, row.description_edited
         )
         label = chooser.choose("table", "", "label", row.label_project, row.label_edited)
-        columns = column_texts(self._session, row.id, (c.name for c in described.columns), chooser)
-        model = model_view(
+        columns = column_texts(
             self._session,
+            row.id,
+            (c.name for c in described.columns),
+            chooser,
+            stored=stored_columns,
+        )
+        model_shown = model_view_of(
+            self._session,
+            model,
             row,
             ref,
             lambda target: self.can_read_table(p, target),
-            ReferenceCheckFilter(self._session, self._authz, p, ref.environment).hides,
+            withheld.hides,
             texts=chooser,
         )
         keys = [
@@ -4062,39 +4407,13 @@ class CatalogService:
             if project is not None or edited is not None
         ]
         keys += columns.keys
-        keys += list(model.measure_keys) if model is not None else []
-        expires_at = None
-        expires_soon = False
-        now = db_now(self._session)
-        if row.table_type is TableType.ICEBERG:
-            env = self._find_environment(ref.environment)
-            expires_at = describe_retention(self._session, env, row, ref).expires_at
-            warning = now + timedelta(days=self._expiry_warning_days)
-            # 0 turns the warning off, also for a table already due.
-            expires_soon = (
-                self._expiry_warning_days > 0 and expires_at is not None and expires_at <= warning
-            )
-        terms = TableTerms()
-        if self._authz.permits(
-            p, Action.READ_ENVIRONMENT, Securable.environment_scope(ref.environment)
-        ):
-            dotted = ".".join((*ref.namespace.parts, ref.name))
-            terms = table_terms(
-                self._session, namespace.environment_id, dotted, languages, self._main_language
-            )
-        facts = table_facts(self._session, self._authz, p, [(ref.environment, row)], now=now)[
-            row.id
-        ]
-        defined_by: DefiningFile | None = None
-        actions: tuple[str, ...] = ()
-        if with_actions:
-            ((defined_by, actions),) = self._row_actions(
-                p, [(ref, described.kind, row.owner_id, namespace.environment_id)]
-            )
+        keys += list(model_shown.measure_keys) if model_shown is not None else []
+        # 0 turns the warning off, also for a table already due.
+        expires_soon = (
+            self._expiry_warning_days > 0 and expires_at is not None and expires_at <= warning
+        )
         return replace(
             described,
-            defined_by=defined_by,
-            actions=actions,
             owner=facts.owner,
             created_at=row.created_at,
             last_read_at=facts.last_read_at,
@@ -4117,7 +4436,7 @@ class CatalogService:
             translations=chooser.coverage(keys),
             expires_at=expires_at,
             expires_soon=expires_soon,
-            model=model,
+            model=model_shown,
         )
 
     def with_row_actions(
@@ -4142,8 +4461,6 @@ class CatalogService:
             The same descriptions, filled, in order. A table dropped since it was described is
             returned as it was, without `defined_by` and `actions`.
         """
-        if not described:
-            return []
         rows = {
             table_id: (owner_id, environment_id)
             for table_id, owner_id, environment_id in self._session.execute(
@@ -4805,7 +5122,15 @@ class CatalogService:
             content_message=REASON_MESSAGES[DefinitionReason.RESTRICTED],
         )
 
-    def _describe_row(self, p: PrincipalRef, ref: TableRef, row: Table) -> TableDescription:
+    def _describe_row(
+        self,
+        p: PrincipalRef,
+        ref: TableRef,
+        row: Table,
+        *,
+        resolved: ResolvedStorage | None = None,
+        hides: Callable[[CheckResult], bool],
+    ) -> TableDescription:
         """Describe a table row by kind, without its descriptions.
 
         Parameters
@@ -4816,6 +5141,10 @@ class CatalogService:
             The table reference.
         row
             Its row.
+        resolved
+            Its environment's storage, already resolved for a batch; `None` resolves it.
+        hides
+            The environment's `result_hider` for `p`, shared by the rows of a batch.
 
         Returns
         -------
@@ -4862,11 +5191,10 @@ class CatalogService:
                 columns=[ColumnSpec(name=n, type=t, nullable=True) for n, t in schema.items()],
                 file_format=(row.external_config or {}).get("format"),
             )
-        loaded = self._to_loaded_table(ref, row)
+        loaded = self._to_loaded_table(ref, row, resolved=resolved)
         unpublished = row.unpublished_run_id
         state: Literal["published", "not_published", "kept"] = "published"
         message = None
-        hides = result_hider(self._session, self._authz, p, ref.environment)
         if unpublished is not None:
             state = "not_published"
             message = not_published_message(
@@ -5414,7 +5742,9 @@ class CatalogService:
         securable = Securable.table_scope(environment, NamespacePath.parse(path), current.name)
         return self._authz.permits(p, Action.READ_TABLE, securable)
 
-    def _to_loaded_table(self, ref: TableRef, row: Table) -> LoadedTable:
+    def _to_loaded_table(
+        self, ref: TableRef, row: Table, *, resolved: ResolvedStorage | None = None
+    ) -> LoadedTable:
         """Build a `LoadedTable` for an already-resolved row, without authorizing.
 
         Factored out of `load_table` so that `rename_table` can return the
@@ -5429,6 +5759,8 @@ class CatalogService:
             How the table is addressed.
         row
             The resolved catalog row.
+        resolved
+            The environment's storage, already resolved; `None` resolves it.
 
         Returns
         -------
@@ -5446,7 +5778,8 @@ class CatalogService:
         """
         if row.metadata_location is None:
             raise NotFoundError(f"Table {ref.name!r} has no metadata yet.")
-        resolved = self._storage.for_environment(ref.environment)
+        if resolved is None:
+            resolved = self._storage.for_environment(ref.environment)
         try:
             metadata = read_metadata(resolved.file_io, row.metadata_location)
         except Exception as exc:

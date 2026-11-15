@@ -7,7 +7,7 @@ main language's edit, else its header text.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from sqlalchemy import select
@@ -161,8 +161,38 @@ class ShownColumns:
     keys: list[_TextKey]
 
 
+def stored_column_texts(
+    session: Session, table_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, ColumnDescription]]:
+    """Read the column texts of several tables in one statement.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    table_ids
+        The tables.
+
+    Returns
+    -------
+    dict
+        Table id → column name → its stored row; every table is present, empty without texts.
+    """
+    found: dict[uuid.UUID, dict[str, ColumnDescription]] = {table_id: {} for table_id in table_ids}
+    for row in session.scalars(
+        select(ColumnDescription).where(ColumnDescription.table_id.in_(list(found)))
+    ):
+        found[row.table_id][row.column] = row
+    return found
+
+
 def column_texts(
-    session: Session, table_id: uuid.UUID, columns: Iterable[str], chooser: TextChooser
+    session: Session,
+    table_id: uuid.UUID,
+    columns: Iterable[str],
+    chooser: TextChooser,
+    *,
+    stored: Mapping[str, ColumnDescription] | None = None,
 ) -> ShownColumns:
     """Choose the texts of each of a table's present columns.
 
@@ -176,6 +206,9 @@ def column_texts(
         The names of the columns the table has now; the texts of any other column are not shown.
     chooser
         The reader's chooser.
+    stored
+        The table's stored rows by column, already read (`stored_column_texts`); `None` reads
+        them.
 
     Returns
     -------
@@ -184,12 +217,7 @@ def column_texts(
         language whose main text is missing) shows it too.
     """
     present = list(columns)
-    main = {
-        r.column: r
-        for r in session.scalars(
-            select(ColumnDescription).where(ColumnDescription.table_id == table_id)
-        )
-    }
+    main = stored if stored is not None else stored_column_texts(session, [table_id])[table_id]
     descriptions: dict[str, ShownDescription] = {}
     labels: dict[str, ShownDescription] = {}
     keys: list[_TextKey] = []

@@ -777,24 +777,66 @@ def table_terms(
     TableTerms
         The terms; a term linked several times to one column shows once.
     """
-    pairs = session.execute(
-        select(GlossaryTermLink.column_name, GlossaryTerm)
+    return tables_terms(session, environment_id, [dotted], languages, main_language)[dotted]
+
+
+def tables_terms(
+    session: Session,
+    environment_id: uuid.UUID,
+    dotted_names: Sequence[str],
+    languages: Sequence[str],
+    main_language: str,
+) -> dict[str, TableTerms]:
+    """List the terms linked to several tables of one environment, in two statements.
+
+    Authorization is the caller's, as for `table_terms`.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    dotted_names
+        The tables' dotted names.
+    languages
+        The reader's canonical languages, most wanted first.
+    main_language
+        The instance's main language, for a term whose project declares none.
+
+    Returns
+    -------
+    dict
+        Each dotted name → its terms, as `table_terms` gives them (empty for a table without).
+    """
+    wanted = list(dict.fromkeys(dotted_names))
+    links = session.execute(
+        select(GlossaryTermLink.table_name, GlossaryTermLink.column_name, GlossaryTerm)
         .join(GlossaryTerm, GlossaryTerm.id == GlossaryTermLink.term_id)
-        .where(GlossaryTerm.environment_id == environment_id, GlossaryTermLink.table_name == dotted)
+        .where(
+            GlossaryTerm.environment_id == environment_id,
+            GlossaryTermLink.table_name.in_(wanted),
+        )
         .order_by(GlossaryTerm.term_key, GlossaryTermLink.position)
     ).all()
-    texts = _texts_by_term(session, {term.id for _, term in pairs})
-    table: set[TermRef] = set()
-    columns: dict[str, set[TermRef]] = {}
-    for column, term in pairs:
+    texts = _texts_by_term(session, {term.id for _, _, term in links})
+    tables: dict[str, set[TermRef]] = {name: set() for name in wanted}
+    columns: dict[str, dict[str, set[TermRef]]] = {name: {} for name in wanted}
+    for table_name, column, term in links:
         ref = TermRef(
             term.term_key, _shown(term, texts.get(term.id, []), languages, main_language).name
         )
-        (table if column is None else columns.setdefault(column, set())).add(ref)
-    return TableTerms(
-        tuple(sorted(table, key=lambda r: r.key)),
-        {c: tuple(sorted(refs, key=lambda r: r.key)) for c, refs in columns.items()},
-    )
+        if column is None:
+            tables[table_name].add(ref)
+        else:
+            columns[table_name].setdefault(column, set()).add(ref)
+    return {
+        name: TableTerms(
+            tuple(sorted(tables[name], key=lambda r: r.key)),
+            {c: tuple(sorted(refs, key=lambda r: r.key)) for c, refs in columns[name].items()},
+        )
+        for name in wanted
+    }
 
 
 def term_names(

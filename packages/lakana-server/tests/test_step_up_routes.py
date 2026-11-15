@@ -11,7 +11,8 @@ new write route cannot skip the decision unnoticed.
 The rule: step-up when a write changes who or what can act or read (identities, rights,
 run-as, CI trust), handles credentials or secrets, changes where code or data come from or
 go (repositories, package indexes, an environment's storage), or drops data: a table, an
-artifact, an artifact version, a namespace, a rebuild (with or without `purge`); none for
+artifact, an artifact version, a namespace, a rebuild (with or without `purge`), an environment
+with `purge`; none for
 operating on existing work under one's own rights (undrop and maintenance included), or for
 removing access.
 """
@@ -840,6 +841,9 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
     ("POST", "/api/v1/environments/{name}/purge-rows"): Case(
         lambda c: (_unreachable_deleted(c), None), 204
     ),
+    ("DELETE", "/api/v1/environments/{name}"): Case(
+        lambda c: (f"/api/v1/environments/{_environment(c)}?purge=true", None), 200
+    ),
     ("POST", "/api/v1/environments/{environment_name}/secrets"): Case(
         lambda c: (
             "/api/v1/environments/dev/secrets",
@@ -910,9 +914,11 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
 }
 """Each operation that needs a fresh passkey touch in a browser session (`require_step_up`),
 with a request it answers with success. `DELETE .../sessions` is another person's (one's own
-sessions end without step-up). Adding a passkey is a session-only ceremony: a token gets 409
-there for that reason, not for step-up; its second half (`POST .../passkeys`) needs no touch of
-its own because it answers a challenge only the options route hands out."""
+sessions end without step-up). `DELETE /api/v1/environments/{name}` asks only with `purge=true`
+(`test_a_stale_session_deletes_an_environment_without_purge` pins the other half). Adding a
+passkey is a session-only ceremony: a token gets 409 there for that reason, not for step-up; its
+second half (`POST .../passkeys`) needs no touch of its own because it answers a challenge only
+the options route hands out."""
 
 NO_STEP_UP: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/groups"): "a new group is empty and grants nothing",
@@ -973,9 +979,6 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/repositories/{name}"): "removing a repository removes a source",
     ("POST", "/api/v1/repository-probes"): (
         "queues a check of a host or a repository; stores no credential and changes nothing"
-    ),
-    ("DELETE", "/api/v1/environments/{name}"): (
-        "data operation, undone with restore; joins step-up with its screen in part 8 (spec)"
     ),
     ("POST", "/api/v1/environments/{name}/restore"): "brings back a deleted environment as it was",
     (
@@ -1179,6 +1182,20 @@ def test_a_stale_session_is_asked_for_a_touch_and_a_token_never(
     assert done.status_code == case.ok, done.text
     by_token = _send(client, method, case.build(client), AUTH_HEADER)
     assert by_token.status_code == (case.token or case.ok), by_token.text
+
+
+def test_a_stale_session_deletes_an_environment_without_purge(client: TestClient) -> None:
+    """Without `purge` a deletion is undone with restore, so a stale session is not asked."""
+    stale = datetime.now(UTC) - timedelta(minutes=16)
+    name, value, csrf = signed_in(client, "admin", touched_at=stale)
+    environment = _environment(client)
+
+    deleted = client.delete(
+        f"/api/v1/environments/{environment}", headers=session_headers(name, value, csrf)
+    )
+
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["purge_after"] is not None
 
 
 def test_every_listed_route_exists() -> None:

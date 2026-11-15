@@ -2204,6 +2204,10 @@ class AuditEvent:
         The table this event's target refers to, if any.
     detail
         Event-specific facts not already captured by the fields above.
+    event_type_raw
+        The type as stored. For an `event_type` of ``UNKNOWN`` (a type the server does not
+        know, written by a newer release before a downgrade) it is that release's name for it;
+        otherwise the same as `event_type`. `None` from a server older than this field.
     """
 
     id: str
@@ -2215,6 +2219,7 @@ class AuditEvent:
     securable_namespace: str | None
     securable_table: str | None
     detail: dict
+    event_type_raw: str | None = None
 
 
 @dataclass(frozen=True)

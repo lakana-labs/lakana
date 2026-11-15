@@ -1236,6 +1236,70 @@ def test_the_namespace_list_reads_the_definitions_once_however_many_tables(
     assert all(t["actions"][:1] == ["drop"] for t in listed)
 
 
+def _statements_of_the_list(client: TestClient, path: str) -> int:
+    """Count the SQL statements one namespace table list issues.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    path
+        The namespace.
+
+    Returns
+    -------
+    int
+        How many statements the request ran.
+    """
+    engine = client.app.state.engine
+    seen: list[str] = []
+
+    def record(conn: object, cursor: object, statement: str, *args: object) -> None:
+        """Record one statement.
+
+        Parameters
+        ----------
+        conn
+            The connection.
+        cursor
+            The cursor.
+        statement
+            The SQL.
+        *args
+            The rest of the event's arguments.
+        """
+        seen.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        response = client.get(
+            f"/api/v1/environments/dev/namespaces/{path}/tables", headers=AUTH_HEADER
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert response.status_code == 200, response.text
+    return len(seen)
+
+
+def test_the_namespace_list_issues_as_many_statements_for_three_tables_as_for_one(
+    client: TestClient,
+) -> None:
+    """#622: the list describes its rows in one batch, so its cost does not grow with them."""
+    create_environment(client)
+    create_table(client, "dev", "silver", "a")
+    for name in ("a", "b", "c"):
+        create_table(client, "dev", "gold", name)
+    with Session(client.app.state.engine) as session:
+        deploy_file(session, "dev", "silver.a", "SELECT 1")
+        deploy_file(session, "dev", "gold.a", "SELECT 1")
+    _statements_of_the_list(client, "silver")
+
+    one = _statements_of_the_list(client, "silver")
+    three = _statements_of_the_list(client, "gold")
+
+    assert three == one
+
+
 def test_the_create_and_undrop_answers_say_what_the_caller_may_do(client: TestClient) -> None:
     """M1: the creator owns the table, so the answer is never an empty list for them."""
     create_environment(client)

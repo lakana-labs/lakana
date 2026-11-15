@@ -111,7 +111,8 @@ The file is a JSON list of events. These are the two events of one type in a new
     "detail": {
       "principal": "auditor",
       "type": "SERVICE_ACCOUNT"
-    }
+    },
+    "event_type_raw": "PRINCIPAL_CREATED"
   },
   {
     "id": "<uuid>",
@@ -125,7 +126,8 @@ The file is a JSON list of events. These are the two events of one type in a new
     "detail": {
       "principal": "admin",
       "type": "USER"
-    }
+    },
+    "event_type_raw": "PRINCIPAL_CREATED"
   }
 ]
 ```
@@ -152,6 +154,12 @@ Without the CLI, the route is `GET /api/v1/audit-events` (the
 `{"items": [...], "next_cursor": ...}`; send the same filters with the `next_cursor` of the last
 page until it is `null`. It answers `403` without `READ_AUDIT_LOG` and `503` when a read that must
 be recorded could not be.
+
+`event_type_raw` is the type as stored, normally the same as `event_type`. After going back to an
+older release, an event that the newer release wrote under a type the older one does not know is
+listed with `event_type` `UNKNOWN` and the newer release's name for it in `event_type_raw`, so the
+list still answers and no event is left out. `--event-type` (and `event_type`) takes only the
+types this release knows, so it cannot select such an event; read them without that filter.
 
 ## Export every month, and keep the files
 

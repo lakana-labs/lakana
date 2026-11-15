@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import String, and_, or_, select, type_coerce
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.content import hidden_fields, shown_detail, warn_unclassified
@@ -62,7 +62,10 @@ class ShownAuditEvent:
     principal_id
         Whom it is attributed to, or `None`.
     event_type
-        Its type.
+        Its type; `UNKNOWN` for a stored type this release does not know (#613).
+    event_type_raw
+        The type as stored: the same text as `event_type` for a known type, and for `UNKNOWN`
+        the text a newer release wrote, so a downgrade hides nothing.
     securable_kind
         The kind of object it targets, or `None`.
     securable_environment
@@ -80,6 +83,7 @@ class ShownAuditEvent:
     occurred_at: datetime
     principal_id: uuid.UUID | None
     event_type: AuditEventType
+    event_type_raw: str
     securable_kind: SecurableKind | None
     securable_environment: str | None
     securable_namespace: str | None
@@ -171,11 +175,22 @@ class AuditService:
         AuditEvent
             The created (not yet necessarily committed) row.
 
+        Raises
+        ------
+        ValueError
+            If `event_type` is `UNKNOWN`, which only stands for a stored type this release does
+            not know.
+
         Warns
         -----
         UnclassifiedAuditFieldWarning
             If `detail` has a field that `lakana_core.audit.content` does not classify.
         """
+        if event_type is AuditEventType.UNKNOWN:
+            raise ValueError(
+                "No audit event is written as UNKNOWN: it only stands for a stored type this "
+                "release does not know."
+            )
         apply_id = self._session.info.get(ACCESS_APPLY_KEY)
         if apply_id is not None:
             detail = {**(detail or {}), "access_apply_id": str(apply_id)}
@@ -263,7 +278,8 @@ class AuditService:
         ------
         ValidationError
             If this `AuditService` was constructed with no
-            `AuthorizationService`, `kind` is not a kind, or `event_type` is not of `kind`.
+            `AuthorizationService`, `kind` is not a kind, `event_type` is not of `kind`, or
+            `event_type` is `UNKNOWN`.
         PermissionDenied
             If `p` may not read the audit log.
         AuditUnavailableError
@@ -275,7 +291,14 @@ class AuditService:
                 "this instance was constructed with none."
             )
         self._authz.authorize(p, Action.READ_AUDIT_LOG, Securable.instance_scope())
-        stmt = select(AuditEvent)
+        if event_type is AuditEventType.UNKNOWN:
+            raise ValidationError(
+                "event_type UNKNOWN is not a filter: it stands for a stored type this release "
+                "does not know. Leave out event_type and read event_type_raw instead."
+            )
+        stmt = select(
+            AuditEvent, type_coerce(AuditEvent.event_type, String).label("event_type_raw")
+        )
         if kind is not None:
             types = _kind_types(kind)
             if event_type is not None and event_type not in types:
@@ -302,8 +325,9 @@ class AuditService:
                 )
             )
         stmt = stmt.order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc()).limit(limit + 1)
-        found = list(self._session.execute(stmt).scalars().all())
-        rows = found[:limit]
+        found = [(row, str(raw)) for row, raw in self._session.execute(stmt).tuples().all()]
+        rows = [row for row, _ in found[:limit]]
+        raw_types = {row.id: raw for row, raw in found[:limit]}
         self._record_read(
             p,
             rows,
@@ -317,7 +341,7 @@ class AuditService:
             },
             principal_id=principal_id,
         )
-        items = _shown(self._authz, p, rows)
+        items = _shown(self._authz, p, rows, raw_types)
         last = rows[-1] if len(found) > limit else None
         next_cursor = None if last is None else AuditCursor(last.occurred_at, last.id)
         return AuditPage(items=items, next_cursor=next_cursor)
@@ -401,7 +425,10 @@ def _kind_types(kind: str) -> frozenset[AuditEventType]:
 
 
 def _shown(
-    authz: AuthorizationService, p: PrincipalRef, rows: Sequence[AuditEvent]
+    authz: AuthorizationService,
+    p: PrincipalRef,
+    rows: Sequence[AuditEvent],
+    raw_types: dict[uuid.UUID, str],
 ) -> list[ShownAuditEvent]:
     """Copy the events of a page for their reader, hiding what the reader may not see.
 
@@ -416,6 +443,8 @@ def _shown(
         The reader.
     rows
         The stored events.
+    raw_types
+        Each event's type as stored, by id.
 
     Returns
     -------
@@ -437,6 +466,7 @@ def _shown(
                 occurred_at=row.occurred_at,
                 principal_id=row.principal_id,
                 event_type=row.event_type,
+                event_type_raw=raw_types[row.id],
                 securable_kind=row.securable_kind,
                 securable_environment=row.securable_environment,
                 securable_namespace=row.securable_namespace,
