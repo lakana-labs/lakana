@@ -1,10 +1,10 @@
 /**
  * The Actions menu above the Catalog's tree: what the person may do to the chosen environment or
- * namespace, and the dialogs those items open.
+ * namespace, and the dialogs those items open. New external table's form loads only when chosen.
  *
  * @packageDocumentation
  */
-import { type JSX, useEffect, useId, useRef, useState } from "react";
+import { type JSX, lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { Button, Menu, MenuItem, MenuTrigger, Popover, Separator } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import type { PlaceAction } from "../../api";
@@ -14,6 +14,9 @@ import type { CatalogNode } from "../tree";
 import { DeleteNamespaceDialog } from "./DeleteNamespaceDialog";
 import { NewNamespaceDialog } from "./NewNamespaceDialog";
 import "./placeStrings";
+
+// The external table's form, with its fields and format choice, which most visits never open.
+const ExternalTableDialog = lazy(() => import("./ExternalTableDialog"));
 
 /** The items before the separator, which add to the place, in menu order. */
 const ADDING: readonly PlaceAction[] = ["create_namespace", "create_external_table"];
@@ -112,6 +115,8 @@ export default function PlaceActions({
   };
   const finish = (done: () => void): void => {
     if (mounted.current) {
+      // Closed here, so a move away that removes the menu loses no focus a dialog held.
+      dialogOpen.current = false;
       setOpen(null);
       done();
     } else {
@@ -166,6 +171,16 @@ export default function PlaceActions({
             });
           }}
         />
+      )}
+      {open === "create_external_table" && namespace !== null && (
+        <Suspense fallback={null}>
+          <ExternalTableDialog
+            environment={environment}
+            namespace={namespace}
+            onCancel={close}
+            onDone={finish}
+          />
+        </Suspense>
       )}
       {open === "drop" && namespace !== null && (
         <DeleteNamespaceDialog

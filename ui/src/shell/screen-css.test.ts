@@ -52,3 +52,10 @@ it("lifts what carries a title above the row's link in the Catalog list only", (
   expect(screen).toMatch(/\.catalog-list \[title\]\s*{[^}]*position:\s*relative/);
   expect(screen).not.toMatch(/\.list \[title\]/);
 });
+
+it("lays a horizontal radio group out in a row that wraps, with its label and texts above", () => {
+  expect(screen).toMatch(/\.field\[data-orientation="horizontal"\]\s*{[^}]*flex-flow:\s*row wrap;/);
+  expect(screen).toMatch(
+    /\.field\[data-orientation="horizontal"\] > :not\(\.radio-field\)\s*{[^}]*flex-basis:\s*100%;/,
+  );
+});

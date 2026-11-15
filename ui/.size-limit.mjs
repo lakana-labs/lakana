@@ -66,7 +66,19 @@ const NAMED_LIMITS = [
   // Measured 1.94 kB (2026-11-16) + 10 %: the Catalog's place menu with New namespace and Delete
   // namespace, their dialogs and the strings of the places, loaded once the tree is known and an
   // environment or a namespace is chosen.
-  { name: "the place menu", prefix: "PlaceActions-", limit: "2.13 kB" },
+  // Raised to the measured 2.36 kB (2026-11-16) + 10 %: the loader of New external table's form
+  // with the list of chunks it preloads, and the call that registers the table, which the form
+  // imports from here.
+  { name: "the place menu", prefix: "PlaceActions-", limit: "2.6 kB" },
+  // Measured 1.23 kB (2026-11-16) + 10 %: New external table's form (name, location, format and
+  // the format read from the location's ending), loaded when it is chosen.
+  { name: "New external table", prefix: "ExternalTableDialog-", limit: "1.35 kB" },
+  // Measured 653 B (2026-11-16) + 10 %: the strings of the places, shared by the place menu, New
+  // external table's form and the place note.
+  { name: "the strings of the places", prefix: "placeStrings-", limit: "0.72 kB" },
+  // Measured 2.67 kB (2026-11-16) + 10 %: React Aria's radio group, which the Retention dialog and
+  // New external table's form share; loaded with the first of them.
+  { name: "the radio group", prefix: "RadioGroup-", limit: "2.94 kB" },
   // Measured 393 B (2026-11-16) + 10 %: the note after a namespace was created or deleted,
   // loaded only when the address carries it.
   { name: "the place note", prefix: "PlaceNote-", limit: "0.43 kB" },
@@ -84,7 +96,9 @@ const NAMED_LIMITS = [
   { name: "Maintain now", prefix: "MaintainDialog-", limit: "1.29 kB" },
   // Measured 3.99 kB (2026-11-16) + 10 %: the Retention dialog (its three rules, the sentence
   // that states the retention and the date field), loaded when it is chosen.
-  { name: "Retention", prefix: "RetentionDialog-", limit: "4.39 kB" },
+  // Lowered to the measured 1.36 kB (2026-11-16) + 10 %: React Aria's radio group moved into a
+  // chunk of its own (above) once New external table's form became its second importer.
+  { name: "Retention", prefix: "RetentionDialog-", limit: "1.5 kB" },
   // Measured 9.06 kB (2026-11-16) + 10 %: React Aria's number field with its parsing and
   // formatting, which only the Maintain now and Retention forms use; loaded with the first of
   // them.

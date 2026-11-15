@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createNamespace, deleteNamespace } from "./namespaces";
+import { createExternalTable, createNamespace, deleteNamespace } from "./namespaces";
 
 import { manageRoutes } from "../test/manage";
 import { fakeServer } from "../test/server";
@@ -38,6 +38,53 @@ describe("namespaces api", () => {
       [
         "DELETE",
         "/api/v1/environments/prod/namespaces/silver?break_glass_reason=fix+it+now+please",
+      ],
+    ]);
+  });
+
+  it("registers an external table with snake_case fields under its namespace", async () => {
+    const server = fakeServer(manageRoutes());
+
+    const registered = await createExternalTable("prod", "bronze", {
+      name: "orders",
+      locationPattern: "raw/orders/*.csv",
+      format: "csv",
+      breakGlassReason: null,
+    });
+    await createExternalTable("prod", "bronze", {
+      name: "orders",
+      locationPattern: "raw/orders/*.csv",
+      format: "csv",
+      breakGlassReason: "Quarter close needs the orders",
+    });
+
+    expect(registered).toEqual({
+      name: "orders",
+      namespace: "bronze",
+      location_pattern: "raw/orders/*.csv",
+      format: "csv",
+      schema: { order_id: "int64", amount: "double" },
+    });
+    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
+      [
+        "POST",
+        "/api/v1/environments/prod/namespaces/bronze/tables/external",
+        {
+          name: "orders",
+          location_pattern: "raw/orders/*.csv",
+          format: "csv",
+          break_glass_reason: null,
+        },
+      ],
+      [
+        "POST",
+        "/api/v1/environments/prod/namespaces/bronze/tables/external",
+        {
+          name: "orders",
+          location_pattern: "raw/orders/*.csv",
+          format: "csv",
+          break_glass_reason: "Quarter close needs the orders",
+        },
       ],
     ]);
   });

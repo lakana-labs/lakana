@@ -18,6 +18,18 @@
     "text": "Only an empty namespace can be deleted. The grants given on it are revoked.",
     "confirm": "Delete the namespace"
   },
+  "external": {
+    "title": "New external table in {{namespace}}",
+    "name": "Name",
+    "nameText": "The table's name, without its namespace.",
+    "location": "Location",
+    "locationText": "Files under raw/: a directory and a file pattern, such as raw/orders/*.csv. The table reads the matching files directly in that directory, and no other external table may use it. At least one file must match: Lakana reads one to learn the columns.",
+    "format": "Format",
+    "csv": "CSV",
+    "json": "JSON",
+    "parquet": "Parquet",
+    "confirm": "Register"
+  },
   "note": {
     "created": "Created namespace {{namespace}}.",
     "deleted": "Deleted namespace {{namespace}}.",

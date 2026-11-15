@@ -45,6 +45,7 @@ Pages:
 - [Let tables expire](let-tables-expire.md): let a development table, or every table of an environment, be dropped once nobody has used it for a while; see what expires soon, and keep a table.
 - [Find a table](find-a-table.md): search tables, columns, descriptions, runs and people from one text, and what you are allowed to see.
 - [Organise tables in namespaces](organise-tables-in-namespaces.md): create a namespace, see them, and delete an empty one, on the command line or in the Catalog, also in a protected environment.
+- [Register files as an external table](register-files-as-an-external-table.md): make files that already lie under `raw/` readable as a table, the rules for its location, its formats, and what each refusal means, on the command line or in the Catalog.
 - [Open a table](open-a-table.md): open a table's page from the Catalog or from Home, read its columns and preview, and see what the page says when you may not read the table.
 - [Find a run, a query or a deploy](find-a-run.md): filter the lists by status, trigger, job, time, submitter or repository, and page through a long one.
 - [Stop a query](stop-a-query.md): cancel one with Ctrl-C or a command, who may, and what else ends a query.

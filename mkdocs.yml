@@ -75,6 +75,7 @@ nav:
       - how-to/clean-up-files-left-by-older-releases.md
       - how-to/find-a-table.md
       - how-to/organise-tables-in-namespaces.md
+      - how-to/register-files-as-an-external-table.md
       - how-to/open-a-table.md
       - how-to/preview-a-table.md
       - how-to/see-where-a-table-is-defined.md

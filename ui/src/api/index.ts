@@ -133,6 +133,7 @@ export {
   setRetention,
 } from "./manage";
 export type { OrphanOut, RetentionRule, TableRebuildOut, TableRetentionOut } from "./manage";
-export { createNamespace, deleteNamespace } from "./namespaces";
+export { createExternalTable, createNamespace, deleteNamespace } from "./namespaces";
+export type { ExternalFormat } from "./namespaces";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";
