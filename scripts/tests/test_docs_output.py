@@ -206,7 +206,7 @@ def test_fix_replaces_only_the_lines_that_changed(tmp_path: Path) -> None:
 
 def test_fix_never_writes_the_secret_of_a_token(tmp_path: Path) -> None:
     """A token in a run reaches the page as `<secret>`, whether or not the page had the line."""
-    secret = "3PbXyZ0123456789abcdEFGH"
+    secret = "x" * 24
     printed = f"Token: lakana_pat_a445f5d891704fbb_{secret}\nlakana_ci_Ab12Cd34_{secret}\n"
     root, captures = _tree(tmp_path, BLOCK, "old\nold2\n", printed)
     fix(root, root / "docs/site", None, captures)
