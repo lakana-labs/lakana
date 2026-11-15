@@ -667,8 +667,8 @@ server's info route (`GET /api/v1/info`).
 | `GET /namespaces/{path}/artifacts/{name}/versions/{version}/blobs/{sha256}` | Download one file. | `READ_TABLE` |
 
 The routes that begin an upload, send a file, commit and delete (a version or the artifact) take
-`break_glass_reason` as a query parameter; withdrawing an upload does not, because it writes
-nothing. In the blob download route `{version}` must be a number, not `current`. A caller who may
+`break_glass_reason` as a query parameter; withdrawing an upload does not, because it writes no
+version and no file (only its `ARTIFACT_UPLOAD_ABORTED` audit event). In the blob download route `{version}` must be a number, not `current`. A caller who may
 not use a name gets the same 403 whether or not the artifact, the version or the file exists, and a list shows only
 what the caller may read. The download route answers `GET` only, ignores a `Range` header and
 sends the whole file with its size as `Content-Length`.

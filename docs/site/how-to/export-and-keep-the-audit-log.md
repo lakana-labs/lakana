@@ -35,8 +35,10 @@ What the log does **not** record:
   tables it touched and the number of rows it returned. Loading a table through the Iceberg REST
   catalog is no event, and neither is listing tables, namespaces or environments. A task's write
   whose worker died without evidence of a commit ends failed and has no `QUERY_COMPLETED` event.
-- **Creating or renaming a table, creating, changing or dropping a namespace.** The code of these
-  operations writes no event (the other changes in the table above do).
+- **Creating a managed table, renaming a table, or changing a namespace's properties.** The code
+  of these operations writes no event. Creating and dropping a namespace and registering an
+  external table do (`NAMESPACE_CREATED`, `NAMESPACE_DROPPED`, `TABLE_CREATED`), as do the other
+  changes in the table above.
 - **A data commit by an Iceberg client** that Lakana did not make as a write of its own: there is
   no event for the commit. A commit that removes or replaces a column is recorded as
   `TABLE_SCHEMA_CHANGED`.

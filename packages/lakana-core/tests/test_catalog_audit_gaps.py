@@ -169,3 +169,23 @@ def test_a_refused_create_writes_no_event(
 
     session.rollback()
     assert len(_events(session, AuditEventType.NAMESPACE_CREATED)) == 1
+
+
+def test_a_create_that_loses_the_insert_race_writes_no_event(
+    session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A duplicate the check above the insert misses fails at the database, and its event goes too.
+
+    The lookup is made to miss, as it does for the loser of a race between two servers, so the
+    insert reaches the unique constraint: the event must be rolled back with the row, which
+    holds only while it is written in the same transaction as the insert.
+    """
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization())
+    catalog.create_namespace(principal, "dev", _SCRATCH)
+    monkeypatch.setattr(catalog, "_lookup_namespace", lambda env, path: None)
+
+    with pytest.raises(AlreadyExistsError):
+        catalog.create_namespace(principal, "dev", _SCRATCH)
+
+    session.rollback()
+    assert len(_events(session, AuditEventType.NAMESPACE_CREATED)) == 1

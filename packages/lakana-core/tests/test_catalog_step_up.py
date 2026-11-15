@@ -20,13 +20,14 @@ from core_test_helpers import (
     _minimal_schema,
     _prepared_catalog,
     artifact_service,
+    deploy_assets,
     store_version,
 )
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SessionContext
-from lakana_core.errors import StepUpRequired
+from lakana_core.errors import ConflictError, StepUpRequired
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import ArtifactVersion, AuditEvent, Namespace, Table
 
@@ -269,3 +270,28 @@ def test_a_fresh_touch_and_a_token_both_pass(
     drop.run(actor)
 
     assert not drop.intact()
+
+
+def test_a_stale_session_learns_nothing_of_the_file_that_defines_a_table(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A git-owned table asks a stale session for a touch first, never naming its file.
+
+    Step-up comes before the git-owned refusal, so a stale session gets `StepUpRequired`, whose
+    text holds neither the repository nor the defining file; the same drop by token gets the
+    409 that names them, which shows the table is git-owned.
+    """
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    table_id = catalog.create_table(principal, _CLEAN, schema=_minimal_schema()).uuid
+    deploy_assets(session, "dev", "analytics", {"silver.clean": {}})
+
+    with pytest.raises(StepUpRequired) as refused:
+        catalog.drop_table(_with_touch(principal, minutes_ago=16), _CLEAN)
+
+    session.rollback()
+    assert "analytics" not in str(refused.value)
+    assert "clean.sql" not in str(refused.value)
+    assert session.get(Table, table_id) is not None
+    with pytest.raises(ConflictError) as owned:
+        catalog.drop_table(principal, _CLEAN)
+    assert "analytics/assets/silver/clean.sql" in str(owned.value)
