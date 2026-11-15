@@ -307,7 +307,9 @@ reached: the clean-up deletes that one's files and then the environment, and
   `POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop` restores, with an optional
   body `{"new_name": "..."}`, and answers with the table.
   For an environment: `DELETE /api/v1/environments/{name}` (with `?purge=true`) answers with the
-  environment and its `deleted_at` and `purge_after`; `GET /api/v1/environments?deleted=true` lists
+  environment and its `deleted_at` and `purge_after`; with `?purge=true`, from the web interface it
+  asks for a passkey touch within the last 15 minutes (403 `StepUpRequired`, nothing deleted), a
+  token never does; `GET /api/v1/environments?deleted=true` lists
   the deleted ones; `POST /api/v1/environments/{name}/restore` restores one;
   `POST /api/v1/environments/{name}/purge-rows` removes a deleted environment whose storage cannot
   be reached from the catalog (204, no body); from the web interface it asks for a passkey touch

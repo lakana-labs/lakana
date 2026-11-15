@@ -284,7 +284,8 @@ def delete_environment(
     Deletes the environment. Its tables can be restored until the `purge_after` time in the
     answer. Needs `MANAGE_ENVIRONMENT`. Answers 404 when there is no such environment (or it
     is already deleted and `purge` is not set), 409 while a repository is still deployed in
-    it and 422 when it is protected.
+    it and 422 when it is protected. With `purge`, a signed-in browser needs a passkey touch
+    within the last 15 minutes (403 `StepUpRequired`, nothing deleted); a token is never asked.
 
     Parameters
     ----------
@@ -313,6 +314,8 @@ def delete_environment(
         A repository is still deployed; mapped to 409.
     lakana_core.errors.ValidationError
         The environment is protected; mapped to 422.
+    lakana_core.errors.StepUpRequired
+        `purge` from a browser whose last passkey touch is older than 15 minutes; mapped to 403.
     """
     return EnvironmentOut.model_validate(catalog.delete_environment(principal, name, purge=purge))
 

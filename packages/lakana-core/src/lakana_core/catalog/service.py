@@ -1786,6 +1786,11 @@ class CatalogService:
 
         A protected environment (`Environment.is_protected`) refuses deletion outright.
 
+        With `purge`, a browser session needs a fresh passkey touch (`require_step_up`), checked
+        right after the authorization and before the row is locked or read, so a stale session
+        changes and learns nothing; the purge cannot be undone. A token is never asked, and a
+        deletion without `purge` is undone with `restore_environment`, so it asks no session.
+
         An environment that still has a deployed repository refuses deletion: a run start locks
         the deployment pointer and then the environment row, and a deletion locks the row
         first, so the two could deadlock. The environment row is locked first (and re-read, so
@@ -1819,8 +1824,12 @@ class CatalogService:
             If a repository is still deployed to the environment; the message names them.
         PermissionDenied
             If the principal may not manage environments.
+        StepUpRequired
+            If `purge` is set and a browser session's last passkey touch is not fresh.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.environment_scope(name))
+        if purge:
+            require_step_up(p)
         env = self._lock_environment_row(name)
         if env is None:
             self._session.rollback()

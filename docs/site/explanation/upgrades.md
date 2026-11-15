@@ -187,8 +187,9 @@ restore a table](../how-to/drop-and-restore-a-table.md).
 ### A browser asks for a passkey touch before a drop
 
 A signed-in browser now asks for a passkey touch before it drops a table, drops an artifact, deletes
-an artifact version, deletes a namespace, or rebuilds a table. A token, the CLI and the SDK are not
-asked, so no script changes.
+an artifact version, deletes a namespace, rebuilds a table, or deletes an environment with purge
+(`DELETE /api/v1/environments/{name}?purge=true`). Deleting an environment without purge still asks
+for no touch: restore undoes it. A token, the CLI and the SDK are not asked, so no script changes.
 
 ### Expiring tables, namespaces, artifacts and orphans come in pages (breaking)
 
