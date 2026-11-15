@@ -30,15 +30,26 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.artifacts.store import artifact_prefix, dropped_marker_path
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, RunContext
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    BoundTask,
+    PrincipalRef,
+    RunContext,
+    TaskScope,
+)
 from lakana_core.catalog.git_owned import (
     GIT_OWNED_ARTIFACT_DROP,
+    GIT_OWNED_ARTIFACT_HIDDEN,
     GIT_OWNED_CREATE,
     GIT_OWNED_DROP,
     GIT_OWNED_HIDDEN,
+    GIT_OWNED_RENAME,
+    GIT_OWNED_RENAME_HIDDEN,
 )
 from lakana_core.catalog.service import CatalogService
-from lakana_core.errors import ConflictError
+from lakana_core.errors import ConflictError, PermissionDenied
+from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     AuditEvent,
@@ -512,7 +523,9 @@ def test_an_iceberg_rename_of_a_table_a_deployment_builds_is_refused(
     with pytest.raises(ConflictError) as refused:
         catalog.rename_table(principal, _CLEAN, TableRef("dev", _SILVER, "moved"))
 
-    assert str(refused.value) == _drop_message()
+    assert str(refused.value) == GIT_OWNED_RENAME.format(
+        name="silver.clean", repository=_REPO, path="assets/silver/clean.sql", environment="dev"
+    )
     session.rollback()
     assert session.get_one(Table, built).name == "clean"
 
@@ -528,3 +541,140 @@ def test_an_undeclared_rename_still_moves_the_table(
 
     session.rollback()
     assert session.get_one(Table, table_id).name == "final"
+
+
+def test_a_rename_away_hides_the_file_from_a_caller_who_may_not_read_the_table(
+    session: Session, principal: PrincipalRef, built: uuid.UUID
+) -> None:
+    mover = _with(session, ActionAllowList(Action.DROP_TABLE, Action.CREATE_TABLE))
+
+    with pytest.raises(ConflictError) as refused:
+        mover.rename_table(principal, _CLEAN, TableRef("dev", _SILVER, "moved"))
+
+    assert str(refused.value) == GIT_OWNED_RENAME_HIDDEN
+    assert "analytics" not in str(refused.value)
+
+
+def test_a_persons_upload_of_a_new_artifact_under_a_declared_name_is_refused(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    service = artifact_service(session, tmp_path)
+    _declare(session, "models.churn", kind="python", output="artifact", path="assets/churn.py")
+
+    with pytest.raises(ConflictError) as refused:
+        store_version(service, principal, ARTIFACT_REF, {"m": b"weights"})
+
+    assert str(refused.value) == _create_message("models.churn", "assets/churn.py")
+    session.rollback()
+    assert session.scalars(select(Table).where(Table.name == "churn")).all() == []
+
+
+def test_a_persons_upload_under_a_declared_table_name_is_refused_too(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    service = artifact_service(session, tmp_path)
+    _declare(session, "models.churn")
+
+    with pytest.raises(ConflictError) as refused:
+        store_version(service, principal, ARTIFACT_REF, {"m": b"weights"})
+
+    assert str(refused.value) == _create_message("models.churn", "assets/models/churn.sql")
+
+
+def test_an_upload_hides_the_file_from_a_caller_who_may_not_read_the_name(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    service = artifact_service(
+        session, tmp_path, ActionAllowList(Action.WRITE_TABLE, Action.CREATE_TABLE)
+    )
+    _declare(session, "models.churn", kind="python", output="artifact")
+
+    with pytest.raises(ConflictError) as refused:
+        store_version(service, principal, ARTIFACT_REF, {"m": b"weights"})
+
+    assert str(refused.value) == GIT_OWNED_ARTIFACT_HIDDEN
+
+
+def test_a_run_still_uploads_the_artifact_its_project_declares(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    service = artifact_service(session, tmp_path)
+    _declare(session, "models.churn", kind="python", output="artifact")
+    task = python_task_run(
+        session, principal.id, asset="models.churn", extra={"output": "artifact"}
+    )
+    run = dataclasses.replace(principal, run_context=RunContext(task_run_id=task.id, claim=1))
+
+    store_version(service, run, ARTIFACT_REF, {"m": b"weights"})
+
+    assert session.scalars(select(Table).where(Table.name == "churn")).one() is not None
+
+
+def _dropped(catalog: CatalogService, p: PrincipalRef) -> None:
+    """Create `silver.clean` and drop it while nothing declares it.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    p
+        The acting principal.
+    """
+    _managed(catalog, p)
+    catalog.drop_table(p, _CLEAN)
+
+
+def test_an_undrop_onto_a_name_now_declared_as_an_artifact_is_refused(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    _dropped(catalog, principal)
+    _declare(session, "silver.clean", kind="python", output="artifact")
+
+    with pytest.raises(ConflictError) as refused:
+        catalog.undrop_table(principal, _CLEAN)
+
+    assert str(refused.value) == _create_message("silver.clean", "assets/silver/clean.sql")
+    session.rollback()
+    assert session.scalars(select(Table).where(Table.name == "clean")).all() == []
+
+
+def test_an_undrop_onto_a_name_declared_as_a_table_is_allowed(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    _dropped(catalog, principal)
+    _declare(session, "silver.clean")
+
+    restored = catalog.undrop_table(principal, _CLEAN)
+
+    assert restored.ref == _CLEAN
+
+
+def test_a_run_of_one_repository_cannot_create_a_table_another_declares(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    # Deploy's ownership claim keeps `silver.b` out of repository `a`'s manifest; what keeps a
+    # run of `a` from creating it anyway is its task token, bound to its own asset.
+    deploy_assets(session, "dev", "a", {"silver.a": {}})
+    deploy_assets(session, "dev", "b", {"silver.b": {}})
+    task = python_task_run(session, principal.id, asset="silver.a", kind="sql")
+    bound = BoundTask(
+        task_run_id=task.id, claim=1, asset="silver.a", inputs=(), readable=(), repository="a"
+    )
+    run = dataclasses.replace(
+        principal,
+        run_context=RunContext(task_run_id=task.id, claim=1),
+        task_scope=TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4(), bound=bound),
+    )
+    data = _rows()
+
+    with pytest.raises(PermissionDenied):
+        _with(session, GrantAuthorization(session)).write_batches(
+            run,
+            TableRef("dev", _SILVER, "b"),
+            mode=WriteMode.CREATE,
+            schema=data.schema,
+            batches=data.to_batches(),
+        )
+
+    session.rollback()
+    assert session.scalars(select(Table).where(Table.name == "b")).all() == []

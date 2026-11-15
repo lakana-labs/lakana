@@ -136,7 +136,11 @@ from lakana_core.artifacts.store import (
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, RunContext, Securable
 from lakana_core.catalog.connection_lineage import connection_edges, connection_sources
-from lakana_core.catalog.git_owned import refuse_owned_drop
+from lakana_core.catalog.git_owned import (
+    GIT_OWNED_ARTIFACT_HIDDEN,
+    refuse_declared_name,
+    refuse_owned_drop,
+)
 from lakana_core.catalog.identity import resolve_environment_id, resolve_table_id
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.writes import MAX_SOURCE_NAME, MAX_SOURCE_VERSIONS
@@ -1428,7 +1432,10 @@ class ArtifactService:
             If the name space does not exist.
         ConflictError
             If another request created the name at the same moment, or the
-            artifact already has `MAX_OPEN_UPLOADS` open uploads.
+            artifact already has `MAX_OPEN_UPLOADS` open uploads; or, for a person (no run),
+            if the artifact is new and a deployed project declares its name
+            (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`, or
+            `GIT_OWNED_ARTIFACT_HIDDEN` to a caller who may not read it).
         """
         securable = self._securable(ref)
         self._authz.authorize(p, Action.WRITE_TABLE, securable)
@@ -1444,6 +1451,18 @@ class ArtifactService:
                 f"{ref.dotted()} is {_KIND_WORDS[row.kind]}, not an artifact; drop it first, "
                 "or choose another name."
             )
+        if row is None and p.run_context is None:
+            # A person may not create what a deployed project declares; its run produces it.
+            environment_id = resolve_environment_id(self._session, ref.environment)
+            if environment_id is not None:
+                refuse_declared_name(
+                    self._session,
+                    self._authz,
+                    p,
+                    ref,
+                    environment_id,
+                    hidden=GIT_OWNED_ARTIFACT_HIDDEN,
+                )
         manifest = parse_manifest(document, self._limits)
         try:
             if row is None:

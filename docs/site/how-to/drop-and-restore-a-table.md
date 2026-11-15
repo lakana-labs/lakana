@@ -47,9 +47,14 @@ lakana table delete silver.clean --env dev --yes
 
 A name that a deployed project declares cannot be taken by anything else either: `lakana table
 create`, `lakana table create-external`, a `lakana load` or `PUT …/data` that would create the
-table, and an Iceberg client's create or rename onto the name all answer 409. The project's own
-runs still create the tables it declares. Choose another name, or remove the asset and deploy
-first.
+table, a `lakana artifact upload` that would create a new artifact, and an Iceberg client's create
+or rename onto the name all answer 409. The project's own runs still create what it declares.
+Choose another name, or remove the asset and deploy first.
+
+An Iceberg client cannot rename a table the project builds either. The answer is
+``` `silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Rename it there and deploy.```
+(or, to someone who may not read the table,
+`A deployed project defines this table; rename it in git and deploy.`).
 
 Some tables carry a declared name and can still be dropped: an external table, and a table under
 the name of an asset that produces an artifact. The refusal applies only when the project builds
@@ -90,6 +95,10 @@ The table comes back as it was when it was dropped:
 
 What does not come back is the record of who read the table: [table health](../reference/table-health.md)
 counts readers again from the restore on.
+
+A table can be restored under a name a deployed project declares as a table or a view: that is
+the table the project builds. Under a name it declares as an artifact, the restore is refused
+with the `is declared by a deployed project` message; restore it under another name with `--as`.
 
 Restoring needs the right to drop tables and the right to create tables in the namespace. In a
 protected environment it is refused like any other change outside a run; add `--break-glass` with a

@@ -427,6 +427,11 @@ name may not hold a control character, a format character (such as U+202E or a z
 or a line or paragraph separator, as for a table: the refusal names the character as `U+XXXX`. An
 artifact that already has such a name keeps working.
 
+A new artifact cannot be uploaded under a name a deployed project declares: the upload answers
+``` `models.churn` is declared by a deployed project. Defined in analytics/assets/models/churn.py. Choose another name, or remove it there and deploy first.```
+(or `A deployed project defines this artifact; change it in git.` to someone who may not read the
+name). The project's run produces that artifact; choose another name for an upload.
+
 If the upload fails, or the server refuses the commit, the command withdraws its upload, so it does
 not keep one of the artifact's 16 places. If the server's answer to the last request is lost,
 the command says that the version may or may not exist, and names the `manifest_sha256` to look

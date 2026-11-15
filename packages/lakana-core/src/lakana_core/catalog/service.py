@@ -124,7 +124,11 @@ from lakana_core.catalog.files_read import (
     forget_table_files_read,
     record_files_read,
 )
-from lakana_core.catalog.git_owned import refuse_declared_name, refuse_owned_drop
+from lakana_core.catalog.git_owned import (
+    refuse_declared_name,
+    refuse_owned_drop,
+    undrop_refusal,
+)
 from lakana_core.catalog.glossary_read import TableTerms, TermRef, table_terms
 from lakana_core.catalog.health import (
     TableHealth,
@@ -9624,8 +9628,10 @@ class CatalogService:
             If a table of the name exists now (`NAME_TAKEN_MESSAGE` names `--as`).
         ConflictError
             If the undo period has ended or the purge has started, the table's metadata file is
-            gone, or the write failed for another reason (the namespace dropped at the same
-            moment).
+            gone, a deployed project now declares the name as an artifact
+            (`lakana_core.catalog.git_owned.undrop_refusal`; a name declared as a table or view
+            is restored), or the write failed for another reason (the namespace dropped at the
+            same moment).
         """
         target = ref if new_name is None else replace(ref, name=new_name)
         if new_name is not None:
@@ -9677,6 +9683,10 @@ class CatalogService:
             holder = taken.table_type
             self._session.rollback()
             raise AlreadyExistsError(self._undrop_taken_message(ref, target, holder))
+        refusal = undrop_refusal(self._session, self._authz, p, target, env.id)
+        if refusal is not None:
+            self._session.rollback()
+            raise refusal
         if not self._metadata_file_exists(ref.environment, snapshot["row"]["metadata_location"]):
             self._session.rollback()
             raise ConflictError(FILES_GONE_MESSAGE.format(table=shown(ref.dotted())))
@@ -9867,8 +9877,8 @@ class CatalogService:
             also when another writer took the name at the same moment; for an
             artifact the message says so and names how to drop it.
         ConflictError
-            If a deployed project builds the source (moving it away would drop it from the
-            project's name, `GIT_OWNED_DROP`) or declares the destination
+            If a deployed project builds the source (moving it away would take it from the
+            project's name, `GIT_OWNED_RENAME`) or declares the destination
             (`GIT_OWNED_CREATE`); see `lakana_core.catalog.git_owned`.
             If the write failed for another reason, such as the destination
             namespace being dropped at the same moment.
@@ -9899,7 +9909,9 @@ class CatalogService:
             raise NotFoundError(f"{source.dotted()} is a view; views can't be renamed here.")
         if row.table_type is TableType.ARTIFACT:
             raise NotFoundError(f"{source.dotted()} is an artifact; artifacts can't be renamed.")
-        refuse_owned_drop(self._session, self._authz, p, source, source_ns.environment_id, row.kind)
+        refuse_owned_drop(
+            self._session, self._authz, p, source, source_ns.environment_id, row.kind, rename=True
+        )
         env = self._find_environment(destination.environment)
         target_ns = self._find_namespace(env, destination.namespace)
         taken = self._lookup_table(target_ns, destination.name)

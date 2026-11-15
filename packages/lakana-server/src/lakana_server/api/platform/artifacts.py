@@ -620,7 +620,8 @@ async def begin_upload(
     artifact is created on first use. The answer names the files the store does not have
     yet: send those with the blob route, then commit. Needs `WRITE_TABLE` on the name, and
     `CREATE_TABLE` as well to create the artifact. Answers 404 when the namespace does
-    not exist, 409 when the artifact has too many open uploads, 413 for a manifest over the
+    not exist, 409 when the artifact has too many open uploads or when a person would create
+    an artifact under a name a deployed project declares, 413 for a manifest over the
     server's limit, 408 when the body arrives too slowly, 503 when the server is busy (try
     again after `Retry-After`) and 422 when the body is not a manifest or breaks one of its
     rules.
