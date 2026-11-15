@@ -1541,8 +1541,9 @@ def _require_unambiguous_references(parsed: exp.Expr, dialect: str) -> None:
     gate is for, is done by the table step and `Scope.selected_sources`, which
     the flag does not touch: over the guard-fuzzing corpus (26,819 statements)
     the gate decides every statement the same with and without the column step
-    on sqlglot 30.24, except twelve whose only fault was a column a `WITH` or a
-    derived table does not have (`Unknown column`), which DuckDB refuses itself.
+    on sqlglot 30.24, except twelve: eleven read a column a `WITH` or a derived
+    table does not have (`Unknown column`), which DuckDB refuses itself, and one
+    was a `JOIN` without a `FROM`, which `_reject_joins_without_from` refuses.
 
     Reading `Scope.selected_sources` is what raises on two sources of one
     scope sharing a name, so every scope's is read here explicitly rather
