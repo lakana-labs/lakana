@@ -26,6 +26,7 @@ from sqlglot import exp
 from sqlglot.dialects.duckdb import DuckDB
 from sqlglot.parser import binary_range_parser
 from sqlglot.parsers.duckdb import DuckDBParser
+from sqlglot.tokens import TokenType
 
 if TYPE_CHECKING:
     from sqlglot.dialects.dialect import DialectType
@@ -62,7 +63,7 @@ class _LakanaDuckDBParser(DuckDBParser):
         sqlglot's DuckDB parser builds a lambda from the keyword form only after matching the
         `LAMBDA` keyword at the current token, and otherwise returns `None` or hands over to the
         generic parser, which never matches that keyword. So a lambda returned while the current
-        token reads `LAMBDA` is the keyword form.
+        token is the unquoted word `LAMBDA` is the keyword form.
 
         Parameters
         ----------
@@ -76,7 +77,13 @@ class _LakanaDuckDBParser(DuckDBParser):
             `KEYWORD_LAMBDA` in its `meta`.
         """
         current = self._curr
-        keyword = current is not None and current.text.upper() == "LAMBDA"
+        # The bare word only: a quoted `"lambda"` is a column name (an IDENTIFIER token), and
+        # `upper("lambda" -> 'a')` is a JSON extract on it, not a keyword lambda.
+        keyword = (
+            current is not None
+            and current.token_type is TokenType.VAR
+            and current.text.upper() == "LAMBDA"
+        )
         node = super()._parse_lambda(alias=alias)
         if keyword and isinstance(node, exp.Lambda):
             node.meta[KEYWORD_LAMBDA] = True

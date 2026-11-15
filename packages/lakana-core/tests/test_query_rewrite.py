@@ -463,6 +463,21 @@ _JSON = 'FROM (SELECT \'{"a": "b"}\'::JSON AS j) AS d'
 """A derived table with one JSON column `j`, for the JSON-arrow cases."""
 
 
+def test_a_json_arrow_on_a_column_named_lambda_stays_a_json_extract() -> None:
+    """A quoted `"lambda"` before an arrow is a column, not the `LAMBDA` keyword (#415 review).
+
+    Marked as a keyword lambda it rendered as `UPPER((LAMBDA "lambda" : 'a'))`, which DuckDB
+    refuses; the caller's text is a JSON extract on the column.
+    """
+    sql = 'SELECT upper("lambda" -> \'a\') AS v FROM (SELECT \'{"a": "b"}\'::JSON AS "lambda") AS d'
+    check_blacklist(sql)
+
+    rewritten = rewrite_query(sql, {}).sql
+
+    assert "UPPER(\"lambda\" -> 'a')" in rewritten
+    assert "LAMBDA" not in rewritten
+
+
 @pytest.mark.parametrize(
     ("expression", "rendered"),
     [

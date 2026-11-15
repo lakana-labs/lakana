@@ -31,6 +31,7 @@ def _lambdas(sql: str) -> list[bool]:
     [
         ("SELECT upper(lambda j: 'a')", [True]),
         ("SELECT upper(j -> 'a')", [False]),
+        ("SELECT upper(\"lambda\" -> 'a')", [False]),
         ("SELECT list_reduce(l, lambda x, y: x + y)", [True]),
         ("SELECT list_transform(l, lambda x: list_transform(x, y -> y))", [True, False]),
         ("SELECT list_transform(l, x -> list_transform(x, lambda y: y))", [False, True]),

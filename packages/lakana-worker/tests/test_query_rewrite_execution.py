@@ -365,6 +365,15 @@ def test_a_json_arrow_as_a_function_argument_runs_as_duckdb_runs_its_text(
     assert [row[0] for row in _run(sql, {})] == [expected]
 
 
+def test_a_json_arrow_on_a_column_named_lambda_runs() -> None:
+    """`upper("lambda" -> 'a')` extracts from the column `lambda`, as DuckDB runs the text."""
+    sql = 'SELECT upper("lambda" -> \'a\') FROM (SELECT \'{"a": "b"}\'::JSON AS "lambda")'
+    check_blacklist(sql)
+
+    assert duckdb.connect().execute(sql).fetchall() == [('"B"',)]
+    assert [row[0] for row in _run(sql, {})] == ['"B"']
+
+
 def test_a_lambda_over_a_table_read_runs(tmp_path: Path) -> None:
     """A lambda in a query that reads a table runs through the rewrite's reader CTE."""
     source = _parquet(str(_orders(tmp_path)))
