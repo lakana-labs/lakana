@@ -94,7 +94,7 @@
 "ns delete": { class: ui, part: 3 }
 "ns get": { class: read, part: 3 }
 "ns list": { class: read, part: 3 }
-"orphans": { class: ui, part: 3 }
+"orphans": { class: ui, part: 3, done: true }
 "passkey list": { class: ui, part: 1 }
 "passkey remove": { class: ui, part: 1 }
 "principal create": { class: ui, part: 7 }
@@ -162,29 +162,29 @@
   }
 "table create-external": { class: ui, part: 3 }
 "table definition": { class: read, part: 3, done: true }
-"table delete": { class: ui, part: 3 }
+"table delete": { class: ui, part: 3, done: true }
 "table describe": { class: ui, part: 3, done: true }
-"table expiring": { class: ui, part: 3 }
+"table expiring": { class: ui, part: 3, done: true }
 "table get": { class: read, part: 3, done: true }
 "table health": { class: read, part: 3, done: true }
 "table lineage": { class: read, part: 3, note: "run lineage is not shown on the table page" }
 "table list": { class: ui, part: 3, done: true }
-"table maintain": { class: ui, part: 3 }
+"table maintain": { class: ui, part: 3, done: true }
 "table merge":
   {
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
 "table preview": { class: read, part: 3, done: true }
-"table references": { class: ui, part: 3 }
+"table references": { class: ui, part: 3, done: true }
 "table replace":
   {
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
-"table retention": { class: ui, part: 3 }
-"table undrop": { class: ui, part: 3 }
-"table rebuild": { class: ui, part: 3 }
+"table retention": { class: ui, part: 3, done: true }
+"table undrop": { class: ui, part: 3, done: true }
+"table rebuild": { class: ui, part: 3, done: true }
 "task history": { class: read, part: 5 }
 "task-token mint":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
@@ -210,7 +210,8 @@
   { class: ui, part: 3 }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}":
   { class: ui, part: 3 }
-"DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}": { class: ui, part: 3 }
+"DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
+  { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/grants/{grant_id}": { class: ui, part: 7 }
 "DELETE /api/v1/groups/{name}": { class: ui, part: 7 }
@@ -248,7 +249,7 @@
 "GET /api/v1/environments/{env}/deployments": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deploys": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deploys/{deploy_id}": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/graph/impact": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/graph/join-path": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/graph/lineage": { class: read, part: 3, done: true }
@@ -265,8 +266,9 @@
   { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}/blobs/{sha256}":
   { class: ui, part: 3 }
-"GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables": { class: ui, part: 3 }
-"GET /api/v1/environments/{env}/dropped-tables": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables":
+  { class: ui, part: 3, done: true }
+"GET /api/v1/environments/{env}/dropped-tables": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: read, part: 3, done: true }
@@ -284,10 +286,12 @@
   }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage":
   { class: read, part: 3, note: "run lineage is not shown on the table page" }
-"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references": { class: ui, part: 3 }
-"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references":
+  { class: ui, part: 3, done: true }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
+  { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }
-"GET /api/v1/environments/{env}/orphans": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/orphans": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/project-versions/{project_version_id}": { class: ui, part: 5 }
 "GET /api/v1/environments/{env}/queries": { class: ui, part: 4 }
 "GET /api/v1/environments/{env}/queries/{query_id}": { class: ui, part: 4 }
@@ -418,7 +422,7 @@
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/load":
   { class: git, reason: "`lakana load` (UI file load #224 optional)" }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/maintenance":
-  { class: ui, part: 3 }
+  { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/merge":
   {
     class: git,
@@ -426,8 +430,10 @@
   }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview":
   { class: read, part: 3, done: true }
-"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild": { class: ui, part: 3 }
-"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop": { class: ui, part: 3 }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/rebuild":
+  { class: ui, part: 3, done: true }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop":
+  { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/queries": { class: ui, part: 4 }
 "POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4 }
 "POST /api/v1/environments/{env}/runs": { class: ui, part: 5 }
@@ -475,7 +481,8 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
-"PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention": { class: ui, part: 3 }
+"PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
+  { class: ui, part: 3, done: true }
 "PUT /api/v1/environments/{name}/retention": { class: ui, part: 8 }
 "PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
 "PUT /api/v1/principals/{name}/picture": { class: ui, part: 2 }

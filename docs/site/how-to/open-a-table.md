@@ -18,10 +18,59 @@ The page has:
 - **The table's name** as the heading, with its label under it when the table has one.
 - **A line under the name** with what the table is and where it lives, such as `Fact · gold.sales`,
   and the environment's label.
-- **Tabs**: Overview, Columns, Preview, Lineage, Health and Access. Every tab has its own
+- **Tabs**: Overview, Columns, Preview, Lineage, References, Health and Access. Every tab has its own
   address, so a link opens the tab you were looking at. Everyone sees the same tabs.
+- **Actions** beside the name, once the table is read, when there is something you may do to the
+  table (see [Actions](#actions)).
 
-The page has no button beside the name. What you may do is in the tabs.
+## Actions
+
+**Actions** opens a menu of what you may do to the table as a whole. It lists only what the
+server says you may do, so an item you see is one you are allowed to use; with none, the page has
+no **Actions** at all. An artifact's page has no **Actions** either: drop an artifact with
+`lakana artifact drop`.
+
+- **Maintain now…** queues maintenance for the table, as `lakana table maintain` does. See
+  [Maintain a table now](#maintain-a-table-now).
+- **Retention…** shows and changes when the table expires, as `lakana table retention` does. See
+  [Let tables expire](let-tables-expire.md#see-a-tables-retention).
+- **Rebuild from git…** drops a table a deployed project builds and queues the run that builds it
+  again. It asks why, for the audit log. See
+  [Rebuild a table from git](drop-and-restore-a-table.md#rebuild-a-table-from-git).
+- **Drop…** asks first, then drops the table and opens the **Dropped** view of its namespace,
+  where you can undo it. See [Drop a table](drop-and-restore-a-table.md#drop-a-table).
+
+When a deployed project builds the table, **Drop…** is shown but cannot be chosen, and the menu
+says `Defined in analytics/assets/silver/clean.sql — change it in git`, with the table's own
+repository and file. A screen reader hears that sentence when the menu opens. Change the table in
+git, or use **Rebuild from git…**.
+
+Drop and Rebuild from git ask for a recent passkey touch: one from the last 15 minutes. When yours
+is older, the browser asks you to touch your passkey and the action is sent again. If the touch
+fails, the dialog stays open with the reason, nothing is dropped, and **Cancel** closes it. In a
+protected environment Drop also asks why you break the protection, which the audit log records.
+Rebuild from git asks for no second reason: the one reason it asks for is also sent as the reason
+you break the protection, as `--break-glass` does.
+
+### Maintain a table now
+
+Maintenance expires a table's old snapshots, deletes the files nothing references any more and
+removes the tags of failed checks (see `lakana table maintain` in the
+[CLI reference](../reference/cli.md#lakana-table-maintain)). In the web interface, choose
+**Actions**, then **Maintain now…**. The form starts with the server's defaults, the same as the
+command's:
+
+- **Keep snapshots younger than (days):** 7, from 0 up.
+- **Always keep the latest snapshots:** 5, from 1 up.
+- **Delete unreferenced files older than (hours):** 72, from 1 to 87,600.
+- **Dry run: report, change nothing:** off.
+
+Press **Maintain now**. The dialog then says "Maintenance is queued as query" with the query's
+identifier and gives a command to copy, `lakana query status <id> --env <environment>`. Maintenance
+runs in the background; the web interface does not show its progress yet, so follow it with that
+command. If the server refuses, for example because you lack the right to maintain the table, the
+form stays open with the server's sentence. **Maintain now…** is in the menu only for a managed
+table you may maintain.
 
 ## Overview
 
@@ -128,6 +177,24 @@ you may not read, are not drawn, and nothing counts them. If you see only the ta
 tab says "Nothing upstream or downstream." A very large lineage shows its first 500 nodes each way
 and says "Showing the first 500 nodes each way." If lineage cannot be read, the tab says why and
 offers **Try again**.
+
+## References
+
+References are what the table's header declares it points at, such as a `store_id` that must
+match `dim_store.store_id`. They are not lineage: lineage is how data flowed, references are
+what the model says relates. The tab shows the same as `lakana table references`. Its address
+ends in `/references`.
+
+- **This table references** lists each reference as `column → table.column`. The target table is
+  a link to its page. A target that does not exist says "This table does not exist." and is not a
+  link. A target that keeps history says "valid at" and the time column the reference follows.
+- **Referenced by** lists the tables whose headers point at this one, each a link, with the column
+  they reference and the column of this table it must match.
+
+References to or from a table you may not read are counted and never named: the tab says, for
+example, "2 more from tables you may not read" or "1 more points at a table you may not read".
+When the header declares no references and no table points at this one, the tab says so. If the
+references cannot be read, it says why and offers **Try again**.
 
 ## Health
 

@@ -41,3 +41,32 @@ it("ships no lineage string in the first load, and the Lineage tab registers its
 
   expect(i18n.t("table.lineage.stepUp")).toBe("One step up");
 });
+
+it("ships no string of the views or the actions in the first load, and importing ViewBody registers them", async () => {
+  const i18n = initI18n();
+
+  expect(Object.keys(en.catalog)).not.toContain("views");
+  expect(i18n.exists("catalog.views.dropped.empty")).toBe(false);
+  expect(i18n.exists("table.actions.undrop.title")).toBe(false);
+  expect(i18n.exists("table.actions.drop.title")).toBe(false);
+  expect(i18n.exists("table.actions.maintain.title")).toBe(false);
+  expect(i18n.exists("table.actions.retention.title")).toBe(false);
+  expect(i18n.exists("catalog.views.retention.never")).toBe(false);
+  expect(i18n.t("catalog.view.dropped")).toBe("Dropped");
+
+  await import("../catalog/views/ViewBody");
+
+  expect(i18n.t("catalog.views.dropped.empty", { place: "prod" })).toBe(
+    "Nothing was dropped in prod that can still be restored.",
+  );
+  expect(i18n.t("table.actions.undrop.title", { table: "gold.sales.fact" })).toBe(
+    "Restore gold.sales.fact",
+  );
+  expect(i18n.t("table.actions.drop.title", { table: "gold.sales.fact" })).toBe(
+    "Drop gold.sales.fact?",
+  );
+  expect(i18n.t("table.actions.maintain.title", { table: "gold.sales.fact" })).toBe(
+    "Maintain gold.sales.fact now",
+  );
+  expect(i18n.t("catalog.views.retention.never")).toBe("never");
+});
