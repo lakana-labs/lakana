@@ -323,7 +323,10 @@ every missing output of it means "run everything".
   `packages/*/src/` as well as for the bundle, packaging and script files in the filter of its
   "Did the bundle change?" step, and for the files and the REST stand-in of the `ingest-files`
   and `ingest-rest` examples, which its ingestion part reads (M6's exit criterion, see
-  `docs/agent/release.md`). A `unit` shard has a 25-minute timeout, `test` 15 minutes.
+  `docs/agent/release.md`). Its last step, `scripts/offline_install_test.sh`, runs the built image under
+  `docker run --network none` with `LAKANA_WORKER__EXTENSION_SOURCE=none` and checks that local mode
+  starts and answers `lakana sql` (#493, the proof for the offline install how-to); the script is in
+  the filter too. A `unit` shard has a 25-minute timeout, `test` 15 minutes.
 - **Coverage** is measured on 3.14 only, by the three 3.14 shards, and combined in exactly one
   job, `test (3.14)` (see the coverage ratchet below). That job uploads the combined report,
   `coverage.json`, as the artifact `coverage-report` (kept 7 days), also when the ratchet fails,
