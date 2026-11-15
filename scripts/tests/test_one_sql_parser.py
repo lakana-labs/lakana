@@ -240,7 +240,7 @@ def _mentions_sqlglot(text: str) -> bool:
 
     Every way the scan recognises sqlglot is an `import sqlglot...` or `from sqlglot... import`
     statement, and both spell the module name in the file text. Python reads an identifier in
-    NFKC form (`import ｓqlglot` binds sqlglot), so the text is normalised the same way first.
+    NFKC form (a fullwidth "s" in the name still binds sqlglot), so the text is normalised the same way first.
 
     Parameters
     ----------
