@@ -20,6 +20,9 @@ from lakana._artifact_tree import TreeWriter, check_manifest
 from lakana._models import ArtifactFile
 from lakana.errors import ArtifactCorrupt
 
+# A test that finds a path in a message writes under `short_tmp_path`: a message shortens a long
+# path, which a long `--basetemp` makes `tmp_path` (#604).
+
 
 def _file(path: str, data: bytes) -> ArtifactFile:
     """Build a manifest file for some contents.
@@ -361,9 +364,9 @@ def test_a_move_that_fails_at_once_leaves_the_target_empty(
 
 
 def test_a_move_that_stops_half_way_says_what_is_where_and_removes_nothing(
-    tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch
+    short_tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    target = tmp_path / "here"
+    target = short_tmp_path / "here"
     target.mkdir()
     writer = TreeWriter.begin(target, 2)
     writer.write_file(_file("a", b"a"), [b"a"])
@@ -387,9 +390,9 @@ def test_a_move_that_stops_half_way_says_what_is_where_and_removes_nothing(
 
 
 def test_a_read_only_copy_that_stops_half_way_names_the_chmod_that_lets_the_person_empty_it(
-    tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch
+    short_tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    target = tmp_path / "here"
+    target = short_tmp_path / "here"
     target.mkdir()
     writer = TreeWriter.begin(target, 2, read_only=True)
     writer.write_file(_file("a/x", b"a"), [b"a"])
@@ -402,41 +405,41 @@ def test_a_read_only_copy_that_stops_half_way_names_the_chmod_that_lets_the_pers
         writer.discard()
     finally:
         monkeypatch.undo()
-        _open_up(tmp_path)
+        _open_up(short_tmp_path)
 
 
 def test_a_staging_directory_swapped_for_another_one_is_noticed_before_the_rename(
-    tmp_path: Path,
+    short_tmp_path: Path,
 ) -> None:
     """The writer holds its own directory by descriptor; a foreign one never reaches the target."""
-    writer = TreeWriter.begin(tmp_path / "copy", 1)
+    writer = TreeWriter.begin(short_tmp_path / "copy", 1)
     writer.write_file(_file("mine", b"x"), [b"x"])
     writer.write_file(_file("d/mine", b"x"), [b"x"])
-    os.rename(writer.staging, tmp_path / "ours")
+    os.rename(writer.staging, short_tmp_path / "ours")
     writer.staging.mkdir()
     (writer.staging / "theirs").write_bytes(b"theirs")
     with pytest.raises(ManifestError, match="was replaced by another") as caught:
         writer.commit()
-    assert f"{tmp_path / 'copy'} was not created" in str(caught.value)
+    assert f"{short_tmp_path / 'copy'} was not created" in str(caught.value)
     assert "left as it is" not in str(caught.value)
-    assert not (tmp_path / "copy").exists()
+    assert not (short_tmp_path / "copy").exists()
     assert (writer.staging / "theirs").read_bytes() == b"theirs"
-    assert _leftovers(tmp_path / "ours") == []
+    assert _leftovers(short_tmp_path / "ours") == []
     writer.discard()
     assert (writer.staging / "theirs").read_bytes() == b"theirs"
 
 
 def test_a_staging_directory_swapped_during_the_rename_is_noticed_after_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    short_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A swap between the check and the rename cannot be prevented; it is reported truthfully."""
-    writer = TreeWriter.begin(tmp_path / "copy", 1)
+    writer = TreeWriter.begin(short_tmp_path / "copy", 1)
     writer.write_file(_file("mine", b"x"), [b"x"])
     real = os.rename
 
     def swapping(src: Any, dst: Any, **kwargs: Any) -> None:  # ruff: ignore[any-type]
         if ".lakana-partial-" in str(src):
-            real(writer.staging, tmp_path / "ours")
+            real(writer.staging, short_tmp_path / "ours")
             writer.staging.mkdir()
             (writer.staging / "theirs").write_bytes(b"theirs")
         real(src, dst, **kwargs)
@@ -446,10 +449,11 @@ def test_a_staging_directory_swapped_during_the_rename_is_noticed_after_it(
         writer.commit()
     monkeypatch.undo()
     text = " ".join(str(caught.value).split())
-    assert f"The directory now at {tmp_path / 'copy'} is not the one this download wrote" in text
+    copy = short_tmp_path / "copy"
+    assert f"The directory now at {copy} is not the one this download wrote" in text
     assert "left as it is" not in text
-    assert (tmp_path / "copy" / "theirs").read_bytes() == b"theirs"
-    assert _leftovers(tmp_path / "ours") == []
+    assert (short_tmp_path / "copy" / "theirs").read_bytes() == b"theirs"
+    assert _leftovers(short_tmp_path / "ours") == []
     writer.discard()
 
 
@@ -473,9 +477,9 @@ def test_a_staging_directory_swapped_inside_an_existing_target_is_not_touched(
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root writes everywhere")
 def test_an_empty_target_that_cannot_be_written_to_is_refused_with_the_reason(
-    tmp_path: Path, mode: str
+    short_tmp_path: Path, mode: str
 ) -> None:
-    target = tmp_path / "here"
+    target = short_tmp_path / "here"
     target.mkdir()
     target.chmod(0o500)
     try:
@@ -559,7 +563,7 @@ def test_the_staging_tree_is_removed_through_the_descriptors_that_are_still_open
 
 
 def test_a_name_the_file_system_refuses_is_a_message_naming_the_path(
-    tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch
+    short_tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     real = os.mkdir
 
@@ -568,17 +572,17 @@ def test_a_name_the_file_system_refuses_is_a_message_naming_the_path(
             raise OSError(errno.ENAMETOOLONG, "File name too long")
         real(path, *args, **kwargs)
 
-    writer = TreeWriter.begin(tmp_path / "copy", 1)
+    writer = TreeWriter.begin(short_tmp_path / "copy", 1)
     monkeypatch.setattr(os, "mkdir", refusing)
     with pytest.raises(ManifestError) as caught:
         writer.write_file(_file("toolong/f", b"x"), [b"x"])
-    assert f"Cannot write toolong/f for {tmp_path / 'copy'}: File name too long." in str(
+    assert f"Cannot write toolong/f for {short_tmp_path / 'copy'}: File name too long." in str(
         caught.value
     )
     assert "Nothing was kept" in str(caught.value)
     monkeypatch.undo()
     writer.discard()
-    assert _leftovers(tmp_path) == []
+    assert _leftovers(short_tmp_path) == []
 
 
 def test_a_directory_that_cannot_be_opened_for_another_reason_names_the_path(
@@ -944,21 +948,21 @@ def test_a_target_that_fills_up_before_the_end_is_refused_and_cleaned(
 
 
 def test_download_refuses_when_the_disk_is_too_small(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+    short_tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     """Refused before the first byte, with both numbers."""
     monkeypatch.setattr(shutil, "disk_usage", lambda _path: types.SimpleNamespace(free=10))
     with pytest.raises(ManifestError) as caught:
-        TreeWriter.begin(tmp_path / "copy", 11)
+        TreeWriter.begin(short_tmp_path / "copy", 11)
     assert str(caught.value) == (
-        f"The artifact needs 11 bytes but only 10 are free in {tmp_path / 'copy'}; free some "
+        f"The artifact needs 11 bytes but only 10 are free in {short_tmp_path / 'copy'}; free some "
         "space or choose another directory."
     )
-    assert _leftovers(tmp_path) == []
+    assert _leftovers(short_tmp_path) == []
     with pytest.raises(ManifestError, match="only 10 are free"):
-        TreeWriter.begin(tmp_path / "a" / "b" / "copy", 11)
-    assert _leftovers(tmp_path) == []  # no parent was made for a refusal
-    TreeWriter.begin(tmp_path / "copy", 10).discard()
+        TreeWriter.begin(short_tmp_path / "a" / "b" / "copy", 11)
+    assert _leftovers(short_tmp_path) == []  # no parent was made for a refusal
+    TreeWriter.begin(short_tmp_path / "copy", 10).discard()
 
 
 def test_a_directory_that_cannot_be_made_says_why(tmp_path: Path, mode: str) -> None:
@@ -1139,9 +1143,9 @@ def test_a_staging_directory_replaced_by_another_real_one_is_noticed_without_des
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads everywhere")
 def test_an_existing_target_that_cannot_be_opened_is_refused_with_the_reason(
-    tmp_path: Path, mode: str
+    short_tmp_path: Path, mode: str
 ) -> None:
-    target = tmp_path / "here"
+    target = short_tmp_path / "here"
     target.mkdir()
     target.chmod(0)
     try:

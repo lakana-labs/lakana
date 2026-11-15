@@ -441,14 +441,13 @@ _WEATHER = pa.table({"id": pa.array([1, 2], pa.int64())})
 _SELECT = 'SELECT * FROM "silver"."weather"'
 
 
-@pytest.fixture
-def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
-    """Write the asset and its helper, and make the code directory the cwd.
+def _make_world(base: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
+    """Write the asset and its helper under `base`, and make the code directory the cwd.
 
     Parameters
     ----------
-    tmp_path
-        Pytest's per-test directory.
+    base
+        The directory the world lives in.
     monkeypatch
         Changes the cwd and isolates `sys.path` and `sys.modules`.
 
@@ -457,7 +456,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
     _World
         The world.
     """
-    root = tmp_path / "code"
+    root = base / "code"
     (root / "assets" / "gold").mkdir(parents=True)
     (root / "src").mkdir()
     (root / "assets" / "gold" / "scores.py").write_text(_ASSET)
@@ -471,8 +470,49 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
         _Tables(WriteResult(rows=2, files=1, snapshot_id=42)),
         _Artifacts(),
     )
-    (tmp_path / "attempt").mkdir(mode=0o700)
-    return _World(root, client, tmp_path / "attempt" / "result.json")
+    (base / "attempt").mkdir(mode=0o700)
+    return _World(root, client, base / "attempt" / "result.json")
+
+
+@pytest.fixture
+def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
+    """Build the world in pytest's per-test directory.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    monkeypatch
+        Changes the cwd and isolates `sys.path` and `sys.modules`.
+
+    Returns
+    -------
+    _World
+        The world.
+    """
+    return _make_world(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def short_world(short_tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
+    """Build the world in a directory with a short path, for a test that reads a path back.
+
+    A message bounds a long path by cutting its middle, so under a long `--basetemp` the part
+    of the path such a test looks for would be cut away (#604).
+
+    Parameters
+    ----------
+    short_tmp_path
+        A per-test directory with a short path.
+    monkeypatch
+        Changes the cwd and isolates `sys.path` and `sys.modules`.
+
+    Returns
+    -------
+    _World
+        The world.
+    """
+    return _make_world(short_tmp_path, monkeypatch)
 
 
 def test_a_run_reads_inputs_calls_the_function_and_replaces_the_table(
@@ -2387,7 +2427,8 @@ def test_an_object_that_claims_to_be_a_path_is_not_one(world: _World) -> None:
     assert "got lakana_asset.churn_model.<locals>.Fake" in world.record()["message"]
 
 
-def test_the_message_shows_a_hostile_path_escaped_and_bounded(world: _World) -> None:
+def test_the_message_shows_a_hostile_path_escaped_and_bounded(short_world: _World) -> None:
+    world = short_world  # a short path, so the hostile part is not cut away with the middle
     source = _PRODUCER.replace(
         "    return out\n",
         '    return lakana.output_dir() / ("x\\n\\x1b[31m\\u202e" + "y" * 400)\n',
