@@ -516,3 +516,25 @@ def test_the_rebuild_reason_is_checked(
         _rebuild(session, catalog).rebuild(principal, _CLEAN, reason=reason)
 
     _assert_intact(session, table_id)
+
+
+def test_a_rebuild_after_a_deploy_that_switches_to_history_runs_the_new_version(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A deploy that makes a table a history table is not refused, so a rebuild reads it.
+
+    The deploy keeps no check of the table's columns (a deploy has no output types); the run's
+    history write refuses the table without the added columns and points at a rebuild, which
+    then queues the version that writes history, not the one before it.
+    """
+    catalog = _catalog(session, tmp_path)
+    _managed(catalog, principal)
+    deploy_assets(session, "dev", "analytics", {"silver.clean": {}})
+    history = {"write": "history", "key": ["id"], "history": {"valid_from": None}}
+    switched = deploy_assets(session, "dev", "analytics", {"silver.clean": history})
+
+    result = _rebuild(session, catalog).rebuild(principal, _CLEAN, reason=_REASON)
+
+    run = session.get(Run, result.run_id)
+    assert run is not None
+    assert run.job_version_id == switched.id
