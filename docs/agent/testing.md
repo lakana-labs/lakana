@@ -526,7 +526,7 @@ lakana sql "SELECT * FROM gold.station_ranking ORDER BY warmth_rank"
 | `alert time` | the time of a health alert, `05 Nov 00:33 UTC` | `<alert time>` |
 | `short hash` | the abbreviated commit id in `git commit`'s `[master 9445d5e]` | `[master <short hash>]` |
 | `snapshot` | an Iceberg snapshot id, 16 to 19 digits | `<snapshot>` |
-| `token` | `lakana_pat_`, `lakana_ci_` and `lakana_task_` tokens | `lakana_pat_<key id>_<secret>` |
+| `token` | `lakana_pat_`, `lakana_ci_` and `lakana_task_` tokens; a page shows `<secret>` for the secret part, and `--fix` writes it that way, never the real value | `lakana_pat_<key id>_<secret>` |
 | `port` | the port after `localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]` | `host:<port>` |
 | `path` | absolute paths under `/tmp`, `/var/tmp`, `/var/folders`, `/home`, `/Users`, `/root`, `/run/user`, also after `file://` | `<path>` |
 | `version` | `1.2.3`, with `.dev4`, `rc1`, `+g1a2b3c` | `<version>` |

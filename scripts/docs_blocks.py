@@ -600,6 +600,8 @@ def _region(name: str, region: str, lines: list[str]) -> str:
 
 
 _HEX = r"[0-9a-f]"
+_SECRET = r"(?:[A-Za-z0-9_-]{8,}|<secret>)"
+_TOKEN_SECRET = re.compile(rf"(\blakana_(?:pat|ci|task)_[A-Za-z0-9]{{6,}}_){_SECRET}")
 MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
     (name, re.compile(pattern), replacement)
     for name, pattern, replacement in (
@@ -627,7 +629,7 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("snapshot", r"(?<![\w.])\d{16,19}(?![\w.])", "<snapshot>"),
         (
             "token",
-            r"\b(lakana_(?:pat|ci|task)_)[A-Za-z0-9]{6,}_[A-Za-z0-9_-]{8,}",
+            rf"\b(lakana_(?:pat|ci|task)_)(?:[A-Za-z0-9]{{6,}}|<key id>)_{_SECRET}",
             r"\1<key id>_<secret>",
         ),
         ("port", r"\b(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{2,5}\b", r"\1:<port>"),
@@ -681,6 +683,25 @@ def mask(text: str) -> str:
     for _, pattern, replacement in MASKS:
         text = pattern.sub(replacement, text)
     return text
+
+
+def redact(text: str) -> str:
+    """Replace the secret part of every token in `text` with ``<secret>``.
+
+    A page never holds a real secret, so `fix` passes everything it copies from a run through
+    this.
+
+    Parameters
+    ----------
+    text
+        Output as an example printed it.
+
+    Returns
+    -------
+    str
+        `text` with each ``lakana_pat_<key id>_<secret>`` token's secret replaced.
+    """
+    return _TOKEN_SECRET.sub(r"\1<secret>", text)
 
 
 def _lines(text: str) -> list[str]:
@@ -744,7 +765,7 @@ def _merge(shown: str, printed: str) -> str:
     str
         The new body, each line ending in a newline.
     """
-    page, run = _lines(shown), _lines(printed)
+    page, run = _lines(shown), _lines(redact(printed))
     matcher = difflib.SequenceMatcher(None, [mask(x) for x in page], [mask(x) for x in run])
     out: list[str] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():

@@ -204,6 +204,20 @@ def test_fix_replaces_only_the_lines_that_changed(tmp_path: Path) -> None:
     assert fix(root, root / "docs/site", None, captures) == []
 
 
+def test_fix_never_writes_the_secret_of_a_token(tmp_path: Path) -> None:
+    """A token in a run reaches the page as `<secret>`, whether or not the page had the line."""
+    secret = "3PbXyZ0123456789abcdEFGH"
+    printed = f"Token: lakana_pat_a445f5d891704fbb_{secret}\nlakana_ci_Ab12Cd34_{secret}\n"
+    root, captures = _tree(tmp_path, BLOCK, "old\nold2\n", printed)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert secret not in text
+    assert "lakana_pat_a445f5d891704fbb_<secret>" in text
+    assert "lakana_ci_Ab12Cd34_<secret>" in text
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+    assert fix(root, root / "docs/site", None, captures) == []
+
+
 def test_fix_keeps_an_indented_block_indented(tmp_path: Path) -> None:
     """A block inside a list item keeps its fence's indent."""
     page = "- item\n\n  <!-- output: demo#show -->\n  ```text\n  old\n  ```\n"

@@ -89,7 +89,7 @@ says so, one says whom to give the token to and what they type. Here the secret 
 Store this token now: it can't be shown again.
 Give this token to alice over a trusted channel; they run `lakana login`.
 Issued token a445f5d891704fbb (alice-laptop) for alice
-Token: lakana_pat_a445f5d891704fbb_3PbYjzc3e989pc43e-Z2kG6Zdap2QtaroAchHZdZtEU
+Token: lakana_pat_a445f5d891704fbb_<secret>
 ```
 
 Hand over three things: the token, the address of the instance (the URL that the person passes to
