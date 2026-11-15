@@ -9,11 +9,13 @@ external tables and views never expire. These tests run on a SQLite file.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from core_test_helpers import ActionAllowList, python_task_run
@@ -1149,3 +1151,28 @@ def test_the_expiring_list_forged_cursor_reveals_nothing_unreadable(
     page = only_orders.list_expiring_tables(reader, "dev", within_days=7, cursor=forged)
 
     assert [entry.ref.dotted() for entry in page.items] == ["gold.orders"]
+
+
+def test_the_expiring_list_pages_rows_with_equal_expiry_without_skip_or_repeat(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """Four tables that expire at the same instant each appear exactly once at `limit=1`."""
+    _expiring_catalog(session, principal, catalog)
+    same = datetime(2026, 12, 1, 12, 0, tzinfo=UTC)
+    real = retention_module.describe_retentions
+
+    def equal_expiry(*args: object, **kwargs: object) -> list[object]:
+        return [dataclasses.replace(e, expires_at=same) for e in real(*args, **kwargs)]  # ty: ignore[invalid-argument-type]
+
+    seen = []
+    cursor = None
+    with mock.patch("lakana_core.catalog.service.describe_retentions", equal_expiry):
+        while True:
+            page = catalog.list_expiring_tables(
+                principal, "dev", within_days=3650, limit=1, cursor=cursor
+            )
+            seen += [entry.table_id for entry in page.items]
+            cursor = page.next_cursor
+            if cursor is None:
+                break
+    assert len(seen) == 4 and len(set(seen)) == 4

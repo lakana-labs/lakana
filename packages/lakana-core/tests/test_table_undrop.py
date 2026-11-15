@@ -1575,3 +1575,21 @@ def test_dropped_tables_across_the_environment_leave_out_what_the_caller_may_not
 
     assert [d.name for d in listed.items] == ["late", "orders"]
     assert [d.name for d in after.items] == ["orders"]
+
+
+def test_dropped_tables_with_equal_drop_time_page_without_skip_or_repeat(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """Three tables dropped at the same instant each appear exactly once at `limit=1`."""
+    ids = _dropped_in_two_namespaces(session, catalog, principal)
+    session.execute(update(TableLocation).values(dropped_at=datetime.now(UTC)))
+    session.commit()
+    seen = []
+    cursor = None
+    while True:
+        page = catalog.list_environment_dropped_tables(principal, "dev", limit=1, cursor=cursor)
+        seen += [d.table_id for d in page.items]
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert sorted(seen) == sorted(ids)
