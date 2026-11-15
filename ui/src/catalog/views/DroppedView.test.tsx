@@ -77,6 +77,26 @@ describe("DroppedView", () => {
     expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   });
 
+  it("keeps the rows and shows the server's sentence when Show more fails", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [ENVIRONMENT_LIST]: (request) =>
+          request.path.includes("cursor=c1")
+            ? { status: 500, body: { type: "InternalError", detail: "Try again in a moment." } }
+            : {
+                status: 200,
+                body: { items: [dropped({ name: "first", uuid: "u1" })], next_cursor: "c1" },
+              },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Try again in a moment.");
+    expect(rows()).toHaveLength(1);
+  });
+
   it("moves the focus to the result line when Show more brings an empty last page", async () => {
     const { user } = renderShell(ADDRESS, {
       routes: {
@@ -288,6 +308,28 @@ describe("DroppedView", () => {
       new_name: null,
       break_glass_reason: "Dropped by mistake",
     });
+  });
+
+  it("closes the reason's dialog with Cancel and sends nothing", async () => {
+    const { server, user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        "GET /api/v1/environments/prod": {
+          status: 200,
+          body: { name: "prod", is_protected: true },
+        },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Undrop gold.sales.fact_returns" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(rows()).toHaveLength(1);
+    expect(writes(server.sent)).toHaveLength(0);
   });
 
   it("uses the namespace route and says dropped from the namespace", async () => {

@@ -95,4 +95,96 @@ describe("useCursorPages", () => {
     expect(result.current.error).toBe("Try again in a moment.");
     expect(result.current.hasMore).toBe(true);
   });
+
+  it("reads nothing more at the last page", async () => {
+    const load = vi.fn(() => Promise.resolve(page([1], null)));
+    const { result } = renderHook(() => useCursorPages("a", load));
+    await waitFor(() => {
+      expect(result.current.items).toEqual([1]);
+    });
+
+    await act(() => result.current.loadMore());
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(result.current.items).toEqual([1]);
+  });
+
+  it("drops a next page, or its failure, that arrives for a key no longer shown", async () => {
+    const late: Array<{ resolve: () => void; reject: () => void }> = [];
+    const load =
+      (key: string) =>
+      (cursor: string | null): Promise<CursorPage<number>> =>
+        key === "new"
+          ? Promise.resolve(page([9], null))
+          : cursor === null
+            ? Promise.resolve(page([1], "c1"))
+            : new Promise((resolve, reject) => {
+                late.push({
+                  resolve: () => {
+                    resolve(page([2], null));
+                  },
+                  reject: () => {
+                    reject(new ApiError(500, "InternalError", "Late."));
+                  },
+                });
+              });
+    const { result, rerender } = renderHook(({ key }) => useCursorPages(key, load(key)), {
+      initialProps: { key: "old" },
+    });
+    await waitFor(() => {
+      expect(result.current.hasMore).toBe(true);
+    });
+    const pending = [result.current.loadMore(), result.current.loadMore()];
+
+    rerender({ key: "new" });
+    await waitFor(() => {
+      expect(result.current.items).toEqual([9]);
+    });
+    await act(async () => {
+      late[0]?.resolve();
+      late[1]?.reject();
+      await Promise.allSettled(pending);
+    });
+
+    expect(late).toHaveLength(2);
+    expect(result.current.items).toEqual([9]);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("drops a first page, or its failure, that arrives for a key no longer shown", async () => {
+    let settle: Array<() => void> = [];
+    const load = (key: string) => (): Promise<CursorPage<number>> =>
+      key === "new"
+        ? Promise.resolve(page([9], null))
+        : new Promise((resolve, reject) => {
+            settle.push(
+              key === "a"
+                ? () => {
+                    resolve(page([1], null));
+                  }
+                : () => {
+                    reject(new ApiError(500, "InternalError", "Late."));
+                  },
+            );
+          });
+    const { result, rerender } = renderHook(({ key }) => useCursorPages(key, load(key)), {
+      initialProps: { key: "a" },
+    });
+    rerender({ key: "b" });
+    rerender({ key: "new" });
+    await waitFor(() => {
+      expect(result.current.items).toEqual([9]);
+    });
+
+    await act(async () => {
+      for (const done of settle) {
+        done();
+      }
+      settle = [];
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(result.current.items).toEqual([9]);
+    expect(result.current.error).toBeNull();
+  });
 });

@@ -56,4 +56,28 @@ describe("useProtected", () => {
       expect(result.current).toBe(false);
     });
   });
+
+  it("drops an answer, or a failure, that arrives for an environment no longer asked about", async () => {
+    const prod = held();
+    const staging = held();
+    fakeServer({
+      "GET /api/v1/environments/prod": prod.route,
+      "GET /api/v1/environments/staging": staging.route,
+      "GET /api/v1/environments/dev": { status: 200, body: { name: "dev", is_protected: false } },
+    });
+    const { result, rerender } = renderHook(({ name }) => useProtected(name), {
+      initialProps: { name: "prod" },
+    });
+    rerender({ name: "staging" });
+    rerender({ name: "dev" });
+    await waitFor(() => {
+      expect(result.current).toBe(false);
+    });
+
+    prod.release({ status: 200, body: { name: "prod", is_protected: true } });
+    staging.release({ status: 500, body: { detail: "Broken." } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(result.current).toBe(false);
+  });
 });
