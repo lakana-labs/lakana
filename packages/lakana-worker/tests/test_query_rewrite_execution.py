@@ -29,6 +29,7 @@ from lakana_core.query_rewrite import (
     ViewDefinition,
     check_blacklist,
     expand_views,
+    extract_table_refs,
     rewrite_query,
 )
 from lakana_worker import query_child
@@ -1214,6 +1215,32 @@ def test_a_column_mask_holds_for_a_read_inside_a_bare_values_list(tmp_path: Path
     rows = _fetch(rewrite_query(sql, {"gold.customers": source}))
 
     assert rows == [("***", 2)]
+
+
+@pytest.mark.parametrize("sql", ["TABLE gold.customers", "table gold.customers"])
+def test_table_is_select_star_with_the_row_filter_and_masks(tmp_path: Path, sql: str) -> None:
+    """`TABLE t` reads as `SELECT * FROM t`, through the same row filter and masks (#415).
+
+    Parameters
+    ----------
+    tmp_path
+        Directory to write into.
+    sql
+        The `TABLE` statement.
+    """
+    probe = tmp_path / "customers.parquet"
+    pq.write_table(pa.table({"id": [1, 2], "ssn": ["111-22-3333", "444-55-6666"]}), probe)
+    source = TableSource(
+        urls=[str(probe)],
+        file_format="parquet",
+        columns={"id": "BIGINT", "ssn": "VARCHAR"},
+        row_filters=("id > 1",),
+        column_masks={"ssn": "'***'"},
+    )
+    check_blacklist(sql)
+
+    assert extract_table_refs(sql) == ["gold.customers"]
+    assert _fetch(rewrite_query(sql, {"gold.customers": source})) == [(2, "***")]
 
 
 def _sales(

@@ -76,6 +76,12 @@ with ...; remove it from the query.": `AT (...)`, `ONLY`, `WITH ORDINALITY`, a t
 `WITH (NOLOCK)`, `FOR SYSTEM_TIME`, `PARTITION (...)`, `CHANGES (...)`, `ROWS FROM (...)`,
 `INDEXED BY` and `LATERAL VIEW`.
 
+## `TABLE t` and `SORT BY`
+
+`TABLE gold.sales` is shorthand for `SELECT * FROM gold.sales`: it returns the rows your row
+filters leave, with your column masks applied. `SORT BY` is refused with "SORT BY is not
+supported; use ORDER BY."; write `ORDER BY` instead.
+
 ## Recursive queries are refused
 
 A query may not run recursively, in either spelling:
