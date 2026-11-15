@@ -4139,7 +4139,8 @@ class CatalogService:
         Returns
         -------
         list of TableDescription
-            The same descriptions, filled, in order.
+            The same descriptions, filled, in order. A table dropped since it was described is
+            returned as it was, without `defined_by` and `actions`.
         """
         if not described:
             return []
@@ -4151,12 +4152,18 @@ class CatalogService:
                 .where(Table.id.in_([d.id for d in described]))
             )
         }
+        present = [d for d in described if d.id in rows]
         filled = self._row_actions(
-            p, [(d.ref, d.kind, rows[d.id][0], rows[d.id][1]) for d in described]
+            p, [(d.ref, d.kind, rows[d.id][0], rows[d.id][1]) for d in present]
         )
+        fill = {
+            d.id: (defined_by, actions)
+            for d, (defined_by, actions) in zip(present, filled, strict=True)
+        }
+        # A table dropped since it was described keeps its bare row: nothing to offer on it.
         return [
-            replace(d, defined_by=defined_by, actions=actions)
-            for d, (defined_by, actions) in zip(described, filled, strict=True)
+            replace(d, defined_by=fill[d.id][0], actions=fill[d.id][1]) if d.id in fill else d
+            for d in described
         ]
 
     def row_actions(

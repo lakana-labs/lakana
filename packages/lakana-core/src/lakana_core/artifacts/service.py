@@ -1440,9 +1440,10 @@ class ArtifactService:
         """Refuse a caller who may not begin an upload, before its manifest is read.
 
         The route runs this before it reads a request body of up to 16 MiB: authorization first
-        (write, and create when the name is new), then the protected-write guard and the kind
-        of the name, exactly as `begin_upload` does. Writes nothing and records no break-glass
-        event; `begin_upload` does that.
+        (write, and create when the name is new), then the protected-write guard, the kind of
+        the name and a person's upload under a name a deployment declares, exactly as
+        `begin_upload` does. Writes nothing and records no break-glass event; `begin_upload`
+        does that.
 
         Parameters
         ----------
@@ -1457,6 +1458,8 @@ class ArtifactService:
             If the caller may not write (or create) the name, or the guard refuses.
         ValidationError
             If the name belongs to a table, a view or an external table.
+        ConflictError
+            If a person would create an artifact under a name a deployment declares.
         """
         securable = self._securable(ref)
         self._authz.authorize(p, Action.WRITE_TABLE, securable)
@@ -1476,7 +1479,41 @@ class ArtifactService:
                 f"{ref.dotted()} is {_KIND_WORDS[row.kind]}, not an artifact; drop it first, "
                 "or choose another name."
             )
+        self._refuse_declared_upload(p, ref, row)
         self._session.rollback()
+
+    def _refuse_declared_upload(self, p: PrincipalRef, ref: TableRef, row: Table | None) -> None:
+        """Refuse a person's upload that would create an artifact under a declared name.
+
+        A run produces what its project declares; a person may not take that name.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The artifact.
+        row
+            The artifact's row, or `None` when the name is new.
+
+        Raises
+        ------
+        ConflictError
+            If the name is new, the caller is a person, and a current deployment declares it
+            (`GIT_OWNED_CREATE`, or `GIT_OWNED_ARTIFACT_HIDDEN` to a caller who may not read it).
+        """
+        if row is not None or p.run_context is not None:
+            return
+        environment_id = resolve_environment_id(self._session, ref.environment)
+        if environment_id is not None:
+            refuse_declared_name(
+                self._session,
+                self._authz,
+                p,
+                ref,
+                environment_id,
+                hidden=GIT_OWNED_ARTIFACT_HIDDEN,
+            )
 
     def begin_upload(self, p: PrincipalRef, ref: TableRef, document: object) -> UploadView:
         """Start adding a version: validate the manifest, create the artifact on first use.
@@ -1529,18 +1566,7 @@ class ArtifactService:
                 f"{ref.dotted()} is {_KIND_WORDS[row.kind]}, not an artifact; drop it first, "
                 "or choose another name."
             )
-        if row is None and p.run_context is None:
-            # A person may not create what a deployed project declares; its run produces it.
-            environment_id = resolve_environment_id(self._session, ref.environment)
-            if environment_id is not None:
-                refuse_declared_name(
-                    self._session,
-                    self._authz,
-                    p,
-                    ref,
-                    environment_id,
-                    hidden=GIT_OWNED_ARTIFACT_HIDDEN,
-                )
+        self._refuse_declared_upload(p, ref, row)
         manifest = parse_manifest(document, self._limits)
         try:
             if row is None:

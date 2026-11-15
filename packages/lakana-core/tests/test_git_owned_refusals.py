@@ -571,6 +571,19 @@ def test_a_persons_upload_of_a_new_artifact_under_a_declared_name_is_refused(
     assert session.scalars(select(Table).where(Table.name == "churn")).all() == []
 
 
+def test_the_upload_precheck_refuses_a_declared_name_before_a_manifest_is_read(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The route asks `check_can_upload` before it reads a 16 MiB body, so the refusal is here."""
+    service = artifact_service(session, tmp_path)
+    _declare(session, "models.churn", kind="python", output="artifact", path="assets/churn.py")
+
+    with pytest.raises(ConflictError) as refused:
+        service.check_can_upload(principal, ARTIFACT_REF)
+
+    assert str(refused.value) == _create_message("models.churn", "assets/churn.py")
+
+
 def test_a_persons_upload_under_a_declared_table_name_is_refused_too(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:

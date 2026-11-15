@@ -819,6 +819,25 @@ def test_the_batched_fill_reads_as_much_for_three_tables_as_for_one(
     assert all("drop" in d.actions for d in filled)
 
 
+def test_a_table_dropped_between_the_describe_and_the_fill_gets_no_actions(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A concurrent drop leaves the row without actions instead of failing the whole list."""
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization(), namespaces=[_SILVER])
+    kept = TableRef("dev", _SILVER, "kept")
+    gone = TableRef("dev", _SILVER, "gone")
+    for ref in (kept, gone):
+        catalog.create_table(principal, ref, schema=_minimal_schema())
+    bare = [catalog.describe_table(principal, ref, with_actions=False) for ref in (kept, gone)]
+    catalog.drop_table(principal, gone)
+
+    filled = catalog.with_row_actions(principal, bare)
+
+    assert [d.ref.name for d in filled] == ["kept", "gone"]
+    assert "drop" in filled[0].actions
+    assert (filled[1].actions, filled[1].defined_by) == ((), None)
+
+
 def test_a_columns_only_describe_reads_no_definition(
     session: Session, tmp_path: Path, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
 ) -> None:
