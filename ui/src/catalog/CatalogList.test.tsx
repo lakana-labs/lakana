@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { TableMatchOut } from "../api";
 import { item, PAGE, TREE } from "../test/catalog";
+import { manageRoutes } from "../test/manage";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
 
@@ -750,7 +751,9 @@ describe("CatalogList", () => {
       await screen.findByRole("treegrid");
 
       await user.click(
-        within(screen.getByRole("navigation")).getByRole("link", { name: "Catalog" }),
+        within(screen.getByRole("navigation", { name: "Areas" })).getByRole("link", {
+          name: "Catalog",
+        }),
       );
 
       await waitFor(() => {
@@ -788,7 +791,9 @@ describe("CatalogList", () => {
       await screen.findByRole("heading", { level: 1, name: "Home" });
 
       await user.click(
-        within(screen.getByRole("navigation")).getByRole("link", { name: "Catalog" }),
+        within(screen.getByRole("navigation", { name: "Areas" })).getByRole("link", {
+          name: "Catalog",
+        }),
       );
 
       await waitFor(() => {
@@ -1019,6 +1024,40 @@ describe("CatalogList", () => {
       });
 
       expect(screen.getAllByRole("alert")).toHaveLength(1);
+    });
+  });
+
+  describe("the views", () => {
+    it("hides Search and Sort and reads no table list off All", async () => {
+      const { server } = renderShell("/catalog?view=dropped&env=prod", { routes: manageRoutes() });
+
+      await screen.findByRole("region", { name: "Dropped tables" });
+
+      expect(server.sent.some((request) => /^\/api\/v1\/tables\?/.test(request.path))).toBe(false);
+      expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Sort by/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Dropped" })).toHaveAttribute("aria-current", "page");
+    });
+
+    it("shows the switch above the search on All, and switches to Dropped keeping the place", async () => {
+      const { user, router } = renderShell("/catalog?env=prod&ns=gold", { routes: manageRoutes() });
+      await screen.findByRole("link", { name: "fact_sales" });
+      expect(screen.getByRole("searchbox")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("link", { name: "Dropped" }));
+
+      expect(router.state.location.search).toBe("?env=prod&ns=gold&view=dropped");
+      expect(await screen.findByText(/Tables dropped from gold/)).toBeInTheDocument();
+    });
+
+    it("asks for an environment when a view has none, and keeps the view in the links", async () => {
+      renderShell("/catalog?view=orphans", { routes: manageRoutes() });
+
+      expect(await screen.findByText(/are listed per environment/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "prod" })).toHaveAttribute(
+        "href",
+        "/catalog?env=prod&view=orphans",
+      );
     });
   });
 });

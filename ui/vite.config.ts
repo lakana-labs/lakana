@@ -28,6 +28,16 @@ export default defineConfig({
     // notices instead (MIT and Apache-2.0 ask for them in every copy), and lakana-server serves
     // it at /licenses/THIRD-PARTY-NOTICES.md (Vite's default, .vite/license.md, is not served).
     license: { fileName: "licenses/THIRD-PARTY-NOTICES.md" },
+    rolldownOptions: {
+      output: {
+        // react-router stays in one chunk of the first load. A screen loaded on demand that
+        // uses only some of its hooks (a table's Actions uses useNavigate) would otherwise split
+        // it in two, and the exports between the parts cost about 1.5 kB gzipped there.
+        codeSplitting: {
+          groups: [{ name: "lib", test: /node_modules[\\/]react-router[\\/]/ }],
+        },
+      },
+    },
   },
   preview: {
     host: "127.0.0.1",

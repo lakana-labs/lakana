@@ -17,7 +17,8 @@ export function catalogPath(view: CatalogView): string {
 }
 
 /** The tabs of a table's page. */
-export type TableTab = "overview" | "columns" | "preview" | "lineage" | "health" | "access";
+export type TableTab =
+  "overview" | "columns" | "preview" | "lineage" | "references" | "health" | "access";
 
 /** Every tab, in the order they are shown. */
 export const TABLE_TABS: readonly TableTab[] = [
@@ -25,6 +26,7 @@ export const TABLE_TABS: readonly TableTab[] = [
   "columns",
   "preview",
   "lineage",
+  "references",
   "health",
   "access",
 ];
