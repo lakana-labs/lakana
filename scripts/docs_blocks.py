@@ -619,6 +619,11 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
             r"\b\d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2}:\d{2} UTC\b",
             "<alert time>",
         ),
+        (
+            "short hash",
+            rf"(?<=\[)([\w./-]+(?: \([\w -]+\))? ){_HEX}{{7,12}}(?=\])",
+            r"\1<short hash>",
+        ),
         ("snapshot", r"(?<![\w.])\d{16,19}(?![\w.])", "<snapshot>"),
         (
             "token",
@@ -644,6 +649,11 @@ MASKS: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
             "<duration>",
         ),
         ("size", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:KiB|MiB|GiB|KB|MB|GB)\b", "<size>"),
+        (
+            "short id",
+            rf"(?<![\w.-])(?:{_HEX}{{16}}|{_HEX}{{12}}|{_HEX}{{8}})(?![\w-])",
+            "<short id>",
+        ),
         ("package count", r"(?<=\bResolved )\d+(?= packages?\b)", "<count>"),
     )
 )

@@ -37,6 +37,10 @@ BLOCK = "<!-- output: demo#show -->\n```text\n{}```\n"
         ("lakana_ci_Ab12Cd34_s3cr3t-value", "lakana_ci_<key id>_<secret>"),
         ("(snapshot 5033228317085625887, 05 Nov 00:33 UTC)", "(snapshot <snapshot>, <alert time>)"),
         ("│ 503322831708562588 │", "│ <snapshot> │"),
+        ("[master 9445d5e] Break the data", "[master <short hash>] Break the data"),
+        ("[main (root-commit) 1a2b3c4] First", "[main (root-commit) <short hash>] First"),
+        ("Run 941ef675 failed, token 634fb88f45cabc42", "Run <short id> failed, token <short id>"),
+        ("manifest 420bf73218ec", "manifest <short id>"),
     ],
 )
 def test_each_mask_hides_the_part_that_differs_per_run(text: str, expected: str) -> None:
@@ -55,6 +59,9 @@ def test_each_mask_hides_the_part_that_differs_per_run(text: str, expected: str)
         "v1.2",
         "1234567 rows on 05 Nov",
         "44 packages",
+        "[master] no hash",
+        "a 9-digit 123456789 and 1234567",
+        "silver.station_temperatures/no_missing_station",
     ],
 )
 def test_text_that_is_the_same_on_every_run_is_left_alone(text: str) -> None:
