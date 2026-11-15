@@ -255,8 +255,18 @@ Wait for it. The first run builds the Python environment, which can take a minut
 the command prints a line each time an asset changes state. It ends with a summary like this one.
 The run identifier and the durations differ on your machine:
 
-<!-- output -->
+<!-- output: train-and-predict#run -->
 ```text
+ce66258f-f41c-41ea-a1e4-8d58c48e7921
+bronze.visits  pending
+gold.spend_predictions  pending
+models.spend_model  pending
+bronze.visits  running  attempt 1/3
+bronze.visits  succeeded  attempt 1/3  1.0s
+models.spend_model  running  attempt 1/3
+gold.spend_predictions  running  attempt 1/3
+models.spend_model  succeeded  attempt 1/3  8.0s
+gold.spend_predictions  succeeded  attempt 1/3  3.0s
 Run 8f620b06-184b-4fd0-8995-9b3a940c3f05 succeeded
 ┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━┓
 ┃ asset                  ┃ status    ┃ attempt ┃ duration ┃ rows ┃ error ┃
@@ -365,7 +375,7 @@ a line below the table names them. In a window it tells you to widen it or use `
 the output here was made in a window of 120 characters and written to a file, where there is no
 window to widen, so the line mentions only `--output json`:
 
-<!-- output -->
+<!-- output: train-and-predict#artifact-versions -->
 ```text
 ┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
 ┃ version ┃ created_at                  ┃ size  ┃ manifest_sha256 ┃ run_id                               ┃ deleted_at ┃
@@ -432,7 +442,7 @@ git commit -m "A fifth customer, and a job that refreshes the forecasts every mi
 lakana deploy --env dev
 ```
 
-<!-- output -->
+<!-- output: train-and-predict#schedule-deploy -->
 ```text
 [master 6f54bc9] A fifth customer, and a job that refreshes the forecasts every minute
  2 files changed, 6 insertions(+), 1 deletion(-)

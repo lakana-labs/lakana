@@ -65,7 +65,7 @@ Commit the file. A dry run shows what the deploy would do, schedules included, b
 lakana deploy --env dev --dry-run
 ```
 
-<!-- output -->
+<!-- output: run-a-job#dry-run -->
 ```text
 Queued dry run 5e33fdd8-8103-4bd2-adb8-fadeaa707f42
 Dry run of readings in dev at 24bc0c3b3040b76773d8ada2381a4e16ad3ce8db
@@ -170,7 +170,7 @@ environment to anyone who may read it; `--repo` limits it to one repository.
 lakana job pause daily_silver --env dev
 ```
 
-<!-- output -->
+<!-- output: run-a-job#pause -->
 ```text
 Paused daily_silver in dev; resume it with 'lakana job resume daily_silver --env dev'.
 ```
@@ -201,10 +201,11 @@ Resumed daily_silver in dev; next run 2026-10-15 06:00 Europe/Berlin (04:00 UTC)
 lakana job run hourly_bronze --env dev
 ```
 
-<!-- output -->
+<!-- output: run-a-job#run -->
 ```text
 154e7bca-6967-4645-a882-1817466b5730
 bronze.readings  pending
+bronze.readings  running  attempt 1/3
 bronze.readings  succeeded  attempt 1/3  1.0s
 Run 154e7bca-6967-4645-a882-1817466b5730 succeeded
 ┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━┓
@@ -246,7 +247,7 @@ lakana grant create --principal ci-jobs --action RUN --kind ENVIRONMENT --env de
 lakana job run daily_silver --env dev --no-wait
 ```
 
-<!-- output -->
+<!-- output: run-a-job#ci-run -->
 ```text
 d47af24f-dea0-48d6-a742-8bf6120986a1
 ```

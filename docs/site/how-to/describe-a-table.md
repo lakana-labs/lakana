@@ -153,8 +153,26 @@ result of each check the header generates:
 lakana table get gold.fact_sales --env dev
 ```
 
-<!-- output -->
+<!-- output: see-a-tables-model#get -->
 ```text
+┌───────────────────┬──────────────────────────────────────────────────────────────────────────────┐
+│ name              │ fact_sales                                                                   │
+│ namespace         │ gold                                                                         │
+│ kind              │ TABLE                                                                        │
+│ state             │ published                                                                    │
+│ uuid              │ 3fb55062-12fc-432f-afa8-8554d088d2f6                                         │
+│ metadata_location │ file:///home/you/.local/share/lakana/local/lake/dev/managed/gold/fact_sales… │
+└───────────────────┴──────────────────────────────────────────────────────────────────────────────┘
+Defined in: shop/assets/gold/fact_sales.sql
+Description (from the project): Sales per store, product and day.
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┓
+┃ name     ┃ type          ┃ nullable ┃ description ┃ description_source ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━┩
+│ date     │ date          │ True     │             │                    │
+│ store_id │ int           │ True     │             │                    │
+│ sku      │ string        │ True     │             │                    │
+│ amount   │ decimal(38,1) │ True     │             │                    │
+└──────────┴───────────────┴──────────┴─────────────┴────────────────────┘
 Model: fact
 Grain: One row per store, product and calendar day.
 Key: date, store_id, sku
