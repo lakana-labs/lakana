@@ -106,6 +106,7 @@ lakana table get gold.sales --env dev --lang fr
 │ uuid              │ 0a36b6b8-248f-44b2-8c80-d42c0af870ca                                         │
 │ metadata_location │ file:///tmp/tmp.DDpC2meKAW/home/data/lakana/local/lake/dev/managed/gold/sal… │
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────┘
+Defined in: shop/assets/gold/sales.sql
 Label: Ventes par magasin
 Description (from the project) [en]: One row per store, with its net sales.
 Translations: fr 2 of 5
@@ -164,6 +165,7 @@ Your language is now fr
 │ uuid              │ 0a36b6b8-248f-44b2-8c80-d42c0af870ca                                         │
 │ metadata_location │ file:///tmp/tmp.DDpC2meKAW/home/data/lakana/local/lake/dev/managed/gold/sal… │
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────┘
+Defined in: shop/assets/gold/sales.sql
 Label: Ventes par magasin
 Description (from the project) [en]: One row per store, with its net sales.
 Translations: fr 2 of 5
