@@ -18,7 +18,12 @@ from lakana._models import (
     known_fields,
 )
 from lakana._routes import ROUTES
-from lakana.resources.tables import _when, owner_from_json
+from lakana.resources.tables import (
+    _when,
+    actions_from_json,
+    defined_by_from_json,
+    owner_from_json,
+)
 
 
 def _item_from_json(data: dict[str, Any]) -> TableListItem:
@@ -52,6 +57,8 @@ def _item_from_json(data: dict[str, Any]) -> TableListItem:
         readers_7d=data["readers_7d"],
         health_summary=HealthSummary(**known_fields(HealthSummary, data["health_summary"])),
         match=None if match is None else TableMatch(**known_fields(TableMatch, match)),
+        defined_by=defined_by_from_json(data.get("defined_by")),
+        actions=actions_from_json(data.get("actions")),
     )
 
 

@@ -24302,6 +24302,13 @@
               }
             ],
             "title": "Keep Versions"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -24316,7 +24323,7 @@
           "created_at"
         ],
         "title": "ArtifactOut",
-        "description": "One artifact, as a listing or a lookup shows it.\n\nParameters\n----------\nname\n    The artifact's name.\nnamespace\n    Dot-joined namespace path.\nuuid\n    The artifact's id.\nkind\n    Always ``ARTIFACT``.\ncurrent_version\n    The highest live version; `None` while it has none.\nversions\n    How many versions it has had, deleted ones included.\nsize_bytes\n    The summed size of its live versions.\ncreated_at\n    When it was created.\ndefined_by\n    The deployed project file that declares it; `None` when none does.\nkeep_versions\n    How many live versions the declaration keeps; `None` keeps all."
+        "description": "One artifact, as a listing or a lookup shows it.\n\nParameters\n----------\nname\n    The artifact's name.\nnamespace\n    Dot-joined namespace path.\nuuid\n    The artifact's id.\nkind\n    Always ``ARTIFACT``.\ncurrent_version\n    The highest live version; `None` while it has none.\nversions\n    How many versions it has had, deleted ones included.\nsize_bytes\n    The summed size of its live versions.\ncreated_at\n    When it was created.\ndefined_by\n    The deployed project file that declares it; `None` when none does.\nkeep_versions\n    How many live versions the declaration keeps; `None` keeps all.\nactions\n    ``[\"drop\"]`` when the caller's rights allow dropping it. A drop of an artifact with\n    `defined_by` is still refused: only git may remove it."
       },
       "ArtifactSourceIn": {
         "properties": {
@@ -24555,6 +24562,13 @@
             "type": "array",
             "title": "Deleted Versions"
           },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
+          },
           "freed_files": {
             "type": "integer",
             "title": "Freed Files"
@@ -24722,6 +24736,13 @@
             },
             "type": "array",
             "title": "Deleted Versions"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -24742,7 +24763,7 @@
           "files"
         ],
         "title": "ArtifactVersionOut",
-        "description": "One version of an artifact.\n\nParameters\n----------\nversion\n    The number; versions can have gaps, since a number is never reused.\nmanifest_sha256\n    The digest of the canonical manifest: the identity of the content.\nsize_bytes\n    The summed size of its files.\nfile_count\n    The number of its files.\nis_directory\n    Whether it is a directory (otherwise one file).\ntask_run_id\n    The task run that committed it, if one did.\nrun_id\n    That task run's run.\nproject_version_id\n    The project version the run executed.\ncommit_sha\n    The commit of that project version.\ncreated_by\n    The name of the principal that committed it.\ncreated_at\n    When it was committed.\ndeleted_at\n    When it was deleted; `None` while it is live.\ndeleted_by\n    The name of the principal that deleted it.\nfiles\n    Its files; empty in a listing and for a deleted version.\ndeleted_versions\n    The numbers of the versions this commit pruned (`keep_versions`)."
+        "description": "One version of an artifact.\n\nParameters\n----------\nversion\n    The number; versions can have gaps, since a number is never reused.\nmanifest_sha256\n    The digest of the canonical manifest: the identity of the content.\nsize_bytes\n    The summed size of its files.\nfile_count\n    The number of its files.\nis_directory\n    Whether it is a directory (otherwise one file).\ntask_run_id\n    The task run that committed it, if one did.\nrun_id\n    That task run's run.\nproject_version_id\n    The project version the run executed.\ncommit_sha\n    The commit of that project version.\ncreated_by\n    The name of the principal that committed it.\ncreated_at\n    When it was committed.\ndeleted_at\n    When it was deleted; `None` while it is live.\ndeleted_by\n    The name of the principal that deleted it.\nfiles\n    Its files; empty in a listing and for a deleted version.\ndeleted_versions\n    The numbers of the versions this commit pruned (`keep_versions`).\nactions\n    ``[\"delete\"]`` on a live version when the caller's rights allow deleting it; empty for\n    a deleted one and in the answer of a commit or a delete."
       },
       "AttentionItemOut": {
         "properties": {
@@ -27161,6 +27182,13 @@
           "restorable": {
             "type": "boolean",
             "title": "Restorable"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -27174,7 +27202,7 @@
           "restorable"
         ],
         "title": "DroppedTableOut",
-        "description": "One dropped table whose files are not deleted yet.\n\nParameters\n----------\nname\n    The table's name when it was dropped.\nnamespace\n    Dot-joined namespace path it was dropped from.\nuuid\n    The table's id, which a restore keeps.\nkind\n    ``TABLE``: only managed tables can be restored.\ndropped_at\n    When it was dropped.\npurge_after\n    From when on the worker's sweep deletes its files; it can be restored until then.\nrestorable\n    Whether `POST .../tables/{name}/undrop` would still restore it: `false` once\n    `purge_after` has passed or the sweep has started deleting its files."
+        "description": "One dropped table whose files are not deleted yet.\n\nParameters\n----------\nname\n    The table's name when it was dropped.\nnamespace\n    Dot-joined namespace path it was dropped from.\nuuid\n    The table's id, which a restore keeps.\nkind\n    ``TABLE``: only managed tables can be restored.\ndropped_at\n    When it was dropped.\npurge_after\n    From when on the worker's sweep deletes its files; it can be restored until then.\nrestorable\n    Whether `POST .../tables/{name}/undrop` would still restore it: `false` once\n    `purge_after` has passed or the sweep has started deleting its files.\nactions\n    ``[\"undrop\"]`` when the caller's rights allow a restore under its own name\n    (`DROP_TABLE` on the namespace and `CREATE_TABLE` on the name); `restorable` says\n    whether it can still be restored at all."
       },
       "DroppedTablePageOut": {
         "properties": {
@@ -29952,6 +29980,13 @@
           "exists": {
             "type": "boolean",
             "title": "Exists"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -29962,7 +29997,7 @@
           "exists"
         ],
         "title": "OrphanOut",
-        "description": "One orphaned table.\n\nParameters\n----------\nrepository\n    The repository that used to produce it.\ntable\n    Dotted table name.\nkind\n    What it is: ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nexists\n    `False` for a dropped orphan that can still be restored."
+        "description": "One orphaned table.\n\nParameters\n----------\nrepository\n    The repository that used to produce it.\ntable\n    Dotted table name.\nkind\n    What it is: ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nexists\n    `False` for a dropped orphan that can still be restored.\nactions\n    ``[\"drop\"]`` when the caller's rights allow dropping it; always empty for a dropped\n    orphan (restore it from the dropped tables)."
       },
       "OrphanedLocationOut": {
         "properties": {
@@ -33609,6 +33644,23 @@
                 "type": "null"
               }
             ]
+          },
+          "defined_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefinedByOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -33631,7 +33683,7 @@
           "match"
         ],
         "title": "TableListItemOut",
-        "description": "One table of the catalog list.\n\nParameters\n----------\nenvironment\n    Its environment.\nnamespace\n    Its namespace, dotted.\nname\n    Its name.\nuuid\n    Its id.\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    The ``kind`` its asset header declares, if any.\nstate\n    ``not_published`` or ``kept`` for a managed table so marked; ``published`` otherwise.\nowner\n    Its owner; `None` when the owner was deleted.\ncreated_at\n    When it was created.\nrow_count\n    Its rows, as stored; `None` when not known.\nsize_bytes\n    The size of its data files; `None` when not known, and whenever `last_write_at` is.\nlast_write_at\n    When its current snapshot was committed; `None` without one.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included.\nhealth_summary\n    Its health in one word, as the caller may see it.\nmatch\n    With a search text, what of the table matched; `None` without one."
+        "description": "One table of the catalog list.\n\nParameters\n----------\nenvironment\n    Its environment.\nnamespace\n    Its namespace, dotted.\nname\n    Its name.\nuuid\n    Its id.\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmodel_kind\n    The ``kind`` its asset header declares, if any.\nstate\n    ``not_published`` or ``kept`` for a managed table so marked; ``published`` otherwise.\nowner\n    Its owner; `None` when the owner was deleted.\ncreated_at\n    When it was created.\nrow_count\n    Its rows, as stored; `None` when not known.\nsize_bytes\n    The size of its data files; `None` when not known, and whenever `last_write_at` is.\nlast_write_at\n    When its current snapshot was committed; `None` without one.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included.\nhealth_summary\n    Its health in one word, as the caller may see it.\nmatch\n    With a search text, what of the table matched; `None` without one.\ndefined_by\n    The deployed project file (repository and path) that owns it, so that only git may\n    remove it: a client shows Drop disabled with \"Defined in\". `None` when no deployed\n    project declares it as what it is.\nactions\n    What the caller's rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and\n    ``set_retention``: a client offers an action only when it is listed (Rebuild only then).\n    The server still decides each request."
       },
       "TableListPageOut": {
         "properties": {
@@ -34196,6 +34248,23 @@
                 "type": "null"
               }
             ]
+          },
+          "defined_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefinedByOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -34207,7 +34276,7 @@
           "schema"
         ],
         "title": "TableOut",
-        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference, or fails the\n    content gate of \"Defined in\" (`content_reason`).\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\ncontent_reason\n    ``restricted`` when a view's `sql` is withheld because the caller lacks\n    READ_ENVIRONMENT, a referenced table is a view, the SQL reads a file, or a row filter\n    or column mask applies to the caller on a referenced table; `None` otherwise.\ncontent_message\n    What `content_reason` means and what to do, in one sentence; `None` when it is `None`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has.\nterms\n    The glossary terms that link the table itself, in the reader's language; empty without\n    ``READ_ENVIRONMENT`` on the environment.\nhealth\n    The effects of the asset's `health:` that differ from `warn`, by ``signal`` or\n    ``signal.column`` (``range.price``), sorted by key; empty when every signal warns, and\n    for every kind but a managed table.\nhealth_missing\n    The keys of `health` whose column the table does not have: the deploy cannot check the\n    columns of a ``SELECT *`` or Python asset. Such an entry has no effect.\nhealth_never_judged\n    The ``block`` column entries of `health` that no commit can judge, by key, with the\n    reason (``a string column has no range``, ``only the first 200 columns are judged``): a\n    run warns on such an entry instead of blocking.\nowner\n    Who owns the table; `None` when the owner was deleted, and for an answer that does not\n    look it up (a create or a commit).\ncreated_at\n    When the table was created.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included; never their names.\nhealth_summary\n    Its health in one word, as the caller may see it."
+        "description": "Response body for a table, external table or view, read-only.\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path the table lives in.\nuuid\n    The table's id (the Iceberg ``table-uuid`` for a managed table).\nkind\n    ``TABLE``, ``EXTERNAL``, ``VIEW`` or ``ARTIFACT``.\nmetadata_location\n    Absolute URI of the current metadata file; `None` for an external\n    table or a view.\ncolumns\n    The columns, serialized as `schema`.\nsql\n    A view's SELECT. `None` if the caller may not read every reference, or fails the\n    content gate of \"Defined in\" (`content_reason`).\nreferences\n    A view's references. Empty if the caller may not read every\n    reference.\nhidden_references\n    The number of the view's references the caller may not read, and\n    so are withheld from `sql` and `references`.\ncontent_reason\n    ``restricted`` when a view's `sql` is withheld because the caller lacks\n    READ_ENVIRONMENT, a referenced table is a view, the SQL reads a file, or a row filter\n    or column mask applies to the caller on a referenced table; `None` otherwise.\ncontent_message\n    What `content_reason` means and what to do, in one sentence; `None` when it is `None`.\nsnapshot_id\n    The current snapshot of a managed table; `None`\n    without one, and for a view or an external table.\nstate\n    ``not_published`` for a table whose first build did not finish, or failed a blocking\n    check, and that no later run has published; ``published`` for everything else.\nstate_message\n    Why it is not published, naming the check and the run; `None` otherwise.\ndescription\n    The table's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlast_write_at\n    When the current snapshot was committed; `None` without one, and for a view, an\n    external table and an artifact.\nrow_count\n    The rows of the current snapshot, from its summary; `None` when missing.\nsize_bytes\n    The size of its data files, from its summary; `None` when missing.\nfile_count\n    Its data files, from its summary; `None` when missing.\nexpires_at\n    When a managed table's retention makes it expire; `None` when it never does.\nexpires_soon\n    Whether that is within the server's warning window\n    (``LAKANA_TABLES__EXPIRY_WARNING_DAYS``, 7 days by default); always `false` when that\n    is 0.\nmodel\n    The model the asset header declares (kind, grain, key, references, measures and the\n    checks they generate); `None` for a table whose header declares none.\nlabel\n    The table's short name for people, chosen like `description`; `None` for none.\nlabel_source\n    Where `label` came from (``edited`` or ``project``); `None` without a label.\nlabel_language\n    Which language `label` is in; `None` exactly when there is no label.\ndescription_language\n    Which language `description` is in; `None` exactly when there is no description.\nlanguage\n    The language the texts were chosen for: `lang`, else your profile's, else the first of\n    Accept-Language, else the instance's main language.\nmain_language\n    The table's main language: its project's `main_language`, else the instance's; a text\n    with no translation is shown in it.\ntranslations\n    Per language that has texts for the table, how many of its main-language texts it has.\nterms\n    The glossary terms that link the table itself, in the reader's language; empty without\n    ``READ_ENVIRONMENT`` on the environment.\nhealth\n    The effects of the asset's `health:` that differ from `warn`, by ``signal`` or\n    ``signal.column`` (``range.price``), sorted by key; empty when every signal warns, and\n    for every kind but a managed table.\nhealth_missing\n    The keys of `health` whose column the table does not have: the deploy cannot check the\n    columns of a ``SELECT *`` or Python asset. Such an entry has no effect.\nhealth_never_judged\n    The ``block`` column entries of `health` that no commit can judge, by key, with the\n    reason (``a string column has no range``, ``only the first 200 columns are judged``): a\n    run warns on such an entry instead of blocking.\nowner\n    Who owns the table; `None` when the owner was deleted, and for an answer that does not\n    look it up (a create or a commit).\ncreated_at\n    When the table was created.\nlast_read_at\n    When a succeeded query last read it; `None` when none did.\nreaders_7d\n    How many principals read it in the last 7 UTC days, today included; never their names.\nhealth_summary\n    Its health in one word, as the caller may see it.\ndefined_by\n    The deployed project file (repository and path) that owns it, so that only git may\n    remove it: a client shows Drop disabled with \"Defined in\". `None` when no deployed\n    project declares it as what it is, and in the answer of a create or a restore.\nactions\n    What the caller's rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and\n    ``set_retention``: a client offers an action only when it is listed (Rebuild only then).\n    The server still decides each request. Empty in the\n    answer of a create or a restore; read the table for them."
       },
       "TableRebuildIn": {
         "properties": {

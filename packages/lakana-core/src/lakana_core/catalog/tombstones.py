@@ -156,6 +156,9 @@ class DroppedTable:
     restorable
         Whether an undrop would still be accepted: the undo period has not ended and the purge
         has not started.
+    actions
+        The words of `lakana_core.catalog.row_actions.DROPPED_ACTIONS` the reader's rights
+        allow; empty until a listing fills it for its reader.
     """
 
     name: str
@@ -165,6 +168,7 @@ class DroppedTable:
     dropped_at: datetime
     purge_after: datetime
     restorable: bool
+    actions: tuple[str, ...] = ()
 
 
 def _encode(value: object) -> object:

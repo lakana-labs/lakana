@@ -84,7 +84,6 @@ from lakana._models import (
     ArtifactUpload,
     ArtifactUploadPage,
     ArtifactVersion,
-    DefinedBy,
     DeletedArtifactVersion,
 )
 from lakana._routes import ROUTES
@@ -97,7 +96,11 @@ from lakana.errors import (
     ServerError,
     ValidationError,
 )
-from lakana.resources.tables import _split_namespace_table
+from lakana.resources.tables import (
+    _split_namespace_table,
+    actions_from_json,
+    defined_by_from_json,
+)
 
 _BLOB_TIMEOUT_SECONDS = 300.0
 """Per-operation timeout for one file's upload.
@@ -346,15 +349,9 @@ def artifact_from_json(data: object) -> Artifact:
             versions=int(data["versions"]),
             size_bytes=int(data["size_bytes"]),
             created_at=str(data["created_at"]),
-            defined_by=(
-                None
-                if data.get("defined_by") is None
-                else DefinedBy(
-                    repository=str(data["defined_by"]["repository"]),
-                    path=str(data["defined_by"]["path"]),
-                )
-            ),
+            defined_by=defined_by_from_json(data.get("defined_by")),
             keep_versions=data.get("keep_versions"),
+            actions=actions_from_json(data.get("actions")),
         )
     except (AssertionError, KeyError, TypeError, ValueError):
         raise InvalidResponse(_ODD_ANSWER.format(what="an artifact")) from None
@@ -466,6 +463,7 @@ def _version(data: dict[str, Any]) -> ArtifactVersion:
         deleted_by=data.get("deleted_by"),
         files=[ArtifactFile(f["path"], f["size"], f["sha256"]) for f in data.get("files", [])],
         deleted_versions=list(data.get("deleted_versions", [])),
+        actions=actions_from_json(data.get("actions")),
     )
 
 

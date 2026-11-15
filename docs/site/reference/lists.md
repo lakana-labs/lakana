@@ -27,6 +27,13 @@ the list shows without it.
 | Orphans | `lakana orphans` | `READ_ENVIRONMENT`; an orphan you may not read is only counted as hidden | repository, then table name |
 | Artifacts | `lakana artifact list [--namespace NS]` | `READ_ENVIRONMENT`; an artifact you may not read is left out | namespace parts, then name |
 
+Each row of the dropped tables, the orphans and the artifacts has `actions`: what your rights
+allow on it. A dropped table has `["undrop"]` when you hold `DROP_TABLE` on its namespace and
+`CREATE_TABLE` on its name. An orphan has `["drop"]` when you hold `DROP_TABLE` on it; a dropped
+orphan (`exists: false`) has none, so restore it from the dropped tables. An artifact has
+`["drop"]` on the same right. A client offers only these actions. The server still checks every
+request. See [What you may do with a table](table-list.md#what-you-may-do-with-a-table).
+
 `--namespace` keeps that namespace and the ones beneath it. `--parent` keeps every namespace below
 the parent at every depth, and `--depth 1` keeps only its direct children (the top level without a
 parent). They take `--limit` and `--cursor` like the lists above.

@@ -257,6 +257,7 @@ from lakana_core.catalog.retention import (
     planned_expiry,
     retention_candidates,
 )
+from lakana_core.catalog.row_actions import dropped_actions_each, table_actions_each
 from lakana_core.catalog.schema_compat import SchemaDiff, arrow_to_iceberg_schema, plan_schema
 from lakana_core.catalog.schema_inference import infer_schema
 from lakana_core.catalog.table_listing import TableOwner, table_facts
@@ -377,7 +378,10 @@ from lakana_core.policy.schema_change import (
 )
 from lakana_core.projects.definition import (
     REASON_MESSAGES,
+    DefiningFile,
     DefinitionReason,
+    defining_ref,
+    owned_by_git,
     passes_content_gate,
 )
 from lakana_core.projects.layers import LAYERS
@@ -864,6 +868,13 @@ class TableDescription:
         How many distinct principals read it in the last 7 UTC days, today included; never who.
     health_summary
         Its health in one word, with the reference checks the reader may see.
+    defined_by
+        The deployed project file that owns it (`owned_by_git`: declared as a table or view,
+        and it is one), so that only git may remove it; `None` otherwise. Shown to every reader
+        of the row, without the file's text.
+    actions
+        The words of `lakana_core.catalog.row_actions.TABLE_ACTIONS` the reader's rights allow
+        on it; the server decides each request again.
     """
 
     ref: TableRef
@@ -910,6 +921,8 @@ class TableDescription:
     last_read_at: datetime | None = None
     readers_7d: int = 0
     health_summary: HealthSummary | None = None
+    defined_by: DefiningFile | None = None
+    actions: tuple[str, ...] = ()
 
 
 def _stored_effects(row: Table, dotted: str) -> HealthEffects:
@@ -4062,8 +4075,14 @@ class CatalogService:
         facts = table_facts(self._session, self._authz, p, [(ref.environment, row)], now=now)[
             row.id
         ]
+        found = defining_ref(self._session, namespace.environment_id, ref)
+        (actions,) = table_actions_each(
+            self._authz, p, [(ref, described.kind, row.owner_id, found is not None)]
+        )
         return replace(
             described,
+            defined_by=found if owned_by_git(found, described.kind) else None,
+            actions=actions,
             owner=facts.owner,
             created_at=row.created_at,
             last_read_at=facts.last_read_at,
@@ -9965,11 +9984,12 @@ class CatalogService:
         env = self._find_environment(environment)
         self._find_namespace(env, namespace)
         dropped = list_tombstones(self._session, env.id, namespace, now=db_now(self._session))
-        return [
+        readable = [
             entry
             for entry in dropped
             if self.can_read_table(p, TableRef(environment, namespace, entry.name))
         ]
+        return self._with_undrop(p, environment, readable)
 
     def list_environment_dropped_tables(
         self,
@@ -10016,7 +10036,7 @@ class CatalogService:
             for entry in dropped
             if self.can_read_table(p, TableRef(environment, entry.namespace, entry.name))
         ]
-        return page_in_order(
+        page = page_in_order(
             readable,
             kind="dropped_tables",
             key_of=lambda d: (instant_key(d.dropped_at), str(d.table_id)),
@@ -10024,6 +10044,32 @@ class CatalogService:
             cursor=cursor,
             descending=True,
         )
+        return Page(self._with_undrop(p, environment, page.items), page.next_cursor)
+
+    def _with_undrop(
+        self, p: PrincipalRef, environment: str, dropped: Sequence[DroppedTable]
+    ) -> list[DroppedTable]:
+        """Fill each dropped table's `actions` for its reader, in one batch.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            Their environment.
+        dropped
+            The dropped tables the reader may read.
+
+        Returns
+        -------
+        list of DroppedTable
+            The same tables, each with its `actions`.
+        """
+        refs = [TableRef(environment, d.namespace, d.name) for d in dropped]
+        return [
+            replace(d, actions=actions)
+            for d, actions in zip(dropped, dropped_actions_each(self._authz, p, refs), strict=True)
+        ]
 
     def rename_table(self, p: PrincipalRef, source: TableRef, destination: TableRef) -> LoadedTable:
         """Move a table to a new namespace or name.

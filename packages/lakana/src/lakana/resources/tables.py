@@ -31,6 +31,7 @@ from lakana._models import (
     AppendResult,
     CheckHealth,
     Column,
+    DefinedBy,
     DroppedTable,
     DroppedTablePage,
     ExternalTable,
@@ -481,7 +482,45 @@ def _table_from_json(data: dict[str, Any]) -> Table:
         last_read_at=_when(data.get("last_read_at")),
         readers_7d=data.get("readers_7d", 0),
         health_summary=health_summary_from_json(data.get("health_summary")),
+        defined_by=defined_by_from_json(data.get("defined_by")),
+        actions=actions_from_json(data.get("actions")),
     )
+
+
+def defined_by_from_json(data: object) -> DefinedBy | None:
+    """Read the file that owns a row from the response body.
+
+    Parameters
+    ----------
+    data
+        The body's `defined_by`; absent from an older server, `null` when no file owns it.
+
+    Returns
+    -------
+    DefinedBy or None
+        The file, or `None`.
+    """
+    if not isinstance(data, dict):
+        return None
+    return DefinedBy(repository=str(data["repository"]), path=str(data["path"]))
+
+
+def actions_from_json(data: object) -> tuple[str, ...]:
+    """Read what a row says its reader may do from the response body.
+
+    Parameters
+    ----------
+    data
+        The body's `actions`; absent from an older server.
+
+    Returns
+    -------
+    tuple of str
+        The action words; empty without a list.
+    """
+    if not isinstance(data, list):
+        return ()
+    return tuple(str(word) for word in data)
 
 
 def owner_from_json(data: dict[str, Any] | None) -> TableOwner | None:
@@ -665,6 +704,7 @@ def _dropped_from_json(item: dict[str, Any]) -> DroppedTable:
         dropped_at=datetime.fromisoformat(item["dropped_at"]),
         purge_after=datetime.fromisoformat(item["purge_after"]),
         restorable=item["restorable"],
+        actions=actions_from_json(item.get("actions")),
     )
 
 

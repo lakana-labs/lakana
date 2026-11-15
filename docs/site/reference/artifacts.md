@@ -290,6 +290,7 @@ What a version records:
 | `commit_sha`, `project_version_id`, `run_id`, `task_run_id` | For a version a run stored: the git commit of the deployed code, the deploy (project version), the run and the task. `null` for a version a person uploaded (see [upload](#upload)). A task token sees `null` for `project_version_id`, `run_id` and `task_run_id`: it reads what it consumes, not the identifiers of other runs. |
 | `deleted_at`, `deleted_by` | For a deleted version: when, and by whom (for a version removed by `keep_versions`, the principal that stored the newer one). |
 | `files` | Path, size and SHA-256 of each file. Shown for one version, empty for a deleted one. |
+| `actions` | `["delete"]` on a live version when your rights allow deleting it (`DROP_TABLE`). Empty for a deleted version, and in the answer of a store or a delete. |
 
 ## Commands
 
@@ -663,11 +664,18 @@ server's info route (`GET /api/v1/info`).
 | `DELETE /namespaces/{path}/artifacts/{name}/uploads/{upload_id}` | Withdraw an open upload. | `WRITE_TABLE` |
 | `DELETE /namespaces/{path}/artifacts/{name}/versions/{version}` | Delete one version's files. The answer is `200` with the version and, added to its fields, `freed_files`, `freed_bytes`, `kept_files`, `kept_bytes` and `kept` (`reason`, `files`, `bytes`, `version`), as under `versions delete`. | `DROP_TABLE`; from the web interface also a passkey touch within the last 15 minutes (403 `StepUpRequired`) |
 | `DELETE /namespaces/{path}/artifacts/{name}` | Drop the artifact. | `DROP_TABLE`; from the web interface also a passkey touch within the last 15 minutes (403 `StepUpRequired`) |
-| `GET /artifacts` (optional `namespace`, `limit`, `cursor` queries) | List the artifacts you may read, as an array in namespace and name order. Each item has `defined_by` (`{repository, path}` or `null`) and `keep_versions` (a number or `null`). `limit` is 1 to 200 (default 100); the `X-Next-Cursor` header holds the `cursor` of the next page and is absent on the last. | `READ_ENVIRONMENT`, then `READ_TABLE` for each |
+| `GET /artifacts` (optional `namespace`, `limit`, `cursor` queries) | List the artifacts you may read, as an array in namespace and name order. Each item has `defined_by` (`{repository, path}` or `null`), `keep_versions` (a number or `null`) and `actions` (see below). `limit` is 1 to 200 (default 100); the `X-Next-Cursor` header holds the `cursor` of the next page and is absent on the last. | `READ_ENVIRONMENT`, then `READ_TABLE` for each |
 | `GET /namespaces/{path}/artifacts/{name}` | Show one artifact. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions` | List the versions, without files. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions/{version}` | Show one version with its files; `{version}` is a number or `current`. | `READ_TABLE` |
 | `GET /namespaces/{path}/artifacts/{name}/versions/{version}/blobs/{sha256}` | Download one file. | `READ_TABLE` |
+
+An artifact, in the list and when shown alone, has `actions`: `["drop"]` when your rights allow
+dropping it (`DROP_TABLE`), else `[]`. The same holds for a version and `["delete"]`. A client
+offers an action only when its word is listed. The server still checks every request: a drop of
+an artifact with `defined_by` is refused, because only git may remove it. In the SDK, both
+`Artifact.actions` and `ArtifactVersion.actions` are tuples; an older server sends no `actions`,
+and you get `()`.
 
 The routes that begin an upload, send a file, commit and delete (a version or the artifact) take
 `break_glass_reason` as a query parameter; withdrawing an upload does not, because it writes no

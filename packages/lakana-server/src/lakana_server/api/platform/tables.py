@@ -66,6 +66,7 @@ from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import (
     AppendOut,
     ColumnOut,
+    DefinedByOut,
     DescriptionIn,
     DroppedTableOut,
     DroppedTablePageOut,
@@ -713,6 +714,12 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         health=description.health,
         health_missing=list(description.health_missing),
         health_never_judged=dict(description.health_never_judged),
+        defined_by=None
+        if description.defined_by is None
+        else DefinedByOut(
+            repository=description.defined_by.repository, path=description.defined_by.path
+        ),
+        actions=list(description.actions),
     )
 
 
@@ -2498,6 +2505,7 @@ def list_environment_dropped_tables(
                 dropped_at=dropped.dropped_at,
                 purge_after=dropped.purge_after,
                 restorable=dropped.restorable,
+                actions=list(dropped.actions),
             )
             for dropped in page.items
         ],
@@ -2549,6 +2557,7 @@ def list_dropped_tables(
             dropped_at=dropped.dropped_at,
             purge_after=dropped.purge_after,
             restorable=dropped.restorable,
+            actions=list(dropped.actions),
         )
         for dropped in catalog.list_dropped_tables(principal, env, ns)
     ]

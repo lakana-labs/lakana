@@ -21,6 +21,7 @@ from lakana._models import (
 from lakana._routes import ROUTES
 from lakana.errors import DeployFailed, JobStartsNotRecorded
 from lakana.resources.queries import waiting_for_from_json
+from lakana.resources.tables import actions_from_json
 
 
 def _when(value: str | None) -> datetime | None:
@@ -548,6 +549,7 @@ class OrphanTables:
                     table=o["table"],
                     kind=o.get("kind"),
                     exists=o.get("exists", True),
+                    actions=actions_from_json(o.get("actions")),
                 )
                 for o in data["orphans"]
             ],

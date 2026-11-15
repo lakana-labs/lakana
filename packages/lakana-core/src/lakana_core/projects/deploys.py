@@ -47,6 +47,7 @@ from lakana_core.catalog.graph_model import NodeKind, parse_node
 from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.identity import live_table, resolve_table_id
 from lakana_core.catalog.model_metadata import clear_health_effects, clear_removed_models
+from lakana_core.catalog.row_actions import ORPHAN_ACTIONS, drop_actions_each
 from lakana_core.catalog.tombstones import DroppedTable, list_environment_tombstones
 from lakana_core.catalog.warning_text import named as _named
 from lakana_core.catalog.warning_text import typed as _typed
@@ -955,12 +956,16 @@ class OrphanView:
     exists
         Whether the object is still in the catalog; `False` for a dropped orphan that can still
         be restored.
+    actions
+        The words of `lakana_core.catalog.row_actions.ORPHAN_ACTIONS` the reader's rights allow;
+        always empty for a dropped orphan (`undrop` it from the dropped tables).
     """
 
     repository: str
     table: str
     kind: str | None = None
     exists: bool = True
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2968,7 +2973,13 @@ class DeployService:
             limit=limit,
             cursor=cursor,
         )
-        return OrphanReport(orphans=page.items, hidden=hidden, next_cursor=page.next_cursor)
+        alive = [o for o in page.items if o.exists]
+        refs = [TableRef.from_dotted(environment, o.table) for o in alive]
+        words = iter(drop_actions_each(self._authz, p, refs, ORPHAN_ACTIONS[0]))
+        listed = [
+            dataclasses.replace(o, actions=next(words) if o.exists else ()) for o in page.items
+        ]
+        return OrphanReport(orphans=listed, hidden=hidden, next_cursor=page.next_cursor)
 
     # -- worker side -----------------------------------------------------
 

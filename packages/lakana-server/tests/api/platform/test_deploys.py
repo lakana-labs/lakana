@@ -705,6 +705,7 @@ def test_orphans_say_what_they_are_and_page(client: TestClient) -> None:
     assert [
         {k: o[k] for k in ("repository", "table", "kind", "exists")} for o in first["orphans"]
     ] == [{"repository": "analytics", "table": "silver.a", "kind": "TABLE", "exists": True}]
+    assert first["orphans"][0]["actions"] == ["drop"]
     second = client.get(
         url, params={"limit": 1, "cursor": first["next_cursor"]}, headers=AUTH_HEADER
     ).json()

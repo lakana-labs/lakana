@@ -771,6 +771,21 @@ def _marker(language: str | None, table: Table) -> str:
     return f" [{language}]" if language and language != table.language else ""
 
 
+def _emit_defined_by(state: CliState, table: Table) -> None:
+    """Print the deployed project file that owns a table or view, when one does.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    table
+        The table.
+    """
+    if table.defined_by is not None:
+        found = table.defined_by
+        _output.emit(state, _output.inline(f"Defined in: {found.repository}/{found.path}"))
+
+
 def _emit_texts(state: CliState, table: Table) -> None:
     """Print a table's label, description and translation coverage, when it has them.
 
@@ -889,6 +904,7 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
         else:
             _output.emit(state, table.sql or "")
         _output.emit(state, table.references)
+        _emit_defined_by(state, table)
         _emit_texts(state, table)
         _emit_columns(state, table)
         _emit_terms(state, table)
@@ -912,6 +928,7 @@ def get(ctx: typer.Context, name: str, lang: _LANG = None, env: _ENV = None) -> 
             f"retention {shlex.quote(_output.inline(name))} --env "
             f"{shlex.quote(_output.inline(environment))} --never",
         )
+    _emit_defined_by(state, table)
     _emit_texts(state, table)
     _emit_columns(state, table)
     _emit_terms(state, table)

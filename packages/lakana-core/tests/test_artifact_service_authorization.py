@@ -685,7 +685,11 @@ def test_a_listing_asks_for_the_environment_and_reads_per_artifact(
     service = ArtifactService(session, StorageResolver(session), recording)
     assert [a.ref for a in service.list_artifacts(principal, "dev").items] == [ARTIFACT_REF]
     assert recording.seen == [(Action.READ_ENVIRONMENT, _ENVIRONMENT)]
-    assert recording.permitted == [(Action.READ_TABLE, _table("churn"))]
+    # The read filter, then the row's actions (`drop_actions_each`), both without a refusal.
+    assert recording.permitted == [
+        (Action.READ_TABLE, _table("churn")),
+        (Action.DROP_TABLE, _table("churn")),
+    ]
 
 
 def test_a_listing_needs_the_environment_and_hides_what_the_caller_may_not_read(

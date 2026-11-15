@@ -189,8 +189,10 @@ def test_three_steps_store_version_one(
     assert (view.current_version, view.versions, view.size_bytes) == (1, 1, version.size_bytes)
     assert [a.ref for a in service.list_artifacts(principal, "dev").items] == [ARTIFACT_REF]
     assert service.list_artifacts(principal, "dev", NamespacePath.from_parts(["gold"])).items == []
-    assert service.get_version(principal, ARTIFACT_REF) == version
-    assert service.get_version(principal, ARTIFACT_REF, 1) == version
+    # The commit's answer carries no actions; a read offers what the reader may do.
+    shown = dataclasses.replace(version, actions=("delete",))
+    assert service.get_version(principal, ARTIFACT_REF) == shown
+    assert service.get_version(principal, ARTIFACT_REF, 1) == shown
     listed = service.list_versions(principal, ARTIFACT_REF)
     assert [(v.version, v.files) for v in listed] == [(1, ())]
 

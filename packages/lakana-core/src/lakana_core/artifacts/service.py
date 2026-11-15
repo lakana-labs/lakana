@@ -99,7 +99,7 @@ import time
 import unicodedata
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 
@@ -142,6 +142,7 @@ from lakana_core.catalog.git_owned import (
     refuse_owned_drop,
 )
 from lakana_core.catalog.identity import resolve_environment_id, resolve_table_id
+from lakana_core.catalog.row_actions import ARTIFACT_ACTIONS, VERSION_ACTIONS, drop_actions_each
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.writes import MAX_SOURCE_NAME, MAX_SOURCE_VERSIONS
 from lakana_core.config import ArtifactsConfig
@@ -322,6 +323,10 @@ class ArtifactView:
     keep_versions
         How many live versions that declaration keeps; `None` keeps all (also when no deployed
         project declares it).
+    actions
+        The words of `lakana_core.catalog.row_actions.ARTIFACT_ACTIONS` the reader's rights
+        allow; the server decides each request again (a drop of one `defined_by` names is
+        refused).
     """
 
     ref: TableRef
@@ -332,6 +337,7 @@ class ArtifactView:
     created_at: datetime
     defined_by: DefiningFile | None = None
     keep_versions: int | None = None
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -368,6 +374,10 @@ class VersionView:
         The name of the principal that deleted it.
     files
         Its files; empty in a listing and for a deleted version.
+    actions
+        The words of `lakana_core.catalog.row_actions.VERSION_ACTIONS` the reader's rights
+        allow on a live version, in a listing and when one is shown; empty for a deleted one and
+        in the answers of a commit or a delete.
     """
 
     version: int
@@ -384,6 +394,7 @@ class VersionView:
     deleted_at: datetime | None
     deleted_by: str | None
     files: tuple[ManifestFile, ...]
+    actions: tuple[str, ...] = ()
 
 
 class KeptReason(StrEnum):
@@ -1188,7 +1199,15 @@ class ArtifactService:
             cursor=cursor,
         )
         entries = deployed_entries(self._session, environment_id)
-        return Page([self._view(ref, row, entries) for ref, row in page.items], page.next_cursor)
+        refs = [ref for ref, _ in page.items]
+        words = drop_actions_each(self._authz, p, refs, ARTIFACT_ACTIONS[0])
+        return Page(
+            [
+                replace(self._view(ref, row, entries), actions=actions)
+                for (ref, row), actions in zip(page.items, words, strict=True)
+            ],
+            page.next_cursor,
+        )
 
     def get_artifact(self, p: PrincipalRef, ref: TableRef) -> ArtifactView:
         """Show one artifact.
@@ -1217,7 +1236,8 @@ class ArtifactService:
         self._authz.authorize(p, Action.READ_TABLE, self._securable(ref))
         environment_id = resolve_environment_id(self._session, ref.environment)
         entries = deployed_entries(self._session, environment_id) if environment_id else {}
-        return self._view(ref, self._artifact(ref), entries)
+        (actions,) = drop_actions_each(self._authz, p, [ref], ARTIFACT_ACTIONS[0])
+        return replace(self._view(ref, self._artifact(ref), entries), actions=actions)
 
     def list_versions(self, p: PrincipalRef, ref: TableRef) -> list[VersionView]:
         """List an artifact's versions, newest first, deleted ones included.
@@ -1271,9 +1291,13 @@ class ArtifactService:
                 .where(mine)
             )
         }
+        (may_delete,) = drop_actions_each(self._authz, p, [ref], VERSION_ACTIONS[0])
         return [
-            self._version_view(
-                ref, version, with_files=False, principal_names=names, run_ids=run_ids
+            replace(
+                self._version_view(
+                    ref, version, with_files=False, principal_names=names, run_ids=run_ids
+                ),
+                actions=may_delete if version.deleted_at is None else (),
             )
             for version in rows
         ]
@@ -1316,7 +1340,11 @@ class ArtifactService:
         found = version_row(self._session, row.id, number) if _is_version(number) else None
         if found is None:
             raise self._no_version(ref, number)
-        return self._version_view(ref, found, with_files=True)
+        (may_delete,) = drop_actions_each(self._authz, p, [ref], VERSION_ACTIONS[0])
+        return replace(
+            self._version_view(ref, found, with_files=True),
+            actions=may_delete if found.deleted_at is None else (),
+        )
 
     @staticmethod
     def _require_attempt(p: PrincipalRef) -> None:

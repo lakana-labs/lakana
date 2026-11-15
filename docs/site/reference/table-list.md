@@ -52,9 +52,56 @@ The answer is `{"items": [...], "next_cursor": ..., "capped": ...}`. An item has
 | `readers_7d` | integer | How many principals read it in the last 7 UTC days, today included. Never who. |
 | `health_summary` | object | Its health in one word: `state` (`failing`, `warning`, `healthy` or `not_judged`), `item`, `text` and `others`, how many other findings the word leaves out. See [Table health](table-health.md#the-health-in-one-word). |
 | `match` | object or `null` | With `q`, what matched: `kind` (`table` or `column`), `matched` (the field), and for a column `column` and `column_type`, for a text the `snippet` and its `language` and whether it is a `translated` text. |
+| `defined_by` | object or `null` | `{"repository", "path"}` of the deployed project file that builds it, when a project declares it as a table or view and it is one. Only git may remove such a table. `null` otherwise. See [What you may do with a table](#what-you-may-do-with-a-table). |
+| `actions` | list of text | What your rights allow on it: `drop`, `rebuild`, `maintain`, `set_retention`. See [What you may do with a table](#what-you-may-do-with-a-table). |
 
 A table whose figures are not known yet shows them as `null`; it is listed all the same. On an
 instance that has just been upgraded, the worker fills them in within its next sweeps.
+
+## What you may do with a table
+
+`GET .../tables/{name}`, a namespace's table list and this list give every table two more fields:
+`actions` and `defined_by`. With them a client can show the right buttons without asking the
+server about each table.
+
+`actions` lists what your rights allow, by kind:
+
+| Word | Means | Needs | Kinds |
+|---|---|---|---|
+| `drop` | `lakana table delete` | `DROP_TABLE` on the table | table, view, external table |
+| `rebuild` | `lakana table rebuild` | `DROP_TABLE` on the table and `RUN` on the environment, and a current deployment must declare the name | table, view, external table |
+| `maintain` | `lakana table maintain` | `MAINTAIN_TABLE` on the table | managed table |
+| `set_retention` | `lakana table retention` | you own the table, or `WRITE_TABLE` on it | managed table |
+
+An artifact has no actions here. Its own list says what you may do with it (see
+[Artifacts](artifacts.md#rest)).
+
+`defined_by` says what git owns. When it is set, a deployed project builds the table and a drop is
+refused, even though `drop` is in `actions`. Remove the asset from the project and deploy, or
+rebuild the table from git. Anyone who may read the table sees `defined_by`: the repository and the
+file's path, never the file's text.
+
+The web interface follows these rules:
+
+- It offers an action only when its word is in `actions`.
+- When `defined_by` is set, it shows Drop disabled, with "Defined in" and the file.
+- It shows Rebuild only when `rebuild` is in `actions`.
+
+The server still checks every request. An action in `actions` can be refused for another reason,
+for example:
+
+- a project defines the table;
+- the environment is protected, and you give no break-glass reason;
+- you have not touched your passkey in the last 15 minutes;
+- a retention that makes the table expire sooner needs `DROP_TABLE` as well.
+
+The answers of `POST .../tables` (create) and `POST .../tables/{name}/undrop` leave `actions`
+empty and `defined_by` `null`. Read the table to get them.
+
+`lakana table get NAME` prints `Defined in: REPOSITORY/PATH` for a table or view a project builds.
+In the SDK, `Table.defined_by` and `TableListItem.defined_by` are a `DefinedBy` or `None`, and
+`actions` is a tuple of the words. An older server sends neither field; you then get `None` and
+`()`.
 
 ## The sorts
 
@@ -166,6 +213,8 @@ your token as `Authorization: Bearer TOKEN`. The answer for `?q=order&limit=1`:
       "last_read_at": "2026-11-11T09:30:00Z",
       "readers_7d": 3,
       "health_summary": {"state": "healthy", "item": "healthy", "text": "Healthy", "others": 0},
+      "defined_by": {"repository": "analytics", "path": "assets/silver/orders.sql"},
+      "actions": ["drop", "rebuild", "maintain", "set_retention"],
       "match": {
         "kind": "table",
         "matched": "name",

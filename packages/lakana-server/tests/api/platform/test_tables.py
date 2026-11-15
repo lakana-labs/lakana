@@ -39,7 +39,7 @@ from lakana_server.api.platform.tables import _to_out
 from lakana_server.settings import Settings
 from tests.api.platform.test_tables_health import _table
 from tests.conftest import AUTH_HEADER
-from tests.server_test_helpers import create_environment, create_table
+from tests.server_test_helpers import create_environment, create_table, deploy_file
 
 
 def _create_env_and_namespace(
@@ -1154,3 +1154,37 @@ def test_table_get_leaves_the_terms_out_without_read_environment(client: TestCli
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["terms"] == [] and all(c["terms"] == [] for c in body["schema"])
+
+
+def test_a_table_says_which_file_owns_it_and_what_the_caller_may_do(client: TestClient) -> None:
+    create_environment(client)
+    create_table(client, "dev", "silver", "clean")
+    with Session(client.app.state.engine) as session:
+        deploy_file(session, "dev", "silver.clean", "SELECT 1")
+
+    body = client.get(
+        "/api/v1/environments/dev/namespaces/silver/tables/clean", headers=AUTH_HEADER
+    ).json()
+
+    assert body["defined_by"] == {"repository": "analytics", "path": "assets/silver/clean.sql"}
+    assert body["actions"] == ["drop", "rebuild", "maintain", "set_retention"]
+    (listed,) = client.get(
+        "/api/v1/environments/dev/namespaces/silver/tables", headers=AUTH_HEADER
+    ).json()
+    assert (listed["defined_by"], listed["actions"]) == (body["defined_by"], body["actions"])
+
+
+def test_both_dropped_table_lists_offer_undrop_to_an_administrator(client: TestClient) -> None:
+    create_environment(client)
+    create_table(client, "dev", "gold", "sales")
+    url = "/api/v1/environments/dev/namespaces/gold/tables/sales"
+    assert client.delete(url, headers=AUTH_HEADER).status_code == 204
+
+    (in_namespace,) = client.get(
+        "/api/v1/environments/dev/namespaces/gold/dropped-tables", headers=AUTH_HEADER
+    ).json()
+    (everywhere,) = client.get(
+        "/api/v1/environments/dev/dropped-tables", headers=AUTH_HEADER
+    ).json()["items"]
+
+    assert in_namespace["actions"] == everywhere["actions"] == ["undrop"]

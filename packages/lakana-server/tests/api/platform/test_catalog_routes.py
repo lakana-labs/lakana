@@ -15,6 +15,7 @@ from lakana_core.pagination import encode_sorted_cursor
 from tests.api.platform.test_tables_descriptions import _person
 from tests.api.platform.test_tables_health import _add_reads, _health, _table
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import create_environment, create_table, deploy_file
 
 _TABLE = "/api/v1/environments/dev/namespaces/gold/tables/t"
 
@@ -83,6 +84,8 @@ def test_the_list_pages_with_next_cursor_and_capped(client: TestClient) -> None:
         "match",
         "state",
         "model_kind",
+        "defined_by",
+        "actions",
     } == set(body["items"][0])
     second = client.get(
         "/api/v1/tables",
@@ -218,3 +221,25 @@ def test_a_grant_added_between_two_requests_is_seen_by_the_second(client: TestCl
     assert granted.status_code < 300, granted.text
     assert [i["name"] for i in client.get("/api/v1/tables", headers=rita).json()["items"]] == ["t"]
     assert client.get("/api/v1/tables/tree", headers=rita).json()["count"] == 1
+
+
+def test_the_list_items_say_which_file_owns_each_and_what_the_caller_may_do(
+    client: TestClient,
+) -> None:
+    create_environment(client)
+    create_table(client, "dev", "silver", "clean")
+    create_table(client, "dev", "silver", "free")
+    with Session(client.app.state.engine) as session:
+        deploy_file(session, "dev", "silver.clean", "SELECT 1")
+
+    items = {
+        i["name"]: i for i in client.get("/api/v1/tables", headers=AUTH_HEADER).json()["items"]
+    }
+
+    assert items["clean"]["defined_by"] == {
+        "repository": "analytics",
+        "path": "assets/silver/clean.sql",
+    }
+    assert items["clean"]["actions"] == ["drop", "rebuild", "maintain", "set_retention"]
+    assert items["free"]["defined_by"] is None
+    assert items["free"]["actions"] == ["drop", "maintain", "set_retention"]

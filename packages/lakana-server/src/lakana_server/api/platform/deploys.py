@@ -448,7 +448,13 @@ def list_orphans(
     report = service.orphans(principal, env, limit=limit, cursor=cursor)
     return OrphansOut(
         orphans=[
-            OrphanOut(repository=o.repository, table=o.table, kind=o.kind, exists=o.exists)
+            OrphanOut(
+                repository=o.repository,
+                table=o.table,
+                kind=o.kind,
+                exists=o.exists,
+                actions=list(o.actions),
+            )
             for o in report.orphans
         ],
         hidden=report.hidden,

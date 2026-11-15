@@ -257,6 +257,7 @@ def artifact_out(view: ArtifactView) -> ArtifactOut:
             else DefinedByOut(repository=view.defined_by.repository, path=view.defined_by.path)
         ),
         keep_versions=view.keep_versions,
+        actions=list(view.actions),
     )
 
 
@@ -359,6 +360,7 @@ def version_out(
         deleted_by=view.deleted_by,
         files=[ArtifactFileOut(path=f.path, size=f.size, sha256=f.sha256) for f in view.files],
         deleted_versions=list(deleted_versions),
+        actions=list(view.actions),
     )
 
 

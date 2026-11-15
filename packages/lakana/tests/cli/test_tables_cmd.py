@@ -241,6 +241,23 @@ def test_table_get_prints_a_terms_section(tmp_path: Path) -> None:
     assert lines[at + 1 : at + 3] == ["orders — Orders", "order_id: order_number — Order number"]
 
 
+@pytest.mark.parametrize("kind", ["TABLE", "VIEW"])
+def test_table_get_names_the_file_that_defines_it(tmp_path: Path, kind: str) -> None:
+    """A table or view a deployed project owns says where; one it does not, says nothing."""
+    api = FakeApi()
+    owned = {"repository": "analytics", "path": "assets/bronze/sales.sql"}
+    api.on("GET", f"{_BASE}/sales", json={**_TABLE, "kind": kind, "defined_by": owned})
+    api.on("GET", f"{_BASE}/free", json={**_TABLE, "kind": kind, "name": "free"})
+
+    result = invoke(make_state(tmp_path, api), "table", "get", "bronze.sales", "--env", "dev")
+    free = invoke(make_state(tmp_path, api), "table", "get", "bronze.free", "--env", "dev")
+
+    assert result.exit_code == 0, result.stderr
+    assert "Defined in: analytics/assets/bronze/sales.sql" in result.stdout
+    assert free.exit_code == 0, free.stderr
+    assert "Defined in" not in free.stdout
+
+
 def test_table_get_without_terms_prints_no_terms_section(tmp_path: Path) -> None:
     """An older server's answer has no `terms`: no `Terms:` line."""
     api = FakeApi()

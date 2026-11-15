@@ -160,6 +160,7 @@ def test_list_and_describe(stored: TestClient) -> None:
         "created_at",
         "defined_by",
         "keep_versions",
+        "actions",
     }
 
 
@@ -1278,3 +1279,14 @@ def test_a_nul_character_in_a_name_is_refused_before_it_reaches_sql(
     answer = stored.get(path, headers=AUTH_HEADER)
     assert answer.status_code == 422, answer.text
     assert "NUL" in answer.json()["detail"]
+
+
+def test_an_artifact_and_its_live_versions_offer_what_the_caller_may_do(
+    stored: TestClient,
+) -> None:
+    (churn, _) = stored.get(f"{_ENV}/artifacts", headers=AUTH_HEADER).json()
+    assert churn["actions"] == ["drop"]
+    versions = stored.get(f"{_BASE}/versions", headers=AUTH_HEADER).json()
+    assert [v["actions"] for v in versions] == [["delete"], ["delete"]]
+    one = stored.get(f"{_BASE}/versions/1", headers=AUTH_HEADER).json()
+    assert one["actions"] == ["delete"]
