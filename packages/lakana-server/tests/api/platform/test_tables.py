@@ -18,7 +18,7 @@ from typing import cast
 
 from fastapi.testclient import TestClient
 from pyiceberg.schema import Schema
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.descriptions import sync_project_descriptions
@@ -1188,3 +1188,75 @@ def test_both_dropped_table_lists_offer_undrop_to_an_administrator(client: TestC
     ).json()["items"]
 
     assert in_namespace["actions"] == everywhere["actions"] == ["undrop"]
+
+
+def test_the_namespace_list_reads_the_definitions_once_however_many_tables(
+    client: TestClient,
+) -> None:
+    """I1: one read of the deployed definitions per request for the list, not one per row."""
+    create_environment(client)
+    for name in ("a", "b", "c"):
+        create_table(client, "dev", "silver", name)
+    with Session(client.app.state.engine) as session:
+        deploy_file(session, "dev", "silver.a", "SELECT 1")
+    engine = client.app.state.engine
+    manifest_reads: list[str] = []
+
+    def record(conn: object, cursor: object, statement: str, *args: object) -> None:
+        """Record a statement that reads the deployed definitions (`deployed_entries`).
+
+        Parameters
+        ----------
+        conn
+            The connection.
+        cursor
+            The cursor.
+        statement
+            The SQL.
+        *args
+            The rest of the event's arguments.
+        """
+        if "manifest_json, repositories.name" in statement:
+            manifest_reads.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        listed = client.get(
+            "/api/v1/environments/dev/namespaces/silver/tables", headers=AUTH_HEADER
+        ).json()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert len(manifest_reads) == 1
+    assert [(t["name"], t["defined_by"] is not None) for t in listed] == [
+        ("a", True),
+        ("b", False),
+        ("c", False),
+    ]
+    assert all(t["actions"][:1] == ["drop"] for t in listed)
+
+
+def test_the_create_and_undrop_answers_say_what_the_caller_may_do(client: TestClient) -> None:
+    """M1: the creator owns the table, so the answer is never an empty list for them."""
+    create_environment(client)
+    created = client.post(
+        "/api/v1/environments/dev/namespaces/silver/tables",
+        json={"name": "clean", "columns": [{"name": "id", "type": "long", "nullable": False}]},
+        headers=AUTH_HEADER,
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["actions"] == ["drop", "maintain", "set_retention"]
+    assert created.json()["defined_by"] is None
+    url = "/api/v1/environments/dev/namespaces/silver/tables/clean"
+    assert client.delete(url, headers=AUTH_HEADER).status_code == 204
+    with Session(client.app.state.engine) as session:
+        deploy_file(session, "dev", "silver.clean", "SELECT 1")
+
+    restored = client.post(f"{url}/undrop", json={}, headers=AUTH_HEADER)
+
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["defined_by"] == {
+        "repository": "analytics",
+        "path": "assets/silver/clean.sql",
+    }
+    assert restored.json()["actions"] == ["drop", "rebuild", "maintain", "set_retention"]

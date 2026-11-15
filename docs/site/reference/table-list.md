@@ -68,13 +68,13 @@ server about each table.
 
 | Word | Means | Needs | Kinds |
 |---|---|---|---|
-| `drop` | `lakana table delete` | `DROP_TABLE` on the table | table, view, external table |
+| `drop` | `lakana table delete`; for an artifact, `lakana artifact drop` | `DROP_TABLE` on the table | every kind |
 | `rebuild` | `lakana table rebuild` | `DROP_TABLE` on the table and `RUN` on the environment, and a current deployment must declare the name | table, view, external table |
 | `maintain` | `lakana table maintain` | `MAINTAIN_TABLE` on the table | managed table |
 | `set_retention` | `lakana table retention` | you own the table, or `WRITE_TABLE` on it | managed table |
 
-An artifact has no actions here. Its own list says what you may do with it (see
-[Artifacts](artifacts.md#rest)).
+An artifact offers only `drop`, the same as in its own list (see [Artifacts](artifacts.md#rest)),
+so a row offers the same in every list.
 
 `defined_by` says what git owns. When it is set, a deployed project builds the table and a drop is
 refused, even though `drop` is in `actions`. Remove the asset from the project and deploy, or
@@ -95,8 +95,9 @@ for example:
 - you have not touched your passkey in the last 15 minutes;
 - a retention that makes the table expire sooner needs `DROP_TABLE` as well.
 
-The answers of `POST .../tables` (create) and `POST .../tables/{name}/undrop` leave `actions`
-empty and `defined_by` `null`. Read the table to get them.
+The answers of `POST .../tables` (create) and `POST .../tables/{name}/undrop` carry both fields
+too. A restore can bring back a table a project declares, so its answer can have `defined_by`. You
+may create or restore a table without being allowed to read it; you then get `defined_by` `null`.
 
 `lakana table get NAME` prints `Defined in: REPOSITORY/PATH` for a table or view a project builds.
 In the SDK, `Table.defined_by` and `TableListItem.defined_by` are a `DefinedBy` or `None`, and

@@ -1264,7 +1264,7 @@ class TableListItemOut(BaseModel):
     actions
         What the caller's rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and
         ``set_retention``: a client offers an action only when it is listed (Rebuild only then).
-        The server still decides each request.
+        The server still decides each request. An artifact offers only ``drop``.
     """
 
     # jscpd:ignore-start
@@ -1482,12 +1482,12 @@ class TableOut(BaseModel):
     defined_by
         The deployed project file (repository and path) that owns it, so that only git may
         remove it: a client shows Drop disabled with "Defined in". `None` when no deployed
-        project declares it as what it is, and in the answer of a create or a restore.
+        project declares it as what it is. In the answer of a create or a restore, also
+        `None` to a caller who may not read the table.
     actions
         What the caller's rights allow on it, from ``drop``, ``rebuild``, ``maintain`` and
         ``set_retention``: a client offers an action only when it is listed (Rebuild only then).
-        The server still decides each request. Empty in the
-        answer of a create or a restore; read the table for them.
+        The server still decides each request. An artifact offers only ``drop``.
     """
 
     name: str

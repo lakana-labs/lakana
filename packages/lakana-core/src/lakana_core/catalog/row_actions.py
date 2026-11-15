@@ -44,7 +44,7 @@ VERSION_ACTIONS = ("delete",)
 """The words an artifact version's `actions` may hold."""
 
 _DROPPABLE = frozenset({"TABLE", "EXTERNAL", "VIEW"})
-"""The kinds `drop` and `rebuild` apply to; an artifact is dropped as an artifact."""
+"""The kinds `rebuild` applies to; `rebuild` refuses an artifact row."""
 
 _Question = tuple[Action, Securable]
 
@@ -99,7 +99,8 @@ def table_actions_each(
 ) -> list[tuple[str, ...]]:
     """Say which of `TABLE_ACTIONS` the reader's rights allow on each table row.
 
-    - ``drop``: `DROP_TABLE` on the table, for a table, a view or an external table.
+    - ``drop``: `DROP_TABLE` on the table, for every kind. An artifact row offers it as the
+      artifact list does (`ArtifactService.drop_artifact`), so a row agrees across lists.
     - ``rebuild``: `DROP_TABLE` on the table and `RUN` on the environment, for the same kinds,
       and only when a current deployment declares the name (of any output).
     - ``maintain``: `MAINTAIN_TABLE` on the table, for a managed table.
@@ -125,9 +126,9 @@ def table_actions_each(
     for ref, kind, owner_id, declared in rows:
         scope = _table(ref)
         questions: list[_Question] = []
-        if kind in _DROPPABLE:
+        if kind in _DROPPABLE or kind == "ARTIFACT":
             questions.append((Action.DROP_TABLE, scope))
-            if declared:
+            if declared and kind in _DROPPABLE:
                 questions.append((Action.RUN, Securable.environment_scope(ref.environment)))
         if kind == "TABLE":
             questions.append((Action.MAINTAIN_TABLE, scope))

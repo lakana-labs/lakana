@@ -1134,7 +1134,9 @@ class FakeColumnCatalog(NoPolicyFields):
     field_ids: dict[str, int] | None = None
     calls: list[tuple[PrincipalRef, TableRef]] = field(default_factory=list)
 
-    def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
+    def describe_table(
+        self, p: PrincipalRef, ref: TableRef, *, with_actions: bool = True
+    ) -> TableDescription:
         """Describe a table as having `names` as its columns.
 
         Parameters
@@ -1143,6 +1145,8 @@ class FakeColumnCatalog(NoPolicyFields):
             The acting principal.
         ref
             The table reference.
+        with_actions
+            Ignored.
 
         Returns
         -------

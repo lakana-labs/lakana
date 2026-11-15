@@ -55,6 +55,7 @@ from lakana_core.heap import trim_heap
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.projects.asset_model import require_model_kind
 from lakana_core.projects.definition import (
+    DefiningFile,
     TableDefinition,
     TableDefinitionFile,
     table_definition,
@@ -579,7 +580,14 @@ def _decode_arrow_stream(payload: pa.Buffer, max_bytes: int, max_arrays: int) ->
     return data
 
 
-def _to_out(namespace: str, loaded: LoadedTable, *, language: str, main_language: str) -> TableOut:
+def _to_out(
+    namespace: str,
+    loaded: LoadedTable,
+    *,
+    language: str,
+    main_language: str,
+    row: tuple[DefiningFile | None, tuple[str, ...]] = (None, ()),
+) -> TableOut:
     """Build a response body from a loaded table.
 
     Parameters
@@ -592,6 +600,8 @@ def _to_out(namespace: str, loaded: LoadedTable, *, language: str, main_language
         The reader's first language, for `TableOut.language`.
     main_language
         `LAKANA_MAIN_LANGUAGE`; the table's main language unless its project declares one.
+    row
+        `CatalogService.row_actions` of the table: its owning file and the caller's actions.
 
     Returns
     -------
@@ -611,7 +621,25 @@ def _to_out(namespace: str, loaded: LoadedTable, *, language: str, main_language
         snapshot_id=loaded.metadata.current_snapshot_id,
         language=language,
         main_language=loaded.text_language or main_language,
+        defined_by=_defined_by_out(row[0]),
+        actions=list(row[1]),
     )
+
+
+def _defined_by_out(found: DefiningFile | None) -> DefinedByOut | None:
+    """Show the file that owns a table.
+
+    Parameters
+    ----------
+    found
+        The file, or `None`.
+
+    Returns
+    -------
+    DefinedByOut or None
+        Its repository and path.
+    """
+    return None if found is None else DefinedByOut(repository=found.repository, path=found.path)
 
 
 def _column_out(column: ColumnSpec, description: TableDescription) -> ColumnOut:
@@ -714,11 +742,7 @@ def _describe_out(namespace: str, description: TableDescription) -> TableOut:
         health=description.health,
         health_missing=list(description.health_missing),
         health_never_judged=dict(description.health_never_judged),
-        defined_by=None
-        if description.defined_by is None
-        else DefinedByOut(
-            repository=description.defined_by.repository, path=description.defined_by.path
-        ),
+        defined_by=_defined_by_out(description.defined_by),
         actions=list(description.actions),
     )
 
@@ -1174,6 +1198,7 @@ def create_table(
         loaded,
         language=reader_languages(request, None, principal, main_language)[0],
         main_language=main_language,
+        row=catalog.row_actions(principal, loaded.ref),
     )
 
 
@@ -1234,16 +1259,22 @@ def list_tables(
     languages = reader_languages(request, lang, principal, main_language)
     ns = NamespacePath.from_parts(path.split("."))
     refs = catalog.list_tables(principal, env, ns)
-    described = [
-        catalog.describe_table(
-            principal,
-            ref,
-            languages=languages,
-            view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
-        )
-        for ref in refs
-        if catalog.can_read_table(principal, ref)
-    ]
+    # Every row is described without its actions, then all are filled at once: one read of
+    # the deployed definitions and one rights batch per request, not per row.
+    described = catalog.with_row_actions(
+        principal,
+        [
+            catalog.describe_table(
+                principal,
+                ref,
+                languages=languages,
+                view_sql_window_minutes=request.app.state.settings.view_audit.window_minutes,
+                with_actions=False,
+            )
+            for ref in refs
+            if catalog.can_read_table(principal, ref)
+        ],
+    )
     return [
         _describe_out(path, d)
         for d in described
@@ -2210,6 +2241,7 @@ def undrop_table(
         loaded,
         language=reader_languages(request, None, principal, main_language)[0],
         main_language=main_language,
+        row=catalog.row_actions(principal, loaded.ref),
     )
 
 

@@ -362,6 +362,7 @@ from lakana_core.models import (
     WriteMode,
 )
 from lakana_core.models.run import TERMINAL_TASK_STATUSES
+from lakana_core.models.table import table_kind
 from lakana_core.pagination import (
     LIST_LIMIT_DEFAULT,
     Page,
@@ -380,7 +381,8 @@ from lakana_core.projects.definition import (
     REASON_MESSAGES,
     DefiningFile,
     DefinitionReason,
-    defining_ref,
+    definition_for,
+    deployed_definitions,
     owned_by_git,
     passes_content_gate,
 )
@@ -3962,6 +3964,7 @@ class CatalogService:
         *,
         languages: Sequence[str] = (),
         view_sql_window_minutes: int | None = None,
+        with_actions: bool = True,
     ) -> TableDescription:
         """Describe a table, an external table or a view for the platform API.
 
@@ -3977,6 +3980,10 @@ class CatalogService:
             `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`, from a route that shows a view's SQL. `None`
             (an internal caller that needs only the columns) never returns a view's SQL and
             records nothing.
+        with_actions
+            Fill `defined_by` and `actions` (one read of the deployed definitions, one rights
+            batch). `False` leaves them empty: for a caller that needs only the columns, and for
+            a list that fills every row at once with `with_row_actions`.
 
         Returns
         -------
@@ -4075,13 +4082,15 @@ class CatalogService:
         facts = table_facts(self._session, self._authz, p, [(ref.environment, row)], now=now)[
             row.id
         ]
-        found = defining_ref(self._session, namespace.environment_id, ref)
-        (actions,) = table_actions_each(
-            self._authz, p, [(ref, described.kind, row.owner_id, found is not None)]
-        )
+        defined_by: DefiningFile | None = None
+        actions: tuple[str, ...] = ()
+        if with_actions:
+            ((defined_by, actions),) = self._row_actions(
+                p, [(ref, described.kind, row.owner_id, namespace.environment_id)]
+            )
         return replace(
             described,
-            defined_by=found if owned_by_git(found, described.kind) else None,
+            defined_by=defined_by,
             actions=actions,
             owner=facts.owner,
             created_at=row.created_at,
@@ -4107,6 +4116,115 @@ class CatalogService:
             expires_soon=expires_soon,
             model=model,
         )
+
+    def with_row_actions(
+        self, p: PrincipalRef, described: Sequence[TableDescription]
+    ) -> list[TableDescription]:
+        """Fill `defined_by` and `actions` of many descriptions at once.
+
+        For a list that describes its rows with ``with_actions=False``: one read of the rows'
+        owners, one read of the deployed definitions per environment, and one rights batch,
+        however many rows there are.
+
+        Parameters
+        ----------
+        p
+            The reader; each description must be one `describe_table` gave `p`.
+        described
+            The descriptions.
+
+        Returns
+        -------
+        list of TableDescription
+            The same descriptions, filled, in order.
+        """
+        if not described:
+            return []
+        rows = {
+            table_id: (owner_id, environment_id)
+            for table_id, owner_id, environment_id in self._session.execute(
+                select(Table.id, Table.owner_id, Namespace.environment_id)
+                .join(Namespace, Namespace.id == Table.namespace_id)
+                .where(Table.id.in_([d.id for d in described]))
+            )
+        }
+        filled = self._row_actions(
+            p, [(d.ref, d.kind, rows[d.id][0], rows[d.id][1]) for d in described]
+        )
+        return [
+            replace(d, defined_by=defined_by, actions=actions)
+            for d, (defined_by, actions) in zip(described, filled, strict=True)
+        ]
+
+    def row_actions(
+        self, p: PrincipalRef, ref: TableRef
+    ) -> tuple[DefiningFile | None, tuple[str, ...]]:
+        """Say which file owns a table and what `p` may do with it, for a create or a restore.
+
+        The answer of a create or an undrop is the only one given to a caller who may not read
+        the table, so the file is left out unless `p` holds `READ_TABLE` on it (ruling 2).
+
+        Parameters
+        ----------
+        p
+            The caller.
+        ref
+            The table, as it is now.
+
+        Returns
+        -------
+        tuple
+            The owning file (or `None`) and the action words.
+
+        Raises
+        ------
+        NotFoundError
+            If the table does not exist.
+        """
+        namespace, row = self._find_table(ref)
+        ((defined_by, actions),) = self._row_actions(
+            p, [(ref, table_kind(row.table_type), row.owner_id, namespace.environment_id)]
+        )
+        if defined_by is not None and not self.can_read_table(p, ref):
+            defined_by = None
+        return defined_by, actions
+
+    def _row_actions(
+        self,
+        p: PrincipalRef,
+        rows: Sequence[tuple[TableRef, str, uuid.UUID | None, uuid.UUID]],
+    ) -> list[tuple[DefiningFile | None, tuple[str, ...]]]:
+        """Read the definitions once per environment and ask every row's rights in one batch.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        rows
+            ``(ref, kind, owner_id, environment_id)`` per row.
+
+        Returns
+        -------
+        list of tuple
+            Per row, the owning file (`owned_by_git`, else `None`) and the action words.
+        """
+        definitions = {
+            environment_id: deployed_definitions(self._session, environment_id)
+            for environment_id in dict.fromkeys(env for *_, env in rows)
+        }
+        found = [definition_for(definitions[env], ref) for ref, _, _, env in rows]
+        actions = table_actions_each(
+            self._authz,
+            p,
+            [
+                (ref, kind, owner_id, file is not None)
+                for (ref, kind, owner_id, _), file in zip(rows, found, strict=True)
+            ],
+        )
+        return [
+            (file if owned_by_git(file, kind) else None, allowed)
+            for (_, kind, _, _), file, allowed in zip(rows, found, actions, strict=True)
+        ]
 
     def table_references(self, p: PrincipalRef, ref: TableRef) -> TableReferences:
         """Show what a table's header says it references, and which tables reference it.
@@ -4939,7 +5057,7 @@ class CatalogService:
             `MAX_EDIT_LANGUAGES`.
         """
         row = self._find_table_to_describe(p, ref)
-        names = [c.name for c in self.describe_table(p, ref).columns]
+        names = [c.name for c in self.describe_table(p, ref, with_actions=False).columns]
         if column not in names:
             have = ", ".join(names) if names else "none"
             raise NotFoundError(

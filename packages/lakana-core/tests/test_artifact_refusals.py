@@ -782,6 +782,7 @@ _ARTIFACT_HANDLING = {
         "load_table_at_check": "hides",
         "commit_table": "refuses",
         "describe_table": "describes",
+        "row_actions": "describes",
         "policy_fields": "describes",
         "table_health": "describes",
         "table_health_signals": "describes",
@@ -961,6 +962,16 @@ def test_every_operation_on_a_table_says_what_it_does_with_an_artifact(cls: type
             "remove it from _ARTIFACT_HANDLING, or fix the selection rule in _table_methods."
         )
     assert set(classified.values()) <= _KINDS_OF_HANDLING
+
+
+def test_the_actions_of_an_artifact_row_are_those_of_the_artifact_list(
+    session: Session, tmp_path: Path
+) -> None:
+    """`row_actions` describes an artifact row: only `drop` (M4), never table maintenance."""
+    catalog, p = _catalog(session, tmp_path)
+
+    assert catalog.row_actions(p, _REF) == (None, ("drop",))
+    assert catalog.describe_table(p, _REF).actions == ("drop",)
 
 
 def test_a_load_names_the_bronze_layer_and_never_the_artifact(

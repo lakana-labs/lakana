@@ -894,7 +894,9 @@ class _GrantCheckingCatalog(NoPolicyFields):
     authz: GrantAuthorization
     names: list[str]
 
-    def describe_table(self, p: PrincipalRef, ref: TableRef) -> TableDescription:
+    def describe_table(
+        self, p: PrincipalRef, ref: TableRef, *, with_actions: bool = True
+    ) -> TableDescription:
         """Describe the table after asking for READ_TABLE as `p`.
 
         Parameters
@@ -903,6 +905,8 @@ class _GrantCheckingCatalog(NoPolicyFields):
             The acting principal.
         ref
             The table reference.
+        with_actions
+            Ignored.
 
         Returns
         -------
