@@ -45,8 +45,9 @@ def extract_lineage(sql: str, dialect: str = "duckdb") -> dict[str, list[dict[st
         column_name = projection.alias_or_name
         try:
             # No schema is known here. sqlglot 30.22 made the argument required; an empty
-            # mapping is what its earlier default (None) meant.
-            node = sqlglot.lineage.lineage(column_name, sql, schema={}, dialect=dialect)
+            # mapping is what its earlier default (None) meant. The tree, not the text: sqlglot
+            # would parse text again with its own DuckDB reading (#415); it copies the tree.
+            node = sqlglot.lineage.lineage(column_name, parsed, schema={}, dialect=dialect)
         except sqlglot.errors.SqlglotError:
             # An unaliased computed projection has no name to trace:
             # `SELECT COUNT(*) FROM t` names the column `*` and
