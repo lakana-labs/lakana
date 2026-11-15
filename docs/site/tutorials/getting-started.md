@@ -7,9 +7,10 @@ Docker or a database server.
 
 Lakana is pre-1.0: the API and the data layout may change between 0.x releases, so do not put
 production data in it yet. Everything in this tutorial is done in a terminal with the CLI;
-the web interface is under way. A first preview of it, which signs you in
-but shows no data yet, is off by default: set `LAKANA_UI__ENABLED` to `true` in the environment
-you start the instance from, and the start opens it in your browser, signed in (see the
+the web interface is under way. A preview of it, with Home and the Catalog, where you find a
+table and open its page (see [Start in the web interface](../how-to/start-in-the-web-interface.md)),
+is off by default: set `LAKANA_UI__ENABLED` to `true` in the environment you start the instance
+from, and the start opens it in your browser, signed in (see the
 [settings reference](../reference/settings.md)).
 
 You need Python 3.11 or newer (on macOS: Python 3.13 or newer) and git. With an older Python on macOS, `lakana server start --local` stops before it starts anything and says so. Once Lakana is installed, plan on ten minutes.
