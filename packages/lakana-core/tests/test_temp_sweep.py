@@ -444,3 +444,64 @@ def test_the_writer_names_its_temporary_file_the_way_the_sweep_recognises_it(
         temp = os.path.basename(stream._temp)
         stream.abort()
         assert is_temp_name(temp), temp
+
+
+def test_a_stop_before_the_first_directory_walks_nothing(tmp_path: Path) -> None:
+    storage = FsspecStorage(f"file://{tmp_path}", {})
+    stale = tmp_path / f".a.{_HEX}.part"
+    stale.write_bytes(b"x")
+    _age(stale, _STALE)
+    counts = storage.remove_stale_temp_files(older_than=_NOW, should_stop=lambda: True)
+    assert counts.stopped is True
+    assert counts.removed == 0
+    assert stale.exists()
+
+
+def test_a_temporary_file_gone_before_it_is_looked_at_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The writer's commit or abort can take the file between the listing and the look."""
+    storage = FsspecStorage(f"file://{tmp_path}", {})
+    stale = tmp_path / f".a.{_HEX}.part"
+    stale.write_bytes(b"x")
+    _age(stale, _STALE)
+    real = os.stat
+
+    def vanishing(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:  # ruff: ignore[any-type]
+        if path == stale.name and kwargs.get("dir_fd") is not None:
+            raise FileNotFoundError(errno.ENOENT, "gone")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", vanishing)
+    counts = storage.remove_stale_temp_files(older_than=_NOW, should_stop=lambda: False)
+    assert (counts.removed, counts.failed, counts.left_alone, counts.kept_fresh) == (0, 0, 0, 0)
+
+
+def test_a_backend_that_is_not_the_fsspec_one_is_skipped(world: World) -> None:
+    """`Storage` is a protocol: a root resolved to another backend has no temporary files."""
+    world.environment("dev")
+
+    class _Other:
+        """A resolver that hands out a storage of another kind."""
+
+        def for_environment(self, name: str) -> object:
+            """Resolve an environment.
+
+            Parameters
+            ----------
+            name
+                The environment.
+
+            Returns
+            -------
+            object
+                Something with a `storage` that is not an `FsspecStorage`.
+            """
+            return type("Resolved", (), {"storage": object()})()
+
+    report = sweep_temp_files(
+        world.session,
+        _Other(),  # ty: ignore[invalid-argument-type]
+        now=_NOW,
+    )
+    assert (report.removed, report.failed_roots) == (0, 0)
