@@ -187,10 +187,10 @@ export default [
   // strings of Lineage, Health and Access, which load there too, do not use it up. With the Health
   // and Access tabs it measures 208.3 kB (2026-11-13), with the copy line and the signed-in
   // person, which the tabs share with the first load, in chunks of their own that index.html
-  // preloads. It measures 210.13 kB (2026-11-16) with a table's Actions menu: React Aria's Menu,
-  // which the user menu and Help draw on the first paint, is now shared with that menu's chunk,
-  // so the bundler splits it and its hooks into a chunk of their own that index.html preloads
-  // (+1.7 kB of the split, measured with and without the menu's lazy import); the limit holds.
+  // preloads. With a table's Actions menu it measured 210.13 kB (2026-11-16): the menu's chunk
+  // imports react-router's useNavigate, which split the router's chunk of the first load into
+  // two (hooks- and lib-), and the exports between them cost 1.55 kB. vite.config.ts keeps
+  // react-router in one chunk (codeSplitting.groups); it measures 208.57 kB, and the limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
