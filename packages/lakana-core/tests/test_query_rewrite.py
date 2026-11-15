@@ -2747,9 +2747,18 @@ def test_a_clause_duckdb_does_not_take_on_a_bare_values_list_is_refused(
         assert str(caught.value) == message
 
 
-@pytest.mark.parametrize("sql", ["VALUES (1) SORT BY 1", "SELECT 1 AS a SORT BY 1"])
-def test_a_sort_by_is_refused_as_a_syntax_error(sql: str) -> None:
-    """A `SORT BY`, which sqlglot dropped from its rendering up to 30.24, no longer parses.
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "VALUES (1) SORT BY 1",
+        "SELECT 1 AS a SORT BY 1",
+        "select a from bronze.x sort by a",
+        "SELECT * FROM (SELECT 1 AS a SORT BY a) AS s",
+        "SELECT a FROM bronze.x SORT\n  BY a",
+    ],
+)
+def test_a_sort_by_is_refused_with_the_order_by_hint(sql: str) -> None:
+    """A `SORT BY` is refused naming `ORDER BY` (sqlglot 30.24 dropped it, 30.25 cannot parse it).
 
     DuckDB has no `SORT BY` either, so it is never run without the clause the caller wrote.
 
@@ -2759,8 +2768,31 @@ def test_a_sort_by_is_refused_as_a_syntax_error(sql: str) -> None:
         A query with a `SORT BY`.
     """
     for check in (check_blacklist, extract_table_refs, lambda text: rewrite_query(text, {})):
+        with pytest.raises(ValidationError) as caught:
+            check(sql)
+        assert str(caught.value) == "SORT BY is not supported; use ORDER BY."
+
+
+@pytest.mark.parametrize(
+    "sql",
+    ["SELECT 1 +", "SELECT sort, by FROM", "SELECT 'SORT BY' AS s FROM"],
+)
+def test_a_syntax_error_without_sort_by_stays_a_syntax_error(sql: str) -> None:
+    """Only the words `SORT BY` outside a string get the hint; other broken SQL does not.
+
+    Parameters
+    ----------
+    sql
+        A query sqlglot cannot parse.
+    """
+    for check in (check_blacklist, extract_table_refs, lambda text: rewrite_query(text, {})):
         with pytest.raises(sqlglot.errors.ParseError):
             check(sql)
+
+
+def test_sort_by_inside_a_string_is_just_text() -> None:
+    """A string reading `SORT BY` is a value, not a clause."""
+    assert extract_table_refs("SELECT 'x SORT BY y' AS s FROM bronze.x") == ["bronze.x"]
 
 
 def test_every_argument_sqlglot_can_set_on_values_is_allowed_or_refused_by_name() -> None:

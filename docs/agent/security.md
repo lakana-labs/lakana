@@ -4557,7 +4557,8 @@ explicitly (sqlglot renders the joined table as a column there). Diffing the gua
 that corpus between sqlglot 30.24 on the old code and 30.31 on the adapted code found no
 statement newly allowed that reaches data: `TABLE t` now parses as `SELECT * FROM t` and is
 rewritten like it (row filter and masks applied; `TABLE fn()` refused as a table function), and
-`SORT BY`, which 30.24 dropped silently, no longer parses.
+`SORT BY`, which 30.24 dropped silently, no longer parses; when a parse fails and the tokens
+hold `SORT BY` outside a string, `_parse_with_hints` refuses it naming `ORDER BY`.
 
 **User SQL cannot reach the values the platform sets, and may not contain a placeholder
 (`?`, `$1`, `$name`).** The rewriter reads each table's resolved file list — on S3, presigned

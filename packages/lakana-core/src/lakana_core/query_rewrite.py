@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import itertools
 import logging
 import re
 from collections import Counter
@@ -578,6 +579,9 @@ list gets each of them exactly as a `SELECT` list does.
 _VALUES_ALIAS = "__lakana_values"
 """The alias a bare `VALUES` list takes when `_parse_checked` makes it a `SELECT` of it."""
 
+_SORT_BY_MESSAGE = "SORT BY is not supported; use ORDER BY."
+"""Why a query with a `SORT BY` is refused: neither sqlglot nor DuckDB reads the clause."""
+
 _JOIN_WITHOUT_FROM_MESSAGE = (
     "A JOIN needs a FROM before it: write SELECT ... FROM a JOIN b ON ... and submit it again."
 )
@@ -1043,6 +1047,49 @@ def _render(parsed: exp.Expr, dialect: str) -> str:
             node.replace(wrapper)
             wrapper.set("this", node)
     return parsed.sql(dialect=dialect)
+
+
+def _parse_with_hints(sql: str, dialect: str) -> exp.Expr:
+    """Parse submitted SQL as `_parse_sql` does, naming `ORDER BY` for a `SORT BY` it cannot read.
+
+    From sqlglot 30.25 the DuckDB parser fails on `SORT BY` (30.24 parsed it and dropped it from
+    the rendering). Only when the parse fails are the tokens looked at: `SORT` followed by `BY`
+    outside a string or quoted name turns the syntax error into the refusal that says what to
+    write instead.
+
+    Parameters
+    ----------
+    sql
+        The text to parse.
+    dialect
+        The SQL dialect to parse `sql` as.
+
+    Returns
+    -------
+    sqlglot.expressions.Expr
+        The tree `_parse_sql` returns.
+
+    Raises
+    ------
+    ValidationError
+        If the text does not parse and holds `SORT BY` (`_SORT_BY_MESSAGE`).
+    sqlglot.errors.ParseError
+        If it does not parse for any other reason; see `_parse_sql`.
+    """
+    try:
+        return _parse_sql(sql, dialect)
+    except sqlglot.errors.ParseError as exc:
+        try:
+            tokens = sqlglot.tokenize(sql, dialect=sql_dialect.reading_dialect(dialect))
+        except sqlglot.errors.SqlglotError:
+            raise exc from None
+        words = [
+            token.text.upper() if token.token_type is sqlglot.tokens.TokenType.VAR else None
+            for token in tokens
+        ]
+        if any(a == "SORT" and b == "BY" for a, b in itertools.pairwise(words)):
+            raise ValidationError(_SORT_BY_MESSAGE) from exc
+        raise
 
 
 def _takes_a_lambda(function: exp.Expr | None) -> bool:
@@ -1610,7 +1657,7 @@ def _parse_checked(sql: str, dialect: str) -> exp.Expr:
         keep that promise here, so it must not be reachable by a future
         caller that skips the blacklist.
     """
-    parsed = _parse_sql(sql, dialect)
+    parsed = _parse_with_hints(sql, dialect)
     if isinstance(parsed, exp.Values):
         parsed = _select_of_values(parsed)
     _reject_placeholders(parsed)
@@ -2635,9 +2682,10 @@ def check_blacklist(sql: str, dialect: str = "duckdb") -> None:
         list, or is a `VALUES` list with an alias or a clause other than `ORDER BY`,
         `LIMIT` and `OFFSET`; if a statement that
         is not a read sits anywhere inside it; or if it
-        contains a `WITH RECURSIVE` clause or a `CONNECT BY`.
+        contains a `WITH RECURSIVE` clause or a `CONNECT BY`; or if it does not parse
+        and holds a `SORT BY` (`_SORT_BY_MESSAGE`).
     """
-    parsed = _parse_sql(sql, dialect)
+    parsed = _parse_with_hints(sql, dialect)
     for item in parsed.find_all(exp.Table, exp.Lateral):
         function = _from_item_function_name(item)
         if function is not None and function not in _ALLOWED_TABLE_FUNCTIONS:
