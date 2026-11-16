@@ -216,6 +216,40 @@ nav:
               - reference/cli/lakana-bundle.md
           - REST API:
               - reference/rest-api.md
+              - reference/rest/environments.md
+              - reference/rest/namespaces.md
+              - reference/rest/queries.md
+              - reference/rest/tables.md
+              - reference/rest/search.md
+              - reference/rest/catalog.md
+              - reference/rest/glossary.md
+              - reference/rest/graph.md
+              - reference/rest/artifacts.md
+              - reference/rest/principals.md
+              - reference/rest/groups.md
+              - reference/rest/tokens.md
+              - reference/rest/task-tokens.md
+              - reference/rest/grants.md
+              - reference/rest/row-filters.md
+              - reference/rest/column-masks.md
+              - reference/rest/secrets.md
+              - reference/rest/connections.md
+              - reference/rest/repositories.md
+              - reference/rest/package-indexes.md
+              - reference/rest/deploys.md
+              - reference/rest/runs.md
+              - reference/rest/jobs.md
+              - reference/rest/audit.md
+              - reference/rest/ci-trust-rules.md
+              - reference/rest/access.md
+              - reference/rest/auth.md
+              - reference/rest/whoami.md
+              - reference/rest/sign-in.md
+              - reference/rest/settings.md
+              - reference/rest/info.md
+              - reference/rest/status.md
+              - reference/rest/interface.md
+              - reference/rest/home.md
           # generated:end api-nav
   - Project:
       - explanation/roadmap.md

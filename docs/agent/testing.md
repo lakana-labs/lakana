@@ -445,8 +445,13 @@ has one page per command group, named after the command (`reference/cli/lakana-t
 `reference/settings.md` from the settings models of `lakana-core` and `lakana-server` (the
 description of a variable is its entry in the model's `Parameters` docstring section, so document
 a new setting there), and `reference/openapi.json`, the OpenAPI document of the platform REST API
-(`docs/agent/release.md`, "The REST API contract"). After a command, an option, a setting or a
-route changes, run
+(`docs/agent/release.md`, "The REST API contract"). The REST reference is generated from
+`openapi.json`: `reference/rest/<tag>.md` is one page per OpenAPI tag (its routes with their
+parameters, request body and answers), and the list of those pages in `reference/rest-api.md` is
+the generated region between the `generated:begin rest-pages` and `generated:end rest-pages`
+markers; the rest of `rest-api.md` is written by hand. A route's text on those pages is its
+summary and description in the OpenAPI document, so write them for a user. After a command, an
+option, a setting or a route changes, run
 `uv run python scripts/generate_reference.py` and commit the pages; `--check` fails, naming the
 stale page, and runs in CI's `docs` job and in `scripts/tests/test_generate_reference.py`.
 
