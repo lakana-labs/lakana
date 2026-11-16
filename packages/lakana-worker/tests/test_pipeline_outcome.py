@@ -41,6 +41,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -145,6 +146,7 @@ def _run(session: Session, principal_id: uuid.UUID | None, sql: str) -> uuid.UUI
     """
     env = session.scalars(select(Environment)).one()
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal_id,
@@ -1152,6 +1154,7 @@ def _task_write_run(session: Session, principal_id: uuid.UUID) -> uuid.UUID:
     session.add(task)
     session.flush()
     query = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal_id,
@@ -1213,6 +1216,7 @@ def test_the_audit_of_a_run_ended_in_the_workers_place_is_told_by_who_ended_it(
     status: QueryRunStatus, cause: str | None, task_run: bool, token: bool, expected: bool
 ) -> None:
     run = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         status=status,
         error_cause=cause,

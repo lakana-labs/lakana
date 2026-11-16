@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import AuthorizationService
 from lakana_core.config import QueryLimitsConfig
 from lakana_core.db import db_now
-from lakana_core.models import QueryRun, QueryRunStatus
+from lakana_core.models import QueryOrigin, QueryRun, QueryRunStatus
 from lakana_core.projects.checks import CheckSpec, count_query
 from lakana_core.secrets.keys import KeyProvider
 from lakana_worker.pipeline import ReadOutcome, run_one
@@ -125,6 +125,7 @@ def count_check(
         principal_id=principal_id,
         sql_text=sql,
         status=QueryRunStatus.RUNNING,
+        origin=QueryOrigin.CHECK,
         task_run_id=task_run_id,
         worker_id=worker_id,
     )

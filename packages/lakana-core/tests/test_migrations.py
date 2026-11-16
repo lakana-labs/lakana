@@ -1587,6 +1587,8 @@ def test_0021_adds_cancel_requested_and_its_downgrade_turns_cancelled_runs_into_
         values = ":id, :env, 'SELECT 1', :status, :now, :now"
         if cancel:
             names, values = names + ", cancel_requested", values + ", 1"
+        if "origin" in columns():  # from revision 0080 on, a run names where it came from
+            names, values = names + ", origin", values + ", 'written'"
         connection.execute(
             sa.text(f"INSERT INTO query_runs ({names}) VALUES ({values})"),
             {"id": run_id, "env": uuid.uuid4().hex, "status": status, "now": _utc_text()},
@@ -6042,3 +6044,89 @@ def test_0079_indexes_the_artifact_rows_other_rows_point_at_and_downgrade_drops_
     assert present() == _ARTIFACT_INDEXES
     command.downgrade(config, _REVISION_0078)
     assert present() == {}
+
+
+_REVISION_0080 = "d8e2f5a1c736"
+_RUN_ORIGIN_COLUMNS = ("origin", "result_rows", "result_bytes", "error_line", "error_column")
+_OLD_RUN_ORIGINS: tuple[tuple[str, str, str], ...] = (
+    # (name, extra columns, expected origin); one row per line of the rule, in its order
+    ("preview", "preview_table_id", "preview"),
+    ("check", "check_result_id", "check"),
+    ("maintenance", "write_mode", "maintenance"),
+    ("task_run", "task_run_id", "task"),
+    ("task_token", "task_token_id", "task"),
+    ("write", "write_mode", "write"),
+    ("written", "", "written"),
+)
+
+
+def test_0080_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -> None:
+    """Revision `0080`: an old run's origin follows the rule; the new columns stay empty.
+
+    Seven runs, one per line of the rule, are given their origin, in the rule's order; the
+    size and position columns are nullable and `NULL`; the downgrade drops the five columns and
+    the `(principal_id, finished_at)` index.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0079)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+    ids = {name: uuid.uuid4().hex for name, _, _ in _OLD_RUN_ORIGINS}
+    values: dict[str, str] = {
+        "preview_table_id": uuid.uuid4().hex,
+        "check_result_id": uuid.uuid4().hex,
+        "task_run_id": uuid.uuid4().hex,
+        "task_token_id": uuid.uuid4().hex,
+    }
+
+    def column_names() -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns("query_runs")}
+
+    def index_names() -> set[str | None]:
+        return {i["name"] for i in inspect(engine).get_indexes("query_runs")}
+
+    try:
+        assert not set(_RUN_ORIGIN_COLUMNS) & column_names()
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            for name, column, _ in _OLD_RUN_ORIGINS:
+                extra, marks = "", ""
+                if column == "write_mode":
+                    mode = "MAINTAIN" if name == "maintenance" else "CREATE"
+                    extra, marks = ", write_mode", f", '{mode}'"
+                elif column:
+                    extra, marks = f", {column}", f", '{values[column]}'"
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO query_runs (id, environment_id, sql_text, status, created_at,"
+                        f" updated_at{extra}) VALUES (:id, :env, 'SELECT 1', 'SUCCEEDED', :now,"
+                        f" :now{marks})"
+                    ),
+                    {"id": ids[name], "env": uuid.uuid4().hex, "now": _utc_text()},
+                )
+        command.upgrade(config, _REVISION_0080)
+        columns = {c["name"]: c for c in inspect(engine).get_columns("query_runs")}
+        assert columns["origin"]["nullable"] is False
+        for name in _RUN_ORIGIN_COLUMNS[1:]:
+            assert columns[name]["nullable"] is True
+        assert "ix_query_runs_principal_id_finished_at" in index_names()
+        with engine.connect() as connection:
+            origins = dict(connection.execute(sa.text("SELECT id, origin FROM query_runs")).all())
+            unset = connection.execute(
+                sa.text(
+                    "SELECT count(*) FROM query_runs WHERE result_rows IS NOT NULL OR"
+                    " result_bytes IS NOT NULL OR error_line IS NOT NULL OR"
+                    " error_column IS NOT NULL"
+                )
+            ).scalar_one()
+        assert origins == {ids[name]: origin for name, _, origin in _OLD_RUN_ORIGINS}
+        assert unset == 0
+        command.downgrade(config, _REVISION_0079)
+        assert not set(_RUN_ORIGIN_COLUMNS) & column_names()
+        assert "ix_query_runs_principal_id_finished_at" not in index_names()
+    finally:
+        engine.dispose()

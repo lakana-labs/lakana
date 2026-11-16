@@ -41,6 +41,7 @@ from lakana_core.models import (
     Grant,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     RollbackOutcome,
@@ -189,6 +190,7 @@ def _maintenance(
         "tags_removed": ["failed-a"],
     }
     run = QueryRun(
+        origin=QueryOrigin.WRITE,
         id=uuid.uuid4(),
         environment_id=environment.id,
         principal_id=principal.id,
@@ -259,6 +261,7 @@ def test_the_last_maintenance_is_the_newest_complete_run_that_changed_something(
     _maintenance(session, principal, finished_at=_NOW, table_id=uuid.uuid4())
     session.add(
         QueryRun(
+            origin=QueryOrigin.MAINTENANCE,
             id=uuid.uuid4(),
             environment_id=old.environment_id,
             principal_id=principal.id,

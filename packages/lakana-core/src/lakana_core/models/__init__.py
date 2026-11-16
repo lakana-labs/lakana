@@ -14,7 +14,13 @@ from lakana_core.models.principal import Principal, PrincipalType
 from lakana_core.models.grant import Grant
 from lakana_core.models.group import Group, GroupMembership
 from lakana_core.models.namespace import Namespace
-from lakana_core.models.query_run import QueryErrorCause, QueryRun, QueryRunStatus, WriteMode
+from lakana_core.models.query_run import (
+    QueryErrorCause,
+    QueryOrigin,
+    QueryRun,
+    QueryRunStatus,
+    WriteMode,
+)
 from lakana_core.models.table import Table, TableType
 from lakana_core.models.table_column import TableColumn
 from lakana_core.models.declared_reference import DeclaredReference
@@ -145,6 +151,7 @@ __all__ = [
     "ProjectFile",
     "ProjectFileText",
     "QueryErrorCause",
+    "QueryOrigin",
     "QueryRun",
     "QueryRunStatus",
     "RecentOpen",

@@ -34,6 +34,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -133,6 +134,7 @@ def _write(
     authz = AllowAllAuthorization() if authz is None else authz
     env = session.scalars(select(Environment).where(Environment.name == "prod")).one()
     run = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,
@@ -401,6 +403,7 @@ def test_a_write_reclaimed_before_it_starts_is_left_as_the_reclaim_stamped_it(
     before = _location(session, principal)
     env = session.scalars(select(Environment).where(Environment.name == "prod")).one()
     write = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,
@@ -427,14 +430,23 @@ def test_run_context_for_a_bound_query_is_the_claim_form() -> None:
     task_run_id, query_id, token_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     bound = BoundTask(task_run_id, 3, "gold.scores", ("silver.a",), ("silver.a",))
     scope = TaskScope(environment="dev", asset_scope=[], token_id=token_id, bound=bound)
-    stamped = QueryRun(id=query_id, task_run_id=task_run_id, task_token_id=token_id)
+    stamped = QueryRun(
+        origin=QueryOrigin.TASK, id=query_id, task_run_id=task_run_id, task_token_id=token_id
+    )
     assert _run_context(stamped, scope) == RunContext(task_run_id=task_run_id, claim=3)
-    worker_write = QueryRun(id=query_id, task_run_id=task_run_id)
+    worker_write = QueryRun(origin=QueryOrigin.TASK, id=query_id, task_run_id=task_run_id)
     assert _run_context(worker_write, None) == RunContext(
         task_run_id=task_run_id, query_run_id=query_id
     )
-    assert _run_context(QueryRun(id=query_id), None) is None
+    assert _run_context(QueryRun(origin=QueryOrigin.WRITTEN, id=query_id), None) is None
     unbound = dataclasses.replace(scope, bound=None)
-    assert _run_context(QueryRun(id=query_id, task_token_id=token_id), unbound) is None
-    corrupt = QueryRun(id=query_id, task_run_id=task_run_id, task_token_id=token_id)
+    assert (
+        _run_context(
+            QueryRun(origin=QueryOrigin.TASK, id=query_id, task_token_id=token_id), unbound
+        )
+        is None
+    )
+    corrupt = QueryRun(
+        origin=QueryOrigin.TASK, id=query_id, task_run_id=task_run_id, task_token_id=token_id
+    )
     assert _run_context(corrupt, unbound) is None

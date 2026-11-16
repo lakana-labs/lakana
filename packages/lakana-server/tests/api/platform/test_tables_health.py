@@ -21,6 +21,7 @@ from lakana_core.models import (
     CheckResult,
     Environment,
     Principal,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Table,
@@ -327,6 +328,7 @@ def test_the_last_maintenance_and_the_checks_are_shown(client: TestClient) -> No
         task = session.scalars(select(TaskRun)).one()
         session.add(
             QueryRun(
+                origin=QueryOrigin.MAINTENANCE,
                 id=uuid.uuid4(),
                 environment_id=env.id,
                 principal_id=_admin_id(client),

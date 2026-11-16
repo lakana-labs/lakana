@@ -89,6 +89,7 @@ from lakana_core.models import (
     JobVersion,
     Namespace,
     Principal,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     RollbackOutcome,
@@ -407,6 +408,17 @@ def test_a_sql_tasks_write_run_carries_the_workers_id(world: World) -> None:
         write = session.get(QueryRun, task.query_run_id)
         assert write is not None
         assert (write.status, write.worker_id) == (QueryRunStatus.SUCCEEDED, "w1")
+
+
+def test_a_tasks_sql_write_is_of_origin_task(world: World) -> None:
+    """The write run `_prepare` inserts is a task's, whoever started the pipeline."""
+    _start(world)
+    run_claimed(_engine(world), _claim(world))
+    task = _task(world, "silver.clean")
+    with world.session() as session:
+        write = session.get(QueryRun, task.query_run_id)
+        assert write is not None
+        assert write.origin is QueryOrigin.TASK
 
 
 def test_a_write_run_failed_before_run_one_carries_the_workers_id(world: World) -> None:

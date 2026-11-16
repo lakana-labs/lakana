@@ -49,6 +49,7 @@ from lakana_core.models import (
     GroupMembership,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -275,6 +276,25 @@ def test_task_token_caller_sees_only_its_own_runs(
     with pytest.raises(NotFoundError):
         service.get_query_run(task_principal, "dev", pat_run.id)
     assert service.get_query_run(task_principal, "dev", task_run.id).id == task_run.id
+
+
+def test_a_submitted_read_is_written_and_a_task_tokens_is_task(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The origin comes from the caller's token, never from the request."""
+    _catalog(session).create_environment(
+        principal, name="dev", storage=StorageConfig(scheme="file", root=f"file://{tmp_path}")
+    )
+    service = QueryService(session, AllowAllAuthorization())
+    task_principal = PrincipalRef(
+        id=principal.id,
+        name=principal.name,
+        type=principal.type,
+        task_scope=TaskScope(environment="dev", asset_scope=["gold.*"], token_id=uuid.uuid4()),
+    )
+
+    assert service.submit_query(principal, "dev", "SELECT 1").origin is QueryOrigin.WRITTEN
+    assert service.submit_query(task_principal, "dev", "SELECT 1").origin is QueryOrigin.TASK
 
 
 def test_pat_caller_sees_runs_its_tasks_submitted(
@@ -955,6 +975,7 @@ def _other_work(
     for n in range(query_ahead):
         session.add(
             QueryRun(
+                origin=QueryOrigin.WRITTEN,
                 id=uuid.uuid4(),
                 environment_id=other.id,
                 sql_text="SELECT 2",
@@ -976,6 +997,7 @@ def _other_work(
     for n in range(later):
         session.add(
             QueryRun(
+                origin=QueryOrigin.WRITTEN,
                 id=uuid.uuid4(),
                 environment_id=other.id,
                 sql_text="SELECT 3",
@@ -1002,6 +1024,7 @@ def _busy_worker(session: Session, worker_id: str = "busy", age: int = 5) -> Non
     env = session.scalars(select(Environment).where(Environment.name == "dev")).one()
     session.add(
         QueryRun(
+            origin=QueryOrigin.WRITTEN,
             id=uuid.uuid4(),
             environment_id=env.id,
             sql_text="SELECT 9",
@@ -1183,6 +1206,7 @@ def _running_query(
         The committed run.
     """
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=environment_id or queued.environment_id,
         principal_id=principal.id,
@@ -1668,6 +1692,7 @@ def _add_run(
         The committed row.
     """
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=None if submitter is None else submitter.id,

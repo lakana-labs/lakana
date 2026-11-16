@@ -29,6 +29,7 @@ from lakana_core.models import (
     JobVersion,
     NotificationDelivery,
     NotificationState,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -211,6 +212,7 @@ def test_a_lost_lease_fails_the_orphaned_write_run(session: Session, run_id: uui
     ):
         session.add(
             QueryRun(
+                origin=QueryOrigin.TASK,
                 id=query_run_id,
                 environment_id=run.environment_id,
                 principal_id=run.run_as_principal_id,
@@ -699,6 +701,7 @@ def test_a_missed_reclaim_leaves_the_tasks_write_run_running(
     write_id = uuid.uuid4()
     session.add(
         QueryRun(
+            origin=QueryOrigin.TASK,
             id=write_id,
             environment_id=run.environment_id,
             principal_id=run.run_as_principal_id,
@@ -830,7 +833,7 @@ def _run(session: Session, environment_id: uuid.UUID, **fields: object) -> Query
         "status": QueryRunStatus.RUNNING,
     }
     values.update(fields)
-    run = QueryRun(**values)
+    run = QueryRun(origin=QueryOrigin.WRITTEN, **values)
     session.add(run)
     session.flush()
     return run
@@ -2259,6 +2262,7 @@ def _lost_task_with_write(
         )
     )
     write = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=pipeline.environment_id,
         principal_id=pipeline.run_as_principal_id,
@@ -2360,6 +2364,7 @@ def test_the_evidence_of_an_earlier_attempts_write_does_not_end_a_later_attempt(
     """Only the task's CURRENT write run counts (`task_runs.query_run_id`)."""
     task, current = _lost_task_with_write(session, run_id, rows=None, attempt=2)
     earlier = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=current.environment_id,
         principal_id=current.principal_id,
@@ -2387,6 +2392,7 @@ def test_a_later_attempt_that_is_running_is_left_alone_whatever_an_earlier_one_c
     )
     session.add(
         QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=current.environment_id,
             principal_id=current.principal_id,
@@ -2535,6 +2541,7 @@ def test_a_lost_tasks_other_running_runs_end_by_their_own_evidence(
     others = []
     for rows in (7, None):
         other = QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=current.environment_id,
             principal_id=current.principal_id,

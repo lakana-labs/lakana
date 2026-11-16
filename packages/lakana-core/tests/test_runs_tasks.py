@@ -18,6 +18,7 @@ import lakana_core.runs.tasks as tasks_module
 from lakana_core.models import (
     OWN_TIP_NO_SNAPSHOT,
     AttemptOutcome,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Run,
@@ -198,6 +199,7 @@ def test_a_reclaim_clears_the_previous_attempts_query_run(
     run = session.get(Run, run_id)
     assert task is not None and run is not None
     stale = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=run.environment_id,
         sql_text="select 1",
@@ -1112,6 +1114,7 @@ def _link_write(session: Session, claimed: ClaimedTask, rows: int | None) -> Non
     pipeline = session.get(Run, claimed.run_id)
     assert pipeline is not None
     write = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=pipeline.environment_id,
         principal_id=pipeline.run_as_principal_id,
@@ -1206,6 +1209,7 @@ def test_a_run_of_an_earlier_attempt_is_not_evidence_for_this_one(
     assert pipeline is not None
     session.add(
         QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=pipeline.environment_id,
             principal_id=pipeline.run_as_principal_id,

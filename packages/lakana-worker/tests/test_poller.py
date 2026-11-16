@@ -27,6 +27,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -1154,6 +1155,7 @@ def _queue_one_of_each(
         principal, "dev", "SELECT 1"
     )
     maintain = QueryRun(
+        origin=QueryOrigin.MAINTENANCE,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,
@@ -1163,6 +1165,7 @@ def _queue_one_of_each(
     )
     task_run_id = _queue_task_run(session, env.id, principal.id)
     input_query = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,
@@ -1438,6 +1441,7 @@ def test_next_query_passes_a_capped_principal_by(
         )
     ):
         run = QueryRun(
+            origin=QueryOrigin.WRITTEN,
             id=uuid.uuid4(),
             environment_id=env.id,
             sql_text="SELECT 1",
@@ -1589,6 +1593,7 @@ def _runs(
     ids = []
     for offset in range(n):
         run = QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=environment_id,
             principal_id=principal_id,

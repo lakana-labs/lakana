@@ -24,7 +24,7 @@ from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.identifiers import TableRef
-from lakana_core.models import Namespace, QueryRunStatus, Table, TableType, WriteMode
+from lakana_core.models import Namespace, QueryOrigin, QueryRunStatus, Table, TableType, WriteMode
 from lakana_core.storage.resolver import StorageResolver
 
 
@@ -320,6 +320,31 @@ def test_write_and_maintenance_runs_are_stamped_with_a_bound_token_task_run(
     assert maintenance.task_run_id == task.id
     plain = service.submit_maintenance(principal, "dev", "gold.daily")
     assert plain.task_run_id is None
+
+
+def test_a_submitted_write_is_write_and_maintenance_is_maintenance(
+    session: Session, principal: PrincipalRef, seeded: CatalogService
+) -> None:
+    """A write is `write` for a person and `task` for a task token; maintenance is its own."""
+    task = python_task_run(session, principal.id)
+    scope = TaskScope(
+        environment="dev",
+        asset_scope=[],
+        token_id=uuid.uuid4(),
+        bound=BoundTask(task.id, 1, "gold.daily", (), ()),
+    )
+    bound = dataclasses.replace(principal, task_scope=scope)
+    service = QueryService(session, AllowAllAuthorization())
+    target = WriteTarget(table="gold.daily", mode=WriteMode.APPEND)
+
+    assert service.submit_write(principal, "dev", "SELECT 1 AS id", target).origin is (
+        QueryOrigin.WRITE
+    )
+    assert service.submit_write(bound, "dev", "SELECT 1 AS id", target).origin is QueryOrigin.TASK
+    assert service.submit_maintenance(principal, "dev", "gold.daily").origin is (
+        QueryOrigin.MAINTENANCE
+    )
+    assert service.submit_maintenance(bound, "dev", "gold.daily").origin is QueryOrigin.MAINTENANCE
 
 
 @pytest.mark.parametrize(

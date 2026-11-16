@@ -17,6 +17,7 @@ import lakana_worker.tasks as tasks_module
 from lakana_core.models import (
     AttemptOutcome,
     Environment,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     TaskAttempt,
@@ -108,6 +109,7 @@ def _stopped_for_memory(
                 continue
             session.add(
                 QueryRun(
+                    origin=QueryOrigin.TASK,
                     id=run_id,
                     environment_id=env.id,
                     principal_id=world.admin.id,
@@ -215,6 +217,7 @@ def test_another_workers_running_write_run_is_not_touched_by_a_stop(world: World
         for run_id, task_run_id in ((theirs_by_task, claimed.task_run_id), (theirs_by_id, None)):
             session.add(
                 QueryRun(
+                    origin=QueryOrigin.TASK,
                     id=run_id,
                     environment_id=env.id,
                     principal_id=world.admin.id,
@@ -328,6 +331,7 @@ def _add_query_run(
         env = session.scalars(select(Environment)).one()
         session.add(
             QueryRun(
+                origin=QueryOrigin.TASK,
                 id=run_id,
                 task_run_id=task_run_id,
                 environment_id=env.id,

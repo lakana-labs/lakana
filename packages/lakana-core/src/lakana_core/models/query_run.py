@@ -11,6 +11,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     Uuid,
@@ -56,6 +57,27 @@ class QueryErrorCause(enum.StrEnum):
     stopped the query itself, or the scheduler ended the run."""
 
 
+class QueryOrigin(enum.StrEnum):
+    """Where a query run came from.
+
+    Set by the code that creates the run, never from a request field, and stored as the
+    member's lower-case value in `QueryRun.origin`. A client must treat a value it does not
+    know as `WRITTEN`.
+
+    `WRITTEN`: a read query a person or program submitted. `PREVIEW`: a table preview.
+    `CHECK`: the rows of a check result, or the count query of a check. `WRITE`: a SQL write
+    a person or program submitted. `MAINTENANCE`: a table's maintenance. `TASK`: a read or
+    write of a pipeline task, whether its token submitted it or the worker made it.
+    """
+
+    WRITTEN = "written"
+    PREVIEW = "preview"
+    CHECK = "check"
+    WRITE = "write"
+    MAINTENANCE = "maintenance"
+    TASK = "task"
+
+
 class WriteMode(enum.StrEnum):
     """What a write run does to its target.
 
@@ -88,6 +110,7 @@ class QueryRun(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_query_runs_status_created_at", "status", "created_at"),
         Index("ix_query_runs_environment_id_finished_at", "environment_id", "finished_at"),
+        Index("ix_query_runs_principal_id_finished_at", "principal_id", "finished_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -98,6 +121,18 @@ class QueryRun(Base, TimestampMixin):
         ForeignKey("principals.id", ondelete="SET NULL"), nullable=True
     )
     sql_text: Mapped[str] = mapped_column(Text)
+    origin: Mapped[QueryOrigin] = mapped_column(
+        SAEnum(
+            QueryOrigin,
+            native_enum=False,
+            length=16,
+            values_callable=lambda members: [member.value for member in members],
+        )
+    )
+    """Where the run came from: a `QueryOrigin`, stored as its value.
+
+    Has no Python default, so every constructor names one. A run from before the column was
+    given its origin by the rule of migration 0080."""
     status: Mapped[QueryRunStatus] = mapped_column(SAEnum(QueryRunStatus, native_enum=False))
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     """Set by `QueryService.cancel_query` on a running run; the worker reads it about twice a
@@ -111,6 +146,17 @@ class QueryRun(Base, TimestampMixin):
     (`store._apply_task`)."""
     lineage_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     result_location: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    result_rows: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """The rows of the stored result; set with `result_location`, `None` before that and for
+    a run from before the column existed."""
+    result_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    """The length of the stored Arrow file in bytes; set with `result_location`, `None`
+    before that and for a run from before the column existed."""
+    error_line: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    """The line, from 1, of the submitted SQL where a failed run's error lies; `None` when the
+    position is not known."""
+    error_column: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    """The column, from 1, within `error_line`; set and cleared with it."""
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     task_token_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)

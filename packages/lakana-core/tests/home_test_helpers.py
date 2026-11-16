@@ -22,6 +22,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -249,6 +250,7 @@ def query_of(
         session.flush()
         task_run_id = task.id
     row = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=environment(session, environment_name),
         principal_id=who.id,

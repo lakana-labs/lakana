@@ -51,6 +51,7 @@ from lakana_core.models import (
     CheckResult,
     Environment,
     IncrementalFileRead,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     RollbackOutcome,
@@ -1893,6 +1894,7 @@ def _query_run_context(session: Session, principal: PrincipalRef, task: TaskRun)
     run = session.get(Run, task.run_id)
     assert run is not None
     query = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=run.environment_id,
         principal_id=principal.id,

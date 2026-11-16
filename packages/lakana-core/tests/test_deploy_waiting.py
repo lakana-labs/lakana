@@ -19,6 +19,7 @@ from lakana_core.models import (
     DeployRun,
     DeployStatus,
     Environment,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Worker,
@@ -168,6 +169,7 @@ def test_every_pipeline_worker_busy_and_queued_work_ahead(
     _worker(session, "w", takes="pipeline")
     session.add(
         QueryRun(
+            origin=QueryOrigin.WRITTEN,
             id=uuid.uuid4(),
             environment_id=env.id,
             sql_text="SELECT 1",

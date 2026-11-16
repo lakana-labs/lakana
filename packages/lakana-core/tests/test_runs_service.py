@@ -42,6 +42,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -1668,6 +1669,7 @@ def test_wait_reasons_of_source_checks_and_of_a_written_task_that_waits_again(
     run_row = session.get(Run, started.id)
     assert run_row is not None
     write = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=run_row.environment_id,
         principal_id=principal.id,
@@ -2019,6 +2021,7 @@ def test_what_a_worker_is_doing_is_derived(
         _register(session, name, 5 if name != "lost" else 100)
     dev = session.scalars(select(Environment)).one()
     query = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=dev.id,
         sql_text="SELECT 1",
@@ -2035,12 +2038,14 @@ def test_what_a_worker_is_doing_is_derived(
         worker_id="busy",
     )
     queued = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=dev.id,
         sql_text="SELECT 2",
         status=QueryRunStatus.QUEUED,
     )
     done = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=dev.id,
         sql_text="SELECT 3",
@@ -2054,6 +2059,7 @@ def test_what_a_worker_is_doing_is_derived(
     task.lease_owner = "busy"
     session.add(
         QueryRun(
+            origin=QueryOrigin.WRITTEN,
             id=uuid.uuid4(),
             environment_id=dev.id,
             sql_text="SELECT 4",
@@ -2084,6 +2090,7 @@ def test_a_worker_with_several_runs_shows_the_oldest(
     now = datetime.now(UTC)
     runs = [
         QueryRun(
+            origin=QueryOrigin.WRITTEN,
             id=uuid.uuid4(),
             environment_id=dev.id,
             sql_text="SELECT 1",
@@ -2848,6 +2855,7 @@ def test_a_workers_query_says_whether_it_is_ad_hoc(
     for worker_id, task_run_id in (("adhoc", None), ("pipeline", task.id)):
         session.add(
             QueryRun(
+                origin=QueryOrigin.TASK,
                 id=uuid.uuid4(),
                 environment_id=dev.id,
                 sql_text="SELECT 1",

@@ -31,6 +31,7 @@ from lakana_core.models import (
     AttemptOutcome,
     AuditEvent,
     AuditEventType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Run,
@@ -318,6 +319,7 @@ def test_a_bound_tokens_write_run_into_another_table_is_refused_by_the_worker(
         run = session.get(Run, attempt.run_id)
         assert run is not None
         forged = QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=run.environment_id,
             principal_id=attempt.principal_id,

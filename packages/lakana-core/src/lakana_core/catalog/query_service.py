@@ -38,6 +38,7 @@ from lakana_core.models import (
     Environment,
     Principal,
     QueryErrorCause,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Table,
@@ -290,6 +291,7 @@ class QueryService:
             status=QueryRunStatus.QUEUED,
             task_token_id=p.task_scope.token_id if p.task_scope is not None else None,
             task_run_id=_bound_task_run_id(p),
+            origin=QueryOrigin.WRITTEN if p.task_scope is None else QueryOrigin.TASK,
         )
         self._session.add(run)
         self._session.commit()
@@ -1134,6 +1136,7 @@ class QueryService:
             status=QueryRunStatus.QUEUED,
             task_token_id=p.task_scope.token_id if p.task_scope is not None else None,
             task_run_id=_bound_task_run_id(p),
+            origin=QueryOrigin.WRITE if p.task_scope is None else QueryOrigin.TASK,
             write_mode=target.mode,
             target_name=ref.dotted(),
             target_table_id=None if row is None else row.id,
@@ -1224,6 +1227,7 @@ class QueryService:
             status=QueryRunStatus.QUEUED,
             task_token_id=p.task_scope.token_id if p.task_scope is not None else None,
             task_run_id=_bound_task_run_id(p),
+            origin=QueryOrigin.MAINTENANCE,
             write_mode=WriteMode.MAINTAIN,
             target_name=ref.dotted(),
             target_table_id=table_id,

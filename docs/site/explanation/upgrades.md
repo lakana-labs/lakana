@@ -268,6 +268,24 @@ Migration `0079` adds six indexes to `artifact_versions` and `artifact_uploads`,
 person, a run or a project version finds their artifact rows without reading the whole table. It
 runs with the other migrations, and nothing else has to be done. Going back drops them.
 
+### Every query run records where it came from
+
+Migration `0080` adds an `origin` to every query run (`written`, `preview`, `check`, `write`,
+`maintenance` or `task`), room for the size of its stored result and the position of its error,
+and an index on the person who ran it and when it ended. A run that exists before the upgrade is
+given its origin by the first of these rules that holds:
+
+1. it previews a table: `preview`;
+2. it shows the rows of a check result: `check`;
+3. it maintains a table: `maintenance`;
+4. a pipeline task ran it: `task`;
+5. it is a SQL write: `write`;
+6. otherwise: `written`.
+
+A check run of a task from before the upgrade is therefore `task`; only new ones say `check`. The
+size and position of an old run stay empty. The migration runs with the others, and nothing else
+has to be done. Going back drops the new columns and the index.
+
 ### `grant list` shows one `access` column
 
 The table of `lakana grant list` has one column, `access`, with the grant's role or its single

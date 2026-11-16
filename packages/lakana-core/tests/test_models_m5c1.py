@@ -23,6 +23,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -228,6 +229,7 @@ def test_deployment_binding_and_query_run_context_columns(session: Session) -> N
         )
     )
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=environment.id,
         principal_id=principal.id,

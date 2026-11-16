@@ -15,6 +15,7 @@ from lakana_core.models import (
     DeployRun,
     DeployStatus,
     Environment,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -89,7 +90,7 @@ def _run(session: Session, environment_id: uuid.UUID, **fields: object) -> Query
         "status": QueryRunStatus.RUNNING,
     }
     values.update(fields)
-    run = QueryRun(**values)
+    run = QueryRun(origin=QueryOrigin.WRITTEN, **values)
     session.add(run)
     session.flush()
     return run

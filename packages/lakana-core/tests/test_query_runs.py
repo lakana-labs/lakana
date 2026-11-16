@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from lakana_core.models import PrincipalType, QueryRun, QueryRunStatus
+from lakana_core.models import PrincipalType, QueryOrigin, QueryRun, QueryRunStatus
 
 
 def test_a_query_run_round_trips_through_the_database(session: Session) -> None:
@@ -25,6 +25,7 @@ def test_a_query_run_round_trips_through_the_database(session: Session) -> None:
     session.commit()
 
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,
@@ -61,6 +62,7 @@ def test_a_query_run_survives_its_principal_being_deleted(session: Session) -> N
     session.add_all([env, principal])
     session.commit()
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,
