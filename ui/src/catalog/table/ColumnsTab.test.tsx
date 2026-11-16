@@ -208,6 +208,7 @@ describe("ColumnsTab", () => {
         name: "Back to the text from Git for chanU+202Enel",
       }),
     ).toBeInTheDocument();
+    expect(within(region).getByRole("button", { name: "Edit chanU+202Enel" })).toBeInTheDocument();
     expect(region.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
 

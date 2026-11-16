@@ -236,7 +236,10 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   (`ui/src/shell/VisibleText.tsx`; `markedText` where only a string fits, such as an
   `aria-label` or a translated sentence), which shows C0 and C1 controls (tab and line feed excepted), U+2028, U+2029 and every `Cf` character, bidi
   controls included, as a visible `U+XXXX` mark; a run of one character is one mark with its
-  count (`U+200B ×350000`).
+  count (`U+200B ×350000`). i18next marks every value interpolated into a `t()` sentence the
+  same way (`interpolation.escape` is `markedText`, `ui/src/i18n/i18n.ts`), so a name passed to
+  `t()` needs no call of its own; only a command to copy opts out, with `{{- name}}`, and
+  `CopyLine` shows its marks.
 - **No Node globals in browser code.** `globals.node` is on for the config files and scripts, so
   ESLint refuses `process` and `Buffer` inside `ui/src/` (`src/api/` included): Vite does not
   polyfill them, so they would fail only in the browser. Use `import.meta.env` and `Uint8Array`.

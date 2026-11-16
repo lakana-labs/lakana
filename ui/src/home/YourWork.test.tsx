@@ -116,4 +116,18 @@ describe("YourWork", () => {
     expect(await within(work).findByRole("listitem", { name: "analyU+202Etics" })).toBeVisible();
     expect(work.textContent).not.toMatch(/\u202E/u);
   });
+
+  it("marks a hidden character of a job's repository on its second line", async () => {
+    const job = { ...WORK.jobs[0], repository: "analy\u202Etics" };
+    renderShell("/", {
+      routes: { "GET /api/v1/home/work": { status: 200, body: { ...WORK, jobs: [job] } } },
+    });
+
+    const work = await region();
+    const row = (await within(work).findByRole("link", { name: "daily_sales" })).closest(
+      "tr",
+    ) as HTMLElement;
+    expect(row).toHaveTextContent("analyU+202Etics");
+    expect(work.textContent).not.toMatch(/\u202E/u);
+  });
 });

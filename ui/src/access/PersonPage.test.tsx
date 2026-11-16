@@ -330,4 +330,31 @@ describe("PersonPage", () => {
     expect(await screen.findByRole("dialog")).toHaveTextContent("kU+202Eim");
     expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
+
+  it("marks a hidden character of the person's name in the issued link's sentence", async () => {
+    const base = "/api/v1/principals/k\u202Eim";
+    const { user } = renderShell("/access/people/k%E2%80%AEim", {
+      routes: {
+        [`GET ${base}`]: principal("k\u202Eim", false),
+        [`GET ${base}/passkeys`]: { status: 200, body: [] },
+        [`GET ${base}/sessions`]: { status: 200, body: [] },
+        [`POST ${base}/recovery-link`]: {
+          status: 201,
+          body: {
+            id: "r-1",
+            name: "k\u202Eim",
+            url: "https://lakana.example.com/sign-in#l=a&s=b",
+            expires_at: "2026-11-08T11:00:00Z",
+          },
+        },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Issue a recovery link" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    const sentence = await screen.findByText(/^It works once, for 1 hour/u);
+    expect(sentence).toHaveTextContent("send it to kU+202Eim yourself.");
+    expect(document.body.textContent).not.toMatch(/\u202E/u);
+  });
 });

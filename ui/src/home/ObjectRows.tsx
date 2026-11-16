@@ -77,7 +77,9 @@ export function ObjectRow({ to, name, environment, second, aside }: ObjectRowPro
           </Link>
         )}{" "}
         <EnvironmentLabel environment={environment} />
-        <span className="second">{second}</span>
+        <span className="second">
+          <VisibleText text={second} />
+        </span>
       </td>
       <td>{aside}</td>
       <td>
