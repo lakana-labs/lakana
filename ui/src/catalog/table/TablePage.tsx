@@ -35,6 +35,9 @@ const HealthTab = lazy(() => import("./HealthTab"));
 const AccessTab = lazy(() => import("./AccessTab"));
 const ReferencesTab = lazy(() => import("./ReferencesTab"));
 
+// An artifact's versions, their files and Download load only when its Versions tab is opened.
+const VersionsTab = lazy(() => import("../artifact/VersionsTab"));
+
 /** What the page reads: the table, and for an artifact its own entry as well. */
 export interface LoadedTable {
   /** The table as the server answered it. */
@@ -206,6 +209,11 @@ export function TablePage({
         {tab === "health" && (
           <Suspense fallback={<p role="status">{t("table.loadingTab")}</p>}>
             <HealthTab />
+          </Suspense>
+        )}
+        {tab === "versions" && (
+          <Suspense fallback={<p role="status">{t("table.loadingTab")}</p>}>
+            <VersionsTab />
           </Suspense>
         )}
         {tab === "access" && (

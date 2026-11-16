@@ -65,11 +65,20 @@ shortly after by Lakana's periodic clean-up (the person who runs the instance fi
 declares it, and empty for an artifact that keeps all its versions or that no deployed project
 declares. `defined in` names the file.
 
+In the web interface, the artifact's Overview in the Catalog shows **Keeps**: `The newest 2 versions
+(keep_versions)`, or `Every version` for an artifact that keeps all its versions. **Defined in**
+names the file that declares it.
+
 ## See what was deleted
 
 The `artifact versions list` subcommand shows every version, with `deleted_at` on the deleted ones.
 The audit log records each pruned version as `ARTIFACT_VERSION_DELETED` with `reason` set to
 `keep_versions` and the id of the task run (the `audit list` subcommand with `--event-type`).
+
+In the web interface, the artifact's **Versions** tab lists the deleted versions with the live
+ones. A deleted version says when and by whom it was deleted, such as `Deleted 3 hours ago by
+svc-forecasts`, in place of its buttons; for a pruned version that is the principal that stored the
+newer version.
 
 ## Know the consequences
 

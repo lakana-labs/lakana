@@ -111,6 +111,16 @@ describe("artifacts api", () => {
     await expect(downloadFile(REF, 3, WEIGHTS)).rejects.toBeInstanceOf(DownloadMismatch);
   });
 
+  it("refuses a file larger than the browser downloads without asking the server", async () => {
+    const server = fakeServer(artifactRoutes());
+
+    await expect(
+      downloadFile(REF, 3, { ...WEIGHTS, size: BROWSER_DOWNLOAD_LIMIT + 1 }),
+    ).rejects.toBeInstanceOf(RangeError);
+
+    expect(server.sent).toEqual([]);
+  });
+
   it("encodes every part of a path", async () => {
     const server = fakeServer({});
     const ref = { environment: "pro d", namespace: "a b", name: "m/x" };

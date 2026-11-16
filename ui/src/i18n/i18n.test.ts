@@ -89,3 +89,16 @@ it("ships no string of the place menu in the first load, and importing PlaceActi
     "Dropped artifact ml.model. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not.",
   );
 });
+
+it("ships no string of an artifact's versions in the first load, and importing VersionsTab registers them", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("table.artifact.versions.heading")).toBe(false);
+
+  await import("../catalog/artifact/VersionsTab");
+
+  expect(i18n.t("table.artifact.versions.heading")).toBe("Versions");
+  expect(i18n.t("table.artifact.files.mismatch", { path: "models/model.pkl" })).toBe(
+    "models/model.pkl did not arrive whole, so nothing was saved. Download it again, or use the command above.",
+  );
+});

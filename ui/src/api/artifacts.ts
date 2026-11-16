@@ -259,6 +259,8 @@ async function sha256Hex(blob: Blob): Promise<string> {
  * @param version - The version's number.
  * @param file - The file, as the version lists it.
  * @returns The file's bytes, the same size and SHA-256 as the manifest's.
+ * @throws {RangeError} for a file larger than {@link BROWSER_DOWNLOAD_LIMIT}, before any request:
+ *   `lakana artifact download` fetches it.
  * @throws {DownloadMismatch} when the size or the SHA-256 differs.
  * @throws {ApiError} for a refusal; 404 for a version deleted meanwhile.
  */
@@ -267,6 +269,9 @@ export async function downloadFile(
   version: number,
   file: ArtifactFileOut,
 ): Promise<Blob> {
+  if (file.size > BROWSER_DOWNLOAD_LIMIT) {
+    throw new RangeError(`${file.path} is larger than the browser downloads.`);
+  }
   const blob = await api.download(
     artifactApiPath(ref, `/versions/${String(version)}/blobs/${encodeURIComponent(file.sha256)}`),
   );

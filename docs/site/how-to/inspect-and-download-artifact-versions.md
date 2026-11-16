@@ -39,6 +39,11 @@ you uploaded that no deployed project declares). The list shows 100 artifacts at
 other than your profile's default. An artifact you may not read is not listed. A namespace you may
 not see gives an empty list, not an error.
 
+**In the web interface:** the Catalog lists artifacts with the tables. The line under an artifact's
+name reads **Artifact** and its namespace, such as `Artifact · models`. Choose the name to open the
+artifact's page. Its Overview shows the current version, how many versions it has had, how many it
+keeps and the size of its live versions. An artifact you may not read is not listed there either.
+
 ## 2. See the versions
 
 Give the versions list command the artifact's name, as `namespace.name`, to see its versions,
@@ -84,6 +89,13 @@ narrow for it, as the line above the last one says.
 - **No run is shown** for a version a person uploaded, and a task token never sees run
   identifiers.
 
+**In the web interface:** open the artifact's **Versions** tab. It lists every version, newest
+first, the deleted ones included. A row shows the number, with **current** under the current
+version; when the version was stored, with who stored it and from which commit when known; its
+size; and its number of files. A deleted version says when and by whom it was deleted, such as
+`Deleted 2 days ago by kim.schulz`, and has no buttons. The tab shows 100 versions at first;
+**Show 100 more** adds the next ones.
+
 If you have no versions listed, or the artifact does not appear, the run that produces it has not
 stored a version yet. The messages you can meet are in "When it fails".
 
@@ -112,6 +124,25 @@ has arrived and matches the manifest: if anything fails, nothing is left in the 
 directory that did not exist is not created, and one that existed is empty again). The command
 prints `Downloaded <environment>/<name> version <n> to <path>`, as in the output above. For an artifact that is one file,
 `<path>` is the file, for example `model.joblib`; for a directory artifact it is the directory.
+
+**In the web interface:** on the **Versions** tab, press **Files** beside a live version. Its files
+open below it, with their paths and sizes, 100 at a time. The browser downloads one file at a time,
+never a whole version, so above the files the tab shows the command for the whole version with
+**Copy command**, for example
+`lakana artifact download 'models.spend_model' './spend_model-v2' --version 2 --env 'dev'`.
+
+- **Download** beside a file reads it, checks its size and SHA-256 against the manifest, and only
+  then saves it in your browser's downloads under the last part of its path: `models/model.joblib`
+  is saved as `model.joblib`. The saved file has the permissions your browser gives every
+  download, not the private ones the command gives.
+- If what arrived is not what the version recorded, or the connection broke on the way, nothing is
+  saved and the tab says `<path> did not arrive whole, so nothing was saved. Download it again, or
+  use the command above.`
+- A file larger than 256 MiB has no **Download**. The tab says it is larger than the browser
+  downloads; the command fetches it.
+- If the version was deleted after you opened the tab, the tab shows the server's sentence
+  (`Version 3 of models.spend_model was deleted; its bytes are gone. ...`), reads the versions
+  again and marks the version deleted.
 
 Things to know:
 

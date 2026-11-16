@@ -498,10 +498,12 @@
   }
 }
 
-/* Health, Access and References: flat panels (screen.css), one after the other, 24 px apart. */
+/* Health, Access, References and an artifact's Versions: flat panels (screen.css), one after the
+   other, 24 px apart. */
 .health-tab,
 .access-tab,
-.references-tab {
+.references-tab,
+.versions-tab {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
@@ -547,6 +549,31 @@
 
 .list-scroll.signals-scroll .list {
   min-width: 760px;
+}
+
+/* An artifact's versions: five columns, fewer than the Catalog's seven. A version's files sit in
+   a row that spans them, in a list of their own that scrolls with the versions, not apart. */
+.list-scroll.versions-scroll .list {
+  min-width: 560px;
+}
+
+.list-scroll .files-list .list {
+  min-width: 0;
+}
+
+.version-files > *:last-child {
+  margin-bottom: 0;
+}
+
+.version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.versions-section .show-more,
+.version-files .show-more {
+  margin-top: var(--space-3);
 }
 
 /* A status word with its glyph never breaks: "Failed" in three pieces cannot be read. */

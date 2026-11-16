@@ -11,7 +11,13 @@
 "access export": { class: ui, part: 7, note: "a download of the live access as an access file" }
 "access plan": { class: git, reason: "pre-commit validation of an access file" }
 "access status": { class: read, part: 7 }
-"artifact download": { class: ui, part: 3 }
+"artifact download":
+  {
+    class: ui,
+    part: 3,
+    done: true,
+    note: "one file at a time, up to 256 MiB; a whole version with the CLI",
+  }
 "artifact drop": { class: ui, part: 3, done: true }
 "artifact list":
   {
@@ -24,7 +30,7 @@
 "artifact uploads abort": { class: ui, part: 3 }
 "artifact uploads list": { class: ui, part: 3 }
 "artifact versions delete": { class: ui, part: 3 }
-"artifact versions list": { class: ui, part: 3 }
+"artifact versions list": { class: ui, part: 3, done: true }
 "audit list": { class: ui, part: 8 }
 "bundle init": { class: git, reason: "local deployment tooling (compose.yaml, .env)" }
 "check list": { class: read, part: 5 }
@@ -275,11 +281,17 @@
 "GET /api/v1/environments/{env}/namespaces/{path}": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}":
   { class: ui, part: 3, done: true }
-"GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions":
+  { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}":
-  { class: ui, part: 3 }
+  { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}/blobs/{sha256}":
-  { class: ui, part: 3 }
+  {
+    class: ui,
+    part: 3,
+    done: true,
+    note: "one file at a time, up to 256 MiB; a whole version with the CLI",
+  }
 "GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables":
   { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/dropped-tables": { class: ui, part: 3, done: true }

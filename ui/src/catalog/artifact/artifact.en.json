@@ -1,0 +1,38 @@
+{
+  "versions": {
+    "heading": "Versions",
+    "region": "Versions of {{artifact}}",
+    "none": "{{artifact}} has no version yet; run the asset that produces it.",
+    "columns": {
+      "version": "Version",
+      "stored": "Stored",
+      "size": "Size",
+      "files": "Files",
+      "actions": "Actions"
+    },
+    "current": "current",
+    "by": "by {{who}}",
+    "commit": "from commit {{sha}}",
+    "deletedBy": "Deleted <when/> by <who/>",
+    "deleted": "Deleted <when/>",
+    "files": "Files",
+    "filesOf": "Files of version {{version}}"
+  },
+  "files": {
+    "region": "Files of version {{version}}",
+    "whole": "Download the whole version with:",
+    "copy": "Copy command",
+    "columns": {
+      "path": "Path",
+      "size": "Size",
+      "download": "Download"
+    },
+    "download": "Download",
+    "downloadFor": "Download {{path}}",
+    "downloading": "Downloading…",
+    "downloadingFor": "Downloading {{path}}…",
+    "tooLarge": "{{size}}: larger than the browser downloads (256 MiB). Use the command above.",
+    "mismatch": "{{path}} did not arrive whole, so nothing was saved. Download it again, or use the command above."
+  },
+  "showMore": "Show {{count}} more"
+}

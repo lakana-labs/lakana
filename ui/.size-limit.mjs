@@ -126,6 +126,8 @@ const NAMED_LIMITS = [
   // the first load (about 1.8 kB gzipped less there) into this chunk, registered when it loads.
   // Measured 9.4 kB (2026-11-16) with the artifact's read, its facts and the tabs by kind, after
   // the table's calls moved to manage- (above); the limit holds.
+  // Measured 9.76 kB (2026-11-16) with the lazy import of an artifact's Versions tab; the limit
+  // holds.
   { name: "a table's page", prefix: "TablePage-", limit: "10.97 kB" },
   // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
@@ -152,6 +154,11 @@ const NAMED_LIMITS = [
   // Measured 1.01 kB (2026-11-16, `npm run size`) + 10 %: the References tab, its two flat panels of references,
   // the hidden counts and the focus after Try again. It loads only when the tab is opened.
   { name: "the References tab", prefix: "ReferencesTab-", limit: "1.11 kB" },
+  // Measured 3.04 kB (2026-11-16) + 10 %: an artifact's Versions tab, its versions 100 at a time
+  // with current, who stored each and when, the deleted ones, Files one version at a time, the
+  // whole version's command, Download with the size and SHA-256 check, the save under the file's
+  // own name, and its own strings. It loads only when the tab is opened.
+  { name: "an artifact's Versions tab", prefix: "VersionsTab-", limit: "3.35 kB" },
   // Measured 3.83 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
   // included. The page and the two tabs share them, so the bundler gave them a chunk of their own,
   // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.
