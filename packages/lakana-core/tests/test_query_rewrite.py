@@ -10,7 +10,7 @@ import sqlglot.errors
 import sqlglot.expressions as exp
 
 from lakana_core import query_rewrite
-from lakana_core.errors import ValidationError
+from lakana_core.errors import SqlPosition, SqlRefusal, ValidationError
 from lakana_core.query_rewrite import (
     ReadField,
     TableSource,
@@ -2836,7 +2836,7 @@ def test_an_argument_on_values_with_no_name_yet_is_refused_all_the_same() -> Non
     values.set("novel", exp.Literal.number(1))
 
     with pytest.raises(ValidationError, match="takes no NOVEL"):
-        query_rewrite._reject_values_clauses(values)
+        query_rewrite._reject_values_clauses(values, "VALUES (1)")
 
 
 _WITNESS_PLACEHOLDER_NAME = "SELECT id fROM goLd.v_ouELECT $1 At"
@@ -2992,3 +2992,45 @@ def test_a_pivot_without_the_values_of_its_on_column_is_refused(sql: str) -> Non
 def test_a_pivot_with_its_values_listed_and_an_unpivot_pass(sql: str) -> None:
     check_blacklist(sql)
     assert extract_table_refs(sql) == ["gold.sales"]
+
+
+def test_a_refused_table_function_carries_its_position() -> None:
+    """A refused file reader is placed at the function, on the line the person wrote it."""
+    with pytest.raises(SqlRefusal) as info:
+        check_blacklist("SELECT *\nFROM read_csv('raw/x.csv')")
+    assert info.value.position == SqlPosition(2, 6)
+
+
+def test_a_recursive_cte_refusal_carries_the_ctes_position() -> None:
+    """The refusal points into the `WITH RECURSIVE` clause."""
+    sql = "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t)\nSELECT * FROM t"
+    with pytest.raises(SqlRefusal) as info:
+        check_blacklist(sql)
+    assert info.value.position == SqlPosition(1, 16)
+
+
+def test_a_placeholder_refusal_has_no_position() -> None:
+    """A placeholder has no offset; the refusal is still a `ValidationError`."""
+    with pytest.raises(ValidationError) as info:
+        check_blacklist("SELECT ?")
+    assert getattr(info.value, "position", None) is None
+
+
+@pytest.mark.parametrize(
+    ("sql", "message"),
+    [
+        ("WITH RECURSIVE t AS (SELECT 1) SELECT * FROM t", query_rewrite._RECURSIVE_CTE_MESSAGE),
+        ("SELECT ?", query_rewrite._PLACEHOLDER_MESSAGE),
+        ("SELECT * FROM (PIVOT t ON a USING sum(b))", query_rewrite.PIVOT_VALUES_MESSAGE),
+        ("SELECT * JOIN t ON true", query_rewrite._JOIN_WITHOUT_FROM_MESSAGE),
+        ("VALUES (1) AS v", query_rewrite._ALIASED_VALUES_MESSAGE),
+        ("ATTACH 'x'", "ATTACH is not permitted in a submitted query."),
+    ],
+)
+def test_refusal_messages_are_unchanged(sql: str, message: str) -> None:
+    """Giving a refusal a position leaves its text as it was."""
+    with pytest.raises(ValidationError) as info:
+        check_blacklist(sql)
+        extract_table_refs(sql)
+    assert type(info.value) is not ValidationError
+    assert str(info.value) == message

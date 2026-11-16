@@ -12,6 +12,9 @@ import unicodedata
 from typing import NamedTuple
 
 import sqlglot.errors
+from sqlglot import exp
+
+from lakana_core.errors import SqlPosition, SqlRefusal
 
 SQL_SYNTAX_ERRORS = (sqlglot.errors.ParseError, sqlglot.errors.TokenError, RecursionError)
 """What a parse raises for SQL it cannot read; a fault of the query, not of the platform.
@@ -252,3 +255,73 @@ def describe_syntax_error(
         "Fix the query's syntax and submit it again."
     )
     return _clean(message, MAX_MESSAGE_CHARS)
+
+
+def _position_at(sql: str, offset: int) -> SqlPosition | None:
+    """Turn a 0-based character offset into a line and a column.
+
+    Parameters
+    ----------
+    sql
+        The text the offset refers to.
+    offset
+        The 0-based character offset.
+
+    Returns
+    -------
+    SqlPosition or None
+        The line and column, both from 1; `None` when the offset is outside the text.
+    """
+    if not 0 <= offset <= len(sql):
+        return None
+    line = sql.count("\n", 0, offset) + 1
+    return SqlPosition(line, offset - (sql.rfind("\n", 0, offset) + 1) + 1)
+
+
+def node_position(node: exp.Expr, sql: str) -> SqlPosition | None:
+    """Find where a parsed node starts in the SQL it was parsed from.
+
+    Parameters
+    ----------
+    node
+        A node of the tree parsed from `sql`.
+    sql
+        The text that was parsed.
+
+    Returns
+    -------
+    SqlPosition or None
+        The line and column of the node's own ``meta["start"]``, else of the smallest
+        ``start`` among its descendants; `None` when none of them has one (a placeholder).
+    """
+    starts = [
+        start for candidate in node.walk() if isinstance(start := candidate.meta.get("start"), int)
+    ]
+    own = node.meta.get("start")
+    offset = own if isinstance(own, int) else min(starts, default=None)
+    return None if offset is None else _position_at(sql, offset)
+
+
+def error_position(exc: BaseException, sql: str) -> SqlPosition | None:
+    """Find where in the SQL an error is, when it knows.
+
+    Parameters
+    ----------
+    exc
+        A guard refusal or a parse error.
+    sql
+        The submitted SQL.
+
+    Returns
+    -------
+    SqlPosition or None
+        `SqlRefusal.position`, else the line and column of the syntax problem the parser
+        reported; `None` otherwise.
+    """
+    if isinstance(exc, SqlRefusal):
+        return exc.position
+    if isinstance(exc, sqlglot.errors.SqlglotError):
+        problem = syntax_problem(exc, sql)
+        if problem is not None and problem.line is not None and problem.column is not None:
+            return SqlPosition(problem.line, problem.column)
+    return None

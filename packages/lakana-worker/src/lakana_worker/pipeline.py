@@ -135,6 +135,7 @@ from lakana_core.models import (
     Namespace,
     Principal,
     QueryErrorCause,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Table,
@@ -179,7 +180,7 @@ from lakana_core.runs.checks import (
 from lakana_core.runs.lockdown import WriteFenceRefused
 from lakana_core.runs.store import query_completed_detail
 from lakana_core.secrets.keys import KeyProvider
-from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS, describe_syntax_error
+from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS, describe_syntax_error, error_position
 from lakana_core.storage.base import Storage, StreamWriter
 from lakana_core.storage.resolver import (
     ResolvedStorage,
@@ -1887,6 +1888,8 @@ class _ArrowSink:
     def __init__(self, stream: StreamWriter) -> None:
         self._stream = stream
         self.closed = False
+        self.written = 0
+        """How many bytes have been passed on."""
 
     def write(self, data: bytes | memoryview) -> int:
         """Pass a piece on.
@@ -1903,13 +1906,14 @@ class _ArrowSink:
         """
         piece = bytes(data)
         self._stream.write(piece)
+        self.written += len(piece)
         return len(piece)
 
     def flush(self) -> None:
         """Do nothing: the stream buffers on its own."""
 
 
-def _store_result(storage: Storage, path: str, result: pa.Table) -> None:
+def _store_result(storage: Storage, path: str, result: pa.Table) -> int:
     """Write a query result to `path` as an Arrow IPC file, piece by piece.
 
     The table is serialised straight into a storage stream, so the bytes of the file never
@@ -1925,6 +1929,11 @@ def _store_result(storage: Storage, path: str, result: pa.Table) -> None:
         Root-relative path of the result.
     result
         The rows.
+
+    Returns
+    -------
+    int
+        How many bytes the stored file holds.
     """
     stream = storage.open_write(path)
     try:
@@ -1935,6 +1944,28 @@ def _store_result(storage: Storage, path: str, result: pa.Table) -> None:
     except BaseException:
         stream.abort()
         raise
+    return sink.written
+
+
+def _record_error_position(run: QueryRun, exc: BaseException, cause: QueryErrorCause) -> None:
+    """Record where in the person's SQL a failure is, when it is a fault of that SQL.
+
+    Parameters
+    ----------
+    run
+        The run; `error_line` and `error_column` are set on it.
+    exc
+        The exception the failure was recorded from.
+    cause
+        The failure's cause; only `QueryErrorCause.INVALID_QUERY` has a position.
+    """
+    if cause != QueryErrorCause.INVALID_QUERY:
+        return
+    if run.origin not in (QueryOrigin.WRITTEN, QueryOrigin.WRITE):
+        return
+    position = error_position(exc, run.sql_text)
+    if position is not None:
+        run.error_line, run.error_column = position
 
 
 def _create_view(
@@ -3022,8 +3053,10 @@ def _run_one(
                     )
                 else:
                     result_path = f"_artifacts/queries/{run.id}/result.arrow"
-                    _store_result(resolved_storage.storage, result_path, result)
+                    stored = _store_result(resolved_storage.storage, result_path, result)
                     run.result_location = result_path
+                    run.result_rows = result.num_rows
+                    run.result_bytes = stored
                     run.masked_columns = [
                         {"table": table, "column": column} for table, column in prepared.masked
                     ]
@@ -3063,6 +3096,7 @@ def _run_one(
         outcome = QueryRunStatus.FAILED
         run.error_message = str(exc)
         run.error_cause = failure_cause(failure_exc).value
+        _record_error_position(run, failure_exc, failure_cause(failure_exc))
         gone = _snapshot_gone_after_failure(
             session, run, environment.name, principal, dotted_refs, authz, key_provider, failure_exc
         )
@@ -3070,6 +3104,7 @@ def _run_one(
             failure_exc = gone
             run.error_message = str(gone)
             run.error_cause = failure_cause(gone).value
+            run.error_line = run.error_column = None
     except LakanaError as exc:
         failure_exc = exc
         outcome = (
@@ -3124,6 +3159,8 @@ def _run_one(
             failure = _without_the_value(failure, prepared.restricted)
         run.error_message = _redact(str(failure), locations)
         run.error_cause = failure_cause(failure).value
+        if failure is exc:
+            _record_error_position(run, exc, failure_cause(failure))
         if run.check_result_id is not None and failure is exc and _engine_text(exc):
             # The database's message can quote the check's SQL, which its caller may not see.
             run.error_message = check_rows_query_failed_message(failure_cause(failure).value)
@@ -3136,6 +3173,7 @@ def _run_one(
             else CHECK_ROWS_SQL_REFUSED
         )
         run.error_cause = failure_cause(exc).value
+        _record_error_position(run, exc, failure_cause(exc))
     except MemoryError:
         # An allocation outside DuckDB (pyarrow, Python) failed: the machine or the container
         # itself has no memory left (the worker's own limit is a watchdog, not an allocation
