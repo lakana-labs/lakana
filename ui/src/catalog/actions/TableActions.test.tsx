@@ -13,7 +13,8 @@ import { fakeWebAuthn } from "../../test/webauthn";
 import TableActions from "./TableActions";
 
 const PLACE: TableRef = { environment: "prod", namespace: "gold.sales", name: "fact_sales" };
-const DEFINED_IN = "Defined in analytics/assets/silver/clean.sql — change it in git";
+const DEFINED_IN =
+  "Drop is off: analytics/assets/silver/clean.sql defines this. Remove it there and deploy, then drop it from Orphans.";
 const ARTIFACT_PLACE: TableRef = { environment: "prod", namespace: "ml", name: "model" };
 const ARTIFACT_PAGE = "/catalog/prod/ml/model";
 const ARTIFACT_DROP = "DELETE /api/v1/environments/prod/namespaces/ml/artifacts/model";
@@ -118,7 +119,7 @@ describe("TableActions", () => {
       "true",
     );
     expect(menu).toHaveAccessibleDescription(
-      "Defined in analytics/assets/ml/model.py — change it in git",
+      "Drop is off: analytics/assets/ml/model.py defines this. Remove it there and deploy, then drop it from Orphans.",
     );
   });
 
@@ -199,7 +200,7 @@ describe("TableActions", () => {
     expect(router.state.location.pathname).toBe("/catalog/prod/gold.sales/fact_sales");
   });
 
-  it("disables a git-owned Drop and says Defined in analytics/assets/silver/clean.sql — change it in git", async () => {
+  it("disables a git-owned Drop and says Drop is off: analytics/assets/silver/clean.sql defines this. Remove it there and deploy, then drop it from Orphans.", async () => {
     const { user } = renderActions(
       table({
         actions: ["drop", "rebuild"],
@@ -242,7 +243,7 @@ describe("TableActions", () => {
     const mark = screen.getByText("U+202E");
     expect(mark).toHaveClass("char-mark");
     expect(screen.getByRole("menu")).toHaveAccessibleDescription(
-      "Defined in analytics/assets/U+202Eloc.sql — change it in git",
+      "Drop is off: analytics/assets/U+202Eloc.sql defines this. Remove it there and deploy, then drop it from Orphans.",
     );
   });
 

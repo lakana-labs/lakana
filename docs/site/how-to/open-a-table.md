@@ -45,10 +45,10 @@ no **Actions** at all. An artifact's **Actions** has only **Drop…**, which dro
 - **Drop…** asks first, then drops the table and opens the **Dropped** view of its namespace,
   where you can undo it. See [Drop a table](drop-and-restore-a-table.md#drop-a-table).
 
-When a deployed project builds the table, **Drop…** is shown but cannot be chosen, and the menu
-says `Defined in analytics/assets/silver/clean.sql — change it in git`, with the table's own
-repository and file. A screen reader hears that sentence when the menu opens. Change the table in
-git, or use **Rebuild from git…**.
+When a deployed project builds the table, **Drop…** is shown but cannot be chosen, and the menu says
+`Drop is off: analytics/assets/silver/clean.sql defines this. Remove it there and deploy, then drop
+it from Orphans.`, with the table's own repository and file. A screen reader hears that sentence
+when the menu opens. Change the table in git, or use **Rebuild from git…**.
 
 Drop and Rebuild from git ask for a recent passkey touch: one from the last 15 minutes. When yours
 is older, the browser asks you to touch your passkey and the action is sent again. If the touch

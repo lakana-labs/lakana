@@ -261,6 +261,12 @@
   background: var(--color-accent-bg);
 }
 
+/* A disabled item is dimmed and never highlighted; the menu's note says why it is off. */
+.menu-item[data-disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .menu-item[data-focus-visible] {
   outline: var(--focus-ring);
   outline-offset: -2px;
