@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TableRef } from "../../api";
@@ -52,13 +53,16 @@ function renderDelete(onGone?: () => void) {
   const onCancel = vi.fn();
   const user = userEvent.setup();
   render(
-    <DeleteVersionDialog
-      place={PLACE}
-      version={version()}
-      onDone={onDone}
-      onCancel={onCancel}
-      {...(onGone === undefined ? {} : { onGone })}
-    />,
+    // A refusal for an account without a passkey links to the account page.
+    <MemoryRouter>
+      <DeleteVersionDialog
+        place={PLACE}
+        version={version()}
+        onDone={onDone}
+        onCancel={onCancel}
+        {...(onGone === undefined ? {} : { onGone })}
+      />
+    </MemoryRouter>,
   );
   return { onDone, onCancel, user };
 }
@@ -163,6 +167,31 @@ describe("DeleteVersionDialog", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call the versions gone for the step-up's 409 of an account without a passkey", async () => {
+    fakeWebAuthn();
+    fakeServer({
+      ...artifactRoutes(),
+      ...manageRoutes(),
+      [DELETE]: STEP_UP_REQUIRED,
+      "POST /api/v1/sign-in/step-up/options": {
+        status: 409,
+        body: {
+          type: "NoPasskeyError",
+          detail:
+            "Your account has no passkey at this address, and this action needs a passkey touch.",
+        },
+      },
+    });
+    const onGone = vi.fn();
+    const { user } = renderDelete(onGone);
+
+    await user.click(await screen.findByRole("button", { name: "Delete the version" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no passkey yet/);
+    expect(onGone).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("does not call the versions gone for a refusal of another kind", async () => {

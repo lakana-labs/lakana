@@ -85,7 +85,8 @@ function Stored({ row }: StoredProps): JSX.Element {
  * version deleted, its files close and the server's sentence stands in its row with the focus. A
  * newer read that shows the version live forgets the sentence. Delete… asks first; Close then
  * reads the versions and the artifact again, so "current" moves, and the focus goes to the
- * version's number. Cancel gives it back to Delete…, or to the number once the version is gone.
+ * version's number. Cancel gives it back to Delete…, or to the number once the version is gone,
+ * also when the read a 409 asked for lands after Cancel and the focus is still on that Delete….
  *
  * @returns The tab.
  */
@@ -106,6 +107,12 @@ export default function VersionsTab(): JSX.Element | null {
   const goneNote = useRef<HTMLParagraphElement>(null);
   const [deleting, setDeleting] = useState<ArtifactVersionOut | null>(null);
   const focusAfterDelete = useRef<FocusAfterDelete | null>(null);
+  // The versions as they were when the dialog's 409 or 404 asked for them again.
+  const goneAsked = useRef<{ base: readonly ArtifactVersionOut[] | undefined } | null>(null);
+  const focusOnRead = useRef<{
+    version: number;
+    base: readonly ArtifactVersionOut[] | undefined;
+  } | null>(null);
   const ids = useId();
   const dotted = markedText(`${namespace}.${name}`);
   const number = new Intl.NumberFormat(i18n.language);
@@ -135,6 +142,19 @@ export default function VersionsTab(): JSX.Element | null {
     focusAfterDelete.current = null;
     const button = next.on === "delete" ? document.getElementById(deleteId(next.version)) : null;
     (button ?? document.getElementById(numberId(next.version)))?.focus();
+  });
+  useEffect(() => {
+    // Cancel gave the focus to Delete… before the read the 409 asked for landed; when that read
+    // removes the button, the focus goes to the version's number instead of the page.
+    const watched = focusOnRead.current;
+    if (watched === null || resource.data === watched.base) {
+      return;
+    }
+    focusOnRead.current = null;
+    const lost = document.activeElement === document.body;
+    if (lost && document.getElementById(deleteId(watched.version)) === null) {
+      document.getElementById(numberId(watched.version))?.focus();
+    }
   });
 
   if (resource.data === undefined) {
@@ -299,12 +319,21 @@ export default function VersionsTab(): JSX.Element | null {
         <DeleteVersionDialog
           place={ref}
           version={deleting}
-          onGone={resource.reload}
+          onGone={() => {
+            goneAsked.current = { base: resource.data };
+            resource.reload();
+          }}
           onCancel={() => {
             focusAfterDelete.current = { version: deleting.version, on: "delete" };
+            const asked = goneAsked.current;
+            goneAsked.current = null;
+            if (asked !== null && asked.base === resource.data) {
+              focusOnRead.current = { version: deleting.version, base: asked.base };
+            }
             setDeleting(null);
           }}
           onDone={() => {
+            goneAsked.current = null;
             focusAfterDelete.current = { version: deleting.version, on: "row" };
             setDeleting(null);
             resource.reload();

@@ -437,6 +437,66 @@ describe("VersionsTab", () => {
     });
   });
 
+  it("moves the focus from Delete… to the row when Cancel came before the 409's read of the versions", async () => {
+    const detail = "Version 3 of ml.model is already deleted.";
+    const reread = held();
+    const { server, user } = renderShell(TAB, {
+      routes: {
+        ...artifactRoutes(),
+        ...manageRoutes(),
+        [DELETE]: { status: 409, body: { type: "ConflictError", detail } },
+      },
+    });
+
+    const remove = within(at(await rows(), 0)).getByRole("button", { name: "Delete version 3…" });
+    await user.click(remove);
+    server.route({ [VERSIONS]: reread.route });
+    await user.click(await screen.findByRole("button", { name: "Delete the version" }));
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent(detail);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(remove).toHaveFocus();
+    });
+
+    reread.release(afterDelete()[VERSIONS]);
+
+    await waitFor(async () => {
+      expect(cells(at(await rows(), 0))[4]).toBe("Deleted WHEN by admin");
+    });
+    await waitFor(async () => {
+      expect(at(await rows(), 0).querySelector(".version-number")).toHaveFocus();
+    });
+  });
+
+  it("leaves the focus where the person put it when the 409's read lands after they moved on", async () => {
+    const detail = "Version 3 of ml.model is already deleted.";
+    const reread = held();
+    const { server, user } = renderShell(TAB, {
+      routes: {
+        ...artifactRoutes(),
+        ...manageRoutes(),
+        [DELETE]: { status: 409, body: { type: "ConflictError", detail } },
+      },
+    });
+
+    await user.click(
+      within(at(await rows(), 0)).getByRole("button", { name: "Delete version 3…" }),
+    );
+    server.route({ [VERSIONS]: reread.route });
+    await user.click(await screen.findByRole("button", { name: "Delete the version" }));
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent(detail);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    const files = within(at(await rows(), 1)).getByRole("button", { name: "Files of version 2" });
+    files.focus();
+
+    reread.release(afterDelete()[VERSIONS]);
+
+    await waitFor(async () => {
+      expect(cells(at(await rows(), 0))[4]).toBe("Deleted WHEN by admin");
+    });
+    expect(files).toHaveFocus();
+  });
+
   it("forgets a download's gone sentence once the versions show the version live, so a later delete shows only its own words", async () => {
     const { server, user } = renderShell(TAB, {
       routes: { ...artifactRoutes(), ...manageRoutes() },

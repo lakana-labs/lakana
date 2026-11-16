@@ -4,6 +4,7 @@ import {
   ApiError,
   CSRF_STORAGE_KEY,
   DownloadCut,
+  DownloadTooLong,
   api,
   onUnauthorized,
   send,
@@ -301,7 +302,7 @@ describe("api.upload and api.blob", () => {
     });
     setCsrfToken("csrf-1");
 
-    const read = await api.download("/api/v1/files/one");
+    const read = await api.download("/api/v1/files/one", 5);
 
     expect(await read.text()).toBe("bytes");
     expect(server.sent[0]?.headers).toMatchObject({
@@ -311,16 +312,61 @@ describe("api.upload and api.blob", () => {
     expect(server.sent[0]?.headers["x-lakana-background"]).toBeUndefined();
   });
 
+  it("download reads an answer without a body as an empty file", async () => {
+    fakeServer({ "GET /api/v1/files/one": { status: 204 } });
+
+    const read = await api.download("/api/v1/files/one", 5);
+
+    expect(read.size).toBe(0);
+  });
+
+  /**
+   * Answers every request with a body the test streams.
+   *
+   * @param source - The body's source.
+   */
+  function streamed(source: UnderlyingDefaultSource<Uint8Array>): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(new ReadableStream(source), { status: 200 }))),
+    );
+  }
+
+  it("download stops reading once the body passes the limit and cancels the rest", async () => {
+    // An endless body: a server or a proxy that sends more than the manifest records.
+    let pulls = 0;
+    let cancelled = false;
+    streamed({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(4));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    await expect(api.download("/api/v1/files/one", 10)).rejects.toBeInstanceOf(DownloadTooLong);
+
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThan(10);
+  });
+
   it("download names a body cut in the middle, and passes any other error on", async () => {
-    fakeServer({ "GET /api/v1/files/one": { status: 200, blob: new Blob(["bytes"]) } });
-    const read = vi.spyOn(Response.prototype, "blob");
+    streamed({
+      start(controller) {
+        controller.enqueue(new Uint8Array(2));
+        controller.error(new TypeError("network error"));
+      },
+    });
+    await expect(api.download("/api/v1/files/one", 10)).rejects.toBeInstanceOf(DownloadCut);
 
-    read.mockRejectedValueOnce(new TypeError("network error"));
-    await expect(api.download("/api/v1/files/one")).rejects.toBeInstanceOf(DownloadCut);
-
-    read.mockRejectedValueOnce(new RangeError("other"));
-    await expect(api.download("/api/v1/files/one")).rejects.toBeInstanceOf(RangeError);
-    read.mockRestore();
+    streamed({
+      start(controller) {
+        controller.error(new RangeError("other"));
+      },
+    });
+    await expect(api.download("/api/v1/files/one", 10)).rejects.toBeInstanceOf(RangeError);
   });
 
   it("asks the server again before showing a file the browser has cached", async () => {
