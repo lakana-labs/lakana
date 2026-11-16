@@ -11,6 +11,7 @@ import type { OwnerOut } from "../api";
 import { Avatar } from "../profile/Avatar";
 import { useWhen } from "../shell/useWhen";
 import { formatRows, relativeTime } from "./format";
+import { VisibleText } from "../shell/VisibleText";
 
 /**
  * The word for what a table is: its modelling kind (`Fact`) when it has one, else its entry kind
@@ -139,7 +140,9 @@ export function OwnerName({ owner }: OwnerNameProps): JSX.Element {
   return (
     <div className="person-cell">
       <Avatar name={owner.name} displayName={null} etag={null} size={24} />
-      <span>{owner.name}</span>
+      <span>
+        <VisibleText text={owner.name} />
+      </span>
       {owner.kind === "SERVICE_ACCOUNT" && (
         <span className="second">{t("catalog.serviceAccount")}</span>
       )}

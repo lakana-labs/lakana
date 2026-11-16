@@ -14,6 +14,7 @@ import { problemText } from "./messages";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
 import { PendingButton } from "../shell/PendingButton";
+import { markedText } from "../shell/VisibleText";
 
 /** The states of a link the server answers 410 with. */
 const UNUSABLE = new Set(["used", "expired", "withdrawn", "unknown"]);
@@ -159,14 +160,18 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
       </Step>
     );
   }
-  const shown = phase.link.display_name ?? phase.link.name;
+  const shown = markedText(phase.link.display_name ?? phase.link.name);
   const invite = phase.link.kind === "invite";
   return (
     <Step title={invite ? t("link.joinAs", { name: shown }) : t("link.signInAs", { name: shown })}>
       <p>{invite ? t("link.joinIntro") : t("link.signInIntro")}</p>
-      {session.state === "signed-in" && phase.link.kind !== "local" && (
-        <p className="step-notice">{t("link.replaces", { name: session.session?.name })}</p>
-      )}
+      {session.state === "signed-in" &&
+        session.session !== undefined &&
+        phase.link.kind !== "local" && (
+          <p className="step-notice">
+            {t("link.replaces", { name: markedText(session.session.name) })}
+          </p>
+        )}
       <div className="step-actions">
         <PendingButton className="button button-primary" pending={attempt.busy} onPress={use}>
           {t("link.confirm")}

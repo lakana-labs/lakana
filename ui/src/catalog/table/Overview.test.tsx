@@ -15,6 +15,21 @@ describe("Overview", () => {
     expect(screen.getByText("From the project in Git")).toBeVisible();
   });
 
+  it("marks a hidden character in the description", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: {
+          status: 200,
+          body: table({ description: "Sales of analy\u202Etics." }),
+        },
+      },
+    });
+
+    const mark = await screen.findByText("U+202E", { selector: ".description-text > .char-mark" });
+    expect(mark.parentElement).toHaveTextContent("Sales of analyU+202Etics.");
+    expect(mark.parentElement?.textContent).not.toMatch(/\u202E/u);
+  });
+
   it("says a description was edited here", async () => {
     renderShell(PAGE, {
       routes: {

@@ -21,6 +21,7 @@ import { PasskeysPanel } from "../sign-in/PasskeysPanel";
 import { SessionsPanel } from "../sign-in/SessionsPanel";
 import { useSession } from "../sign-in/SessionProvider";
 import { RecoveryDialog } from "./RecoveryDialog";
+import { markedText } from "../shell/VisibleText";
 
 /** Who the page is about, as far as recovering them goes. */
 type Kind = "own" | "service" | "admin" | "person";
@@ -120,11 +121,11 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
         )}
       </div>
       {kind === "service" && (
-        <p className="page-purpose">{t("access.people.serviceNote", { name })}</p>
+        <p className="page-purpose">{t("access.people.serviceNote", { name: markedText(name) })}</p>
       )}
       {kind === "admin" && (
         <section className="page-notice">
-          <p>{t("access.recovery.operatorFor", { name })}</p>
+          <p>{t("access.recovery.operatorFor", { name: markedText(name) })}</p>
           <CopyLine
             text={t("access.recovery.command", { name })}
             copyLabel={t("comingSoon.copy")}
@@ -136,7 +137,7 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
       <SessionsPanel name={name} own={own} />
       {removing && (
         <ConfirmDialog
-          title={t("profile.removeTitle", { name })}
+          title={t("profile.removeTitle", { name: markedText(name) })}
           confirmLabel={t("profile.remove")}
           onConfirm={() => removePicture(name)}
           onCancel={() => {
@@ -147,7 +148,7 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
             setRemoving(false);
           }}
         >
-          <p>{t("profile.removeBody", { name })}</p>
+          <p>{t("profile.removeBody", { name: markedText(name) })}</p>
         </ConfirmDialog>
       )}
       {recovering && (

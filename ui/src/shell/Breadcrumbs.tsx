@@ -7,6 +7,8 @@ import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
+import { VisibleText } from "./VisibleText";
+
 /** One part of a breadcrumb before the page itself. */
 export interface Crumb {
   /** Where the part leads. */
@@ -40,14 +42,18 @@ export function Breadcrumbs({ trail, current }: BreadcrumbsProps): JSX.Element {
       <ol>
         {trail.map((crumb) => (
           <li key={`${crumb.label} ${crumb.to}`}>
-            <Link to={crumb.to}>{crumb.label}</Link>
+            <Link to={crumb.to}>
+              <VisibleText text={crumb.label} />
+            </Link>
             <span className="breadcrumb-separator" aria-hidden="true">
               ›
             </span>
           </li>
         ))}
         <li>
-          <span aria-current="page">{current}</span>
+          <span aria-current="page">
+            <VisibleText text={current} />
+          </span>
         </li>
       </ol>
     </nav>

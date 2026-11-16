@@ -15,6 +15,7 @@ import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { ShownOnce } from "./ShownOnce";
 import { PendingButton } from "../shell/PendingButton";
+import { markedText } from "../shell/VisibleText";
 
 /** Properties of {@link RecoveryDialog}. */
 export interface RecoveryDialogProps {
@@ -79,7 +80,7 @@ export function RecoveryDialog({ name: known, onClose }: RecoveryDialogProps): J
               <FieldError />
             </TextField>
           ) : (
-            <p>{t("access.recovery.askFor", { name: known })}</p>
+            <p>{t("access.recovery.askFor", { name: markedText(known) })}</p>
           )}
           <p className="page-notice">{t("access.recovery.confirmFirst")}</p>
           <div className="step-actions">
@@ -95,7 +96,9 @@ export function RecoveryDialog({ name: known, onClose }: RecoveryDialogProps): J
       )}
       {stage.kind === "operator" && (
         <>
-          <Heading slot="title">{t("access.recovery.adminTitle", { name })}</Heading>
+          <Heading slot="title">
+            {t("access.recovery.adminTitle", { name: markedText(name) })}
+          </Heading>
           <p>{t("access.recovery.operatorOnly")}</p>
           <CopyLine
             text={t("access.recovery.command", { name })}
@@ -106,7 +109,7 @@ export function RecoveryDialog({ name: known, onClose }: RecoveryDialogProps): J
       )}
       {stage.kind === "issued" && (
         <ShownOnce
-          title={t("access.shownTitle", { name: stage.link.name })}
+          title={t("access.shownTitle", { name: markedText(stage.link.name) })}
           url={stage.link.url}
           onDone={onClose}
         >

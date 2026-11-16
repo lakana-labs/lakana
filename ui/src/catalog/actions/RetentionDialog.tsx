@@ -152,7 +152,11 @@ function RetentionForm({ place, onClose, current }: RetentionFormProps): JSX.Ele
         </RadioField>
       </RadioGroup>
       {protectedEnvironment && (
-        <p>{t("table.actions.retention.protectedOnly", { environment: place.environment })}</p>
+        <p>
+          {t("table.actions.retention.protectedOnly", {
+            environment: markedText(place.environment),
+          })}
+        </p>
       )}
       {choice === "days" && (
         <NumberField

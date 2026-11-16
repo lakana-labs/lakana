@@ -10,7 +10,7 @@ import { Cell, Column, Row, Table, TableBody, TableHeader } from "react-aria-com
 import { useTranslation } from "react-i18next";
 
 import type { MaskedColumnOut, QueryRunStatus, ResultPageOut } from "../../api";
-import { VisibleText } from "../../shell/VisibleText";
+import { markedText, VisibleText } from "../../shell/VisibleText";
 import "../../shell/data-grid.css";
 import { StatusGlyph } from "../../status/StatusGlyph";
 import { isNumberType, type PreviewText, previewValue } from "./previewValue";
@@ -247,9 +247,12 @@ function PreviewGrid({ page, cells, name }: PreviewGridProps): JSX.Element {
         ref={region}
         className="data-grid-scroll"
         role="region"
-        aria-label={t("table.preview.region", { name })}
+        aria-label={t("table.preview.region", { name: markedText(name) })}
       >
-        <Table aria-label={t("table.preview.grid", { name })} className="data-grid">
+        <Table
+          aria-label={t("table.preview.grid", { name: markedText(name) })}
+          className="data-grid"
+        >
           <TableHeader>
             <Column id="row-number" isRowHeader className="row-number" textValue="#">
               #
@@ -288,7 +291,10 @@ function PreviewGrid({ page, cells, name }: PreviewGridProps): JSX.Element {
       {whole !== undefined && column !== undefined && chosen !== null ? (
         <section
           className="preview-value"
-          aria-label={t("table.preview.valueOf", { column: column.name, row: chosen.row + 1 })}
+          aria-label={t("table.preview.valueOf", {
+            column: markedText(column.name),
+            row: chosen.row + 1,
+          })}
         >
           <p className="second">
             {t("table.preview.value")} · <VisibleText text={column.name} />
@@ -324,7 +330,9 @@ export function PreviewTab(): JSX.Element {
   const { phase, status, page, error } = preview;
   if (phase === "not_allowed") {
     return (
-      <p className="empty">{t("table.preview.notAllowed", { environment: ref.environment })}</p>
+      <p className="empty">
+        {t("table.preview.notAllowed", { environment: markedText(ref.environment) })}
+      </p>
     );
   }
   const busy = phase === "checking" || phase === "waiting";

@@ -36,4 +36,18 @@ describe("Page", () => {
     const header = screen.getByRole("heading", { level: 1, name: "Access" }).parentElement;
     expect(header).toContainElement(screen.getByRole("button", { name: "Invite someone" }));
   });
+
+  it("marks hidden characters in the heading and the document title", () => {
+    render(
+      <Page title={"fact_\u202Eselas"}>
+        <p>Content</p>
+      </Page>,
+    );
+
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toHaveTextContent("fact_U+202Eselas");
+    expect(heading.textContent).not.toContain("\u202E");
+    expect(screen.getByText("U+202E")).toHaveClass("char-mark");
+    expect(document.title).toBe("fact_U+202Eselas · Lakana");
+  });
 });

@@ -10,6 +10,7 @@ import { Link } from "react-router";
 
 import { getLineage, getTableHealth } from "../../api";
 import { useResource } from "../../shell/useResource";
+import { VisibleText } from "../../shell/VisibleText";
 import { tablePath } from "../paths";
 import { ColumnsTable } from "./ColumnsTab";
 import { ComesFrom } from "./ComesFrom";
@@ -57,7 +58,9 @@ function DescriptionBlock(): JSX.Element {
         <p className="second">{t("table.description.none")}</p>
       ) : (
         <>
-          <p className="description-text">{table.description}</p>
+          <p className="description-text">
+            <VisibleText text={table.description} />
+          </p>
           {table.description_source !== null && (
             <p className="second">{t(`table.description.source.${table.description_source}`)}</p>
           )}

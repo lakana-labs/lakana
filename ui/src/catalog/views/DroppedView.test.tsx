@@ -466,7 +466,7 @@ describe("DroppedView", () => {
         ...manageRoutes(),
         [ENVIRONMENT_LIST]: {
           status: 200,
-          body: { items: [dropped({ name: "fact‮sales" })], next_cursor: null },
+          body: { items: [dropped({ name: "fact\u202Esales" })], next_cursor: null },
         },
       },
     });
@@ -492,5 +492,58 @@ describe("DroppedView", () => {
     const line = await screen.findByText("Dropped gold.sales.fact_sales.");
     expect(line).toHaveAttribute("role", "status");
     expect(line).toHaveFocus();
+  });
+
+  it("marks hidden characters of the environment and namespace in its sentences", async () => {
+    const tree = {
+      count: 0,
+      environments: [
+        {
+          name: "pr\u2066od",
+          count: 0,
+          actions: [],
+          namespaces: [{ path: "go\u202Eld", count: 0, actions: [] }],
+        },
+      ],
+    };
+    renderShell("/catalog?view=dropped&env=pr%E2%81%A6od&ns=go%E2%80%AEld", {
+      routes: {
+        ...manageRoutes(),
+        "GET /api/v1/tables/tree": { status: 200, body: tree },
+        "GET /api/v1/environments/pr\u2066od/namespaces/go\u202Eld/dropped-tables": {
+          status: 200,
+          body: [],
+        },
+      },
+    });
+
+    expect(await screen.findByText("Tables dropped from goU+202Eld.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Nothing was dropped in goU+202Eld that can still be restored."),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
+
+  it("marks a hidden character in the server's sentence that the name is taken", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [`POST ${UNDROP}/fact_returns/undrop`]: {
+          status: 409,
+          body: {
+            type: "AlreadyExistsError",
+            detail: "A table fact_\u202Ereturns already exists.",
+          },
+        },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Undrop gold.sales.fact_returns" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "A table fact_U+202Ereturns already exists.",
+    );
+    expect(dialog.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
 });

@@ -16,6 +16,7 @@ import { STATUS_KINDS, type StatusKind } from "../status/status";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { objectPath } from "./links";
 import { ObjectRow, ObjectTable } from "./ObjectRows";
+import { VisibleText } from "../shell/VisibleText";
 
 /**
  * Whether a run's or a deploy's state has a glyph.
@@ -48,7 +49,7 @@ function Repository({ repository }: RepositoryProps): JSX.Element {
   return (
     <li aria-labelledby={name}>
       <span className="home-repo-name" id={name}>
-        {repository.name}
+        <VisibleText text={repository.name} />
       </span>
       <ul className="home-deploys">
         {repository.environments.map((deploy) => (

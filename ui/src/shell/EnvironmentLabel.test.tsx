@@ -16,4 +16,12 @@ describe("EnvironmentLabel", () => {
 
     expect(screen.getByText("Instance")).toHaveClass("env-label");
   });
+
+  it("marks hidden characters in the environment's name", () => {
+    const { container } = render(<EnvironmentLabel environment={"pr\u202Eod"} />);
+
+    expect(container).toHaveTextContent("Environment prU+202Eod");
+    expect(container.textContent).not.toContain("\u202E");
+    expect(screen.getByText("U+202E")).toHaveClass("char-mark");
+  });
 });
