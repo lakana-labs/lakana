@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { catalogPath, splitDotted, TABLE_TABS, tablePath } from "./paths";
+import { ARTIFACT_TABS, catalogPath, splitDotted, TABLE_TABS, tablePath, tabsFor } from "./paths";
 import { DEFAULT_VIEW } from "./view";
 
 describe("catalog paths", () => {
@@ -35,7 +35,15 @@ describe("catalog paths", () => {
   });
 
   it("has Lineage, Health and Access after Preview", () => {
-    expect(TABLE_TABS).toEqual(["overview", "columns", "preview", "lineage", "health", "access"]);
+    expect(TABLE_TABS).toEqual([
+      "overview",
+      "columns",
+      "preview",
+      "lineage",
+      "references",
+      "health",
+      "access",
+    ]);
     expect(tablePath("prod", "gold.sales", "fact_sales", "lineage")).toBe(
       "/catalog/prod/gold.sales/fact_sales/lineage",
     );
@@ -45,6 +53,15 @@ describe("catalog paths", () => {
     expect(tablePath("prod", "gold.sales", "fact_sales", "access")).toBe(
       "/catalog/prod/gold.sales/fact_sales/access",
     );
+  });
+
+  it("gives an artifact Overview, Versions, Lineage and Access, and a table its seven tabs", () => {
+    expect(tabsFor("ARTIFACT")).toEqual(["overview", "versions", "lineage", "access"]);
+    expect(ARTIFACT_TABS).toBe(tabsFor("ARTIFACT"));
+    for (const kind of ["TABLE", "EXTERNAL", "VIEW"] as const) {
+      expect(tabsFor(kind)).toBe(TABLE_TABS);
+    }
+    expect(tablePath("prod", "ml", "model", "versions")).toBe("/catalog/prod/ml/model/versions");
   });
 
   it("splits a dotted reference at its last dot", () => {

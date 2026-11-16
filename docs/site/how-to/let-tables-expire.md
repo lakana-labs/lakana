@@ -42,6 +42,17 @@ The answer says when the table expires, the rule (and whether the table or its e
 it), who set it, and the table's last activity. A table that sets nothing and whose environment
 has no retention does not expire.
 
+In the web interface, open the table's page, choose **Actions**, then **Retention…**. The dialog
+states the retention that applies in one sentence, for example "30 days after its last activity,
+set for the table by ana", and under it when the table expires and when it was last used. A table
+with no retention says "No retention: it never expires."
+Two tables never expire whatever their retention says, and the dialog says so. In a protected
+environment it says "Tables in a protected environment never expire." For a table a deployed
+project builds it says "A deployed project declares this table, so it does not expire while it is
+deployed." and then, after "After that:", the rule that applies once the project no longer builds
+it, for example "30 days after its last activity, set for the table by ana."
+**Retention…** is in the menu only if you may change the table's retention.
+
 ## Change it
 
 Give the table a number of days, a day, or no expiry at all:
@@ -63,6 +74,15 @@ lakana table retention bronze.trial --never
 
 A change of the retention counts as activity, so `--days 3` means three days from now at the
 earliest.
+
+In the web interface, **Actions**, **Retention…** shows the three rules as options: **After days
+without activity** (1 to 3,650 days), **On a day** (a date after today, UTC) and **Never**. Choose
+one, fill in its field and press **Save**; the dialog then shows the new rule in the same sentence
+and **Close** returns you to **Actions**. It sends exactly one rule. In a protected environment only **Never** can be
+chosen, and the dialog says why. A number you type is sent as you typed it, never changed to fit.
+The server judges the rule and
+who may set it: when it refuses, for example days in a protected environment or a day that is not
+after today, the dialog stays open with the server's sentence.
 
 **Who may.** The table's owner (who created it) may set any retention. Anyone else needs:
 
@@ -105,6 +125,13 @@ one page; `--limit` and `--cursor` page on, and the last line names the command 
 Without `--within` the window is the server's warning window,
 `LAKANA_TABLES__EXPIRY_WARNING_DAYS` (7 days by default). Within that window, `lakana table list NAMESPACE`
 shows an `expires` column (the list across namespaces has none) and `lakana table get` says when the table expires and how to keep it.
+
+In the web interface, open **Catalog**, choose **Expiring** and an environment. The list has one row
+per table: its name and namespace (a link to its page), **Expires** (how long until it, such as "in 5 days", with the
+exact time on hover, or "Due now" once the time has passed) and **Why**, the sentence of the
+**Retention…** dialog. Choosing a namespace in the tree keeps only that namespace and the ones
+beneath it. **Show more** reads the next page. When nothing expires within the window, the page
+says "Nothing expires soon in" the place.
 
 ## What counts as activity
 

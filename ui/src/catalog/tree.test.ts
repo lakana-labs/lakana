@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ancestorIds, buildTree, findNode, nodeId } from "./tree";
+import { ancestorIds, buildTree, findNode, nodeId, parentOf } from "./tree";
 
 import { TREE } from "../test/catalog";
 
@@ -33,8 +33,36 @@ describe("catalog tree", () => {
         environment: "prod",
         namespace: "gold.sales",
         count: 1,
+        actions: ["create_namespace", "create_external_table", "drop"],
         children: [],
       },
+    ]);
+  });
+
+  it("copies each node's actions and reads a missing field as none", () => {
+    const root = buildTree({
+      count: 1,
+      environments: [
+        {
+          name: "prod",
+          count: 1,
+          actions: ["create_namespace"],
+          namespaces: [
+            { path: "gold", count: 1, actions: ["create_external_table"] },
+            { path: "silver", count: 0 },
+          ],
+        },
+        { name: "dev", count: 0, namespaces: [] },
+      ],
+    });
+
+    expect(root.actions).toEqual([]);
+    const [dev, prod] = root.children;
+    expect(dev?.actions).toEqual([]);
+    expect(prod?.actions).toEqual(["create_namespace"]);
+    expect(prod?.children.map((node) => [node.namespace, node.actions])).toEqual([
+      ["gold", ["create_external_table"]],
+      ["silver", []],
     ]);
   });
 
@@ -118,5 +146,15 @@ describe("catalog tree", () => {
 
     expect(root.children[0]?.children).toHaveLength(10);
     expect(elapsed).toBeLessThan(200);
+  });
+  it("finds the place a node sits under: a namespace, an environment, or none", () => {
+    const root = buildTree(TREE);
+    const at = (environment: string | null, namespace: string | null) =>
+      findNode(root, environment, namespace) ?? root;
+
+    expect(parentOf(root, at("prod", "gold.sales"))?.id).toBe("ns:prod:gold");
+    expect(parentOf(root, at("prod", "silver"))?.id).toBe("env:prod");
+    expect(parentOf(root, at("prod", null))?.id).toBe("all");
+    expect(parentOf(root, root)).toBeNull();
   });
 });

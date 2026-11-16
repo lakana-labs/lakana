@@ -22,6 +22,7 @@ describe("catalog view", () => {
     expect(DEFAULT_VIEW).toEqual({
       environment: null,
       namespace: null,
+      view: "all",
       q: "",
       sort: "name",
       order: "asc",
@@ -70,6 +71,7 @@ describe("catalog view", () => {
       viewSearch({
         environment: "prod",
         namespace: "gold.sales",
+        view: "all",
         q: "store",
         sort: "size",
         order: "asc",
@@ -80,15 +82,31 @@ describe("catalog view", () => {
   it("round-trips every view through the address", () => {
     const views: CatalogView[] = [
       DEFAULT_VIEW,
-      { environment: "prod", namespace: null, q: "", sort: "name", order: "desc" },
+      { environment: "prod", namespace: null, view: "all", q: "", sort: "name", order: "desc" },
+      {
+        environment: "prod",
+        namespace: "gold",
+        view: "dropped",
+        q: "",
+        sort: "name",
+        order: "asc",
+      },
       {
         environment: "prod",
         namespace: "gold.sales",
+        view: "all",
         q: "a b&c=d",
         sort: "last_read",
         order: "asc",
       },
-      { environment: "dev", namespace: "gold", q: "ü %", sort: "health", order: "desc" },
+      {
+        environment: "dev",
+        namespace: "gold",
+        view: "all",
+        q: "ü %",
+        sort: "health",
+        order: "desc",
+      },
     ];
     for (const view of views) {
       expect(read(viewSearch(view))).toEqual(view);
@@ -112,6 +130,7 @@ describe("catalog view", () => {
     const view: CatalogView = {
       environment: "dev",
       namespace: "bronze",
+      view: "all",
       q: "x",
       sort: "rows",
       order: "asc",
@@ -120,6 +139,7 @@ describe("catalog view", () => {
     expect(placed(view, "prod", "gold")).toEqual({
       environment: "prod",
       namespace: "gold",
+      view: "all",
       q: "x",
       sort: "rows",
       order: "asc",
@@ -131,10 +151,37 @@ describe("catalog view", () => {
     expect(viewQuery({ ...DEFAULT_VIEW, environment: "prod" }, "c1")).toEqual({
       environment: "prod",
       namespace: null,
+      view: "all",
       q: "",
       sort: "name",
       order: "asc",
       cursor: "c1",
+    });
+  });
+
+  it("reads ?view=dropped and leaves all out of the address", () => {
+    const view = read("env=prod&ns=gold.sales&view=dropped");
+
+    expect(view).toMatchObject({ view: "dropped", environment: "prod", namespace: "gold.sales" });
+    expect(viewSearch(view)).toBe("?env=prod&ns=gold.sales&view=dropped");
+    expect(viewSearch({ ...view, view: "all" })).toBe("?env=prod&ns=gold.sales");
+    expect(read("view=expiring").view).toBe("expiring");
+    expect(read("view=orphans").view).toBe("orphans");
+  });
+
+  it("reads an unknown view as all", () => {
+    expect(read("view=bogus").view).toBe("all");
+    expect(read("view=").view).toBe("all");
+  });
+
+  it("placed keeps the view", () => {
+    const view = read("env=prod&view=orphans&q=x");
+
+    expect(placed(view, "dev", "bronze")).toMatchObject({
+      environment: "dev",
+      namespace: "bronze",
+      view: "orphans",
+      q: "x",
     });
   });
 });

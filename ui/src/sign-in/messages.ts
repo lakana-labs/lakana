@@ -32,8 +32,19 @@ const ENDED_REASONS = new Set([
 ]);
 
 /**
- * Names what went wrong: a passkey refusal of the browser, an unreachable server, or the
- * server's own sentence, which names the cause and the next step.
+ * Whether a step-up failed because the person's account has no passkey to touch.
+ *
+ * @param error - What was thrown.
+ * @returns True for the server's 409 `NoPasskeyError`.
+ */
+export function needsPasskey(error: unknown): boolean {
+  return error instanceof ApiError && error.type === "NoPasskeyError";
+}
+
+/**
+ * Names what went wrong: a passkey refusal of the browser, an unreachable server, an account
+ * without a passkey to touch, or the server's own sentence, which names the cause and the next
+ * step.
  *
  * @param t - The translation function.
  * @param error - What was thrown.
@@ -43,6 +54,9 @@ export function problemText(t: TFunction, error: unknown): string {
   if (error instanceof DOMException) {
     const key = BROWSER_REFUSALS[error.name];
     return key === undefined ? t("passkey.failed", { name: error.name }) : t(key);
+  }
+  if (needsPasskey(error)) {
+    return t("passkey.none");
   }
   if (error instanceof ApiError) {
     return error.type === "NetworkError" ? t("errors.unreachable") : error.detail;

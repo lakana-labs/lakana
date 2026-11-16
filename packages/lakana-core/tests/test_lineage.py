@@ -1,6 +1,8 @@
 """Tests for column-level lineage extraction."""
 
 import pytest
+import sqlglot.expressions as exp
+import sqlglot.lineage
 
 from lakana_core.lineage import extract_lineage
 
@@ -79,3 +81,32 @@ def test_a_traceable_column_survives_an_untraceable_sibling() -> None:
 def test_a_bare_values_list_has_no_traceable_column() -> None:
     """A `VALUES` list reads no table, so its columns trace to nothing."""
     assert extract_lineage("VALUES (1, 'a')") == {}
+
+
+def test_lineage_traces_the_tree_lakanas_parser_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sqlglot's lineage gets the tree `sql_dialect` parsed, never the text to parse again (#415).
+
+    Parameters
+    ----------
+    monkeypatch
+        Replaces `sqlglot.lineage.lineage` with a recorder that calls the original.
+    """
+    seen: list[object] = []
+    original = sqlglot.lineage.lineage
+
+    def recording(
+        column: str, sql: str | exp.Expr, schema: dict[str, object], dialect: str
+    ) -> sqlglot.lineage.Node:
+        seen.append(sql)
+        return original(column, sql, schema=schema, dialect=dialect)
+
+    monkeypatch.setattr(sqlglot.lineage, "lineage", recording)
+
+    result = extract_lineage("SELECT a ~ 'b' AS m FROM bronze.t")
+
+    assert result == {"m": [{"table": "bronze.t", "column": "a"}]}
+    assert seen
+    assert all(isinstance(sql, exp.Expr) for sql in seen)
+    assert all(
+        isinstance(sql, exp.Expr) and sql.find(exp.RegexpFullMatch) is not None for sql in seen
+    )

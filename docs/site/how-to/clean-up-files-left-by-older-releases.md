@@ -39,7 +39,7 @@ A directory is listed only when nothing in the catalog uses it:
   `_artifacts/` directory, whose files have no record. If it does, each directory is listed with a
   `kept_because` naming that environment's root, and none is deleted: move the environment to a
   root of its own. Only an environment created by an earlier release can be there: a new one is
-  refused at such a root (see [`lakana env create`](../reference/cli.md#lakana-env-create)).
+  refused at such a root (see [`lakana env create`](../reference/cli/lakana-env.md#lakana-env-create)).
 
 **The same place under another name keeps it.** Every environment's storage root, every table
 and every location record is compared under each way a storage may read it: without case and in

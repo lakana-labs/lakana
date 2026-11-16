@@ -16,14 +16,14 @@ import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Collection, Sequence
-from datetime import datetime
+from datetime import UTC, datetime, tzinfo
 from typing import Any
 
 from pyiceberg.io import FileIO
 from pyiceberg.manifest import DataFile
 from pyiceberg.table.metadata import TableMetadata
 from pyiceberg.table.snapshots import Operation, Snapshot
-from sqlalchemy import ColumnElement, Subquery, and_, delete, func, not_, select, update
+from sqlalchemy import ColumnElement, Subquery, and_, case, delete, func, not_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.sql.elements import UnaryExpression
@@ -126,7 +126,10 @@ def recent_observations(
     """Read the newest observed values of each commit signal and column of a table.
 
     Only rows observed since the (2 x `HISTORY`)-th newest ``schema`` row are ranked, so a
-    table's whole retention is never ranked on a commit. Every commit records one ``schema``
+    table's whole retention is never ranked on a commit. ``volume`` keeps up to 2 x `HISTORY`
+    values, each with its row's ``observed_at`` (the commit's time), so the band of a commit's
+    weekday can reach back `WEEKDAY_WEEKS` weeks of daily loads (#565); the band of all loads
+    still reads the newest `HISTORY`. Every commit records one ``schema``
     row, but compactions and commits whose signals failed record no other: on a table compacted
     more often than appended to, the window can hold fewer than `HISTORY` values of a signal
     (fewer than `MIN_HISTORY` leaves it at ``no_history``). The rows it misses are the oldest.
@@ -143,8 +146,9 @@ def recent_observations(
     Returns
     -------
     dict
-        (signal, column) → observed values, newest first, at most `HISTORY` each, from rows in
-        state ``ok``, ``fired`` or ``no_history``. A row whose snapshot was set back is left out,
+        (signal, column) → observed values, newest first, at most `HISTORY` each (2 x
+        `HISTORY` for ``volume``, whose items also hold ``observed_at``), from rows in state
+        ``ok``, ``fired`` or ``no_history``. A row whose snapshot was set back is left out,
         and does not count towards the window either; so is a fired row whose effect was
         ``block``, whose data is set back unless the set-back failed.
     """
@@ -173,14 +177,25 @@ def recent_observations(
         conditions.append(TableHealthSignal.observed_at >= since)
     window = ranked(*conditions)
     rows = session.execute(
-        select(TableHealthSignal.signal, TableHealthSignal.column_name, TableHealthSignal.observed)
+        select(
+            TableHealthSignal.signal,
+            TableHealthSignal.column_name,
+            TableHealthSignal.observed,
+            TableHealthSignal.observed_at,
+        )
         .join(window, window.c.id == TableHealthSignal.id)
-        .where(window.c.position <= HISTORY)
+        .where(
+            window.c.position
+            <= case((TableHealthSignal.signal == "volume", 2 * HISTORY), else_=HISTORY)
+        )
         .order_by(window.c.position)
     )
     found: dict[tuple[str, str | None], list[dict[str, Any]]] = defaultdict(list)
-    for signal, column, observed in rows:
-        found[signal, column].append(observed or {})
+    for signal, column, observed, observed_at in rows:
+        item = observed or {}
+        found[signal, column].append(
+            {**item, "observed_at": observed_at} if signal == "volume" else item
+        )
     return dict(found)
 
 
@@ -268,6 +283,8 @@ def _observe(
     files: Sequence[DataFile] | None,
     effects: HealthEffects,
     own_summaries: bool,
+    now: datetime | None,
+    zone: tzinfo,
 ) -> list[Observation]:
     """Observe the commit signals of a new snapshot.
 
@@ -301,6 +318,11 @@ def _observe(
     own_summaries
         Whether this service wrote the snapshots through pyiceberg, so their summaries hold
         ``added-data-files`` exactly when a data file was added.
+    now
+        The commit's time, for the weekday of the volume band; `None` judges volume against all
+        loads.
+    zone
+        The zone that weekday is taken in.
 
     Returns
     -------
@@ -331,6 +353,8 @@ def _observe(
             volume_off=effects.of("volume") == "off",
             own_summaries=own_summaries,
             found_schema=found_schema,
+            now=now,
+            zone=zone,
         )
     if files is None or compactions:
         # The field-id check's files include the compactions'; they are read again without.
@@ -338,7 +362,13 @@ def _observe(
     history = {} if table_id is None else recent_observations(session, table_id)
     newest = counted[-1].summary
     found = [
-        volume_signal(newest, history.get(("volume", None), []), no_data_files=files == []),
+        volume_signal(
+            newest,
+            history.get(("volume", None), []),
+            no_data_files=files == [],
+            at=now,
+            zone=zone,
+        ),
         found_schema,
     ]
     if files is None:
@@ -370,6 +400,8 @@ def _columns_off_observations(
     volume_off: bool,
     own_summaries: bool,
     found_schema: Observation,
+    now: datetime | None,
+    zone: tzinfo,
 ) -> list[Observation]:
     """Observe a commit that loads data into a table whose column signals are all off (#454).
 
@@ -409,6 +441,10 @@ def _columns_off_observations(
         Whether this service wrote the snapshots through pyiceberg.
     found_schema
         The schema observation.
+    now
+        The commit's time, for the weekday of the volume band.
+    zone
+        The zone that weekday is taken in.
 
     Returns
     -------
@@ -433,6 +469,8 @@ def _columns_off_observations(
             counted[-1].summary,
             history.get(("volume", None), []),
             no_data_files=no_data_files,
+            at=now,
+            zone=zone,
         ),
         found_schema,
         Observation("null_rate", None, "off", None, None),
@@ -452,6 +490,8 @@ def commit_observations(
     effects: HealthEffects,
     files: Sequence[DataFile] | None = None,
     own_summaries: bool = False,
+    now: datetime | None = None,
+    zone: tzinfo = UTC,
 ) -> list[tuple[Observation, str]]:
     """Observe a new snapshot's commit signals and apply the table's effects.
 
@@ -480,6 +520,12 @@ def commit_observations(
     own_summaries
         Whether this service wrote the snapshots through pyiceberg, so their summaries can
         stand in for the files when every column signal is off.
+    now
+        The commit's time (the database's), whose weekday picks the volume band; `None` judges
+        volume against all loads.
+    zone
+        The zone that weekday is taken in: that of the jobs that write the table
+        (`health_jobs.writing_zone`).
 
     Returns
     -------
@@ -510,6 +556,8 @@ def commit_observations(
             files=files,
             effects=effects,
             own_summaries=own_summaries,
+            now=now,
+            zone=zone,
         )
     except SQLAlchemyError:
         raise

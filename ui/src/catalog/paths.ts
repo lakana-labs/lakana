@@ -3,6 +3,7 @@
  *
  * @packageDocumentation
  */
+import type { TableOut } from "../api";
 import { viewSearch } from "./view";
 import type { CatalogView } from "./view";
 
@@ -16,8 +17,9 @@ export function catalogPath(view: CatalogView): string {
   return `/catalog${viewSearch(view)}`;
 }
 
-/** The tabs of a table's page. */
-export type TableTab = "overview" | "columns" | "preview" | "lineage" | "health" | "access";
+/** The tabs of a table's page, and of an artifact's, which shows it at the same address. */
+export type TableTab =
+  "overview" | "columns" | "preview" | "lineage" | "references" | "health" | "access" | "versions";
 
 /** Every tab, in the order they are shown. */
 export const TABLE_TABS: readonly TableTab[] = [
@@ -25,9 +27,23 @@ export const TABLE_TABS: readonly TableTab[] = [
   "columns",
   "preview",
   "lineage",
+  "references",
   "health",
   "access",
 ];
+
+/** The tabs of an artifact's page, in the order they are shown: it holds files, not rows. */
+export const ARTIFACT_TABS: readonly TableTab[] = ["overview", "versions", "lineage", "access"];
+
+/**
+ * The tabs of an entry of the Catalog, by its kind.
+ *
+ * @param kind - What the entry is.
+ * @returns The artifact's tabs for an artifact ({@link ARTIFACT_TABS}), else the table's.
+ */
+export function tabsFor(kind: TableOut["kind"]): readonly TableTab[] {
+  return kind === "ARTIFACT" ? ARTIFACT_TABS : TABLE_TABS;
+}
 
 /**
  * The address of one table, or of one of its tabs.

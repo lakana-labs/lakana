@@ -1,0 +1,68 @@
+{
+  "menu": {
+    "button": "Actions",
+    "maintain": "Maintain now…",
+    "retention": "Retention…",
+    "rebuild": "Rebuild from git…",
+    "drop": "Drop…",
+    "definedIn": "Defined in <file /> — change it in git"
+  },
+  "protected": {
+    "label": "Why you break the protection of {{environment}}",
+    "text": "{{environment}} is protected: only runs write there. Doing this by hand needs the right to manage the environment and is recorded in the audit log."
+  },
+  "drop": {
+    "title": "Drop {{table}}?",
+    "text": "It leaves the catalog with its grants, row filters and column masks. You can restore it from Dropped during the undo period (7 days unless your operator changed it).",
+    "purge": "Delete the files now: the table cannot be restored",
+    "confirm": "Drop the table",
+    "artifactText": "This cannot be undone: every version's files are deleted.",
+    "artifactConfirm": "Drop the artifact"
+  },
+  "rebuild": {
+    "title": "Rebuild {{table}} from git?",
+    "text": "It drops the table, which you can restore like any drop, and queues a run of the asset that builds it.",
+    "reason": "Why it is rebuilt (recorded in the audit log)",
+    "protected": "{{environment}} is protected: only runs write there. Your reason is also sent as the reason you break its protection, which needs the right to manage the environment.",
+    "confirm": "Rebuild",
+    "done": "Dropped {{table}} and queued run {{run}} of {{repository}}, which builds it again from {{path}}.",
+    "doneNoPath": "Dropped {{table}} and queued run {{run}} of {{repository}}.",
+    "copy": "Copy command",
+    "close": "Close"
+  },
+  "undrop": {
+    "button": "Undrop",
+    "for": "Undrop {{table}}",
+    "title": "Restore {{table}}",
+    "text": "The table comes back with its data as it was when it was dropped.",
+    "restoreAs": "Restore as",
+    "restoreAsHelp": "The table comes back under this name. Choose one that no table in {{namespace}} has.",
+    "confirm": "Undrop"
+  },
+  "maintain": {
+    "title": "Maintain {{table}} now",
+    "text": "Maintenance expires old snapshots and deletes the files nothing references any more. It runs as a query in the background.",
+    "keepDays": "Keep snapshots younger than (days)",
+    "keepLast": "Always keep the latest snapshots",
+    "olderThanHours": "Delete unreferenced files older than (hours)",
+    "dryRun": "Dry run: report, change nothing",
+    "confirm": "Maintain now",
+    "done": "Maintenance is queued as query {{id}}.",
+    "follow": "Its progress is not shown here yet. Follow it with:",
+    "copy": "Copy command",
+    "close": "Close"
+  },
+  "retention": {
+    "title": "Retention of {{table}}",
+    "expires": "Expires {{when}}; last activity {{last}}.",
+    "rule": "When it expires",
+    "daysChoice": "After days without activity",
+    "onChoice": "On a day",
+    "neverChoice": "Never",
+    "days": "Days",
+    "day": "Day",
+    "save": "Save",
+    "close": "Close",
+    "protectedOnly": "{{environment}} is protected, so its tables never expire and no days or day can be set there. Never is still accepted, to remove a rule set before the protection."
+  }
+}

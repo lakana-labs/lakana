@@ -41,3 +41,64 @@ it("ships no lineage string in the first load, and the Lineage tab registers its
 
   expect(i18n.t("table.lineage.stepUp")).toBe("One step up");
 });
+
+it("ships no string of the views or the actions in the first load, and importing ViewBody registers them", async () => {
+  const i18n = initI18n();
+
+  expect(Object.keys(en.catalog)).not.toContain("views");
+  expect(i18n.exists("catalog.views.dropped.empty")).toBe(false);
+  expect(i18n.exists("table.actions.undrop.title")).toBe(false);
+  expect(i18n.exists("table.actions.drop.title")).toBe(false);
+  expect(i18n.exists("table.actions.maintain.title")).toBe(false);
+  expect(i18n.exists("table.actions.retention.title")).toBe(false);
+  expect(i18n.exists("catalog.views.retention.never")).toBe(false);
+  expect(i18n.t("catalog.view.dropped")).toBe("Dropped");
+
+  await import("../catalog/views/ViewBody");
+
+  expect(i18n.t("catalog.views.dropped.empty", { place: "prod" })).toBe(
+    "Nothing was dropped in prod that can still be restored.",
+  );
+  expect(i18n.t("table.actions.undrop.title", { table: "gold.sales.fact" })).toBe(
+    "Restore gold.sales.fact",
+  );
+  expect(i18n.t("table.actions.drop.title", { table: "gold.sales.fact" })).toBe(
+    "Drop gold.sales.fact?",
+  );
+  expect(i18n.t("table.actions.maintain.title", { table: "gold.sales.fact" })).toBe(
+    "Maintain gold.sales.fact now",
+  );
+  expect(i18n.t("catalog.views.retention.never")).toBe("never");
+});
+
+it("ships no string of the place menu in the first load, and importing PlaceActions registers them", async () => {
+  const i18n = initI18n();
+
+  expect(Object.keys(en.catalog)).not.toContain("places");
+  expect(i18n.exists("catalog.places.delete.title")).toBe(false);
+
+  await import("../catalog/places/PlaceActions");
+
+  expect(i18n.t("catalog.places.delete.title", { namespace: "silver" })).toBe(
+    "Delete namespace silver?",
+  );
+  expect(i18n.t("catalog.places.note.created", { namespace: "gold.finance" })).toBe(
+    "Created namespace gold.finance.",
+  );
+  expect(i18n.t("catalog.places.note.artifactDropped", { artifact: "ml.model" })).toBe(
+    "Dropped artifact ml.model. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not.",
+  );
+});
+
+it("ships no string of an artifact's versions in the first load, and importing VersionsTab registers them", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("table.artifact.versions.heading")).toBe(false);
+
+  await import("../catalog/artifact/VersionsTab");
+
+  expect(i18n.t("table.artifact.versions.heading")).toBe("Versions");
+  expect(i18n.t("table.artifact.files.mismatch", { path: "models/model.pkl" })).toBe(
+    "models/model.pkl did not arrive whole, so nothing was saved. Download it again, or use the command above.",
+  );
+});

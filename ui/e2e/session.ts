@@ -103,19 +103,54 @@ const HOME: Record<string, unknown> = {
   "/api/v1/info": { version: "0.23.0" },
 };
 
+/** What an administrator may do on each namespace of the tree. */
+const PLACE_ACTIONS = ["create_namespace", "create_external_table", "drop"];
+
 /** What the Catalog reads besides the list: a tree of two environments and an empty namespace. */
 const CATALOG: Record<string, unknown> = {
+  "/api/v1/environments/prod": { name: "prod", is_protected: false },
+  "/api/v1/environments/prod/dropped-tables": {
+    items: [
+      {
+        name: "fact_returns",
+        namespace: "gold.sales",
+        uuid: "5c1d7e90-2f3a-4b6c-9d8e-0a1b2c3d4e5f",
+        kind: "TABLE",
+        dropped_at: "2026-11-14T09:30:00Z",
+        purge_after: "2026-11-21T09:30:00Z",
+        restorable: true,
+        actions: ["undrop"],
+      },
+      {
+        name: "old_totals",
+        namespace: "gold",
+        uuid: "7e2f9a41-3b5c-4d6e-8f70-1a2b3c4d5e6f",
+        kind: "TABLE",
+        dropped_at: "2026-10-01T09:30:00Z",
+        purge_after: "2026-10-08T09:30:00Z",
+        restorable: false,
+        actions: ["undrop"],
+      },
+    ],
+    next_cursor: null,
+  },
   "/api/v1/tables/tree": {
     count: 4,
     environments: [
-      { name: "dev", count: 1, namespaces: [{ path: "gold", count: 1 }] },
+      {
+        name: "dev",
+        count: 1,
+        actions: ["create_namespace"],
+        namespaces: [{ path: "gold", count: 1, actions: PLACE_ACTIONS }],
+      },
       {
         name: "prod",
         count: 3,
+        actions: ["create_namespace"],
         namespaces: [
-          { path: "gold", count: 3 },
-          { path: "gold.sales", count: 1 },
-          { path: "bronze", count: 0 },
+          { path: "gold", count: 3, actions: PLACE_ACTIONS },
+          { path: "gold.sales", count: 1, actions: PLACE_ACTIONS },
+          { path: "bronze", count: 0, actions: PLACE_ACTIONS },
         ],
       },
     ],
@@ -243,13 +278,45 @@ function tablesAnswer(url: URL): { status: number; json: unknown } {
 }
 
 /** The path of the table page's table, `prod/gold.sales/fact_sales`. */
-const TABLE_PATH = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
+export const TABLE_PATH = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
 
 /** The path of what the administrator may do with a table. */
 const PERMISSIONS_PATH = "/api/v1/principals/admin/permissions";
 
 /** The path of the table's health, which Overview reads without the readers. */
 const HEALTH_PATH = `${TABLE_PATH}/health`;
+
+/** The path of the table's references, which the References tab reads. */
+const REFERENCES_PATH = `${TABLE_PATH}/references`;
+
+/** What the References tab reads: one reference each way and one hidden each way. */
+const REFERENCES = {
+  table: "gold.sales.fact_sales",
+  outgoing: [
+    {
+      id: "gold.sales.fact_sales/ref_store_id",
+      table: "gold.sales.fact_sales",
+      column: "store_id",
+      target: "gold.dim_store",
+      target_column: "store_id",
+      target_exists: true,
+      at: null,
+    },
+  ],
+  hidden_outgoing: 1,
+  incoming: [
+    {
+      id: "gold.sales.fact_returns/ref_sale_id",
+      table: "gold.sales.fact_returns",
+      column: "sale_id",
+      target: "gold.sales.fact_sales",
+      target_column: "id",
+      target_exists: true,
+      at: "sold_at",
+    },
+  ],
+  hidden_incoming: 2,
+};
 
 /** The path of where the table is defined, which Overview reads for its Defined in fact. */
 const DEFINITION_PATH = `${TABLE_PATH}/definition`;
@@ -582,7 +649,7 @@ const COLUMN_MASKS = [
 ];
 
 /** The table `fact_sales` as its page reads it. */
-const TABLE_DETAIL = {
+export const TABLE_DETAIL = {
   name: "fact_sales",
   namespace: "gold.sales",
   uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
@@ -650,6 +717,8 @@ const TABLE_DETAIL = {
   last_read_at: "2026-11-10T07:50:00Z",
   readers_7d: 2,
   health_summary: { state: "failing", item: "check_failed", text: "Check failed", others: 2 },
+  defined_by: null,
+  actions: ["drop", "maintain", "set_retention"],
 };
 
 /** What the administrator may do with `fact_sales`: everything the page asks about. */
@@ -691,6 +760,7 @@ export const STUBBED = [
   TABLES,
   TABLE_PATH,
   HEALTH_PATH,
+  REFERENCES_PATH,
   LINEAGE_PATH,
   PERMISSIONS_PATH,
   "/api/v1/grants",
@@ -761,6 +831,10 @@ export async function signInAsAdmin(page: Page): Promise<void> {
             ? HEALTH
             : { ...HEALTH, readers: READERS },
       }),
+  );
+  await page.route(
+    (url) => url.pathname === REFERENCES_PATH,
+    (route) => route.fulfill({ json: REFERENCES }),
   );
   await page.route(
     (url) => url.pathname === DEFINITION_PATH,

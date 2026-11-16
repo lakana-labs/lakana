@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -14,7 +14,14 @@ from home_test_helpers import check_result, deployed_job, environment, person, r
 from sqlalchemy import Engine, delete, event, func, select
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind, TaskScope
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    PrincipalRef,
+    Securable,
+    SecurableKind,
+    TaskScope,
+)
 from lakana_core.catalog import search, table_listing
 from lakana_core.catalog.health import readers
 from lakana_core.catalog.health_summary import HEALTH_ITEMS, HealthSummary
@@ -39,6 +46,7 @@ from lakana_core.models import (
     AuditEvent,
     CheckOutcome,
     ColumnDescription,
+    Environment,
     Namespace,
     PrincipalType,
     Table,
@@ -1165,6 +1173,149 @@ def test_the_tree_shows_empty_namespaces_only_to_a_reader_of_namespaces(
     alice_tree = world.listing.tree(world.alice)
     assert "empty" not in [n.path for e in alice_tree.environments for n in e.namespaces]
     assert [e.name for e in world.listing.tree(world.tim).environments] == ["dev"]
+
+
+def _places(tree: table_listing.TableTree, env: str) -> dict[str | None, tuple[str, ...]]:
+    """Map each node of an environment to its actions; the environment itself is ``None``.
+
+    Parameters
+    ----------
+    tree
+        The tree.
+    env
+        The environment's name.
+
+    Returns
+    -------
+    dict
+        The actions by namespace path.
+    """
+    (node,) = (e for e in tree.environments if e.name == env)
+    return {None: node.actions, **{n.path: n.actions for n in node.namespaces}}
+
+
+def test_the_tree_says_what_each_place_allows(world: ListingWorld) -> None:
+    dev = _places(world.listing.tree(world.admin), "dev")
+    assert dev[None] == ("create_namespace",)
+    assert dev["silver"] == ("create_namespace", "create_external_table", "drop")
+    assert all(actions for actions in dev.values())
+    for env in world.listing.tree(world.alice).environments:
+        assert env.actions == ()
+        assert all(n.actions == () for n in env.namespaces)
+
+
+def test_a_namespace_grant_offers_its_actions_there_and_beneath(world: ListingWorld) -> None:
+    session = world.session
+    dev = session.scalar(select(Environment.id).where(Environment.name == "dev"))
+    assert dev is not None
+    _namespace(session, dev, "silver.x")
+    session.commit()
+    dan = person(session, "dan")
+    grants = GrantService(session, AllowAllAuthorization())
+    for action, kind, namespace in (
+        (Action.READ_ENVIRONMENT, SecurableKind.ENVIRONMENT, None),
+        (Action.READ_NAMESPACE, SecurableKind.ENVIRONMENT, None),
+        (Action.DROP_NAMESPACE, SecurableKind.NAMESPACE, "silver"),
+    ):
+        grants.grant(
+            world.admin,
+            principal="dan",
+            action=action,
+            kind=kind,
+            environment="dev",
+            namespace=namespace,
+        )
+    places = _places(TableListing(session, GrantAuthorization(session)).tree(dan), "dev")
+    assert places[None] == ()
+    assert places["silver"] == ("drop",)
+    assert places["silver.x"] == ("drop",)
+    assert places["gold"] == ()
+
+
+class _SpyAuthorization:
+    """An authorization that counts the batches it is asked.
+
+    Parameters
+    ----------
+    inner
+        The service answering.
+    """
+
+    def __init__(self, inner: GrantAuthorization) -> None:
+        self._inner = inner
+        self.batches: list[list[tuple[Action, Securable]]] = []
+
+    def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+        """Answer as the inner service.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Returns
+        -------
+        bool
+            The answer.
+        """
+        return self._inner.permits(principal, action, securable)
+
+    def permits_each(
+        self, principal: PrincipalRef, questions: Sequence[tuple[Action, Securable]]
+    ) -> list[bool]:
+        """Record the batch and answer as the inner service.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        questions
+            The questions.
+
+        Returns
+        -------
+        list of bool
+            The answers.
+        """
+        self.batches.append(list(questions))
+        return self._inner.permits_each(principal, questions)
+
+
+def test_the_tree_asks_the_rights_of_its_places_in_one_batch(session: Session) -> None:
+    admin = person(session, "admin")
+    GrantService(session, AllowAllAuthorization()).grant(
+        admin, principal="admin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    env = environment(session, "dev")
+
+    def place_batches(count: int) -> int:
+        """Count the batches that ask a place's rights, over `count` namespaces.
+
+        Parameters
+        ----------
+        count
+            The namespaces in the environment, after the call.
+
+        Returns
+        -------
+        int
+            The batches asking for `DROP_NAMESPACE`.
+        """
+        for n in range(count):
+            if session.scalar(select(Namespace.id).where(Namespace.path == f"n{n}")) is None:
+                _namespace(session, env, f"n{n}")
+        session.commit()
+        spy = _SpyAuthorization(GrantAuthorization(session))
+        tree = TableListing(session, cast(Any, spy)).tree(admin)
+        assert len(tree.environments[0].namespaces) == count
+        return sum(any(a is Action.DROP_NAMESPACE for a, _ in batch) for batch in spy.batches)
+
+    assert place_batches(3) == 1
+    assert place_batches(12) == 1
 
 
 def test_the_statements_do_not_grow_with_the_page(session: Session) -> None:

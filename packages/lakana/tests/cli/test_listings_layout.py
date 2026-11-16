@@ -483,7 +483,14 @@ _LISTINGS = {
     "principals": _Listing(
         ("principal", "list"),
         "/api/v1/principals",
-        [{"name": "renate.müller@example.org", "type": "USER", "is_active": True}],
+        [
+            {
+                "name": "renate.müller@example.org",
+                "type": "USER",
+                "is_active": True,
+                "held_admin": False,
+            }
+        ],
         headers=("name", "type"),
         key="renate.müller@example.org",
     ),

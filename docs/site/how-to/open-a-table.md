@@ -18,10 +18,64 @@ The page has:
 - **The table's name** as the heading, with its label under it when the table has one.
 - **A line under the name** with what the table is and where it lives, such as `Fact · gold.sales`,
   and the environment's label.
-- **Tabs**: Overview, Columns, Preview, Lineage, Health and Access. Every tab has its own
-  address, so a link opens the tab you were looking at. Everyone sees the same tabs.
+- **Tabs**: Overview, Columns, Preview, Lineage, References, Health and Access. An artifact holds
+  files, not rows, so its page shows Overview, Versions, Lineage and Access; its Overview gives the
+  current version, how many versions it has had, how many it keeps, the size of its live versions
+  and, when it expires, the date. Every tab has its own address, so a link opens the tab you were
+  looking at; an address with a tab the entry does not have, such as Preview of an artifact, opens
+  its Overview. Everyone sees the same tabs.
+- **Actions** beside the name, once the table is read, when there is something you may do to the
+  table (see [Actions](#actions)).
 
-The page has no button beside the name. What you may do is in the tabs.
+## Actions
+
+**Actions** opens a menu of what you may do to the table as a whole. It lists only what the
+server says you may do, so an item you see is one you are allowed to use; with none, the page has
+no **Actions** at all. An artifact's **Actions** has only **Drop…**, which drops the artifact as
+`lakana artifact drop` does (see
+[Drop the whole artifact](delete-an-artifact-version.md#drop-the-whole-artifact)).
+
+- **Maintain now…** queues maintenance for the table, as `lakana table maintain` does. See
+  [Maintain a table now](#maintain-a-table-now).
+- **Retention…** shows and changes when the table expires, as `lakana table retention` does. See
+  [Let tables expire](let-tables-expire.md#see-a-tables-retention).
+- **Rebuild from git…** drops a table a deployed project builds and queues the run that builds it
+  again. It asks why, for the audit log. See
+  [Rebuild a table from git](drop-and-restore-a-table.md#rebuild-a-table-from-git).
+- **Drop…** asks first, then drops the table and opens the **Dropped** view of its namespace,
+  where you can undo it. See [Drop a table](drop-and-restore-a-table.md#drop-a-table).
+
+When a deployed project builds the table, **Drop…** is shown but cannot be chosen, and the menu
+says `Defined in analytics/assets/silver/clean.sql — change it in git`, with the table's own
+repository and file. A screen reader hears that sentence when the menu opens. Change the table in
+git, or use **Rebuild from git…**.
+
+Drop and Rebuild from git ask for a recent passkey touch: one from the last 15 minutes. When yours
+is older, the browser asks you to touch your passkey and the action is sent again. If the touch
+fails, the dialog stays open with the reason, nothing is dropped, and **Cancel** closes it. In a
+protected environment Drop also asks why you break the protection, which the audit log records.
+Rebuild from git asks for no second reason: the one reason it asks for is also sent as the reason
+you break the protection, as `--break-glass` does.
+
+### Maintain a table now
+
+Maintenance expires a table's old snapshots, deletes the files nothing references any more and
+removes the tags of failed checks (see `lakana table maintain` in the
+[CLI reference](../reference/cli/lakana-table.md#lakana-table-maintain)). In the web interface, choose
+**Actions**, then **Maintain now…**. The form starts with the server's defaults, the same as the
+command's:
+
+- **Keep snapshots younger than (days):** 7, from 0 up.
+- **Always keep the latest snapshots:** 5, from 1 up.
+- **Delete unreferenced files older than (hours):** 72, from 1 to 87,600.
+- **Dry run: report, change nothing:** off.
+
+Press **Maintain now**. The dialog then says "Maintenance is queued as query" with the query's
+identifier and gives a command to copy, `lakana query status <id> --env <environment>`. Maintenance
+runs in the background; the web interface does not show its progress yet, so follow it with that
+command. If the server refuses, for example because you lack the right to maintain the table, the
+form stays open with the server's sentence. **Maintain now…** is in the menu only for a managed
+table you may maintain.
 
 ## Overview
 
@@ -129,6 +183,24 @@ tab says "Nothing upstream or downstream." A very large lineage shows its first 
 and says "Showing the first 500 nodes each way." If lineage cannot be read, the tab says why and
 offers **Try again**.
 
+## References
+
+References are what the table's header declares it points at, such as a `store_id` that must
+match `dim_store.store_id`. They are not lineage: lineage is how data flowed, references are
+what the model says relates. The tab shows the same as `lakana table references`. Its address
+ends in `/references`.
+
+- **This table references** lists each reference as `column → table.column`. The target table is
+  a link to its page. A target that does not exist says "This table does not exist." and is not a
+  link. A target that keeps history says "valid at" and the time column the reference follows.
+- **Referenced by** lists the tables whose headers point at this one, each a link, with the column
+  they reference and the column of this table it must match.
+
+References to or from a table you may not read are counted and never named: the tab says, for
+example, "2 more from tables you may not read" or "1 more points at a table you may not read".
+When the header declares no references and no table points at this one, the tab says so. If the
+references cannot be read, it says why and offers **Try again**.
+
 ## Health
 
 Health shows everything the Overview's health block sums up. Its address ends in `/health`.
@@ -146,7 +218,8 @@ Health shows everything the Overview's health block sums up. Its address ends in
   write", "3 rows added, 3 in total", "Nothing loaded" or "0 of 3 values empty", or why there
   is no value, such as "Paused" or "No figures recorded for this snapshot", its usual band in the same
   words (such as "up to 24 hours", "900 to 1,100 rows added" or "up to 5.0 % empty", and a range's
-  dates as dates), its effect (Warns, "Blocks publication" or Off) and when it last fired. Words are never broken across lines; when
+  dates as dates; a volume band learned from the loads on one weekday names the day, such as
+  "450 to 550 rows added on Saturdays"), its effect (Warns, "Blocks publication" or Off) and when it last fired. Words are never broken across lines; when
   the window is too narrow for the list, it scrolls sideways in its own area. Under the list, each signal that fired has its sentence,
   as on Overview. If a column mask or a row filter applies to you, the observed value and the
   band say "Hidden for you".
@@ -174,13 +247,13 @@ shows; changing access comes with the Access area.
   in prod." A refused one says why, or "Ask an administrator." You may edit the texts if you own
   the table or may drop it; otherwise the tab names the owner to ask.
 - **Who has access** (administrators only). The grants on the table, on its namespace and each
-  namespace above it, and on the environment, each level under its own heading: the person or
+  namespace above it, on the environment, and on the whole instance (such as the Admin role,
+  which applies to every table), each level under its own heading: the person or
   service account (a link to them), or the group, and the role or action with when it was
   granted. A level with more than 200 grants shows the first 200 and names the command that lists
-  all, such as `lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'`. A grant
-  whose person was removed while the list was read says "a removed person or group" with its id.
-  Grants on the whole instance, such as the Admin role, are not listed here; `lakana grant list`
-  shows every grant.
+  all, such as `lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'` (for the
+  instance, `lakana grant list --kind INSTANCE`). A grant whose person was removed while the list
+  was read says "a removed person or group" with its id.
 - **Row filters** and **Column masks** (administrators only). Who each one is for, the masked
   column for a mask, and the expression, shown as text.
 

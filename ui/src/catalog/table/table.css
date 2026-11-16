@@ -26,7 +26,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Six tabs do not fit one line at 320 px, so they wrap (WCAG 1.4.10 reflow). */
+/* Seven tabs do not fit one line at 320 px, so they wrap (WCAG 1.4.10 reflow). */
 .table-page .tabs {
   flex-wrap: wrap;
   row-gap: 0;
@@ -285,6 +285,7 @@
 .lineage a,
 .health-tab a,
 .access-tab a,
+.references-tab a,
 .source-dialog a {
   color: var(--color-accent);
 }
@@ -497,16 +498,20 @@
   }
 }
 
-/* Health and Access: flat panels (screen.css), one after the other, 24 px apart. */
+/* Health, Access, References and an artifact's Versions: flat panels (screen.css), one after the
+   other, 24 px apart. */
 .health-tab,
-.access-tab {
+.access-tab,
+.references-tab,
+.versions-tab {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
 }
 
 .health-tab:focus,
-.access-tab:focus {
+.access-tab:focus,
+.references-tab:focus {
   outline: none;
 }
 
@@ -544,6 +549,42 @@
 
 .list-scroll.signals-scroll .list {
   min-width: 760px;
+}
+
+/* An artifact's versions: five columns, fewer than the Catalog's seven. A version's files sit in
+   a row that spans them, in a list of their own that scrolls with the versions, not apart. */
+.list-scroll.versions-scroll .list {
+  min-width: 560px;
+}
+
+.list-scroll .files-list .list {
+  min-width: 0;
+}
+
+.version-files > *:last-child {
+  margin-bottom: 0;
+}
+
+.version-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* An open upload's id is a machine's word: monospace, like a column's type. */
+.upload-id {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+/* The line after a Withdraw: no room while it is empty. */
+.uploads-result {
+  margin: 0;
+}
+
+.versions-section .show-more,
+.version-files .show-more {
+  margin-top: var(--space-3);
 }
 
 /* A status word with its glyph never breaks: "Failed" in three pieces cannot be read. */

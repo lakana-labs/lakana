@@ -27,6 +27,19 @@ From the web interface, a drop asks for a recent passkey touch: one from the las
 or without purging the files. The browser asks you to touch your passkey when yours is older. The
 command line uses a token and is never asked. Restoring a table asks for no touch.
 
+In the web interface, open the table's page and choose **Actions**, then **Drop…**. The menu shows
+**Drop…** only if you may drop the table. The dialog says what a drop does: the table leaves the
+catalog with its grants, row filters and column masks, and you can restore it from **Dropped**
+during the undo period (7 days unless your operator changed it). Check **Delete the files now: the
+table cannot be restored** to purge the files as `--purge` does (see
+[Delete a table's files now](#delete-a-tables-files-now)). Press **Drop the table**; the Catalog
+opens at the **Dropped** view of the table's namespace and says "Dropped gold.sales.orders." In a
+protected environment the dialog also asks why you break the protection of the environment, the
+same reason `--break-glass` takes.
+
+If the drop is refused, or the passkey touch fails, the dialog stays open with the server's
+sentence and nothing is dropped; **Cancel** closes it.
+
 ## When a project builds the table
 
 A table or view that a deployed project builds is defined in git, so it is changed in git.
@@ -37,12 +50,19 @@ A table or view that a deployed project builds is defined in git, so it is chang
 `silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Remove it there and deploy; then drop it from Orphans. To build it again from git instead: `lakana table rebuild silver.clean --env dev --reason "…"`.
 ```
 
+In the web interface, **Drop…** under the table's **Actions** is shown but cannot be chosen, and
+the menu says `Defined in analytics/assets/silver/clean.sql — change it in git` with the
+repository and the file that define the table; a screen reader hears it when the menu opens.
+**Rebuild from git…** stays available. If a deploy makes the table git-owned after you opened
+its page, the Drop dialog shows the server's sentence above and stays open.
+
 Neither `--purge` nor a break-glass reason gets past this, and the REST API, the UI and Iceberg
 clients refuse alike. To build it again from git instead, see
 [Rebuild a table from git](#rebuild-a-table-from-git). To drop such a table:
 
 1. Remove its asset from the project in git and deploy. The table stays, now built by nothing.
-2. Find it among the orphans and drop it:
+2. Find it among the orphans and drop it. In the web interface, open **Catalog**, choose **Orphans**
+   and the environment, and press **Drop** beside it. On the command line:
 
 <!-- source: docs/examples/drop-and-restore-a-table/run.sh#drop-orphan -->
 ```bash
@@ -131,6 +151,19 @@ In a protected environment the run writes as the deployment's run principal. Reb
 outside a run needs `--break-glass`, which sends the same `--reason` as the break-glass reason and
 needs `MANAGE_ENVIRONMENT`.
 
+In the web interface, open the table's page and choose **Actions**, then **Rebuild from git…**. The
+menu shows it only if you may rebuild the table. The dialog says what happens: it drops the table,
+which you can restore like any drop, and queues a run of the asset that builds it. Type why it is
+rebuilt in **Why it is rebuilt (recorded in the audit log)**; **Rebuild** stays unavailable until
+you do. In a protected environment the dialog says that your reason is also sent as the reason you
+break the protection, as `--break-glass` does; the server checks its length and its sentence
+shows if the reason is too short. After the rebuild the dialog names the run, the repository and
+the file, as the command does, such as "Dropped gold.sales.orders and queued run 9f1c… of
+analytics, which builds it again from assets/silver/orders.sql.", with **Copy command** for
+`lakana runs show RUN_ID --env ENV`. **Close** opens the Catalog at the table's namespace: the
+table is gone until its run builds it again. A refusal, or a failed passkey touch, stays in the
+dialog with its sentence, and nothing was dropped.
+
 When it is refused, nothing was dropped:
 
 - **No project builds the table.** Drop it with `lakana table delete` instead (see above).
@@ -157,6 +190,15 @@ To see the tables dropped from every namespace of the environment, leave out the
 `--limit` and `--cursor` page on, and the last line names the command for the next page. The route is
 `GET /api/v1/environments/{env}/dropped-tables`, and the SDK's `client.tables.iter_dropped(env)`
 walks every page.
+
+In the web interface, open **Catalog** and choose **Dropped** above the list. It lists the tables
+dropped from one environment, newest first, with the namespace each was dropped from, when it was
+dropped ("2 days ago") and until when it can be restored ("in 5 days", the exact time on hover). Choose an environment in the tree first: with none
+chosen, the page lists your environments to pick from. Choose a namespace in the tree to see only
+the tables dropped from that namespace. **Show more** adds the next page. A table whose undo
+period has ended says "No longer restorable" and has no button. The view says so when nothing that can
+still be restored was dropped there. If the server refuses the list, for example because you may
+not read the environment, the page shows its sentence with **Try again**.
 
 ## Restore a table
 
@@ -187,6 +229,13 @@ Restoring needs the right to drop tables and the right to create tables in the n
 protected environment it is refused like any other change outside a run; add `--break-glass` with a
 `--reason`, as for a create.
 
+In the web interface, press **Undrop** on the row in the Dropped view of the Catalog. It restores
+the table at once, removes the row and says "Restored gold.sales.orders" with a link to the table's
+page; the focus moves to that line. A person may press it if the server lists `undrop` for the row,
+which needs the same rights as the command. In a protected environment the button first opens a
+dialog that asks why you break the protection of the environment, the same reason `--break-glass`
+takes; the audit log records it, and the server's sentence shows if it refuses the reason.
+
 ### When the name is taken
 
 If a new table has the dropped table's name, restore the old one under another name in the same
@@ -196,6 +245,10 @@ namespace:
 ```bash
 lakana table undrop silver.orders --as orders_before
 ```
+
+In the web interface, **Undrop** on that row shows the server's sentence ("A table orders already
+exists in silver ...") in a dialog with a field **Restore as**; type the other name and press
+**Undrop** again.
 
 If a name was dropped more than once, `lakana table undrop` brings back the newest. Restore it, or
 drop the table that holds the name, then run the command again (with `--as` if needed) for the
@@ -230,7 +283,9 @@ and no later than one sweep after it**. The sweep runs every `LAKANA_RUN__SWEEP_
   files wait until the nested one is restored or deleted.
 - **An external table's files are never deleted.** Dropping one removes the catalog entry only; it
   is not listed by `--dropped` and cannot be restored. Register it again with
-  `lakana table create-external`. A view has no files; a deploy of its project creates it again.
+  `lakana table create-external`, or **New external table** in the Catalog (see
+  [Register files as an external table](register-files-as-an-external-table.md)). A view has no
+  files; a deploy of its project creates it again.
 - **Tables dropped before this release** have no undo period: their files stay, and the worker's log
   counts their directories as directories without a record. Remove them when you choose with
   `lakana env orphaned-locations`: see
@@ -345,7 +400,7 @@ reached: the clean-up deletes that one's files and then the environment, and
 | `silver.orders cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the table was dropped with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |
 | `silver.orders cannot be restored: the worker's sweep has started deleting its files, ...` | The sweep began deleting before the restore. | Restore from a backup if you have one. |
 | `silver.orders cannot be restored: its files are gone ...` | Its metadata file was deleted from storage by something other than Lakana. | Restore from a backup of the storage if you have one. |
-| `silver.orders cannot be restored: its namespace silver was dropped after it. ...` | The namespace is gone. | Create the namespace again (`lakana ns create`), then restore the table. |
+| `silver.orders cannot be restored: its namespace silver was dropped after it. ...` | The namespace is gone. | Create the namespace again (`lakana ns create`, or **New namespace** in the Catalog), then restore the table. |
 | `No environment named 'sandbox'. It was deleted, and it can be restored with ...` | The environment was deleted. | Restore it with `lakana env restore sandbox` if you need it. |
 | `Environment 'sandbox' cannot be created: an environment of that name was deleted, ...` | A deleted environment holds the name until its files are deleted. | Restore it, or delete its files now with `lakana env delete sandbox --purge`. |
 | `Environment 'sandbox' cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the environment was deleted with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |

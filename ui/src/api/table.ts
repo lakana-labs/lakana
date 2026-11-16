@@ -52,6 +52,17 @@ export interface ColumnOut {
   readonly terms: readonly TermRefOut[];
 }
 
+/** What a person may do to a table, as the server offers it. */
+export type TableAction = "drop" | "rebuild" | "maintain" | "set_retention";
+
+/** The deployed project file that declares a table or an artifact. */
+export interface DefinedByOut {
+  /** The repository's name. */
+  readonly repository: string;
+  /** The file's path in the repository. */
+  readonly path: string;
+}
+
 /** One reference a table's header declares. */
 export interface ModelReferenceOut {
   /** The name of the reference's generated check. */
@@ -208,6 +219,10 @@ export interface TableOut {
   readonly label_language: string | null;
   /** The description's language. */
   readonly description_language: string | null;
+  /** The deployed project file that declares the table; null for one nobody declared. */
+  readonly defined_by: DefinedByOut | null;
+  /** What the caller may do to the table, by right and by how it is made. */
+  readonly actions: readonly TableAction[];
   /** The reader's language. */
   readonly language: string;
   /** The language the table's texts are written in. */
@@ -452,6 +467,27 @@ export async function listGrantsAt(level: GrantLevel): Promise<GrantPage> {
       query.set("table", level.table);
     }
   }
+  return firstGrants(query);
+}
+
+/**
+ * Lists the grants on the whole instance, which apply to every table. Only an administrator may
+ * list grants.
+ *
+ * @returns The first {@link MOST_GRANTS} of them, newest first, and whether the server has more.
+ * @throws {ApiError} for a refusal.
+ */
+export async function listInstanceGrants(): Promise<GrantPage> {
+  return firstGrants(new URLSearchParams({ kind: "INSTANCE" }));
+}
+
+/**
+ * Reads the first page of a grants listing.
+ *
+ * @param query - The listing's filters.
+ * @returns The first {@link MOST_GRANTS} grants, and whether the server has more.
+ */
+async function firstGrants(query: URLSearchParams): Promise<GrantPage> {
   query.set("limit", String(MOST_GRANTS));
   const page = await api.page(`/api/v1/grants?${query.toString()}`);
   return { grants: page.body as readonly GrantOut[], more: page.nextCursor !== null };

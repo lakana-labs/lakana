@@ -1,12 +1,15 @@
 {
   "tabsLabel": "Sections of the table",
+  "tabsLabelArtifact": "Sections of the artifact",
   "tabs": {
     "overview": "Overview",
     "columns": "Columns",
     "preview": "Preview",
     "lineage": "Lineage",
+    "references": "References",
     "health": "Health",
-    "access": "Access"
+    "access": "Access",
+    "versions": "Versions"
   },
   "toCatalog": "Back to the Catalog",
   "notFound": "There is no table {{name}} in {{environment}} › {{namespace}}. Check the name in the address; if it existed, it may have been dropped or renamed.",
@@ -77,6 +80,19 @@
     "readers_other": "{{count}} readers in the last 7 days",
     "created": "Created",
     "grain": "Grain",
+    "currentVersion": "Current version",
+    "version": "{{version}}",
+    "noVersion": "None: every version is deleted",
+    "noVersionYet": "None yet",
+    "versions": "Versions",
+    "versionsCount_one": "{{count}}, deleted ones included",
+    "versionsCount_other": "{{count}}, deleted ones included",
+    "keeps": "Keeps",
+    "keepsNewest_one": "The newest version (keep_versions)",
+    "keepsNewest_other": "The newest {{count}} versions (keep_versions)",
+    "keepsAll": "Every version",
+    "sizeOfLive": "{{size}} of its live versions",
+    "expires": "Expires",
     "readersLink": "Readers ›"
   },
   "definedIn": {
@@ -143,7 +159,6 @@
     "maskedOf": "column {{column}} of {{table}}",
     "maskedMore": "and {{count}} more",
     "notAllowed": "Preview runs a query as you, which needs the right to run queries in {{environment}}. Ask an administrator for the Analyst role there.",
-    "artifact": "An artifact holds files, not rows, so it has no preview. Download its files with lakana artifact download.",
     "starting": "Starting the preview…",
     "checking": "Checking that you may run queries…",
     "queuing": "Queuing the preview…",
@@ -165,6 +180,22 @@
     "value": "Value",
     "valueOf": "{{column}}, row {{row}}",
     "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here."
+  },
+  "referencesTab": {
+    "reading": "Reading the references…",
+    "empty": "The table's header declares no references and none point here.",
+    "outgoing": "This table references",
+    "incoming": "Referenced by",
+    "table": "Table",
+    "reference": "Reference",
+    "note": "Note",
+    "none": "Nothing here.",
+    "missing": "This table does not exist.",
+    "validAt": "valid at {{at}}",
+    "hiddenOutgoing_one": "{{count}} more points at a table you may not read",
+    "hiddenOutgoing_other": "{{count}} more point at tables you may not read",
+    "hiddenIncoming_one": "{{count}} more from a table you may not read",
+    "hiddenIncoming_other": "{{count}} more from tables you may not read"
   },
   "healthTab": {
     "reading": "Reading the health…",
@@ -235,6 +266,17 @@
         "freshness": "up to {{duration}}",
         "volume_one": "{{low}} to {{high}} row added",
         "volume_other": "{{low}} to {{high}} rows added",
+        "volumeOn_one": "{{low}} to {{high}} row added on {{weekday}}",
+        "volumeOn_other": "{{low}} to {{high}} rows added on {{weekday}}",
+        "weekdays": {
+          "monday": "Mondays",
+          "tuesday": "Tuesdays",
+          "wednesday": "Wednesdays",
+          "thursday": "Thursdays",
+          "friday": "Fridays",
+          "saturday": "Saturdays",
+          "sunday": "Sundays"
+        },
         "nullRateUpTo": "up to {{high}} % empty",
         "nullRate": "{{low}} % to {{high}} % empty"
       },
@@ -347,7 +389,7 @@
       "reading": "Reading the grants…",
       "cut": "The first 200 at this level; <code>{{command}}</code> lists all.",
       "role": "{{role}} role",
-      "instance": "Grants on the whole instance, such as the Admin role, are not listed here; <code>lakana grant list</code> shows every grant."
+      "instance": "On the whole instance"
     },
     "group": "group <name/>",
     "removed": "a removed person or group",

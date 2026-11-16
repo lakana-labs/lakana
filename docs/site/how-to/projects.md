@@ -398,6 +398,14 @@ tables you may not read.
 The list shows 100 orphans at most; a last line `More results: ...` names the command for the next
 page.
 
+In the web interface, open **Catalog**, choose **Orphans** and an environment. It lists the same
+orphans: the table and its namespace, its kind and the repository that last built it. **Drop**
+beside a table asks first and then drops it; an artifact is dropped for good, a table can be
+restored from **Dropped** during its undo period. The list is read again afterwards. It always covers the
+whole environment, whichever namespace is chosen, and a line counts the orphans you may not read.
+An orphan that was dropped and can still be restored has no **Drop**; its **Restore it from
+Dropped** link opens the Dropped view.
+
 ## Run
 
 <!-- not tested: the optional parts in brackets and `RUN_ID` are the reader's to fill in; `run` with its selections and `runs list` run in the example `projects`, while `runs show`, `logs`, `cancel` and `resume` need the id of a run -->
@@ -667,7 +675,7 @@ caller.
 
 In a protected environment (`lakana env protect prod`) only runs of the deployed project version write.
 Every other write — `lakana sql … --into`, `lakana table create|append|replace|delete`,
-`lakana ns create|delete`, an SDK write, a PyIceberg commit, or one from another engine, through the Iceberg REST
+`lakana ns create|delete` (or **New namespace** and **Delete namespace** in the Catalog), an SDK write, a PyIceberg commit, or one from another engine, through the Iceberg REST
 catalog — is refused with 403 "Environment 'prod' is protected: only runs of the deployed
 project version may write. See `lakana run`.", even when the caller's grants allow the write (a caller
 without them gets the ordinary 403 or 404 first). Reads, grants, policies,

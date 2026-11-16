@@ -50,6 +50,12 @@ says so, and `--output json` always has it. It does not say how many files were 
 frees its place one hour after it began unless the operator changed
 `LAKANA_ARTIFACTS__UPLOAD_TTL_SECONDS`.
 
+**In the web interface:** open the artifact's page in the Catalog and its **Versions** tab. Below
+the versions, the section **Your open uploads** lists your own open uploads of that artifact,
+newest first: the upload's id, when it began and when it expires, 100 at a time with **Show
+more**. The section shows only when you have at least one open upload of the artifact; without
+one, or when you may not list uploads, the tab shows the versions alone.
+
 ## Withdraw one
 
 Copy the id from the first column and give it, with the artifact's name, to `uploads abort`. The
@@ -78,6 +84,13 @@ lakana artifact uploads list --env dev
 ```text
 You have no open uploads in dev.
 ```
+
+**In the web interface:** press **Withdraw** beside the upload in **Your open uploads**. It acts at
+once and asks nothing, as `uploads abort` asks nothing: the row goes, and the section says
+`Withdrew upload a8906dd2-aca6-46da-88cb-d8368776a48e.`; after the last one it says `You have no
+open uploads of models.abandoned_model.`. If the upload expired or was committed meanwhile, the
+section shows the server's sentence, `This upload has expired or does not exist; start the upload
+again.`, and reads the list again.
 
 ## When it fails
 

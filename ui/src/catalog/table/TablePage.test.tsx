@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { artifactRoutes } from "../../test/artifacts";
 import { held } from "../../test/pending";
 import { renderShell } from "../../test/render";
 import { permissions, table, TABLE_PATH, tableRoutes } from "../../test/table";
@@ -21,10 +22,11 @@ async function heading(name = "fact_sales"): Promise<HTMLElement> {
 /**
  * The tab links, once the table has arrived.
  *
+ * @param name - The tab row's name, "Sections of the table" unless the page is an artifact's.
  * @returns The links, in order.
  */
-async function tabs(): Promise<HTMLElement[]> {
-  const row = await screen.findByRole("navigation", { name: "Sections of the table" });
+async function tabs(name = "Sections of the table"): Promise<HTMLElement[]> {
+  const row = await screen.findByRole("navigation", { name });
   return within(row).getAllByRole("link");
 }
 
@@ -82,7 +84,7 @@ describe("TablePage", () => {
       expect(await screen.findByText("Sales facts")).toBeVisible();
     });
 
-    it("shows the six tabs in order, each with its own address", async () => {
+    it("shows the seven tabs in order, each with its own address", async () => {
       renderShell(PAGE);
 
       const links = await tabs();
@@ -91,6 +93,7 @@ describe("TablePage", () => {
         "Columns",
         "Preview",
         "Lineage",
+        "References",
         "Health",
         "Access",
       ]);
@@ -99,6 +102,7 @@ describe("TablePage", () => {
         `${PAGE}/columns`,
         `${PAGE}/preview`,
         `${PAGE}/lineage`,
+        `${PAGE}/references`,
         `${PAGE}/health`,
         `${PAGE}/access`,
       ]);
@@ -109,6 +113,7 @@ describe("TablePage", () => {
       ["columns", "Columns"],
       ["preview", "Preview"],
       ["lineage", "Lineage"],
+      ["references", "References"],
       ["health", "Health"],
       ["access", "Access"],
     ])("opens the %s tab at its address", async (segment, name) => {
@@ -163,17 +168,19 @@ describe("TablePage", () => {
         "Columns",
         "Preview",
         "Lineage",
+        "References",
         "Health",
         "Access",
       ]);
     });
 
-    it("offers no primary action", async () => {
+    it("offers Actions as the one thing beside the heading", async () => {
       renderShell(PAGE);
 
       await tabs();
-      const head = (await heading()).parentElement as HTMLElement;
-      expect(head.children).toHaveLength(1);
+      const title = await heading();
+      const actions = await screen.findByRole("button", { name: "Actions" });
+      expect([...(title.parentElement as HTMLElement).children]).toEqual([title, actions]);
     });
 
     it("answers an unknown tab with the not-found state", async () => {
@@ -357,11 +364,92 @@ describe("TablePage", () => {
         "Columns",
         "Preview",
         "Lineage",
+        "References",
         "Health",
         "Access",
       ]);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("an artifact's page", () => {
+  const ARTIFACT_PAGE = "/catalog/prod/ml/model";
+  const ARTIFACT_READ = "/api/v1/environments/prod/namespaces/ml/artifacts/model";
+
+  it("reads the artifact too for an ARTIFACT entry and shows its four tabs in order, each with its own address", async () => {
+    const { server } = renderShell(ARTIFACT_PAGE, { routes: artifactRoutes() });
+
+    const links = await tabs("Sections of the artifact");
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Overview",
+      "Versions",
+      "Lineage",
+      "Access",
+    ]);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      ARTIFACT_PAGE,
+      `${ARTIFACT_PAGE}/versions`,
+      `${ARTIFACT_PAGE}/lineage`,
+      `${ARTIFACT_PAGE}/access`,
+    ]);
+    expect(links[0]).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "Sections of the artifact" })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Sections of the table" })).toBeNull();
+    expect(
+      server.sent.filter((request) => request.method === "GET" && request.path === ARTIFACT_READ),
+    ).toHaveLength(1);
+  });
+
+  it("opens the Versions tab at its address", async () => {
+    renderShell(`${ARTIFACT_PAGE}/versions`, { routes: artifactRoutes() });
+
+    const links = await tabs("Sections of the artifact");
+    expect(links.find((link) => link.textContent === "Versions")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("region", { name: "Versions" })).toBeInTheDocument();
+  });
+
+  it("does not read the artifact route for a table", async () => {
+    const { server } = renderShell(PAGE);
+
+    await tabs();
+
+    expect(server.sent.filter((request) => request.path.includes("/artifacts/"))).toEqual([]);
+  });
+
+  it("replaces a table-only tab in an artifact's address with its Overview", async () => {
+    const { router } = renderShell(`${ARTIFACT_PAGE}/preview`, { routes: artifactRoutes() });
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(ARTIFACT_PAGE);
+    });
+    const links = await tabs("Sections of the artifact");
+    expect(links[0]).toHaveAttribute("aria-current", "page");
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("replaces versions in a table's address with its Overview", async () => {
+    const { router } = renderShell(`${PAGE}/versions`);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(PAGE);
+    });
+    expect((await tabs())[0]).toHaveAttribute("aria-current", "page");
+  });
+
+  it("names the cause when the artifact cannot be read", async () => {
+    renderShell(ARTIFACT_PAGE, {
+      routes: {
+        ...artifactRoutes(),
+        [`GET ${ARTIFACT_READ}`]: { status: 500, body: { detail: "The catalog database broke." } },
+      },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The catalog database broke.");
+    expect(screen.queryByRole("navigation", { name: "Sections of the table" })).toBeNull();
   });
 });
 

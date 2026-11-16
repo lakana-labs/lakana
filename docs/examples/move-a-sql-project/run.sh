@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# The commands of the tutorial "Move a SQL project to Lakana", in order. The page shows the regions;
+# The commands of the how-to guide "Move a SQL project to Lakana", in order. The page shows the regions;
 # the lines between regions are the checks. Run by scripts/run_docs_examples.sh, which starts the
 # local instance and sets EXAMPLE_DIR and WORK. It starts in WORK, a folder of the private home the
 # runner sets. The page quotes the result of two queries; the other commands print what the

@@ -55,7 +55,7 @@ function sidewaysOverflow(page: Page): Promise<number> {
   );
 }
 
-test("an administrator opens a table from the list and sees its six tabs", async ({
+test("an administrator opens a table from the list and sees its seven tabs", async ({
   browser,
   request,
 }) => {
@@ -71,6 +71,7 @@ test("an administrator opens a table from the list and sees its six tabs", async
     "Columns",
     "Preview",
     "Lineage",
+    "References",
     "Health",
     "Access",
   ]);
@@ -213,12 +214,13 @@ for (const scheme of ["light", "dark"] as const) {
       expect(await sidewaysOverflow(page), "Columns, sideways").toBeLessThanOrEqual(0);
       for (const [tab, heading] of [
         ["/lineage", "Nothing upstream or downstream."],
+        ["/references", "The table's header declares no references and none point here."],
         ["/health", "Checks"],
         ["/access", "Column masks"],
       ] as const) {
         await page.goto(`${address}${tab}`);
         await expect(
-          tab === "/lineage"
+          tab === "/lineage" || tab === "/references"
             ? page.getByText(heading)
             : page.getByRole("heading", { level: 2, name: heading }),
         ).toBeVisible();
@@ -256,8 +258,11 @@ test("an administrator sees who has access, by name", async ({ browser, browserN
     "href",
     new RegExp(`${encodeURIComponent(name)}$`),
   );
-  // The owner's grant at the instance is not listed, and the tab says so.
-  await expect(page.getByText("Grants on the whole instance")).toBeVisible();
+  // The grants on the whole instance have a level of their own, with the administrator's role.
+  const instance = who
+    .locator("section.access-section")
+    .filter({ has: page.getByRole("heading", { level: 3, name: "On the whole instance" }) });
+  await expect(instance.getByRole("row").filter({ hasText: "Admin role" }).first()).toBeVisible();
   await page.context().close();
   await reader.context().close();
 });

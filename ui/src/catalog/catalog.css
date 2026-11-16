@@ -20,6 +20,11 @@
   grid-column: 1;
 }
 
+/* The chosen place's Actions, above the tree. */
+.catalog-place-actions {
+  margin: 0 0 var(--space-3);
+}
+
 .catalog-main {
   grid-column: 2;
   min-width: 0;
@@ -181,6 +186,26 @@
    777 px the list has beside the tree in a 1280 px window with a classic scrollbar. */
 .list-scroll .list {
   min-width: 760px;
+}
+
+/* The environments a view can be listed for: links with room around them (target size). */
+.choose-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.choose-list a {
+  display: inline-block;
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Four columns, a name and two times and a button: they need less than the Catalog's eight. */
+.list-scroll.dropped-scroll .list {
+  min-width: 480px;
 }
 
 .list-scroll .row-name {

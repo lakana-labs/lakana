@@ -6957,7 +6957,7 @@
           "catalog"
         ],
         "summary": "Count the tables you may read, by environment and namespace",
-        "description": "A node's count is what the list answers for it without a search text: only tables you may read are counted, an environment is shown with `READ_ENVIRONMENT` or a readable table in it, a namespace with `READ_NAMESPACE` on its environment or a readable table in it or beneath it. Writes no audit event.",
+        "description": "A node's count is what the list answers for it without a search text: only tables you may read are counted, an environment is shown with `READ_ENVIRONMENT` or a readable table in it, a namespace with `READ_NAMESPACE` on its environment or a readable table in it or beneath it. Each environment and namespace also carries ``actions``: what your rights allow there (``create_namespace``, ``create_external_table``, ``drop``), asked in one batch for the whole tree. They are rights only, and say nothing about protection, git or emptiness. Writes no audit event.",
         "operationId": "table_tree_api_v1_tables_tree_get",
         "parameters": [
           {
@@ -11619,7 +11619,7 @@
           "grants"
         ],
         "summary": "List grants",
-        "description": "Lists the active grants, newest first. Every filter is optional and narrows the list, except that `principal_name` and `group_name` exclude each other (422 when both are given). The object filter matches exactly: `table` with `namespace` and `environment` lists the grants on that table, `namespace` with `environment` those on the namespace, `environment` alone those on the environment. Needs the `ADMIN` role on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
+        "description": "Lists the active grants, newest first. Every filter is optional and narrows the list, except that `principal_name` and `group_name` exclude each other (422 when both are given). The object filter matches exactly: `table` with `namespace` and `environment` lists the grants on that table, `namespace` with `environment` those on the namespace, `environment` alone those on the environment. `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to everything in it; with an object filter it must be that object's kind (422 otherwise). Needs the `ADMIN` role on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
         "operationId": "list_grants_api_v1_grants_get",
         "parameters": [
           {
@@ -11729,6 +11729,24 @@
               "title": "Table"
             },
             "description": "The table of the object filter."
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            },
+            "description": "Only grants on objects of this kind: `INSTANCE`, `ENVIRONMENT`, `NAMESPACE` or `TABLE`."
           },
           {
             "name": "limit",
@@ -20920,7 +20938,7 @@
           "sign-in"
         ],
         "summary": "Start confirming your browser session with a passkey touch (step-up)",
-        "description": "Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. A token has no browser session, so it gets 409: step-up never applies to a token's requests.",
+        "description": "Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a passkey on your account page first. A token has no browser session, so it gets 409: step-up never applies to a token's requests.",
         "operationId": "step_up_options_api_v1_sign_in_step_up_options_post",
         "parameters": [
           {
@@ -22311,7 +22329,7 @@
           "principals"
         ],
         "summary": "Start adding a passkey to your own account",
-        "description": "From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.",
+        "description": "From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. After those 15 minutes, a session from a link or a local sign-in without a usable passkey gets a 403 that names `lakana server start --local` or a recovery link, since a touch cannot help it. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.",
         "operationId": "passkey_registration_options_api_v1_principals__name__passkeys_options_post",
         "parameters": [
           {
@@ -30759,6 +30777,17 @@
               }
             ],
             "title": "Picture"
+          },
+          "held_admin": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Admin"
           }
         },
         "type": "object",
@@ -30768,7 +30797,7 @@
           "is_active"
         ],
         "title": "PrincipalOut",
-        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does."
+        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does.\nheld_admin\n    Whether the principal holds or has ever held the `ADMIN` role on the instance, directly\n    or through a group. Such a person is recovered only by the server operator. `null`\n    unless the caller is an administrator (the `ADMIN` role on the instance)."
       },
       "ProfileIn": {
         "properties": {
@@ -35661,6 +35690,14 @@
             },
             "type": "array",
             "title": "Namespaces"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "const": "create_namespace"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -35670,7 +35707,7 @@
           "namespaces"
         ],
         "title": "TreeEnvironmentOut",
-        "description": "An environment of the catalog tree.\n\nParameters\n----------\nname\n    Its name.\ncount\n    The readable tables in it.\nnamespaces\n    Its namespaces the caller is shown, by path."
+        "description": "An environment of the catalog tree.\n\nParameters\n----------\nname\n    Its name.\ncount\n    The readable tables in it.\nnamespaces\n    Its namespaces the caller is shown, by path.\nactions\n    What the reader's rights allow on it: ``create_namespace``. Rights only."
       },
       "TreeNamespaceOut": {
         "properties": {
@@ -35681,6 +35718,18 @@
           "count": {
             "type": "integer",
             "title": "Count"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "create_namespace",
+                "create_external_table",
+                "drop"
+              ]
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -35689,7 +35738,7 @@
           "count"
         ],
         "title": "TreeNamespaceOut",
-        "description": "A namespace of the catalog tree.\n\nParameters\n----------\npath\n    Its path, dotted.\ncount\n    The readable tables in it and beneath it."
+        "description": "A namespace of the catalog tree.\n\nParameters\n----------\npath\n    Its path, dotted.\ncount\n    The readable tables in it and beneath it.\nactions\n    What the reader's rights allow on it: ``create_namespace``, ``create_external_table``,\n    ``drop``. Rights only; nothing about protection, git or emptiness."
       },
       "UndropIn": {
         "properties": {

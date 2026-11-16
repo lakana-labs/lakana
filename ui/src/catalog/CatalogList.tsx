@@ -6,7 +6,7 @@
  */
 import "./catalog.css";
 
-import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import {
@@ -18,8 +18,9 @@ import {
   useSearchParams,
 } from "react-router";
 
-import { getTableTree } from "../api";
+import { getTableTree, type TableTreeOut } from "../api";
 import { CopyLine } from "../shell/CopyLine";
+import { shellQuote } from "../shell/shellQuote";
 import { TUTORIAL_URL } from "../shell/docs";
 import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
@@ -27,19 +28,29 @@ import { PendingButton } from "../shell/PendingButton";
 import { useResource } from "../shell/useResource";
 import { CatalogSearch } from "./CatalogSearch";
 import { CatalogTree } from "./CatalogTree";
+import { ListSkeleton } from "./ListSkeleton";
 import { catalogPath } from "./paths";
+import type { PlaceNoteState } from "./places/PlaceNote";
 import { readChoice, writeChoice } from "./remember";
 import { SortControl } from "./SortControl";
 import { TableList } from "./TableList";
-import { buildTree, findNode } from "./tree";
+import { buildTree, type CatalogNode, findNode, parentOf } from "./tree";
 import { useTablePages } from "./useTablePages";
+import { ViewSwitch } from "./views/ViewSwitch";
 import { type CatalogView, DEFAULT_VIEW, placed, readView, sortedBy, viewSearch } from "./view";
+
+// The body of every view but All loads on demand, with the strings and the code of its lists.
+const ViewBody = lazy(() => import("./views/ViewBody"));
+// The menu of the chosen place, its dialogs and their strings load once the tree is known.
+const PlaceActions = lazy(() => import("./places/PlaceActions"));
+const PlaceNote = lazy(() =>
+  import("./places/PlaceNote").then((module) => ({ default: module.PlaceNote })),
+);
 
 // How long loading takes before the page says so in words.
 const SAY_LOADING_AFTER_MS = 1000;
 // How many tables the server looks at in a search before it stops.
 const SEARCH_CAP = 5000;
-const SKELETON_ROWS = 5;
 
 /**
  * Whether something has lasted longer than a delay.
@@ -111,6 +122,13 @@ export function CatalogList(): JSX.Element {
   const loadTree = useCallback(() => getTableTree(), []);
   const tree = useResource(loadTree);
   const root = useMemo(() => (tree.data === undefined ? null : buildTree(tree.data)), [tree.data]);
+  // A namespace just created: the page goes there once the tree read after the creation arrives,
+  // so the place is never called unknown on the way.
+  const created = useRef<{
+    readonly environment: string;
+    readonly path: string;
+    readonly before: TableTreeOut | undefined;
+  } | null>(null);
   const { items, busy, error, capped, hasMore, loadMore, reload } = useTablePages(view);
   const main = useRef<HTMLElement>(null);
   const focusFrom = useRef<number | null>(null);
@@ -128,7 +146,8 @@ export function CatalogList(): JSX.Element {
   // waits behind the skeleton, so its error for the gone place never shows.
   const stale = fromMemory && root !== null && findNode(root, environment, namespace) === null;
   const settled = treeKnown && !stale;
-  const reading = items === undefined ? error === null : items.length === 0 && busy;
+  const onAll = view.view === "all";
+  const reading = onAll && (items === undefined ? error === null : items.length === 0 && busy);
   const loading = reading || !settled;
   const slow = useLonger(loading, SAY_LOADING_AFTER_MS);
 
@@ -168,9 +187,30 @@ export function CatalogList(): JSX.Element {
     }
   }, [root, allTablesAddress, environment, namespace, fromMemory, me.name, navigate]);
 
+  // A new address forgets what the old one waited for: the rows to focus after Show more, and
+  // a creation whose tree never arrived, so a later read does not move the page.
   useEffect(() => {
     focusFrom.current = null;
+    created.current = null;
   }, [address]);
+
+  // The tree read after a creation has arrived: go to the new place, or, when the tree leaves it
+  // out, stay and say why.
+  useEffect(() => {
+    const pending = created.current;
+    if (pending === null || root === null || tree.data === pending.before) {
+      return;
+    }
+    created.current = null;
+    const shown = findNode(root, pending.environment, pending.path) !== null;
+    const next = shown
+      ? catalogPath(placed({ ...view, view: "all" }, pending.environment, pending.path))
+      : address;
+    void navigate(next, {
+      replace: !shown,
+      state: { placeNote: shown ? "created" : "notShown", namespace: pending.path },
+    });
+  }, [root, tree.data, view, address, navigate]);
 
   useEffect(() => {
     const from = focusFrom.current;
@@ -195,7 +235,7 @@ export function CatalogList(): JSX.Element {
   let result = "";
   if (slow) {
     result = t("catalog.loading");
-  } else if (settled && items !== undefined && items.length > 0 && (hasMore || !busy)) {
+  } else if (onAll && settled && items !== undefined && items.length > 0 && (hasMore || !busy)) {
     const kind = view.q === "" ? "result" : "matches";
     result = t(`catalog.${kind}.${hasMore ? "first" : "all"}`, { count: items.length, place });
   }
@@ -217,6 +257,39 @@ export function CatalogList(): JSX.Element {
     }
   }
   const readsNothing = root !== null && root.children.length === 0;
+  // The chosen environment or namespace, when the tree has it: the place the menu acts on.
+  let chosen: {
+    readonly node: CatalogNode;
+    readonly root: CatalogNode;
+    readonly environment: string;
+  } | null = null;
+  if (root !== null && environment !== null) {
+    const node = findNode(root, environment, namespace);
+    chosen = node === null ? null : { node, root, environment };
+  }
+  // What the place menu left in the location state; only it sets `placeNote`.
+  const noteState = location.state as Omit<PlaceNoteState, "environment"> | null;
+  const placeNote =
+    environment !== null && noteState?.placeNote !== undefined
+      ? {
+          placeNote: noteState.placeNote,
+          namespace: noteState.namespace,
+          environment,
+          ...(noteState.artifact === undefined ? {} : { artifact: noteState.artifact }),
+        }
+      : null;
+  const onCreated = (environmentOfPlace: string, path: string): void => {
+    created.current = { environment: environmentOfPlace, path, before: tree.data };
+    tree.reload();
+  };
+  // Goes to the nearest place above that the tree lists: a parent namespace, else the environment.
+  const onDeleted = (place: NonNullable<typeof chosen>, path: string): void => {
+    const above = parentOf(place.root, place.node)?.namespace ?? null;
+    tree.reload();
+    void navigate(catalogPath(placed({ ...view, view: "all" }, place.environment, above)), {
+      state: { placeNote: "deleted", namespace: path },
+    });
+  };
 
   const noNotice = !readsNothing && unknown === null;
   useEffect(() => {
@@ -273,24 +346,61 @@ export function CatalogList(): JSX.Element {
           )}
           {root !== null && !readsNothing && (
             <aside className="catalog-side" ref={side}>
+              {chosen !== null && (
+                <div className="catalog-place-actions">
+                  <Suspense fallback={null}>
+                    <PlaceActions
+                      key={chosen.node.id}
+                      node={chosen.node}
+                      onCreated={(path) => {
+                        onCreated(chosen.environment, path);
+                      }}
+                      onDeleted={(path) => {
+                        onDeleted(chosen, path);
+                      }}
+                      onChanged={tree.reload}
+                      onFocusLost={() => {
+                        // After React Aria's own attempt, which finds the old button gone.
+                        requestAnimationFrame(() => {
+                          if (document.activeElement === document.body) {
+                            const aside = side.current;
+                            (
+                              aside?.querySelector<HTMLElement>(".catalog-place-actions button") ??
+                              aside?.querySelector<HTMLElement>('[role="treegrid"]')
+                            )?.focus();
+                          }
+                        });
+                      }}
+                    />
+                  </Suspense>
+                </div>
+              )}
               <CatalogTree root={root} view={view} />
             </aside>
           )}
           <section className="catalog-main" ref={main}>
+            {/* One place, above any notice, so the note never remounts when the tree turns the
+                place unknown (a drop that took the namespace out of the tree is still confirmed). */}
+            {placeNote !== null && (
+              <Suspense fallback={null}>
+                <PlaceNote note={placeNote} />
+              </Suspense>
+            )}
             {notice}
             {notice === null && (
               <>
-                <CatalogSearch view={view} onSearch={search} />
+                <ViewSwitch view={view} />
+                {onAll && <CatalogSearch view={view} onSearch={search} />}
                 <div className="catalog-bar">
                   <div className="catalog-result-line">
                     <p className="catalog-result" role="status" tabIndex={-1} ref={resultLine}>
                       {result}
                     </p>
-                    {settled && items !== undefined && items.length > 0 && widenButton}
+                    {onAll && settled && items !== undefined && items.length > 0 && widenButton}
                   </div>
-                  <SortControl view={view} onChange={go} />
+                  {onAll && <SortControl view={view} onChange={go} />}
                 </div>
-                {listAlert && (
+                {onAll && listAlert && (
                   <>
                     <p className="step-error" role="alert">
                       {error}
@@ -300,39 +410,48 @@ export function CatalogList(): JSX.Element {
                     </Button>
                   </>
                 )}
-                {loading && (
-                  <div className="skeleton" aria-hidden="true">
-                    {Array.from({ length: SKELETON_ROWS }, (_row, index) => (
-                      <div className="skeleton-row" key={index} />
-                    ))}
-                  </div>
+                {loading && <ListSkeleton />}
+                {!onAll && settled && root !== null && (
+                  <Suspense fallback={<ListSkeleton />}>
+                    <ViewBody view={view} root={root} onChanged={tree.reload} />
+                  </Suspense>
                 )}
-                {settled && items !== undefined && items.length === 0 && !busy && view.q !== "" && (
-                  <div className="empty">
-                    <p>{t("catalog.noHits", { place, q: view.q })}</p>
-                    {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
-                  </div>
-                )}
-                {settled && items !== undefined && items.length === 0 && !busy && view.q === "" && (
-                  <div className="empty">
-                    <p>
-                      {t("catalog.empty.text", {
-                        place: view.namespace ?? view.environment ?? t("catalog.place.all"),
-                      })}
-                    </p>
-                    <CopyLine
-                      text={`lakana deploy --env ${view.environment ?? "dev"}`}
-                      copyLabel={t("catalog.empty.copy")}
-                    />
-                    <p>
-                      <a href={TUTORIAL_URL} target="_blank" rel="noreferrer">
-                        {t("catalog.empty.tutorial")}
-                        <span className="visually-hidden"> {t("home.newTab")}</span>
-                      </a>
-                    </p>
-                  </div>
-                )}
-                {settled && items !== undefined && items.length > 0 && (
+                {onAll &&
+                  settled &&
+                  items !== undefined &&
+                  items.length === 0 &&
+                  !busy &&
+                  view.q !== "" && (
+                    <div className="empty">
+                      <p>{t("catalog.noHits", { place, q: view.q })}</p>
+                      {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
+                    </div>
+                  )}
+                {onAll &&
+                  settled &&
+                  items !== undefined &&
+                  items.length === 0 &&
+                  !busy &&
+                  view.q === "" && (
+                    <div className="empty">
+                      <p>
+                        {t("catalog.empty.text", {
+                          place: view.namespace ?? view.environment ?? t("catalog.place.all"),
+                        })}
+                      </p>
+                      <CopyLine
+                        text={`lakana deploy --env ${view.environment === null ? "dev" : shellQuote(view.environment)}`}
+                        copyLabel={t("catalog.empty.copy")}
+                      />
+                      <p>
+                        <a href={TUTORIAL_URL} target="_blank" rel="noreferrer">
+                          {t("catalog.empty.tutorial")}
+                          <span className="visually-hidden"> {t("home.newTab")}</span>
+                        </a>
+                      </p>
+                    </div>
+                  )}
+                {onAll && settled && items !== undefined && items.length > 0 && (
                   <>
                     <TableList
                       items={items}
