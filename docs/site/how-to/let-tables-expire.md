@@ -127,7 +127,7 @@ Without `--within` the window is the server's warning window,
 shows an `expires` column (the list across namespaces has none) and `lakana table get` says when the table expires and how to keep it.
 
 In the web interface, open **Catalog**, choose **Expiring** and an environment. The list has one row
-per table: its name and namespace (a link to its page), **Expires** (how long until it, with the
+per table: its name and namespace (a link to its page), **Expires** (how long until it, such as "in 5 days", with the
 exact time on hover, or "Due now" once the time has passed) and **Why**, the sentence of the
 **Retention…** dialog. Choosing a namespace in the tree keeps only that namespace and the ones
 beneath it. **Show more** reads the next page. When nothing expires within the window, the page

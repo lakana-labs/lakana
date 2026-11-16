@@ -52,8 +52,8 @@ export interface WhenProps {
 }
 
 /**
- * A time as how long ago it was, with the absolute time in its `title` and in text a screen
- * reader hears; the words in `never` without a time.
+ * A time as how long ago it was or how long until it comes, with the absolute time in its `title`
+ * and in text a screen reader hears; the words in `never` without a time.
  *
  * @param props - The time and the words.
  * @param props.iso - The time, or null.

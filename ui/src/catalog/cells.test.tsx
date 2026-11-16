@@ -33,6 +33,15 @@ describe("When", () => {
     );
   });
 
+  it("writes how long until a time to come, with the exact time in a title", () => {
+    const { container } = render(<When iso="2026-12-09T12:00:00Z" never="Never" />);
+
+    const time = container.querySelector("time");
+    expect(time).toHaveTextContent("in 26 days");
+    expect(time?.getAttribute("title")).toMatch(/2026/);
+    expect(screen.queryByText("just now")).not.toBeInTheDocument();
+  });
+
   it("says just now under a minute", () => {
     render(<When iso="2026-11-13T11:59:50Z" never="Never read" />);
 

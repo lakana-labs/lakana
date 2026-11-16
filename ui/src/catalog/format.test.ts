@@ -23,6 +23,15 @@ describe("catalog formats", () => {
     expect(formatBytes(98_304, "de")).toBe("98,3 kB");
   });
 
+  it("words a time to come the same way, in the person's language", () => {
+    expect(relativeTime(ago(-26 * 86_400_000), NOW, "en")).toBe("in 26 days");
+    expect(relativeTime(ago(-(26 * 86_400_000 + 3_600_000)), NOW, "en")).toBe("in 26 days");
+    expect(relativeTime(ago(-5 * 60_000), NOW, "en")).toBe("in 5 minutes");
+    expect(relativeTime(ago(-7_200_000), NOW, "en")).toBe("in 2 hours");
+    expect(relativeTime(ago(-65 * 86_400_000), NOW, "en")).toBe("in 2 months");
+    expect(relativeTime(ago(-26 * 86_400_000), NOW, "de")).toBe("in 26 Tagen");
+  });
+
   it("is null under a minute, then minutes, hours, days, months and years", () => {
     expect(relativeTime(ago(30_000), NOW, "en")).toBeNull();
     expect(relativeTime(ago(-5_000), NOW, "en")).toBeNull();

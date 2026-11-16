@@ -55,24 +55,26 @@ const STEPS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
 ];
 
 /**
- * How long ago a time was, in the largest whole unit.
+ * How long ago a time was, or how long until it comes, in the largest whole unit.
  *
  * @param iso - The time, ISO 8601.
  * @param now - The present, in milliseconds since the epoch.
  * @param language - The interface language.
- * @returns The text such as `2 hours ago`; null under a minute (the caller shows "just now"),
- *   for a time in the future and for one that cannot be read.
+ * @returns The text such as `2 hours ago` or `in 26 days`, in the person's language; null within
+ *   a minute of now (the caller shows "just now") and for a time that cannot be read.
  */
 export function relativeTime(iso: string, now: number, language: string): string | null {
   const elapsed = now - Date.parse(iso);
-  // The smallest step is a minute, so a time under a minute, in the future or unreadable (NaN)
-  // matches none.
-  const step = STEPS.find(([, size]) => elapsed >= size);
+  const distance = Math.abs(elapsed);
+  // The smallest step is a minute, so a time within a minute of now or unreadable (NaN) matches
+  // none.
+  const step = STEPS.find(([, size]) => distance >= size);
   if (step === undefined) {
     return null;
   }
+  const whole = Math.floor(distance / step[1]);
   return new Intl.RelativeTimeFormat(language, { numeric: "always" }).format(
-    -Math.floor(elapsed / step[1]),
+    elapsed > 0 ? -whole : whole,
     step[0],
   );
 }
