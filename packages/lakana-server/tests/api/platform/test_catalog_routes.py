@@ -214,6 +214,39 @@ def test_the_tree_carries_each_nodes_actions(client: TestClient) -> None:
     }
 
 
+def test_a_reader_who_may_change_no_place_gets_no_actions_in_the_tree(client: TestClient) -> None:
+    _table(client, "a")
+    rita = _person(client, "rita", "READ_TABLE")
+    tree = client.get("/api/v1/tables/tree", headers=rita).json()
+    (dev,) = tree["environments"]
+    assert dev["actions"] == []
+    assert dev["namespaces"] == [{"path": "gold", "count": 1, "actions": []}]
+
+
+def test_an_environment_seen_only_through_a_namespace_grant_offers_nothing_but_its_namespace_does(
+    client: TestClient,
+) -> None:
+    _table(client, "a")
+    rita = _person(client, "rita")
+    for action in ("READ_TABLE", "DROP_NAMESPACE"):
+        granted = client.post(
+            "/api/v1/grants",
+            headers=AUTH_HEADER,
+            json={
+                "principal": "rita",
+                "action": action,
+                "kind": "NAMESPACE",
+                "environment": "dev",
+                "namespace": "gold",
+            },
+        )
+        assert granted.status_code < 300, granted.text
+    tree = client.get("/api/v1/tables/tree", headers=rita).json()
+    (dev,) = tree["environments"]
+    assert dev["name"] == "dev" and dev["actions"] == []
+    assert dev["namespaces"] == [{"path": "gold", "count": 1, "actions": ["drop"]}]
+
+
 def test_a_missing_environment_is_404_for_an_administrator(client: TestClient) -> None:
     r = client.get("/api/v1/tables", params={"environment": "nope"}, headers=AUTH_HEADER)
     assert r.status_code == 404 and "lakana env list" in r.text

@@ -72,6 +72,84 @@ describe("DeleteNamespaceDialog", () => {
     expect(writes(server.sent)).toEqual(["DELETE /api/v1/environments/prod/namespaces/silver"]);
   });
 
+  it("keeps a click made while it checks the protection, says so, and deletes once it knows", async () => {
+    const protection = held();
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": protection.route,
+    });
+    const { onDone, user } = renderDelete();
+    const button = screen.getByRole("button", { name: "Delete the namespace" });
+
+    await user.click(button);
+
+    expect(writes(server.sent)).toEqual([]);
+    expect(button).toHaveAttribute("data-pending", "true");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Checking whether the environment is protected…",
+    );
+
+    protection.release({ status: 200, body: { name: "prod", is_protected: false } });
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledTimes(1);
+    });
+    expect(writes(server.sent)).toEqual([DELETE]);
+  });
+
+  it("asks for the reason instead of sending a click kept while the environment turned out protected", async () => {
+    const protection = held();
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": protection.route,
+    });
+    const { onDone, user } = renderDelete();
+
+    await user.click(screen.getByRole("button", { name: "Delete the namespace" }));
+    protection.release({ status: 200, body: { name: "prod", is_protected: true } });
+
+    expect(
+      await screen.findByRole("textbox", { name: /Why you break the protection of prod/ }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Delete the namespace" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    expect(writes(server.sent)).toEqual([]);
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["fails", { status: 500, body: { detail: "The catalog database is not reachable." } }],
+    ["is refused", { status: 403, body: { detail: "You may not read prod." } }],
+  ])(
+    "sends nothing for a click kept while the protection check %s, and takes the next click",
+    async (_how, answer) => {
+      const protection = held();
+      const server = fakeServer({
+        ...manageRoutes(),
+        "GET /api/v1/environments/prod": protection.route,
+      });
+      const { onDone, user } = renderDelete();
+      const button = screen.getByRole("button", { name: "Delete the namespace" });
+
+      await user.click(button);
+      protection.release(answer);
+
+      await waitFor(() => {
+        expect(button).not.toHaveAttribute("data-pending");
+      });
+      expect(button).toBeEnabled();
+      expect(writes(server.sent)).toEqual([]);
+      expect(onDone).not.toHaveBeenCalled();
+
+      await user.click(button);
+
+      await waitFor(() => {
+        expect(onDone).toHaveBeenCalledTimes(1);
+      });
+      expect(writes(server.sent)).toEqual([DELETE]);
+    },
+  );
+
   it("runs the passkey touch on StepUpRequired and deletes again", async () => {
     const webauthn = fakeWebAuthn();
     let tries = 0;

@@ -18,7 +18,7 @@ import { useAttempt } from "../../sign-in/Attempt";
 import { catalogPath } from "../paths";
 import { DEFAULT_VIEW } from "../view";
 import "./actionStrings";
-import { ConfirmRow } from "./ConfirmRow";
+import { ConfirmRow, useConfirm } from "./ConfirmRow";
 import { useProtected } from "./useProtected";
 
 /** The most the server takes as a reason. */
@@ -64,7 +64,13 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
       setRebuilt(answer);
     });
   };
-  const ready = reason.trim() !== "" && protectedEnvironment !== undefined && !attempt.busy;
+  const confirm = useConfirm({
+    busy: attempt.busy,
+    waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
+    disabled: reason.trim() === "",
+    onConfirm: rebuild,
+  });
   // While the request is open Escape does nothing: closing then would lose the run it queues.
   const close = rebuilt === null ? onClose : toCatalog;
   return (
@@ -91,9 +97,8 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
-                if (ready) {
-                  rebuild();
-                }
+                // Kept like a click while the protection is not known yet.
+                confirm.press();
               }
             }}
           >
@@ -103,9 +108,7 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
           <ConfirmRow
             attempt={attempt}
             label={t("table.actions.rebuild.confirm")}
-            waiting={protectedEnvironment === undefined}
-            disabled={reason.trim() === ""}
-            onConfirm={rebuild}
+            confirm={confirm}
             onCancel={onClose}
           />
         </>

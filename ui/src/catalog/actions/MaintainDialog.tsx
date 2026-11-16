@@ -15,7 +15,7 @@ import { shellQuote } from "../../shell/shellQuote";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
-import { ConfirmRow } from "./ConfirmRow";
+import { ConfirmRow, useConfirm } from "./ConfirmRow";
 
 /** Properties of {@link MaintainDialog}. */
 export interface MaintainDialogProps {
@@ -90,6 +90,7 @@ export function MaintainDialog({ place, onClose }: MaintainDialogProps): JSX.Ele
       setQueryId(id);
     });
   };
+  const confirm = useConfirm({ busy: attempt.busy, disabled: !complete, onConfirm: maintain });
   return (
     <ActionDialog onClose={onClose}>
       <Heading slot="title">{t("table.actions.maintain.title", { table })}</Heading>
@@ -126,8 +127,7 @@ export function MaintainDialog({ place, onClose }: MaintainDialogProps): JSX.Ele
           <ConfirmRow
             attempt={attempt}
             label={t("table.actions.maintain.confirm")}
-            disabled={!complete}
-            onConfirm={maintain}
+            confirm={confirm}
             onCancel={onClose}
           />
         </>

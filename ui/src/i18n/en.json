@@ -478,6 +478,7 @@
   },
   "dialog": {
     "cancel": "Cancel",
+    "checkingProtection": "Checking whether the environment is protected…",
     "done": "Done"
   },
   "access": {

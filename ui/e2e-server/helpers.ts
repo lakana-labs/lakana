@@ -697,7 +697,7 @@ export async function namespaceStatus(
 /**
  * Registers a repository through the API and records a project version of it that produced
  * tables, with no deployment after it, so those tables are orphans. A deploy needs a git host
- * and a worker, which this suite has neither of; the version row is the one thing written
+ * and a worker, which this suite has neither of; the version row is one of two things written
  * straight into the server's SQLite file (`ui/.e2e-server/lakana.db`), and the API reads it
  * back as it would a deployed one.
  *
@@ -741,6 +741,34 @@ export async function recordOrphanedVersion(
         }),
         "0".repeat(64),
       );
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Moves a person's last passkey touch an hour into the past on every open session, so the next
+ * action that needs a recent touch meets `StepUpRequired`, as after 15 minutes of work without
+ * one. The server has no way to age a touch, so this, like {@link recordOrphanedVersion}, writes
+ * straight into its SQLite file; the server reads the session from it on every request.
+ *
+ * @param name - The person's name.
+ */
+export function ageThePasskeyTouch(name: string): void {
+  // The form SQLAlchemy writes a UTC time in on SQLite: no zone, six digits of a second.
+  const anHourAgo = `${new Date(Date.now() - 3_600_000).toISOString().slice(0, 23).replace("T", " ")}000`;
+  const database = new DatabaseSync(resolve(import.meta.dirname, "..", ".e2e-server", "lakana.db"));
+  try {
+    const changed = database
+      .prepare(
+        `UPDATE browser_sessions SET last_touch_at = ?
+         WHERE ended_at IS NULL
+           AND principal_id = (SELECT id FROM principals WHERE name = ?)`,
+      )
+      .run(anHourAgo, name);
+    if (Number(changed.changes) === 0) {
+      throw new Error(`no open session of ${name} to age`);
+    }
   } finally {
     database.close();
   }

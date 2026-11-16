@@ -283,9 +283,9 @@ describe("DropDialog", () => {
     });
     const { onDone, user } = renderDrop();
 
-    expect(screen.getByRole("button", { name: /Drop the table/ })).toHaveAttribute(
-      "aria-disabled",
-      "true",
+    // Pressable while it checks: a press is kept, not lost (ConfirmRow's own tests).
+    expect(screen.getByRole("button", { name: "Drop the table" })).not.toHaveAttribute(
+      "data-pending",
     );
     protection.release({ status: 200, body: { name: "prod", is_protected: true } });
     const reason = await screen.findByRole("textbox", {

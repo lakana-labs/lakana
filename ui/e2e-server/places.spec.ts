@@ -2,7 +2,9 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import {
   administrator,
+  ageThePasskeyTouch,
   createEnvironment,
+  createNamespace,
   createTable,
   grantOn,
   invitedPerson,
@@ -111,6 +113,46 @@ test("an administrator with a passkey creates a namespace, sees it in the tree a
   ).toHaveCount(0);
   expect(await namespaceStatus(request, environment, "landing")).toBe(404);
   expect(await violations(page), "the note after a delete").toEqual([]);
+  await page.context().close();
+});
+
+test("Delete namespace after the passkey touch went stale asks for a new touch, sends again and lands on the environment", async ({
+  browser,
+  browserName,
+  request,
+}) => {
+  test.skip(browserName !== "chromium", "the virtual authenticator is CDP");
+  const environment = uniqueName("plc");
+  await createEnvironment(request, environment);
+  await createNamespace(request, environment, "landing");
+  const { page, name } = await invitedPerson(browser, request, (person) =>
+    makeAdministrator(request, person),
+  );
+  await skipTheWelcome(page);
+  const sent: string[] = [];
+  page.on("request", (sentRequest) => {
+    const path = new URL(sentRequest.url()).pathname;
+    if (sentRequest.method() !== "GET" && path.startsWith("/api/")) {
+      sent.push(`${sentRequest.method()} ${path}`);
+    }
+  });
+  ageThePasskeyTouch(name);
+
+  await choose(await openPlace(page, environment, "landing"), "Delete namespace…");
+  const remove = page.getByRole("dialog", { name: "Delete namespace landing?" });
+  await confirm(remove.getByRole("button", { name: "Delete the namespace" }));
+
+  await expect(page).toHaveURL(new RegExp(`/catalog\\?env=${environment}$`));
+  await expect(placeNote(page, "Deleted namespace landing.")).toBeFocused();
+  expect(await namespaceStatus(request, environment, "landing")).toBe(404);
+  const deletion = `DELETE /api/v1/environments/${environment}/namespaces/landing`;
+  // Refused for the stale touch, touched again, then sent once more.
+  expect(sent.filter((line) => !line.endsWith("/recent"))).toEqual([
+    deletion,
+    "POST /api/v1/sign-in/step-up/options",
+    "POST /api/v1/sign-in/step-up",
+    deletion,
+  ]);
   await page.context().close();
 });
 

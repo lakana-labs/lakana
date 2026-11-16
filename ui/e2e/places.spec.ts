@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, type Request, test } from "@playwright/test";
 
 import { addAdminPasskey, ORIGIN } from "./manage";
 import { BRONZE_PATH, PLACES_STUBBED, stubPlaces, stubStepUpDelete } from "./places";
@@ -297,7 +297,13 @@ for (const theme of ["light", "dark"] as const) {
       }) => {
         const errors = consoleErrors(page);
         const requests: string[] = [];
-        page.on("request", (request) => requests.push(request.url()));
+        const open = new Set<Request>();
+        page.on("request", (request) => {
+          requests.push(request.url());
+          open.add(request);
+        });
+        page.on("requestfinished", (request) => open.delete(request));
+        page.on("requestfailed", (request) => open.delete(request));
 
         const actions = await openPlace(page, "prod", "bronze");
         await choose(actions, "New namespace…");
@@ -316,7 +322,10 @@ for (const theme of ["light", "dark"] as const) {
           page.getByRole("textbox", { name: /Why you break the protection/ }),
         ).toBeVisible();
         await page.keyboard.press("Escape");
-        await page.waitForLoadState("networkidle");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        await expect(guarded).toBeFocused();
+        // Every request answered, so a late console error would have been seen.
+        await expect.poll(() => open.size).toBe(0);
 
         const api = requests
           .filter((url) => url.includes("/api/"))

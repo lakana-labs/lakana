@@ -40,8 +40,14 @@ command line.
 one beneath, in the tree. **Actions** above the tree shows what you may do there; choose **New
 namespace…**. The **Path** field starts with the chosen namespace and a dot (`gold.`), or empty
 under an environment: complete it and press **Create**. The Catalog opens the new namespace and
-says "Created namespace gold.sales." A refusal stays in the dialog, word for word, with the path
-as you typed it. The web interface creates a namespace without properties.
+says "Created namespace gold.sales." once: a reload or Back does not show it again. A refusal
+stays in the dialog, word for word, with the path as you typed it. The web interface creates a
+namespace without properties.
+
+Every dialog that changes something first asks the server whether the environment is protected.
+**Create**, or any other confirm button, pressed before that answer is in shows "Checking whether
+the environment is protected…" and acts once it knows; in a protected environment it asks for the
+reason first instead. If the check fails or is refused, nothing is sent: press the button again.
 
 If you may create namespaces but not read them, the tree shows a namespace only once it holds a
 table you may read. The Catalog then stays where it was and says so: "Created namespace
