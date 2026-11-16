@@ -10,6 +10,7 @@ import { Link, Navigate } from "react-router";
 
 import { getArtifact, getTable, recordOpened, type TableRef } from "../../api";
 import { useMe } from "../../shell/me";
+import { markedText } from "../../shell/VisibleText";
 import { type Resource, useResource } from "../../shell/useResource";
 import type { ArtifactOut, TableOut } from "../../api";
 import { catalogPath, tablePath, type TableTab, tabsFor } from "../paths";
@@ -97,7 +98,12 @@ interface ProblemProps {
 function Problem({ place, resource, headingRef }: ProblemProps): JSX.Element {
   const { t } = useTranslation();
   const status = resource.failure?.status;
-  const words = { namespace: place.namespace, name: place.name, environment: place.environment };
+  // The names come from the address, which anyone can write: hidden characters show as marks.
+  const words = {
+    namespace: markedText(place.namespace),
+    name: markedText(place.name),
+    environment: markedText(place.environment),
+  };
   if (status === 404 || status === 403) {
     return (
       <div className="table-problem">

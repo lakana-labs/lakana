@@ -10,6 +10,7 @@ import { Link } from "react-router";
 import type { GraphOut } from "../../api";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import type { Resource } from "../../shell/useResource";
+import { VisibleText } from "../../shell/VisibleText";
 import { ReadFailed } from "../cells";
 import { splitDotted, tablePath } from "../paths";
 import { useTableData } from "./TableContext";
@@ -64,10 +65,10 @@ function Side({ label, nothing, graph }: SideProps): JSX.Element | null {
             return (
               <li key={node.id}>
                 {place === null ? (
-                  node.name
+                  <VisibleText text={node.name} />
                 ) : (
                   <Link to={tablePath(ref.environment, place.namespace, place.name)}>
-                    {node.name}
+                    <VisibleText text={node.name} />
                   </Link>
                 )}
               </li>

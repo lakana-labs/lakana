@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { ColumnOut, ModelReferenceOut, TableOut } from "../../api";
+import { markedText, VisibleText } from "../../shell/VisibleText";
 import { Unknown } from "../cells";
 import { splitDotted, tablePath } from "../paths";
 import { editLanguage, languageName } from "./language";
@@ -72,9 +73,11 @@ function Join({ join }: { readonly join: ModelReferenceOut }): JSX.Element {
       <span className="visually-hidden">{t("table.columns.joinsTo")} </span>
       <span aria-hidden="true">→</span>{" "}
       {place === null ? (
-        text
+        <VisibleText text={text} />
       ) : (
-        <Link to={tablePath(ref.environment, place.namespace, place.name)}>{text}</Link>
+        <Link to={tablePath(ref.environment, place.namespace, place.name)}>
+          <VisibleText text={text} />
+        </Link>
       )}
     </span>
   );
@@ -123,11 +126,17 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
     <>
       <tr tabIndex={-1} ref={row}>
         <td className="column-name">
-          {column.name}
-          {column.label !== null && <span className="second column-label">{column.label}</span>}
+          <VisibleText text={column.name} />
+          {column.label !== null && (
+            <span className="second column-label">
+              <VisibleText text={column.label} />
+            </span>
+          )}
         </td>
         <td>
-          <code className="column-type">{column.type}</code>
+          <code className="column-type">
+            <VisibleText text={column.type} />
+          </code>
           {!full && roleWord !== null && <span className="second">{roleWord}</span>}
         </td>
         {full && (
@@ -142,9 +151,17 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
           </td>
         )}
         <td className="column-description">
-          {column.description ?? <Unknown words={t("table.columns.noDescription")} />}
+          {column.description === null ? (
+            <Unknown words={t("table.columns.noDescription")} />
+          ) : (
+            <VisibleText text={column.description} />
+          )}
         </td>
-        {full && <td>{column.terms.map((term) => term.name).join(", ")}</td>}
+        {full && (
+          <td>
+            <VisibleText text={column.terms.map((term) => term.name).join(", ")} />
+          </td>
+        )}
         {editable && (
           <td className="column-actions">
             {!editing && (
@@ -164,7 +181,7 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
             )}
             {!editing && edited && (
               <BackToGit
-                name={column.name}
+                name={markedText(column.name)}
                 reset={() =>
                   saveColumn(column.name, {
                     ...(column.description_source === "edited" ? { description: null } : {}),

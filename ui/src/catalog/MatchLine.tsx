@@ -7,6 +7,7 @@ import { Fragment, type JSX } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { TableMatchOut } from "../api";
+import { VisibleText } from "../shell/VisibleText";
 
 /** Properties of {@link MatchLine}. */
 export interface MatchLineProps {
@@ -17,7 +18,8 @@ export interface MatchLineProps {
 }
 
 /**
- * Text with the first occurrence of the search wrapped in `<mark>`, whatever its case.
+ * Text with the first occurrence of the search wrapped in `<mark>`, whatever its case, and every
+ * hidden character shown as a mark ({@link VisibleText}).
  *
  * @param props - The text and the search text.
  * @param props.text - The text.
@@ -27,13 +29,15 @@ export interface MatchLineProps {
 function Marked({ text, q }: { readonly text: string; readonly q: string }): JSX.Element {
   const at = q === "" ? -1 : text.toLowerCase().indexOf(q.toLowerCase());
   if (at < 0) {
-    return <>{text}</>;
+    return <VisibleText text={text} />;
   }
   return (
     <>
-      {text.slice(0, at)}
-      <mark className="match">{text.slice(at, at + q.length)}</mark>
-      {text.slice(at + q.length)}
+      <VisibleText text={text.slice(0, at)} />
+      <mark className="match">
+        <VisibleText text={text.slice(at, at + q.length)} />
+      </mark>
+      <VisibleText text={text.slice(at + q.length)} />
     </>
   );
 }
@@ -67,7 +71,11 @@ export function MatchLine({ match, q }: MatchLineProps): JSX.Element {
       </span>,
     );
     if (match.column_type !== null) {
-      parts.push(<span key="type">{match.column_type}</span>);
+      parts.push(
+        <span key="type">
+          <VisibleText text={match.column_type} />
+        </span>,
+      );
     }
     if (match.matched !== "name" && match.snippet !== null) {
       parts.push(<Marked key="snippet" text={match.snippet} q={q} />);

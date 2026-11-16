@@ -118,4 +118,23 @@ describe("MatchLine", () => {
   it("marks nothing for an empty search", () => {
     expect(line({}, "").querySelector("mark")).toBeNull();
   });
+
+  it("marks hidden characters in a column's name, its type and the text around a match", () => {
+    const container = line(
+      {
+        column: "store_\u202Eid",
+        column_type: "in\u2066t",
+        matched: "description",
+        snippet: "joins \u202Edim_store",
+      },
+      "dim",
+    );
+
+    expect(container).toHaveTextContent(
+      "Column store_U+202Eid · inU+2066t · joins U+202Edim_store",
+    );
+    expect(container.textContent).not.toMatch(/[\u202E\u2066]/u);
+    expect(container.querySelector("mark")).toHaveTextContent("dim");
+    expect(container.querySelectorAll(".char-mark")).toHaveLength(3);
+  });
 });

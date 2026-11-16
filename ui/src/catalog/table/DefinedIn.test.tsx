@@ -2,7 +2,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderShell } from "../../test/render";
-import { DEFINITION, definitionFile, TABLE_PATH } from "../../test/table";
+import { DEFINITION, definitionFile, table, TABLE_PATH } from "../../test/table";
 
 const PAGE = "/catalog/prod/gold.sales/fact_sales";
 const FILE_PATH = `${TABLE_PATH}/definition/file`;
@@ -109,6 +109,24 @@ describe("DefinedIn", () => {
     expect(await definedIn()).toHaveTextContent("models/gold/fact_sales.sql, line 1");
   });
 
+  it("marks a hidden character of the table's name in the dialog's heading and name", async () => {
+    const crafted = TABLE_PATH.replace("fact_sales", "fact_\u202Esales");
+    const { user } = renderShell("/catalog/prod/gold.sales/fact_%E2%80%AEsales", {
+      routes: {
+        [`GET ${crafted}`]: { status: 200, body: table({ name: "fact_\u202Esales" }) },
+        [`GET ${crafted}/definition`]: { status: 200, body: DEFINITION },
+        [`GET ${crafted}/definition/file`]: { status: 200, body: definitionFile() },
+      },
+    });
+
+    const dialog = await openFile(user);
+
+    expect(dialog).toHaveAccessibleName("Where fact_U+202Esales is defined");
+    const heading = within(dialog).getByRole("heading", { level: 2 });
+    expect(heading).toHaveTextContent("Where fact_U+202Esales is defined");
+    expect(heading.textContent).not.toMatch(RAW);
+  });
+
   it("opens the file in a dialog and marks the defining line", async () => {
     const { server, user } = renderShell(PAGE, {
       routes: { [`GET ${FILE_PATH}`]: { status: 200, body: definitionFile({ line: 2 }) } },
@@ -197,6 +215,44 @@ describe("DefinedIn", () => {
       expect(within(fact).queryByRole("link")).not.toBeInTheDocument();
       cleanup();
     }
+  });
+
+  it("marks a hidden character in the server's sentence about the file", async () => {
+    const { user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${FILE_PATH}`]: {
+          status: 200,
+          body: definitionFile({
+            content: null,
+            bytes: null,
+            reason: "restricted",
+            message: "Ask about analy\u202Etics.",
+          }),
+        },
+      },
+    });
+
+    const dialog = await openFile(user);
+
+    const mark = await within(dialog).findByText("U+202E", { selector: "p > .char-mark" });
+    expect(mark.parentElement).toHaveTextContent("Ask about analyU+202Etics.");
+    expect(dialog.textContent).not.toMatch(RAW);
+  });
+
+  it("shows neither text nor sentence when the server sends no content and no reason", async () => {
+    const { user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${FILE_PATH}`]: {
+          status: 200,
+          body: definitionFile({ content: null, bytes: null, reason: null, message: null }),
+        },
+      },
+    });
+
+    const dialog = await openFile(user);
+
+    await within(dialog).findByText("analytics");
+    expect(within(dialog).queryByRole("region")).not.toBeInTheDocument();
   });
 
   it("shows the server's sentence when the file is restricted", async () => {

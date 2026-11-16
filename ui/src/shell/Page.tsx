@@ -7,6 +7,7 @@ import { type JSX, type ReactNode, type Ref, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
+import { markedText, VisibleText } from "./VisibleText";
 
 /** Properties of {@link Page}. */
 export interface PageProps {
@@ -28,7 +29,8 @@ export interface PageProps {
 /**
  * Sets `document.title` to "<title> · Lakana" and renders the heading, which the shell
  * focuses after a navigation (hence `tabIndex={-1}`), with the breadcrumb above it on a detail
- * page.
+ * page. The title is often a name the server sent, so both show hidden characters as marks
+ * ({@link VisibleText}).
  *
  * @param props - The title, the content and the action.
  * @param props.title - The page's name.
@@ -41,14 +43,14 @@ export interface PageProps {
 export function Page({ title, children, action, headingRef, trail }: PageProps): JSX.Element {
   const { t } = useTranslation();
   useEffect(() => {
-    document.title = t("shell.documentTitle", { page: title });
+    document.title = t("shell.documentTitle", { page: markedText(title) });
   }, [t, title]);
   return (
     <div className="page">
       {trail !== undefined && <Breadcrumbs trail={trail} current={title} />}
       <div className="page-head">
         <h1 className="page-title" tabIndex={-1} ref={headingRef}>
-          {title}
+          <VisibleText text={title} />
         </h1>
         {action}
       </div>

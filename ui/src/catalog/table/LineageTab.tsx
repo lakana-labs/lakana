@@ -14,6 +14,7 @@ import { getLineage, type GraphOut } from "../../api";
 import { PendingButton } from "../../shell/PendingButton";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { useResource } from "../../shell/useResource";
+import { markedText } from "../../shell/VisibleText";
 import { ReadFailed } from "../cells";
 import { boxWidth, useTextMeasure } from "./boxText";
 import { depthQuery, layout, mergeGraphs, MOST_STEPS, readDepths } from "./layout";
@@ -107,7 +108,7 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
       region.current?.focus();
     }
   });
-  const title = t("table.lineage.region", { name: table.name });
+  const title = t("table.lineage.region", { name: markedText(table.name) });
   if (drawn.nodes.length <= 1) {
     return <p>{t("table.lineage.nothing")}</p>;
   }
@@ -147,7 +148,7 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
                     <div
                       className="lineage-region lineage-full-region"
                       role="region"
-                      aria-label={t("table.lineage.fullRegion", { name: table.name })}
+                      aria-label={t("table.lineage.fullRegion", { name: markedText(table.name) })}
                       // Scrolls both ways at the drawing's natural size, so it takes a tab stop
                       // (WCAG 2.1.1), like the region on the tab.
                       // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex

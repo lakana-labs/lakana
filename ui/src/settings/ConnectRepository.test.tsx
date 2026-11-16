@@ -956,4 +956,21 @@ describe("ConnectRepository", () => {
       expect(JSON.stringify(request.body ?? null)).not.toContain("PRIVATE KEY");
     }
   });
+
+  it("marks a hidden character in the server's sentence for a conflict", async () => {
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repositories": {
+          status: 409,
+          body: { type: "ConflictError", detail: "The repository analy\u202Etics is in use." },
+        },
+      }),
+    );
+    await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await shell.user.click(ui.create());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The repository analyU+202Etics is in use.");
+    expect(alert.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

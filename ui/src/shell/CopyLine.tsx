@@ -7,6 +7,8 @@ import { type JSX, useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
+import { VisibleText } from "./VisibleText";
+
 /** Properties of {@link CopyLine}. */
 export interface CopyLineProps {
   /** The text to copy. */
@@ -21,9 +23,10 @@ type CopyState = "idle" | "copied" | "select";
 const COPIED_FOR_MS = 2000;
 
 /**
- * Shows the text and offers one action: copy it. Without the Clipboard API (an instance served
- * over plain HTTP) or when the browser refuses, it selects the text and says so, so the user can
- * still copy it.
+ * Shows the text, every hidden character as a mark ({@link VisibleText}), and offers one action:
+ * copy it, exactly as given. Without the Clipboard API (an instance served over plain HTTP) or
+ * when the browser refuses, it selects the text and says so, so the user can still copy it; that
+ * selection holds the marks, not the hidden characters.
  *
  * @param props - The text and the button's label.
  * @param props.text - The text to copy.
@@ -61,7 +64,9 @@ export function CopyLine({ text, copyLabel }: CopyLineProps): JSX.Element {
   return (
     <>
       <div className="copy-line">
-        <code ref={line}>{text}</code>
+        <code ref={line}>
+          <VisibleText text={text} />
+        </code>
         <Button
           className="button"
           onPress={() => {

@@ -6,6 +6,8 @@
 import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
 
+import { VisibleText } from "./VisibleText";
+
 /** Properties of {@link EnvironmentLabel}. */
 export interface EnvironmentLabelProps {
   /** The environment's name; null for something of the whole instance (a worker, a link). */
@@ -28,7 +30,7 @@ export function EnvironmentLabel({ environment }: EnvironmentLabelProps): JSX.El
   return (
     <span className="env-label">
       <span className="visually-hidden">{t("home.environment")} </span>
-      {environment}
+      <VisibleText text={environment} />
     </span>
   );
 }

@@ -16,7 +16,7 @@ import {
   type TableRef,
 } from "../../api";
 import { useResource } from "../../shell/useResource";
-import { VisibleText } from "../../shell/VisibleText";
+import { markedText, VisibleText } from "../../shell/VisibleText";
 import { ReadFailed } from "../cells";
 
 /** How many characters of the commit the fact shows; the dialog shows all of it. */
@@ -191,7 +191,9 @@ function FileBody({ place }: FileBodyProps): JSX.Element {
         </div>
       </dl>
       {file.data.content === null ? (
-        <p>{file.data.message}</p>
+        <p>
+          <VisibleText text={file.data.message ?? ""} />
+        </p>
       ) : (
         <SourceText content={file.data.content} line={where.line} />
       )}
@@ -245,7 +247,7 @@ export function DefinedIn({ place }: DefinedInProps): JSX.Element | null {
                 {({ close }) => (
                   <>
                     <Heading slot="title" level={2}>
-                      {t("table.definedIn.title", { name: place.name })}
+                      {t("table.definedIn.title", { name: markedText(place.name) })}
                     </Heading>
                     <FileBody place={place} />
                     <div className="step-actions">

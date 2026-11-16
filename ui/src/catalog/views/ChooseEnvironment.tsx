@@ -7,6 +7,7 @@ import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
+import { VisibleText } from "../../shell/VisibleText";
 import { catalogPath } from "../paths";
 import type { CatalogNode } from "../tree";
 import { type CatalogView, placed } from "../view";
@@ -37,7 +38,9 @@ export function ChooseEnvironment({ view, root }: ChooseEnvironmentProps): JSX.E
       <ul className="choose-list" aria-label={t("catalog.views.chooseLabel")}>
         {root.children.map((node) => (
           <li key={node.id}>
-            <Link to={catalogPath(placed(view, node.environment, null))}>{node.label}</Link>
+            <Link to={catalogPath(placed(view, node.environment, null))}>
+              <VisibleText text={node.label} />
+            </Link>
           </li>
         ))}
       </ul>

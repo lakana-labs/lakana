@@ -15,6 +15,7 @@ import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
 import { AccessFrame } from "./AccessFrame";
 import { personPath } from "./personPath";
+import { VisibleText } from "../shell/VisibleText";
 
 // How long typing must pause before the list is read again.
 const SEARCH_PAUSE_MS = 250;
@@ -70,7 +71,7 @@ export function PeoplePage(): JSX.Element {
                             size={24}
                           />
                           <Link className="row-name" to={personPath(person.name)}>
-                            {person.name}
+                            <VisibleText text={person.name} />
                           </Link>
                           <span className="second">
                             {person.type === "USER"

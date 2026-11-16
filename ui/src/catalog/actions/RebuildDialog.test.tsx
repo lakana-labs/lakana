@@ -143,7 +143,10 @@ describe("RebuildDialog", () => {
   it("marks a bidi character in the repository and the file", async () => {
     fakeServer({
       ...manageRoutes(),
-      [REBUILD]: { status: 202, body: { ...REBUILT, repository: "sales‮", path: "a‮.py" } },
+      [REBUILD]: {
+        status: 202,
+        body: { ...REBUILT, repository: "sales\u202E", path: "a\u202E.py" },
+      },
     });
     const { user } = renderRebuild();
 
@@ -365,5 +368,42 @@ describe("RebuildDialog", () => {
       expect(router.state.location.pathname).toBe("/catalog");
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a hidden character of a protected environment's name", async () => {
+    fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/pr\u202Eod": {
+        status: 200,
+        body: { name: "pr\u202Eod", is_protected: true },
+      },
+    });
+    renderRebuild({ ...PLACE, environment: "pr\u202Eod" });
+
+    expect(await screen.findByText(/^prU\+202Eod is protected/u)).toBeInTheDocument();
+    expect(screen.getByRole("dialog").textContent).not.toMatch(/\u202E/u);
+  });
+
+  it("marks hidden characters in the server's refusal, whose sentence names stored things", async () => {
+    fakeServer({
+      ...manageRoutes(),
+      [REBUILD]: {
+        status: 409,
+        body: {
+          type: "ConflictError",
+          detail: "Run 42 of analy\u202Etics is already active for gold.fact_\u2066sales.",
+        },
+      },
+    });
+    const { user } = renderRebuild();
+
+    await user.type(await screen.findByRole("textbox", { name: /^Why it is rebuilt/u }), REASON);
+    await user.click(screen.getByRole("button", { name: "Rebuild" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Run 42 of analyU+202Etics is already active for gold.fact_U+2066sales.",
+    );
+    expect(alert.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
 });

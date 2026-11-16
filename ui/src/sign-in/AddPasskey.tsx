@@ -13,6 +13,7 @@ import { AttemptStatus, useAttempt } from "./Attempt";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
 import { PendingButton } from "../shell/PendingButton";
+import { markedText } from "../shell/VisibleText";
 
 /** Properties of {@link AddPasskey}. */
 export interface AddPasskeyProps {
@@ -39,7 +40,7 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
   return (
     <Step title={t("addPasskey.title")}>
       <p className="step-who">
-        {t("addPasskey.who", { name: account.display_name ?? account.name })}
+        {t("addPasskey.who", { name: markedText(account.display_name ?? account.name) })}
       </p>
       <p>{required ? t("addPasskey.required") : t("addPasskey.offer")}</p>
       <div className="step-actions">

@@ -54,6 +54,23 @@ async function openMenu(): Promise<ReturnType<typeof renderShell>> {
 }
 
 describe("UserMenu", () => {
+  it("names nobody while the session is not read yet", async () => {
+    renderShell("/", { session: signedIn({ session: undefined }) });
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+
+    expect(screen.getByRole("button", { name: "Signed in as" })).toBeInTheDocument();
+  });
+
+  it("marks a hidden character of the person's display name in the menu button", async () => {
+    renderShell("/", {
+      session: signedIn({ session: { ...ADMIN_SESSION, display_name: "Ad\u202Emin" } }),
+    });
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+
+    const button = screen.getByRole("button", { name: "Signed in as AdU+202Emin" });
+    expect(button.textContent).not.toMatch(/\u202E/u);
+  });
+
   it("opens one's passkeys and sessions", async () => {
     const { user, router } = await openMenu();
 

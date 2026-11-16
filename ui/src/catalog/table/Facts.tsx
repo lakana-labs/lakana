@@ -10,6 +10,7 @@ import { Link } from "react-router";
 
 import type { ArtifactOut } from "../../api";
 import { useMe } from "../../shell/me";
+import { VisibleText } from "../../shell/VisibleText";
 import { useWhen } from "../../shell/useWhen";
 import { OwnerName, RowCount, Unknown, When } from "../cells";
 import { formatBytes } from "../format";
@@ -193,7 +194,11 @@ export function Facts(): JSX.Element {
         <Fact term={t("table.facts.created")}>
           <When iso={table.created_at} never={t("catalog.notKnown")} />
         </Fact>
-        {grain !== null && <Fact term={t("table.facts.grain")}>{grain}</Fact>}
+        {grain !== null && (
+          <Fact term={t("table.facts.grain")}>
+            <VisibleText text={grain} />
+          </Fact>
+        )}
         <DefinedIn place={ref} />
       </dl>
     </section>

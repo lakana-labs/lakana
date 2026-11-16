@@ -164,4 +164,12 @@ describe("TableList", () => {
 
     expect(screen.getByRole("region", { name: "Tables" })).toHaveAttribute("aria-busy", "true");
   });
+
+  it("marks a hidden character of the owner's name", () => {
+    show([item({ owner: { name: "kim\u202E.schulz", kind: "USER" } })]);
+
+    const cell = screen.getByText("U+202E").closest("td") as HTMLElement;
+    expect(cell).toHaveTextContent("kimU+202E.schulz");
+    expect(cell.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });
