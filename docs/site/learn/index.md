@@ -2,7 +2,8 @@
 
 Learn is one path in three levels, from your first instance to a trained model. Lessons that teach
 Lakana together with the ideas behind it are being written. Until a lesson lands, the tutorial it
-will replace stands under its level.
+will replace stands under its level. If you use data on a Lakana instance someone else runs, you need no project:
+start with [The catalog and the web interface](../how-to/index.md#the-catalog-and-the-web-interface).
 
 ## Beginner
 

@@ -43,12 +43,13 @@ Lakana is pre-1.0: the API and the data layout may change between releases, and 
 for production data until v1.0.0. You work with it through the command line, the Python SDK or
 the REST API. The web interface is under way: a first part exists, off by default.
 
-Lakana is open source, with best-effort [support](explanation/support.md), and its
-code contains no telemetry: see [what leaves the machine](explanation/what-leaves-the-machine.md).
+Lakana is open source, with best-effort [support](explanation/support.md), and we
+found no telemetry in its code: see [what leaves the machine](explanation/what-leaves-the-machine.md).
 More in [Scope and philosophy](explanation/scope.md) and
 [Where Lakana fits](explanation/where-lakana-fits.md).
 
 ## Two ways in
 
-- [Start learning](learn/index.md): from your first instance to a trained model.
+- [Start learning](learn/index.md): from your first instance to a trained model. If someone else runs
+  your instance, [start with the catalog](how-to/index.md#the-catalog-and-the-web-interface).
 - [Find a how-to](how-to/index.md): one task by the shortest path.

@@ -242,7 +242,8 @@ guard against a broken page, so `docs` has no condition. `scripts/tests/test_doc
 which reads `mkdocs.yml` (the navigation, `docs_dir`), is among those `scripts/tests`, so a
 docs-only change to the navigation is checked by it and by the strict build. Because `lint` and `static` are skipped for such a change,
 the same file fails on a `hooks:` key or a plugin in `mkdocs.yml` (code run at build time) until it
-is listed in a pull request that is not docs-only. A push to `main` runs everything unless
+is listed in a pull request that is not docs-only. The same file refuses a Markdown extension outside
+`ALLOWED_EXTENSIONS`. A push to `main` runs everything unless
 it proves the content was tested (below).
 
 "Documentation" is defined in one place, `scripts/docs_only.py`: a file under `docs/`, the root

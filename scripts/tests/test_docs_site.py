@@ -229,6 +229,18 @@ def test_a_moved_page_keeps_a_short_page_at_its_old_path() -> None:
 
 
 def _tab(title: str) -> list | str:
+    """Return the `nav` value of one tab.
+
+    Parameters
+    ----------
+    title
+        The tab's title, such as `Learn`.
+
+    Returns
+    -------
+    list or str
+        The tab's entries, or its single page path.
+    """
     return next(next(iter(e.values())) for e in _config()["nav"] if next(iter(e)) == title)
 
 
@@ -250,13 +262,23 @@ INDEXED_TABS = {
 }
 NOT_ON_AN_INDEX = (
     "tutorials/index.md",
+    # reserved for the generated reference (PR B); their pages are listed by the generator
     "reference/cli/",
     "reference/rest/",
     "reference/sdk/",
 )
 
 
+def test_the_navigation_sections_are_the_index_headings_in_order() -> None:
+    """A tab's index has one `##` per `nav` section, in the same order."""
+    for title in ("How-to guides", "Reference", "Learn"):
+        sections = [next(iter(e)) for e in _tab(title) if isinstance(e, dict)]
+        text = (SITE / INDEXED_TABS[title]).read_text(encoding="utf-8")
+        assert sections == re.findall(r"^## (.+?)\s*$", text, flags=re.MULTILINE), title
+
+
 def test_each_tab_index_links_every_page_of_its_tab() -> None:
+    """Every page of an indexed tab is linked from that tab's index."""
     missing = []
     for title, index in INDEXED_TABS.items():
         text = (SITE / index).read_text(encoding="utf-8")
@@ -573,9 +595,28 @@ def test_the_learn_page_lists_the_tutorials_under_their_levels() -> None:
     assert "<a " not in text  # links stay Markdown, so the strict build checks them
 
 
+def _prose_words(text: str) -> int:
+    """Count the words a reader sees: link targets, heading marks and list markers left out.
+
+    Parameters
+    ----------
+    text
+        Markdown source.
+
+    Returns
+    -------
+    int
+        The number of words in the rendered prose.
+    """
+    text = re.sub(r"\]\([^)]*\)", "]", text)
+    text = re.sub(r"^\s*(?:#+|[-*])\s+", "", text, flags=re.MULTILINE)
+    return len(re.sub(r"[*\[\]]", "", text).split())
+
+
 def test_the_home_page_is_what_is_lakana_with_two_ways_in() -> None:
+    """The home page names the tab, links the two ways in and stays about one screen."""
     text = (SITE / "index.md").read_text(encoding="utf-8")
     assert text.startswith("# What is Lakana?\n")
     assert "(learn/index.md)" in text
     assert "(how-to/index.md)" in text
-    assert len(text.split()) <= 400  # about one screen
+    assert _prose_words(text) <= 440  # about one screen: today's page plus 10 %

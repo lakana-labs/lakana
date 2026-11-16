@@ -3,7 +3,7 @@
 You may already transform data with SQL files, one file per table, run by a tool that works out
 the order from the references between them. This page says what each of the usual concepts of such
 a tool becomes in Lakana, what has no counterpart (and what to do instead), what you get in
-return, and when to stay where you are. A worked conversion, step by step, is the tutorial
+return, and when to stay where you are. A worked conversion, step by step, is the how-to guide
 [Move a SQL project to Lakana](../how-to/move-a-sql-project.md).
 
 Lakana runs no other tool's project, and it has no converter: you rewrite each file by hand. The
@@ -88,7 +88,7 @@ stores tables in Apache Iceberg.
 ## How to move, in an order that keeps you safe
 
 1. **Start with the end of the pipeline.** Pick one table that people use, and move the tables it
-   needs, with the raw tables they read. A small project first, as in the tutorial.
+   needs, with the raw tables they read. A small project first, as in the guide.
 2. **Load the sources and seeds** into a `dev` environment, rewrite the files, and run.
 3. **Compare** the result with what your current tool builds, with queries on both, until the
    numbers agree. Keep the old pipeline running until they do.
