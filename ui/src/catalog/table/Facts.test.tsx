@@ -53,6 +53,23 @@ describe("Facts", () => {
     expect(fact(list, "Grain")).toHaveTextContent("one row per sale");
   });
 
+  it("marks a hidden character in the grain", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: {
+          status: 200,
+          body: table({
+            model: { ...(table().model as object), grain: "one row per sa‮le" } as never,
+          }),
+        },
+      },
+    });
+
+    const grain = fact(await facts(), "Grain");
+    expect(grain).toHaveTextContent("one row per saU+202Ele");
+    expect(grain.textContent).not.toContain("‮");
+  });
+
   it("says one file in the singular", async () => {
     renderShell(PAGE, {
       routes: { [`GET ${TABLE_PATH}`]: { status: 200, body: table({ file_count: 1 }) } },
