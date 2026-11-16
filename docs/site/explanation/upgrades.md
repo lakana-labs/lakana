@@ -283,7 +283,8 @@ given its origin by the first of these rules that holds:
 6. otherwise: `written`.
 
 A check run of a task from before the upgrade is therefore `task`; only new ones say `check`. The
-size and position of an old run stay empty. The migration runs with the others, and nothing else
+size and position of an old run stay empty. A run that a server or worker of the previous
+release records while the upgrade is under way is recorded as `written`. The migration runs with the others, and nothing else
 has to be done. Going back drops the new columns and the index.
 
 ### `grant list` shows one `access` column

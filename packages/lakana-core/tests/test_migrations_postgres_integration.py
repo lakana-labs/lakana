@@ -3786,6 +3786,22 @@ def test_0080_on_postgres() -> None:
             origins = dict(conn.execute(sqlalchemy.text("SELECT id, origin FROM query_runs")).all())
             assert origins == {ids[name]: origin for name, (_, origin) in rows.items()}
             assert conn.execute(index).scalar_one().endswith("(principal_id, finished_at)")
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            old_id = uuid.uuid4()
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO query_runs (id, environment_id, sql_text, status, created_at, "
+                    "updated_at) VALUES (:id, :env, 'SELECT 1', 'QUEUED', now(), now())"
+                ),
+                {"id": old_id, "env": uuid.uuid4()},
+            )
+            assert (
+                conn.execute(
+                    sqlalchemy.text("SELECT origin FROM query_runs WHERE id = :id"), {"id": old_id}
+                ).scalar_one()
+                == "written"
+            )
         migrate.downgrade(url, revision_0079)
         assert _alembic_version(engine) == revision_0079
         with engine.connect() as conn:

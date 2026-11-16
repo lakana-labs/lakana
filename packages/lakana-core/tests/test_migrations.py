@@ -6111,6 +6111,7 @@ def test_0080_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -
         command.upgrade(config, _REVISION_0080)
         columns = {c["name"]: c for c in inspect(engine).get_columns("query_runs")}
         assert columns["origin"]["nullable"] is False
+        assert "written" in str(columns["origin"]["default"])
         for name in _RUN_ORIGIN_COLUMNS[1:]:
             assert columns[name]["nullable"] is True
         assert "ix_query_runs_principal_id_finished_at" in index_names()
@@ -6125,6 +6126,25 @@ def test_0080_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -
             ).scalar_one()
         assert origins == {ids[name]: origin for name, _, origin in _OLD_RUN_ORIGINS}
         assert unset == 0
+        # a run inserted by a server of the previous release, which names no origin
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                sa.text(
+                    "INSERT INTO query_runs (id, environment_id, sql_text, status, created_at,"
+                    " updated_at) VALUES (:id, :env, 'SELECT 1', 'QUEUED', :now, :now)"
+                ),
+                {"id": uuid.uuid4().hex, "env": uuid.uuid4().hex, "now": _utc_text()},
+            )
+            assert (
+                connection.execute(
+                    sa.text(
+                        "SELECT count(*) FROM query_runs WHERE origin = 'written'"
+                        " AND status = 'QUEUED'"
+                    )
+                ).scalar_one()
+                == 1
+            )
         command.downgrade(config, _REVISION_0079)
         assert not set(_RUN_ORIGIN_COLUMNS) & column_names()
         assert "ix_query_runs_principal_id_finished_at" not in index_names()

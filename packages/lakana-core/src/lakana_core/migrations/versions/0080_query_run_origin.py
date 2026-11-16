@@ -11,6 +11,10 @@ An old run is given its origin by the first of these rules that holds:
 
 An old check run of a task is therefore `task`; only runs made after this revision say `check`.
 
+The column keeps a database default of `written`, so that a server or worker of the previous
+release, which does not know the column, still inserts runs during an upgrade; they are
+recorded as `written`. The model has no default: new code names an origin everywhere.
+
 Revision ID: d8e2f5a1c736
 Revises: c4e8a1f2d937
 Create Date: 2026-11-16 09:00:00.000000
@@ -36,9 +40,9 @@ def upgrade() -> None:
     """Upgrade schema.
 
     Adds `origin` (nullable at first), fills it by the rule in the module docstring with one
-    `UPDATE`, then makes it not null. Adds the four nullable size and position columns, which
-    stay `NULL` for old runs, and the index `(principal_id, finished_at)` that serves a
-    person's list of their own runs.
+    `UPDATE`, then makes it not null with the default `written`. Adds the four nullable size
+    and position columns, which stay `NULL` for old runs, and the index
+    `(principal_id, finished_at)` that serves a person's list of their own runs.
     """
     op.add_column("query_runs", sa.Column("origin", sa.String(16), nullable=True))
     op.add_column("query_runs", sa.Column("result_rows", sa.BigInteger(), nullable=True))
@@ -55,7 +59,12 @@ def upgrade() -> None:
         "ELSE 'written' END"
     )
     with op.batch_alter_table("query_runs") as batch:
-        batch.alter_column("origin", existing_type=sa.String(16), nullable=False)
+        batch.alter_column(
+            "origin",
+            existing_type=sa.String(16),
+            nullable=False,
+            server_default="written",
+        )
     op.create_index(_INDEX, "query_runs", ["principal_id", "finished_at"], unique=False)
 
 
