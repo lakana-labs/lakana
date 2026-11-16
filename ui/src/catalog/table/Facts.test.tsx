@@ -186,11 +186,23 @@ describe("Facts", () => {
       // Readers › would open a Health tab the artifact does not have.
       expect(within(list).queryByText("Last read", { selector: "dt" })).not.toBeInTheDocument();
       expect(within(list).queryByText("Last write", { selector: "dt" })).not.toBeInTheDocument();
+      // Defined in joins last once its own read arrives; wait for it, so the order does not
+      // depend on whether that read beat this line (it did under the coverage run's load).
+      await within(list).findByText("Defined in", { selector: "dt" });
       expect(
         within(list)
           .getAllByRole("term")
           .map((term) => term.textContent),
-      ).toEqual(["Owner", "Current version", "Versions", "Keeps", "Size", "Expires", "Created"]);
+      ).toEqual([
+        "Owner",
+        "Current version",
+        "Versions",
+        "Keeps",
+        "Size",
+        "Expires",
+        "Created",
+        "Defined in",
+      ]);
     });
 
     it("says None yet for an artifact that has no version at all", async () => {

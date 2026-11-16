@@ -160,10 +160,12 @@ describe("TableActions", () => {
     expect(router.state.location.pathname + router.state.location.search).toBe(
       "/catalog?env=prod&ns=ml",
     );
+    // Marked seen once shown, so a reload or Back does not show it again.
     expect(router.state.location.state).toEqual({
       placeNote: "artifactDropped",
       namespace: "ml",
       artifact: "ml.model",
+      seen: true,
     });
     expect(webauthn.get).toHaveBeenCalledTimes(1);
     expect(

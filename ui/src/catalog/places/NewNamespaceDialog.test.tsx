@@ -107,6 +107,26 @@ describe("NewNamespaceDialog", () => {
     expect(creations(server.sent)).toHaveLength(1);
   });
 
+  it("keeps Enter pressed in the path while it checks the protection, and creates once it knows", async () => {
+    const protection = held();
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": protection.route,
+    });
+    const { onDone, user } = renderCreate(null);
+
+    await user.type(screen.getByRole("textbox", { name: "Path" }), "platinum{Enter}");
+
+    expect(creations(server.sent)).toEqual([]);
+    expect(screen.getByRole("button", { name: /^Create/ })).toHaveAttribute("data-pending", "true");
+    protection.release({ status: 200, body: { name: "prod", is_protected: false } });
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledWith("platinum");
+    });
+    expect(creations(server.sent)).toHaveLength(1);
+  });
+
   it("shows the server's 409 for an existing namespace word for word and keeps the path", async () => {
     const detail = "Namespace gold.sales already exists in 'prod'.";
     fakeServer({

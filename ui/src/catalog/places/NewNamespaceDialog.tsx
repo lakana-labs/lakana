@@ -10,7 +10,7 @@ import { createNamespace } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
-import { ConfirmRow } from "../actions/ConfirmRow";
+import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
 import { useProtected } from "../actions/useProtected";
 import "./placeStrings";
@@ -53,7 +53,6 @@ export function NewNamespaceDialog({
   const [reason, setReason] = useState("");
   const needsReason = protectedEnvironment === true;
   const missing = path.trim() === "" || (needsReason && reason.trim() === "");
-  const ready = !missing && protectedEnvironment !== undefined && !attempt.busy;
   const create = (): void => {
     const sent = path;
     attempt.run(async () => {
@@ -61,11 +60,15 @@ export function NewNamespaceDialog({
       onDone(created.path);
     });
   };
-  const submit = (): void => {
-    if (ready) {
-      create();
-    }
-  };
+  const confirm = useConfirm({
+    busy: attempt.busy,
+    waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
+    disabled: missing,
+    onConfirm: create,
+  });
+  // Enter in a field presses Create, kept like a click while the protection is not known yet.
+  const submit = confirm.press;
   const close = (): void => {
     if (!attempt.busy) {
       onCancel();
@@ -103,9 +106,7 @@ export function NewNamespaceDialog({
       <ConfirmRow
         attempt={attempt}
         label={t("catalog.places.create.confirm")}
-        waiting={protectedEnvironment === undefined}
-        disabled={missing}
-        onConfirm={create}
+        confirm={confirm}
         onCancel={close}
       />
     </ActionDialog>

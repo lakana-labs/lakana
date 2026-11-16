@@ -1293,19 +1293,38 @@ describe("CatalogList", () => {
       await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
       await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      // The frames wait here until the note has the focus, so the menu's frame, which puts the
+      // focus back on the place when it was lost, meets a note that already has it: only its
+      // guard keeps the focus there, whatever order the browser would run them in.
+      const frames: FrameRequestCallback[] = [];
+      const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
 
-      await act(async () => {
-        await router.navigate("/catalog?env=prod&ns=silver", {
-          state: { placeNote: "deleted", namespace: "silver.old" },
+      try {
+        await act(async () => {
+          await router.navigate("/catalog?env=prod&ns=silver", {
+            state: { placeNote: "deleted", namespace: "silver.old" },
+          });
         });
-      });
+        const note = await screen.findByText("Deleted namespace silver.old.");
+        await waitFor(() => {
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        });
+        expect(note).toHaveFocus();
+        expect(frames.length).toBeGreaterThan(0);
 
-      const note = await screen.findByText("Deleted namespace silver.old.");
-      await act(async () => {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      });
-      expect(note).toHaveFocus();
+        act(() => {
+          for (let next = frames.shift(); next !== undefined; next = frames.shift()) {
+            next(performance.now());
+          }
+        });
+
+        expect(note).toHaveFocus();
+      } finally {
+        frame.mockRestore();
+      }
     });
 
     it("forgets a creation whose tree did not arrive once the address changes", async () => {
@@ -1379,6 +1398,56 @@ describe("CatalogList", () => {
       await waitFor(() => {
         expect(note).toHaveFocus();
       });
+    });
+
+    it("shows a note once: the history entry forgets it, so Back and a reload do not show it again", async () => {
+      const { router } = renderShell("/catalog?env=prod");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=gold", {
+          state: { placeNote: "deleted", namespace: "gold.old" },
+        });
+      });
+
+      const note = await screen.findByText("Deleted namespace gold.old.");
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      await waitFor(() => {
+        expect(router.state.location.state).toEqual({
+          placeNote: "deleted",
+          namespace: "gold.old",
+          seen: true,
+        });
+      });
+      expect(screen.getByText("Deleted namespace gold.old.")).toBe(note);
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=silver");
+      });
+      expect(screen.queryByText("Deleted namespace gold.old.")).not.toBeInTheDocument();
+      await act(async () => {
+        await router.navigate(-1);
+      });
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      await screen.findByRole("link", { name: "fact_sales" });
+      expect(screen.queryByText("Deleted namespace gold.old.")).not.toBeInTheDocument();
+    });
+
+    it("shows no note for an entry whose note was already shown, as after a reload", async () => {
+      const { router } = renderShell("/catalog?env=prod");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=gold", {
+          state: { placeNote: "created", namespace: "gold", seen: true },
+        });
+      });
+
+      await screen.findByRole("button", { name: "Actions for gold" });
+      expect(screen.queryByText(/Created namespace/)).not.toBeInTheDocument();
     });
 
     it("confirms a drop above the notice when the namespace has left the tree", async () => {

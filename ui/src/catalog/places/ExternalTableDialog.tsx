@@ -21,7 +21,7 @@ import { createExternalTable, type ExternalFormat } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
-import { ConfirmRow } from "../actions/ConfirmRow";
+import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
 import { useProtected } from "../actions/useProtected";
 import { tablePath } from "../paths";
@@ -124,15 +124,12 @@ export default function ExternalTableDialog({
   const needsReason = protectedEnvironment === true;
   const missing =
     name.trim() === "" || location.trim() === "" || (needsReason && reason.trim() === "");
-  const ready = !missing && protectedEnvironment !== undefined && !attempt.busy;
-  const submit = (): void => {
-    if (!ready || format === null) {
-      return;
-    }
+  const create = (): void => {
     const sent = {
       name,
       locationPattern: location,
-      format,
+      // Never null here: Register cannot be pressed without a format.
+      format: format as ExternalFormat,
       breakGlassReason: needsReason ? reason.trim() : null,
     };
     attempt.run(async () => {
@@ -142,6 +139,15 @@ export default function ExternalTableDialog({
       });
     });
   };
+  const confirm = useConfirm({
+    busy: attempt.busy,
+    waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
+    disabled: missing || format === null,
+    onConfirm: create,
+  });
+  // Enter in a field presses Register, kept like a click while the protection is not known yet.
+  const submit = confirm.press;
   const close = (): void => {
     if (!attempt.busy) {
       onCancel();
@@ -192,9 +198,7 @@ export default function ExternalTableDialog({
       <ConfirmRow
         attempt={attempt}
         label={t("catalog.places.external.confirm")}
-        waiting={protectedEnvironment === undefined}
-        disabled={missing || format === null}
-        onConfirm={submit}
+        confirm={confirm}
         onCancel={close}
       />
     </ActionDialog>

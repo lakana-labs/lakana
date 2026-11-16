@@ -64,8 +64,8 @@ describe("UndropDialog", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: /Undrop/ });
-    expect(button).toHaveAttribute("aria-disabled", "true");
+    // Pressable while it checks: a press is kept, not lost (ConfirmRow's own tests).
+    expect(screen.getByRole("button", { name: "Undrop" })).not.toHaveAttribute("data-pending");
     protection.release({ status: 200, body: { name: "prod", is_protected: true } });
     const reason = await screen.findByRole("textbox", {
       name: /Why you break the protection of prod/,
