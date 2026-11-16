@@ -12,6 +12,7 @@ import sqlglot
 import sqlglot.errors
 import sqlglot.lineage
 
+from lakana_core import sql_dialect
 from lakana_core.query_rewrite import _dotted_table_name
 
 
@@ -38,14 +39,15 @@ def extract_lineage(sql: str, dialect: str = "duckdb") -> dict[str, list[dict[st
     # only defined on the Query subtype, which a SELECT statement always
     # parses to. The cast tells the type checker what sqlglot guarantees at
     # runtime but does not encode in parse_one's own signature.
-    parsed = cast("sqlglot.expressions.Query", sqlglot.parse_one(sql, dialect=dialect))
+    parsed = cast("sqlglot.expressions.Query", sql_dialect.parse_one(sql, dialect=dialect))
     result: dict[str, list[dict[str, str]]] = {}
     for projection in parsed.selects:
         column_name = projection.alias_or_name
         try:
             # No schema is known here. sqlglot 30.22 made the argument required; an empty
-            # mapping is what its earlier default (None) meant.
-            node = sqlglot.lineage.lineage(column_name, sql, schema={}, dialect=dialect)
+            # mapping is what its earlier default (None) meant. The tree, not the text: sqlglot
+            # would parse text again with its own DuckDB reading (#415); it copies the tree.
+            node = sqlglot.lineage.lineage(column_name, parsed, schema={}, dialect=dialect)
         except sqlglot.errors.SqlglotError:
             # An unaliased computed projection has no name to trace:
             # `SELECT COUNT(*) FROM t` names the column `*` and

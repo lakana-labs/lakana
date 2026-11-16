@@ -1233,7 +1233,7 @@ in `ui (e2e smoke)` and `ui (e2e server)` beside it (the required check `ui` wai
   `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm
   --prefix ui run build`) and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof
   is the smoke test's positive control (an image without alt text must be found); the audits prove
-  themselves in `security.yml` on a lock generated at run time with `lodash@4.17.20`.
+  themselves in `security.yml` on a lock written at run time with `lodash@4.17.20`.
 - **Playwright.** Pull requests that touch `ui/` run the smoke test on Chromium; the full
   three-browser suite (`npm --prefix ui run e2e:all`) runs on release. The tests run against
   `vite preview` of the production build, which sends the content security policy of

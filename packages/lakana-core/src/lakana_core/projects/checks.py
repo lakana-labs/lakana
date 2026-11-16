@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import pydantic
-import sqlglot
 import sqlglot.errors
 from sqlglot import exp
 
+from lakana_core import sql_dialect
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef, shown, validate_path_component
@@ -43,7 +43,7 @@ from lakana_core.projects.manifest import CHECKS_VERSION, LISTS_CHECKS, manifest
 from lakana_core.projects.measures import AGGREGATIONS
 from lakana_core.projects.parse import _sql_issue
 from lakana_core.projects.project_config import SafeTextModel, pydantic_issues
-from lakana_core.query_rewrite import check_blacklist, extract_table_refs
+from lakana_core.query_rewrite import check_blacklist, extract_table_refs, refuse_sort_by
 from lakana_core.statement_limit import statement_too_long_message
 
 ON_FAILURE: tuple[str, ...] = CHECK_MODES
@@ -441,9 +441,17 @@ def _one_select(sql: str) -> exp.Query:
     Raises
     ------
     ValidationError
-        If there is no SQL, more than one statement, or a statement that is not a query.
+        If there is no SQL, more than one statement, or a statement that is not a query, or a
+        `SORT BY` the parser cannot read (the `ORDER BY` hint a query gets).
+    sqlglot.errors.ParseError
+        If the SQL does not parse for any other reason.
     """
-    trees = [tree for tree in sqlglot.parse(sql, dialect=_DIALECT) if tree is not None]
+    try:
+        parsed = sql_dialect.parse(sql, dialect=_DIALECT)
+    except sqlglot.errors.ParseError as exc:
+        refuse_sort_by(sql, _DIALECT, exc)
+        raise
+    trees = [tree for tree in parsed if tree is not None]
     if not trees:
         raise ValidationError("the check has no SQL")
     if len(trees) != 1:

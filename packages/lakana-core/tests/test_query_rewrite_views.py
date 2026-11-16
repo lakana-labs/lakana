@@ -338,3 +338,18 @@ def test_an_expanded_view_renders_its_lambdas_in_the_keyword_form() -> None:
 
     assert "LIST_TRANSFORM(tags, LAMBDA x : x * 2)" in expanded.sql
     assert "->" not in expanded.sql
+
+
+def test_a_stored_view_with_a_sort_by_is_named_as_unreadable() -> None:
+    """A view saved with `SORT BY` before sqlglot 30.25 is unreadable, not the reader's mistake.
+
+    sqlglot 30.24 parsed `SORT BY` (and dropped it), so such a view can be stored. The reader
+    never wrote the clause: they get the view's name and its owner as the next step, exactly as
+    for any other stored SQL that no longer parses, and not the `ORDER BY` hint.
+    """
+    lookup = _lookup({"gold.v": "SELECT a FROM bronze.secret_tbl SORT BY a"})
+
+    with pytest.raises(ValidationError) as caught:
+        expand_views("SELECT * FROM gold.v", lookup)
+
+    assert str(caught.value) == "View 'gold.v' could not be read. Ask its owner to recreate it."
