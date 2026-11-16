@@ -115,6 +115,18 @@ What the answer takes into account:
 or group was created, newest first; equal times by id. `--limit` and `--cursor` page as for the
 grants.
 
+A principal (`lakana principal list` and `get`, `lakana group members`, and their routes) has
+these fields:
+
+| Field | Meaning |
+|---|---|
+| `name` | the principal's name |
+| `type` | `USER` (a person) or `SERVICE_ACCOUNT` |
+| `is_active` | `false` once it is deactivated |
+| `held_admin` | whether it holds the `ADMIN` role on the instance now or has ever held it, directly or through a group. Only the server operator can recover such a person ([Lost your passkey](../how-to/lost-your-passkey.md)); taking the role away does not change that. Shown only to an administrator: anyone else, such as someone granted only `MANAGE_PRINCIPAL`, gets `null` (an empty cell) |
+
+The REST answer also has `picture`, the etag of the profile picture, which the web interface shows.
+
 ## Refusals
 
 | Cause | Answer |

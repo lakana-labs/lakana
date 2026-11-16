@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from lakana_core.auth import PrincipalRef
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.pictures import PictureService
+from lakana_core.identity.principals import PrincipalService
 from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.principals import principals_out
 from lakana_server.api.platform.schemas import GroupCreate, GroupOut, PrincipalOut
@@ -17,6 +18,7 @@ from lakana_server.deps import (
     get_managed_write_principal,
     get_picture_service,
     get_principal,
+    get_principal_service,
 )
 
 router = APIRouter(
@@ -145,6 +147,7 @@ def list_members(
     principal: PrincipalRef = Depends(get_principal),
     service: GroupService = Depends(get_group_service),
     pictures: PictureService = Depends(get_picture_service),
+    principals: PrincipalService = Depends(get_principal_service),
 ) -> list[PrincipalOut]:
     """List the members of a group.
 
@@ -160,6 +163,8 @@ def list_members(
         The group service for this request.
     pictures
         The picture service, for each member's picture etag.
+    principals
+        The principal service, for whether each member holds or has held ADMIN.
 
     Returns
     -------
@@ -171,7 +176,7 @@ def list_members(
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
     """
-    return principals_out(service.list_members(principal, name), pictures)
+    return principals_out(service.list_members(principal, name), pictures, principals, principal)
 
 
 @router.put("/{name}/members/{principal_name}", status_code=204, responses=errors(403, 404, 409))

@@ -27,17 +27,16 @@ const SESSION = {
 };
 
 /**
- * The permissions route's answer for a person who is, or is not, an administrator.
+ * The principal route's answer for a person who holds or has held the ADMIN role, or has not.
  *
- * @param admin - Whether the person holds the ADMIN role on the instance.
+ * @param name - The person's name.
+ * @param heldAdmin - Whether they hold or have ever held ADMIN.
  * @returns The fake route's answer.
  */
-function permissions(admin: boolean): { status: number; body: unknown } {
+function principal(name: string, heldAdmin: boolean): { status: number; body: unknown } {
   return {
     status: 200,
-    body: {
-      permissions: [{ via: admin ? [{ kind: "group", role: "ADMIN" }] : [] }],
-    },
+    body: { name, type: "USER", is_active: true, picture: null, held_admin: heldAdmin },
   };
 }
 
@@ -45,7 +44,7 @@ describe("PersonPage", () => {
   it("shows another person's passkeys and sessions, without adding one for them", async () => {
     renderShell("/access/people/kim", {
       routes: {
-        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [PASSKEY] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [SESSION] },
       },
@@ -64,7 +63,7 @@ describe("PersonPage", () => {
   it("shows the breadcrumb Access › People › the person", async () => {
     renderShell("/access/people/kim", {
       routes: {
-        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
       },
@@ -76,18 +75,30 @@ describe("PersonPage", () => {
     expect(within(nav).getByText("kim")).toHaveAttribute("aria-current", "page");
   });
 
-  it("shows the operator's command instead of a button for an administrator", async () => {
-    renderShell("/access/people/ada", {
+  it("shows the operator's command instead of a button for a former administrator", async () => {
+    // The ADMIN role was taken away, so the rights read none; the durable mark still counts.
+    const { server } = renderShell("/access/people/ada", {
       routes: {
-        "GET /api/v1/principals/ada/permissions": permissions(true),
+        "GET /api/v1/principals/ada": principal("ada", true),
+        "GET /api/v1/principals/ada/permissions": {
+          status: 200,
+          body: { permissions: [{ via: [] }] },
+        },
         "GET /api/v1/principals/ada/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/ada/sessions": { status: 200, body: [] },
       },
     });
 
     expect(await screen.findByText("lakana recovery create ada")).toBeInTheDocument();
-    expect(screen.getByText(/only the server operator can recover/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "ada is or was an administrator, so only the server operator can recover this account " +
+          "(taking the role away does not change that): run this where the server runs, with " +
+          "the bootstrap token.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Issue a recovery link" })).not.toBeInTheDocument();
+    expect(server.sent.some((request) => request.path.endsWith("/permissions"))).toBe(false);
   });
 
   it("issues a recovery link for the person shown, with a passkey touch", async () => {
@@ -95,7 +106,7 @@ describe("PersonPage", () => {
     let tries = 0;
     const { user } = renderShell("/access/people/kim", {
       routes: {
-        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
         "POST /api/v1/principals/kim/recovery-link": () => {
@@ -133,7 +144,7 @@ describe("PersonPage", () => {
     const request = held();
     const { user } = renderShell("/access/people/kim", {
       routes: {
-        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
         "POST /api/v1/principals/kim/recovery-link": request.route,
@@ -165,7 +176,6 @@ describe("PersonPage", () => {
           blob: new Blob(["webp"], { type: "image/webp" }),
         },
         "DELETE /api/v1/principals/kim/picture": request.route,
-        "GET /api/v1/principals/kim/permissions": permissions(false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
       },
@@ -198,7 +208,7 @@ describe("PersonPage", () => {
   it("offers the recovery link when the person's rights cannot be read", async () => {
     renderShell("/access/people/kim", {
       routes: {
-        "GET /api/v1/principals/kim/permissions": { status: 500, body: { detail: "Broken." } },
+        "GET /api/v1/principals/kim": { status: 500, body: { detail: "Broken." } },
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
       },
@@ -212,7 +222,7 @@ describe("PersonPage", () => {
   it("closes the recovery dialog with Cancel or Escape", async () => {
     const { user } = renderShell("/access/people/kim", {
       routes: {
-        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
       },
@@ -256,7 +266,6 @@ describe("PersonPage", () => {
           blob: new Blob(["webp"], { type: "image/webp" }),
         },
         "DELETE /api/v1/principals/kim/picture": { status: 204 },
-        "GET /api/v1/principals/kim/permissions": permissions(false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
       },

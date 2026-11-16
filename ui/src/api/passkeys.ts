@@ -56,13 +56,11 @@ function answer(credential: Credential | null): unknown {
 /**
  * Asks the browser for a passkey touch on the server's request options.
  *
- * @param path - The options route.
+ * @param options - What the options route answered.
  * @returns The ceremony id and the browser's answer.
  */
-async function touch(path: string): Promise<{ ceremony_id: string; credential: unknown }> {
-  const credentials = webAuthn();
-  const options = await send<OptionsOut>("POST", path, {});
-  const publicKey = credentials.parseRequestOptionsFromJSON(
+async function touch(options: OptionsOut): Promise<{ ceremony_id: string; credential: unknown }> {
+  const publicKey = webAuthn().parseRequestOptionsFromJSON(
     options.public_key as PublicKeyCredentialRequestOptionsJSON,
   );
   const credential = await navigator.credentials.get({ publicKey });
@@ -75,15 +73,20 @@ async function touch(path: string): Promise<{ ceremony_id: string; credential: u
  * @returns Who is signed in.
  */
 export async function signInWithPasskey(): Promise<SignInOut> {
-  const proof = await touch("/api/v1/sign-in/passkey/options");
+  webAuthn();
+  const proof = await touch(await send<OptionsOut>("POST", "/api/v1/sign-in/passkey/options", {}));
   const signedIn = await send<SignInOut>("POST", "/api/v1/sign-in/passkey", proof);
   setCsrfToken(signedIn.csrf_token);
   return signedIn;
 }
 
-/** Confirms this browser's session with a touch of one of the person's passkeys. */
+/**
+ * Confirms this browser's session with a touch of one of the person's passkeys. The server is
+ * asked first, so an account without a passkey hears that (409 `NoPasskeyError`) rather than
+ * anything about the browser.
+ */
 export async function stepUp(): Promise<void> {
-  const proof = await touch("/api/v1/sign-in/step-up/options");
+  const proof = await touch(await send<OptionsOut>("POST", "/api/v1/sign-in/step-up/options", {}));
   await send("POST", "/api/v1/sign-in/step-up", proof);
 }
 

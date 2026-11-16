@@ -176,12 +176,12 @@ option is in [Grants, permissions, principals and groups](../reference/access.md
 
 <!-- output: give-access#who -->
 ```text
-┏━━━━━━━┳━━━━━━┳━━━━━━━━━━━┓
-┃ name  ┃ type ┃ is_active ┃
-┡━━━━━━━╇━━━━━━╇━━━━━━━━━━━┩
-│ alice │ USER │ True      │
-│ admin │ USER │ True      │
-└───────┴──────┴───────────┘
+┏━━━━━━━┳━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ name  ┃ type ┃ is_active ┃ held_admin ┃
+┡━━━━━━━╇━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ alice │ USER │ True      │ False      │
+│ admin │ USER │ True      │ True       │
+└───────┴──────┴───────────┴────────────┘
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━┓
 ┃ id                                   ┃ subject    ┃ access  ┃ environment ┃
 ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━┩
