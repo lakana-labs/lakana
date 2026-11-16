@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import cast
 
-import sqlglot
 import sqlglot.errors
 from sqlglot import exp
 
+from lakana_core import sql_dialect
 from lakana_core.errors import ValidationError
 from lakana_core.lineage import extract_lineage
 from lakana_core.projects.asset_model import ParsedAsset, model_issues
@@ -48,7 +48,7 @@ def normalize_sql(sql: str) -> str:
     str
         sqlglot's canonical DuckDB rendering.
     """
-    return sqlglot.parse_one(sql, dialect=_DIALECT).sql(
+    return sql_dialect.parse_one(sql, dialect=_DIALECT).sql(
         dialect=_DIALECT, normalize=True, comments=False
     )
 
@@ -89,7 +89,7 @@ def _output_columns(sql: str) -> tuple[str, ...] | None:
         does not count. `None` too for a bare `VALUES` list, whose columns
         DuckDB names itself (`col0`, `col1`, ...).
     """
-    parsed = sqlglot.parse_one(sql, dialect=_DIALECT)
+    parsed = sql_dialect.parse_one(sql, dialect=_DIALECT)
     if isinstance(parsed, exp.Values):
         return None
     query = cast("exp.Query", parsed)
@@ -189,7 +189,7 @@ def sql_file_references(sql: str, references: Iterable[str]) -> set[str]:
         parsed again, every reference is treated that way.
     """
     try:
-        tree = sqlglot.parse_one(sql, dialect="duckdb")
+        tree = sql_dialect.parse_one(sql, dialect="duckdb")
     except sqlglot.errors.SqlglotError:
         return set(references)
     found: set[str] = set()

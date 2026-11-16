@@ -29,6 +29,7 @@ from lakana_core.query_rewrite import (
     ViewDefinition,
     check_blacklist,
     expand_views,
+    extract_table_refs,
     rewrite_query,
 )
 from lakana_worker import query_child
@@ -284,6 +285,51 @@ def test_a_lambda_runs_as_the_guard_parsed_it(sql: str, expected: list[object]) 
 
 
 @pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT 'abc' ~ 'b'", False),
+        ("SELECT 'abc' !~ 'b'", True),
+        ("SELECT 'abc' ~ '.*b.*'", True),
+        ("SELECT regexp_matches('abc', 'b')", True),
+    ],
+)
+def test_a_tilde_runs_as_a_whole_text_match(sql: str, expected: bool) -> None:
+    """`~` matches the whole text, as documented, though DuckDB 2.0 alone matches a part (#415).
+
+    Parameters
+    ----------
+    sql
+        The query as the caller wrote it.
+    expected
+        The single value it returns.
+    """
+    check_blacklist(sql)
+
+    assert _run(sql, {}) == [(expected,)]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT upper(lambda j: 'a') FROM (SELECT '{\"a\": 1}' AS j) AS d",
+        "SELECT upper(LAMBDA j : 'a') FROM (SELECT '{\"a\": 1}' AS j) AS d",
+    ],
+)
+def test_a_keyword_lambda_outside_a_lambda_function_is_refused_by_duckdb(sql: str) -> None:
+    """A keyword lambda is never read as the JSON extract `j -> 'a'`; DuckDB refuses it (#415).
+
+    Parameters
+    ----------
+    sql
+        A query passing a keyword lambda to a function that takes none.
+    """
+    check_blacklist(sql)
+
+    with pytest.raises(duckdb.Error):
+        _run(sql, {})
+
+
+@pytest.mark.parametrize(
     ("expression", "expected"),
     [
         ("upper(j -> '$.a')", '"B"'),
@@ -317,6 +363,15 @@ def test_a_json_arrow_as_a_function_argument_runs_as_duckdb_runs_its_text(
 
     assert duckdb.connect().execute(sql).fetchall() == [(expected,)]
     assert [row[0] for row in _run(sql, {})] == [expected]
+
+
+def test_a_json_arrow_on_a_column_named_lambda_runs() -> None:
+    """`upper("lambda" -> 'a')` extracts from the column `lambda`, as DuckDB runs the text."""
+    sql = 'SELECT upper("lambda" -> \'a\') FROM (SELECT \'{"a": "b"}\'::JSON AS "lambda")'
+    check_blacklist(sql)
+
+    assert duckdb.connect().execute(sql).fetchall() == [('"B"',)]
+    assert [row[0] for row in _run(sql, {})] == ['"B"']
 
 
 def test_a_lambda_over_a_table_read_runs(tmp_path: Path) -> None:
@@ -1169,6 +1224,32 @@ def test_a_column_mask_holds_for_a_read_inside_a_bare_values_list(tmp_path: Path
     rows = _fetch(rewrite_query(sql, {"gold.customers": source}))
 
     assert rows == [("***", 2)]
+
+
+@pytest.mark.parametrize("sql", ["TABLE gold.customers", "table gold.customers"])
+def test_table_is_select_star_with_the_row_filter_and_masks(tmp_path: Path, sql: str) -> None:
+    """`TABLE t` reads as `SELECT * FROM t`, through the same row filter and masks (#415).
+
+    Parameters
+    ----------
+    tmp_path
+        Directory to write into.
+    sql
+        The `TABLE` statement.
+    """
+    probe = tmp_path / "customers.parquet"
+    pq.write_table(pa.table({"id": [1, 2], "ssn": ["111-22-3333", "444-55-6666"]}), probe)
+    source = TableSource(
+        urls=[str(probe)],
+        file_format="parquet",
+        columns={"id": "BIGINT", "ssn": "VARCHAR"},
+        row_filters=("id > 1",),
+        column_masks={"ssn": "'***'"},
+    )
+    check_blacklist(sql)
+
+    assert extract_table_refs(sql) == ["gold.customers"]
+    assert _fetch(rewrite_query(sql, {"gold.customers": source})) == [(2, "***")]
 
 
 def _sales(

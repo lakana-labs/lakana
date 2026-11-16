@@ -14,12 +14,12 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-import sqlglot
 import sqlglot.expressions as exp
 from pyiceberg.table.metadata import TableMetadata
 from sqlalchemy import func, null, select, update
 from sqlalchemy.orm import Session
 
+from lakana_core import sql_dialect
 from lakana_core.catalog.columns import BACKFILL_BATCH
 from lakana_core.catalog.metadata import read_metadata
 from lakana_core.db import rowcount
@@ -55,7 +55,7 @@ def _columns_read(expression: str) -> set[str] | None:
         The names as written; `None` when it does not parse or qualifies a column.
     """
     try:
-        parsed = sqlglot.parse_one(expression, dialect="duckdb", into=exp.Condition)
+        parsed = sql_dialect.parse_one(expression, dialect="duckdb", into=exp.Condition)
     except SQL_SYNTAX_ERRORS:
         return None
     found = list(parsed.find_all(exp.Column))

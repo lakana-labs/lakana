@@ -4530,6 +4530,58 @@ as an arrow again. A lambda-taking function a later DuckDB adds and the list mis
 to bind (its lambda reaches DuckDB as JSON); it never runs anything the guard did not see
 (review of #284).
 
+**Lakana reads DuckDB SQL with its own parser, not sqlglot's newest reading (#415).** From
+sqlglot 30.25 the DuckDB parser no longer records that a lambda was written with `LAMBDA`
+(`upper(lambda j: 'a')` and `upper(j -> 'a')` became one tree, and the first ran as the JSON
+extract) and reads `~`/`!~` as DuckDB 2.0's partial match. Every parse of submitted or stored
+SQL text in the packages (a query, a view, a check, an asset, a row filter or column mask) goes
+through `lakana_core.sql_dialect` (`parse_one`, `parse`), whose parser marks a keyword lambda
+(`KEYWORD_LAMBDA` in its `meta`, which `_json_arrows_outside_lambda_functions` reads) and reads
+`~` as `RegexpFullMatch`, so a query, a check and a deployed asset keep the whole-text match the
+user documentation promises (`test_a_tilde_runs_as_a_whole_text_match`,
+`test_a_keyword_lambda_outside_a_lambda_function_is_refused_by_duckdb`). A new parse site that
+calls `sqlglot.parse_one` directly gets the other reading; use the module. sqlglot's
+`lineage` is handed the parsed tree, never the text (`lineage.extract_lineage`).
+
+`scripts/tests/test_one_sql_parser.py` scans every file under `packages/*/src` except
+`sql_dialect.py`. It resolves each name a file binds to sqlglot (any alias, any import form) and
+finds: an import of `parse`, `parse_one`, `parse_into`, `transpile` or `maybe_parse` from sqlglot; a
+call of one of them on anything rooted in sqlglot, through attributes and calls
+(`sqlglot.Dialect.get_or_raise("duckdb").parse_one(...)`); any use of sqlglot's `Dialect`,
+`dialects`, `parser` or `parsers` (so a dialect object kept in a variable, or `DuckDB().parse`,
+is refused where it is reached); and every call of sqlglot's `lineage`, under any name, outside
+the functions `LINEAGE_ALLOWED` names with a reason. Whether a `lineage` argument holds text
+cannot be told from the source, so that rule fails closed: a new call needs an allow-list entry,
+and an allowed call is still refused if it hands `lineage` a string literal or `sources=` (whose
+values sqlglot parses with its own reading). It does not see dynamic access (`getattr`,
+`importlib`), and it does not see sqlglot's builders that parse a string argument with sqlglot's
+stock reading: `exp.to_table`, `exp.condition`, `exp.cast` (its type), `exp.DataType.build`,
+`Select.where`/`from_`/`select`, `exp.alias_` and `sqlglot.optimizer.optimize`. The packages hand
+those builders nodes or no SQL of a user: the generated read alias is built as
+`exp.Table(this=exp.to_identifier(alias))`, a column's declared type is read by
+`query_rewrite._type` with `sql_dialect.reading_dialect`, and `checks.count_query` and the empty
+relation pass only expressions and identifiers. A reviewer checks a new builder call by hand.
+
+**The ambiguity gate qualifies tables, not columns.** `_require_unambiguous_references` runs
+`qualify(..., qualify_columns=False)`: from 30.25 the column step refuses every unqualified
+column it cannot place without a schema (a correlated subquery, a bare `VALUES` list's subquery,
+a `SELECT` alias in `WHERE`), and the platform passes none. The gate's subject, one name for two
+sources, is decided by the table step and `Scope.selected_sources`, which the flag leaves alone.
+Over the guard-fuzzing corpus plus the guard's test statements (26,819) the gate's verdict with
+and without the column step differed on sqlglot 30.24 only for twelve statements: eleven read a
+column a `WITH` or a derived table lacks (DuckDB's Binder refuses them; checked by executing the
+rewrites), and one was a `JOIN` without a `FROM`, which `_reject_joins_without_from` now refuses
+explicitly (sqlglot renders the joined table as a column there). Diffing the guard's verdicts on
+that corpus between sqlglot 30.24 on the old code and 30.31 on the adapted code found no
+statement newly allowed that reaches data: `TABLE t` now parses as `SELECT * FROM t` and is
+rewritten like it (row filter and masks applied; `TABLE fn()` refused as a table function), and
+`SORT BY`, which 30.24 dropped silently, no longer parses; when a parse fails at the `SORT` or
+`BY` of a pair of plain words `SORT BY`, `refuse_sort_by` raises `SortByError` naming `ORDER BY`
+(for a query, an asset and a check). It runs only after a failed parse, and the caller re-raises
+the syntax error when it does not raise, so it never lets anything through. Expanding a stored view catches `SortByError` with the syntax
+errors and names the view as unreadable: the reader did not write the clause, and the hint
+would tell them a fact about SQL they may not read.
+
 **User SQL cannot reach the values the platform sets, and may not contain a placeholder
 (`?`, `$1`, `$name`).** The rewriter reads each table's resolved file list — on S3, presigned
 URLs of the raw files — through `getvariable('v_<n>_files')`; the query child sets each value
