@@ -55,19 +55,29 @@ const STEPS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
 ];
 
 /**
- * How long ago a time was, or how long until it comes, in the largest whole unit.
+ * How long ago a time was, in the largest whole unit; with `ahead`, also how long until a time to
+ * come.
  *
  * @param iso - The time, ISO 8601.
  * @param now - The present, in milliseconds since the epoch.
  * @param language - The interface language.
+ * @param ahead - Word a time to come, such as an expiry (`in 26 days`). Leave it false for a time
+ *   something happened: one a little ahead of the browser's clock is then a clock difference, and
+ *   gives null like a time within the last minute.
  * @returns The text such as `2 hours ago` or `in 26 days`, in the person's language; null within
- *   a minute of now (the caller shows "just now") and for a time that cannot be read.
+ *   a minute of now (the caller shows "just now"), for a time to come unless `ahead`, and for a
+ *   time that cannot be read.
  */
-export function relativeTime(iso: string, now: number, language: string): string | null {
+export function relativeTime(
+  iso: string,
+  now: number,
+  language: string,
+  ahead = false,
+): string | null {
   const elapsed = now - Date.parse(iso);
-  const distance = Math.abs(elapsed);
-  // The smallest step is a minute, so a time within a minute of now or unreadable (NaN) matches
-  // none.
+  // The smallest step is a minute, so a time within a minute of now, a time to come that was not
+  // asked for, or one that is unreadable (NaN) matches none.
+  const distance = ahead ? Math.abs(elapsed) : elapsed;
   const step = STEPS.find(([, size]) => distance >= size);
   if (step === undefined) {
     return null;

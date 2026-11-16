@@ -194,7 +194,7 @@ export function DroppedView({ environment, namespace, onChanged }: DroppedViewPr
             </td>
             <td>
               {row.restorable ? (
-                <When iso={row.purge_after} never={t("catalog.views.dropped.neverKnown")} />
+                <When iso={row.purge_after} never={t("catalog.views.dropped.neverKnown")} ahead />
               ) : (
                 t("catalog.views.dropped.gone")
               )}
