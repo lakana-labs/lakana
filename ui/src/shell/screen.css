@@ -99,9 +99,15 @@
   background: var(--color-sunk);
 }
 
+/* Only a link is drawn in the accent: a name without a page (a dropped table, an orphan, an
+   upload, a version) is plain text and must not look like a link. */
 .row-name {
-  color: var(--color-accent);
+  color: var(--color-text);
   text-decoration: none;
+}
+
+a.row-name {
+  color: var(--color-accent);
 }
 
 a.row-name::after {

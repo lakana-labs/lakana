@@ -330,6 +330,41 @@ function reachable(locator: Locator): Promise<boolean> {
   });
 }
 
+for (const theme of ["light", "dark"] as const) {
+  test(`only a name that is a link is drawn in the accent, ${theme}`, async ({ page }) => {
+    await stubManagement(page);
+    await page.addInitScript(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme, density: "roomy", language: "en" })],
+    );
+    await openView(page, VIEWS[0], "&ns=gold.sales");
+    const colours = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      const probe = document.createElement("span");
+      document.body.append(probe);
+      const resolve = (token: string): string => {
+        probe.style.color = style.getPropertyValue(token);
+        return getComputedStyle(probe).color;
+      };
+      const name = document.querySelector("span.row-name");
+      const result = {
+        text: resolve("--color-text"),
+        accent: resolve("--color-accent"),
+        name: name === null ? "" : getComputedStyle(name).color,
+      };
+      probe.remove();
+      return result;
+    });
+    expect(colours.name, "a dropped table's name").toBe(colours.text);
+
+    await openView(page, VIEWS[1]);
+    const link = page.getByRole("region", { name: "Expiring tables" }).locator("a.row-name");
+    await expect(link.first()).toHaveCSS("color", colours.accent);
+  });
+}
+
 test.describe("the views' times and links under the pointer", () => {
   test.beforeEach(async ({ page }) => {
     await stubManagement(page);
