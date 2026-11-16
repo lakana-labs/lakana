@@ -36,7 +36,7 @@ from pyiceberg.types import ListType, MapType, NestedField, StructType
 
 from lakana_core.errors import ConflictError, LakanaError
 from lakana_core.errors import ValidationError as LakanaValidationError
-from lakana_core.identifiers import refuse_hidden_characters
+from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_whitespace
 
 
 def parse_metadata_version(location: str | None) -> int:
@@ -124,7 +124,7 @@ def _field_names(fields: Iterable[NestedField]) -> Iterator[str]:
 
 
 def refuse_hidden_column_names(schema: Schema, *, stored: frozenset[str] = frozenset()) -> None:
-    """Refuse a new column name that holds an invisible or line-breaking character.
+    """Refuse a new column name that holds an invisible character or starts or ends with a space.
 
     Parameters
     ----------
@@ -136,11 +136,13 @@ def refuse_hidden_column_names(schema: Schema, *, stored: frozenset[str] = froze
     Raises
     ------
     LakanaValidationError
-        From `refuse_hidden_characters`, for the first new name that holds such a character.
+        From `refuse_hidden_characters` or `refuse_outer_whitespace`, for the first new name
+        that breaks either rule.
     """
     for name in _field_names(schema.fields):
         if name not in stored:
             refuse_hidden_characters(name, what="Column name")
+            refuse_outer_whitespace(name, what="Column name")
 
 
 def build_table_metadata(
