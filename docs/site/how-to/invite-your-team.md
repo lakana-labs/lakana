@@ -87,4 +87,4 @@ Every step has a command: `invite create`, `invite list` and `invite withdraw`, 
 for recovery links, and `session list` and `passkey list` for what a person has (`session list`
 names each browser the same way; `lakana --output json session list` also has the raw
 `user_agent`). The
-[CLI reference](../reference/cli.md#lakana-invite) lists them with their options.
+[CLI reference](../reference/cli/lakana-invite.md) lists them with their options.

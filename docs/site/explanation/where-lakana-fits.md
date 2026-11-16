@@ -21,7 +21,7 @@ does. What it adds is the part that keeps several people, and production, safe:
   [What the audit log records](security.md#what-the-audit-log-records).
 - **Lineage kept by the platform.** Lakana reads which tables and columns each SQL file uses, and
   which tables a Python file reads. You do not maintain it by hand.
-  `lakana table lineage` shows it ([the command](../reference/cli.md#lakana-table-lineage)).
+  `lakana table lineage` shows it ([the command](../reference/cli/lakana-table.md#lakana-table-lineage)).
 - **Protected environments.** In a protected environment only runs of the deployed code write;
   a person cannot change a production table by hand, whatever their grants. For an emergency, a
   person with the right to manage the environment can make a single write, with a reason that is

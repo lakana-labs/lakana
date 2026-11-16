@@ -436,7 +436,12 @@ Within a tab, `nav` groups the pages into named sections, and the tab's index ha
 section in the same order. A page keeps its file when it moves between tabs or sections: only
 `nav` and the index pages change, so no published URL breaks (the site has no redirects).
 
-Three reference files are generated, never edited by hand: `reference/cli.md` from the Typer app,
+The reference files below are generated, never edited by hand. The command line reference comes
+from the Typer app: `reference/cli.md` is its index (the options for every command and one line
+per page), `reference/cli/commands.md` has the commands outside a group, and `reference/cli/`
+has one page per command group, named after the command (`reference/cli/lakana-table.md` for
+`lakana table`), so link a command on its group's page, for example
+`cli/lakana-table.md#lakana-table-maintain`. Also generated:
 `reference/settings.md` from the settings models of `lakana-core` and `lakana-server` (the
 description of a variable is its entry in the model's `Parameters` docstring section, so document
 a new setting there), and `reference/openapi.json`, the OpenAPI document of the platform REST API

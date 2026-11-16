@@ -174,6 +174,46 @@ nav:
           # generated:begin api-nav — written by scripts/generate_reference.py; do not edit by hand
           - Command line:
               - reference/cli.md
+              - reference/cli/commands.md
+              - reference/cli/lakana-me.md
+              - reference/cli/lakana-profile.md
+              - reference/cli/lakana-env.md
+              - reference/cli/lakana-ns.md
+              - reference/cli/lakana-table.md
+              - reference/cli/lakana-artifact.md
+              - reference/cli/lakana-query.md
+              - reference/cli/lakana-principal.md
+              - reference/cli/lakana-group.md
+              - reference/cli/lakana-token.md
+              - reference/cli/lakana-task-token.md
+              - reference/cli/lakana-invite.md
+              - reference/cli/lakana-recovery.md
+              - reference/cli/lakana-session.md
+              - reference/cli/lakana-passkey.md
+              - reference/cli/lakana-sign-in.md
+              - reference/cli/lakana-grant.md
+              - reference/cli/lakana-access.md
+              - reference/cli/lakana-row-filter.md
+              - reference/cli/lakana-column-mask.md
+              - reference/cli/lakana-secret.md
+              - reference/cli/lakana-connection.md
+              - reference/cli/lakana-repo.md
+              - reference/cli/lakana-index.md
+              - reference/cli/lakana-ci-trust.md
+              - reference/cli/lakana-deploys.md
+              - reference/cli/lakana-deployments.md
+              - reference/cli/lakana-project-version.md
+              - reference/cli/lakana-runs.md
+              - reference/cli/lakana-scheduler.md
+              - reference/cli/lakana-worker.md
+              - reference/cli/lakana-term.md
+              - reference/cli/lakana-graph.md
+              - reference/cli/lakana-job.md
+              - reference/cli/lakana-task.md
+              - reference/cli/lakana-check.md
+              - reference/cli/lakana-audit.md
+              - reference/cli/lakana-server.md
+              - reference/cli/lakana-bundle.md
           - REST API:
               - reference/rest-api.md
           # generated:end api-nav

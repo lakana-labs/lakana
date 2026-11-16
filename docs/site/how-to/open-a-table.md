@@ -56,7 +56,7 @@ you break the protection, as `--break-glass` does.
 
 Maintenance expires a table's old snapshots, deletes the files nothing references any more and
 removes the tags of failed checks (see `lakana table maintain` in the
-[CLI reference](../reference/cli.md#lakana-table-maintain)). In the web interface, choose
+[CLI reference](../reference/cli/lakana-table.md#lakana-table-maintain)). In the web interface, choose
 **Actions**, then **Maintain now…**. The form starts with the server's defaults, the same as the
 command's:
 
