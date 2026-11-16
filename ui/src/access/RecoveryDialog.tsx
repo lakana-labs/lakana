@@ -1,6 +1,6 @@
 /**
  * The dialog that issues a recovery link: for a person who is not an administrator, the link,
- * shown once; for an administrator, the server operator's command instead.
+ * shown once; for anyone who holds or has held ADMIN, the server operator's command instead.
  *
  * @packageDocumentation
  */
@@ -8,7 +8,7 @@ import { type JSX, useState } from "react";
 import { Button, FieldError, Form, Heading, Input, Label, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import { createRecoveryLink, isAdministrator, type RecoveryLinkOut } from "../api";
+import { createRecoveryLink, getPrincipal, type RecoveryLinkOut } from "../api";
 import { ActionDialog } from "../shell/ActionDialog";
 import { CopyLine } from "../shell/CopyLine";
 import { useWhen } from "../shell/useWhen";
@@ -31,7 +31,7 @@ type Stage =
   | { readonly kind: "issued"; readonly link: RecoveryLinkOut };
 
 /**
- * Asks for whose account (unless named), finds out whether the person is an administrator, and
+ * Asks for whose account (unless named), finds out whether the person holds or has held ADMIN, and
  * then either shows the operator's command or issues the link (a passkey touch when the server
  * asks for one) and shows it once.
  *
@@ -63,7 +63,7 @@ export function RecoveryDialog({ name: known, onClose }: RecoveryDialogProps): J
             event.preventDefault();
             attempt.run(async () => {
               setStage(
-                (await isAdministrator(name))
+                (await getPrincipal(name)).held_admin === true
                   ? { kind: "operator" }
                   : { kind: "issued", link: await createRecoveryLink(name) },
               );

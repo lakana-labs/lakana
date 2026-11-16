@@ -181,6 +181,47 @@ def test_listing_without_a_filter_includes_the_instance_grants(client: TestClien
     assert any(g["role"] == "ADMIN" for g in listed.json())
 
 
+def test_kind_instance_lists_only_the_grants_on_the_whole_instance(client: TestClient) -> None:
+    """`kind=INSTANCE` (any letter case) lists the instance level alone, as its own level."""
+    create_environment(client)
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "alice", "type": "USER"})
+    on_env = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "alice", "role": "ANALYST", "kind": "ENVIRONMENT", "environment": "dev"},
+    )
+    on_instance = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "alice", "role": "VIEWER", "kind": "INSTANCE"},
+    )
+    assert on_env.status_code == on_instance.status_code == 201
+    listed = client.get("/api/v1/grants", headers=AUTH_HEADER, params={"kind": "instance"})
+    assert listed.status_code == 200, listed.text
+    assert {g["kind"] for g in listed.json()} == {"INSTANCE"}
+    assert on_instance.json()["id"] in {g["id"] for g in listed.json()}
+    assert any(g["role"] == "ADMIN" for g in listed.json())
+    by_env = client.get("/api/v1/grants", headers=AUTH_HEADER, params={"kind": "ENVIRONMENT"})
+    assert [g["id"] for g in by_env.json()] == [on_env.json()["id"]]
+
+
+def test_kind_that_disagrees_with_the_object_is_refused(client: TestClient) -> None:
+    """`kind` with names must name the same level; an unknown kind lists the kinds."""
+    create_environment(client)
+    mixed = client.get(
+        "/api/v1/grants", headers=AUTH_HEADER, params={"kind": "INSTANCE", "environment": "dev"}
+    )
+    assert mixed.status_code == 422, mixed.text
+    assert "environment" in mixed.json()["detail"]
+    agreeing = client.get(
+        "/api/v1/grants", headers=AUTH_HEADER, params={"kind": "ENVIRONMENT", "environment": "dev"}
+    )
+    assert agreeing.status_code == 200, agreeing.text
+    unknown = client.get("/api/v1/grants", headers=AUTH_HEADER, params={"kind": "PLANET"})
+    assert unknown.status_code == 422
+    assert "INSTANCE" in unknown.json()["detail"]
+
+
 def test_dropping_and_recreating_an_environment_revokes_its_stale_grant(
     client: TestClient, settings: Settings
 ) -> None:

@@ -94,6 +94,7 @@ export {
   getTableHealth,
   listColumnMasks,
   listGrantsAt,
+  listInstanceGrants,
   listRowFilters,
   myPermissions,
   submitPreview,

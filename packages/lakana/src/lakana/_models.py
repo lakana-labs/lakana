@@ -1435,11 +1435,17 @@ class Principal:
         `"USER"` or `"SERVICE_ACCOUNT"`.
     is_active
         Whether this principal can currently authenticate.
+    held_admin
+        Whether the principal holds or has ever held the `ADMIN` role on the instance, directly
+        or through a group: only the server operator recovers such a person
+        (`lakana recovery create` with the bootstrap token). `None` unless you are an
+        administrator, or from a server older than this field.
     """
 
     name: str
     type: str
     is_active: bool
+    held_admin: bool | None = None
 
 
 @dataclass(frozen=True)

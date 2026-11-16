@@ -258,8 +258,11 @@ test("an administrator sees who has access, by name", async ({ browser, browserN
     "href",
     new RegExp(`${encodeURIComponent(name)}$`),
   );
-  // The owner's grant at the instance is not listed, and the tab says so.
-  await expect(page.getByText("Grants on the whole instance")).toBeVisible();
+  // The grants on the whole instance have a level of their own, with the administrator's role.
+  const instance = who
+    .locator("section.access-section")
+    .filter({ has: page.getByRole("heading", { level: 3, name: "On the whole instance" }) });
+  await expect(instance.getByRole("row").filter({ hasText: "Admin role" }).first()).toBeVisible();
   await page.context().close();
   await reader.context().close();
 });

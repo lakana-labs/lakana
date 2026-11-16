@@ -111,6 +111,25 @@ def test_principals_list_parses_every_item() -> None:
     assert result == [Principal(name="admin", type="USER", is_active=True)]
 
 
+def test_principals_read_whether_someone_holds_or_held_admin() -> None:
+    """`held_admin` comes through; an older server, or a caller who is no administrator, None."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {"name": "dave", "type": "USER", "is_active": True, "held_admin": True},
+                {"name": "erin", "type": "USER", "is_active": True, "held_admin": False},
+                {"name": "bot", "type": "SERVICE_ACCOUNT", "is_active": True, "held_admin": None},
+                {"name": "old", "type": "USER", "is_active": True},
+            ],
+        )
+
+    result = Principals(_transport(handler)).list()
+
+    assert [p.held_admin for p in result] == [True, False, None, None]
+
+
 def test_principals_deactivate_sends_a_delete() -> None:
     """`principals.deactivate` DELETEs `/api/v1/principals/{name}`."""
     seen: dict[str, Any] = {}

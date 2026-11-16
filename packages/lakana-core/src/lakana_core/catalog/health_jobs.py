@@ -12,13 +12,15 @@ from __future__ import annotations
 import uuid
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, tzinfo
+from zoneinfo import ZoneInfoNotFoundError
 
 from sqlalchemy import ColumnElement, ScalarSelect, and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from lakana_core.catalog.health_record import NEWEST_COMMIT, NOT_SET_BACK
 from lakana_core.errors import ValidationError
+from lakana_core.jobs.tz import load_zone
 from lakana_core.models import (
     EnvironmentDeployment,
     JobVersion,
@@ -121,6 +123,35 @@ def building_jobs(manifests: Sequence[tuple[uuid.UUID, object]], table: str) -> 
                     )
                 )
     return found
+
+
+def writing_zone(manifests: Sequence[tuple[uuid.UUID, object]], table: str) -> tzinfo:
+    """Find the time zone a table's volume band takes a commit's weekday in (#565).
+
+    Parameters
+    ----------
+    manifests
+        From `deployed_manifests`; untrusted.
+    table
+        The dotted table name.
+
+    Returns
+    -------
+    tzinfo
+        The zone of the schedules of the jobs that build the table when they all share one; UTC
+        for a table no job builds, for jobs whose zones differ, and when one of them has no
+        schedule (it counts as UTC) or a zone this server does not know.
+    """
+    zones = {
+        "UTC" if job.schedule is None else job.schedule[1]
+        for job in building_jobs(manifests, table)
+    }
+    if len(zones) != 1:
+        return UTC
+    try:
+        return load_zone(zones.pop())
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return UTC
 
 
 def judged_by_run(

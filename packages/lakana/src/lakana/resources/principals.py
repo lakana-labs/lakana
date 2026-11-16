@@ -24,7 +24,12 @@ def _principal_from_json(data: dict[str, Any]) -> Principal:
     Principal
         The parsed principal.
     """
-    return Principal(name=data["name"], type=data["type"], is_active=data["is_active"])
+    return Principal(
+        name=data["name"],
+        type=data["type"],
+        is_active=data["is_active"],
+        held_admin=data.get("held_admin"),
+    )
 
 
 def _scope_from_json(data: dict[str, Any]) -> Scope:
