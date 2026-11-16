@@ -1291,6 +1291,11 @@ in `ui (e2e smoke)` and `ui (e2e server)` beside it (the required check `ui` wai
 - **Vitest workers.** `ui/vitest.config.ts` caps Vitest at 8 workers (its default is one per CPU
   but one): 19 workers on a 20-thread machine needed more than the 4 GB cap for the coverage run.
   CI's 4-CPU runners keep the default of three.
+- **Async waits.** `ui/src/test/setup.ts` sets Testing Library's `asyncUtilTimeout` to 3 s (the
+  default is 1 s): a file's first render can take longer under the coverage job's load (#657). It
+  stays below Vitest's 5 s test timeout, so a missing element fails with Testing Library's own
+  message and the DOM rather than "Test timed out"; raise both together. A wait that is met
+  returns at once; a test that expects something *not* to appear gives its own short `timeout`.
 - **Locally.** Use Node 26: `~/.local/share/node/current/bin` first on `PATH`, or any Node 26
   (`node --version` must print `v26.*`). Run npm under the memory cap with `TMPDIR` off `/tmp`:
 
