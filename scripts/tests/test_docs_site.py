@@ -1,5 +1,6 @@
 """Tests for the documentation site's configuration."""
 
+import os
 import re
 import subprocess
 import unicodedata
@@ -157,7 +158,14 @@ Tying output blocks to the regions of the examples (#265) lowered `UNCHECKED_OUT
 so the orphan drop and `lakana table rebuild` of `drop-and-restore-a-table.md` are tested:
 `NOT_TESTED_CEILING` fell from 64 to 62, and the rise of 80 to 82 above no longer applies.
 """
-SECTIONS = ("tutorials", "how-to", "reference", "explanation")
+TABS = {
+    "What is Lakana?": "index.md",
+    "Learn": "learn/index.md",
+    "How-to guides": "how-to/index.md",
+    "Concepts": "explanation/index.md",
+    "Reference": "reference/index.md",
+    "Project": "explanation/roadmap.md",
+}
 
 
 def _config() -> dict:
@@ -207,10 +215,45 @@ def test_every_page_is_in_the_navigation_and_every_entry_exists() -> None:
     assert len(listed) == len(set(listed))
 
 
-def test_the_four_sections_exist() -> None:
-    """Tutorials, how-to guides, reference and explanation each have a landing page."""
-    for section in SECTIONS:
-        assert (SITE / section / "index.md").is_file()
+def _tab(title: str) -> list | str:
+    return next(next(iter(e.values())) for e in _config()["nav"] if next(iter(e)) == title)
+
+
+def test_the_navigation_is_six_tabs_in_order() -> None:
+    config = _config()
+    assert [next(iter(e)) for e in config["nav"]] == list(TABS)
+    for title, first in TABS.items():
+        value = _tab(title)
+        assert (value if isinstance(value, str) else _nav_files(value)[0]) == first
+        assert (SITE / first).is_file()
+    assert {"navigation.tabs", "navigation.indexes"} <= set(config["theme"]["features"])
+
+
+INDEXED_TABS = {
+    "Learn": "learn/index.md",
+    "How-to guides": "how-to/index.md",
+    "Concepts": "explanation/index.md",
+    "Reference": "reference/index.md",
+}
+NOT_ON_AN_INDEX = (
+    "tutorials/index.md",
+    "tutorials/move-a-sql-project.md",  # Task 4 drops this one
+    "reference/cli/",
+    "reference/rest/",
+    "reference/sdk/",
+)
+
+
+def test_each_tab_index_links_every_page_of_its_tab() -> None:
+    missing = []
+    for title, index in INDEXED_TABS.items():
+        text = (SITE / index).read_text(encoding="utf-8")
+        for page in _nav_files(_tab(title)):
+            if page == index or page.startswith(NOT_ON_AN_INDEX):
+                continue
+            if f"({os.path.relpath(page, Path(index).parent)}" not in text:
+                missing.append(f"{index} -> {page}")
+    assert missing == []
 
 
 def test_no_file_names_a_page_at_its_old_path() -> None:
