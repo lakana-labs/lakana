@@ -27,10 +27,12 @@ from lakana_core.models import (
     Environment,
     Group,
     PackageIndex,
+    PersonalAccessToken,
     Principal,
     PrincipalType,
     Repository,
     RepositoryKind,
+    Secret,
 )
 from lakana_core.projects.package_indexes import PackageIndexService
 from lakana_core.projects.repositories import RepositoryService
@@ -249,6 +251,7 @@ def test_a_new_secret_name_with_a_format_character_is_refused(
     service = _secrets(session)
     with pytest.raises(ValidationError, match=rf"^Secret name '.*' holds {re.escape(code)}"):
         service.create(_admin(session), environment="dev", name=name, values={"k": "v"})
+    assert session.query(Secret).count() == 0
 
 
 @pytest.mark.parametrize(("name", "where"), [("\xa0s3creds", "starts"), ("s3creds\u3000", "ends")])
@@ -259,6 +262,37 @@ def test_a_new_secret_name_with_an_outer_space_is_refused(
     service = _secrets(session)
     with pytest.raises(ValidationError, match=rf"^Secret name .* {where} with a space"):
         service.create(_admin(session), environment="dev", name=name, values={"k": "v"})
+    assert session.query(Secret).count() == 0
+
+
+def test_a_stored_secret_name_with_a_hidden_character_stays_usable(session: Session) -> None:
+    """A secret named before the rule is listed, rotated and revoked as before."""
+    admin = _admin(session)
+    service = _secrets(session)
+    created = service.create(admin, environment="dev", name="s3creds", values={"k": "v"})
+    name = "s3\u200bcreds"
+    session.query(Secret).update({Secret.name: name})
+    session.commit()
+
+    assert [secret.name for secret in service.list_for_environment(admin, "dev")] == [name]
+    assert service.rotate(admin, created.id, values={"k": "w"}).name == name
+    service.revoke(admin, created.id)
+    assert service.list_for_environment(admin, "dev") == []
+
+
+def test_a_stored_token_name_with_a_hidden_character_stays_usable(session: Session) -> None:
+    """A token named before the rule is listed, signs in and is revoked as before."""
+    admin = _admin(session)
+    service = PatService(session, AllowAllAuthorization())
+    issued = service.issue(admin, admin.name, name="laptop")
+    name = "lap\u202etop"
+    session.query(PersonalAccessToken).update({PersonalAccessToken.name: name})
+    session.commit()
+
+    assert [token.name for token in service.list(admin, admin.name)] == [name]
+    assert service.verify(issued.key_id, issued.token.rsplit("_", 1)[1]).id == admin.id
+    service.revoke(admin, admin.name, issued.key_id)
+    assert all(token.revoked_at is not None for token in service.list(admin, admin.name))
 
 
 @pytest.mark.parametrize(("name", "code"), _HIDDEN)
@@ -305,5 +339,5 @@ def test_a_new_principal_name_with_an_outer_space_is_refused(
 @pytest.mark.parametrize("name", ["Mac\u2028Book", "Mac\u2029Book"])
 def test_a_passkey_name_with_a_line_separator_is_refused(name: str) -> None:
     """Control and format characters were refused before; line separators are now."""
-    with pytest.raises(ValidationError, match=re.escape("no control characters")):
+    with pytest.raises(ValidationError, match=re.escape("no control or format characters")):
         _passkey_name(name)

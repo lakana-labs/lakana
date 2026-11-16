@@ -211,9 +211,9 @@ def _passkey_name(name: str | None) -> str:
         for ch in text
     ):
         raise ValidationError(
-            f"A passkey name has at most {_MAX_NAME} characters and no control characters or "
-            "line breaks. "
-            "Choose a shorter name, such as the device it is on."
+            f"A passkey name has at most {_MAX_NAME} characters and no control or format "
+            "characters (which are invisible) or line breaks. Choose a shorter name of visible "
+            "characters, such as the device it is on."
         )
     return text
 

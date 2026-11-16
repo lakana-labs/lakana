@@ -362,7 +362,7 @@ namespace's path and an undrop's new name without their outer spaces; it now sen
 so it and the CLI create the same names and refuse the same ones with the same sentence. Existing
 names are not touched: they stay readable and writable, and can be renamed or dropped.
 
-### The same name rules for repositories, groups, tokens, secrets and package indexes (breaking)
+### The same name rules for repositories, groups, tokens, secrets, package indexes, principals and passkeys (breaking)
 
 The two rules above now hold for more of the names you choose. A new repository, group, package
 index, secret or personal access token name may no longer hold a control or format character
@@ -381,9 +381,9 @@ instead, …`.
   creates already met them.
 - **Personal access token** (`lakana token issue`, `POST /api/v1/principals/{name}/tokens`): both
   rules for the token's name.
-- **Secret** (`lakana secret create`): its name already refused an ASCII space, control
-  characters and bidirectional controls; now every other format character and any other Unicode
-  space at either end are refused too.
+- **Secret** (`lakana secret create`, `POST /api/v1/environments/{environment_name}/secrets`):
+  its name already refused an ASCII space, control characters and bidirectional controls; now
+  every other format character and any other Unicode space at either end are refused too.
 - **Principal** (`lakana principal create`, `POST /api/v1/principals`): control and format
   characters were refused already; the line and paragraph separators and a space at either end
   are now too, as an invite already did.
