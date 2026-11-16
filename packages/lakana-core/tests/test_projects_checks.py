@@ -155,6 +155,11 @@ def _messages(issues: list) -> list[str]:
             "GROUP BY id) SELECT * FROM d WHERE n > 1) AS lakana_check",
         ),
         (
+            "SELECT id FROM silver.t WHERE code !~ '[A-Z]{3}'",
+            "SELECT COUNT(*) AS failing FROM (SELECT id FROM silver.t WHERE NOT "
+            "REGEXP_FULL_MATCH(code, '[A-Z]{3}')) AS lakana_check",
+        ),
+        (
             "SELECT id FROM silver.t EXCEPT SELECT id FROM dim.keys",
             "SELECT COUNT(*) AS failing FROM (SELECT id FROM silver.t EXCEPT SELECT id FROM "
             "dim.keys) AS lakana_check",
@@ -297,6 +302,15 @@ def test_a_syntax_error_names_its_line() -> None:
     (issue,) = caught.value.issues
     assert issue.line == 6
     assert issue.message.startswith("the SQL does not parse:")
+
+
+def test_a_sort_by_gets_the_order_by_hint() -> None:
+    """A check's `SORT BY` is refused as a query's is, naming `ORDER BY`, not as a syntax error."""
+    text = "SELECT * FROM silver.station_temperatures WHERE a < 0 SORT BY a\n"
+    with pytest.raises(ProjectValidationError) as caught:
+        parse_checks([_check(text)])
+    (issue,) = caught.value.issues
+    assert issue.message == "SORT BY is not supported; use ORDER BY."
 
 
 def test_a_statement_over_the_limit_is_refused() -> None:

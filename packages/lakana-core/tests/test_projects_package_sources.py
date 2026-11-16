@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 
 from lakana_core.errors import ValidationError
@@ -349,7 +351,8 @@ def test_six_hosts_of_the_public_index_are_refused_with_and_without_a_credential
 def test_testpypi_may_be_registered_but_never_with_a_credential(url: str) -> None:
     stored = normalize_index_url(url, credential=False)
     assert stored == comparable_index_url(url)
-    assert stored.startswith("https://test.pypi.org")
+    parts = urlsplit(stored)
+    assert (parts.scheme, parts.hostname) == ("https", "test.pypi.org")
     with pytest.raises(ValidationError) as caught:
         normalize_index_url(url, credential=True)
     assert str(caught.value) == (

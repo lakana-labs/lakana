@@ -17,10 +17,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-import sqlglot
 import sqlglot.expressions as exp
 from pyiceberg.types import NestedField
 
+from lakana_core import sql_dialect
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import shown
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
@@ -339,7 +339,7 @@ def rename_columns(expression: str, names: Mapping[str, str]) -> str:
         the binding does not have: the policy is never applied as written instead.
     """
     try:
-        parsed = sqlglot.parse_one(expression, dialect="duckdb", into=exp.Condition)
+        parsed = sql_dialect.parse_one(expression, dialect="duckdb", into=exp.Condition)
     except SQL_SYNTAX_ERRORS as exc:
         raise UnreadablePolicyError from exc
     for column in list(parsed.find_all(exp.Column)):

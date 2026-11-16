@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import uuid
 
-import sqlglot
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlglot import exp
 
+from lakana_core import sql_dialect
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.catalog.identity import live_table
 from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied
@@ -166,7 +166,7 @@ def preview_parts(sql: str) -> tuple[str, ...]:
     ValueError
         If the SQL names no table, so it is not a preview's.
     """
-    table = sqlglot.parse_one(sql, read="duckdb").find(exp.Table)
+    table = sql_dialect.parse_one(sql, dialect="duckdb").find(exp.Table)
     if table is None:
         raise ValueError("The SQL names no table, so it is not a preview's.")
     return tuple(part.name for part in table.parts)

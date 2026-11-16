@@ -568,6 +568,16 @@ at run time) now fails. Declare every package the task needs in `[project] depen
 `uv lock` and deploy ([Dependencies](../reference/python-assets.md#dependencies)). Pull the task
 images of the new version together with the others.
 
+### `SORT BY` is refused (breaking)
+
+Lakana reads SQL with a newer sqlglot, which no longer reads `SORT BY`. The older one accepted it
+and ran the query with the clause dropped, so the rows came back unsorted. A query, a SQL asset or a
+check that holds `SORT BY` is now refused with "SORT BY is not supported; use ORDER BY.": write
+`ORDER BY` instead. A view created before the upgrade whose SQL holds `SORT BY` can no longer be
+read: a query over it fails with "View 'gold.v' could not be read. Ask its owner to recreate it."
+Its owner creates the view again with `ORDER BY` in place of `SORT BY`
+([SQL in queries](../reference/sql-in-queries.md#table-t-and-sort-by)).
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header
