@@ -139,7 +139,7 @@ class Alphas:
         return 0
 
     @property
-    def label(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def label(self):  # ruff: ignore[missing-return-type-public-function]
         """A label without a type.
 
         Returns
