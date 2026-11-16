@@ -185,6 +185,80 @@ def test_rewrite_refuses_a_table_alias_that_reuses_a_cte_name() -> None:
         rewrite_query(sql, sources={"raw.events": _parquet("a.parquet")})
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a FROM bronze.x WHERE a IN (SELECT a FROM silver.y)",
+        "SELECT a FROM bronze.x WHERE EXISTS (SELECT 1 FROM silver.y WHERE y.b = a)",
+        "SELECT a, (SELECT count(*) FROM silver.y WHERE y.a = a) AS n FROM bronze.x",
+        "SELECT a AS b FROM bronze.x, silver.y WHERE b > 1",
+    ],
+)
+def test_an_unqualified_column_no_schema_places_is_not_an_ambiguity(sql: str) -> None:
+    """A column only a schema could place is ordinary SQL; the gate is about table names.
+
+    From sqlglot 30.25 its column qualifier refuses such a column when no schema is given
+    (a correlated subquery, a `SELECT` alias in `WHERE`), so the gate no longer runs it (#415).
+
+    Parameters
+    ----------
+    sql
+        A query whose tables are unambiguous and whose columns are not qualified.
+    """
+    assert sorted(extract_table_refs(sql)) == ["bronze.x", "silver.y"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a FROM bronze.x WHERE a IN "
+        "(WITH t AS (SELECT 1 AS a) SELECT a FROM bronze.t JOIN t ON true)",
+        "SELECT a FROM bronze.x WHERE EXISTS "
+        "(WITH c AS (SELECT 1 AS a) SELECT a FROM c, silver.y AS c WHERE a = 1)",
+        "SELECT a, (SELECT count(*) FROM (SELECT 1 AS a) AS y, silver.y AS y WHERE y.a = a) AS n "
+        "FROM bronze.x",
+    ],
+)
+def test_a_name_that_means_two_tables_is_refused_beside_unqualified_columns(sql: str) -> None:
+    """Without the column step, a name for two sources in a correlated scope is still refused.
+
+    Parameters
+    ----------
+    sql
+        A query with one name for two sources inside a subquery that reads outer columns.
+    """
+    with pytest.raises(ValidationError, match="unambiguously"):
+        extract_table_refs(sql)
+    with pytest.raises(ValidationError, match="unambiguously"):
+        rewrite_query(sql, sources={"silver.y": _parquet("a.parquet")})
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * JOIN bronze.canary ON true",
+        "SELECT val JOIN bronze.canary AS c USING (id)",
+        "SELECT *, val JOIN bronze.canary",
+        "SELECT (SELECT 1 JOIN bronze.canary ON true) AS x FROM silver.y",
+        "SELECT * JOIN gfrom read_json_auto('s3://other-bucket/x.json')",
+    ],
+)
+def test_a_join_without_a_from_is_refused(sql: str) -> None:
+    """A `JOIN` with no `FROM` before it is refused, as sqlglot's column step refused it up to #415.
+
+    DuckDB cannot parse it either; refused by the guard, it never reaches DuckDB in the shape
+    sqlglot renders it (the joined table as a column of the `SELECT`).
+
+    Parameters
+    ----------
+    sql
+        A `SELECT` that joins a table to nothing.
+    """
+    for check in (extract_table_refs, lambda text: rewrite_query(text, {})):
+        with pytest.raises(ValidationError, match="A JOIN needs a FROM"):
+            check(sql)
+
+
 def test_extract_table_refs_reports_both_tables_of_an_unqualified_column_join() -> None:
     """An unqualified column over two sources is ordinary SQL, not an ambiguity to refuse.
 
@@ -389,6 +463,21 @@ _JSON = 'FROM (SELECT \'{"a": "b"}\'::JSON AS j) AS d'
 """A derived table with one JSON column `j`, for the JSON-arrow cases."""
 
 
+def test_a_json_arrow_on_a_column_named_lambda_stays_a_json_extract() -> None:
+    """A quoted `"lambda"` before an arrow is a column, not the `LAMBDA` keyword (#415 review).
+
+    Marked as a keyword lambda it rendered as `UPPER((LAMBDA "lambda" : 'a'))`, which DuckDB
+    refuses; the caller's text is a JSON extract on the column.
+    """
+    sql = 'SELECT upper("lambda" -> \'a\') AS v FROM (SELECT \'{"a": "b"}\'::JSON AS "lambda") AS d'
+    check_blacklist(sql)
+
+    rewritten = rewrite_query(sql, {}).sql
+
+    assert "UPPER(\"lambda\" -> 'a')" in rewritten
+    assert "LAMBDA" not in rewritten
+
+
 @pytest.mark.parametrize(
     ("expression", "rendered"),
     [
@@ -474,6 +563,37 @@ def test_columns_a_keyword_lambda_and_two_parameters_stay_lambdas(sql: str) -> N
         A query whose lambda must stay a lambda.
     """
     assert "LAMBDA" in rewrite_query(sql, {}).sql
+
+
+@pytest.mark.parametrize(
+    ("sql", "rendered"),
+    [
+        ("SELECT a ~ 'b' AS m FROM (SELECT 'abc' AS a) AS d", "REGEXP_FULL_MATCH(a, 'b')"),
+        ("SELECT a !~ 'b' AS m FROM (SELECT 'abc' AS a) AS d", "NOT REGEXP_FULL_MATCH(a, 'b')"),
+        (
+            "SELECT regexp_matches(a, 'b') AS m FROM (SELECT 'abc' AS a) AS d",
+            "REGEXP_MATCHES(a, 'b')",
+        ),
+    ],
+)
+def test_a_tilde_matches_the_whole_text_as_documented(sql: str, rendered: str) -> None:
+    """`~` and `!~` stay a whole-text match; sqlglot 30.25 reads them as DuckDB 2.0's partial one.
+
+    Parameters
+    ----------
+    sql
+        A query with a regular-expression match.
+    rendered
+        The match as the rewrite must hand it to DuckDB.
+    """
+    assert rendered in rewrite_query(sql, {}).sql
+
+
+def test_a_keyword_lambda_inside_a_keyword_lambda_stays_a_lambda() -> None:
+    """Every keyword lambda is marked, a nested one too, so neither becomes a JSON extract."""
+    sql = "SELECT upper(lambda j: upper(lambda k: 'a')) FROM (SELECT 1 AS j, 2 AS k) AS d"
+
+    assert rewrite_query(sql, {}).sql.count("LAMBDA") == 2
 
 
 def test_the_lambda_functions_sqlglot_gives_a_class_are_matched_by_that_class() -> None:
@@ -2602,7 +2722,6 @@ _SELECT_FORM = (
 """The refusal for a clause DuckDB takes in a `SELECT` but not on a bare `VALUES`."""
 
 _VALUES_CLAUSES_DUCKDB_REFUSES = [
-    pytest.param("SORT BY 1", "DuckDB has no SORT BY; use ORDER BY.", id="sort-by"),
     pytest.param("CLUSTER BY 1", "DuckDB has no CLUSTER BY; use ORDER BY.", id="cluster-by"),
     pytest.param("DISTRIBUTE BY 1", "DuckDB has no DISTRIBUTE BY; remove it.", id="distribute-by"),
     pytest.param(
@@ -2641,6 +2760,60 @@ def test_a_clause_duckdb_does_not_take_on_a_bare_values_list_is_refused(
         with pytest.raises(ValidationError) as caught:
             check(sql)
         assert str(caught.value) == message
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "VALUES (1) SORT BY 1",
+        "SELECT 1 AS a SORT BY 1",
+        "select a from bronze.x sort by a",
+        "SELECT * FROM (SELECT 1 AS a SORT BY a) AS s",
+        "SELECT a FROM bronze.x SORT\n  BY a",
+        "SELECT sort by FROM bronze.x SORT BY by",
+    ],
+)
+def test_a_sort_by_is_refused_with_the_order_by_hint(sql: str) -> None:
+    """A `SORT BY` is refused naming `ORDER BY` (sqlglot 30.24 dropped it, 30.25 cannot parse it).
+
+    DuckDB has no `SORT BY` either, so it is never run without the clause the caller wrote.
+
+    Parameters
+    ----------
+    sql
+        A query with a `SORT BY`.
+    """
+    for check in (check_blacklist, extract_table_refs, lambda text: rewrite_query(text, {})):
+        with pytest.raises(ValidationError) as caught:
+            check(sql)
+        assert str(caught.value) == "SORT BY is not supported; use ORDER BY."
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 1 +",
+        "SELECT sort, by FROM",
+        "SELECT 'SORT BY' AS s FROM",
+        "SELECT sort by FROM bronze.x WHERE",
+    ],
+)
+def test_a_syntax_error_without_sort_by_stays_a_syntax_error(sql: str) -> None:
+    """Only the words `SORT BY` outside a string get the hint; other broken SQL does not.
+
+    Parameters
+    ----------
+    sql
+        A query sqlglot cannot parse.
+    """
+    for check in (check_blacklist, extract_table_refs, lambda text: rewrite_query(text, {})):
+        with pytest.raises(sqlglot.errors.ParseError):
+            check(sql)
+
+
+def test_sort_by_inside_a_string_is_just_text() -> None:
+    """A string reading `SORT BY` is a value, not a clause."""
+    assert extract_table_refs("SELECT 'x SORT BY y' AS s FROM bronze.x") == ["bronze.x"]
 
 
 def test_every_argument_sqlglot_can_set_on_values_is_allowed_or_refused_by_name() -> None:

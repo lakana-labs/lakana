@@ -62,6 +62,8 @@ export const TABLE: TableOut = {
     column("channel", "string"),
     column("note", "string"),
   ],
+  defined_by: null,
+  actions: ["drop", "maintain", "set_retention"],
   sql: null,
   references: null,
   hidden_references: 0,

@@ -246,4 +246,22 @@ describe("useTablePages", () => {
       expect(result.current.capped).toBe(true);
     });
   });
+
+  it("reads no table list while another view is shown, and reads again on All", async () => {
+    const server = fakeServer({ "GET /api/v1/tables": { status: 200, body: FIRST } });
+    const { result, rerender } = render({ ...DEFAULT_VIEW, view: "dropped" });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(server.sent).toHaveLength(0);
+    expect(result.current.busy).toBe(false);
+    expect(result.current.items).toBeUndefined();
+
+    rerender({ shown: DEFAULT_VIEW });
+    await waitFor(() => {
+      expect(names(result.current.items)).toEqual(["a", "b"]);
+    });
+    expect(server.sent).toHaveLength(1);
+  });
 });

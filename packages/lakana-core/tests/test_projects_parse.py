@@ -134,6 +134,11 @@ def test_normalize_sql_ignores_formatting_comments_and_keyword_case() -> None:
     assert normalize_sql(first) != normalize_sql("SELECT a FROM bronze.x WHERE a > 1")
 
 
+def test_normalize_sql_keeps_a_tilde_a_whole_text_match() -> None:
+    """A deployed asset's `~` is stored as the whole-text match it runs as (#415)."""
+    assert "REGEXP_FULL_MATCH(code, 'a')" in normalize_sql("SELECT code ~ 'a' FROM bronze.x")
+
+
 def test_recursion_error_is_an_issue(monkeypatch: pytest.MonkeyPatch) -> None:
     """Adversarial: a RecursionError from sqlglot never escapes."""
 

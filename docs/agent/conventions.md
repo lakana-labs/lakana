@@ -284,7 +284,7 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
 ## Upper bounds on the deeply used dependencies
 
 `sqlglot` and `pyiceberg` (`lakana-core`) and `duckdb` (`lakana-worker`) carry an upper bound:
-`sqlglot>=30.21.0,<30.25`, `pyiceberg>=0.12,<0.13`, `duckdb>=2.0,<3`. Lakana uses their APIs deeply
+`sqlglot>=30.31.0,<31`, `pyiceberg>=0.12,<0.13`, `duckdb>=2.0,<3`. Lakana uses their APIs deeply
 (`sqlglot` drives lineage and the query rewriter for row filters and column masks), and
 they change signatures in minor releases. The lock does not protect a user: `pip install` ignores
 it, so an unbounded requirement takes the newest release on the day it is installed (a `sqlglot`
@@ -295,13 +295,15 @@ only 2.0 has (`extension_directories`, `allow_extension_repositories`, `async_th
 same test pins `duckdb>=2.0,<3`. Moving to DuckDB 3 means sweeping the guard's function lists
 (`query_rewrite.py`) and the query process's settings (`query_child.py`) again, as #96 did for 2.0.
 
-**`sqlglot` is held below 30.25** (issue #415): from 30.25 its qualifier refuses an unqualified
-column in a subquery, or a `SELECT` alias in `WHERE`, when no schema is given ("Cannot resolve
-'a' due to missing source schemas"), so the guard would refuse ordinary queries and check
-queries, and its DuckDB parser no longer records that a lambda was written with `LAMBDA`. A hold
-below a minor release is also an `ignore` in `.github/dependabot.yml`, or the weekly group raises
-the bound itself (#528 did); the same test fails when the two disagree. Lift both together, once
-the guard is adapted without weakening a check.
+**A `sqlglot` minor release can change what the guard sees.** 30.25 did (issue #415): its
+qualifier refuses an unqualified column it cannot place without a schema, its DuckDB parser
+reads `~` as a partial match and forgets that a lambda was written with `LAMBDA`. Lakana parses
+DuckDB SQL only through `lakana_core.sql_dialect` (whole-text `~`, keyword lambdas marked), and
+the guard's ambiguity check skips the column step. When a minor release has to be held back
+until the guard is adapted, the hold below it is also an `ignore` in `.github/dependabot.yml`,
+or the weekly group raises the bound itself (#528 did); `scripts/tests/test_dependency_bounds.py`
+fails when the two disagree. Lift both together, once the guard is adapted without weakening a
+check.
 
 To raise a bound: its own pull request (the Dependabot updates keep the lock current inside the
 bounds), after reading the upstream changelog, with the suite green on the new version.

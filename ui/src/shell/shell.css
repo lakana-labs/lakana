@@ -223,6 +223,19 @@
   border-top: 1px solid var(--color-line);
 }
 
+/* Between groups of items in a menu without sections, such as a table's Actions. */
+.menu-separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--color-line);
+}
+
+/* A note under a menu's items that a file path can make long: it wraps, at 320 px too. */
+.menu-note {
+  max-width: 22rem;
+  overflow-wrap: anywhere;
+}
+
 .menu-header {
   padding: var(--space-1) var(--space-3);
   font-size: var(--type-label-size);

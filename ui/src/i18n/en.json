@@ -321,6 +321,13 @@
     "working": "Working…"
   },
   "catalog": {
+    "view": {
+      "label": "Views of the catalog",
+      "all": "All tables",
+      "dropped": "Dropped",
+      "expiring": "Expiring",
+      "orphans": "Orphans"
+    },
     "tables": "Tables",
     "columns": {
       "name": "Name",

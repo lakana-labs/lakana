@@ -18,11 +18,12 @@ async function openTable(page: Page, tab = ""): Promise<void> {
   await expect(page.getByRole("navigation", { name: "Sections of the table" })).toBeVisible();
 }
 
-/** The tabs after Preview, with what shows once each has read its data. */
+/** The tabs after Preview (References last, so the indices of the others hold), with what shows once each has read its data. */
 const NEW_TABS = [
   ["/lineage", "region", "Lineage of fact_sales"],
   ["/health", "heading", "Checks"],
   ["/access", "heading", "Column masks"],
+  ["/references", "heading", "This table references"],
 ] as const;
 
 /**
@@ -36,7 +37,7 @@ function tabName(entry: (typeof NEW_TABS)[number]): string {
 }
 
 /**
- * Opens one of the Lineage, Health and Access tabs and waits until it shows what it read.
+ * Opens one of the Lineage, Health, Access and References tabs and waits until it shows what it read.
  *
  * @param page - The page.
  * @param entry - The tab, the role of what to wait for and its name.
@@ -192,14 +193,14 @@ for (const theme of ["light", "dark"] as const) {
         await expect(path).toBeFocused();
       });
 
-      test("the six tabs wrap at 320 px and every tab fits and passes axe", async ({ page }) => {
+      test("the seven tabs wrap at 320 px and every tab fits and passes axe", async ({ page }) => {
         await page.setViewportSize({ width: 320, height: 640 });
         await openTable(page);
         const tabs = page.getByRole("navigation", { name: "Sections of the table" });
         const boxes = await tabs
           .getByRole("link")
           .evaluateAll((links) => links.map((link) => link.getBoundingClientRect()));
-        expect(boxes).toHaveLength(6);
+        expect(boxes).toHaveLength(7);
         // Wrapped: more than one line, and every tab inside the window.
         expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBeGreaterThan(1);
         expect(Math.max(...boxes.map((box) => box.right))).toBeLessThanOrEqual(320);
@@ -211,7 +212,7 @@ for (const theme of ["light", "dark"] as const) {
         }
       });
 
-      test("the sections of Overview, Lineage, Health and Access are flat panels; Columns has none", async ({
+      test("the sections of Overview, Lineage, References, Health and Access are flat panels; Columns has none", async ({
         page,
       }) => {
         await page.setViewportSize({ width: 1920, height: 1080 });
@@ -689,7 +690,7 @@ test.describe("the table page in real Chromium", () => {
       await openTable(page, "/columns");
       await expect(page.locator("html")).toHaveAttribute("data-density", density);
       await measure("Columns");
-      for (const entry of NEW_TABS.slice(1)) {
+      for (const entry of NEW_TABS.slice(1, 3)) {
         await openNewTab(page, entry);
         await measure(entry[0]);
       }
@@ -704,7 +705,7 @@ test.describe("the table page in real Chromium", () => {
 
   test("at 320 px a status word in Health and Access stays on one line", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
-    for (const entry of NEW_TABS.slice(1)) {
+    for (const entry of NEW_TABS.slice(1, 3)) {
       await openNewTab(page, entry);
       const words = page.locator(".table-tab .glyph-word");
       await expect(words.first()).toBeVisible();
@@ -1148,5 +1149,84 @@ test.describe("the table page in real Chromium", () => {
     await page.getByRole("link", { name: "Lineage ›" }).click();
     await expect(page).toHaveURL(/\/fact_sales\/lineage$/);
     await expect(page.getByRole("region", { name: "Lineage of fact_sales" })).toBeVisible();
+  });
+});
+
+test.describe("Maintain now and Retention in Chromium", () => {
+  const origin = "http://localhost:4173";
+  const table = "/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales";
+
+  test("Maintain now queues maintenance and names the query and its command; axe is clean", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+    await page.route(
+      (url) => url.pathname === `${table}/maintenance`,
+      (route) => route.fulfill({ status: 202, json: { query_id: "q-77" } }),
+    );
+
+    await page.goto(`${origin}${TABLE}`);
+    await page.getByRole("button", { name: "Actions" }).click();
+    await page.getByRole("menuitem", { name: "Maintain now…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Maintain gold.sales.fact_sales now" });
+    await expect(dialog.getByRole("textbox", { name: /Keep snapshots younger/ })).toHaveValue("7");
+    expect(await violations(page), "the Maintain now form").toEqual([]);
+    await dialog.getByRole("button", { name: "Maintain now" }).click();
+
+    await expect(dialog.getByText("Maintenance is queued as query q-77.")).toBeVisible();
+    await expect(dialog.getByText("lakana query status 'q-77' --env 'prod'")).toBeVisible();
+    expect(await violations(page), "the queued dialog").toEqual([]);
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("button", { name: "Actions" })).toBeFocused();
+  });
+
+  test("Retention shows the rule, saves another and shows its sentence; axe is clean", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+    const retention = {
+      name: "fact_sales",
+      namespace: "gold.sales",
+      uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+      source: "table",
+      days: 30,
+      on: null,
+      never: false,
+      set_by: "ana",
+      set_at: "2026-11-01T08:00:00Z",
+      last_activity_at: "2026-11-12T06:00:00Z",
+      expires_at: "2026-12-12T06:00:00Z",
+      kept: null,
+    };
+    let body: unknown = null;
+    await page.route(
+      (url) => url.pathname === `${table}/retention`,
+      async (route) => {
+        if (route.request().method() === "PUT") {
+          body = route.request().postDataJSON();
+          return route.fulfill({
+            json: { ...retention, days: null, never: true, expires_at: null },
+          });
+        }
+        return route.fulfill({ json: retention });
+      },
+    );
+
+    await page.goto(`${origin}${TABLE}`);
+    await page.getByRole("button", { name: "Actions" }).click();
+    await page.getByRole("menuitem", { name: "Retention…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Retention of gold.sales.fact_sales" });
+    await expect(
+      dialog.getByText("30 days after its last activity, set for the table by ana"),
+    ).toBeVisible();
+    expect(await violations(page), "the Retention form").toEqual([]);
+    await dialog.getByText("On a day").click();
+    expect(await violations(page), "the day field").toEqual([]);
+    await dialog.getByText("Never").click();
+    await dialog.getByRole("button", { name: "Save" }).click();
+
+    await expect(dialog.getByText("never, set for the table by ana")).toBeVisible();
+    expect(body).toEqual({ never: true });
+    expect(await violations(page), "the saved retention").toEqual([]);
   });
 });

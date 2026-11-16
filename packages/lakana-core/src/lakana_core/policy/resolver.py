@@ -7,11 +7,11 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-import sqlglot
 import sqlglot.expressions as exp
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from lakana_core import sql_dialect
 from lakana_core.auth import PrincipalRef
 from lakana_core.identifiers import TableRef
 from lakana_core.models import ColumnMask, Group, GroupMembership, RowFilter
@@ -175,7 +175,7 @@ def _substitute_context_functions(
         its text (`UNREADABLE_POLICY_MESSAGE`).
     """
     try:
-        parsed = sqlglot.parse_one(expression, dialect=dialect, into=exp.Condition)
+        parsed = sql_dialect.parse_one(expression, dialect=dialect, into=exp.Condition)
     except SQL_SYNTAX_ERRORS as exc:
         raise UnreadablePolicyError from exc
     for node in list(parsed.walk()):
