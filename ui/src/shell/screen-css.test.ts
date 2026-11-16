@@ -48,9 +48,16 @@ it("right-aligns numbers with tabular figures", () => {
   );
 });
 
-it("lifts what carries a title above the row's link in the Catalog list only", () => {
-  expect(screen).toMatch(/\.catalog-list \[title\]\s*{[^}]*position:\s*relative/);
+it("lifts what carries a title above the row's link only in the lists that forward its click", () => {
+  expect(screen).toMatch(
+    /\.catalog-list \[title\],\s*\.expiring-view \[title\]\s*{[^}]*position:\s*relative/,
+  );
   expect(screen).not.toMatch(/\.list \[title\]/);
+});
+
+it("lays the row's overlay only from a link: a name without a page covers nothing", () => {
+  expect(screen).toMatch(/a\.row-name::after\s*{[^}]*position:\s*absolute/);
+  expect(screen).not.toMatch(/(^|[^a])\.row-name::after/m);
 });
 
 it("lays a horizontal radio group out in a row that wraps, with its label and texts above", () => {
