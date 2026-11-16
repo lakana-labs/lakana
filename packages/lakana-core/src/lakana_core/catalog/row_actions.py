@@ -280,9 +280,11 @@ def place_actions_each(
         Each place's actions, in `ENVIRONMENT_ACTIONS` or `NAMESPACE_ACTIONS` order.
     """
     per_row: list[list[_Question]] = []
+    words: list[tuple[str, ...]] = []
     for environment, namespace in places:
         if namespace is None:
             per_row.append([(Action.CREATE_NAMESPACE, Securable.environment_scope(environment))])
+            words.append(ENVIRONMENT_ACTIONS)
         else:
             scope = Securable.namespace_scope(environment, namespace)
             per_row.append(
@@ -292,15 +294,8 @@ def place_actions_each(
                     (Action.DROP_NAMESPACE, scope),
                 ]
             )
+            words.append(NAMESPACE_ACTIONS)
     return [
-        tuple(
-            word
-            for word, allowed in zip(
-                ENVIRONMENT_ACTIONS if len(answers) == 1 else NAMESPACE_ACTIONS,
-                answers,
-                strict=True,
-            )
-            if allowed
-        )
-        for answers in _ask(authz, p, per_row)
+        tuple(word for word, allowed in zip(row_words, answers, strict=True) if allowed)
+        for row_words, answers in zip(words, _ask(authz, p, per_row), strict=True)
     ]

@@ -179,24 +179,24 @@ def test_the_last_read_and_its_count_are_not_audited_as_activity_viewed(
     assert [e.detail["view"] for e in _activity_viewed(client)] == ["table_readers"]
 
 
+NAMESPACE_ACTIONS = ["create_namespace", "create_external_table", "drop"]
+
+
 def test_the_tree_answers_counts_per_node(client: TestClient) -> None:
     _table(client, "a")
     _table(client, "b")
     tree = client.get("/api/v1/tables/tree", headers=AUTH_HEADER).json()
-    for env in tree["environments"]:
-        env.pop("actions")
-        for namespace in env["namespaces"]:
-            namespace.pop("actions")
     assert tree == {
         "count": 2,
         "environments": [
             {
                 "name": "dev",
                 "count": 2,
+                "actions": ["create_namespace"],
                 "namespaces": [
-                    {"path": "bronze", "count": 0},
-                    {"path": "gold", "count": 2},
-                    {"path": "silver", "count": 0},
+                    {"path": "bronze", "count": 0, "actions": NAMESPACE_ACTIONS},
+                    {"path": "gold", "count": 2, "actions": NAMESPACE_ACTIONS},
+                    {"path": "silver", "count": 0, "actions": NAMESPACE_ACTIONS},
                 ],
             }
         ],
