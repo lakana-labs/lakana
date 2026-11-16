@@ -193,7 +193,7 @@ walks every page.
 
 In the web interface, open **Catalog** and choose **Dropped** above the list. It lists the tables
 dropped from one environment, newest first, with the namespace each was dropped from, when it was
-dropped and until when it can be restored. Choose an environment in the tree first: with none
+dropped ("2 days ago") and until when it can be restored ("in 5 days", the exact time on hover). Choose an environment in the tree first: with none
 chosen, the page lists your environments to pick from. Choose a namespace in the tree to see only
 the tables dropped from that namespace. **Show more** adds the next page. A table whose undo
 period has ended says "No longer restorable" and has no button. The view says so when nothing that can
@@ -283,7 +283,9 @@ and no later than one sweep after it**. The sweep runs every `LAKANA_RUN__SWEEP_
   files wait until the nested one is restored or deleted.
 - **An external table's files are never deleted.** Dropping one removes the catalog entry only; it
   is not listed by `--dropped` and cannot be restored. Register it again with
-  `lakana table create-external`. A view has no files; a deploy of its project creates it again.
+  `lakana table create-external`, or **New external table** in the Catalog (see
+  [Register files as an external table](register-files-as-an-external-table.md)). A view has no
+  files; a deploy of its project creates it again.
 - **Tables dropped before this release** have no undo period: their files stay, and the worker's log
   counts their directories as directories without a record. Remove them when you choose with
   `lakana env orphaned-locations`: see
@@ -398,7 +400,7 @@ reached: the clean-up deletes that one's files and then the environment, and
 | `silver.orders cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the table was dropped with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |
 | `silver.orders cannot be restored: the worker's sweep has started deleting its files, ...` | The sweep began deleting before the restore. | Restore from a backup if you have one. |
 | `silver.orders cannot be restored: its files are gone ...` | Its metadata file was deleted from storage by something other than Lakana. | Restore from a backup of the storage if you have one. |
-| `silver.orders cannot be restored: its namespace silver was dropped after it. ...` | The namespace is gone. | Create the namespace again (`lakana ns create`), then restore the table. |
+| `silver.orders cannot be restored: its namespace silver was dropped after it. ...` | The namespace is gone. | Create the namespace again (`lakana ns create`, or **New namespace** in the Catalog), then restore the table. |
 | `No environment named 'sandbox'. It was deleted, and it can be restored with ...` | The environment was deleted. | Restore it with `lakana env restore sandbox` if you need it. |
 | `Environment 'sandbox' cannot be created: an environment of that name was deleted, ...` | A deleted environment holds the name until its files are deleted. | Restore it, or delete its files now with `lakana env delete sandbox --purge`. |
 | `Environment 'sandbox' cannot be restored: its undo period ended at ... (UTC), ...` | The period is over, or the environment was deleted with `--purge`. | The files are deleted or about to be; restore from a backup if you have one. |

@@ -181,6 +181,30 @@ def test_tree_reads_environments_and_namespaces() -> None:
     assert sent[-1].url.path == "/api/v1/tables/tree"
 
 
+def test_tree_reads_actions_and_defaults_them_for_an_older_server() -> None:
+    new = {
+        "count": 0,
+        "environments": [
+            {
+                "name": "dev",
+                "count": 0,
+                "actions": ["create_namespace"],
+                "namespaces": [{"path": "gold", "count": 0, "actions": ["drop"]}],
+            }
+        ],
+    }
+    old = {
+        "count": 0,
+        "environments": [{"name": "dev", "count": 0, "namespaces": [{"path": "gold", "count": 0}]}],
+    }
+    tree = Catalog(_transport([new], [])).tree()
+    assert tree.environments[0].actions == ("create_namespace",)
+    assert tree.environments[0].namespaces[0].actions == ("drop",)
+    older = Catalog(_transport([old], [])).tree()
+    assert older.environments[0].actions == ()
+    assert older.environments[0].namespaces[0].actions == ()
+
+
 def test_get_table_reads_owner_and_health_summary_and_tolerates_their_absence() -> None:
     sent: list[httpx.Request] = []
     base = {

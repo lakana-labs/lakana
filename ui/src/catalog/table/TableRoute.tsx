@@ -8,10 +8,10 @@ import { type JSX, lazy, Suspense, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 
-import type { TableOut, TableRef } from "../../api";
+import type { ArtifactOut, TableOut, TableRef } from "../../api";
 import { NotFound } from "../../shell/NotFound";
 import { Page } from "../../shell/Page";
-import { catalogPath, TABLE_TABS, type TableTab } from "../paths";
+import { ARTIFACT_TABS, catalogPath, TABLE_TABS, type TableTab } from "../paths";
 import { DEFAULT_VIEW } from "../view";
 import { LoadingStatus, TableSkeleton } from "./TableSkeleton";
 import "./table.css";
@@ -24,8 +24,12 @@ const TablePage = lazy(async () => {
 // The menu, its dialogs and their strings load once a table is shown.
 const TableActions = lazy(() => import("../actions/TableActions"));
 
+/** Every tab of a table or an artifact: the kind is not known before the read. */
+const ANY_TABS: readonly TableTab[] = [...TABLE_TABS, ...ARTIFACT_TABS];
+
 /**
- * The tab an address names: Overview for none, else the segment when a tab has it.
+ * The tab an address names: Overview for none, else the segment when a tab of a table or an
+ * artifact has it. The page sends a tab its entry does not have to Overview once it is read.
  *
  * @param segment - What follows the table's name in the address.
  * @returns The tab, or null for a segment that names none (Overview has no segment).
@@ -34,7 +38,7 @@ function tabOf(segment: string | undefined): TableTab | null {
   if (segment === undefined || segment === "") {
     return "overview";
   }
-  return TABLE_TABS.find((tab) => tab !== "overview" && tab === segment) ?? null;
+  return ANY_TABS.find((tab) => tab !== "overview" && tab === segment) ?? null;
 }
 
 /** The tabs that show data or a drawing and take the whole window; the others keep the reading width. */
@@ -51,7 +55,7 @@ interface TableViewProps {
 /**
  * The page frame: the breadcrumb and the heading, which stay put while the chunk, the table and
  * the tabs come and go, so that the focus the shell puts on the heading is never lost. The
- * Actions menu joins the heading once the table is read.
+ * Actions menu joins the heading once the table, and an artifact's own entry, are read.
  *
  * @param props - The table and the tab.
  * @param props.place - The table the address names.
@@ -62,7 +66,10 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
   const { t } = useTranslation();
   const heading = useRef<HTMLHeadingElement>(null);
   const [waiting, setWaiting] = useState(true);
-  const [table, setTable] = useState<TableOut | null>(null);
+  const [loaded, setLoaded] = useState<{
+    table: TableOut;
+    artifact: ArtifactOut | null;
+  } | null>(null);
   const { environment, namespace, name } = place;
   return (
     <div className={WIDE_TABS.has(tab) ? "table-page table-page-wide" : "table-page"}>
@@ -70,9 +77,9 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
         title={name}
         headingRef={heading}
         action={
-          table !== null && (
+          loaded !== null && (
             <Suspense fallback={null}>
-              <TableActions place={place} table={table} />
+              <TableActions place={place} table={loaded.table} artifact={loaded.artifact} />
             </Suspense>
           )
         }
@@ -88,7 +95,7 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
             tab={tab}
             headingRef={heading}
             onWaiting={setWaiting}
-            onLoaded={setTable}
+            onLoaded={setLoaded}
           />
         </Suspense>
         <LoadingStatus waiting={waiting} />

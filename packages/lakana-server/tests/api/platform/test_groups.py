@@ -35,13 +35,16 @@ def test_list_members_returns_principals_sorted_by_name(client: TestClient) -> N
     for name in ("bob", "alice"):
         client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "USER"})
         client.put(f"/api/v1/groups/engineers/members/{name}", headers=AUTH_HEADER)
+    client.put("/api/v1/groups/engineers/members/admin", headers=AUTH_HEADER)
 
     response = client.get("/api/v1/groups/engineers/members", headers=AUTH_HEADER)
 
     assert response.status_code == 200, response.text
+    member = {"type": "USER", "is_active": True, "picture": None}
     assert response.json() == [
-        {"name": "alice", "type": "USER", "is_active": True, "picture": None},
-        {"name": "bob", "type": "USER", "is_active": True, "picture": None},
+        {"name": "admin", **member, "held_admin": True},
+        {"name": "alice", **member, "held_admin": False},
+        {"name": "bob", **member, "held_admin": False},
     ]
 
 

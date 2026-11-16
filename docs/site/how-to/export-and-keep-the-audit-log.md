@@ -134,7 +134,7 @@ The file is a JSON list of events. These are the two events of one type in a new
 
 Narrow it with `--since` and `--until` (ISO 8601, UTC when there is no offset; both ends
 are included), `--event-type`, `--kind connection`, `--env` and `--principal-id`
-([the command](../reference/cli.md#lakana-audit-list)). A period with no events gives `[]`:
+([the command](../reference/cli/lakana-audit.md#lakana-audit-list)). A period with no events gives `[]`:
 
 <!-- source: docs/examples/audit-export/run.sh#export-period -->
 ```bash

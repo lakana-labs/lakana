@@ -70,3 +70,35 @@ it("ships no string of the views or the actions in the first load, and importing
   );
   expect(i18n.t("catalog.views.retention.never")).toBe("never");
 });
+
+it("ships no string of the place menu in the first load, and importing PlaceActions registers them", async () => {
+  const i18n = initI18n();
+
+  expect(Object.keys(en.catalog)).not.toContain("places");
+  expect(i18n.exists("catalog.places.delete.title")).toBe(false);
+
+  await import("../catalog/places/PlaceActions");
+
+  expect(i18n.t("catalog.places.delete.title", { namespace: "silver" })).toBe(
+    "Delete namespace silver?",
+  );
+  expect(i18n.t("catalog.places.note.created", { namespace: "gold.finance" })).toBe(
+    "Created namespace gold.finance.",
+  );
+  expect(i18n.t("catalog.places.note.artifactDropped", { artifact: "ml.model" })).toBe(
+    "Dropped artifact ml.model. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not.",
+  );
+});
+
+it("ships no string of an artifact's versions in the first load, and importing VersionsTab registers them", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("table.artifact.versions.heading")).toBe(false);
+
+  await import("../catalog/artifact/VersionsTab");
+
+  expect(i18n.t("table.artifact.versions.heading")).toBe("Versions");
+  expect(i18n.t("table.artifact.files.mismatch", { path: "models/model.pkl" })).toBe(
+    "models/model.pkl did not arrive whole, so nothing was saved. Download it again, or use the command above.",
+  );
+});

@@ -1,13 +1,69 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { TableMatchOut } from "../api";
+import type { TableMatchOut, TableTreeOut } from "../api";
 import { item, PAGE, TREE } from "../test/catalog";
 import { manageRoutes } from "../test/manage";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
 
 const EMPTY = { items: [], next_cursor: null, capped: false };
+const ALL = ["create_namespace", "create_external_table", "drop"] as const;
+
+/**
+ * The administrator's tree with `prod` holding other namespaces.
+ *
+ * @param namespaces - The namespaces of `prod`, each with every action.
+ * @returns The tree.
+ */
+function prodTree(namespaces: readonly { path: string; count: number }[]): TableTreeOut {
+  const count = namespaces.reduce((sum, entry) => sum + entry.count, 0);
+  return {
+    count,
+    environments: [
+      {
+        name: "prod",
+        count,
+        actions: ["create_namespace"],
+        namespaces: namespaces.map((entry) => ({ ...entry, actions: ALL })),
+      },
+    ],
+  };
+}
+
+/**
+ * Answers the tree's reads in turn: the first answer, then the next one for every later read.
+ *
+ * @param first - The tree before the change.
+ * @param after - The tree after it.
+ * @returns The route.
+ */
+function treeThen(first: TableTreeOut, after: TableTreeOut) {
+  let reads = 0;
+  return () => {
+    reads += 1;
+    return { status: 200, body: reads === 1 ? first : after };
+  };
+}
+
+/**
+ * Records every text the page shows from now on, to prove a sentence never appeared.
+ *
+ * @returns The texts seen, and a stop function.
+ */
+function watchTexts(): { readonly seen: string[]; readonly stop: () => void } {
+  const seen: string[] = [];
+  const observer = new MutationObserver(() => {
+    seen.push(document.body.textContent);
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  return {
+    seen,
+    stop: () => {
+      observer.disconnect();
+    },
+  };
+}
 
 /**
  * The list's rows below the head.
@@ -258,7 +314,7 @@ describe("CatalogList", () => {
     expect(
       await screen.findByText("No tables in gold yet. Tables appear once a project is deployed."),
     ).toBeInTheDocument();
-    expect(screen.getByText("lakana deploy --env prod")).toBeInTheDocument();
+    expect(screen.getByText("lakana deploy --env 'prod'")).toBeInTheDocument();
   });
 
   it("moves focus to the first new row after Show more", async () => {
@@ -1058,6 +1114,409 @@ describe("CatalogList", () => {
         "href",
         "/catalog?env=prod&view=orphans",
       );
+    });
+  });
+  describe("the place menu", () => {
+    it("shows Actions above the tree for the chosen place only", async () => {
+      const { user } = renderShell("/catalog?env=prod&ns=gold", { routes: manageRoutes() });
+
+      const button = await screen.findByRole("button", { name: "Actions for gold" });
+      const side = button.closest("aside") as HTMLElement;
+      const tree = within(side).getByRole("treegrid");
+      expect(button.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      expect(screen.getAllByRole("button", { name: /^Actions for/ })).toHaveLength(1);
+
+      await user.click(within(tree).getByRole("link", { name: /^All tables/ }));
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: /^Actions for/ })).not.toBeInTheDocument();
+      });
+    });
+
+    it("after New namespace reloads the tree, goes to the new place and focuses Created namespace {ns}", async () => {
+      const { user, router, server } = renderShell("/catalog?env=prod&ns=gold", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": treeThen(
+            prodTree([{ path: "gold", count: 4 }]),
+            prodTree([
+              { path: "gold", count: 4 },
+              { path: "gold.finance", count: 0 },
+            ]),
+          ),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+      await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+      const texts = watchTexts();
+
+      await user.type(await screen.findByRole("textbox", { name: "Path" }), "finance{Enter}");
+
+      const note = await screen.findByText("Created namespace gold.finance.");
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      texts.stop();
+      expect(router.state.location.search).toBe("?env=prod&ns=gold.finance");
+      expect(server.sent.filter((request) => request.path === "/api/v1/tables/tree")).toHaveLength(
+        2,
+      );
+      expect(screen.getByRole("link", { name: "finance, 0 tables" })).toBeInTheDocument();
+      expect(texts.seen.some((text) => text.includes("There is no namespace"))).toBe(false);
+      expect(screen.getByRole("button", { name: "Actions for gold.finance" })).toBeInTheDocument();
+    });
+
+    it("says the new namespace is not shown when the tree leaves it out", async () => {
+      const before = prodTree([{ path: "gold", count: 4 }]);
+      const { user, router } = renderShell("/catalog?env=prod&ns=gold", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": treeThen(before, prodTree([{ path: "gold", count: 4 }])),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+      await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+      const texts = watchTexts();
+
+      await user.type(await screen.findByRole("textbox", { name: "Path" }), "finance{Enter}");
+
+      const note = await screen.findByText(
+        "Created namespace gold.finance. You may not read the namespaces of prod, so the tree does not show it while it holds no table you may read.",
+      );
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      texts.stop();
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      expect(texts.seen.some((text) => text.includes("There is no namespace"))).toBe(false);
+    });
+
+    it("after Delete namespace goes to the place above with fresh counts and focuses Deleted namespace {ns}", async () => {
+      const { user, router, server } = renderShell("/catalog?env=prod&ns=gold.archive", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": treeThen(
+            prodTree([
+              { path: "gold", count: 4 },
+              { path: "gold.archive", count: 0 },
+            ]),
+            prodTree([{ path: "gold", count: 3 }]),
+          ),
+          "DELETE /api/v1/environments/prod/namespaces/gold.archive": { status: 204 },
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold.archive" }));
+      await user.click(screen.getByRole("menuitem", { name: "Delete namespace…" }));
+      await user.click(await screen.findByRole("button", { name: "Delete the namespace" }));
+
+      const note = await screen.findByText("Deleted namespace gold.archive.");
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      expect(server.sent.filter((request) => request.path === "/api/v1/tables/tree")).toHaveLength(
+        2,
+      );
+      expect(await screen.findByRole("link", { name: "gold, 3 tables" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /archive/ })).not.toBeInTheDocument();
+    });
+
+    it("goes to the environment after deleting a namespace at its top", async () => {
+      const { user, router } = renderShell("/catalog?env=prod&ns=silver", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": treeThen(
+            prodTree([
+              { path: "gold", count: 4 },
+              { path: "silver", count: 0 },
+            ]),
+            prodTree([{ path: "gold", count: 4 }]),
+          ),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for silver" }));
+      await user.click(screen.getByRole("menuitem", { name: "Delete namespace…" }));
+      await user.click(await screen.findByRole("button", { name: "Delete the namespace" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Deleted namespace silver.")).toHaveFocus();
+      });
+      expect(router.state.location.search).toBe("?env=prod");
+    });
+
+    it.each([
+      ["All tables", "/catalog", null],
+      ["an unknown place", "/catalog?env=prod&ns=platinum", null],
+      ["a place with no actions", "/catalog?env=prod", null],
+      ["a place with its own menu", "/catalog?env=prod&ns=silver", "Actions for silver"],
+    ])(
+      "keeps the focus on the page when the place changes to %s under an open dialog",
+      async (_name, address, menu) => {
+        const tree = prodTree([
+          { path: "gold", count: 4 },
+          { path: "silver", count: 0 },
+        ]);
+        const { user, router } = renderShell("/catalog?env=prod&ns=gold", {
+          routes: {
+            ...manageRoutes(),
+            "GET /api/v1/tables/tree": {
+              status: 200,
+              body: {
+                ...tree,
+                environments: tree.environments.map((e) => ({ ...e, actions: [] })),
+              },
+            },
+          },
+        });
+        await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+        await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+        expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+        await act(async () => {
+          await router.navigate(address);
+        });
+
+        await waitFor(() => {
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+          expect(document.activeElement).not.toBe(document.body);
+        });
+        const focused = document.activeElement as HTMLElement;
+        if (menu === null) {
+          expect(screen.getByRole("treegrid").contains(focused)).toBe(true);
+        } else {
+          expect(screen.getByRole("button", { name: menu })).toHaveFocus();
+        }
+      },
+    );
+
+    it("leaves the focus on a note that took it when the place changes under an open dialog", async () => {
+      const { user, router } = renderShell("/catalog?env=prod&ns=gold", { routes: manageRoutes() });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+      await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      // The frames wait here until the note has the focus, so the menu's frame, which puts the
+      // focus back on the place when it was lost, meets a note that already has it: only its
+      // guard keeps the focus there, whatever order the browser would run them in.
+      const frames: FrameRequestCallback[] = [];
+      const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+
+      try {
+        await act(async () => {
+          await router.navigate("/catalog?env=prod&ns=silver", {
+            state: { placeNote: "deleted", namespace: "silver.old" },
+          });
+        });
+        const note = await screen.findByText("Deleted namespace silver.old.");
+        await waitFor(() => {
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        });
+        expect(note).toHaveFocus();
+        expect(frames.length).toBeGreaterThan(0);
+
+        act(() => {
+          for (let next = frames.shift(); next !== undefined; next = frames.shift()) {
+            next(performance.now());
+          }
+        });
+
+        expect(note).toHaveFocus();
+      } finally {
+        frame.mockRestore();
+      }
+    });
+
+    it("forgets a creation whose tree did not arrive once the address changes", async () => {
+      let reads = 0;
+      const { user, router } = renderShell("/catalog?env=prod&ns=gold", {
+        routes: {
+          ...manageRoutes(),
+          "GET /api/v1/tables/tree": () => {
+            reads += 1;
+            if (reads === 2) {
+              return { status: 500, body: { detail: "The catalog is down." } };
+            }
+            return {
+              status: 200,
+              body: prodTree(
+                reads === 1
+                  ? [
+                      { path: "gold", count: 4 },
+                      { path: "silver", count: 0 },
+                    ]
+                  : [
+                      { path: "gold", count: 4 },
+                      { path: "gold.finance", count: 0 },
+                    ],
+              ),
+            };
+          },
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
+      await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
+      await user.type(await screen.findByRole("textbox", { name: "Path" }), "finance{Enter}");
+      await waitFor(() => {
+        expect(reads).toBe(2);
+      });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=silver");
+      });
+      await user.click(await screen.findByRole("button", { name: "Actions for silver" }));
+      await user.click(screen.getByRole("menuitem", { name: "Delete namespace…" }));
+      await user.click(await screen.findByRole("button", { name: "Delete the namespace" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Deleted namespace silver.")).toHaveFocus();
+      });
+      await waitFor(() => {
+        expect(reads).toBe(3);
+      });
+      // The tree after the deletion has arrived: it holds gold.finance and no longer silver.
+      await waitFor(() => {
+        expect(screen.queryByRole("link", { name: /^silver/ })).not.toBeInTheDocument();
+      });
+      expect(router.state.location.search).toBe("?env=prod");
+      expect(screen.queryByText(/Created namespace/)).not.toBeInTheDocument();
+    });
+
+    it("shows the artifactDropped note from the location state with the artifact's name, and focuses it", async () => {
+      const { router } = renderShell("/catalog?env=prod&ns=gold");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=gold", {
+          state: { placeNote: "artifactDropped", namespace: "gold", artifact: "gold.model" },
+        });
+      });
+
+      const note = await screen.findByText(
+        "Dropped artifact gold.model. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not.",
+      );
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+    });
+
+    it("shows a note once: the history entry forgets it, so Back and a reload do not show it again", async () => {
+      const { router } = renderShell("/catalog?env=prod");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=gold", {
+          state: { placeNote: "deleted", namespace: "gold.old" },
+        });
+      });
+
+      const note = await screen.findByText("Deleted namespace gold.old.");
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      await waitFor(() => {
+        expect(router.state.location.state).toEqual({
+          placeNote: "deleted",
+          namespace: "gold.old",
+          seen: true,
+        });
+      });
+      expect(screen.getByText("Deleted namespace gold.old.")).toBe(note);
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=silver");
+      });
+      expect(screen.queryByText("Deleted namespace gold.old.")).not.toBeInTheDocument();
+      await act(async () => {
+        await router.navigate(-1);
+      });
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      await screen.findByRole("link", { name: "fact_sales" });
+      expect(screen.queryByText("Deleted namespace gold.old.")).not.toBeInTheDocument();
+    });
+
+    it("shows no note for an entry whose note was already shown, as after a reload", async () => {
+      const { router } = renderShell("/catalog?env=prod");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=gold", {
+          state: { placeNote: "created", namespace: "gold", seen: true },
+        });
+      });
+
+      await screen.findByRole("button", { name: "Actions for gold" });
+      expect(screen.queryByText(/Created namespace/)).not.toBeInTheDocument();
+    });
+
+    it("confirms a drop above the notice when the namespace has left the tree", async () => {
+      const { router } = renderShell("/catalog?env=prod");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=ml", {
+          state: { placeNote: "artifactDropped", namespace: "ml", artifact: "ml.model" },
+        });
+      });
+
+      const note = await screen.findByText(/^Dropped artifact ml\.model\./);
+      const notice = await screen.findByText("There is no namespace ml in prod that you may read.");
+      expect(note.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Show all tables" })).toBeVisible();
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+    });
+
+    it("keeps the same note, with the focus, while the tree turns the place unknown", async () => {
+      const tree = held();
+      const { router } = renderShell("/catalog/prod/gold.sales/fact_sales", {
+        routes: { "GET /api/v1/tables/tree": tree.route },
+      });
+      await screen.findByRole("heading", { level: 1, name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=ml", {
+          state: { placeNote: "artifactDropped", namespace: "ml", artifact: "ml.model" },
+        });
+      });
+      const note = await screen.findByText(/^Dropped artifact ml\.model\./);
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      const lost: unknown[] = [];
+      const onFocusOut = (event: FocusEvent): void => {
+        lost.push(event.relatedTarget);
+      };
+      document.addEventListener("focusout", onFocusOut);
+
+      await act(async () => {
+        tree.release({ status: 200, body: TREE });
+        await Promise.resolve();
+      });
+
+      expect(
+        await screen.findByText("There is no namespace ml in prod that you may read."),
+      ).toBeVisible();
+      document.removeEventListener("focusout", onFocusOut);
+      expect(screen.getByText(/^Dropped artifact ml\.model\./)).toBe(note);
+      expect(note).toHaveFocus();
+      expect(lost).toEqual([]);
+    });
+
+    it("quotes the environment in the deploy command of an empty place", async () => {
+      renderShell("/catalog?env=dev's", {
+        routes: {
+          "GET /api/v1/tables/tree": {
+            status: 200,
+            body: { count: 0, environments: [{ name: "dev's", count: 0, namespaces: [] }] },
+          },
+          "GET /api/v1/tables": { status: 200, body: EMPTY },
+        },
+      });
+
+      expect(await screen.findByText("lakana deploy --env 'dev'\\''s'")).toBeInTheDocument();
     });
   });
 });

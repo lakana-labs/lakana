@@ -112,7 +112,9 @@ export const REBUILT: TableRebuildOut = {
 /**
  * The routes of environment `prod` for the catalog-management calls, with the exact bodies the
  * server answers: a list of one dropped table, one expiring table and one orphan, the
- * references and retention of `gold.sales.fact_sales`, and the answers of the writes.
+ * references and retention of `gold.sales.fact_sales`, the answers of the writes, and the
+ * creation of any namespace, the deletion of `silver`, and the registration of any external
+ * table in `bronze`, whose columns are `order_id` and `amount`.
  *
  * @returns The routes, keyed `"METHOD /path"`.
  */
@@ -143,5 +145,23 @@ export function manageRoutes(): Record<string, FakeRoute> {
     [`POST ${table}/rebuild`]: { status: 202, body: REBUILT },
     [`POST ${table}/maintenance`]: { status: 202, body: { query_id: "q-1" } },
     "DELETE /api/v1/environments/prod/namespaces/ml/artifacts/model": { status: 204 },
+    "POST /api/v1/environments/prod/namespaces": (request) => ({
+      status: 201,
+      body: { path: (request.body as { path: string }).path, properties: {} },
+    }),
+    "DELETE /api/v1/environments/prod/namespaces/silver": { status: 204 },
+    "POST /api/v1/environments/prod/namespaces/bronze/tables/external": (request) => {
+      const sent = request.body as { name: string; location_pattern: string; format: string };
+      return {
+        status: 201,
+        body: {
+          name: sent.name,
+          namespace: "bronze",
+          location_pattern: sent.location_pattern,
+          format: sent.format,
+          schema: { order_id: "int64", amount: "double" },
+        },
+      };
+    },
   };
 }

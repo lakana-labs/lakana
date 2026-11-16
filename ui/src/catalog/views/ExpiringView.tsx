@@ -72,7 +72,7 @@ export function ExpiringView({ environment, namespace }: ExpiringViewProps): JSX
               {row.expires_at !== null && Date.parse(row.expires_at) <= now ? (
                 t("catalog.views.expiring.dueNow")
               ) : (
-                <When iso={row.expires_at} never={t("catalog.views.dropped.neverKnown")} />
+                <When iso={row.expires_at} never={t("catalog.views.dropped.neverKnown")} ahead />
               )}
             </td>
             <td>{retentionWords(t, row)}</td>

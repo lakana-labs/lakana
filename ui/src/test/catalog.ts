@@ -4,33 +4,54 @@
  *
  * @packageDocumentation
  */
-import type { TableListItemOut, TableListPageOut, TableTreeOut } from "../api/catalog";
+import type { PlaceAction, TableListItemOut, TableListPageOut, TableTreeOut } from "../api/catalog";
 import type { FakeRoute } from "./server";
 
-/** Two environments, the medallion namespaces and one nested namespace. */
-export const TREE: TableTreeOut = {
-  count: 9,
-  environments: [
-    {
-      name: "dev",
-      count: 3,
-      namespaces: [
-        { path: "bronze", count: 1 },
-        { path: "gold", count: 2 },
-      ],
-    },
-    {
-      name: "prod",
-      count: 6,
-      namespaces: [
-        { path: "bronze", count: 1 },
-        { path: "silver", count: 1 },
-        { path: "gold", count: 4 },
-        { path: "gold.sales", count: 1 },
-      ],
-    },
-  ],
-};
+/** Every action on a place, which an administrator has. */
+export const ALL_ACTIONS: readonly PlaceAction[] = [
+  "create_namespace",
+  "create_external_table",
+  "drop",
+];
+
+/**
+ * Two environments, the medallion namespaces and one nested namespace, with the actions a reader
+ * has on each place: an environment gets only `create_namespace` of them, as the server sends.
+ *
+ * @param actions - What the reader may do on every namespace.
+ * @returns The tree.
+ */
+export function treeWith(actions: readonly PlaceAction[]): TableTreeOut {
+  const environment = actions.filter((action) => action === "create_namespace");
+  return {
+    count: 9,
+    environments: [
+      {
+        name: "dev",
+        count: 3,
+        actions: environment,
+        namespaces: [
+          { path: "bronze", count: 1, actions },
+          { path: "gold", count: 2, actions },
+        ],
+      },
+      {
+        name: "prod",
+        count: 6,
+        actions: environment,
+        namespaces: [
+          { path: "bronze", count: 1, actions },
+          { path: "silver", count: 1, actions },
+          { path: "gold", count: 4, actions },
+          { path: "gold.sales", count: 1, actions },
+        ],
+      },
+    ],
+  };
+}
+
+/** The tree as an administrator reads it, with every action on every place. */
+export const TREE: TableTreeOut = treeWith(ALL_ACTIONS);
 
 /**
  * One row of the list: a published table in `prod.gold`, owned by Kim, healthy.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,7 +12,12 @@ from lakana_core.access.managed import guard_change, lock_access
 from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
-from lakana_core.grants.service import assert_admin_headroom, withdraw_links_of_lapsed_issuers
+from lakana_core.grants.admin import acts_as_instance_admin
+from lakana_core.grants.service import (
+    assert_admin_headroom,
+    held_admin_ids,
+    withdraw_links_of_lapsed_issuers,
+)
 from lakana_core.identity.links import (
     invisible_character_problem,
     name_length_problem,
@@ -279,6 +285,33 @@ class PrincipalService:
             limit=limit,
             cursor=cursor,
         )
+
+    def held_admin_of(
+        self, p: PrincipalRef, rows: Iterable[Principal]
+    ) -> dict[uuid.UUID, bool] | None:
+        """Say, for an administrator, which of these principals hold or have held ADMIN.
+
+        Such a person is recovered only by the server operator (`held_admin_ids`), so the
+        interface shows the operator's command for them instead of a button. Read-only, and only
+        for an administrator: someone who may only manage principals does not learn who is one.
+
+        Parameters
+        ----------
+        p
+            The acting principal, already allowed to read `rows`.
+        rows
+            The principals.
+
+        Returns
+        -------
+        dict of uuid.UUID to bool, or None
+            Each principal's answer, or `None` when `p` is not an instance administrator.
+        """
+        if not acts_as_instance_admin(self._session, self._authz, p):
+            return None
+        found = list(rows)
+        held = held_admin_ids(self._session, found)
+        return {row.id: row.id in held for row in found}
 
     def set_own_language(self, p: PrincipalRef, language: str | None) -> str | None:
         """Set or reset the caller's own preferred language for catalog texts.

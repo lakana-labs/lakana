@@ -15,6 +15,7 @@ import {
   type GrantOut,
   listColumnMasks,
   listGrantsAt,
+  listInstanceGrants,
   listRowFilters,
   type PermissionOut,
   type RowFilterOut,
@@ -226,10 +227,13 @@ function Mine(): JSX.Element {
   );
 }
 
+/** The command that lists every grant on the whole instance. */
+const INSTANCE_GRANTS_COMMAND = "lakana grant list --kind INSTANCE";
+
 /** Properties of {@link GrantsAt}. */
 interface GrantsAtProps {
-  /** The level whose grants are listed. */
-  readonly level: GrantLevel;
+  /** The level whose grants are listed: an object, or `instance` for the whole instance. */
+  readonly level: GrantLevel | "instance";
   /** The level's heading, such as "On namespace gold". */
   readonly heading: ReactNode;
 }
@@ -245,10 +249,13 @@ interface GrantsAtProps {
  */
 function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
   const { t } = useTranslation();
-  const { environment, namespace, table } = level;
+  const instance = level === "instance";
+  const environment = instance ? "" : level.environment;
+  const namespace = instance ? null : level.namespace;
+  const table = instance ? null : level.table;
   const load = useCallback(
-    () => listGrantsAt({ environment, namespace, table }),
-    [environment, namespace, table],
+    () => (instance ? listInstanceGrants() : listGrantsAt({ environment, namespace, table })),
+    [instance, environment, namespace, table],
   );
   const resource = useResource(load);
   return (
@@ -297,7 +304,11 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
                 <Trans
                   t={t}
                   i18nKey="table.access.who.cut"
-                  values={{ command: grantListCommand(environment, namespace, table) }}
+                  values={{
+                    command: instance
+                      ? INSTANCE_GRANTS_COMMAND
+                      : grantListCommand(environment, namespace, table),
+                  }}
                   components={{ code: <code /> }}
                 />
               </p>
@@ -310,8 +321,8 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
 }
 
 /**
- * Who has access: the grants on the table, on its namespace and each one above it, and on the
- * environment, each level read on its own.
+ * Who has access: the grants on the table, on its namespace and each one above it, on the
+ * environment, and on the whole instance, each level read on its own.
  *
  * @returns The section.
  */
@@ -349,9 +360,7 @@ function WhoHasAccess(): JSX.Element {
           />
         }
       />
-      <p className="second">
-        <Trans t={t} i18nKey="table.access.who.instance" components={{ code: <code /> }} />
-      </p>
+      <GrantsAt level="instance" heading={t("table.access.who.instance")} />
     </section>
   );
 }

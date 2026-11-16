@@ -71,10 +71,10 @@ from lakana_core.errors import (
     AlreadyExistsError,
     AuthenticationError,
     ConflictError,
+    NoPasskeyError,
     NotFoundError,
     PasskeyRefused,
     PermissionDenied,
-    StepUpRequired,
     ValidationError,
 )
 from lakana_core.grants.service import active_instance_admin_ids
@@ -140,6 +140,10 @@ _CHALLENGE_GONE = (
 _NO_SESSION = (
     "Passkeys are added and confirmed in the web interface: a passkey ceremony belongs to a "
     "browser session, and a token has none. Sign in to the web interface and do it there."
+)
+_NO_PASSKEY = (
+    "Your account has no passkey at this address, and this action needs a passkey touch. "
+    "Add a passkey on your account page in the web interface first, then try again."
 )
 _NOT_VERIFIED = (
     "Your browser's passkey answer did not verify: it came from another address than {origin}, "
@@ -751,9 +755,11 @@ class PasskeyService:
         ConflictError
             If the caller authenticated with a token.
         PermissionDenied
-            For a local-link session of a person who has a passkey already.
+            For a local-link session of a person who has a passkey already, and for a link
+            session of a person without a usable passkey outside the first-passkey window (a
+            touch cannot help).
         StepUpRequired
-            Without a fresh touch, outside the first-passkey window.
+            Otherwise, without a fresh touch.
         NotFoundError
             If the caller's principal no longer exists.
         """
@@ -765,21 +771,22 @@ class PasskeyService:
                 "This session began with a local sign-in link, without a passkey touch, so it "
                 "may add only a first passkey. Sign in with your passkey to add another."
             )
-        first = not usable and context.via in LINK_VIAS
-        if not (first and now - context.created_at < FIRST_PASSKEY_WINDOW):
-            if not usable and context.via == "local":
-                raise StepUpRequired(
+        if usable or context.via not in LINK_VIAS:
+            require_step_up(p, now=now)
+        elif now - context.created_at >= FIRST_PASSKEY_WINDOW:
+            # Not StepUpRequired: without a passkey a touch is impossible, and the interface
+            # would start a step-up the person cannot finish instead of showing the way out.
+            if context.via == "local":
+                raise PermissionDenied(
                     "A first passkey can be added within 15 minutes of signing in, and this "
                     "session is older. Sign in again with `lakana server start --local` and add "
                     "the passkey right away."
                 )
-            if not usable and context.via in LINK_VIAS:
-                raise StepUpRequired(
-                    "A first passkey can be added within 15 minutes of signing in with a link, "
-                    "and this session is older. Ask an administrator for a recovery link (or "
-                    "the operator for a new setup link) and add the passkey right away."
-                )
-            require_step_up(p, now=now)
+            raise PermissionDenied(
+                "A first passkey can be added within 15 minutes of signing in with a link, "
+                "and this session is older. Ask an administrator for a recovery link (or "
+                "the operator for a new setup link) and add the passkey right away."
+            )
         principal = self._session.get(Principal, p.id)
         if principal is None:
             raise NotFoundError("No such principal.")
@@ -994,7 +1001,12 @@ class PasskeyService:
         ------
         ConflictError
             If the caller authenticated with a token: step-up is for browser sessions.
+        NoPasskeyError
+            If the caller has no passkey that can sign in at this address.
         """
+        self._session_of(p)
+        if not self.has_usable_passkey(p.id):
+            raise NoPasskeyError(_NO_PASSKEY)
         return self._authentication_options("step_up", p=p)
 
     def step_up(self, p: PrincipalRef, ceremony_id: uuid.UUID, credential_json: str) -> datetime:

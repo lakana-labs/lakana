@@ -66,8 +66,8 @@ Send it only after you have confirmed, as above, that the person asked for it.
 An administrator's account is recovered only by the **server operator**, the person who holds the
 instance's bootstrap token: for an administrator the interface shows the command to run where the
 server runs instead of a button. This covers anyone who has ever held the `ADMIN` role, directly
-or through a group. Taking the role away first does not change it: the server refuses the link
-and names the operator's command. [Lost your passkey](lost-your-passkey.md) has both sides of a
+or through a group. Taking the role away first does not change it: the person's page still shows
+the operator's command, and the server refuses a link for them all the same. [Lost your passkey](lost-your-passkey.md) has both sides of a
 recovery.
 
 ## Look after a person's sign-in
@@ -87,4 +87,4 @@ Every step has a command: `invite create`, `invite list` and `invite withdraw`, 
 for recovery links, and `session list` and `passkey list` for what a person has (`session list`
 names each browser the same way; `lakana --output json session list` also has the raw
 `user_agent`). The
-[CLI reference](../reference/cli.md#lakana-invite) lists them with their options.
+[CLI reference](../reference/cli/lakana-invite.md) lists them with their options.

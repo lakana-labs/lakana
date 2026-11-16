@@ -179,6 +179,9 @@ def test_the_last_read_and_its_count_are_not_audited_as_activity_viewed(
     assert [e.detail["view"] for e in _activity_viewed(client)] == ["table_readers"]
 
 
+NAMESPACE_ACTIONS = ["create_namespace", "create_external_table", "drop"]
+
+
 def test_the_tree_answers_counts_per_node(client: TestClient) -> None:
     _table(client, "a")
     _table(client, "b")
@@ -189,14 +192,59 @@ def test_the_tree_answers_counts_per_node(client: TestClient) -> None:
             {
                 "name": "dev",
                 "count": 2,
+                "actions": ["create_namespace"],
                 "namespaces": [
-                    {"path": "bronze", "count": 0},
-                    {"path": "gold", "count": 2},
-                    {"path": "silver", "count": 0},
+                    {"path": "bronze", "count": 0, "actions": NAMESPACE_ACTIONS},
+                    {"path": "gold", "count": 2, "actions": NAMESPACE_ACTIONS},
+                    {"path": "silver", "count": 0, "actions": NAMESPACE_ACTIONS},
                 ],
             }
         ],
     }
+
+
+def test_the_tree_carries_each_nodes_actions(client: TestClient) -> None:
+    _table(client, "a")
+    tree = client.get("/api/v1/tables/tree", headers=AUTH_HEADER).json()
+    (dev,) = tree["environments"]
+    assert dev["actions"] == ["create_namespace"]
+    assert {n["path"]: n["actions"] for n in dev["namespaces"]} == {
+        path: ["create_namespace", "create_external_table", "drop"]
+        for path in ("bronze", "gold", "silver")
+    }
+
+
+def test_a_reader_who_may_change_no_place_gets_no_actions_in_the_tree(client: TestClient) -> None:
+    _table(client, "a")
+    rita = _person(client, "rita", "READ_TABLE")
+    tree = client.get("/api/v1/tables/tree", headers=rita).json()
+    (dev,) = tree["environments"]
+    assert dev["actions"] == []
+    assert dev["namespaces"] == [{"path": "gold", "count": 1, "actions": []}]
+
+
+def test_an_environment_seen_only_through_a_namespace_grant_offers_nothing_but_its_namespace_does(
+    client: TestClient,
+) -> None:
+    _table(client, "a")
+    rita = _person(client, "rita")
+    for action in ("READ_TABLE", "DROP_NAMESPACE"):
+        granted = client.post(
+            "/api/v1/grants",
+            headers=AUTH_HEADER,
+            json={
+                "principal": "rita",
+                "action": action,
+                "kind": "NAMESPACE",
+                "environment": "dev",
+                "namespace": "gold",
+            },
+        )
+        assert granted.status_code < 300, granted.text
+    tree = client.get("/api/v1/tables/tree", headers=rita).json()
+    (dev,) = tree["environments"]
+    assert dev["name"] == "dev" and dev["actions"] == []
+    assert dev["namespaces"] == [{"path": "gold", "count": 1, "actions": ["drop"]}]
 
 
 def test_a_missing_environment_is_404_for_an_administrator(client: TestClient) -> None:
