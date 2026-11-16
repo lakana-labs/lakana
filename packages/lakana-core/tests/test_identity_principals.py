@@ -17,8 +17,10 @@ from lakana_core.errors import (
     PermissionDenied,
     ValidationError,
 )
+from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
+from lakana_core.identity.groups import GroupService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService
 from lakana_core.models import AuditEvent, AuditEventType, BrowserSession, Principal, PrincipalType
@@ -208,3 +210,55 @@ def test_a_principal_that_is_gone_cannot_set_a_language(session: Session) -> Non
     ghost = PrincipalRef(id=uuid.uuid4(), name="ghost", type=PrincipalType.USER)
     with pytest.raises(NotFoundError, match="Your principal no longer exists"):
         PrincipalService(session, AllowAllAuthorization()).set_own_language(ghost, "fr")
+
+
+def test_held_admin_of_names_current_and_former_administrators(session: Session) -> None:
+    """ADMIN now or ever (directly or through a group) is held; a revoked ADMIN stays held."""
+    admin = _admin(session)
+    principals = PrincipalService(session, AllowAllAuthorization())
+    grants = GrantService(session, AllowAllAuthorization())
+    for name in ("now", "once", "never", "member"):
+        principals.create_principal(admin, name=name, type=PrincipalType.USER)
+    grants.grant(admin, principal="now", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    once = grants.grant(admin, principal="once", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    grants.revoke(admin, once.id)
+    group = GroupService(session, AllowAllAuthorization())
+    group.create_group(admin, name="admins")
+    group.add_member(admin, "admins", "member")
+    grants.grant(admin, group="admins", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    rows = principals.list_principals(admin).items
+    held = principals.held_admin_of(admin, rows)
+    assert held is not None
+    assert {row.name: held[row.id] for row in rows if row.name != admin.name} == {
+        "now": True,
+        "once": True,
+        "never": False,
+        "member": True,
+    }
+
+
+def test_held_admin_of_a_principal_marked_before_the_flag_counts(session: Session) -> None:
+    """ADMIN that covers a person whose flag is not set (made before it existed) still counts."""
+    admin = _admin(session)
+    principals = PrincipalService(session, AllowAllAuthorization())
+    grants = GrantService(session, AllowAllAuthorization())
+    row = principals.create_principal(admin, name="old", type=PrincipalType.USER)
+    grants.grant(admin, principal="old", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    row.held_admin = False
+    session.commit()
+    held = principals.held_admin_of(admin, [row])
+    assert held == {row.id: True}
+
+
+def test_held_admin_of_is_none_for_a_caller_who_is_not_an_administrator(session: Session) -> None:
+    """Someone who may manage principals but is no administrator does not learn who is one."""
+    admin = _admin(session)
+    setup = PrincipalService(session, AllowAllAuthorization())
+    clerk = setup.create_principal(admin, name="clerk", type=PrincipalType.USER)
+    GrantService(session, AllowAllAuthorization()).grant(
+        admin, principal="clerk", action=Action.MANAGE_PRINCIPAL, kind=SecurableKind.INSTANCE
+    )
+    as_clerk = PrincipalRef(id=clerk.id, name=clerk.name, type=clerk.type)
+    service = PrincipalService(session, GrantAuthorization(session))
+    rows = service.list_principals(as_clerk).items
+    assert service.held_admin_of(as_clerk, rows) is None

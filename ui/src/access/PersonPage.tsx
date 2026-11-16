@@ -8,7 +8,7 @@ import { type JSX, useCallback, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import { getPrincipal, isAdministrator, removePicture, type SessionOut } from "../api";
+import { getPrincipal, removePicture, type SessionOut } from "../api";
 import { Avatar, useCurrentPicture } from "../profile/Avatar";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { CopyLine } from "../shell/CopyLine";
@@ -35,9 +35,9 @@ interface About {
 
 /**
  * Finds out what kind of account another person has, and their picture: a service account has
- * no passkeys to recover, and an administrator is recovered only by the server operator. What
- * cannot be read counts as a person without a picture, so the button shows and the server names
- * the cause if it refuses.
+ * no passkeys to recover, and anyone who holds or has ever held ADMIN is recovered only by the
+ * server operator (the principal's `held_admin`). What cannot be read counts as a person without
+ * a picture, so the button shows and the server names the cause if it refuses.
  *
  * @param name - The principal name.
  * @returns The kind and the picture.
@@ -48,7 +48,7 @@ async function aboutOther(name: string): Promise<About> {
   if (principal !== null && principal.type !== "USER") {
     return { kind: "service", picture };
   }
-  return { kind: (await isAdministrator(name).catch(() => false)) ? "admin" : "person", picture };
+  return { kind: principal?.held_admin === true ? "admin" : "person", picture };
 }
 
 /** Properties of {@link PersonPage}. */
@@ -60,7 +60,7 @@ export interface PersonPageProps {
 /**
  * Renders the person's page, their picture first. Its one action issues a recovery link, and an
  * administrator may remove another person's picture (one's own is set and removed in the user
- * menu). For an administrator the
+ * menu). For anyone who holds or has held ADMIN the
  * page shows the server operator's command instead, for a service account a line saying it signs
  * in with its token, and for oneself no button (Add a passkey is the way) but, for an
  * administrator, the operator's command that lets them back in.

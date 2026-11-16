@@ -5,6 +5,90 @@ from fastapi.testclient import TestClient
 from tests.conftest import AUTH_HEADER
 
 
+def _create(client: TestClient, name: str, kind: str = "USER") -> None:
+    """Create a principal as the bootstrap administrator.
+
+    Parameters
+    ----------
+    client
+        The client.
+    name
+        The new principal's name.
+    kind
+        `USER` or `SERVICE_ACCOUNT`.
+    """
+    r = client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": kind})
+    assert r.status_code == 201, r.text
+
+
+def _grant(client: TestClient, **body: str) -> str:
+    """Grant something on the instance as the bootstrap administrator.
+
+    Parameters
+    ----------
+    client
+        The client.
+    **body
+        The grant's fields besides `kind`.
+
+    Returns
+    -------
+    str
+        The grant's id.
+    """
+    r = client.post("/api/v1/grants", headers=AUTH_HEADER, json={**body, "kind": "INSTANCE"})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def _token(client: TestClient, name: str) -> dict[str, str]:
+    """Issue a token for a principal.
+
+    Parameters
+    ----------
+    client
+        The client.
+    name
+        The principal.
+
+    Returns
+    -------
+    dict of str to str
+        Its Authorization header.
+    """
+    r = client.post(f"/api/v1/principals/{name}/tokens", headers=AUTH_HEADER, json={"name": "t"})
+    assert r.status_code == 201, r.text
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
+def test_held_admin_marks_current_and_former_administrators(client: TestClient) -> None:
+    """A former administrator stays marked, so the interface offers the operator's command."""
+    for name in ("carol", "dave", "erin"):
+        _create(client, name)
+    _grant(client, principal="carol", role="ADMIN")
+    revoked = client.delete(
+        f"/api/v1/grants/{_grant(client, principal='dave', role='ADMIN')}", headers=AUTH_HEADER
+    )
+    assert revoked.status_code == 204, revoked.text
+    listed = client.get("/api/v1/principals", headers=AUTH_HEADER).json()
+    held = {row["name"]: row["held_admin"] for row in listed}
+    assert held == {"admin": True, "carol": True, "dave": True, "erin": False}
+    for name, expected in held.items():
+        one = client.get(f"/api/v1/principals/{name}", headers=AUTH_HEADER).json()
+        assert one["held_admin"] is expected
+
+
+def test_held_admin_is_only_for_administrators(client: TestClient) -> None:
+    """Who is or was an administrator is not shown to someone who only manages principals."""
+    _create(client, "hr-bot", "SERVICE_ACCOUNT")
+    _grant(client, principal="hr-bot", action="MANAGE_PRINCIPAL")
+    headers = _token(client, "hr-bot")
+    listed = client.get("/api/v1/principals", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert {row["held_admin"] for row in listed.json()} == {None}
+    assert client.get("/api/v1/principals/admin", headers=headers).json()["held_admin"] is None
+
+
 def test_create_and_get_principal(client: TestClient) -> None:
     """A created principal is fetchable by name and starts active."""
     response = client.post(
@@ -18,6 +102,7 @@ def test_create_and_get_principal(client: TestClient) -> None:
         "type": "SERVICE_ACCOUNT",
         "is_active": True,
         "picture": None,
+        "held_admin": False,
     }
 
     fetched = client.get("/api/v1/principals/ci-bot", headers=AUTH_HEADER)
