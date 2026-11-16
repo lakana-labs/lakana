@@ -171,11 +171,11 @@ removes any it could not." In a protected environment the dialog also asks why y
 protection of the environment, the same text `--reason` takes with `--break-glass`.
 
 For an artifact a deployed project produces, **Drop…** is shown but cannot be chosen, and the menu
-says `Defined in analytics/assets/ml/model.py — change it in git` with the repository and the file
-that declare it; a screen reader hears it when the menu opens. Deleting single versions stays
-possible. If the drop is refused, for instance because a deploy made the artifact git-owned after
-you opened its page, or the passkey touch fails, the dialog stays open with the server's sentence
-and nothing is dropped.
+says `Drop is off: analytics/assets/ml/model.py defines this. Remove it there and deploy, then drop
+it from Orphans.` with the repository and the file that declare it; a screen reader hears it when
+the menu opens. Deleting single versions stays possible. If the drop is refused, for instance
+because a deploy made the artifact git-owned after you opened its page, or the passkey touch fails,
+the dialog stays open with the server's sentence and nothing is dropped.
 
 ## When it fails
 

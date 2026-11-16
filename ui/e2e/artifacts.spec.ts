@@ -269,7 +269,7 @@ for (const theme of ["light", "dark"] as const) {
         const note = await menu.getAttribute("aria-describedby");
         expect(note, "the menu is described").not.toBeNull();
         await expect(page.locator(`[id="${note ?? ""}"]`)).toHaveText(
-          "Defined in analytics/assets/ml/model.py — change it in git",
+          "Drop is off: analytics/assets/ml/model.py defines this. Remove it there and deploy, then drop it from Orphans.",
         );
         await expect(page.getByRole("menuitem", { name: "Drop…" })).toHaveAttribute(
           "aria-disabled",

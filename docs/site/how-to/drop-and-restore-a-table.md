@@ -50,11 +50,12 @@ A table or view that a deployed project builds is defined in git, so it is chang
 `silver.clean` is built by a deployed project. Defined in analytics/assets/silver/clean.sql. Remove it there and deploy; then drop it from Orphans. To build it again from git instead: `lakana table rebuild silver.clean --env dev --reason "…"`.
 ```
 
-In the web interface, **Drop…** under the table's **Actions** is shown but cannot be chosen, and
-the menu says `Defined in analytics/assets/silver/clean.sql — change it in git` with the
-repository and the file that define the table; a screen reader hears it when the menu opens.
-**Rebuild from git…** stays available. If a deploy makes the table git-owned after you opened
-its page, the Drop dialog shows the server's sentence above and stays open.
+In the web interface, **Drop…** under the table's **Actions** is shown but cannot be chosen, and the
+menu says `Drop is off: analytics/assets/silver/clean.sql defines this. Remove it there and deploy,
+then drop it from Orphans.` with the repository and the file that define the table; a screen reader
+hears it when the menu opens. **Rebuild from git…** stays available. If a deploy makes the table
+git-owned after you opened its page, the Drop dialog shows the server's sentence above and stays
+open.
 
 Neither `--purge` nor a break-glass reason gets past this, and the REST API, the UI and Iceberg
 clients refuse alike. To build it again from git instead, see
