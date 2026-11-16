@@ -239,7 +239,9 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   count (`U+200B ×350000`). i18next marks every value interpolated into a `t()` sentence the
   same way (`interpolation.escape` is `markedText`, `ui/src/i18n/i18n.ts`), so a name passed to
   `t()` needs no call of its own; only a command to copy opts out, with `{{- name}}`, and
-  `CopyLine` shows its marks.
+  `CopyLine` shows its marks. The Playwright smoke test `ui/e2e/hidden-characters.spec.ts`
+  fails on a server value that reaches the page unmarked (#669, see "The `ui/` gates" in
+  `docs/agent/testing.md`); a new screen adds its walk there.
 - **No Node globals in browser code.** `globals.node` is on for the config files and scripts, so
   ESLint refuses `process` and `Buffer` inside `ui/src/` (`src/api/` included): Vite does not
   polyfill them, so they would fail only in the browser. Use `import.meta.env` and `Uint8Array`.
