@@ -27,6 +27,7 @@ from lakana_core.errors import (
     AlreadyExistsError,
     AuthenticationError,
     ConflictError,
+    NoPasskeyError,
     NotFoundError,
     PasskeyRefused,
     PermissionDenied,
@@ -416,8 +417,9 @@ def test_user_handle_is_random_and_not_the_name(world: World, alice: Signed) -> 
 def test_first_passkey_needs_a_fresh_link_session(world: World, alice: Signed) -> None:
     """A link session may add the first passkey for 15 minutes, then only with step-up."""
     world.clock.now = START + FIRST_PASSKEY_WINDOW + timedelta(minutes=1)
-    with pytest.raises(StepUpRequired, match="recovery link"):
+    with pytest.raises(PermissionDenied, match="recovery link") as refused:
         world.passkeys.registration_options(world.ref(alice))
+    assert refused.type is PermissionDenied, "a touch cannot help a person without a passkey"
 
 
 def test_a_session_without_a_link_needs_step_up_for_the_first_passkey(world: World) -> None:
@@ -482,8 +484,9 @@ def test_a_local_session_after_the_window_names_a_new_local_link(world: World) -
     """The next step after a local sign-in is another local sign-in, not a recovery link."""
     local = world.start(world.person("gus"), via="local")
     world.clock.now = START + FIRST_PASSKEY_WINDOW + timedelta(minutes=1)
-    with pytest.raises(StepUpRequired, match="lakana server start --local"):
+    with pytest.raises(PermissionDenied, match="lakana server start --local") as refused:
         world.passkeys.registration_options(world.ref(local))
+    assert refused.type is PermissionDenied
 
 
 def test_a_counter_changed_meanwhile_refuses_the_sign_in(
@@ -781,6 +784,36 @@ def test_step_up_with_another_persons_passkey_is_refused(
     after = world.ref(alice).session
     assert before is not None and after is not None
     assert after.last_touch_at == before.last_touch_at
+
+
+@pytest.mark.parametrize("via", ["local", "passkey"])
+def test_step_up_without_a_passkey_says_to_add_one(world: World, via: str) -> None:
+    """A person without a usable passkey gets `NoPasskeyError`, not an empty passkey list.
+
+    An empty list would open the browser's picker with nothing to choose; the refusal names the
+    cause and the next step, and stores no challenge.
+    """
+    signed = world.start(world.person("hana"), via=via)
+    with pytest.raises(NoPasskeyError, match=r"no passkey.*Add a passkey"):
+        world.passkeys.step_up_options(world.ref(signed))
+    assert world.session.scalar(select(func.count()).select_from(WebauthnChallenge)) == 0
+
+
+def test_step_up_with_only_a_passkey_of_an_earlier_address_says_to_add_one(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    """A passkey registered for another public address cannot answer, so it does not count."""
+    alice, _, _ = enrolled
+    moved = world.service(rp_id="lakana.example.org", origin="https://lakana.example.org")
+    with pytest.raises(NoPasskeyError):
+        moved.step_up_options(world.ref(alice))
+
+
+def test_a_token_caller_is_told_step_up_is_for_browsers(world: World) -> None:
+    """A token has no session: the browser-session refusal comes first, passkey or not."""
+    row = world.person("ivo")
+    with pytest.raises(ConflictError, match="browser session"):
+        world.passkeys.step_up_options(PrincipalRef(id=row.id, name=row.name, type=row.type))
 
 
 def test_step_up_sets_the_touch_time(
