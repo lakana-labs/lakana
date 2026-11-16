@@ -5,6 +5,7 @@
     "columns": "Columns",
     "preview": "Preview",
     "lineage": "Lineage",
+    "references": "References",
     "health": "Health",
     "access": "Access"
   },
@@ -165,6 +166,22 @@
     "value": "Value",
     "valueOf": "{{column}}, row {{row}}",
     "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here."
+  },
+  "referencesTab": {
+    "reading": "Reading the references…",
+    "empty": "The table's header declares no references and none point here.",
+    "outgoing": "This table references",
+    "incoming": "Referenced by",
+    "table": "Table",
+    "reference": "Reference",
+    "note": "Note",
+    "none": "Nothing here.",
+    "missing": "This table does not exist.",
+    "validAt": "valid at {{at}}",
+    "hiddenOutgoing_one": "{{count}} more points at a table you may not read",
+    "hiddenOutgoing_other": "{{count}} more point at tables you may not read",
+    "hiddenIncoming_one": "{{count}} more from a table you may not read",
+    "hiddenIncoming_other": "{{count}} more from tables you may not read"
   },
   "healthTab": {
     "reading": "Reading the health…",

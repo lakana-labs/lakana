@@ -6,10 +6,10 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Literal, cast
 
-import sqlglot
 import sqlglot.errors
 import sqlglot.expressions as exp
 
+from lakana_core import sql_dialect
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import shown
 from lakana_core.sql_syntax import syntax_problem
@@ -315,7 +315,7 @@ def validate_restricted_expression(
     """
     allowed = _MASK_NODE_TYPES if kind == "mask" else _FILTER_NODE_TYPES
     try:
-        parsed = sqlglot.parse_one(sql_expr, dialect=dialect, into=exp.Condition)
+        parsed = sql_dialect.parse_one(sql_expr, dialect=dialect, into=exp.Condition)
     except Exception as exc:
         reader_error = isinstance(exc, sqlglot.errors.SqlglotError)
         problem = syntax_problem(exc, sql_expr) if reader_error else None
@@ -374,7 +374,7 @@ def columns_of(sql_expr: str, dialect: str = "duckdb") -> set[str]:
         with such a reference, but one stored before that is still read this way. The database
         matches a column name without regard to case, so a caller compares them that way.
     """
-    parsed = sqlglot.parse_one(sql_expr, dialect=dialect, into=exp.Condition)
+    parsed = sql_dialect.parse_one(sql_expr, dialect=dialect, into=exp.Condition)
     return {column.parts[0].name for column in parsed.find_all(exp.Column)}
 
 
@@ -394,6 +394,6 @@ def normalized_expression(sql_expr: str) -> str:
         the problem).
     """
     try:
-        return sqlglot.parse_one(sql_expr, dialect="duckdb").sql(dialect="duckdb")
+        return sql_dialect.parse_one(sql_expr, dialect="duckdb").sql(dialect="duckdb")
     except (sqlglot.errors.SqlglotError, RecursionError):
         return sql_expr

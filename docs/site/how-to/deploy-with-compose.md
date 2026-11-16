@@ -1215,8 +1215,8 @@ above.
 
 A restore puts the catalog and the object storage back from one backup, taken as under
 "Backups". The project's `compose-smoke` job runs the backup and these steps: it backs up, changes
-a table, loses the instance, restores into a new directory, and compares the table, the runs and
-an artifact.
+a table, loses the instance, restores into a new directory, and compares the table and its
+snapshot, the runs, the grants, the secrets and an artifact.
 
 **Where to restore.** Into the directory of the bundle you lost, if it is still there, or into a
 new, empty directory (on a new machine, say). The directory needs the `compose.yaml` and the
@@ -1276,6 +1276,24 @@ docker compose up -d --wait
 lakana sql "SELECT id, name FROM bronze.demo ORDER BY id"
 lakana runs list --env dev
 ```
+
+**Order.** Catalog first (step 3), then storage (step 4), then start everything (step 5), as above.
+Nothing may start before both are back, or the server reads a catalog that points at missing
+files; and `.env` with its master key must be in place before step 5, or no secret decrypts.
+
+**What a restore loses (RPO) and how long it takes (RTO).** The recovery point is the moment of the
+backup: everything written after it is gone, so the most you can lose is the time since your last
+backup. Take backups as often as you can afford to lose work, and note that the instance is
+unavailable while each backup runs. The recovery time is the time to copy the two files back,
+start the stack and check it. It grows with the size of the archive and the speed of the disk, and
+loading the catalog grows with the number of tables, snapshots and runs. The `compose-smoke` job
+prints it as `restore took N s` for a small instance, with images already pulled and its own checks
+included: about a minute (64 s on GitHub's runner, November 2026). Time a restore of your own
+backups on a spare machine to learn yours.
+
+The same job proves the round trip before the project ships a release: it checks that the table is
+at the same snapshot, that the grants and the secrets are the same, and that a table of a second
+environment reads (so the master key in `.env` still decrypts its storage secret).
 
 Everything written after the backup is gone: rows, runs, grants and tokens. People whose token
 was issued after it must get a new one. Secrets are back as they were, because they are in the

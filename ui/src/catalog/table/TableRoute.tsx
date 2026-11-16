@@ -8,7 +8,7 @@ import { type JSX, lazy, Suspense, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 
-import type { TableRef } from "../../api";
+import type { TableOut, TableRef } from "../../api";
 import { NotFound } from "../../shell/NotFound";
 import { Page } from "../../shell/Page";
 import { catalogPath, TABLE_TABS, type TableTab } from "../paths";
@@ -20,6 +20,9 @@ const TablePage = lazy(async () => {
   const { TablePage: loaded } = await import("./TablePage");
   return { default: loaded };
 });
+
+// The menu, its dialogs and their strings load once a table is shown.
+const TableActions = lazy(() => import("../actions/TableActions"));
 
 /**
  * The tab an address names: Overview for none, else the segment when a tab has it.
@@ -47,7 +50,8 @@ interface TableViewProps {
 
 /**
  * The page frame: the breadcrumb and the heading, which stay put while the chunk, the table and
- * the tabs come and go, so that the focus the shell puts on the heading is never lost.
+ * the tabs come and go, so that the focus the shell puts on the heading is never lost. The
+ * Actions menu joins the heading once the table is read.
  *
  * @param props - The table and the tab.
  * @param props.place - The table the address names.
@@ -58,12 +62,20 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
   const { t } = useTranslation();
   const heading = useRef<HTMLHeadingElement>(null);
   const [waiting, setWaiting] = useState(true);
+  const [table, setTable] = useState<TableOut | null>(null);
   const { environment, namespace, name } = place;
   return (
     <div className={WIDE_TABS.has(tab) ? "table-page table-page-wide" : "table-page"}>
       <Page
         title={name}
         headingRef={heading}
+        action={
+          table !== null && (
+            <Suspense fallback={null}>
+              <TableActions place={place} table={table} />
+            </Suspense>
+          )
+        }
         trail={[
           { to: catalogPath(DEFAULT_VIEW), label: t("areas.catalog.name") },
           { to: catalogPath({ ...DEFAULT_VIEW, environment }), label: environment },
@@ -71,7 +83,13 @@ function TableView({ place, tab }: TableViewProps): JSX.Element {
         ]}
       >
         <Suspense fallback={<TableSkeleton />}>
-          <TablePage place={place} tab={tab} headingRef={heading} onWaiting={setWaiting} />
+          <TablePage
+            place={place}
+            tab={tab}
+            headingRef={heading}
+            onWaiting={setWaiting}
+            onLoaded={setTable}
+          />
         </Suspense>
         <LoadingStatus waiting={waiting} />
       </Page>

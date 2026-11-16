@@ -63,17 +63,22 @@ export function useTablePages(view: CatalogView): TablePages {
     next: null,
     capped: false,
     error: null,
-    loading: "first",
+    loading: view.view === "all" ? "first" : null,
   });
   const [round, setRound] = useState(0);
   const generation = useRef(0);
-  const { environment, namespace, q, sort, order } = view;
+  const { environment, namespace, view: kind, q, sort, order } = view;
 
   useEffect(() => {
     generation.current += 1;
     const mine = generation.current;
+    if (kind !== "all") {
+      // Another view lists something else; no table list is read for it.
+      setState({ items: undefined, next: null, capped: false, error: null, loading: null });
+      return;
+    }
     setState((previous) => ({ ...previous, error: null, loading: "first" }));
-    listTables(viewQuery({ environment, namespace, q, sort, order }, null)).then(
+    listTables(viewQuery({ environment, namespace, view: kind, q, sort, order }, null)).then(
       (page) => {
         if (mine === generation.current) {
           setState({
@@ -97,7 +102,7 @@ export function useTablePages(view: CatalogView): TablePages {
         }
       },
     );
-  }, [environment, namespace, q, sort, order, round, t]);
+  }, [environment, namespace, kind, q, sort, order, round, t]);
 
   const { next, items } = state;
   const loadMore = useCallback(async () => {
@@ -107,7 +112,9 @@ export function useTablePages(view: CatalogView): TablePages {
     const mine = generation.current;
     setState((previous) => ({ ...previous, error: null, loading: "more" }));
     try {
-      const page = await listTables(viewQuery({ environment, namespace, q, sort, order }, next));
+      const page = await listTables(
+        viewQuery({ environment, namespace, view: kind, q, sort, order }, next),
+      );
       if (mine === generation.current) {
         const seen = new Set(items.map(keyOf));
         setState({
@@ -123,7 +130,7 @@ export function useTablePages(view: CatalogView): TablePages {
         setState((previous) => ({ ...previous, error: problemText(t, failure), loading: null }));
       }
     }
-  }, [environment, namespace, q, sort, order, next, items, t]);
+  }, [environment, namespace, kind, q, sort, order, next, items, t]);
 
   const reload = useCallback(() => {
     setRound((previous) => previous + 1);
