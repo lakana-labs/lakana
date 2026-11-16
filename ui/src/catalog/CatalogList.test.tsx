@@ -1381,6 +1381,56 @@ describe("CatalogList", () => {
       });
     });
 
+    it("shows a note once: the history entry forgets it, so Back and a reload do not show it again", async () => {
+      const { router } = renderShell("/catalog?env=prod");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=gold", {
+          state: { placeNote: "deleted", namespace: "gold.old" },
+        });
+      });
+
+      const note = await screen.findByText("Deleted namespace gold.old.");
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      await waitFor(() => {
+        expect(router.state.location.state).toEqual({
+          placeNote: "deleted",
+          namespace: "gold.old",
+          seen: true,
+        });
+      });
+      expect(screen.getByText("Deleted namespace gold.old.")).toBe(note);
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=silver");
+      });
+      expect(screen.queryByText("Deleted namespace gold.old.")).not.toBeInTheDocument();
+      await act(async () => {
+        await router.navigate(-1);
+      });
+      expect(router.state.location.search).toBe("?env=prod&ns=gold");
+      await screen.findByRole("link", { name: "fact_sales" });
+      expect(screen.queryByText("Deleted namespace gold.old.")).not.toBeInTheDocument();
+    });
+
+    it("shows no note for an entry whose note was already shown, as after a reload", async () => {
+      const { router } = renderShell("/catalog?env=prod");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=gold", {
+          state: { placeNote: "created", namespace: "gold", seen: true },
+        });
+      });
+
+      await screen.findByRole("button", { name: "Actions for gold" });
+      expect(screen.queryByText(/Created namespace/)).not.toBeInTheDocument();
+    });
+
     it("confirms a drop above the notice when the namespace has left the tree", async () => {
       const { router } = renderShell("/catalog?env=prod");
       await screen.findByRole("link", { name: "fact_sales" });

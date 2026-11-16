@@ -52,6 +52,24 @@ const SAY_LOADING_AFTER_MS = 1000;
 // How many tables the server looks at in a search before it stops.
 const SEARCH_CAP = 5000;
 
+/** A place note as the history entry carries it, marked once the page has shown it. */
+type NoteInHistory = Omit<PlaceNoteState, "environment"> & { readonly seen?: true };
+
+/**
+ * Whether the history entry carries the note the page holds, marked seen or not.
+ *
+ * @param held - The note the page shows.
+ * @param state - The entry's state.
+ * @returns True for the same note.
+ */
+function sameNote(held: NoteInHistory, state: NoteInHistory | null): boolean {
+  return (
+    state?.placeNote === held.placeNote &&
+    state.namespace === held.namespace &&
+    state.artifact === held.artifact
+  );
+}
+
 /**
  * Whether something has lasted longer than a delay.
  *
@@ -267,15 +285,33 @@ export function CatalogList(): JSX.Element {
     const node = findNode(root, environment, namespace);
     chosen = node === null ? null : { node, root, environment };
   }
-  // What the place menu left in the location state; only it sets `placeNote`.
-  const noteState = location.state as Omit<PlaceNoteState, "environment"> | null;
+  // What the place menu left in the location state; only it sets `placeNote`. The page shows it
+  // once: it holds the note while the entry is marked seen (below), so a reload or Back to the
+  // entry, which find it seen, show nothing.
+  const noteState = location.state as NoteInHistory | null;
+  const fresh = noteState?.placeNote !== undefined && noteState.seen !== true;
+  const [held, setHeld] = useState<NoteInHistory | null>(null);
+  if (fresh && held !== noteState) {
+    setHeld(noteState);
+  } else if (!fresh && held !== null && !sameNote(held, noteState)) {
+    setHeld(null);
+  }
+  useEffect(() => {
+    if (fresh) {
+      const { pathname, search: query, hash } = location;
+      void navigate(
+        { pathname, search: query, hash },
+        { replace: true, state: { ...noteState, seen: true } },
+      );
+    }
+  }, [fresh, noteState, location, navigate]);
   const placeNote =
-    environment !== null && noteState?.placeNote !== undefined
+    environment !== null && held !== null
       ? {
-          placeNote: noteState.placeNote,
-          namespace: noteState.namespace,
+          placeNote: held.placeNote,
+          namespace: held.namespace,
           environment,
-          ...(noteState.artifact === undefined ? {} : { artifact: noteState.artifact }),
+          ...(held.artifact === undefined ? {} : { artifact: held.artifact }),
         }
       : null;
   const onCreated = (environmentOfPlace: string, path: string): void => {
