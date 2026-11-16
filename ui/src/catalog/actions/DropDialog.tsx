@@ -37,7 +37,7 @@ export interface DropDialogProps {
  * Renders the question. A table can be restored from Dropped unless "Delete the files now" is
  * checked; an artifact cannot, and has no such box. In a protected environment it asks for the
  * reason to break the protection first. A refusal, the server's or a failed passkey touch,
- * stays in the dialog with its sentence.
+ * stays in the dialog with its sentence. While the drop is pending, the dialog cannot be closed.
  *
  * @param props - What to drop and the handlers.
  * @param props.target - What to drop.
@@ -74,8 +74,14 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
       drop();
     }
   };
+  // While the drop or its passkey touch is pending, Escape, the close button and Cancel do nothing.
+  const close = (): void => {
+    if (!attempt.busy) {
+      onCancel();
+    }
+  };
   return (
-    <ActionDialog onClose={onCancel}>
+    <ActionDialog onClose={close}>
       <Heading slot="title">
         {t("table.actions.drop.title", { table: markedText(`${ref.namespace}.${ref.name}`) })}
       </Heading>
@@ -112,7 +118,7 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
         waiting={protectedEnvironment === undefined}
         disabled={needsReason && reason.trim() === ""}
         onConfirm={drop}
-        onCancel={onCancel}
+        onCancel={close}
       />
     </ActionDialog>
   );

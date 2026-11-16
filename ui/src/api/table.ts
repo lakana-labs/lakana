@@ -55,8 +55,8 @@ export interface ColumnOut {
 /** What a person may do to a table, as the server offers it. */
 export type TableAction = "drop" | "rebuild" | "maintain" | "set_retention";
 
-/** The deployed project file that declares a table. */
-interface DefinedByOut {
+/** The deployed project file that declares a table or an artifact. */
+export interface DefinedByOut {
   /** The repository's name. */
   readonly repository: string;
   /** The file's path in the repository. */

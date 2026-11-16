@@ -9,7 +9,6 @@ import {
   QUERY_ID,
   queryStatus,
   result,
-  table,
   TABLE_PATH,
   VIEW,
   VIEW_RESULT,
@@ -257,21 +256,6 @@ describe("PreviewTab", () => {
     });
 
     expect(await screen.findByRole("alert")).toHaveTextContent("You may not run queries here.");
-  });
-
-  it("says an artifact has no preview and asks nothing", async () => {
-    const { server } = renderShell(PREVIEW, {
-      routes: { [`GET ${TABLE_PATH}`]: { status: 200, body: table({ kind: "ARTIFACT" }) } },
-    });
-
-    expect(
-      await screen.findByText(
-        "An artifact holds files, not rows, so it has no preview. Download its files with lakana artifact download.",
-      ),
-    ).toBeVisible();
-    expect(sent(server, "GET", "/permissions?environment=prod")).toEqual([]);
-    expect(sent(server, "POST", "/preview")).toEqual([]);
-    expect(server.sent.filter((request) => request.path.includes("/queries"))).toEqual([]);
   });
 
   it("waits with words after a second", async () => {

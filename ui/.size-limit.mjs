@@ -52,7 +52,14 @@ const NAMED_LIMITS = [
   // share with the table's Actions (below).
   // Raised to the measured 3.41 kB (2026-11-16) + 10 %: the list frame, the Expiring list (when, due now and the
   // retention sentence) and the Orphans list with its Drop dialog and its sentences.
-  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.75 kB" },
+  // Lowered to the measured 2.98 kB (2026-11-16) + 10 %: the list frame and the paging by cursor
+  // moved into a chunk of their own (below) once an artifact's open uploads became their second
+  // importer.
+  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.28 kB" },
+  // Measured 1.1 kB (2026-11-16) + 10 %: the list frame (skeleton, the server's sentence with Try
+  // again, the empty sentence, the scrolling table and Show more) and the paging by cursor, which
+  // the Catalog's views share with an artifact's open uploads.
+  { name: "the list frame", prefix: "ViewList-", limit: "1.21 kB" },
   // Measured 2.29 kB (2026-11-16) + 10 %: the Drop dialog with the break-glass reason field and
   // the strings of the actions, which the table's Actions and the Catalog's views share.
   // Lowered to the measured 0.81 kB (2026-11-16) + 10 %: the reason field, the confirm row, the
@@ -75,16 +82,23 @@ const NAMED_LIMITS = [
   { name: "New external table", prefix: "ExternalTableDialog-", limit: "1.35 kB" },
   // Measured 653 B (2026-11-16) + 10 %: the strings of the places, shared by the place menu, New
   // external table's form and the place note.
-  { name: "the strings of the places", prefix: "placeStrings-", limit: "0.72 kB" },
+  // Raised to the measured 725 B (2026-11-16) + 10 % with the note after an artifact's drop.
+  { name: "the strings of the places", prefix: "placeStrings-", limit: "0.8 kB" },
   // Measured 2.67 kB (2026-11-16) + 10 %: React Aria's radio group, which the Retention dialog and
   // New external table's form share; loaded with the first of them.
   { name: "the radio group", prefix: "RadioGroup-", limit: "2.94 kB" },
   // Measured 393 B (2026-11-16) + 10 %: the note after a namespace was created or deleted,
   // loaded only when the address carries it.
-  { name: "the place note", prefix: "PlaceNote-", limit: "0.43 kB" },
+  // Raised to the measured 499 B (2026-11-16) + 10 % with the note after an artifact's drop and
+  // the focus it takes back from the heading the shell focuses after a move to another page.
+  { name: "the place note", prefix: "PlaceNote-", limit: "0.55 kB" },
   // Measured 0.94 kB (2026-11-16) + 10 %: the API calls of catalog management, shared by the
   // table's Actions and the Catalog's views.
-  { name: "the calls of catalog management", prefix: "manage-", limit: "1.04 kB" },
+  // Raised to the measured 1.62 kB (2026-11-16) + 10 %: the table page reads an artifact with
+  // artifacts.ts, which imports manage.ts, so the bundler now puts the table page's own calls
+  // (api/table.ts, about 0.6 kB that left TablePage-) in this chunk, shared by the table page, its
+  // Actions and the Catalog's views.
+  { name: "the calls of catalog management", prefix: "manage-", limit: "1.78 kB" },
   // Measured 1.17 kB (2026-11-16) + 10 %: the retention sentences and calls, shared by the
   // Retention dialog and the Catalog's views.
   { name: "retention", prefix: "retention-", limit: "1.29 kB" },
@@ -117,6 +131,10 @@ const NAMED_LIMITS = [
   // the page: its import, the loading line and the code the bundler moved here with it.
   // Raised to the measured 9.97 kB (2026-11-13) + 10 % with the page's strings, which moved out of
   // the first load (about 1.8 kB gzipped less there) into this chunk, registered when it loads.
+  // Measured 9.4 kB (2026-11-16) with the artifact's read, its facts and the tabs by kind, after
+  // the table's calls moved to manage- (above); the limit holds.
+  // Measured 9.76 kB (2026-11-16) with the lazy import of an artifact's Versions tab; the limit
+  // holds.
   { name: "a table's page", prefix: "TablePage-", limit: "10.97 kB" },
   // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
@@ -143,6 +161,17 @@ const NAMED_LIMITS = [
   // Measured 1.01 kB (2026-11-16, `npm run size`) + 10 %: the References tab, its two flat panels of references,
   // the hidden counts and the focus after Try again. It loads only when the tab is opened.
   { name: "the References tab", prefix: "ReferencesTab-", limit: "1.11 kB" },
+  // Measured 3.04 kB (2026-11-16) + 10 %: an artifact's Versions tab, its versions 100 at a time
+  // with current, who stored each and when, the deleted ones, Files one version at a time, the
+  // whole version's command, Download with the size and SHA-256 check, the save under the file's
+  // own name, and its own strings. It loads only when the tab is opened.
+  // Raised to the measured 4.39 kB (2026-11-16) + 10 %: Delete… on a version, its dialog with the
+  // size and file count, the passkey and protected-environment steps (their code stays in
+  // ProtectedReason-), and what the delete freed and kept, in the command line's words.
+  // Raised to the measured 5.12 kB (2026-11-16) + 10 %: your open uploads below the versions,
+  // their reading that shows nothing without one or on a 403, Withdraw at once with the line that
+  // takes the focus, the server's sentence and the read again after a 409.
+  { name: "an artifact's Versions tab", prefix: "VersionsTab-", limit: "5.63 kB" },
   // Measured 3.83 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
   // included. The page and the two tabs share them, so the bundler gave them a chunk of their own,
   // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.
@@ -154,7 +183,8 @@ const NAMED_LIMITS = [
   { name: "the status glyph", prefix: "StatusGlyph-", limit: "0.73 kB" },
   // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
   // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
-  { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },
+  // Raised to the measured 994 B (2026-11-16) + 10 % with an artifact's tabs and the tabs by kind.
+  { name: "the catalog's addresses", prefix: "paths-", limit: "1.09 kB" },
   // Measured 95 B (a person's address, which the Access area and the Health and Access tabs
   // share, 2026-11-13) + 10 %.
   { name: "a person's address", prefix: "personPath-", limit: "0.11 kB" },

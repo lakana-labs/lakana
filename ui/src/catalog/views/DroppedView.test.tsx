@@ -1,5 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { dropped, manageRoutes } from "../../test/manage";
 import { held } from "../../test/pending";
@@ -48,6 +48,21 @@ describe("DroppedView", () => {
     expect(server.sent.map((request) => request.path)).toContain(
       "/api/v1/environments/prod/dropped-tables?limit=100",
     );
+  });
+
+  it("says how long ago a table was dropped and how long it can still be restored", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-11-16T09:30:00Z"), toFake: ["Date"] });
+    try {
+      renderShell(ADDRESS, { routes: manageRoutes() });
+
+      await screen.findByRole("region", { name: "Dropped tables" });
+      const times = [...(rows()[0] as HTMLElement).querySelectorAll("time")].map(
+        (time) => time.textContent,
+      );
+      expect(times).toEqual(["2 days ago", "in 5 days"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pages with Show more and the body's cursor", async () => {

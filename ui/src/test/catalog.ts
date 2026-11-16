@@ -8,7 +8,11 @@ import type { PlaceAction, TableListItemOut, TableListPageOut, TableTreeOut } fr
 import type { FakeRoute } from "./server";
 
 /** Every action on a place, which an administrator has. */
-const ALL_ACTIONS: readonly PlaceAction[] = ["create_namespace", "create_external_table", "drop"];
+export const ALL_ACTIONS: readonly PlaceAction[] = [
+  "create_namespace",
+  "create_external_table",
+  "drop",
+];
 
 /**
  * Two environments, the medallion namespaces and one nested namespace, with the actions a reader

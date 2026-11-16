@@ -141,6 +141,20 @@ export function environmentPath(environment: string, suffix = ""): string {
 }
 
 /**
+ * The path of an artifact, or of one of its parts. It lives here rather than in `artifacts.ts`,
+ * which imports this module, so that {@link dropArtifact} can use it without an import cycle.
+ *
+ * @param ref - The artifact; its `name` is the artifact's name.
+ * @param suffix - What follows it, such as `/versions/3`.
+ * @returns The path, every part encoded.
+ */
+export function artifactApiPath(ref: TableRef, suffix = ""): string {
+  const namespace = encodeURIComponent(ref.namespace);
+  const name = encodeURIComponent(ref.name);
+  return environmentPath(ref.environment, `/namespaces/${namespace}/artifacts/${name}${suffix}`);
+}
+
+/**
  * Appends a query to a path, if it has anything.
  *
  * @param path - The path.
@@ -159,7 +173,7 @@ export function withQuery(path: string, query: URLSearchParams): string {
  * @param query - A query to start from.
  * @returns The query.
  */
-function pageQuery(cursor: string | null, query = new URLSearchParams()): URLSearchParams {
+export function pageQuery(cursor: string | null, query = new URLSearchParams()): URLSearchParams {
   query.set("limit", String(PAGE_SIZE));
   if (cursor !== null) {
     query.set("cursor", cursor);
@@ -312,9 +326,7 @@ export function getReferences(ref: TableRef): Promise<TableReferencesOut> {
  * @throws {ApiError} for a refusal.
  */
 export async function dropArtifact(ref: TableRef, breakGlassReason: string | null): Promise<void> {
-  const namespace = encodeURIComponent(ref.namespace);
-  const name = encodeURIComponent(ref.name);
-  const path = environmentPath(ref.environment, `/namespaces/${namespace}/artifacts/${name}`);
+  const path = artifactApiPath(ref);
   await api.request<undefined>("DELETE", withQuery(path, breakGlassQuery(breakGlassReason)));
 }
 

@@ -405,6 +405,28 @@ export function observedWords(
 }
 
 /**
+ * The words for the days a weekday's volume band is of, by the names the server stores
+ * (`WEEKDAYS` in lakana-core's health_signals.py, #637).
+ */
+const WEEKDAY_WORDS: ReadonlyMap<unknown, string> = new Map(
+  ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((day) => [
+    day,
+    `${SIGNAL_WORDS}.bandWords.weekdays.${day}`,
+  ]),
+);
+
+/**
+ * The words for the day a volume band is of: its weekday when its basis is one, else null (a
+ * band of all days, one recorded before #637, or a day name this interface does not know).
+ *
+ * @param band - The usual band.
+ * @returns The translation key of the day's words, or null.
+ */
+function bandWeekday(band: Readonly<Record<string, unknown>>): string | null {
+  return band["basis"] === "weekday" ? (WEEKDAY_WORDS.get(band["weekday"]) ?? null) : null;
+}
+
+/**
  * A signal's usual band in words, without a guard.
  *
  * @param signal - The signal's kind.
@@ -443,11 +465,15 @@ function bandText(
   }
   if (low !== null && high !== null) {
     if (signal === "volume") {
-      return t(`${words}.volume`, {
+      const counts = {
         count: Math.round(Math.max(high, 0)),
         low: rows(low, number),
         high: rows(high, number),
-      });
+      };
+      const weekday = bandWeekday(band);
+      return weekday === null
+        ? t(`${words}.volume`, counts)
+        : t(`${words}.volumeOn`, { ...counts, weekday: t(weekday) });
     }
     if (signal === "null_rate") {
       return low <= 0
@@ -461,7 +487,7 @@ function bandText(
 /**
  * A signal's usual band in words, matching {@link observedWords} and the server's sentences:
  * freshness as the longest time between writes, volume as the rows usually added (rounded, never
- * below zero), empty values as their usual share (clipped to 0 to 100 %), and a range from its
+ * below zero; on the band's weekday when it is a weekday's band), empty values as their usual share (clipped to 0 to 100 %), and a range from its
  * usual lowest to highest value in the column's own kind. Any other signal or shape reads as the
  * server's pairs without the absent ones, and a value no browser can format falls back to them.
  *
