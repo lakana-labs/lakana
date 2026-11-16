@@ -67,6 +67,7 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
   const confirm = useConfirm({
     busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
     disabled: reason.trim() === "",
     onConfirm: rebuild,
   });

@@ -117,6 +117,39 @@ describe("DeleteNamespaceDialog", () => {
     expect(onDone).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["fails", { status: 500, body: { detail: "The catalog database is not reachable." } }],
+    ["is refused", { status: 403, body: { detail: "You may not read prod." } }],
+  ])(
+    "sends nothing for a click kept while the protection check %s, and takes the next click",
+    async (_how, answer) => {
+      const protection = held();
+      const server = fakeServer({
+        ...manageRoutes(),
+        "GET /api/v1/environments/prod": protection.route,
+      });
+      const { onDone, user } = renderDelete();
+      const button = screen.getByRole("button", { name: "Delete the namespace" });
+
+      await user.click(button);
+      protection.release(answer);
+
+      await waitFor(() => {
+        expect(button).not.toHaveAttribute("data-pending");
+      });
+      expect(button).toBeEnabled();
+      expect(writes(server.sent)).toEqual([]);
+      expect(onDone).not.toHaveBeenCalled();
+
+      await user.click(button);
+
+      await waitFor(() => {
+        expect(onDone).toHaveBeenCalledTimes(1);
+      });
+      expect(writes(server.sent)).toEqual([DELETE]);
+    },
+  );
+
   it("runs the passkey touch on StepUpRequired and deletes again", async () => {
     const webauthn = fakeWebAuthn();
     let tries = 0;

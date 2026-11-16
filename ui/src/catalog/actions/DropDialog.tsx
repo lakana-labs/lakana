@@ -68,6 +68,7 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
   const confirm = useConfirm({
     busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
     disabled: needsReason && reason.trim() === "",
     onConfirm: drop,
   });

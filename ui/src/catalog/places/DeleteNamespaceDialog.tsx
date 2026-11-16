@@ -62,6 +62,7 @@ export function DeleteNamespaceDialog({
   const confirm = useConfirm({
     busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
     disabled: missing,
     onConfirm: remove,
   });

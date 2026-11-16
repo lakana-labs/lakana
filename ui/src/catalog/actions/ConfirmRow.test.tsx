@@ -12,6 +12,8 @@ interface RowProps {
   readonly waiting: boolean;
   /** Whether the confirm button cannot be pressed. */
   readonly disabled: boolean;
+  /** Whether the wait ended without an answer, such as a failed check; no by default. */
+  readonly failed?: boolean;
   /** The action. */
   readonly onConfirm: () => void;
 }
@@ -22,12 +24,13 @@ interface RowProps {
  * @param props - The row's state.
  * @param props.waiting - Whether the dialog still waits.
  * @param props.disabled - Whether the confirm button cannot be pressed.
+ * @param props.failed - Whether the wait ended without an answer.
  * @param props.onConfirm - The action.
  * @returns The row.
  */
-function Row({ waiting, disabled, onConfirm }: RowProps): JSX.Element {
+function Row({ waiting, disabled, failed = false, onConfirm }: RowProps): JSX.Element {
   const attempt = useAttempt();
-  const confirm = useConfirm({ waiting, busy: false, disabled, onConfirm });
+  const confirm = useConfirm({ waiting, failed, busy: false, disabled, onConfirm });
   return (
     <ConfirmRow
       attempt={attempt}
@@ -133,5 +136,24 @@ describe("ConfirmRow", () => {
     await user.click(screen.getByRole("button", { name: "Enter" }));
 
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("drops a kept press when the wait ends without an answer, and takes the next press", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = render(<Row waiting disabled={false} onConfirm={onConfirm} />);
+    const button = screen.getByRole("button", { name: "Delete the namespace" });
+
+    await user.click(button);
+    rerender(<Row waiting={false} failed disabled={false} onConfirm={onConfirm} />);
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(button).not.toHaveAttribute("data-pending");
+    expect(button).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+
+    await user.click(button);
+
+    expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });

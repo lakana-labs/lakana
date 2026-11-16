@@ -93,6 +93,7 @@ export function DeleteVersionDialog({
   const confirm = useConfirm({
     busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
     disabled: missing,
     onConfirm: remove,
   });

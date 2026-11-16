@@ -142,6 +142,7 @@ export default function ExternalTableDialog({
   const confirm = useConfirm({
     busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
     disabled: missing || format === null,
     onConfirm: create,
   });

@@ -47,7 +47,7 @@ namespace without properties.
 Every dialog that changes something first asks the server whether the environment is protected.
 **Create**, or any other confirm button, pressed before that answer is in shows "Checking whether
 the environment is protected…" and acts once it knows; in a protected environment it asks for the
-reason first instead.
+reason first instead. If the check fails or is refused, nothing is sent: press the button again.
 
 If you may create namespaces but not read them, the tree shows a namespace only once it holds a
 table you may read. The Catalog then stays where it was and says so: "Created namespace

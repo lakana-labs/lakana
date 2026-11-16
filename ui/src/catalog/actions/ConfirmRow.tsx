@@ -23,6 +23,11 @@ export interface Confirm {
 export interface ConfirmOptions {
   /** Whether the dialog still waits to learn whether the environment is protected; no by default. */
   readonly waiting?: boolean;
+  /**
+   * Whether the wait ended without an answer (the check failed or was refused); no by default.
+   * A press kept through such a wait is dropped, so the person decides again with what they see.
+   */
+  readonly failed?: boolean;
   /** Whether the action already runs, so a second press, such as Enter, does nothing. */
   readonly busy: boolean;
   /** Whether the confirm button cannot be pressed, such as for an empty required field. */
@@ -34,11 +39,13 @@ export interface ConfirmOptions {
 /**
  * A dialog's confirm action. A press while the dialog still asks whether the environment is
  * protected is kept, shown as pending, and acted on once the answer is in, unless the answer
- * made the button unpressable (a protected environment needs a reason first): a press is never
- * lost without a word.
+ * made the button unpressable (a protected environment needs a reason first) or no answer came
+ * (the check failed or was refused): then the press is dropped and the button can be pressed
+ * again, so the person decides with what they see. A press is never lost without a word.
  *
  * @param options - The wait, whether the button can be pressed, and the action.
  * @param options.waiting - Whether the dialog still waits.
+ * @param options.failed - Whether the wait ended without an answer.
  * @param options.busy - Whether the action already runs.
  * @param options.disabled - Whether the confirm button cannot be pressed.
  * @param options.onConfirm - Starts the action.
@@ -46,13 +53,14 @@ export interface ConfirmOptions {
  */
 export function useConfirm({
   waiting = false,
+  failed = false,
   busy,
   disabled,
   onConfirm,
 }: ConfirmOptions): Confirm {
   const [queued, setQueued] = useState(false);
   const release = useEffectEvent(() => {
-    if (!disabled) {
+    if (!disabled && !failed) {
       onConfirm();
     }
   });
