@@ -284,7 +284,8 @@ and no later than one sweep after it**. The sweep runs every `LAKANA_RUN__SWEEP_
 - **An external table's files are never deleted.** Dropping one removes the catalog entry only; it
   is not listed by `--dropped` and cannot be restored. Register it again with
   `lakana table create-external`, or **New external table** in the Catalog (see
-  [Register files as an external table](register-files-as-an-external-table.md)). A view has no files; a deploy of its project creates it again.
+  [Register files as an external table](register-files-as-an-external-table.md)). A view has no
+  files; a deploy of its project creates it again.
 - **Tables dropped before this release** have no undo period: their files stay, and the worker's log
   counts their directories as directories without a record. Remove them when you choose with
   `lakana env orphaned-locations`: see

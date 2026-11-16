@@ -47,8 +47,10 @@ table you may read."
 
 ## See the namespaces
 
-The Catalog's tree shows the environments and namespaces you may read, with the number of tables
-you may read in each. On the command line, list the namespaces of an environment:
+**In the web interface,** open **Catalog**. Its tree shows the environments and namespaces you may
+read, with the number of tables you may read in each.
+
+On the command line, list the namespaces of an environment:
 
 <!-- source: docs/examples/organise-tables-in-namespaces/run.sh#list -->
 ```bash

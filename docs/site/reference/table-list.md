@@ -146,11 +146,11 @@ already listed do not set it. Narrow the text, or add `namespace` or `environmen
 ## The tree
 
 `GET /api/v1/tables/tree` answers `{"count", "environments": [{"name", "count", "actions",
-"namespaces": [{"path", "count", "actions"}]}]}`. A count is what the list answers for the same filter without a search
-text: a namespace counts the tables in it and beneath it, an environment all of its tables, and
-`count` at the top every environment. Only tables you may read are counted. An environment is
-shown if you may read it or any table in it, and a namespace if you may read the namespaces of its
-environment or any table in or beneath it.
+"namespaces": [{"path", "count", "actions"}]}]}`. A count is what the list answers for the same
+filter without a search text: a namespace counts the tables in it and beneath it, an environment
+all of its tables, and `count` at the top every environment. Only tables you may read are
+counted. An environment is shown if you may read it or any table in it, and a namespace if you
+may read the namespaces of its environment or any table in or beneath it.
 
 `actions` says what your rights allow at that place, as the rows' `actions` do for a table:
 
