@@ -100,7 +100,9 @@ A namespace that is not empty is refused, and the sentence says what it holds:
 under **Actions**. While the tree shows tables or namespaces below it, the item cannot be chosen
 and the menu says "Only an empty namespace can be deleted."; a screen reader hears it when the menu
 opens. The tree counts only the tables you may read, so the server may still refuse; the dialog
-then shows its sentence, as above, and stays open. The dialog asks "Delete namespace gold.sales?";
+then shows its sentence, as above, and stays open. An artifact is dropped from its own page, with
+**Drop…** under **Actions** (see
+[Drop the whole artifact](delete-an-artifact-version.md#drop-the-whole-artifact)). The dialog asks "Delete namespace gold.sales?";
 press **Delete the namespace**. From a browser the server asks for a passkey touch within the last
 15 minutes: touch your passkey when the browser asks, and the delete is sent again. If the touch
 fails, the dialog stays open with the reason and nothing is deleted. The Catalog then opens the

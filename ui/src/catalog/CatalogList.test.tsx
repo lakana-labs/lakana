@@ -1363,6 +1363,43 @@ describe("CatalogList", () => {
       expect(screen.queryByText(/Created namespace/)).not.toBeInTheDocument();
     });
 
+    it("shows the artifactDropped note from the location state with the artifact's name, and focuses it", async () => {
+      const { router } = renderShell("/catalog?env=prod&ns=gold");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=gold", {
+          state: { placeNote: "artifactDropped", namespace: "gold", artifact: "gold.model" },
+        });
+      });
+
+      const note = await screen.findByText(
+        "Dropped artifact gold.model. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not.",
+      );
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+    });
+
+    it("confirms a drop above the notice when the namespace has left the tree", async () => {
+      const { router } = renderShell("/catalog?env=prod");
+      await screen.findByRole("link", { name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=ml", {
+          state: { placeNote: "artifactDropped", namespace: "ml", artifact: "ml.model" },
+        });
+      });
+
+      const note = await screen.findByText(/^Dropped artifact ml\.model\./);
+      const notice = await screen.findByText("There is no namespace ml in prod that you may read.");
+      expect(note.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Show all tables" })).toBeVisible();
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+    });
+
     it("quotes the environment in the deploy command of an empty place", async () => {
       renderShell("/catalog?env=dev's", {
         routes: {

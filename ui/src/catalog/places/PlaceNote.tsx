@@ -1,5 +1,6 @@
 /**
- * The line that says what a place's menu just did: a namespace created or deleted.
+ * The line that says what a place's menu just did, a namespace created or deleted, or what an
+ * artifact's page did: the artifact dropped.
  *
  * @packageDocumentation
  */
@@ -8,14 +9,19 @@ import { useTranslation } from "react-i18next";
 import { markedText } from "../../shell/VisibleText";
 import "./placeStrings";
 
-/** What the location state carries after a namespace was created or deleted. */
+/** What the location state carries after a namespace was created or deleted, or an artifact dropped. */
 export interface PlaceNoteState {
-  /** What happened: created, deleted, or created but left out of the reader's tree. */
-  readonly placeNote: "created" | "deleted" | "notShown";
+  /**
+   * What happened: created, deleted, created but left out of the reader's tree, or an artifact
+   * of the namespace dropped.
+   */
+  readonly placeNote: "created" | "deleted" | "notShown" | "artifactDropped";
   /** The dotted namespace. */
   readonly namespace: string;
   /** The environment it is in. */
   readonly environment: string;
+  /** The dropped artifact, dotted, for `artifactDropped`. */
+  readonly artifact?: string;
 }
 
 /** Properties of {@link PlaceNote}. */
@@ -36,15 +42,16 @@ export interface PlaceNoteProps {
 export function PlaceNote({ note }: PlaceNoteProps): JSX.Element {
   const { t } = useTranslation();
   const line = useRef<HTMLParagraphElement>(null);
-  const { placeNote, namespace, environment } = note;
+  const { placeNote, namespace, environment, artifact } = note;
   useEffect(() => {
     line.current?.focus();
-  }, [placeNote, namespace, environment]);
+  }, [placeNote, namespace, environment, artifact]);
   return (
     <p className="catalog-result" role="status" tabIndex={-1} ref={line}>
       {t(`catalog.places.note.${placeNote}`, {
         namespace: markedText(namespace),
         environment: markedText(environment),
+        artifact: markedText(artifact ?? ""),
       })}
     </p>
   );

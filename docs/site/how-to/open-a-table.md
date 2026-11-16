@@ -18,8 +18,12 @@ The page has:
 - **The table's name** as the heading, with its label under it when the table has one.
 - **A line under the name** with what the table is and where it lives, such as `Fact · gold.sales`,
   and the environment's label.
-- **Tabs**: Overview, Columns, Preview, Lineage, References, Health and Access. Every tab has its own
-  address, so a link opens the tab you were looking at. Everyone sees the same tabs.
+- **Tabs**: Overview, Columns, Preview, Lineage, References, Health and Access. An artifact holds
+  files, not rows, so its page shows Overview, Versions, Lineage and Access; its Overview gives the
+  current version, how many versions it has had, how many it keeps, the size of its live versions
+  and, when it expires, the date. Every tab has its own address, so a link opens the tab you were
+  looking at; an address with a tab the entry does not have, such as Preview of an artifact, opens
+  its Overview. Everyone sees the same tabs.
 - **Actions** beside the name, once the table is read, when there is something you may do to the
   table (see [Actions](#actions)).
 
@@ -27,8 +31,9 @@ The page has:
 
 **Actions** opens a menu of what you may do to the table as a whole. It lists only what the
 server says you may do, so an item you see is one you are allowed to use; with none, the page has
-no **Actions** at all. An artifact's page has no **Actions** either: drop an artifact with
-`lakana artifact drop`.
+no **Actions** at all. An artifact's **Actions** has only **Drop…**, which drops the artifact as
+`lakana artifact drop` does (see
+[Drop the whole artifact](delete-an-artifact-version.md#drop-the-whole-artifact)).
 
 - **Maintain now…** queues maintenance for the table, as `lakana table maintain` does. See
   [Maintain a table now](#maintain-a-table-now).

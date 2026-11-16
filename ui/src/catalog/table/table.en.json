@@ -7,7 +7,8 @@
     "lineage": "Lineage",
     "references": "References",
     "health": "Health",
-    "access": "Access"
+    "access": "Access",
+    "versions": "Versions"
   },
   "toCatalog": "Back to the Catalog",
   "notFound": "There is no table {{name}} in {{environment}} › {{namespace}}. Check the name in the address; if it existed, it may have been dropped or renamed.",
@@ -78,6 +79,18 @@
     "readers_other": "{{count}} readers in the last 7 days",
     "created": "Created",
     "grain": "Grain",
+    "currentVersion": "Current version",
+    "version": "{{version}}",
+    "noVersion": "None: every version is deleted",
+    "versions": "Versions",
+    "versionsCount_one": "{{count}}, deleted ones included",
+    "versionsCount_other": "{{count}}, deleted ones included",
+    "keeps": "Keeps",
+    "keepsNewest_one": "The newest version (keep_versions)",
+    "keepsNewest_other": "The newest {{count}} versions (keep_versions)",
+    "keepsAll": "Every version",
+    "sizeOfLive": "{{size}} of its live versions",
+    "expires": "Expires",
     "readersLink": "Readers ›"
   },
   "definedIn": {
@@ -144,7 +157,6 @@
     "maskedOf": "column {{column}} of {{table}}",
     "maskedMore": "and {{count}} more",
     "notAllowed": "Preview runs a query as you, which needs the right to run queries in {{environment}}. Ask an administrator for the Analyst role there.",
-    "artifact": "An artifact holds files, not rows, so it has no preview. Download its files with lakana artifact download.",
     "starting": "Starting the preview…",
     "checking": "Checking that you may run queries…",
     "queuing": "Queuing the preview…",

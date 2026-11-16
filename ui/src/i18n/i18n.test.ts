@@ -85,4 +85,7 @@ it("ships no string of the place menu in the first load, and importing PlaceActi
   expect(i18n.t("catalog.places.note.created", { namespace: "gold.finance" })).toBe(
     "Created namespace gold.finance.",
   );
+  expect(i18n.t("catalog.places.note.artifactDropped", { artifact: "ml.model" })).toBe(
+    "Dropped artifact ml.model. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not.",
+  );
 });

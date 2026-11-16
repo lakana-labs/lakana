@@ -32,4 +32,23 @@ describe("PlaceNote", () => {
       "Created namespace goldU+202Efinance. You may not read the namespaces of prU+200Bod,",
     );
   });
+
+  it("says Dropped artifact {artifact} with its files removed, and marks a bidi character in the name", () => {
+    render(
+      <PlaceNote
+        note={{
+          placeNote: "artifactDropped",
+          namespace: "ml",
+          environment: "prod",
+          artifact: "ml.mo\u202Edel",
+        }}
+      />,
+    );
+
+    const note = screen.getByRole("status");
+    expect(note).toHaveTextContent(
+      "Dropped artifact ml.moU+202Edel. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not.",
+    );
+    expect(note).toHaveFocus();
+  });
 });

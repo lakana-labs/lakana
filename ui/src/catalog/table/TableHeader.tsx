@@ -9,12 +9,13 @@ import { useTranslation } from "react-i18next";
 import { EnvironmentLabel } from "../../shell/EnvironmentLabel";
 import { SectionTabs } from "../../shell/SectionTabs";
 import { kindWord } from "../cells";
-import { TABLE_TABS, tablePath } from "../paths";
+import { tablePath, tabsFor } from "../paths";
 import { useTableData } from "./TableContext";
 
 /**
  * Renders the label when the table has one, the line "Fact · gold.sales" with the environment,
- * and the tabs, each with its own address. Every person sees the same tabs.
+ * and the tabs of its kind, each with its own address: an artifact has Overview, Versions,
+ * Lineage and Access. Every person sees the same tabs.
  *
  * @returns The header.
  */
@@ -33,7 +34,7 @@ export function TableHeader(): JSX.Element {
       </p>
       <SectionTabs
         label={t("table.tabsLabel")}
-        tabs={TABLE_TABS.map((tab) => ({
+        tabs={tabsFor(table.kind).map((tab) => ({
           to: tablePath(ref.environment, ref.namespace, ref.name, tab),
           label: t(`table.tabs.${tab}`),
         }))}

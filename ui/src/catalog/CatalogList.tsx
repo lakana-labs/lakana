@@ -271,7 +271,12 @@ export function CatalogList(): JSX.Element {
   const noteState = location.state as Omit<PlaceNoteState, "environment"> | null;
   const placeNote =
     environment !== null && noteState?.placeNote !== undefined
-      ? { placeNote: noteState.placeNote, namespace: noteState.namespace, environment }
+      ? {
+          placeNote: noteState.placeNote,
+          namespace: noteState.namespace,
+          environment,
+          ...(noteState.artifact === undefined ? {} : { artifact: noteState.artifact }),
+        }
       : null;
   const onCreated = (environmentOfPlace: string, path: string): void => {
     created.current = { environment: environmentOfPlace, path, before: tree.data };
@@ -374,6 +379,12 @@ export function CatalogList(): JSX.Element {
             </aside>
           )}
           <section className="catalog-main" ref={main}>
+            {/* Above a notice as well: a drop that took the namespace out of the tree is still confirmed. */}
+            {placeNote !== null && notice !== null && (
+              <Suspense fallback={null}>
+                <PlaceNote note={placeNote} />
+              </Suspense>
+            )}
             {notice}
             {notice === null && (
               <>

@@ -75,7 +75,8 @@ const NAMED_LIMITS = [
   { name: "New external table", prefix: "ExternalTableDialog-", limit: "1.35 kB" },
   // Measured 653 B (2026-11-16) + 10 %: the strings of the places, shared by the place menu, New
   // external table's form and the place note.
-  { name: "the strings of the places", prefix: "placeStrings-", limit: "0.72 kB" },
+  // Raised to the measured 725 B (2026-11-16) + 10 % with the note after an artifact's drop.
+  { name: "the strings of the places", prefix: "placeStrings-", limit: "0.8 kB" },
   // Measured 2.67 kB (2026-11-16) + 10 %: React Aria's radio group, which the Retention dialog and
   // New external table's form share; loaded with the first of them.
   { name: "the radio group", prefix: "RadioGroup-", limit: "2.94 kB" },
@@ -84,7 +85,11 @@ const NAMED_LIMITS = [
   { name: "the place note", prefix: "PlaceNote-", limit: "0.43 kB" },
   // Measured 0.94 kB (2026-11-16) + 10 %: the API calls of catalog management, shared by the
   // table's Actions and the Catalog's views.
-  { name: "the calls of catalog management", prefix: "manage-", limit: "1.04 kB" },
+  // Raised to the measured 1.62 kB (2026-11-16) + 10 %: the table page reads an artifact with
+  // artifacts.ts, which imports manage.ts, so the bundler now puts the table page's own calls
+  // (api/table.ts, about 0.6 kB that left TablePage-) in this chunk, shared by the table page, its
+  // Actions and the Catalog's views.
+  { name: "the calls of catalog management", prefix: "manage-", limit: "1.78 kB" },
   // Measured 1.17 kB (2026-11-16) + 10 %: the retention sentences and calls, shared by the
   // Retention dialog and the Catalog's views.
   { name: "retention", prefix: "retention-", limit: "1.29 kB" },
@@ -117,6 +122,8 @@ const NAMED_LIMITS = [
   // the page: its import, the loading line and the code the bundler moved here with it.
   // Raised to the measured 9.97 kB (2026-11-13) + 10 % with the page's strings, which moved out of
   // the first load (about 1.8 kB gzipped less there) into this chunk, registered when it loads.
+  // Measured 9.4 kB (2026-11-16) with the artifact's read, its facts and the tabs by kind, after
+  // the table's calls moved to manage- (above); the limit holds.
   { name: "a table's page", prefix: "TablePage-", limit: "10.97 kB" },
   // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
@@ -154,7 +161,8 @@ const NAMED_LIMITS = [
   { name: "the status glyph", prefix: "StatusGlyph-", limit: "0.73 kB" },
   // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
   // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
-  { name: "the catalog's addresses", prefix: "paths-", limit: "0.96 kB" },
+  // Raised to the measured 994 B (2026-11-16) + 10 % with an artifact's tabs and the tabs by kind.
+  { name: "the catalog's addresses", prefix: "paths-", limit: "1.09 kB" },
   // Measured 95 B (a person's address, which the Access area and the Health and Access tabs
   // share, 2026-11-13) + 10 %.
   { name: "a person's address", prefix: "personPath-", limit: "0.11 kB" },

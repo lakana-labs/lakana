@@ -135,6 +135,23 @@ Dropped artifact dev/models.scratch_model; its files are removed from storage, a
   declares it). Remove the asset in git and deploy, then drop it; or free space now by deleting
   single versions, as above.
 - A table is not dropped with this command. For a table, use the `table delete` subcommand.
+
+**In the web interface,** open the artifact's page in the Catalog and choose **Actions**, then
+**Drop…**. The menu shows **Drop…** only if you may drop the artifact. The dialog asks "Drop
+models.scratch_model?" and says "This cannot be undone: every version's files are deleted."; press
+**Drop the artifact**. From a browser the server asks for a passkey touch within the last 15
+minutes: touch your passkey when the browser asks, and the drop is sent again. The command line
+uses a token and is never asked. The Catalog then opens the artifact's namespace and says "Dropped
+artifact models.scratch_model. Its files are removed from storage, and Lakana's periodic clean-up
+removes any it could not." In a protected environment the dialog also asks why you break the
+protection of the environment, the same reason `--break-glass` takes.
+
+For an artifact a deployed project produces, **Drop…** is shown but cannot be chosen, and the menu
+says `Defined in analytics/assets/ml/model.py — change it in git` with the repository and the file
+that declare it; a screen reader hears it when the menu opens. Deleting single versions stays
+possible. If the drop is refused, for instance because a deploy made the artifact git-owned after
+you opened its page, or the passkey touch fails, the dialog stays open with the server's sentence
+and nothing is dropped.
 - The server removes the files inside the request, so a very large artifact can take minutes. A
   reverse proxy in front of the server must allow a request that long, or you see a 504 for a drop
   that still finishes. Check with the `artifact list` subcommand before you run it again.
