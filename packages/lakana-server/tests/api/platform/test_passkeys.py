@@ -208,6 +208,15 @@ def test_step_up_through_the_routes(client: TestClient, alice: dict[str, str]) -
     _register(client, "alice", headers)
 
 
+def test_step_up_without_a_passkey_answers_409_no_passkey(client: TestClient) -> None:
+    """A session whose person has no passkey learns why step-up cannot work, and what to do."""
+    name, value, csrf = signed_in(client, "admin", via="local")
+    r = client.post("/api/v1/sign-in/step-up/options", headers=session_headers(name, value, csrf))
+    assert r.status_code == 409, r.text
+    assert r.json()["type"] == "NoPasskeyError"
+    assert "Add a passkey" in r.json()["detail"]
+
+
 def test_a_failed_step_up_answers_403(client: TestClient, alice: dict[str, str]) -> None:
     """A refused touch is 403, so the interface keeps its session."""
     auth, _ = _register(client, "alice", alice)

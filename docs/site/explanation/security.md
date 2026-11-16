@@ -71,7 +71,9 @@ passkey ([Invite your team](../how-to/invite-your-team.md),
   rules, repositories and package indexes; creating an environment or changing its protection or
   storage; binding a run-as account to a deploy; and dropping a table (with or without purging
   its files), a namespace, an artifact or one artifact version. Restoring a dropped table needs
-  no touch. A stolen session cookie alone is therefore
+  no touch. An account with no passkey yet (after `lakana server start --local`, say) has nothing
+  to touch: the interface says so and links to **Passkeys and sessions**, in the menu under your
+  name, where you add one first. A stolen session cookie alone is therefore
   not enough for any of them. A request with an API token needs no touch: the token is what the
   command line uses.
 - **A passkey is bound to the address.** The browser offers a passkey only to the site it was made
