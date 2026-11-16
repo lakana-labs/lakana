@@ -18,32 +18,58 @@ import {
   useSearchParams,
 } from "react-router";
 
-import { getTableTree } from "../api";
+import { getTableTree, type TableTreeOut } from "../api";
 import { CopyLine } from "../shell/CopyLine";
+import { shellQuote } from "../shell/shellQuote";
 import { TUTORIAL_URL } from "../shell/docs";
 import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { useResource } from "../shell/useResource";
+import { markedText } from "../shell/VisibleText";
 import { CatalogSearch } from "./CatalogSearch";
 import { CatalogTree } from "./CatalogTree";
 import { ListSkeleton } from "./ListSkeleton";
 import { catalogPath } from "./paths";
+import type { PlaceNoteState } from "./places/PlaceNote";
 import { readChoice, writeChoice } from "./remember";
 import { SortControl } from "./SortControl";
 import { TableList } from "./TableList";
-import { buildTree, findNode } from "./tree";
+import { buildTree, type CatalogNode, findNode, parentOf } from "./tree";
 import { useTablePages } from "./useTablePages";
 import { ViewSwitch } from "./views/ViewSwitch";
 import { type CatalogView, DEFAULT_VIEW, placed, readView, sortedBy, viewSearch } from "./view";
 
 // The body of every view but All loads on demand, with the strings and the code of its lists.
 const ViewBody = lazy(() => import("./views/ViewBody"));
+// The menu of the chosen place, its dialogs and their strings load once the tree is known.
+const PlaceActions = lazy(() => import("./places/PlaceActions"));
+const PlaceNote = lazy(() =>
+  import("./places/PlaceNote").then((module) => ({ default: module.PlaceNote })),
+);
 
 // How long loading takes before the page says so in words.
 const SAY_LOADING_AFTER_MS = 1000;
 // How many tables the server looks at in a search before it stops.
 const SEARCH_CAP = 5000;
+
+/** A place note as the history entry carries it, marked once the page has shown it. */
+type NoteInHistory = Omit<PlaceNoteState, "environment"> & { readonly seen?: true };
+
+/**
+ * Whether the history entry carries the note the page holds, marked seen or not.
+ *
+ * @param held - The note the page shows.
+ * @param state - The entry's state.
+ * @returns True for the same note.
+ */
+function sameNote(held: NoteInHistory, state: NoteInHistory | null): boolean {
+  return (
+    state?.placeNote === held.placeNote &&
+    state.namespace === held.namespace &&
+    state.artifact === held.artifact
+  );
+}
 
 /**
  * Whether something has lasted longer than a delay.
@@ -115,6 +141,13 @@ export function CatalogList(): JSX.Element {
   const loadTree = useCallback(() => getTableTree(), []);
   const tree = useResource(loadTree);
   const root = useMemo(() => (tree.data === undefined ? null : buildTree(tree.data)), [tree.data]);
+  // A namespace just created: the page goes there once the tree read after the creation arrives,
+  // so the place is never called unknown on the way.
+  const created = useRef<{
+    readonly environment: string;
+    readonly path: string;
+    readonly before: TableTreeOut | undefined;
+  } | null>(null);
   const { items, busy, error, capped, hasMore, loadMore, reload } = useTablePages(view);
   const main = useRef<HTMLElement>(null);
   const focusFrom = useRef<number | null>(null);
@@ -173,9 +206,30 @@ export function CatalogList(): JSX.Element {
     }
   }, [root, allTablesAddress, environment, namespace, fromMemory, me.name, navigate]);
 
+  // A new address forgets what the old one waited for: the rows to focus after Show more, and
+  // a creation whose tree never arrived, so a later read does not move the page.
   useEffect(() => {
     focusFrom.current = null;
+    created.current = null;
   }, [address]);
+
+  // The tree read after a creation has arrived: go to the new place, or, when the tree leaves it
+  // out, stay and say why.
+  useEffect(() => {
+    const pending = created.current;
+    if (pending === null || root === null || tree.data === pending.before) {
+      return;
+    }
+    created.current = null;
+    const shown = findNode(root, pending.environment, pending.path) !== null;
+    const next = shown
+      ? catalogPath(placed({ ...view, view: "all" }, pending.environment, pending.path))
+      : address;
+    void navigate(next, {
+      replace: !shown,
+      state: { placeNote: shown ? "created" : "notShown", namespace: pending.path },
+    });
+  }, [root, tree.data, view, address, navigate]);
 
   useEffect(() => {
     const from = focusFrom.current;
@@ -196,7 +250,8 @@ export function CatalogList(): JSX.Element {
   }, [items, error]);
 
   const narrowed = environment !== null;
-  const place = namespace ?? environment ?? t("catalog.place.allNamespaces");
+  // A name may hide characters; the words for all namespaces have none to mark.
+  const place = markedText(namespace ?? environment ?? t("catalog.place.allNamespaces"));
   let result = "";
   if (slow) {
     result = t("catalog.loading");
@@ -216,12 +271,66 @@ export function CatalogList(): JSX.Element {
   let unknown: string | null = null;
   if (root !== null && environment !== null && !fromMemory) {
     if (findNode(root, environment, null) === null) {
-      unknown = t("catalog.unknown.environment", { environment });
+      unknown = t("catalog.unknown.environment", { environment: markedText(environment) });
     } else if (namespace !== null && findNode(root, environment, namespace) === null) {
-      unknown = t("catalog.unknown.namespace", { namespace, environment });
+      unknown = t("catalog.unknown.namespace", {
+        namespace: markedText(namespace),
+        environment: markedText(environment),
+      });
     }
   }
   const readsNothing = root !== null && root.children.length === 0;
+  // The chosen environment or namespace, when the tree has it: the place the menu acts on.
+  let chosen: {
+    readonly node: CatalogNode;
+    readonly root: CatalogNode;
+    readonly environment: string;
+  } | null = null;
+  if (root !== null && environment !== null) {
+    const node = findNode(root, environment, namespace);
+    chosen = node === null ? null : { node, root, environment };
+  }
+  // What the place menu left in the location state; only it sets `placeNote`. The page shows it
+  // once: it holds the note while the entry is marked seen (below), so a reload or Back to the
+  // entry, which find it seen, show nothing.
+  const noteState = location.state as NoteInHistory | null;
+  const fresh = noteState?.placeNote !== undefined && noteState.seen !== true;
+  const [held, setHeld] = useState<NoteInHistory | null>(null);
+  if (fresh && held !== noteState) {
+    setHeld(noteState);
+  } else if (!fresh && held !== null && !sameNote(held, noteState)) {
+    setHeld(null);
+  }
+  useEffect(() => {
+    if (fresh) {
+      const { pathname, search: query, hash } = location;
+      void navigate(
+        { pathname, search: query, hash },
+        { replace: true, state: { ...noteState, seen: true } },
+      );
+    }
+  }, [fresh, noteState, location, navigate]);
+  const placeNote =
+    environment !== null && held !== null
+      ? {
+          placeNote: held.placeNote,
+          namespace: held.namespace,
+          environment,
+          ...(held.artifact === undefined ? {} : { artifact: held.artifact }),
+        }
+      : null;
+  const onCreated = (environmentOfPlace: string, path: string): void => {
+    created.current = { environment: environmentOfPlace, path, before: tree.data };
+    tree.reload();
+  };
+  // Goes to the nearest place above that the tree lists: a parent namespace, else the environment.
+  const onDeleted = (place: NonNullable<typeof chosen>, path: string): void => {
+    const above = parentOf(place.root, place.node)?.namespace ?? null;
+    tree.reload();
+    void navigate(catalogPath(placed({ ...view, view: "all" }, place.environment, above)), {
+      state: { placeNote: "deleted", namespace: path },
+    });
+  };
 
   const noNotice = !readsNothing && unknown === null;
   useEffect(() => {
@@ -278,10 +387,46 @@ export function CatalogList(): JSX.Element {
           )}
           {root !== null && !readsNothing && (
             <aside className="catalog-side" ref={side}>
+              {chosen !== null && (
+                <div className="catalog-place-actions">
+                  <Suspense fallback={null}>
+                    <PlaceActions
+                      key={chosen.node.id}
+                      node={chosen.node}
+                      onCreated={(path) => {
+                        onCreated(chosen.environment, path);
+                      }}
+                      onDeleted={(path) => {
+                        onDeleted(chosen, path);
+                      }}
+                      onChanged={tree.reload}
+                      onFocusLost={() => {
+                        // After React Aria's own attempt, which finds the old button gone.
+                        requestAnimationFrame(() => {
+                          if (document.activeElement === document.body) {
+                            const aside = side.current;
+                            (
+                              aside?.querySelector<HTMLElement>(".catalog-place-actions button") ??
+                              aside?.querySelector<HTMLElement>('[role="treegrid"]')
+                            )?.focus();
+                          }
+                        });
+                      }}
+                    />
+                  </Suspense>
+                </div>
+              )}
               <CatalogTree root={root} view={view} />
             </aside>
           )}
           <section className="catalog-main" ref={main}>
+            {/* One place, above any notice, so the note never remounts when the tree turns the
+                place unknown (a drop that took the namespace out of the tree is still confirmed). */}
+            {placeNote !== null && (
+              <Suspense fallback={null}>
+                <PlaceNote note={placeNote} />
+              </Suspense>
+            )}
             {notice}
             {notice === null && (
               <>
@@ -319,7 +464,7 @@ export function CatalogList(): JSX.Element {
                   !busy &&
                   view.q !== "" && (
                     <div className="empty">
-                      <p>{t("catalog.noHits", { place, q: view.q })}</p>
+                      <p>{t("catalog.noHits", { place, q: markedText(view.q) })}</p>
                       {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
                     </div>
                   )}
@@ -332,11 +477,13 @@ export function CatalogList(): JSX.Element {
                     <div className="empty">
                       <p>
                         {t("catalog.empty.text", {
-                          place: view.namespace ?? view.environment ?? t("catalog.place.all"),
+                          place: markedText(
+                            view.namespace ?? view.environment ?? t("catalog.place.all"),
+                          ),
                         })}
                       </p>
                       <CopyLine
-                        text={`lakana deploy --env ${view.environment ?? "dev"}`}
+                        text={`lakana deploy --env ${view.environment === null ? "dev" : shellQuote(view.environment)}`}
                         copyLabel={t("catalog.empty.copy")}
                       />
                       <p>

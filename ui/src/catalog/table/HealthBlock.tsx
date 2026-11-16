@@ -16,6 +16,7 @@ import { HealthWord } from "../HealthWord";
 import { tablePath } from "../paths";
 import { firedLines, judged } from "./health";
 import { useTableData } from "./TableContext";
+import { VisibleText } from "../../shell/VisibleText";
 
 /** The most lines the block shows before it counts the rest. */
 const MOST_LINES = 5;
@@ -68,7 +69,9 @@ function Lines({
         {lines.slice(0, MOST_LINES).map((line, index) => (
           <li key={`${line.kind}:${String(index)}`}>
             <StatusGlyph kind={line.severity === "failing" ? "failed" : "warning"} />
-            <span>{line.sentence}</span>
+            <span>
+              <VisibleText text={line.sentence} />
+            </span>
           </li>
         ))}
       </ul>

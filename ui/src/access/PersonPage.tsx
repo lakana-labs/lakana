@@ -8,7 +8,7 @@ import { type JSX, useCallback, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import { getPrincipal, isAdministrator, removePicture, type SessionOut } from "../api";
+import { getPrincipal, removePicture, type SessionOut } from "../api";
 import { Avatar, useCurrentPicture } from "../profile/Avatar";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { CopyLine } from "../shell/CopyLine";
@@ -21,6 +21,7 @@ import { PasskeysPanel } from "../sign-in/PasskeysPanel";
 import { SessionsPanel } from "../sign-in/SessionsPanel";
 import { useSession } from "../sign-in/SessionProvider";
 import { RecoveryDialog } from "./RecoveryDialog";
+import { markedText } from "../shell/VisibleText";
 
 /** Who the page is about, as far as recovering them goes. */
 type Kind = "own" | "service" | "admin" | "person";
@@ -35,9 +36,9 @@ interface About {
 
 /**
  * Finds out what kind of account another person has, and their picture: a service account has
- * no passkeys to recover, and an administrator is recovered only by the server operator. What
- * cannot be read counts as a person without a picture, so the button shows and the server names
- * the cause if it refuses.
+ * no passkeys to recover, and anyone who holds or has ever held ADMIN is recovered only by the
+ * server operator (the principal's `held_admin`). What cannot be read counts as a person without
+ * a picture, so the button shows and the server names the cause if it refuses.
  *
  * @param name - The principal name.
  * @returns The kind and the picture.
@@ -48,7 +49,7 @@ async function aboutOther(name: string): Promise<About> {
   if (principal !== null && principal.type !== "USER") {
     return { kind: "service", picture };
   }
-  return { kind: (await isAdministrator(name).catch(() => false)) ? "admin" : "person", picture };
+  return { kind: principal?.held_admin === true ? "admin" : "person", picture };
 }
 
 /** Properties of {@link PersonPage}. */
@@ -60,7 +61,7 @@ export interface PersonPageProps {
 /**
  * Renders the person's page, their picture first. Its one action issues a recovery link, and an
  * administrator may remove another person's picture (one's own is set and removed in the user
- * menu). For an administrator the
+ * menu). For anyone who holds or has held ADMIN the
  * page shows the server operator's command instead, for a service account a line saying it signs
  * in with its token, and for oneself no button (Add a passkey is the way) but, for an
  * administrator, the operator's command that lets them back in.
@@ -120,11 +121,11 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
         )}
       </div>
       {kind === "service" && (
-        <p className="page-purpose">{t("access.people.serviceNote", { name })}</p>
+        <p className="page-purpose">{t("access.people.serviceNote", { name: markedText(name) })}</p>
       )}
       {kind === "admin" && (
         <section className="page-notice">
-          <p>{t("access.recovery.operatorFor", { name })}</p>
+          <p>{t("access.recovery.operatorFor", { name: markedText(name) })}</p>
           <CopyLine
             text={t("access.recovery.command", { name })}
             copyLabel={t("comingSoon.copy")}
@@ -136,7 +137,7 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
       <SessionsPanel name={name} own={own} />
       {removing && (
         <ConfirmDialog
-          title={t("profile.removeTitle", { name })}
+          title={t("profile.removeTitle", { name: markedText(name) })}
           confirmLabel={t("profile.remove")}
           onConfirm={() => removePicture(name)}
           onCancel={() => {
@@ -147,7 +148,7 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
             setRemoving(false);
           }}
         >
-          <p>{t("profile.removeBody", { name })}</p>
+          <p>{t("profile.removeBody", { name: markedText(name) })}</p>
         </ConfirmDialog>
       )}
       {recovering && (

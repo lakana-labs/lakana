@@ -10,6 +10,7 @@ import { Link } from "react-router";
 
 import { ListHead } from "../shell/ListHead";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
+import { VisibleText } from "../shell/VisibleText";
 
 /** Properties of {@link ObjectTable}. */
 export interface ObjectTableProps {
@@ -67,14 +68,18 @@ export function ObjectRow({ to, name, environment, second, aside }: ObjectRowPro
     <tr>
       <td>
         {to === null ? (
-          <span className="row-name">{name}</span>
+          <span className="row-name">
+            <VisibleText text={name} />
+          </span>
         ) : (
           <Link className="row-name" to={to}>
-            {name}
+            <VisibleText text={name} />
           </Link>
         )}{" "}
         <EnvironmentLabel environment={environment} />
-        <span className="second">{second}</span>
+        <span className="second">
+          <VisibleText text={second} />
+        </span>
       </td>
       <td>{aside}</td>
       <td>

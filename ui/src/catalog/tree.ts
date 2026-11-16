@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import type { TableTreeOut } from "../api";
+import type { PlaceAction, TableTreeOut } from "../api";
 
 /** One place in the tree. */
 export interface CatalogNode {
@@ -17,6 +17,8 @@ export interface CatalogNode {
   readonly namespace: string | null;
   /** The readable tables at and below the node. */
   readonly count: number;
+  /** What the reader may do there, as the server lists it; none for the root. */
+  readonly actions: readonly PlaceAction[];
   /** The places below it. */
   readonly children: readonly CatalogNode[];
 }
@@ -56,7 +58,8 @@ export function ancestorIds(
 
 /**
  * Nests the server's flat list: a namespace goes under its nearest listed ancestor and is
- * labelled with the rest of its path.
+ * labelled with the rest of its path. Each node keeps the actions the server lists for it; an
+ * older server that lists none offers none.
  *
  * @param tree - The server's counts.
  * @returns The root, "All tables", with an empty label.
@@ -69,9 +72,10 @@ export function buildTree(tree: TableTreeOut): CatalogNode {
     environment: null,
     namespace: null,
     count: tree.count,
+    actions: [],
     children: environments.map((environment) => {
       const names = new Set(environment.namespaces.map((entry) => entry.path));
-      const below = new Map<string | null, { path: string; count: number }[]>();
+      const below = new Map<string | null, (typeof environment.namespaces)[number][]>();
       for (const entry of environment.namespaces) {
         const parent = nearestParent(entry.path, names);
         const siblings = below.get(parent);
@@ -90,6 +94,7 @@ export function buildTree(tree: TableTreeOut): CatalogNode {
             environment: environment.name,
             namespace: entry.path,
             count: entry.count,
+            actions: entry.actions ?? [],
             children: nest(entry.path),
           }));
       return {
@@ -98,6 +103,7 @@ export function buildTree(tree: TableTreeOut): CatalogNode {
         environment: environment.name,
         namespace: null,
         count: environment.count,
+        actions: environment.actions ?? [],
         children: nest(null),
       };
     }),
@@ -134,6 +140,30 @@ export function findNode(
       return node;
     }
     for (const child of node.children) {
+      const found = visit(child);
+      if (found !== null) {
+        return found;
+      }
+    }
+    return null;
+  };
+  return visit(root);
+}
+
+/**
+ * Finds the place a node sits under in the tree: its nearest listed parent namespace, or else its
+ * environment.
+ *
+ * @param root - The tree's root.
+ * @param node - The node.
+ * @returns The parent, or null for the root or a node the tree does not have.
+ */
+export function parentOf(root: CatalogNode, node: CatalogNode): CatalogNode | null {
+  const visit = (current: CatalogNode): CatalogNode | null => {
+    for (const child of current.children) {
+      if (child.id === node.id) {
+        return current;
+      }
       const found = visit(child);
       if (found !== null) {
         return found;

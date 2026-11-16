@@ -248,7 +248,7 @@ describe("OrphansView", () => {
 
   it("marks a bidi character in an orphan's repository", async () => {
     renderShell(ADDRESS, {
-      routes: { ...manageRoutes(), [LIST]: body([orphan({ repository: "sales‮repo" })]) },
+      routes: { ...manageRoutes(), [LIST]: body([orphan({ repository: "sales\u202Erepo" })]) },
     });
 
     await screen.findByRole("region", { name: "Orphans" });
@@ -303,5 +303,40 @@ describe("OrphansView", () => {
     });
 
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("marks hidden characters of the environment and namespace in its sentences", async () => {
+    const tree = {
+      count: 0,
+      environments: [
+        {
+          name: "pr\u2066od",
+          count: 0,
+          actions: [],
+          namespaces: [{ path: "go\u202Eld", count: 0, actions: [] }],
+        },
+      ],
+    };
+    renderShell("/catalog?view=orphans&env=pr%E2%81%A6od&ns=go%E2%80%AEld", {
+      routes: {
+        ...manageRoutes(),
+        "GET /api/v1/tables/tree": { status: 200, body: tree },
+        "GET /api/v1/environments/pr\u2066od/orphans": {
+          status: 200,
+          body: { orphans: [], hidden: 0, next_cursor: null },
+        },
+      },
+    });
+
+    expect(
+      await screen.findByText("Tables no project in prU+2066od builds any more."),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Orphans are listed for the whole of prU+2066od, not only goU+202Eld.",
+      ),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("No project left an orphan in prU+2066od.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
 });

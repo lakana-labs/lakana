@@ -22,6 +22,7 @@ import type { Density, Language, Preferences, Theme } from "../preferences/prefe
 import { problemText } from "../sign-in/messages";
 import { useSession } from "../sign-in/SessionProvider";
 import { useMe } from "./me";
+import { markedText } from "./VisibleText";
 
 const PictureDialog = lazy(async () => {
   const { PictureDialog: loaded } = await import("../profile/PictureDialog");
@@ -114,7 +115,7 @@ export function UserMenu(): JSX.Element {
   const [picking, setPicking] = useState(false);
   const me = useMe();
   const displayName = session.session?.display_name ?? null;
-  const name = displayName ?? session.session?.name;
+  const name = displayName ?? session.session?.name ?? "";
   const end = (ending: () => Promise<void>): void => {
     setError(null);
     ending().catch((failure: unknown) => {
@@ -131,7 +132,7 @@ export function UserMenu(): JSX.Element {
           <Trans
             t={t}
             i18nKey="shell.signedInAs"
-            values={{ name }}
+            values={{ name: markedText(name) }}
             components={{ hidden: <span className="visually-hidden" /> }}
           />
         </Button>

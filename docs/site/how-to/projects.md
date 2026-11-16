@@ -675,7 +675,7 @@ caller.
 
 In a protected environment (`lakana env protect prod`) only runs of the deployed project version write.
 Every other write — `lakana sql … --into`, `lakana table create|append|replace|delete`,
-`lakana ns create|delete`, an SDK write, a PyIceberg commit, or one from another engine, through the Iceberg REST
+`lakana ns create|delete` (or **New namespace** and **Delete namespace** in the Catalog), an SDK write, a PyIceberg commit, or one from another engine, through the Iceberg REST
 catalog — is refused with 403 "Environment 'prod' is protected: only runs of the deployed
 project version may write. See `lakana run`.", even when the caller's grants allow the write (a caller
 without them gets the ordinary 403 or 404 first). Reads, grants, policies,

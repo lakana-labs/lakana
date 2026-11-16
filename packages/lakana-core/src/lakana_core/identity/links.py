@@ -62,6 +62,7 @@ from lakana_core.grants.admin import holds_instance_admin
 from lakana_core.grants.service import (
     ISSUED_BY_ADMINS,
     active_instance_admin_ids,
+    held_admin_ids,
     lapsed_issuer_reason,
 )
 from lakana_core.identity.notices import NoticeService
@@ -1190,10 +1191,9 @@ class LinkService:
         Returns
         -------
         bool
-            `Principal.held_admin`, or ADMIN covering them now (a grant made before the mark
-            existed is backfilled by migration 0070; this is the second net).
+            Whether `held_admin_ids` counts them.
         """
-        return principal.held_admin or principal.id in active_instance_admin_ids(self._session)
+        return principal.id in held_admin_ids(self._session, [principal])
 
     def _operator_token_lapse(self, row: SignInLink) -> str | None:
         """Say why the operator's bootstrap token that issued a link no longer stands, if so.

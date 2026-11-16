@@ -241,7 +241,9 @@
     "unsupported": "This browser cannot use passkeys. Use a current version of Chrome, Edge, Firefox or Safari.",
     "duplicate": "This browser or password manager already holds a passkey for this account. To add another, choose a different place in the browser's window, such as a phone or tablet or a security key; or sign in with the passkey you have.",
     "wrongAddress": "Passkeys work only at the address Lakana was set up with. Open Lakana at that address and try again.",
-    "failed": "The browser could not use the passkey ({{name}}). Try again, or use another device."
+    "failed": "The browser could not use the passkey ({{name}}). Try again, or use another device.",
+    "none": "Your account has no passkey yet, and this action needs a passkey touch. Add one first under Passkeys and sessions, in the menu under your name, then try again.",
+    "add": "Add a passkey"
   },
   "signIn": {
     "title": "Sign in to Lakana",
@@ -476,6 +478,7 @@
   },
   "dialog": {
     "cancel": "Cancel",
+    "checkingProtection": "Checking whether the environment is protected…",
     "done": "Done"
   },
   "access": {
@@ -518,11 +521,11 @@
       "confirmFirst": "Issue one only after confirming outside Lakana, in person or by phone, that the person asked for it.",
       "continue": "Continue",
       "shownOnce": "It works once, for 1 hour, until {{date}}. Using it removes the passkeys of {{name}}, ends their sessions and tells every administrator. This is the only time Lakana shows it: copy it now and send it to {{name}} yourself.",
-      "adminTitle": "{{name}} is an administrator",
-      "operatorOnly": "Only the server operator can recover an administrator: run this where the server runs, with the bootstrap token.",
-      "operatorFor": "{{name}} is an administrator, so only the server operator can recover this account: run this where the server runs, with the bootstrap token.",
+      "adminTitle": "{{name}} is or was an administrator",
+      "operatorOnly": "Only the server operator can recover someone who is or was an administrator, even after the role was taken away: run this where the server runs, with the bootstrap token.",
+      "operatorFor": "{{name}} is or was an administrator, so only the server operator can recover this account (taking the role away does not change that): run this where the server runs, with the bootstrap token.",
       "operatorForYou": "If you lose every passkey, only the server operator can let you back in, because you are an administrator: they run this where the server runs, with the bootstrap token. Add a second passkey before you need it.",
-      "command": "lakana recovery create {{name}}"
+      "command": "lakana recovery create {{- name}}"
     }
   },
   "account": {
@@ -611,7 +614,7 @@
       "token": {
         "toggle": "Use a token instead",
         "body": "Register the HTTPS URL with an access token stored as a secret. A token belongs to a person and expires: when they leave or it runs out, deploys stop. A deploy key belongs to the repository.",
-        "command": "lakana repo add {{name}} --kind https --url {{url}} --credential-secret {{name}}",
+        "command": "lakana repo add {{- name}} --kind https --url {{- url}} --credential-secret {{- name}}",
         "how": "How to store the token and register the repository"
       },
       "keys": {
@@ -663,7 +666,7 @@
         "next": "Next: deploy it, by hand or from CI.",
         "github": "Deploy from GitHub Actions",
         "gitlab": "Deploy from GitLab CI",
-        "deploy": "lakana deploy {{name}} --env {{environment}}"
+        "deploy": "lakana deploy {{- name}} --env {{- environment}}"
       }
     }
   },

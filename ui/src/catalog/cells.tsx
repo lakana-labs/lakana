@@ -11,6 +11,7 @@ import type { OwnerOut } from "../api";
 import { Avatar } from "../profile/Avatar";
 import { useWhen } from "../shell/useWhen";
 import { formatRows, relativeTime } from "./format";
+import { VisibleText } from "../shell/VisibleText";
 
 /**
  * The word for what a table is: its modelling kind (`Fact`) when it has one, else its entry kind
@@ -49,18 +50,24 @@ export interface WhenProps {
   readonly iso: string | null;
   /** What to say when it never happened, such as "Never read". */
   readonly never: string;
+  /**
+   * The time is one to come, such as an expiry: word it as `in 26 days`. Without it a time ahead
+   * of the browser's clock says "just now", as an event that happened cannot be in the future.
+   */
+  readonly ahead?: boolean;
 }
 
 /**
- * A time as how long ago it was, with the absolute time in its `title` and in text a screen
- * reader hears; the words in `never` without a time.
+ * A time as how long ago it was (or, with `ahead`, how long until it comes), with the absolute
+ * time in its `title` and in text a screen reader hears; the words in `never` without a time.
  *
  * @param props - The time and the words.
  * @param props.iso - The time, or null.
  * @param props.never - What to say without one.
+ * @param props.ahead - Word a time to come instead of saying "just now" for it.
  * @returns The time.
  */
-export function When({ iso, never }: WhenProps): JSX.Element {
+export function When({ iso, never, ahead = false }: WhenProps): JSX.Element {
   const { t, i18n } = useTranslation();
   const when = useWhen();
   // The present is read once per mount, so a render never depends on the clock.
@@ -72,7 +79,7 @@ export function When({ iso, never }: WhenProps): JSX.Element {
   return (
     <>
       <time dateTime={iso} title={absolute}>
-        {relativeTime(iso, now, i18n.language) ?? t("catalog.justNow")}
+        {relativeTime(iso, now, i18n.language, ahead) ?? t("catalog.justNow")}
       </time>
       <span className="visually-hidden"> {absolute}</span>
     </>
@@ -133,7 +140,9 @@ export function OwnerName({ owner }: OwnerNameProps): JSX.Element {
   return (
     <div className="person-cell">
       <Avatar name={owner.name} displayName={null} etag={null} size={24} />
-      <span>{owner.name}</span>
+      <span>
+        <VisibleText text={owner.name} />
+      </span>
       {owner.kind === "SERVICE_ACCOUNT" && (
         <span className="second">{t("catalog.serviceAccount")}</span>
       )}

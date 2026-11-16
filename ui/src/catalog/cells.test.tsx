@@ -33,6 +33,21 @@ describe("When", () => {
     );
   });
 
+  it("says just now for a past event the server's clock puts a little ahead", () => {
+    const { container } = render(<When iso="2026-11-13T12:02:00Z" never="Never written" />);
+
+    expect(container.querySelector("time")).toHaveTextContent("just now");
+  });
+
+  it("writes how long until a time to come when asked, with the exact time in a title", () => {
+    const { container } = render(<When iso="2026-12-09T12:00:00Z" never="Never" ahead />);
+
+    const time = container.querySelector("time");
+    expect(time).toHaveTextContent("in 26 days");
+    expect(time?.getAttribute("title")).toMatch(/2026/);
+    expect(screen.queryByText("just now")).not.toBeInTheDocument();
+  });
+
   it("says just now under a minute", () => {
     render(<When iso="2026-11-13T11:59:50Z" never="Never read" />);
 

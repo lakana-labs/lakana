@@ -12,7 +12,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, PrincipalRef, Securable
+from lakana_core.auth import Action, PrincipalRef, Securable, SecurableKind
 from lakana_core.grants.admin import ineffective_note
 from lakana_core.grants.explain import PermissionReport
 from lakana_core.grants.service import GrantService, scope_filter
@@ -181,6 +181,7 @@ def list_grants(
     environment: str | None = Query(default=None, max_length=255),
     namespace: str | None = Query(default=None, max_length=1024),
     table: str | None = Query(default=None, max_length=255),
+    kind: str | None = Query(default=None, max_length=32),
     limit: int = Query(default=100, ge=1, le=200),
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
@@ -193,7 +194,10 @@ def list_grants(
     except that `principal_name` and `group_name` exclude each other (422 when both are
     given). The object filter matches exactly: `table` with `namespace` and `environment`
     lists the grants on that table, `namespace` with `environment` those on the namespace,
-    `environment` alone those on the environment. Needs the `ADMIN` role on the instance.
+    `environment` alone those on the environment. `kind` lists the grants on every object of
+    one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to
+    everything in it; with an object filter it must be that object's kind (422 otherwise).
+    Needs the `ADMIN` role on the instance.
     Answers 404 when no principal or group has the name given. The cursor of the next page
     is in the `X-Next-Cursor` response header.
 
@@ -214,6 +218,8 @@ def list_grants(
         The dot-joined namespace of the object filter.
     table
         The table of the object filter.
+    kind
+        Only grants on objects of this kind: `INSTANCE`, `ENVIRONMENT`, `NAMESPACE` or `TABLE`.
     limit
         Most grants returned (1 to 200).
     cursor
@@ -231,12 +237,14 @@ def list_grants(
         The matching grants.
     """
     actions = parse_choices("action", [action], Action, any_case=True) if action else ()
+    kinds = parse_choices("kind", [kind], SecurableKind, any_case=True) if kind else ()
     page = service.list_grants(
         principal,
         principal_name=principal_name,
         group_name=group_name,
         action=actions[0] if actions else None,
         scope=scope_filter(environment, namespace, table),
+        kind=kinds[0] if kinds else None,
         limit=limit,
         cursor=cursor,
     )

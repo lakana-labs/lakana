@@ -113,4 +113,18 @@ describe("PeoplePage", () => {
       "second",
     ]);
   });
+
+  it("marks a hidden character of a person's name", async () => {
+    renderShell("/access", {
+      routes: {
+        "GET /api/v1/principals": {
+          status: 200,
+          body: [{ name: "k\u202Eim", type: "USER", is_active: true }],
+        },
+      },
+    });
+
+    expect(await screen.findByRole("link", { name: "kU+202Eim" })).toBeInTheDocument();
+    expect(screen.getByRole("table").textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

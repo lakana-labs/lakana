@@ -18,8 +18,12 @@ The page has:
 - **The table's name** as the heading, with its label under it when the table has one.
 - **A line under the name** with what the table is and where it lives, such as `Fact · gold.sales`,
   and the environment's label.
-- **Tabs**: Overview, Columns, Preview, Lineage, References, Health and Access. Every tab has its own
-  address, so a link opens the tab you were looking at. Everyone sees the same tabs.
+- **Tabs**: Overview, Columns, Preview, Lineage, References, Health and Access. An artifact holds
+  files, not rows, so its page shows Overview, Versions, Lineage and Access; its Overview gives the
+  current version, how many versions it has had, how many it keeps, the size of its live versions
+  and, when it expires, the date. Every tab has its own address, so a link opens the tab you were
+  looking at; an address with a tab the entry does not have, such as Preview of an artifact, opens
+  its Overview. Everyone sees the same tabs.
 - **Actions** beside the name, once the table is read, when there is something you may do to the
   table (see [Actions](#actions)).
 
@@ -27,8 +31,9 @@ The page has:
 
 **Actions** opens a menu of what you may do to the table as a whole. It lists only what the
 server says you may do, so an item you see is one you are allowed to use; with none, the page has
-no **Actions** at all. An artifact's page has no **Actions** either: drop an artifact with
-`lakana artifact drop`.
+no **Actions** at all. An artifact's **Actions** has only **Drop…**, which drops the artifact as
+`lakana artifact drop` does (see
+[Drop the whole artifact](delete-an-artifact-version.md#drop-the-whole-artifact)).
 
 - **Maintain now…** queues maintenance for the table, as `lakana table maintain` does. See
   [Maintain a table now](#maintain-a-table-now).
@@ -56,7 +61,7 @@ you break the protection, as `--break-glass` does.
 
 Maintenance expires a table's old snapshots, deletes the files nothing references any more and
 removes the tags of failed checks (see `lakana table maintain` in the
-[CLI reference](../reference/cli.md#lakana-table-maintain)). In the web interface, choose
+[CLI reference](../reference/cli/lakana-table.md#lakana-table-maintain)). In the web interface, choose
 **Actions**, then **Maintain now…**. The form starts with the server's defaults, the same as the
 command's:
 
@@ -213,7 +218,8 @@ Health shows everything the Overview's health block sums up. Its address ends in
   write", "3 rows added, 3 in total", "Nothing loaded" or "0 of 3 values empty", or why there
   is no value, such as "Paused" or "No figures recorded for this snapshot", its usual band in the same
   words (such as "up to 24 hours", "900 to 1,100 rows added" or "up to 5.0 % empty", and a range's
-  dates as dates), its effect (Warns, "Blocks publication" or Off) and when it last fired. Words are never broken across lines; when
+  dates as dates; a volume band learned from the loads on one weekday names the day, such as
+  "450 to 550 rows added on Saturdays"), its effect (Warns, "Blocks publication" or Off) and when it last fired. Words are never broken across lines; when
   the window is too narrow for the list, it scrolls sideways in its own area. Under the list, each signal that fired has its sentence,
   as on Overview. If a column mask or a row filter applies to you, the observed value and the
   band say "Hidden for you".
@@ -241,13 +247,13 @@ shows; changing access comes with the Access area.
   in prod." A refused one says why, or "Ask an administrator." You may edit the texts if you own
   the table or may drop it; otherwise the tab names the owner to ask.
 - **Who has access** (administrators only). The grants on the table, on its namespace and each
-  namespace above it, and on the environment, each level under its own heading: the person or
+  namespace above it, on the environment, and on the whole instance (such as the Admin role,
+  which applies to every table), each level under its own heading: the person or
   service account (a link to them), or the group, and the role or action with when it was
   granted. A level with more than 200 grants shows the first 200 and names the command that lists
-  all, such as `lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'`. A grant
-  whose person was removed while the list was read says "a removed person or group" with its id.
-  Grants on the whole instance, such as the Admin role, are not listed here; `lakana grant list`
-  shows every grant.
+  all, such as `lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'` (for the
+  instance, `lakana grant list --kind INSTANCE`). A grant whose person was removed while the list
+  was read says "a removed person or group" with its id.
 - **Row filters** and **Column masks** (administrators only). Who each one is for, the masked
   column for a mask, and the expression, shown as text.
 

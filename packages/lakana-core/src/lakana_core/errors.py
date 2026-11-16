@@ -126,6 +126,15 @@ class StepUpRequired(PermissionDenied):
     """
 
 
+class NoPasskeyError(ConflictError):
+    """A browser session asked for a passkey touch, and its person has no usable passkey.
+
+    Raised by `lakana_core.identity.passkeys.PasskeyService.step_up_options` instead of
+    answering with an empty list of passkeys, which would open the browser's picker with nothing
+    to choose. Mapped to 409 through `ConflictError`, so the interface can say to add one.
+    """
+
+
 class PasskeyRefused(AuthenticationError):
     """A passkey ceremony inside a browser session failed: a registration or a step-up touch.
 

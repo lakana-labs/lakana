@@ -58,6 +58,7 @@ class GrantFilters(TypedDict, total=False):
     environment: str | None
     namespace: str | None
     table: str | None
+    kind: str | None
 
 
 _GrantList = list[Grant]
@@ -176,7 +177,7 @@ class Grants:
             A previous page's `next_cursor`. Send the same filters with every page.
         **filters
             The filters of `list_page`: `principal_name`, `group_name`, `action`,
-            `environment`, `namespace`, `table`.
+            `environment`, `namespace`, `table`, `kind`.
 
         Returns
         -------
@@ -187,7 +188,8 @@ class Grants:
         ------
         lakana.errors.ValidationError
             If both `principal_name` and `group_name` are given, an object filter has a gap,
-            `action` is unknown, or `cursor` is not one the server issued for the grants list.
+            `action` or `kind` is unknown, `kind` is not the object filter's kind, or `cursor` is
+            not one the server issued for the grants list.
         lakana.errors.PermissionDenied
             Without the `ADMIN` role on the instance.
         """
@@ -202,6 +204,7 @@ class Grants:
         environment: str | None = None,
         namespace: str | None = None,
         table: str | None = None,
+        kind: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
     ) -> GrantPage:
@@ -221,6 +224,10 @@ class Grants:
             The dot-joined namespace of an object filter.
         table
             The table of an object filter.
+        kind
+            Only grants on objects of this kind, in any letter case: `INSTANCE` (the grants on
+            the whole instance, which apply to everything in it), `ENVIRONMENT`, `NAMESPACE` or
+            `TABLE`. With an object filter it must be that object's kind.
         limit
             Most grants returned (1 to 200); `None` leaves it to the server (100).
         cursor
@@ -240,6 +247,7 @@ class Grants:
                 environment=environment,
                 namespace=namespace,
                 table=table,
+                kind=kind.upper() if kind else None,
                 limit=limit,
                 cursor=cursor,
             ),
@@ -258,7 +266,7 @@ class Grants:
             Grants per request (1 to 200).
         **filters
             The filters of `list_page`: `principal_name`, `group_name`, `action`,
-            `environment`, `namespace`, `table`.
+            `environment`, `namespace`, `table`, `kind`.
 
         Returns
         -------

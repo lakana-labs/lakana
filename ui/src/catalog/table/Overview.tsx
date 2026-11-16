@@ -10,6 +10,7 @@ import { Link } from "react-router";
 
 import { getLineage, getTableHealth } from "../../api";
 import { useResource } from "../../shell/useResource";
+import { VisibleText } from "../../shell/VisibleText";
 import { tablePath } from "../paths";
 import { ColumnsTable } from "./ColumnsTab";
 import { ComesFrom } from "./ComesFrom";
@@ -57,7 +58,9 @@ function DescriptionBlock(): JSX.Element {
         <p className="second">{t("table.description.none")}</p>
       ) : (
         <>
-          <p className="description-text">{table.description}</p>
+          <p className="description-text">
+            <VisibleText text={table.description} />
+          </p>
           {table.description_source !== null && (
             <p className="second">{t(`table.description.source.${table.description_source}`)}</p>
           )}
@@ -99,10 +102,26 @@ function DescriptionBlock(): JSX.Element {
 }
 
 /**
+ * Health in a sentence, read without the readers' names.
+ *
+ * @returns The block.
+ */
+function Health(): JSX.Element {
+  const { ref, table } = useTableData();
+  const { environment, namespace, name } = ref;
+  const load = useCallback(
+    () => getTableHealth({ environment, namespace, name }, { readers: false }),
+    [environment, namespace, name],
+  );
+  return <HealthBlock summary={table.health_summary} resource={useResource(load)} />;
+}
+
+/**
  * Renders the description with where it comes from, the first five columns, health in a
  * sentence, the facts, and the tables directly upstream and downstream. Health is read without
  * the readers' names and lineage one step each way; nothing here runs a preview. A block whose
- * read fails says so on its own and leaves the rest as it is.
+ * read fails says so on its own and leaves the rest as it is. An artifact has no columns and is
+ * not judged, so it shows neither block and its health is never read.
  *
  * @returns The tab's content.
  */
@@ -110,11 +129,6 @@ export function Overview(): JSX.Element {
   const { t } = useTranslation();
   const { ref, table } = useTableData();
   const { environment, namespace, name } = ref;
-  const loadHealth = useCallback(
-    () => getTableHealth({ environment, namespace, name }, { readers: false }),
-    [environment, namespace, name],
-  );
-  const health = useResource(loadHealth);
   const node = `table:${table.uuid}`;
   const loadUp = useCallback(() => getLineage(environment, node, "up", 1), [environment, node]);
   const loadDown = useCallback(() => getLineage(environment, node, "down", 1), [environment, node]);
@@ -133,7 +147,7 @@ export function Overview(): JSX.Element {
             </Link>
           </section>
         )}
-        <HealthBlock summary={table.health_summary} resource={health} />
+        {table.kind !== "ARTIFACT" && <Health />}
       </div>
       <div className="overview-side">
         <Facts />

@@ -184,8 +184,8 @@ ingestion helpers and named connections shipped before the web interface.
    bundle can set up a TLS proxy, because passkeys need HTTPS. Done when a new user can sign in and answer a question
    without the CLI. A second security review is due when the interface and sign-in arrive. M7 is designed first (#66): a spec and its slices come before any screen, built around what the
    first audience needs. After M7 comes the rest of the plan; the release candidates test the
-   interface with real teams before v1.0.0. The web interface is under way; a first preview that
-   signs you in exists and is off by default.
+   interface with real teams before v1.0.0. The web interface is under way and off by default:
+   sign-in, Home, the Catalog, and the first parts of Access and Settings exist.
 7. **M8, ML.** Experiment tracking, the model registry, and the offline feature store, all
     queryable and tied to commits. The registry is the artifact store of M5c2b. It adds named
     pointers such as `production`, pinned versions that a consumer can name, and metrics on a

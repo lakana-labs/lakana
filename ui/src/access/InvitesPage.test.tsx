@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
@@ -117,6 +117,43 @@ describe("InvitesPage", () => {
       "/api/v1/sign-in/step-up",
       "/api/v1/invites",
     ]);
+  });
+
+  it("says to add a passkey first when the account has none, and links to where", async () => {
+    // No browser support for passkeys at all: the server's answer comes first, so the person
+    // learns that the account has no passkey, not that the browser cannot use one.
+    vi.stubGlobal("PublicKeyCredential", undefined);
+    const { user, server } = renderShell("/access/invites", {
+      routes: {
+        "GET /api/v1/invites": { status: 200, body: [] },
+        "POST /api/v1/invites": {
+          status: 403,
+          body: { type: "StepUpRequired", detail: "Confirm with your passkey." },
+        },
+        "POST /api/v1/sign-in/step-up/options": {
+          status: 409,
+          body: { type: "NoPasskeyError", detail: "Your account has no passkey at this address." },
+        },
+      },
+    });
+    await screen.findByText(/No invite is open/);
+
+    await user.click(screen.getByRole("button", { name: "Invite someone" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "sam");
+    await user.click(screen.getByRole("button", { name: "Create the invite" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Your account has no passkey yet, and this action needs a passkey touch. Add one first " +
+        "under Passkeys and sessions, in the menu under your name, then try again.",
+    );
+    expect(within(alert).getByRole("link", { name: "Add a passkey" })).toHaveAttribute(
+      "href",
+      "/account",
+    );
+    expect(
+      server.sent.filter((request) => request.method === "POST").map((request) => request.path),
+    ).toEqual(["/api/v1/invites", "/api/v1/sign-in/step-up/options"]);
   });
 
   it("names the server's reason when the invite is refused, and keeps the dialog", async () => {
@@ -255,5 +292,22 @@ describe("InvitesPage", () => {
     });
 
     expect(await screen.findByRole("alert")).toHaveTextContent("You need the ADMIN role.");
+  });
+
+  it("marks hidden characters of an invite's name and display name", async () => {
+    renderShell("/access/invites", {
+      routes: {
+        "GET /api/v1/invites": {
+          status: 200,
+          body: [{ ...OPEN, name: "k\u202Eim", display_name: "Kim\u2066 Lee" }],
+        },
+      },
+    });
+
+    const button = await screen.findByRole("button", { name: "Withdraw the invite of kU+202Eim" });
+    const row = button.closest("tr") as HTMLElement;
+    expect(row).toHaveTextContent("kU+202Eim");
+    expect(row).toHaveTextContent("KimU+2066 Lee");
+    expect(row.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
 });

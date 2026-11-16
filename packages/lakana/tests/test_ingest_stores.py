@@ -1014,7 +1014,7 @@ def _mock_site(monkeypatch: pytest.MonkeyPatch, answer: object) -> list[str]:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(f"{request.method} {request.url}")
-        return answer(request)  # ty: ignore[call-non-callable]
+        return answer(request)  # ty: ignore[not-callable]
 
     def client_for(conn: Connection) -> httpx.Client:
         return httpx.Client(

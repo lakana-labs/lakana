@@ -84,4 +84,32 @@ describe("Recent", () => {
     expect(await within(list).findByText("orphan")).toBeVisible();
     expect(within(list).queryByRole("link", { name: "orphan" })).not.toBeInTheDocument();
   });
+
+  it("marks hidden characters in a table's name and environment", async () => {
+    renderShell("/", {
+      routes: {
+        "GET /api/v1/principals/admin/recent": {
+          status: 200,
+          body: [
+            {
+              kind: "table",
+              environment: "pr\u2066od",
+              ref: "gold.fact_\u202Eselas",
+              opened_at: AT,
+            },
+            { kind: "table", environment: "prod", ref: "or\u202Ephan", opened_at: AT },
+          ],
+        },
+      },
+    });
+
+    const list = await region();
+    const link = await within(list).findByRole("link", { name: "gold.fact_U+202Eselas" });
+    expect(link.closest("tr")).toHaveTextContent("prU+2066od");
+    expect(
+      within(list).getByText("U+202E", { selector: "span.row-name > .char-mark" }),
+    ).toBeVisible();
+    expect(list).toHaveTextContent("orU+202Ephan");
+    expect(list.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

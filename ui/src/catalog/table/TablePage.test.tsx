@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { artifactRoutes } from "../../test/artifacts";
 import { held } from "../../test/pending";
 import { renderShell } from "../../test/render";
 import { permissions, table, TABLE_PATH, tableRoutes } from "../../test/table";
@@ -21,10 +22,11 @@ async function heading(name = "fact_sales"): Promise<HTMLElement> {
 /**
  * The tab links, once the table has arrived.
  *
+ * @param name - The tab row's name, "Sections of the table" unless the page is an artifact's.
  * @returns The links, in order.
  */
-async function tabs(): Promise<HTMLElement[]> {
-  const row = await screen.findByRole("navigation", { name: "Sections of the table" });
+async function tabs(name = "Sections of the table"): Promise<HTMLElement[]> {
+  const row = await screen.findByRole("navigation", { name });
   return within(row).getAllByRole("link");
 }
 
@@ -58,6 +60,42 @@ describe("TablePage", () => {
         "href",
         "/catalog?env=prod&ns=gold.sales",
       );
+    });
+
+    it("marks hidden characters of a crafted link in the heading, the breadcrumb and the title", async () => {
+      renderShell("/catalog/pr%E2%81%A6od/go%E2%80%AEld/fact_%E2%80%AEselas");
+
+      const shown = await heading("fact_U+202Eselas");
+      expect(within(shown).getByText("U+202E")).toHaveClass("char-mark");
+      const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+      expect(
+        within(trail)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent),
+      ).toEqual(["Catalog›", "prU+2066od›", "goU+202Eld›", "fact_U+202Eselas"]);
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "There is no table fact_U+202Eselas in prU+2066od › goU+202Eld.",
+      );
+      expect(document.title).toBe("fact_U+202Eselas · Lakana");
+      expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
+    });
+
+    it("marks hidden characters of a table's namespace and label under the heading", async () => {
+      renderShell(PAGE, {
+        routes: {
+          [`GET ${TABLE_PATH}`]: {
+            status: 200,
+            body: table({ namespace: "gold.\u202Esales", label: "Sales\u2066 facts" }),
+          },
+        },
+      });
+
+      await heading();
+      expect(await screen.findByText("Fact · gold.U+202Esales")).toBeInTheDocument();
+      expect(
+        screen.getByText("U+2066", { selector: ".table-label > .char-mark" }).parentElement,
+      ).toHaveTextContent("SalesU+2066 facts");
+      expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
     });
 
     it("decodes a name and a namespace the address encodes", async () => {
@@ -368,6 +406,86 @@ describe("TablePage", () => {
       ]);
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("an artifact's page", () => {
+  const ARTIFACT_PAGE = "/catalog/prod/ml/model";
+  const ARTIFACT_READ = "/api/v1/environments/prod/namespaces/ml/artifacts/model";
+
+  it("reads the artifact too for an ARTIFACT entry and shows its four tabs in order, each with its own address", async () => {
+    const { server } = renderShell(ARTIFACT_PAGE, { routes: artifactRoutes() });
+
+    const links = await tabs("Sections of the artifact");
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Overview",
+      "Versions",
+      "Lineage",
+      "Access",
+    ]);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      ARTIFACT_PAGE,
+      `${ARTIFACT_PAGE}/versions`,
+      `${ARTIFACT_PAGE}/lineage`,
+      `${ARTIFACT_PAGE}/access`,
+    ]);
+    expect(links[0]).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "Sections of the artifact" })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Sections of the table" })).toBeNull();
+    expect(
+      server.sent.filter((request) => request.method === "GET" && request.path === ARTIFACT_READ),
+    ).toHaveLength(1);
+  });
+
+  it("opens the Versions tab at its address", async () => {
+    renderShell(`${ARTIFACT_PAGE}/versions`, { routes: artifactRoutes() });
+
+    const links = await tabs("Sections of the artifact");
+    expect(links.find((link) => link.textContent === "Versions")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("region", { name: "Versions" })).toBeInTheDocument();
+  });
+
+  it("does not read the artifact route for a table", async () => {
+    const { server } = renderShell(PAGE);
+
+    await tabs();
+
+    expect(server.sent.filter((request) => request.path.includes("/artifacts/"))).toEqual([]);
+  });
+
+  it("replaces a table-only tab in an artifact's address with its Overview", async () => {
+    const { router } = renderShell(`${ARTIFACT_PAGE}/preview`, { routes: artifactRoutes() });
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(ARTIFACT_PAGE);
+    });
+    const links = await tabs("Sections of the artifact");
+    expect(links[0]).toHaveAttribute("aria-current", "page");
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("replaces versions in a table's address with its Overview", async () => {
+    const { router } = renderShell(`${PAGE}/versions`);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(PAGE);
+    });
+    expect((await tabs())[0]).toHaveAttribute("aria-current", "page");
+  });
+
+  it("names the cause when the artifact cannot be read", async () => {
+    renderShell(ARTIFACT_PAGE, {
+      routes: {
+        ...artifactRoutes(),
+        [`GET ${ARTIFACT_READ}`]: { status: 500, body: { detail: "The catalog database broke." } },
+      },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The catalog database broke.");
+    expect(screen.queryByRole("navigation", { name: "Sections of the table" })).toBeNull();
   });
 });
 

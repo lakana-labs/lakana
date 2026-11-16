@@ -156,36 +156,14 @@ export async function addAdminPasskey(context: BrowserContext, page: Page): Prom
 }
 
 /**
- * Makes the table's DELETE ask for a passkey touch once, answers the touch, and then lets the
- * delete through.
+ * Answers the step-up pair, the options and the touch, as the server does once the virtual
+ * authenticator has signed.
  *
  * @param page - The page.
- * @returns The mutating requests that reached the stubs, in order, as `METHOD path`.
+ * @returns Whether the touch was sent yet.
  */
-export async function stubStepUpDrop(page: Page): Promise<string[]> {
-  const sent: string[] = [];
-  page.on("request", (request: Request) => {
-    const path = new URL(request.url()).pathname;
-    if (
-      request.method() !== "GET" &&
-      (path === TABLE_PATH || path.startsWith("/api/v1/sign-in/step-up"))
-    ) {
-      sent.push(`${request.method()} ${path}`);
-    }
-  });
+export async function stubStepUpCeremony(page: Page): Promise<() => boolean> {
   let touched = false;
-  await page.route(
-    (url) => url.pathname === TABLE_PATH,
-    (route) =>
-      route.request().method() !== "DELETE"
-        ? route.fallback()
-        : touched
-          ? route.fulfill({ status: 204 })
-          : route.fulfill({
-              status: 403,
-              json: { type: "StepUpRequired", detail: "Confirm with your passkey." },
-            }),
-  );
   await page.route("**/api/v1/sign-in/step-up/options", (route) =>
     route.fulfill({
       json: {
@@ -204,6 +182,52 @@ export async function stubStepUpDrop(page: Page): Promise<string[]> {
     touched = true;
     return route.fulfill({ status: 204 });
   });
+  return () => touched;
+}
+
+/**
+ * Collects the mutating requests to one path and to the step-up pair, in order.
+ *
+ * @param page - The page.
+ * @param target - The path whose writes are collected.
+ * @returns The requests, filled as they are sent, as `METHOD path`.
+ */
+export function mutatingRequests(page: Page, target: string): string[] {
+  const sent: string[] = [];
+  page.on("request", (request: Request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      request.method() !== "GET" &&
+      (path === target || path.startsWith("/api/v1/sign-in/step-up"))
+    ) {
+      sent.push(`${request.method()} ${path}`);
+    }
+  });
+  return sent;
+}
+
+/**
+ * Makes the table's DELETE ask for a passkey touch once, answers the touch, and then lets the
+ * delete through.
+ *
+ * @param page - The page.
+ * @returns The mutating requests that reached the stubs, in order, as `METHOD path`.
+ */
+export async function stubStepUpDrop(page: Page): Promise<string[]> {
+  const sent = mutatingRequests(page, TABLE_PATH);
+  const touched = await stubStepUpCeremony(page);
+  await page.route(
+    (url) => url.pathname === TABLE_PATH,
+    (route) =>
+      route.request().method() !== "DELETE"
+        ? route.fallback()
+        : touched()
+          ? route.fulfill({ status: 204 })
+          : route.fulfill({
+              status: 403,
+              json: { type: "StepUpRequired", detail: "Confirm with your passkey." },
+            }),
+  );
   return sent;
 }
 
