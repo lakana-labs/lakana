@@ -347,7 +347,7 @@
       "reading": "Reading the grants…",
       "cut": "The first 200 at this level; <code>{{command}}</code> lists all.",
       "role": "{{role}} role",
-      "instance": "Grants on the whole instance, such as the Admin role, are not listed here; <code>lakana grant list</code> shows every grant."
+      "instance": "On the whole instance"
     },
     "group": "group <name/>",
     "removed": "a removed person or group",

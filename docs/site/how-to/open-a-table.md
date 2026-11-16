@@ -174,13 +174,13 @@ shows; changing access comes with the Access area.
   in prod." A refused one says why, or "Ask an administrator." You may edit the texts if you own
   the table or may drop it; otherwise the tab names the owner to ask.
 - **Who has access** (administrators only). The grants on the table, on its namespace and each
-  namespace above it, and on the environment, each level under its own heading: the person or
+  namespace above it, on the environment, and on the whole instance (such as the Admin role,
+  which applies to every table), each level under its own heading: the person or
   service account (a link to them), or the group, and the role or action with when it was
   granted. A level with more than 200 grants shows the first 200 and names the command that lists
-  all, such as `lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'`. A grant
-  whose person was removed while the list was read says "a removed person or group" with its id.
-  Grants on the whole instance, such as the Admin role, are not listed here; `lakana grant list`
-  shows every grant.
+  all, such as `lakana grant list --env 'prod' --ns 'gold.sales' --table 'fact_sales'` (for the
+  instance, `lakana grant list --kind INSTANCE`). A grant whose person was removed while the list
+  was read says "a removed person or group" with its id.
 - **Row filters** and **Column masks** (administrators only). Who each one is for, the masked
   column for a mask, and the expression, shown as text.
 
