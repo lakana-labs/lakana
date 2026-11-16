@@ -23,7 +23,7 @@ export interface ChooseEnvironmentProps {
 
 /**
  * Says that the view is listed per environment and offers one link for each environment the
- * person may read; each keeps the view.
+ * person may read, drawn as buttons like the rest of the screen; each keeps the view.
  *
  * @param props - The view and the tree.
  * @param props.view - The view to keep.
@@ -38,7 +38,7 @@ export function ChooseEnvironment({ view, root }: ChooseEnvironmentProps): JSX.E
       <ul className="choose-list" aria-label={t("catalog.views.chooseLabel")}>
         {root.children.map((node) => (
           <li key={node.id}>
-            <Link to={catalogPath(placed(view, node.environment, null))}>
+            <Link className="button" to={catalogPath(placed(view, node.environment, null))}>
               <VisibleText text={node.label} />
             </Link>
           </li>
