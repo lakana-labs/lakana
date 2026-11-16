@@ -168,7 +168,7 @@ minutes: touch your passkey when the browser asks, and the drop is sent again. T
 uses a token and is never asked. The Catalog then opens the artifact's namespace and says "Dropped
 artifact models.scratch_model. Its files are removed from storage, and Lakana's periodic clean-up
 removes any it could not." In a protected environment the dialog also asks why you break the
-protection of the environment, the same reason `--break-glass` takes.
+protection of the environment, the same text `--reason` takes with `--break-glass`.
 
 For an artifact a deployed project produces, **Drop…** is shown but cannot be chosen, and the menu
 says `Defined in analytics/assets/ml/model.py — change it in git` with the repository and the file
