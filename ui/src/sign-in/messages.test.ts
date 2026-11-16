@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { endedReason, problemText } from "./messages";
+import { endedReason, needsPasskey, problemText } from "./messages";
 
 import { ApiError } from "../api";
 import { initI18n } from "../i18n/i18n";
@@ -27,6 +27,16 @@ describe("problemText", () => {
     expect(problemText(t, new ApiError(0, "NetworkError", "x"))).toMatch(
       /^Lakana could not be reached/,
     );
+  });
+
+  it("says to add a passkey when the account has none to touch", () => {
+    expect(problemText(t, new ApiError(409, "NoPasskeyError", "x"))).toBe(
+      "Your account has no passkey yet, and this action needs a passkey touch. Add one first " +
+        "under Passkeys and sessions, in the menu under your name, then try again.",
+    );
+    expect(needsPasskey(new ApiError(409, "NoPasskeyError", "x"))).toBe(true);
+    expect(needsPasskey(new ApiError(409, "ConflictError", "x"))).toBe(false);
+    expect(needsPasskey(new DOMException("x", "NotAllowedError"))).toBe(false);
   });
 
   it("passes the server's own sentence on", () => {

@@ -241,7 +241,9 @@
     "unsupported": "This browser cannot use passkeys. Use a current version of Chrome, Edge, Firefox or Safari.",
     "duplicate": "This browser or password manager already holds a passkey for this account. To add another, choose a different place in the browser's window, such as a phone or tablet or a security key; or sign in with the passkey you have.",
     "wrongAddress": "Passkeys work only at the address Lakana was set up with. Open Lakana at that address and try again.",
-    "failed": "The browser could not use the passkey ({{name}}). Try again, or use another device."
+    "failed": "The browser could not use the passkey ({{name}}). Try again, or use another device.",
+    "none": "Your account has no passkey yet, and this action needs a passkey touch. Add one first under Passkeys and sessions, in the menu under your name, then try again.",
+    "add": "Add a passkey"
   },
   "signIn": {
     "title": "Sign in to Lakana",

@@ -20920,7 +20920,7 @@
           "sign-in"
         ],
         "summary": "Start confirming your browser session with a passkey touch (step-up)",
-        "description": "Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. A token has no browser session, so it gets 409: step-up never applies to a token's requests.",
+        "description": "Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a passkey on your account page first. A token has no browser session, so it gets 409: step-up never applies to a token's requests.",
         "operationId": "step_up_options_api_v1_sign_in_step_up_options_post",
         "parameters": [
           {
@@ -22311,7 +22311,7 @@
           "principals"
         ],
         "summary": "Start adding a passkey to your own account",
-        "description": "From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.",
+        "description": "From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. After those 15 minutes, a session from a link or a local sign-in without a usable passkey gets a 403 that names `lakana server start --local` or a recovery link, since a touch cannot help it. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.",
         "operationId": "passkey_registration_options_api_v1_principals__name__passkeys_options_post",
         "parameters": [
           {
