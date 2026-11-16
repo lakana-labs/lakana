@@ -2,7 +2,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderShell } from "../../test/render";
-import { DEFINITION, definitionFile, TABLE_PATH } from "../../test/table";
+import { DEFINITION, definitionFile, table, TABLE_PATH } from "../../test/table";
 
 const PAGE = "/catalog/prod/gold.sales/fact_sales";
 const FILE_PATH = `${TABLE_PATH}/definition/file`;
@@ -107,6 +107,24 @@ describe("DefinedIn", () => {
     await user.click(within(fact).getByRole("button", { name: "Try again" }));
 
     expect(await definedIn()).toHaveTextContent("models/gold/fact_sales.sql, line 1");
+  });
+
+  it("marks a hidden character of the table's name in the dialog's heading and name", async () => {
+    const crafted = TABLE_PATH.replace("fact_sales", "fact_\u202Esales");
+    const { user } = renderShell("/catalog/prod/gold.sales/fact_%E2%80%AEsales", {
+      routes: {
+        [`GET ${crafted}`]: { status: 200, body: table({ name: "fact_\u202Esales" }) },
+        [`GET ${crafted}/definition`]: { status: 200, body: DEFINITION },
+        [`GET ${crafted}/definition/file`]: { status: 200, body: definitionFile() },
+      },
+    });
+
+    const dialog = await openFile(user);
+
+    expect(dialog).toHaveAccessibleName("Where fact_U+202Esales is defined");
+    const heading = within(dialog).getByRole("heading", { level: 2 });
+    expect(heading).toHaveTextContent("Where fact_U+202Esales is defined");
+    expect(heading.textContent).not.toMatch(RAW);
   });
 
   it("opens the file in a dialog and marks the defining line", async () => {

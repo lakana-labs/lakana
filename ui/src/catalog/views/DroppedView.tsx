@@ -131,13 +131,13 @@ export function DroppedView({ environment, namespace, onChanged }: DroppedViewPr
     }
   };
 
-  const place = namespace ?? environment;
+  const place = markedText(namespace ?? environment);
   return (
     <div className="dropped-view">
       <p className="page-purpose">
         {namespace === null
-          ? t("catalog.views.dropped.inEnvironment", { environment })
-          : t("catalog.views.dropped.fromNamespace", { namespace })}
+          ? t("catalog.views.dropped.inEnvironment", { environment: markedText(environment) })
+          : t("catalog.views.dropped.fromNamespace", { namespace: markedText(namespace) })}
       </p>
       <p className="catalog-result" role="status" tabIndex={-1} ref={status}>
         {result !== null && (

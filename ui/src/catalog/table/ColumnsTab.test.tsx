@@ -202,8 +202,11 @@ describe("ColumnsTab", () => {
     expect(
       within(region).getByRole("link", { name: "gold.dim_U+202Estore.store_id" }),
     ).toBeInTheDocument();
+    // Edit and Back to Git follow once the person's rights are read.
     expect(
-      within(region).getByRole("button", { name: "Back to the text from Git for chanU+202Enel" }),
+      await within(region).findByRole("button", {
+        name: "Back to the text from Git for chanU+202Enel",
+      }),
     ).toBeInTheDocument();
     expect(region.textContent).not.toMatch(/[\u202E\u2066]/u);
   });

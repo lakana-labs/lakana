@@ -189,4 +189,17 @@ describe("RecoveryLinksPage", () => {
       expect(screen.getByRole("heading", { level: 1, name: "Access" })).toHaveFocus();
     });
   });
+
+  it("marks a hidden character of the person's name", async () => {
+    renderShell("/access/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": { status: 200, body: [{ ...OPEN, name: "k\u202Eim" }] },
+      },
+    });
+
+    const link = await screen.findByRole("link", { name: "kU+202Eim" });
+    const row = link.closest("tr") as HTMLElement;
+    expect(within(row).getByRole("button", { name: /kU\+202Eim/u })).toBeInTheDocument();
+    expect(row.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

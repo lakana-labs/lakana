@@ -80,7 +80,7 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
         <>
           <p>{t("table.actions.rebuild.text")}</p>
           {protectedEnvironment === true && (
-            <p>{t("table.actions.rebuild.protected", { environment })}</p>
+            <p>{t("table.actions.rebuild.protected", { environment: markedText(environment) })}</p>
           )}
           <TextField
             className="field"

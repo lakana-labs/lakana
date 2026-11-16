@@ -308,4 +308,25 @@ describe("HealthBlock", () => {
     ).toBeVisible();
     expect(screen.getByRole("heading", { level: 2, name: "Health" })).toHaveFocus();
   });
+
+  it("marks a hidden character of a check's name in its sentence", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [HEALTH_ROUTE]: {
+          status: 200,
+          body: health({
+            checks: [
+              checkResult({ name: "unique_\u202Esale_id", outcome: "failed", failing_rows: 12 }),
+            ],
+          }),
+        },
+      },
+    });
+
+    const section = await block();
+    const mark = await within(section).findByText("U+202E");
+    expect(mark).toHaveClass("char-mark");
+    expect(mark.parentElement).toHaveTextContent(/^Check unique_U\+202Esale_id failed/u);
+    expect(section.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

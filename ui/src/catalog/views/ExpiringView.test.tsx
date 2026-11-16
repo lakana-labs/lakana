@@ -172,4 +172,34 @@ describe("ExpiringView", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Try again in a moment.");
     expect(rows()[0]).toHaveTextContent("Not known");
   });
+
+  it("marks hidden characters of the environment and namespace in its sentences", async () => {
+    const tree = {
+      count: 0,
+      environments: [
+        {
+          name: "pr\u2066od",
+          count: 0,
+          actions: [],
+          namespaces: [{ path: "go\u202Eld", count: 0, actions: [] }],
+        },
+      ],
+    };
+    renderShell("/catalog?view=expiring&env=pr%E2%81%A6od&ns=go%E2%80%AEld", {
+      routes: {
+        ...manageRoutes(),
+        "GET /api/v1/tables/tree": { status: 200, body: tree },
+        "GET /api/v1/environments/pr\u2066od/expiring-tables": {
+          status: 200,
+          body: [],
+        },
+      },
+    });
+
+    expect(
+      await screen.findByText("Tables in goU+202Eld that expire soon, the soonest first."),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Nothing expires soon in goU+202Eld.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

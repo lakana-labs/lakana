@@ -28,6 +28,7 @@ import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { AccessFrame } from "./AccessFrame";
 import { ShownOnce } from "./ShownOnce";
 import { PendingButton } from "../shell/PendingButton";
+import { markedText, VisibleText } from "../shell/VisibleText";
 
 /** Properties of {@link InviteDialog}. */
 interface InviteDialogProps {
@@ -86,14 +87,19 @@ function InviteDialog({ onClose }: InviteDialogProps): JSX.Element {
         </Form>
       ) : (
         <ShownOnce
-          title={t("access.shownTitle", { name: issued.name })}
+          title={t("access.shownTitle", { name: markedText(issued.name) })}
           url={issued.url}
           onDone={onClose}
         >
           <p>
-            {t("access.invites.shownOnce", { name: issued.name, date: when(issued.expires_at) })}
+            {t("access.invites.shownOnce", {
+              name: markedText(issued.name),
+              date: when(issued.expires_at),
+            })}
           </p>
-          <p className="page-notice">{t("access.invites.confirm", { name: issued.name })}</p>
+          <p className="page-notice">
+            {t("access.invites.confirm", { name: markedText(issued.name) })}
+          </p>
         </ShownOnce>
       )}
     </ActionDialog>
@@ -145,16 +151,22 @@ export function InvitesPage(): JSX.Element {
                 {open.map((invite) => (
                   <tr key={invite.id}>
                     <td>
-                      <span>{invite.name}</span>
+                      <span>
+                        <VisibleText text={invite.name} />
+                      </span>
                       {invite.display_name !== null && (
-                        <span className="second">{invite.display_name}</span>
+                        <span className="second">
+                          <VisibleText text={invite.display_name} />
+                        </span>
                       )}
                     </td>
                     <td>{when(invite.expires_at)}</td>
                     <td>
                       <PendingButton
                         className="button"
-                        aria-label={t("access.invites.withdrawOf", { name: invite.name })}
+                        aria-label={t("access.invites.withdrawOf", {
+                          name: markedText(invite.name),
+                        })}
                         pending={withdraw.busy && pressed === invite.id}
                         isDisabled={withdraw.busy && pressed !== invite.id}
                         onPress={() => {

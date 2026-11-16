@@ -16,6 +16,7 @@ import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import { PendingButton } from "../shell/PendingButton";
+import { markedText, VisibleText } from "../shell/VisibleText";
 
 /** Properties of {@link PasskeysPanel}. */
 export interface PasskeysPanelProps {
@@ -90,13 +91,15 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
                   return (
                     <tr key={passkey.id}>
                       <td>
-                        <span>{label}</span>
+                        <span>
+                          <VisibleText text={label} />
+                        </span>
                         <span className="second">{details(passkey)}</span>
                       </td>
                       <td>
                         <Button
                           className="button"
-                          aria-label={t("passkeys.removeOf", { name: label })}
+                          aria-label={t("passkeys.removeOf", { name: markedText(label) })}
                           onPress={() => {
                             setRemoving({ id: passkey.id, label });
                           }}
@@ -117,8 +120,11 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
         <ConfirmDialog
           title={
             own
-              ? t("passkeys.confirmOwn", { name: removing.label })
-              : t("passkeys.confirmOther", { name: removing.label, person: name })
+              ? t("passkeys.confirmOwn", { name: markedText(removing.label) })
+              : t("passkeys.confirmOther", {
+                  name: markedText(removing.label),
+                  person: markedText(name),
+                })
           }
           confirmLabel={t("passkeys.confirmRemove")}
           onConfirm={() => removePasskey(name, removing.id)}
@@ -131,7 +137,11 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
             passkeys.reload();
           }}
         >
-          <p>{own ? t("passkeys.ownEffect") : t("passkeys.otherEffect", { person: name })}</p>
+          <p>
+            {own
+              ? t("passkeys.ownEffect")
+              : t("passkeys.otherEffect", { person: markedText(name) })}
+          </p>
         </ConfirmDialog>
       )}
     </section>

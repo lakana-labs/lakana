@@ -293,4 +293,21 @@ describe("InvitesPage", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("You need the ADMIN role.");
   });
+
+  it("marks hidden characters of an invite's name and display name", async () => {
+    renderShell("/access/invites", {
+      routes: {
+        "GET /api/v1/invites": {
+          status: 200,
+          body: [{ ...OPEN, name: "k\u202Eim", display_name: "Kim\u2066 Lee" }],
+        },
+      },
+    });
+
+    const button = await screen.findByRole("button", { name: "Withdraw the invite of kU+202Eim" });
+    const row = button.closest("tr") as HTMLElement;
+    expect(row).toHaveTextContent("kU+202Eim");
+    expect(row).toHaveTextContent("KimU+2066 Lee");
+    expect(row.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

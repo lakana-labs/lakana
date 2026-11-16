@@ -143,7 +143,10 @@ describe("RebuildDialog", () => {
   it("marks a bidi character in the repository and the file", async () => {
     fakeServer({
       ...manageRoutes(),
-      [REBUILD]: { status: 202, body: { ...REBUILT, repository: "sales‮", path: "a‮.py" } },
+      [REBUILD]: {
+        status: 202,
+        body: { ...REBUILT, repository: "sales\u202E", path: "a\u202E.py" },
+      },
     });
     const { user } = renderRebuild();
 
@@ -365,5 +368,19 @@ describe("RebuildDialog", () => {
       expect(router.state.location.pathname).toBe("/catalog");
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a hidden character of a protected environment's name", async () => {
+    fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/pr\u202Eod": {
+        status: 200,
+        body: { name: "pr\u202Eod", is_protected: true },
+      },
+    });
+    renderRebuild({ ...PLACE, environment: "pr\u202Eod" });
+
+    expect(await screen.findByText(/^prU\+202Eod is protected/u)).toBeInTheDocument();
+    expect(screen.getByRole("dialog").textContent).not.toMatch(/\u202E/u);
   });
 });

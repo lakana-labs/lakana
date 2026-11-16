@@ -261,7 +261,9 @@ function Signals({ health }: HealthProps): JSX.Element {
               {lines.map((line, index) => (
                 <li key={String(index)}>
                   <StatusGlyph kind={line.severity === "failing" ? "failed" : "warning"} />
-                  <span>{line.sentence}</span>
+                  <span>
+                    <VisibleText text={line.sentence} />
+                  </span>
                 </li>
               ))}
             </ul>

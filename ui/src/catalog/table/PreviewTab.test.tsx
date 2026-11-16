@@ -9,6 +9,7 @@ import {
   QUERY_ID,
   queryStatus,
   result,
+  table,
   TABLE_PATH,
   VIEW,
   VIEW_RESULT,
@@ -596,5 +597,33 @@ describe("PreviewTab", () => {
     ]);
     expect(within(row).getByRole("gridcell", { name: "null" })).toBe(cells[1]);
     expect(cells[3]?.querySelector(".value-marker")).toHaveTextContent("binary, 12 bytes");
+  });
+
+  it("marks hidden characters of the table's and a column's name in the grid's names", async () => {
+    const crafted = TABLE_PATH.replace("fact_sales", "fact_\u202Esales");
+    const page = result();
+    const { user } = renderShell("/catalog/prod/gold.sales/fact_%E2%80%AEsales/preview", {
+      routes: {
+        [`GET ${crafted}`]: { status: 200, body: table({ name: "fact_\u202Esales" }) },
+        [`POST ${crafted}/preview`]: { status: 202, body: { query_id: QUERY_ID } },
+        [RESULT_ROUTE]: {
+          status: 200,
+          body: {
+            ...page,
+            columns: page.columns.map((column, index) =>
+              index === 2 ? { ...column, name: "no\u2066te" } : column,
+            ),
+          },
+        },
+      },
+    });
+
+    const region = await screen.findByRole("region", { name: "Preview of fact_U+202Esales" });
+    const grid = within(region).getByRole("grid", { name: "The first rows of fact_U+202Esales" });
+    await user.click(
+      within(grid).getAllByRole("row")[1]?.querySelectorAll("[role=gridcell]")[2] as HTMLElement,
+    );
+
+    expect(await screen.findByRole("region", { name: "noU+2066te, row 1" })).toBeVisible();
   });
 });

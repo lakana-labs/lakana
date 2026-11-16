@@ -20,6 +20,7 @@ import { AccessFrame } from "./AccessFrame";
 import { personPath } from "./personPath";
 import { RecoveryDialog } from "./RecoveryDialog";
 import { PendingButton } from "../shell/PendingButton";
+import { markedText, VisibleText } from "../shell/VisibleText";
 
 /**
  * Renders the open recovery links; each row opens its person, and is withdrawn in place.
@@ -64,14 +65,16 @@ export function RecoveryLinksPage(): JSX.Element {
                   <tr key={link.id}>
                     <td>
                       <Link className="row-name" to={personPath(link.name)}>
-                        {link.name}
+                        <VisibleText text={link.name} />
                       </Link>
                     </td>
                     <td>{when(link.expires_at)}</td>
                     <td>
                       <PendingButton
                         className="button"
-                        aria-label={t("access.recovery.withdrawOf", { name: link.name })}
+                        aria-label={t("access.recovery.withdrawOf", {
+                          name: markedText(link.name),
+                        })}
                         pending={withdraw.busy && pressed === link.id}
                         isDisabled={withdraw.busy && pressed !== link.id}
                         onPress={() => {
