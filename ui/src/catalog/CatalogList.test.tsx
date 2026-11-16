@@ -1293,19 +1293,38 @@ describe("CatalogList", () => {
       await user.click(await screen.findByRole("button", { name: "Actions for gold" }));
       await user.click(screen.getByRole("menuitem", { name: "New namespace…" }));
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      // The frames wait here until the note has the focus, so the menu's frame, which puts the
+      // focus back on the place when it was lost, meets a note that already has it: only its
+      // guard keeps the focus there, whatever order the browser would run them in.
+      const frames: FrameRequestCallback[] = [];
+      const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
 
-      await act(async () => {
-        await router.navigate("/catalog?env=prod&ns=silver", {
-          state: { placeNote: "deleted", namespace: "silver.old" },
+      try {
+        await act(async () => {
+          await router.navigate("/catalog?env=prod&ns=silver", {
+            state: { placeNote: "deleted", namespace: "silver.old" },
+          });
         });
-      });
+        const note = await screen.findByText("Deleted namespace silver.old.");
+        await waitFor(() => {
+          expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        });
+        expect(note).toHaveFocus();
+        expect(frames.length).toBeGreaterThan(0);
 
-      const note = await screen.findByText("Deleted namespace silver.old.");
-      await act(async () => {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      });
-      expect(note).toHaveFocus();
+        act(() => {
+          for (let next = frames.shift(); next !== undefined; next = frames.shift()) {
+            next(performance.now());
+          }
+        });
+
+        expect(note).toHaveFocus();
+      } finally {
+        frame.mockRestore();
+      }
     });
 
     it("forgets a creation whose tree did not arrive once the address changes", async () => {
