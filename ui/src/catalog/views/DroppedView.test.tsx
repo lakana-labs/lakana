@@ -523,4 +523,27 @@ describe("DroppedView", () => {
     ).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
+
+  it("marks a hidden character in the server's sentence that the name is taken", async () => {
+    const { user } = renderShell(ADDRESS, {
+      routes: {
+        ...manageRoutes(),
+        [`POST ${UNDROP}/fact_returns/undrop`]: {
+          status: 409,
+          body: {
+            type: "AlreadyExistsError",
+            detail: "A table fact_\u202Ereturns already exists.",
+          },
+        },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Undrop gold.sales.fact_returns" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "A table fact_U+202Ereturns already exists.",
+    );
+    expect(dialog.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

@@ -228,6 +228,36 @@ describe("ColumnsTab", () => {
     expect(region.textContent).not.toMatch(/\u202E/u);
   });
 
+  it("marks a hidden character in a column's description", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: {
+          status: 200,
+          body: withColumn("channel", { description: "Sold through analy\u202Etics." }),
+        },
+      },
+    });
+
+    const region = await screen.findByRole("region", { name: "Table columns" });
+    expect(region).toHaveTextContent("Sold through analyU+202Etics.");
+    expect(region.textContent).not.toMatch(/\u202E/u);
+  });
+
+  it("marks a hidden character in a column's glossary terms", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: {
+          status: 200,
+          body: withColumn("sale_id", { terms: [{ key: "t1", name: "Sa\u202Ele" }] }),
+        },
+      },
+    });
+
+    const region = await screen.findByRole("region", { name: "Table columns" });
+    expect(region).toHaveTextContent("SaU+202Ele");
+    expect(region.textContent).not.toMatch(/\u202E/u);
+  });
+
   it("shows a column's label under its name", async () => {
     renderShell(PAGE, {
       routes: {

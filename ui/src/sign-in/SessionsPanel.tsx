@@ -73,7 +73,7 @@ export function SessionsPanel({ name, own }: SessionsPanelProps): JSX.Element {
             <ul>
               {open.map((one) => (
                 <li key={one.id}>
-                  <span title={one.user_agent === "" ? undefined : one.user_agent}>
+                  <span title={one.user_agent === "" ? undefined : markedText(one.user_agent)}>
                     {t("sessions.browser", {
                       browser: one.browser === "" ? t("sessions.unknownBrowser") : one.browser,
                       peer: one.peer,

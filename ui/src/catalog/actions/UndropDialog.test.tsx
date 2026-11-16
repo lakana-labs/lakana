@@ -197,4 +197,30 @@ describe("UndropDialog", () => {
       break_glass_reason: null,
     });
   });
+
+  it("marks a hidden character in the server's sentence that the name is taken", async () => {
+    fakeServer({
+      "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: false } },
+      [UNDROP]: {
+        status: 409,
+        body: { type: "AlreadyExistsError", detail: "A table fact_\u202Ereturns already exists." },
+      },
+    });
+    const user = userEvent.setup();
+    render(
+      <UndropDialog
+        row={dropped()}
+        environment="prod"
+        onDone={vi.fn()}
+        onCancel={vi.fn()}
+        nameTaken={null}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Undrop" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("A table fact_U+202Ereturns already exists.");
+    expect(alert.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

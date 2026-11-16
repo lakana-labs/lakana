@@ -191,7 +191,9 @@ function FileBody({ place }: FileBodyProps): JSX.Element {
         </div>
       </dl>
       {file.data.content === null ? (
-        <p>{file.data.message}</p>
+        <p>
+          <VisibleText text={file.data.message ?? ""} />
+        </p>
       ) : (
         <SourceText content={file.data.content} line={where.line} />
       )}

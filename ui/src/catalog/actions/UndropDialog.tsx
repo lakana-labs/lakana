@@ -75,7 +75,7 @@ export function UndropDialog({
         );
       } catch (error) {
         if (taken === null && error instanceof ApiError && error.type === "AlreadyExistsError") {
-          setTaken(error.detail);
+          setTaken(markedText(error.detail));
           return;
         }
         throw error;

@@ -121,7 +121,7 @@ export function DroppedView({ environment, namespace, onChanged }: DroppedViewPr
       );
     } catch (error) {
       if (error instanceof ApiError && error.type === "AlreadyExistsError") {
-        setDialog({ row, nameTaken: error.detail });
+        setDialog({ row, nameTaken: markedText(error.detail) });
       } else {
         const sentence = problemText(t, error);
         setRefusals((previous) => ({ ...previous, [row.uuid]: sentence }));

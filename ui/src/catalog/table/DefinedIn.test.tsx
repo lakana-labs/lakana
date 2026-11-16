@@ -217,6 +217,44 @@ describe("DefinedIn", () => {
     }
   });
 
+  it("marks a hidden character in the server's sentence about the file", async () => {
+    const { user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${FILE_PATH}`]: {
+          status: 200,
+          body: definitionFile({
+            content: null,
+            bytes: null,
+            reason: "restricted",
+            message: "Ask about analy\u202Etics.",
+          }),
+        },
+      },
+    });
+
+    const dialog = await openFile(user);
+
+    const mark = await within(dialog).findByText("U+202E", { selector: "p > .char-mark" });
+    expect(mark.parentElement).toHaveTextContent("Ask about analyU+202Etics.");
+    expect(dialog.textContent).not.toMatch(RAW);
+  });
+
+  it("shows neither text nor sentence when the server sends no content and no reason", async () => {
+    const { user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${FILE_PATH}`]: {
+          status: 200,
+          body: definitionFile({ content: null, bytes: null, reason: null, message: null }),
+        },
+      },
+    });
+
+    const dialog = await openFile(user);
+
+    await within(dialog).findByText("analytics");
+    expect(within(dialog).queryByRole("region")).not.toBeInTheDocument();
+  });
+
   it("shows the server's sentence when the file is restricted", async () => {
     const message =
       "The file is shown only to people who may read this environment and every table the file uses, without a row filter or column mask. Open it in your git host if you have access there, or ask an administrator.";

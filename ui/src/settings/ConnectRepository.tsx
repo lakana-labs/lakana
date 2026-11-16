@@ -33,6 +33,7 @@ import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { shellQuote } from "../shell/shellQuote";
 import { useFocusAfter } from "../shell/useFocusAfter";
+import { markedText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import { problemText } from "../sign-in/messages";
 import { httpsForm, queryOrFragment, type RecognisedHost, recogniseHost } from "./hosts";
@@ -555,15 +556,17 @@ async function register(
     const refused = (sentence: string): ApiError =>
       new ApiError(error.status, error.type, sentence);
     if (error.type !== "AlreadyExistsError") {
-      throw refused(`${error.detail} ${t("settings.connect.create.conflict")}`);
+      throw refused(`${markedText(error.detail)} ${t("settings.connect.create.conflict")}`);
     }
     const show = `lakana repo show ${shellQuote(body.name)}`;
     const existing = await getRepository(body.name).catch(() => null);
     if (existing === null) {
-      throw refused(`${error.detail} ${t("settings.connect.create.unread", { show })}`);
+      throw refused(`${markedText(error.detail)} ${t("settings.connect.create.unread", { show })}`);
     }
     if (existing.url !== body.url) {
-      throw refused(`${error.detail} ${t("settings.connect.create.taken", { name: body.name })}`);
+      throw refused(
+        `${markedText(error.detail)} ${t("settings.connect.create.taken", { name: body.name })}`,
+      );
     }
     if (existing.kind !== "ssh") {
       throw refused(

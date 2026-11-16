@@ -383,4 +383,27 @@ describe("RebuildDialog", () => {
     expect(await screen.findByText(/^prU\+202Eod is protected/u)).toBeInTheDocument();
     expect(screen.getByRole("dialog").textContent).not.toMatch(/\u202E/u);
   });
+
+  it("marks hidden characters in the server's refusal, whose sentence names stored things", async () => {
+    fakeServer({
+      ...manageRoutes(),
+      [REBUILD]: {
+        status: 409,
+        body: {
+          type: "ConflictError",
+          detail: "Run 42 of analy\u202Etics is already active for gold.fact_\u2066sales.",
+        },
+      },
+    });
+    const { user } = renderRebuild();
+
+    await user.type(await screen.findByRole("textbox", { name: /^Why it is rebuilt/u }), REASON);
+    await user.click(screen.getByRole("button", { name: "Rebuild" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Run 42 of analyU+202Etics is already active for gold.fact_U+2066sales.",
+    );
+    expect(alert.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
 });

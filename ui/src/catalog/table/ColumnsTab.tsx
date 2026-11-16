@@ -151,9 +151,17 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
           </td>
         )}
         <td className="column-description">
-          {column.description ?? <Unknown words={t("table.columns.noDescription")} />}
+          {column.description === null ? (
+            <Unknown words={t("table.columns.noDescription")} />
+          ) : (
+            <VisibleText text={column.description} />
+          )}
         </td>
-        {full && <td>{column.terms.map((term) => term.name).join(", ")}</td>}
+        {full && (
+          <td>
+            <VisibleText text={column.terms.map((term) => term.name).join(", ")} />
+          </td>
+        )}
         {editable && (
           <td className="column-actions">
             {!editing && (

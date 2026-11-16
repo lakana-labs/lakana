@@ -78,4 +78,16 @@ describe("endedReason", () => {
       /^Lakana could not be reached/,
     );
   });
+
+  it("marks a hidden character in the server's sentence", () => {
+    expect(
+      endedReason(
+        t,
+        new ApiError(401, "SessionEndedError", "Ended for k\u202Eim.", { reason: "new" }),
+      ),
+    ).toBe("Ended for kU+202Eim.");
+    expect(problemText(t, new ApiError(409, "ConflictError", "Run of analy\u202Etics."))).toBe(
+      "Run of analyU+202Etics.",
+    );
+  });
 });
