@@ -76,8 +76,10 @@ class Client:
     Parameters
     ----------
     url
-        The platform API's base URL. See `lakana._config.resolve_config` for
-        how this is resolved when omitted.
+        The platform API's base URL, given together with `token`. When both are
+        omitted, the client reads `LAKANA_URL` and `LAKANA_TOKEN` (set both or
+        neither), then the profile in `~/.config/lakana/config.toml`
+        (`$XDG_CONFIG_HOME/lakana/config.toml` when that variable is set).
     token
         A PAT or task token.
     profile
@@ -307,8 +309,8 @@ class Client:
         environment
             The environment to run the query against.
         timeout
-            Seconds to wait before giving up, or `None` to wait
-            indefinitely. Passed straight through to `QueryRun.wait`.
+            Seconds to wait for the query to finish before giving up, or `None` to wait
+            indefinitely.
         into
             Write the result into this table or view instead.
         mode
