@@ -537,6 +537,22 @@ def test_a_holder_of_manage_environment_cancels_anyones_query(client: TestClient
     assert event[1]["submitted_by"] == principals["bob"]
 
 
+def test_a_managers_cancel_of_anothers_run_does_not_return_its_sql(client: TestClient) -> None:
+    """The cancel answer carries the SQL to the submitter only, never to a manager."""
+    _environment(client)
+    bob = person(client, "bob", "ANALYST")
+    carol = person(client, "carol", "ADMIN")
+    by_manager = _submit(client, bob)
+    by_owner = _submit(client, bob)
+
+    managed = client.post(_cancel_url(by_manager), headers=carol).json()
+    owned = client.post(_cancel_url(by_owner), headers=bob).json()
+
+    assert managed["origin"] == "written"
+    assert managed["sql"] is None
+    assert owned["sql"] is not None
+
+
 def test_cancel_needs_a_token(client: TestClient) -> None:
     """Without credentials the route answers 401."""
     _environment(client)

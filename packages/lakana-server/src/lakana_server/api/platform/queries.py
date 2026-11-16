@@ -51,7 +51,9 @@ _SQL_SHOWN = frozenset({QueryOrigin.WRITTEN, QueryOrigin.WRITE})
 """The origins whose SQL the status read gives back: what the submitter wrote themselves."""
 
 
-def _status_out(run: QueryRun, waiting: WaitReason | None) -> QueryStatusOut:
+def _status_out(
+    run: QueryRun, waiting: WaitReason | None, include_sql: bool = True
+) -> QueryStatusOut:
     """Build the status document of a query run.
 
     Parameters
@@ -60,6 +62,8 @@ def _status_out(run: QueryRun, waiting: WaitReason | None) -> QueryStatusOut:
         The query run.
     waiting
         Why it has not started (`QueryService.waiting_for`), or `None`.
+    include_sql
+        `False` leaves `sql` out whatever the origin: for a caller who is not the submitter.
 
     Returns
     -------
@@ -83,7 +87,7 @@ def _status_out(run: QueryRun, waiting: WaitReason | None) -> QueryStatusOut:
         maintenance=run.maintenance,
         error_cause=run.error_cause,
         origin=run.origin.value,
-        sql=run.sql_text if run.origin in _SQL_SHOWN else None,
+        sql=run.sql_text if include_sql and run.origin in _SQL_SHOWN else None,
         created_at=run.created_at,
         started_at=run.started_at,
         finished_at=run.finished_at,
@@ -337,7 +341,8 @@ def cancel_query(
         if it is still running.
     """
     run = queries.cancel_query(principal, env, query_id)
-    return _status_out(run, queries.waiting_for(run))
+    # A manager may cancel another person's run, but never reads its SQL.
+    return _status_out(run, queries.waiting_for(run), include_sql=run.principal_id == principal.id)
 
 
 #: What a succeeded run without a result did instead, by write mode (`None` is a read); a verb
