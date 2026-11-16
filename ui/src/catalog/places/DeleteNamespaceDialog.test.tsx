@@ -72,6 +72,51 @@ describe("DeleteNamespaceDialog", () => {
     expect(writes(server.sent)).toEqual(["DELETE /api/v1/environments/prod/namespaces/silver"]);
   });
 
+  it("keeps a click made while it checks the protection, says so, and deletes once it knows", async () => {
+    const protection = held();
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": protection.route,
+    });
+    const { onDone, user } = renderDelete();
+    const button = screen.getByRole("button", { name: "Delete the namespace" });
+
+    await user.click(button);
+
+    expect(writes(server.sent)).toEqual([]);
+    expect(button).toHaveAttribute("data-pending", "true");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Checking whether the environment is protected…",
+    );
+
+    protection.release({ status: 200, body: { name: "prod", is_protected: false } });
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledTimes(1);
+    });
+    expect(writes(server.sent)).toEqual([DELETE]);
+  });
+
+  it("asks for the reason instead of sending a click kept while the environment turned out protected", async () => {
+    const protection = held();
+    const server = fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/prod": protection.route,
+    });
+    const { onDone, user } = renderDelete();
+
+    await user.click(screen.getByRole("button", { name: "Delete the namespace" }));
+    protection.release({ status: 200, body: { name: "prod", is_protected: true } });
+
+    expect(
+      await screen.findByRole("textbox", { name: /Why you break the protection of prod/ }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Delete the namespace" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    expect(writes(server.sent)).toEqual([]);
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
   it("runs the passkey touch on StepUpRequired and deletes again", async () => {
     const webauthn = fakeWebAuthn();
     let tries = 0;

@@ -21,7 +21,7 @@ import { createExternalTable, type ExternalFormat } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
-import { ConfirmRow } from "../actions/ConfirmRow";
+import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
 import { useProtected } from "../actions/useProtected";
 import { tablePath } from "../paths";
@@ -124,9 +124,8 @@ export default function ExternalTableDialog({
   const needsReason = protectedEnvironment === true;
   const missing =
     name.trim() === "" || location.trim() === "" || (needsReason && reason.trim() === "");
-  const ready = !missing && protectedEnvironment !== undefined && !attempt.busy;
-  const submit = (): void => {
-    if (!ready || format === null) {
+  const create = (): void => {
+    if (format === null) {
       return;
     }
     const sent = {
@@ -141,6 +140,17 @@ export default function ExternalTableDialog({
         void navigate(tablePath(environment, namespace, table.name));
       });
     });
+  };
+  const confirm = useConfirm({
+    waiting: protectedEnvironment === undefined,
+    disabled: missing || format === null,
+    onConfirm: create,
+  });
+  // Enter in a field presses Register, kept like a click while the protection is not known yet.
+  const submit = (): void => {
+    if (!attempt.busy) {
+      confirm.press();
+    }
   };
   const close = (): void => {
     if (!attempt.busy) {
@@ -192,9 +202,7 @@ export default function ExternalTableDialog({
       <ConfirmRow
         attempt={attempt}
         label={t("catalog.places.external.confirm")}
-        waiting={protectedEnvironment === undefined}
-        disabled={missing || format === null}
-        onConfirm={submit}
+        confirm={confirm}
         onCancel={close}
       />
     </ActionDialog>

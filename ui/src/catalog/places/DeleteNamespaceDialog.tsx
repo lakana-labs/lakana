@@ -10,7 +10,7 @@ import { deleteNamespace } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
-import { ConfirmRow } from "../actions/ConfirmRow";
+import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
 import { useProtected } from "../actions/useProtected";
 import "./placeStrings";
@@ -59,10 +59,14 @@ export function DeleteNamespaceDialog({
       onDone();
     });
   };
+  const confirm = useConfirm({
+    waiting: protectedEnvironment === undefined,
+    disabled: missing,
+    onConfirm: remove,
+  });
   const submit = (): void => {
-    // Only the reason's field submits, and it shows once the protection is known.
-    if (!missing && !attempt.busy) {
-      remove();
+    if (!attempt.busy) {
+      confirm.press();
     }
   };
   const close = (): void => {
@@ -87,9 +91,7 @@ export function DeleteNamespaceDialog({
       <ConfirmRow
         attempt={attempt}
         label={t("catalog.places.delete.confirm")}
-        waiting={protectedEnvironment === undefined}
-        disabled={missing}
-        onConfirm={remove}
+        confirm={confirm}
         onCancel={close}
       />
     </ActionDialog>

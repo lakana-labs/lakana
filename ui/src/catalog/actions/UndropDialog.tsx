@@ -14,7 +14,7 @@ import { ActionDialog } from "../../shell/ActionDialog";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
-import { ConfirmRow } from "./ConfirmRow";
+import { ConfirmRow, useConfirm } from "./ConfirmRow";
 import { ProtectedReason } from "./ProtectedReason";
 import { useProtected } from "./useProtected";
 
@@ -83,9 +83,14 @@ export function UndropDialog({
     });
   };
 
+  const confirm = useConfirm({
+    waiting: protectedEnvironment === undefined,
+    disabled: missing,
+    onConfirm: restore,
+  });
   const submit = (): void => {
-    if (!missing && protectedEnvironment !== undefined && !attempt.busy) {
-      restore();
+    if (!attempt.busy) {
+      confirm.press();
     }
   };
   return (
@@ -118,9 +123,7 @@ export function UndropDialog({
       <ConfirmRow
         attempt={attempt}
         label={t("table.actions.undrop.confirm")}
-        waiting={protectedEnvironment === undefined}
-        disabled={missing}
-        onConfirm={restore}
+        confirm={confirm}
         onCancel={onCancel}
       />
     </ActionDialog>

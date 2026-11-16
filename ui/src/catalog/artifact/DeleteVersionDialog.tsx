@@ -19,7 +19,7 @@ import { ActionDialog } from "../../shell/ActionDialog";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
-import { ConfirmRow } from "../actions/ConfirmRow";
+import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
 import { useProtected } from "../actions/useProtected";
 import { formatBytes } from "../format";
@@ -90,10 +90,14 @@ export function DeleteVersionDialog({
       }
     });
   };
+  const confirm = useConfirm({
+    waiting: protectedEnvironment === undefined,
+    disabled: missing,
+    onConfirm: remove,
+  });
   const submit = (): void => {
-    // Only the reason's field submits, and it shows once the protection is known.
-    if (!missing && !attempt.busy) {
-      remove();
+    if (!attempt.busy) {
+      confirm.press();
     }
   };
   // While the delete or its passkey touch is pending, Escape, the close button and Cancel do nothing.
@@ -131,9 +135,7 @@ export function DeleteVersionDialog({
           <ConfirmRow
             attempt={attempt}
             label={t("table.artifact.delete.confirm")}
-            waiting={protectedEnvironment === undefined}
-            disabled={missing}
-            onConfirm={remove}
+            confirm={confirm}
             onCancel={close}
           />
         </>

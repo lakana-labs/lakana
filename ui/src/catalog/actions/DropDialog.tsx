@@ -11,7 +11,7 @@ import { ActionDialog } from "../../shell/ActionDialog";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
-import { ConfirmRow } from "./ConfirmRow";
+import { ConfirmRow, useConfirm } from "./ConfirmRow";
 import { ProtectedReason } from "./ProtectedReason";
 import { useProtected } from "./useProtected";
 
@@ -65,13 +65,14 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
       onDone();
     });
   };
+  const confirm = useConfirm({
+    waiting: protectedEnvironment === undefined,
+    disabled: needsReason && reason.trim() === "",
+    onConfirm: drop,
+  });
   const submit = (): void => {
-    if (
-      !(needsReason && reason.trim() === "") &&
-      protectedEnvironment !== undefined &&
-      !attempt.busy
-    ) {
-      drop();
+    if (!attempt.busy) {
+      confirm.press();
     }
   };
   // While the drop or its passkey touch is pending, Escape, the close button and Cancel do nothing.
@@ -115,9 +116,7 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
       <ConfirmRow
         attempt={attempt}
         label={t(artifact ? "table.actions.drop.artifactConfirm" : "table.actions.drop.confirm")}
-        waiting={protectedEnvironment === undefined}
-        disabled={needsReason && reason.trim() === ""}
-        onConfirm={drop}
+        confirm={confirm}
         onCancel={close}
       />
     </ActionDialog>
