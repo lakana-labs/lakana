@@ -252,6 +252,17 @@
         "freshness": "up to {{duration}}",
         "volume_one": "{{low}} to {{high}} row added",
         "volume_other": "{{low}} to {{high}} rows added",
+        "volumeOn_one": "{{low}} to {{high}} row added on {{weekday}}",
+        "volumeOn_other": "{{low}} to {{high}} rows added on {{weekday}}",
+        "weekdays": {
+          "monday": "Mondays",
+          "tuesday": "Tuesdays",
+          "wednesday": "Wednesdays",
+          "thursday": "Thursdays",
+          "friday": "Fridays",
+          "saturday": "Saturdays",
+          "sunday": "Sundays"
+        },
         "nullRateUpTo": "up to {{high}} % empty",
         "nullRate": "{{low}} % to {{high}} % empty"
       },
