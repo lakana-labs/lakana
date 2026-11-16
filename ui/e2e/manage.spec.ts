@@ -356,6 +356,66 @@ test.describe("the views' times and links under the pointer", () => {
     await expect(page).toHaveURL(/\/catalog\/prod\/gold\/late_arrival$/);
   });
 
+  test("at 320 px a row's button keeps its label on one line in Dropped and Orphans", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    // Long names take the width a short label needs, as real tables' names do.
+    await page.route(
+      (url) => url.pathname === "/api/v1/environments/prod/namespaces/gold.sales/dropped-tables",
+      (route) =>
+        route.fulfill({
+          json: [
+            {
+              name: "station_ranking_by_region_and_hour_of_day",
+              namespace: "gold.sales",
+              uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+              kind: "TABLE",
+              dropped_at: "2026-11-15T09:30:00Z",
+              purge_after: "2026-11-22T09:30:00Z",
+              restorable: true,
+              actions: ["undrop"],
+            },
+          ],
+        }),
+    );
+    await page.route(
+      (url) => url.pathname === "/api/v1/environments/prod/orphans",
+      (route) =>
+        route.fulfill({
+          json: {
+            orphans: [
+              {
+                repository: "analytics_warehouse_models",
+                table: "silver.station_ranking_by_region_and_hour_of_day",
+                kind: "TABLE",
+                exists: true,
+                actions: ["drop"],
+              },
+            ],
+            hidden: 0,
+            next_cursor: null,
+          },
+        }),
+    );
+    for (const [view, extra] of [
+      [VIEWS[0], "&ns=gold.sales"],
+      [VIEWS[2], ""],
+    ] as const) {
+      await openView(page, view, extra);
+      const buttons = page.getByRole("region", { name: view[1] }).getByRole("button");
+      await expect(buttons.first()).toBeVisible();
+      for (const button of await buttons.all()) {
+        const lines = await button.evaluate((element) => {
+          const style = getComputedStyle(element);
+          const inner = element.getBoundingClientRect().height - 2;
+          return Math.round(inner / Number.parseFloat(style.lineHeight));
+        });
+        expect(lines, await button.innerText()).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
   test("Restore it from Dropped on an orphan opens the Dropped view of its namespace", async ({
     page,
   }) => {

@@ -123,6 +123,14 @@ tr:hover a.row-name {
   position: relative;
 }
 
+/* A row's button keeps its label whole: a cell's overflow-wrap (anywhere, for long names) would
+   otherwise let a narrow column break the word inside the button ("Undro" / "p"). The column takes
+   the button's width; the list scrolls in its own region at 320 px. */
+.list .button {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 .second,
 .chevron {
   display: block;

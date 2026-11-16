@@ -55,6 +55,12 @@ it("lifts what carries a title above the row's link only in the lists that forwa
   expect(screen).not.toMatch(/\.list \[title\]/);
 });
 
+it("keeps a row's button label on one line, whatever the cell's overflow-wrap", () => {
+  expect(screen).toMatch(
+    /\.list \.button\s*{[^}]*white-space:\s*nowrap;[^}]*overflow-wrap:\s*normal/,
+  );
+});
+
 it("lays the row's overlay only from a link: a name without a page covers nothing", () => {
   expect(screen).toMatch(/a\.row-name::after\s*{[^}]*position:\s*absolute/);
   expect(screen).not.toMatch(/(^|[^a])\.row-name::after/m);
