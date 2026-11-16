@@ -26,6 +26,7 @@ import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { useResource } from "../shell/useResource";
+import { markedText } from "../shell/VisibleText";
 import { CatalogSearch } from "./CatalogSearch";
 import { CatalogTree } from "./CatalogTree";
 import { ListSkeleton } from "./ListSkeleton";
@@ -231,7 +232,8 @@ export function CatalogList(): JSX.Element {
   }, [items, error]);
 
   const narrowed = environment !== null;
-  const place = namespace ?? environment ?? t("catalog.place.allNamespaces");
+  // A name may hide characters; the words for all namespaces have none to mark.
+  const place = markedText(namespace ?? environment ?? t("catalog.place.allNamespaces"));
   let result = "";
   if (slow) {
     result = t("catalog.loading");
@@ -251,9 +253,12 @@ export function CatalogList(): JSX.Element {
   let unknown: string | null = null;
   if (root !== null && environment !== null && !fromMemory) {
     if (findNode(root, environment, null) === null) {
-      unknown = t("catalog.unknown.environment", { environment });
+      unknown = t("catalog.unknown.environment", { environment: markedText(environment) });
     } else if (namespace !== null && findNode(root, environment, namespace) === null) {
-      unknown = t("catalog.unknown.namespace", { namespace, environment });
+      unknown = t("catalog.unknown.namespace", {
+        namespace: markedText(namespace),
+        environment: markedText(environment),
+      });
     }
   }
   const readsNothing = root !== null && root.children.length === 0;
@@ -423,7 +428,7 @@ export function CatalogList(): JSX.Element {
                   !busy &&
                   view.q !== "" && (
                     <div className="empty">
-                      <p>{t("catalog.noHits", { place, q: view.q })}</p>
+                      <p>{t("catalog.noHits", { place, q: markedText(view.q) })}</p>
                       {narrowed ? widenButton : <p>{t("catalog.noHitsHint")}</p>}
                     </div>
                   )}
@@ -436,7 +441,9 @@ export function CatalogList(): JSX.Element {
                     <div className="empty">
                       <p>
                         {t("catalog.empty.text", {
-                          place: view.namespace ?? view.environment ?? t("catalog.place.all"),
+                          place: markedText(
+                            view.namespace ?? view.environment ?? t("catalog.place.all"),
+                          ),
                         })}
                       </p>
                       <CopyLine

@@ -173,6 +173,41 @@ describe("ColumnsTab", () => {
     ).toEqual([]);
   });
 
+  it("marks hidden characters in a column's name, its label and a join", async () => {
+    const base = withColumn("channel", {
+      name: "chan\u202Enel",
+      label: "Chan\u2066nel",
+      label_source: "edited",
+      label_language: "en",
+    });
+    const model = base.model as NonNullable<typeof base.model>;
+    const body = {
+      ...base,
+      model: {
+        ...model,
+        references: model.references.map((reference) => ({
+          ...reference,
+          target: "gold.dim_\u202Estore",
+        })),
+      },
+    };
+    renderShell(PAGE, { routes: { [`GET ${TABLE_PATH}`]: { status: 200, body } } });
+
+    const region = await screen.findByRole("region", { name: "Table columns" });
+    expect(
+      within(region).getByText("U+2066", { selector: ".column-label > .char-mark" }),
+    ).toBeVisible();
+    expect(region).toHaveTextContent("ChanU+2066nel");
+    expect(region).toHaveTextContent("chanU+202Enel");
+    expect(
+      within(region).getByRole("link", { name: "gold.dim_U+202Estore.store_id" }),
+    ).toBeInTheDocument();
+    expect(
+      within(region).getByRole("button", { name: "Back to the text from Git for chanU+202Enel" }),
+    ).toBeInTheDocument();
+    expect(region.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
+
   it("shows a column's label under its name", async () => {
     renderShell(PAGE, {
       routes: {

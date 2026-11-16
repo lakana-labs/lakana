@@ -1450,4 +1450,88 @@ describe("CatalogList", () => {
       expect(await screen.findByText("lakana deploy --env 'dev'\\''s'")).toBeInTheDocument();
     });
   });
+
+  describe("names with hidden characters", () => {
+    const HIDDEN = /[\u202E\u2066]/u;
+    const tree: TableTreeOut = {
+      count: 1,
+      environments: [
+        {
+          name: "pr\u2066od",
+          count: 1,
+          actions: [],
+          namespaces: [{ path: "go\u202Eld", count: 1, actions: [] }],
+        },
+      ],
+    };
+    const page = {
+      items: [
+        item({ environment: "pr\u2066od", namespace: "go\u202Eld", name: "fact_\u202Eselas" }),
+      ],
+      next_cursor: null,
+      capped: false,
+    };
+
+    it("marks them in the tree and the list", async () => {
+      renderShell("/catalog", {
+        routes: {
+          "GET /api/v1/tables/tree": { status: 200, body: tree },
+          "GET /api/v1/tables": { status: 200, body: page },
+        },
+      });
+
+      const link = await screen.findByRole("link", { name: "fact_U+202Eselas" });
+      expect(within(link).getByText("U+202E")).toHaveClass("char-mark");
+      expect(screen.getByRole("row", { name: "goU+202Eld, 1 table" })).toBeInTheDocument();
+      expect(screen.getByRole("row", { name: "prU+2066od, 1 table" })).toBeInTheDocument();
+      const row = link.closest("tr") as HTMLElement;
+      expect(row).toHaveTextContent("Table · goU+202Eld");
+      expect(row).toHaveTextContent("prU+2066od");
+      expect(document.body.textContent).not.toMatch(HIDDEN);
+    });
+
+    it("marks them in the sentence for a search without hits", async () => {
+      renderShell("/catalog?env=pr%E2%81%A6od&ns=go%E2%80%AEld&q=z%E2%80%AE", {
+        routes: {
+          "GET /api/v1/tables/tree": { status: 200, body: tree },
+          "GET /api/v1/tables": { status: 200, body: EMPTY },
+        },
+      });
+
+      expect(
+        await screen.findByText("No table in goU+202Eld matches “zU+202E”."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1 }).textContent).not.toMatch(HIDDEN);
+    });
+
+    it("marks them in the invitation to deploy and its command", async () => {
+      renderShell("/catalog?env=pr%E2%81%A6od", {
+        routes: {
+          "GET /api/v1/tables/tree": { status: 200, body: tree },
+          "GET /api/v1/tables": { status: 200, body: EMPTY },
+        },
+      });
+
+      expect(
+        await screen.findByText(
+          "No tables in prU+2066od yet. Tables appear once a project is deployed.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("U+2066", { selector: "code .char-mark" }).parentElement,
+      ).toHaveTextContent("lakana deploy --env 'prU+2066od'");
+    });
+
+    it("marks them in the sentence for an unknown place", async () => {
+      renderShell("/catalog?env=pr%E2%81%A6od&ns=pl%E2%80%AEat", {
+        routes: { "GET /api/v1/tables/tree": { status: 200, body: tree } },
+      });
+
+      expect(
+        await screen.findByText(
+          "There is no namespace plU+202Eat in prU+2066od that you may read.",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
 });

@@ -394,6 +394,28 @@ describe("AccessTab", () => {
     expect(within(headings[3] as HTMLElement).getByText("U+202E")).toHaveClass("char-mark");
   });
 
+  it("marks an invisible character in the CLI command of a level with more than 200 grants", async () => {
+    const place = "/api/v1/environments/pr\u202Eod/namespaces/gold.sales/tables/fact_sales";
+    renderShell("/catalog/pr%E2%80%AEod/gold.sales/fact_sales/access", {
+      routes: {
+        [`GET ${place}`]: { status: 200, body: TABLE },
+        [`GET ${GRANTS_PATH}`]: {
+          status: 200,
+          body: MANY,
+          headers: { "X-Next-Cursor": "eyJhZnRlciI6IjIwMCJ9" },
+        },
+      },
+    });
+
+    const who = await section("Who has access");
+    await within(who).findAllByText(/lists all\.$/);
+    const commands = [...who.querySelectorAll(".grants-cut code")].map((code) => code.textContent);
+    expect(commands[0]).toBe(
+      "lakana grant list --env 'prU+202Eod' --ns 'gold.sales' --table 'fact_sales'",
+    );
+    expect(who.textContent).not.toContain("\u202E");
+  });
+
   it("shows row filters without a column and masks with one", async () => {
     renderShell(TAB);
 

@@ -24,7 +24,7 @@ import { personPath } from "../../access/personPath";
 import { useMe } from "../../shell/me";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { type Resource, useResource } from "../../shell/useResource";
-import { VisibleText } from "../../shell/VisibleText";
+import { markedText, VisibleText } from "../../shell/VisibleText";
 import { StatusGlyph } from "../../status/StatusGlyph";
 import { ReadFailed, When } from "../cells";
 import { allowedBecause, editTextsAnswer, grantListCommand, namespaceLevels } from "./reasons";
@@ -307,7 +307,7 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
                   values={{
                     command: instance
                       ? INSTANCE_GRANTS_COMMAND
-                      : grantListCommand(environment, namespace, table),
+                      : markedText(grantListCommand(environment, namespace, table)),
                   }}
                   components={{ code: <code /> }}
                 />

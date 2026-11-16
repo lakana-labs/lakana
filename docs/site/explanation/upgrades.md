@@ -339,7 +339,8 @@ table reads.
 
 Existing names are not touched: they stay readable and writable, a schema change or redeploy may
 keep a column it already has, and an Iceberg client's rename (`rename_table`) moves a table to a
-plain name. To find them, search the JSON output of `lakana --output json table list` (and of
+plain name. The web interface shows each such character in a name as a visible mark with its code
+point, such as `U+202E`, in the Catalog, on the table and artifact pages and in their dialogs. To find them, search the JSON output of `lakana --output json table list` (and of
 `lakana --output json table get NAME` for columns) for these characters, for example with
 `grep -nP '[\x{00AD}\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2028}\x{2029}\x{2060}-\x{206F}\x{FEFF}]|\\u00[0-9a-f]{2}'`
 in a UTF-8 locale.

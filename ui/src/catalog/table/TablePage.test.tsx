@@ -62,6 +62,42 @@ describe("TablePage", () => {
       );
     });
 
+    it("marks hidden characters of a crafted link in the heading, the breadcrumb and the title", async () => {
+      renderShell("/catalog/pr%E2%81%A6od/go%E2%80%AEld/fact_%E2%80%AEselas");
+
+      const shown = await heading("fact_U+202Eselas");
+      expect(within(shown).getByText("U+202E")).toHaveClass("char-mark");
+      const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+      expect(
+        within(trail)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent),
+      ).toEqual(["Catalog›", "prU+2066od›", "goU+202Eld›", "fact_U+202Eselas"]);
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "There is no table fact_U+202Eselas in prU+2066od › goU+202Eld.",
+      );
+      expect(document.title).toBe("fact_U+202Eselas · Lakana");
+      expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
+    });
+
+    it("marks hidden characters of a table's namespace and label under the heading", async () => {
+      renderShell(PAGE, {
+        routes: {
+          [`GET ${TABLE_PATH}`]: {
+            status: 200,
+            body: table({ namespace: "gold.\u202Esales", label: "Sales\u2066 facts" }),
+          },
+        },
+      });
+
+      await heading();
+      expect(await screen.findByText("Fact · gold.U+202Esales")).toBeInTheDocument();
+      expect(
+        screen.getByText("U+2066", { selector: ".table-label > .char-mark" }).parentElement,
+      ).toHaveTextContent("SalesU+2066 facts");
+      expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
+    });
+
     it("decodes a name and a namespace the address encodes", async () => {
       renderShell("/catalog/prod/gold.sales/50%25");
 
