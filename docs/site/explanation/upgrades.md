@@ -351,8 +351,10 @@ A new namespace, table, view, artifact or column name may no longer start or end
 `orders` in every list, and are almost always a typing mistake. The rule applies wherever the
 invisible characters above are refused, and the refusal says what to use instead, for example
 `Table name 'orders ' ends with a space, so it would look like 'orders' in every list but be a
-different name. Use 'orders' instead, or another name without a space at either end.` A space
-inside a name stays allowed.
+different name. Use 'orders' instead, or another name without a space at either end.` A column
+name of only spaces is refused with `Column name '  ' is only spaces, so it would look empty in
+every list. Name it with visible characters, such as letters, digits and '_'.` A space inside a
+name stays allowed.
 
 Earlier releases accepted such names (422 from the REST API now). The web interface sent a new
 namespace's path and an undrop's new name without their outer spaces; it now sends them as typed,

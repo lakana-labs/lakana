@@ -193,3 +193,71 @@ def test_a_new_artifact_name_with_outer_whitespace_is_refused(
     with pytest.raises(ValidationError, match=r"Artifact name 'churn ' ends with a space"):
         service.begin_upload(principal, spaced, artifact_document({"m": b"weights"}))
     assert session.query(Table).filter(Table.name == spaced.name).count() == 0
+
+
+@pytest.mark.parametrize("blank", ["  ", "\xa0", " 　 "])
+def test_a_name_of_only_spaces_is_refused_without_an_empty_suggestion(blank: str) -> None:
+    """The sentence names the cause and asks for visible characters; it never says "Use ''"."""
+    with pytest.raises(ValidationError) as refused:
+        refuse_outer_whitespace(blank, what="Column name")
+    message = str(refused.value)
+    assert "is only spaces" in message
+    assert "visible characters" in message
+    assert "''" not in message
+
+
+def test_every_way_of_creating_a_blank_name_gets_a_sentence_that_can_be_followed(
+    catalog: CatalogService, principal: PrincipalRef, session: Session, tmp_path: Path
+) -> None:
+    """Columns of every kind, a namespace, a table and an artifact named only by spaces."""
+    column_attempts = [
+        lambda: catalog.create_table(
+            principal,
+            _ref("gold.items"),
+            schema=Schema(NestedField(1, "  ", LongType(), required=False)),
+        ),
+        lambda: catalog.create_or_replace_view(
+            principal,
+            _ref("gold.v"),
+            sql="SELECT 1 AS x",
+            references=[],
+            columns=[ColumnSpec(name="  ", type="int", nullable=True)],
+        ),
+        lambda: _write(catalog, principal, "gold.fresh", WriteMode.CREATE, pa.table({"  ": [1]})),
+    ]
+    for attempt in column_attempts:
+        with pytest.raises(ValidationError, match=r"Column name '  ' is only spaces") as refused:
+            attempt()
+        assert "''" not in str(refused.value)
+
+    catalog.create_namespace(principal, "dev", NamespacePath.from_parts(["raw"]))
+    (tmp_path / "raw" / "blank").mkdir(parents=True)
+    pq.write_table(pa.table({"  ": [1]}), tmp_path / "raw" / "blank" / "part-0.parquet")
+    with pytest.raises(ValidationError, match=r"Column name '  ' is only spaces"):
+        catalog.create_external_table(
+            principal,
+            TableRef.from_dotted("dev", "raw.blank"),
+            location_pattern="raw/blank/*.parquet",
+            format="parquet",
+        )
+
+    name_attempts = [
+        lambda: catalog.create_namespace(principal, "dev", NamespacePath.from_parts(["  "])),
+        lambda: catalog.create_namespace(
+            principal, "dev", NamespacePath.from_parts([" ", "daily"])
+        ),
+        lambda: catalog.create_table(
+            principal,
+            TableRef(environment="dev", namespace=NamespacePath.from_parts(["gold"]), name="  "),
+            schema=_schema(),
+        ),
+        lambda: artifact_service(session, tmp_path).begin_upload(
+            principal,
+            dataclasses.replace(ARTIFACT_REF, name="  "),
+            artifact_document({"m": b"weights"}),
+        ),
+    ]
+    for attempt in name_attempts:
+        with pytest.raises(ValidationError, match="whitespace-only") as refused:
+            attempt()
+        assert "''" not in str(refused.value)

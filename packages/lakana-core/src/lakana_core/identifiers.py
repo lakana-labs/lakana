@@ -323,12 +323,20 @@ def refuse_outer_whitespace(name: str, *, what: str) -> None:
     ------
     ValidationError
         If the name starts or ends with a character `str.isspace` accepts; the message says
-        where and names the name to use instead.
+        where and names the name to use instead, or, for a name of only spaces, asks for
+        visible characters.
     """
     starts = name[:1].isspace()
     ends = name[-1:].isspace()
     if not (starts or ends):
         return
+    if not name.strip():
+        # A namespace or table name of only spaces is refused earlier, by
+        # `validate_path_component`; a column name is not, and has no name to suggest.
+        raise ValidationError(
+            f"{what} '{shown(name)}' is only spaces, so it would look empty in every list. "
+            "Name it with visible characters, such as letters, digits and '_'."
+        )
     where = "starts and ends" if starts and ends else "starts" if starts else "ends"
     raise ValidationError(
         f"{what} '{shown(name)}' {where} with a space, so it would look like "
