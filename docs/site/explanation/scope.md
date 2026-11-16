@@ -103,8 +103,9 @@ How the larger pieces are meant to work:
   each further user with the CLI. For people, the web interface (M7) brings
   OpenID Connect (OIDC), or an invite link and a passkey for small teams that have no identity
   provider. No passwords.
-- **Web interface.** Under way (M7) and off by default: sign-in, Home and the Catalog (tables,
-  artifacts and their actions) exist; queries, jobs, connections, access and settings follow. It
+- **Web interface.** Under way (M7) and off by default: sign-in, Home, the Catalog (tables,
+  artifacts and their actions), people and invites under Access, and sign-in and repositories
+  under Settings exist; queries, jobs and connections follow, and Access and Settings grow. It
   is built after ingestion (M6, done) and data modelling (M8d), because the
   first audience, teams without a senior data engineer, needs it and real sign-in from the start,
   and because it then shows model metadata from its first version. It is designed first (#66),
