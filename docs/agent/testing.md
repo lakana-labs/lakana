@@ -436,14 +436,39 @@ Within a tab, `nav` groups the pages into named sections, and the tab's index ha
 section in the same order. A page keeps its file when it moves between tabs or sections: only
 `nav` and the index pages change, so no published URL breaks (the site has no redirects).
 
-Three reference files are generated, never edited by hand: `reference/cli.md` from the Typer app,
+The reference files below are generated, never edited by hand. The command line reference comes
+from the Typer app: `reference/cli.md` is its index (the options for every command and one line
+per page), `reference/cli/commands.md` has the commands outside a group, and `reference/cli/`
+has one page per command group, named after the command (`reference/cli/lakana-table.md` for
+`lakana table`), so link a command on its group's page, for example
+`cli/lakana-table.md#lakana-table-maintain`. Also generated:
 `reference/settings.md` from the settings models of `lakana-core` and `lakana-server` (the
 description of a variable is its entry in the model's `Parameters` docstring section, so document
 a new setting there), and `reference/openapi.json`, the OpenAPI document of the platform REST API
-(`docs/agent/release.md`, "The REST API contract"). After a command, an option, a setting or a
-route changes, run
+(`docs/agent/release.md`, "The REST API contract"). The REST reference is generated from
+`openapi.json`: `reference/rest/<tag>.md` is one page per OpenAPI tag (its routes with their
+parameters, request body and answers), and the list of those pages in `reference/rest-api.md` is
+the generated region between the `generated:begin rest-pages` and `generated:end rest-pages`
+markers; the rest of `rest-api.md` is written by hand. A route's text on those pages is its
+summary and description in the OpenAPI document, so write them for a user. The Python SDK
+reference, `reference/sdk/`, is generated from the docstrings of the `lakana` package: `index.md`
+lists every name of `lakana.__all__` and every resource the client's constructor sets,
+`client.md` is the client, `errors.md` the exported errors, one page per module of the exported
+functions (`assets.md`) and one per module of `lakana/resources` the client uses
+(`reference/sdk/ci-trust-rules.md` for `ci_trust_rules.py`). A method's text there is its
+numpydoc docstring (summary, body, `Parameters`, `Returns`/`Yields`, `Raises`), so write it for a
+user; `scripts/tests/test_generate_reference_sdk.py` fails on a private `lakana._` name, a
+private name in a signature, a parameter without a description, or an error that `lakana` does
+not export. The data classes of `lakana._models` are named only as return types. After a
+command, an option, a setting, a route or a public SDK docstring changes, run
 `uv run python scripts/generate_reference.py` and commit the pages; `--check` fails, naming the
 stale page, and runs in CI's `docs` job and in `scripts/tests/test_generate_reference.py`.
+
+The generator also owns the directories `reference/cli/`, `reference/rest/` and `reference/sdk/`:
+a page there that the code no longer produces is deleted when it runs, and `--check` reports it
+as left over. It owns the `api-nav` region of `mkdocs.yml` too, the `API reference` entries
+between the `generated:begin api-nav` and `generated:end api-nav` markers. Never edit inside
+`generated:begin`/`generated:end` markers: change the code and regenerate.
 
 List a new page in its tab's section under `nav` in `mkdocs.yml`, and link it from its tab's
 index (`test_each_tab_index_links_every_page_of_its_tab`). Every entry must be a page and every
@@ -682,7 +707,7 @@ A change under `docs/examples/` is not a documentation-only change, so CI runs t
 ```bash
 uv sync --locked --all-packages --group docs
 uv run python scripts/docs_blocks.py            # check every block; add --fix to rewrite synced ones
-uv run python scripts/generate_reference.py     # rewrite the CLI, settings and OpenAPI references (--check: fail when stale)
+uv run python scripts/generate_reference.py     # rewrite the generated references and the api-nav region (--check: fail when stale or left over)
 uv run --group docs zensical build --strict     # build into site-build/ (a traceback after the message is normal on failure)
 uv run python scripts/check_built_site.py site-build   # external resources, missing files and URLs outside /lakana/
 uv run --group docs zensical serve              # preview on http://localhost:8000

@@ -581,10 +581,10 @@ class Runs:
 
         Raises
         ------
-        lakana.errors.NotFoundError
+        lakana.errors.NotFound
             If the job or task is unknown: no deployed project declares it and no run attempted it.
             A declared task that has not run yet gives an empty page.
-        lakana.errors.ConflictError
+        lakana.errors.Conflict
             If several repositories ran the job and none was named.
         lakana.errors.ValidationError
             If `limit` is outside 1 to 200 or `cursor` is not one the server issued.

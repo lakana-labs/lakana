@@ -126,8 +126,49 @@ Every route in the document has a short summary and a description written for th
 call it: who may call it, what it does and the main refusals with their status codes. The error
 answers (`401`, `403`, `404`, `409` and others) are listed with the routes that return them, each
 with the body `{"detail": "...", "type": "..."}`. A change of that wording is not a change of the
-contract. The reference pages of this site ([Reference](index.md)) describe the routes in more
-depth.
+contract. Every route is described below, in [The routes, by area](#the-routes-by-area).
+
+## The routes, by area
+
+These pages are generated from the OpenAPI document, one page per area of the API, and list each
+route with its parameters, its request body and its answers.
+
+<!-- generated:begin rest-pages -->
+- [Environments](rest/environments.md): 12 routes
+- [Namespaces](rest/namespaces.md): 4 routes
+- [Queries](rest/queries.md): 5 routes
+- [Tables](rest/tables.md): 27 routes
+- [Search](rest/search.md): 1 route
+- [Catalog](rest/catalog.md): 2 routes
+- [Glossary](rest/glossary.md): 2 routes
+- [Graph](rest/graph.md): 4 routes
+- [Artifacts](rest/artifacts.md): 12 routes
+- [Principals](rest/principals.md): 14 routes
+- [Groups](rest/groups.md): 6 routes
+- [Tokens](rest/tokens.md): 3 routes
+- [Task tokens](rest/task-tokens.md): 2 routes
+- [Grants](rest/grants.md): 3 routes
+- [Row filters](rest/row-filters.md): 3 routes
+- [Column masks](rest/column-masks.md): 3 routes
+- [Secrets](rest/secrets.md): 5 routes
+- [Connections](rest/connections.md): 8 routes
+- [Repositories](rest/repositories.md): 8 routes
+- [Package indexes](rest/package-indexes.md): 5 routes
+- [Deploys](rest/deploys.md): 9 routes
+- [Runs](rest/runs.md): 12 routes
+- [Jobs](rest/jobs.md): 7 routes
+- [Audit](rest/audit.md): 1 route
+- [CI trust rules](rest/ci-trust-rules.md): 8 routes
+- [Access](rest/access.md): 4 routes
+- [Auth](rest/auth.md): 1 route
+- [Whoami](rest/whoami.md): 2 routes
+- [Sign in](rest/sign-in.md): 18 routes
+- [Settings](rest/settings.md): 2 routes
+- [Info](rest/info.md): 1 route
+- [Status](rest/status.md): 1 route
+- [Interface](rest/interface.md): 4 routes
+- [Home](rest/home.md): 3 routes
+<!-- generated:end rest-pages -->
 
 ## How Lakana keeps the promise
 
