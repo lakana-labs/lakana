@@ -10,6 +10,7 @@ import {
   createNamespace,
   invitedPerson,
   makeAdministrator,
+  NO_PASSKEY,
   skipTheWelcome,
   uniqueName,
   uploadArtifact,
@@ -24,10 +25,6 @@ const FIRST = { "models/model.pkl": "weights, first run", "config.json": '{"laye
 
 /** The files of the second version. */
 const SECOND = { "models/model.pkl": "weights, second run", "config.json": '{"layers": 3}' };
-
-/** What the page says for the server's 409 `NoPasskeyError`: the account has no passkey to touch. */
-const NO_PASSKEY =
-  "Your account has no passkey yet, and this action needs a passkey touch. Add one first under Passkeys and sessions, in the menu under your name, then try again.";
 
 /**
  * A new environment with the namespace `ml` and the artifact `ml.model` of one version, so that

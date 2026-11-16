@@ -11,6 +11,7 @@ import {
   recordOrphanedVersion,
   skipTheWelcome,
   tableStatus,
+  NO_PASSKEY,
   uniqueName,
   violations,
 } from "./helpers";
@@ -136,8 +137,9 @@ test("a local administrator without a passkey cannot drop: the dialog says why a
   await page.getByRole("menuitem", { name: "Drop…" }).click();
   const dialog = page.getByRole("dialog", { name: "Drop gold.sales.fact_sales?" });
   await dialog.getByRole("button", { name: "Drop the table" }).click();
-  // The session has no passkey, so there is nothing to touch: the browser cannot answer.
-  await expect(dialog.getByRole("alert")).toContainText(/passkey/i);
+  // The session has no passkey, so there is nothing to touch: the server's 409 NoPasskeyError,
+  // in the interface's words for it.
+  await expect(dialog.getByRole("alert")).toContainText(NO_PASSKEY);
   await expect(dialog).toBeVisible();
   expect(await tableStatus(request, environment, "gold.sales", "fact_sales")).toBe(200);
   await page.context().close();
