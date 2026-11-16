@@ -158,6 +158,7 @@ from lakana_core.identifiers import (
     NamespacePath,
     TableRef,
     refuse_hidden_characters,
+    refuse_outer_whitespace,
     shown,
     validate_path_component,
 )
@@ -1390,8 +1391,9 @@ class ArtifactService:
         Raises
         ------
         ValidationError
-            If the name is not a valid artifact name, or holds an invisible or line-breaking
-            character (`refuse_hidden_characters`).
+            If the name is not a valid artifact name, holds an invisible or line-breaking
+            character (`refuse_hidden_characters`) or starts or ends with a space
+            (`refuse_outer_whitespace`).
         NotFoundError
             If the name space does not exist.
         ConflictError
@@ -1401,6 +1403,7 @@ class ArtifactService:
         # Listed among the namespace's tables: a name that looks like another is refused (#593).
         # A `%` stays allowed: an artifact holds no table directory.
         refuse_hidden_characters(ref.name, what="Artifact name")
+        refuse_outer_whitespace(ref.name, what="Artifact name")
         namespace_id = self._session.execute(
             select(Namespace.id)
             .join(Environment, Namespace.environment_id == Environment.id)

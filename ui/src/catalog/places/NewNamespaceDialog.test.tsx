@@ -58,11 +58,11 @@ describe("NewNamespaceDialog", () => {
     expect(screen.getByRole("textbox", { name: "Path" })).toHaveValue("");
   });
 
-  it("sends the trimmed path and calls onDone with it", async () => {
+  it("sends the path and calls onDone with it", async () => {
     const server = fakeServer(manageRoutes());
     const { onDone, user } = renderCreate();
 
-    await user.type(screen.getByRole("textbox", { name: "Path" }), "finance  ");
+    await user.type(screen.getByRole("textbox", { name: "Path" }), "finance");
     await user.click(await screen.findByRole("button", { name: "Create" }));
 
     await waitFor(() => {
@@ -71,6 +71,27 @@ describe("NewNamespaceDialog", () => {
     expect(creations(server.sent)).toEqual([
       { path: "gold.finance", properties: {}, break_glass_reason: null },
     ]);
+  });
+
+  it("sends the path as typed, so a space at an end gets the CLI's sentence", async () => {
+    const detail =
+      "Namespace component 'finance ' ends with a space, so it would look like 'finance' in " +
+      "every list but be a different name. Use 'finance' instead, or another name without a " +
+      "space at either end.";
+    const server = fakeServer({
+      ...manageRoutes(),
+      [CREATE]: { status: 422, body: { type: "ValidationError", detail } },
+    });
+    const { onDone, user } = renderCreate();
+
+    await user.type(screen.getByRole("textbox", { name: "Path" }), "finance ");
+    await user.click(await screen.findByRole("button", { name: "Create" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(detail);
+    expect(creations(server.sent)).toEqual([
+      { path: "gold.finance ", properties: {}, break_glass_reason: null },
+    ]);
+    expect(onDone).not.toHaveBeenCalled();
   });
 
   it("sends on Enter in the path", async () => {

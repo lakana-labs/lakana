@@ -346,6 +346,7 @@ from lakana_core.identifiers import (
     check_environment_name,
     check_new_name,
     refuse_hidden_characters,
+    refuse_outer_whitespace,
     shown,
     validate_path_component,
 )
@@ -3412,7 +3413,8 @@ class CatalogService:
             active external table's claim in this environment, if it
             escapes the environment's storage root, if `format` is
             unsupported, or if a column name of the sample file holds an invisible or
-            line-breaking character (`refuse_hidden_characters`).
+            line-breaking character (`refuse_hidden_characters`) or starts or ends with a
+            space (`refuse_outer_whitespace`).
         ConflictError
             If a deployed project declares the name, whatever it declares there
             (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); checked before any storage
@@ -3459,6 +3461,7 @@ class CatalogService:
         # The column names come from the caller's own files: new names, under the same rule.
         for column in schema:
             refuse_hidden_characters(column, what="Column name")
+            refuse_outer_whitespace(column, what="Column name")
         # The lock is taken as late as possible, around only the claim
         # re-check and the insert: everything above only reads storage and
         # never touches the environment row, so holding the lock around a
@@ -9060,6 +9063,7 @@ class CatalogService:
         for column in columns:
             if column.name not in stored_columns:
                 refuse_hidden_characters(column.name, what="Column name")
+                refuse_outer_whitespace(column.name, what="Column name")
         top_level = ref.namespace.parts[0]
         if top_level not in _MEDALLION_TOP_LEVEL_NAMESPACES:
             raise ValidationError(

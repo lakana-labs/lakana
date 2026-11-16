@@ -68,7 +68,7 @@ export function UndropDialog({
           await undropTable(
             { environment, namespace: row.namespace, name: row.name },
             {
-              newName: taken === null ? null : name.trim(),
+              newName: taken === null ? null : name,
               breakGlassReason: needsReason ? reason.trim() : null,
             },
           ),

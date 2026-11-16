@@ -54,7 +54,7 @@ export function NewNamespaceDialog({
   const needsReason = protectedEnvironment === true;
   const missing = path.trim() === "" || (needsReason && reason.trim() === "");
   const create = (): void => {
-    const sent = path.trim();
+    const sent = path;
     attempt.run(async () => {
       const created = await createNamespace(environment, sent, needsReason ? reason.trim() : null);
       onDone(created.path);
