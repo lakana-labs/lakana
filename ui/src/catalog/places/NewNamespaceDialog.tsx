@@ -61,16 +61,13 @@ export function NewNamespaceDialog({
     });
   };
   const confirm = useConfirm({
+    busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
     disabled: missing,
     onConfirm: create,
   });
   // Enter in a field presses Create, kept like a click while the protection is not known yet.
-  const submit = (): void => {
-    if (!attempt.busy) {
-      confirm.press();
-    }
-  };
+  const submit = confirm.press;
   const close = (): void => {
     if (!attempt.busy) {
       onCancel();

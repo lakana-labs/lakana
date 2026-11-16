@@ -90,7 +90,7 @@ export function MaintainDialog({ place, onClose }: MaintainDialogProps): JSX.Ele
       setQueryId(id);
     });
   };
-  const confirm = useConfirm({ disabled: !complete, onConfirm: maintain });
+  const confirm = useConfirm({ busy: attempt.busy, disabled: !complete, onConfirm: maintain });
   return (
     <ActionDialog onClose={onClose}>
       <Heading slot="title">{t("table.actions.maintain.title", { table })}</Heading>

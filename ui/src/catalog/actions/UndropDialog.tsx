@@ -84,15 +84,12 @@ export function UndropDialog({
   };
 
   const confirm = useConfirm({
+    busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
     disabled: missing,
     onConfirm: restore,
   });
-  const submit = (): void => {
-    if (!attempt.busy) {
-      confirm.press();
-    }
-  };
+  const submit = confirm.press;
   return (
     <ActionDialog onClose={onCancel}>
       <Heading slot="title">

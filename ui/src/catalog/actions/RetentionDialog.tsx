@@ -108,6 +108,7 @@ function RetentionForm({ place, onClose, current }: RetentionFormProps): JSX.Ele
     });
   };
   const confirm = useConfirm({
+    busy: attempt.busy,
     disabled: rule === null,
     onConfirm: () => {
       save(rule as RetentionRule);

@@ -23,6 +23,8 @@ export interface Confirm {
 export interface ConfirmOptions {
   /** Whether the dialog still waits to learn whether the environment is protected; no by default. */
   readonly waiting?: boolean;
+  /** Whether the action already runs, so a second press, such as Enter, does nothing. */
+  readonly busy: boolean;
   /** Whether the confirm button cannot be pressed, such as for an empty required field. */
   readonly disabled: boolean;
   /** Starts the action. */
@@ -37,11 +39,17 @@ export interface ConfirmOptions {
  *
  * @param options - The wait, whether the button can be pressed, and the action.
  * @param options.waiting - Whether the dialog still waits.
+ * @param options.busy - Whether the action already runs.
  * @param options.disabled - Whether the confirm button cannot be pressed.
  * @param options.onConfirm - Starts the action.
  * @returns The state and the press, for the {@link ConfirmRow} and the dialog's Enter key.
  */
-export function useConfirm({ waiting = false, disabled, onConfirm }: ConfirmOptions): Confirm {
+export function useConfirm({
+  waiting = false,
+  busy,
+  disabled,
+  onConfirm,
+}: ConfirmOptions): Confirm {
   const [queued, setQueued] = useState(false);
   const release = useEffectEvent(() => {
     if (!disabled) {
@@ -58,7 +66,7 @@ export function useConfirm({ waiting = false, disabled, onConfirm }: ConfirmOpti
     disabled,
     queued: queued && waiting,
     press: () => {
-      if (disabled) {
+      if (disabled || busy) {
         return;
       }
       if (waiting) {

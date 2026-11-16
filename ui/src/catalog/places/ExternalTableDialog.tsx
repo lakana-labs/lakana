@@ -125,13 +125,11 @@ export default function ExternalTableDialog({
   const missing =
     name.trim() === "" || location.trim() === "" || (needsReason && reason.trim() === "");
   const create = (): void => {
-    if (format === null) {
-      return;
-    }
     const sent = {
       name,
       locationPattern: location,
-      format,
+      // Never null here: Register cannot be pressed without a format.
+      format: format as ExternalFormat,
       breakGlassReason: needsReason ? reason.trim() : null,
     };
     attempt.run(async () => {
@@ -142,16 +140,13 @@ export default function ExternalTableDialog({
     });
   };
   const confirm = useConfirm({
+    busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
     disabled: missing || format === null,
     onConfirm: create,
   });
   // Enter in a field presses Register, kept like a click while the protection is not known yet.
-  const submit = (): void => {
-    if (!attempt.busy) {
-      confirm.press();
-    }
-  };
+  const submit = confirm.press;
   const close = (): void => {
     if (!attempt.busy) {
       onCancel();

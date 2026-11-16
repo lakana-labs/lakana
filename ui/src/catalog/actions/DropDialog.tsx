@@ -66,15 +66,12 @@ export function DropDialog({ target, onDone, onCancel }: DropDialogProps): JSX.E
     });
   };
   const confirm = useConfirm({
+    busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
     disabled: needsReason && reason.trim() === "",
     onConfirm: drop,
   });
-  const submit = (): void => {
-    if (!attempt.busy) {
-      confirm.press();
-    }
-  };
+  const submit = confirm.press;
   // While the drop or its passkey touch is pending, Escape, the close button and Cancel do nothing.
   const close = (): void => {
     if (!attempt.busy) {

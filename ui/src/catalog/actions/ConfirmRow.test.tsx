@@ -1,4 +1,5 @@
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import type { JSX } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -24,9 +25,9 @@ interface RowProps {
  * @param props.onConfirm - The action.
  * @returns The row.
  */
-function Row({ waiting, disabled, onConfirm }: RowProps): React.JSX.Element {
+function Row({ waiting, disabled, onConfirm }: RowProps): JSX.Element {
   const attempt = useAttempt();
-  const confirm = useConfirm({ waiting, disabled, onConfirm });
+  const confirm = useConfirm({ waiting, busy: false, disabled, onConfirm });
   return (
     <ConfirmRow
       attempt={attempt}
@@ -84,27 +85,52 @@ describe("ConfirmRow", () => {
     expect(screen.getByRole("status")).toHaveTextContent("");
   });
 
-  it("keeps no press made while the button cannot be pressed, such as Enter in an empty field", () => {
+  it("keeps no press made while the button cannot be pressed, such as Enter in an empty field", async () => {
     const onConfirm = vi.fn();
-    let press = (): void => undefined;
+    const user = userEvent.setup();
     /**
-     * Hands out the hook's press, as a dialog's Enter calls it.
+     * A field's Enter, which calls the hook's press directly.
      *
      * @param props - The state.
      * @param props.waiting - Whether the dialog still waits.
      * @param props.disabled - Whether the button cannot be pressed.
-     * @returns Nothing visible.
+     * @returns A button that stands for Enter.
      */
-    function Probe({ waiting, disabled }: { waiting: boolean; disabled: boolean }): null {
-      press = useConfirm({ waiting, disabled, onConfirm }).press;
-      return null;
+    function Enter({ waiting, disabled }: { waiting: boolean; disabled: boolean }): JSX.Element {
+      const { press } = useConfirm({ waiting, busy: false, disabled, onConfirm });
+      return (
+        <button type="button" onClick={press}>
+          Enter
+        </button>
+      );
     }
-    const { rerender } = render(<Probe waiting disabled />);
+    const { rerender } = render(<Enter waiting disabled />);
 
-    act(() => {
-      press();
-    });
-    rerender(<Probe waiting={false} disabled={false} />);
+    await user.click(screen.getByRole("button", { name: "Enter" }));
+    rerender(<Enter waiting={false} disabled={false} />);
+
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("ignores a second press while the action runs, such as Enter after a click", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    /**
+     * A field's Enter while the action already runs.
+     *
+     * @returns A button that stands for Enter.
+     */
+    function Busy(): JSX.Element {
+      const { press } = useConfirm({ busy: true, disabled: false, onConfirm });
+      return (
+        <button type="button" onClick={press}>
+          Enter
+        </button>
+      );
+    }
+    render(<Busy />);
+
+    await user.click(screen.getByRole("button", { name: "Enter" }));
 
     expect(onConfirm).not.toHaveBeenCalled();
   });

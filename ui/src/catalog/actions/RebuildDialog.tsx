@@ -65,6 +65,7 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
     });
   };
   const confirm = useConfirm({
+    busy: attempt.busy,
     waiting: protectedEnvironment === undefined,
     disabled: reason.trim() === "",
     onConfirm: rebuild,
@@ -96,9 +97,7 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
               if (event.key === "Enter") {
                 event.preventDefault();
                 // Kept like a click while the protection is not known yet.
-                if (!attempt.busy) {
-                  confirm.press();
-                }
+                confirm.press();
               }
             }}
           >
