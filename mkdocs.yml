@@ -250,6 +250,39 @@ nav:
               - reference/rest/status.md
               - reference/rest/interface.md
               - reference/rest/home.md
+          - Python SDK:
+              - reference/sdk/index.md
+              - reference/sdk/client.md
+              - reference/sdk/errors.md
+              - reference/sdk/assets.md
+              - reference/sdk/access.md
+              - reference/sdk/artifacts.md
+              - reference/sdk/audit-events.md
+              - reference/sdk/catalog.md
+              - reference/sdk/checks.md
+              - reference/sdk/ci-trust-rules.md
+              - reference/sdk/column-masks.md
+              - reference/sdk/connections.md
+              - reference/sdk/deploys.md
+              - reference/sdk/environments.md
+              - reference/sdk/grants.md
+              - reference/sdk/graph.md
+              - reference/sdk/groups.md
+              - reference/sdk/jobs.md
+              - reference/sdk/namespaces.md
+              - reference/sdk/package-indexes.md
+              - reference/sdk/principals.md
+              - reference/sdk/queries.md
+              - reference/sdk/repositories.md
+              - reference/sdk/row-filters.md
+              - reference/sdk/runs.md
+              - reference/sdk/secrets.md
+              - reference/sdk/sign-in.md
+              - reference/sdk/tables.md
+              - reference/sdk/task-connections.md
+              - reference/sdk/task-tokens.md
+              - reference/sdk/terms.md
+              - reference/sdk/tokens.md
           # generated:end api-nav
   - Project:
       - explanation/roadmap.md

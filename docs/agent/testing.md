@@ -450,8 +450,17 @@ a new setting there), and `reference/openapi.json`, the OpenAPI document of the 
 parameters, request body and answers), and the list of those pages in `reference/rest-api.md` is
 the generated region between the `generated:begin rest-pages` and `generated:end rest-pages`
 markers; the rest of `rest-api.md` is written by hand. A route's text on those pages is its
-summary and description in the OpenAPI document, so write them for a user. After a command, an
-option, a setting or a route changes, run
+summary and description in the OpenAPI document, so write them for a user. The Python SDK
+reference, `reference/sdk/`, is generated from the docstrings of the `lakana` package: `index.md`
+lists every name of `lakana.__all__` and every resource the client's constructor sets,
+`client.md` is the client, `errors.md` the exported errors, one page per module of the exported
+functions (`assets.md`) and one per module of `lakana/resources` the client uses
+(`reference/sdk/ci-trust-rules.md` for `ci_trust_rules.py`). A method's text there is its
+numpydoc docstring (summary, body, `Parameters`, `Returns`/`Yields`, `Raises`), so write it for a
+user; `scripts/tests/test_generate_reference_sdk.py` fails on a private `lakana._` name, a
+private name in a signature, a parameter without a description, or an error that `lakana` does
+not export. The data classes of `lakana._models` are named only as return types. After a
+command, an option, a setting, a route or a public SDK docstring changes, run
 `uv run python scripts/generate_reference.py` and commit the pages; `--check` fails, naming the
 stale page, and runs in CI's `docs` job and in `scripts/tests/test_generate_reference.py`.
 
