@@ -1,13 +1,13 @@
 /**
  * Test setup that every Vitest file runs first: the DOM matchers of jest-dom, object URLs
- * (which jsdom lacks), and a clean document, `fetch`, CSRF token, picture cache and local
- * storage after each test.
+ * (which jsdom lacks), a 5 s wait for `findBy*` and `waitFor`, and a clean document, `fetch`,
+ * CSRF token, picture cache and local storage after each test.
  *
  * @packageDocumentation
  */
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
 import { setCsrfToken } from "../api/client";
@@ -15,6 +15,10 @@ import { forgetPictures } from "../api/pictures";
 import { initI18n } from "../i18n/i18n";
 
 initI18n();
+
+// A file's first render can take longer than the default 1000 ms when CI's coverage job is
+// loaded (#657); a wait that is met returns at once, so a longer limit costs nothing.
+configure({ asyncUtilTimeout: 5000 });
 
 let objectUrls = 0;
 // jsdom has no object URLs; a test spies on these to see what was made and revoked.
