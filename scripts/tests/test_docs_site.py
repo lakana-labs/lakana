@@ -483,3 +483,36 @@ def test_no_page_holds_an_invisible_format_character() -> None:
         if unicodedata.category(char) == "Cf"
     ]
     assert found == [], f"replace each invisible character with a visible notation: {found}"
+
+
+ALLOWED_EXTENSIONS = frozenset(
+    {"admonition", "pymdownx.superfences", "pymdownx.tabbed", "md_in_html"}
+)
+"""The Markdown extensions mkdocs.yml may list; md_in_html renders the Learn page's cards."""
+
+
+def test_the_configuration_lists_only_allowed_markdown_extensions() -> None:
+    names = {next(iter(e)) if isinstance(e, dict) else e for e in _config()["markdown_extensions"]}
+    assert names <= ALLOWED_EXTENSIONS, sorted(names - ALLOWED_EXTENSIONS)
+
+
+LEVELS = ("Beginner", "Intermediate", "Advanced")
+LEARN_NOW = {
+    "Beginner": ["../tutorials/getting-started.md"],
+    "Intermediate": ["../tutorials/python-sample.md"],
+    "Advanced": ["../tutorials/train-a-model.md"],
+}
+"""Today's tutorials stand under their levels until the lessons that fold them in land."""
+
+
+def test_the_learn_page_lists_the_tutorials_under_their_levels() -> None:
+    text = (SITE / "learn" / "index.md").read_text(encoding="utf-8")
+    sections = re.split(r"^## ", text, flags=re.MULTILINE)[1:]
+    assert [s.splitlines()[0].strip() for s in sections] == list(LEVELS)
+    for section in sections:
+        level = section.splitlines()[0].strip()
+        assert '<div class="grid cards" markdown>' in section
+        for link in LEARN_NOW[level]:
+            assert f"]({link})" in section
+        assert section.count('class="lakana-level"') == len(LEARN_NOW[level])
+    assert "<a " not in text  # links stay Markdown, so the strict build checks them

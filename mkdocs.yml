@@ -40,6 +40,7 @@ extra_css:
   - assets/stylesheets/still-water.css
 markdown_extensions:
   - admonition
+  - md_in_html
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
@@ -48,6 +49,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Tutorials:
+      - learn/index.md
       - tutorials/index.md
       - tutorials/getting-started.md
       - tutorials/python-sample.md
