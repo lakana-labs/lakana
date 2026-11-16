@@ -176,7 +176,7 @@ it is hidden, until someone grants the right to them by name. Your own events al
 text in new events (`LAKANA_AUDIT__QUERY_TEXT`: `full`, `hash` or `off`); see
 [Other people's query text and column values](../reference/lists.md#other-peoples-query-text-and-column-values-in-the-audit-log).
 `lakana audit list` filters it by event type, kind (`--kind connection`), environment, principal and time
-([the command](../reference/cli.md#lakana-audit-list)). To keep the log bounded, repeated refusals of one
+([the command](../reference/cli/lakana-audit.md#lakana-audit-list)). To keep the log bounded, repeated refusals of one
 principal are counted after a number per minute that an operator sets
 (`LAKANA_DENIAL_AUDIT__PER_PRINCIPAL_PER_MINUTE`, [settings](../reference/settings.md)).
 For the same reason a successful sign-in is recorded once per token every 15 minutes, not on every
