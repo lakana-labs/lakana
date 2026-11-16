@@ -293,7 +293,7 @@ def _validate_conditions(issuer: str, conditions: Mapping[str, object]) -> dict[
         )
     if not any(name in conditions for name in trigger_claims(issuer)):
         raise ValidationError(_trigger_message(issuer))
-    return dict(conditions)  # ty: ignore[invalid-return-type]
+    return dict(conditions)  # ty: ignore[invalid-explicit-return]
 
 
 def rule_problem(issuer: str, conditions: Mapping[str, object]) -> str | None:
