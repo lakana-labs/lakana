@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import itertools
 import logging
 import re
 from collections import Counter
@@ -53,7 +54,9 @@ import sqlglot.expressions as exp
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, build_scope, traverse_scope
 
+from lakana_core import sql_dialect
 from lakana_core.errors import LakanaError, ValidationError
+from lakana_core.sql_dialect import KEYWORD_LAMBDA
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
 
 _BLACKLISTED_FUNCTIONS = frozenset(
@@ -312,7 +315,7 @@ def _lambda_function_types() -> tuple[type[exp.Expr], ...]:
     for name in _LAMBDA_FUNCTIONS:
         for arguments in ("x -> x", "(x, y) -> x, 0"):
             try:
-                parsed = sqlglot.parse_one(f"SELECT {name}(l, {arguments})", dialect="duckdb")
+                parsed = sql_dialect.parse_one(f"SELECT {name}(l, {arguments})", dialect="duckdb")
             except sqlglot.errors.SqlglotError:
                 continue
             node = parsed.find(exp.Lambda)
@@ -575,6 +578,23 @@ list gets each of them exactly as a `SELECT` list does.
 
 _VALUES_ALIAS = "__lakana_values"
 """The alias a bare `VALUES` list takes when `_parse_checked` makes it a `SELECT` of it."""
+
+_SORT_BY_MESSAGE = "SORT BY is not supported; use ORDER BY."
+"""Why a query with a `SORT BY` is refused: neither sqlglot nor DuckDB reads the clause."""
+
+
+class SortByError(ValidationError):
+    """SQL that does not parse because of a `SORT BY` clause (`_SORT_BY_MESSAGE`).
+
+    A subclass so that a caller parsing text the reader did not write, such as a stored view's,
+    can tell it apart and report that text as unreadable instead of handing the reader the hint.
+    """
+
+
+_JOIN_WITHOUT_FROM_MESSAGE = (
+    "A JOIN needs a FROM before it: write SELECT ... FROM a JOIN b ON ... and submit it again."
+)
+"""Why a `SELECT` that joins a table to nothing is refused."""
 
 _ALIASED_VALUES_MESSAGE = (
     "A VALUES list on its own takes no alias; to name its columns, write "
@@ -992,7 +1012,7 @@ def _parse_sql(sql: str, dialect: str) -> exp.Expr:
         that names a broken stored view, treats it as the syntax error it is.
     """
     try:
-        parsed = sqlglot.parse_one(sql, dialect=dialect)
+        parsed = sql_dialect.parse_one(sql, dialect=dialect)
     except _PARSER_FAULTS as exc:
         raise sqlglot.errors.ParseError("the text could not be read") from exc
     return _json_arrows_outside_lambda_functions(parsed)
@@ -1003,7 +1023,8 @@ def _render(parsed: exp.Expr, dialect: str) -> str:
 
     DuckDB 2.0 refuses the arrow lambda (`x -> x + 1` is a Binder Error) and DuckDB 1.5
     accepts both forms, so every `exp.Lambda` is rendered `LAMBDA x : x + 1` (`LAMBDA x, y :
-    …` for two parameters) whichever form the caller wrote. Only the spelling of the node
+    …` for two parameters) whichever form the caller wrote; sqlglot's DuckDB generator writes
+    the keyword form for every lambda since 30.25. Only the spelling of the node
     changes: its parameters and body are the subtrees the guard already checked, rendered by
     sqlglot as any other expression, so no text reaches DuckDB that the guard did not see.
     The keyword form is also the one DuckDB parses as sqlglot does: `x -> x -> '$.a'` (a
@@ -1020,8 +1041,7 @@ def _render(parsed: exp.Expr, dialect: str) -> str:
     Parameters
     ----------
     parsed
-        The tree to render; its lambdas are marked for the keyword form, and an operand lambda
-        wrapped in parentheses, in place.
+        The tree to render; an operand lambda is wrapped in parentheses, in place.
     dialect
         The SQL dialect to render in.
 
@@ -1031,12 +1051,84 @@ def _render(parsed: exp.Expr, dialect: str) -> str:
         The SQL text.
     """
     for node in list(parsed.find_all(exp.Lambda)):
-        node.set("colon", True)
         if not isinstance(node.parent, exp.Paren) and not _takes_a_lambda(node.parent):
             wrapper = exp.Paren()
             node.replace(wrapper)
             wrapper.set("this", node)
     return parsed.sql(dialect=dialect)
+
+
+_VAR = sqlglot.tokens.TokenType.VAR
+"""The token type of a plain word, which `SORT` and `BY` are to Lakana's tokenizer."""
+
+
+def refuse_sort_by(sql: str, dialect: str, error: sqlglot.errors.ParseError) -> None:
+    """Raise the `ORDER BY` hint when `error` is sqlglot failing on a `SORT BY` clause in `sql`.
+
+    From sqlglot 30.25 the DuckDB parser fails on `SORT BY` (30.24 parsed it and dropped it from
+    the rendering). The hint fires only when the parse failed at the `SORT` or the `BY` of a pair
+    of plain words `SORT` `BY` (outside a string or quoted name): a column `sort` aliased `by` in
+    text that fails somewhere else keeps its own syntax error.
+
+    Parameters
+    ----------
+    sql
+        The text that did not parse.
+    dialect
+        The SQL dialect it was parsed as.
+    error
+        The parse failure.
+
+    Raises
+    ------
+    SortByError
+        If the failure is at a `SORT BY`.
+    """
+    position = next(
+        ((e.get("line"), e.get("col")) for e in error.errors if e.get("line") is not None),
+        None,
+    )
+    if position is None:
+        return
+    # The parse tokenized this text already; a text that does not tokenize raised a
+    # TokenError there, never the ParseError handled here.
+    tokens = sqlglot.tokenize(sql, dialect=sql_dialect.reading_dialect(dialect))
+    for first, second in itertools.pairwise(tokens):
+        words = [t.text.upper() for t in (first, second) if t.token_type is _VAR]
+        if words == ["SORT", "BY"] and position in {
+            (first.line, first.col),
+            (second.line, second.col),
+        }:
+            raise SortByError(_SORT_BY_MESSAGE) from error
+
+
+def _parse_with_hints(sql: str, dialect: str) -> exp.Expr:
+    """Parse submitted SQL as `_parse_sql` does, naming `ORDER BY` for a `SORT BY` it cannot read.
+
+    Parameters
+    ----------
+    sql
+        The text to parse.
+    dialect
+        The SQL dialect to parse `sql` as.
+
+    Returns
+    -------
+    sqlglot.expressions.Expr
+        The tree `_parse_sql` returns.
+
+    Raises
+    ------
+    SortByError
+        If the text does not parse because of a `SORT BY` (`refuse_sort_by`).
+    sqlglot.errors.ParseError
+        If it does not parse for any other reason; see `_parse_sql`.
+    """
+    try:
+        return _parse_sql(sql, dialect)
+    except sqlglot.errors.ParseError as exc:
+        refuse_sort_by(sql, dialect, exc)
+        raise
 
 
 def _takes_a_lambda(function: exp.Expr | None) -> bool:
@@ -1105,7 +1197,8 @@ def _json_arrows_outside_lambda_functions(parsed: exp.Expr) -> exp.Expr:
     extract `j -> 'a'` everywhere else. Done right after parsing, so the guard checks, and the
     rewrite renders, what DuckDB runs: `_render` gives a real lambda the keyword form, and the
     extract renders as an arrow again. A lambda of two parameters, or one written with the
-    keyword, is never JSON.
+    keyword (marked `KEYWORD_LAMBDA` by `lakana_core.sql_dialect`, since sqlglot no longer
+    records the spelling), is never JSON.
 
     Parameters
     ----------
@@ -1120,7 +1213,7 @@ def _json_arrows_outside_lambda_functions(parsed: exp.Expr) -> exp.Expr:
     for node in list(parsed.find_all(exp.Lambda, bfs=False))[::-1]:
         parameters = node.expressions
         if (
-            node.args.get("colon")
+            node.meta.get(KEYWORD_LAMBDA)
             or len(parameters) != 1
             or not isinstance(node.parent, exp.Func)
             or _takes_a_lambda(node.parent)
@@ -1394,6 +1487,29 @@ def _reject_statements_inside(parsed: exp.Expr, dialect: str) -> None:
             )
 
 
+def _reject_joins_without_from(parsed: exp.Expr) -> None:
+    """Refuse a `SELECT` anywhere in the statement that has a `JOIN` but no `FROM`.
+
+    sqlglot parses `SELECT * JOIN t ON true` and renders the joined table as a column of the
+    `SELECT` list; DuckDB cannot parse the text either way. The column step of `qualify`
+    refused it ("Joins ... missing source table") until `_require_unambiguous_references`
+    stopped running that step for sqlglot 30.25 (#415); this keeps the refusal explicit.
+
+    Parameters
+    ----------
+    parsed
+        The parsed statement. Not modified.
+
+    Raises
+    ------
+    ValidationError
+        If a `SELECT` carries a join and no `FROM` (`_JOIN_WITHOUT_FROM_MESSAGE`).
+    """
+    for select in parsed.find_all(exp.Select):
+        if select.args.get("joins") and select.args.get("from_") is None:
+            raise ValidationError(_JOIN_WITHOUT_FROM_MESSAGE)
+
+
 def _require_unambiguous_references(parsed: exp.Expr, dialect: str) -> None:
     """Refuse a query whose own references sqlglot cannot resolve unambiguously.
 
@@ -1416,12 +1532,18 @@ def _require_unambiguous_references(parsed: exp.Expr, dialect: str) -> None:
     (which renames a `COUNT(*)` result column to `_col_0`, among other
     surprises).
 
-    `validate_qualify_columns` is off deliberately. With it on, `qualify`
-    also demands that every *column* resolve to a known source, which no
-    caller here can satisfy: the platform passes no schema, so an ordinary
-    `SELECT id FROM bronze.a JOIN gold.b ON ...` — legal SQL DuckDB runs
-    fine — would be refused. Table and alias resolution, which is what this
-    gate is for, is unaffected by the flag.
+    Columns are not qualified (`qualify_columns=False`, and so nothing to
+    validate). The platform passes no schema, and from sqlglot 30.25 the column
+    step refuses any unqualified column it cannot place without one: one in a
+    correlated subquery, in a bare `VALUES` list's subquery, or a `SELECT`
+    alias used in `WHERE` ("Cannot resolve 'a' due to missing source schemas"),
+    all legal SQL DuckDB runs. Table and alias resolution, which is what this
+    gate is for, is done by the table step and `Scope.selected_sources`, which
+    the flag does not touch: over the guard-fuzzing corpus (26,819 statements)
+    the gate decides every statement the same with and without the column step
+    on sqlglot 30.24, except twelve: eleven read a column a `WITH` or a derived
+    table does not have (`Unknown column`), which DuckDB refuses itself, and one
+    was a `JOIN` without a `FROM`, which `_reject_joins_without_from` refuses.
 
     Reading `Scope.selected_sources` is what raises on two sources of one
     scope sharing a name, so every scope's is read here explicitly rather
@@ -1445,7 +1567,12 @@ def _require_unambiguous_references(parsed: exp.Expr, dialect: str) -> None:
         legitimately run is lost.
     """
     try:
-        qualified = qualify(parsed.copy(), dialect=dialect, validate_qualify_columns=False)
+        qualified = qualify(
+            parsed.copy(),
+            dialect=dialect,
+            qualify_columns=False,
+            validate_qualify_columns=False,
+        )
         root = build_scope(qualified)
         for scope in root.traverse() if root is not None else ():
             _ = scope.selected_sources
@@ -1560,7 +1687,8 @@ def _parse_checked(sql: str, dialect: str) -> exp.Expr:
         `_reject_placeholders`. Or if it contains a `WITH RECURSIVE` clause, whose scope
         bindings `_cte_reference_ids` cannot classify soundly, or a `CONNECT BY`, which
         renders as one — see `_reject_recursive_ctes`. Or if it holds a statement that is not a read
-        anywhere, see `_reject_statements_inside`. Or if it is a bare `VALUES` list with an
+        anywhere, see `_reject_statements_inside`. Or if a `SELECT` has a `JOIN` and no
+        `FROM`, see `_reject_joins_without_from`. Or if it is a bare `VALUES` list with an
         alias or a clause other than `ORDER BY`, `LIMIT` and `OFFSET`, see
         `_reject_values_clauses`. `check_blacklist` already refuses these
         first in `lakana_worker.pipeline.run_one`, so this is defence in
@@ -1569,13 +1697,14 @@ def _parse_checked(sql: str, dialect: str) -> exp.Expr:
         keep that promise here, so it must not be reachable by a future
         caller that skips the blacklist.
     """
-    parsed = _parse_sql(sql, dialect)
+    parsed = _parse_with_hints(sql, dialect)
     if isinstance(parsed, exp.Values):
         parsed = _select_of_values(parsed)
     _reject_placeholders(parsed)
     _reject_statements_inside(parsed, dialect)
     _reject_recursive_ctes(parsed)
     _reject_pivot_without_values(parsed)
+    _reject_joins_without_from(parsed)
     _require_unambiguous_references(parsed, dialect)
     return parsed
 
@@ -1657,6 +1786,22 @@ def _cte_reference_ids(parsed: exp.Expr) -> set[int]:
     }
 
 
+def _type(type_name: str) -> exp.DataType:
+    """Read a DuckDB type name with Lakana's reading (`sql_dialect`), as every other parse is.
+
+    Parameters
+    ----------
+    type_name
+        A DuckDB type name, such as `DECIMAL(10, 2)`.
+
+    Returns
+    -------
+    sqlglot.expressions.DataType
+        The type.
+    """
+    return exp.DataType.build(type_name, dialect=sql_dialect.reading_dialect("duckdb"))
+
+
 def _empty_relation(dotted: str, columns: Mapping[str, str]) -> exp.Select:
     """Build a zero-row relation shaped like a table's declared schema.
 
@@ -1685,7 +1830,7 @@ def _empty_relation(dotted: str, columns: Mapping[str, str]) -> exp.Select:
             f"Table {dotted!r} has no files and no declared columns to stand in for them."
         )
     projections = [
-        exp.alias_(exp.cast(exp.null(), type_name, dialect="duckdb"), name, quoted=True)
+        exp.alias_(exp.cast(exp.null(), _type(type_name)), name, quoted=True)
         for name, type_name in columns.items()
     ]
     return exp.select(*projections).where(exp.false())
@@ -1911,7 +2056,7 @@ def _compiled_row_filter(expression: str, types: Mapping[str, exp.DataType], dia
         The filter, with `TRY_CAST(<date side> AS <timestamp type>)` where a date is compared
         with a timestamp.
     """
-    parsed = sqlglot.parse_one(expression, dialect=dialect)
+    parsed = sql_dialect.parse_one(expression, dialect=dialect)
     changed = False
     for comparison in list(parsed.find_all(*_FILTER_COMPARISONS)):
         left, right = comparison.left, comparison.right
@@ -1962,7 +2107,7 @@ def _masked_projection(mask: str, name: str, target: exp.DataType | None, dialec
     alias = _quoted_identifier(name, dialect)
     if target is None:
         return f"{mask} AS {alias}"
-    value = exp.TryCast(this=sqlglot.parse_one(mask, dialect=dialect), to=target.copy())
+    value = exp.TryCast(this=sql_dialect.parse_one(mask, dialect=dialect), to=target.copy())
     return f"{value.sql(dialect=dialect)} AS {alias}"
 
 
@@ -2223,8 +2368,10 @@ def _expand_into(
         try:
             check_blacklist(view.sql, dialect)
             inner = _parse_checked(view.sql, dialect)
-        except SQL_SYNTAX_ERRORS as exc:
-            # The stored SQL may name tables the reader cannot see: name the view only.
+        except (*SQL_SYNTAX_ERRORS, SortByError) as exc:
+            # The stored SQL may name tables the reader cannot see: name the view only. A
+            # `SORT BY` is unreadable too (a view saved under sqlglot 30.24 can hold one): the
+            # reader never wrote it, so the `ORDER BY` hint is not theirs to act on.
             raise ValidationError(unreadable_view_message(dotted)) from exc
         _expand_into(inner, lookup, (*stack, dotted), expanded, named_views, max_depth, dialect)
         alias = table.args.get("alias")
@@ -2485,7 +2632,7 @@ def rewrite_query(
                 index = reads
                 reads += 1
                 try:
-                    ctes[alias] = sqlglot.parse_one(
+                    ctes[alias] = sql_dialect.parse_one(
                         _reader_select_sql(source, index, dialect), dialect=dialect
                     )
                 except SQL_SYNTAX_ERRORS as exc:
@@ -2500,7 +2647,7 @@ def rewrite_query(
                     parameters[_schema_variable(index)] = tuple(source.field_ids)
             else:
                 ctes[alias] = _empty_relation(dotted, source.columns)
-        replacement = exp.to_table(alias)
+        replacement = exp.Table(this=exp.to_identifier(alias))
         original_alias = table.args.get("alias")
         if original_alias is not None:
             replacement.set("alias", original_alias)
@@ -2593,9 +2740,10 @@ def check_blacklist(sql: str, dialect: str = "duckdb") -> None:
         list, or is a `VALUES` list with an alias or a clause other than `ORDER BY`,
         `LIMIT` and `OFFSET`; if a statement that
         is not a read sits anywhere inside it; or if it
-        contains a `WITH RECURSIVE` clause or a `CONNECT BY`.
+        contains a `WITH RECURSIVE` clause or a `CONNECT BY`; or if it does not parse
+        and holds a `SORT BY` (`_SORT_BY_MESSAGE`).
     """
-    parsed = _parse_sql(sql, dialect)
+    parsed = _parse_with_hints(sql, dialect)
     for item in parsed.find_all(exp.Table, exp.Lateral):
         function = _from_item_function_name(item)
         if function is not None and function not in _ALLOWED_TABLE_FUNCTIONS:

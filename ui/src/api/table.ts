@@ -52,6 +52,17 @@ export interface ColumnOut {
   readonly terms: readonly TermRefOut[];
 }
 
+/** What a person may do to a table, as the server offers it. */
+export type TableAction = "drop" | "rebuild" | "maintain" | "set_retention";
+
+/** The deployed project file that declares a table. */
+interface DefinedByOut {
+  /** The repository's name. */
+  readonly repository: string;
+  /** The file's path in the repository. */
+  readonly path: string;
+}
+
 /** One reference a table's header declares. */
 export interface ModelReferenceOut {
   /** The name of the reference's generated check. */
@@ -208,6 +219,10 @@ export interface TableOut {
   readonly label_language: string | null;
   /** The description's language. */
   readonly description_language: string | null;
+  /** The deployed project file that declares the table; null for one nobody declared. */
+  readonly defined_by: DefinedByOut | null;
+  /** What the caller may do to the table, by right and by how it is made. */
+  readonly actions: readonly TableAction[];
   /** The reader's language. */
   readonly language: string;
   /** The language the table's texts are written in. */

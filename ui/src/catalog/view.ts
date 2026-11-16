@@ -6,12 +6,20 @@
 import { TABLE_SORTS } from "../api/catalog";
 import type { ListTablesQuery, SortOrder, TableSort } from "../api/catalog";
 
-/** The place, the search and the sort of the list. */
+/** What the Catalog shows: every table, or one of the lists that need an environment. */
+export type CatalogViewKind = "all" | "dropped" | "expiring" | "orphans";
+
+/** Every view, in the order the switch shows them. */
+export const VIEW_KINDS: readonly CatalogViewKind[] = ["all", "dropped", "expiring", "orphans"];
+
+/** The place, the view, the search and the sort of the list. */
 export interface CatalogView {
   /** The environment shown; null for all. */
   readonly environment: string | null;
   /** The dotted namespace shown; null for all, and always null without an environment. */
   readonly namespace: string | null;
+  /** Which list is shown; the search and the sort belong to `all`. */
+  readonly view: CatalogViewKind;
   /** The search text; empty for none. */
   readonly q: string;
   /** The column the list is sorted by. */
@@ -24,6 +32,7 @@ export interface CatalogView {
 export const DEFAULT_VIEW: CatalogView = {
   environment: null,
   namespace: null,
+  view: "all",
   q: "",
   sort: "name",
   order: "asc",
@@ -55,9 +64,11 @@ export function readView(params: URLSearchParams): CatalogView {
   const requested = params.get("sort");
   const sort = TABLE_SORTS.find((key) => key === requested) ?? DEFAULT_VIEW.sort;
   const order = params.get("order");
+  const requestedView = params.get("view");
   return {
     environment: environment === "" ? null : environment,
     namespace: environment === "" || namespace === "" ? null : namespace,
+    view: VIEW_KINDS.find((kind) => kind === requestedView) ?? DEFAULT_VIEW.view,
     q: (params.get("q") ?? "").replaceAll("\u0000", "").slice(0, Q_MAX).trim(),
     sort,
     order: order === "asc" || order === "desc" ? order : defaultOrder(sort),
@@ -77,6 +88,9 @@ export function viewSearch(view: CatalogView): string {
     if (view.namespace !== null) {
       params.set("ns", view.namespace);
     }
+  }
+  if (view.view !== DEFAULT_VIEW.view) {
+    params.set("view", view.view);
   }
   if (view.q !== "") {
     params.set("q", view.q);
