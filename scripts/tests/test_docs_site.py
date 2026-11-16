@@ -559,3 +559,11 @@ def test_the_learn_page_lists_the_tutorials_under_their_levels() -> None:
             assert f"]({link})" in section
         assert section.count('class="lakana-level"') == len(LEARN_NOW[level])
     assert "<a " not in text  # links stay Markdown, so the strict build checks them
+
+
+def test_the_home_page_is_what_is_lakana_with_two_ways_in() -> None:
+    text = (SITE / "index.md").read_text(encoding="utf-8")
+    assert text.startswith("# What is Lakana?\n")
+    assert "(learn/index.md)" in text
+    assert "(how-to/index.md)" in text
+    assert len(text.split()) <= 400  # about one screen
