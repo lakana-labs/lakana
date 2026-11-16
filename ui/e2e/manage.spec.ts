@@ -441,12 +441,18 @@ test.describe("the views' times and links under the pointer", () => {
       const buttons = page.getByRole("region", { name: view[1] }).getByRole("button");
       await expect(buttons.first()).toBeVisible();
       for (const button of await buttons.all()) {
+        // The label's text boxes, by the top of their line: one top is one line.
         const lines = await button.evaluate((element) => {
-          const style = getComputedStyle(element);
-          const inner = element.getBoundingClientRect().height - 2;
-          return Math.round(inner / Number.parseFloat(style.lineHeight));
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const tops = new Set(
+            [...range.getClientRects()]
+              .filter((rect) => rect.width > 0 && rect.height > 0)
+              .map((rect) => Math.round(rect.top)),
+          );
+          return tops.size;
         });
-        expect(lines, await button.innerText()).toBeLessThanOrEqual(1);
+        expect(lines, await button.innerText()).toBe(1);
       }
     }
   });
