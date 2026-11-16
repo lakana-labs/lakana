@@ -82,7 +82,9 @@ const NAMED_LIMITS = [
   { name: "the radio group", prefix: "RadioGroup-", limit: "2.94 kB" },
   // Measured 393 B (2026-11-16) + 10 %: the note after a namespace was created or deleted,
   // loaded only when the address carries it.
-  { name: "the place note", prefix: "PlaceNote-", limit: "0.43 kB" },
+  // Raised to the measured 499 B (2026-11-16) + 10 % with the note after an artifact's drop and
+  // the focus it takes back from the heading the shell focuses after a move to another page.
+  { name: "the place note", prefix: "PlaceNote-", limit: "0.55 kB" },
   // Measured 0.94 kB (2026-11-16) + 10 %: the API calls of catalog management, shared by the
   // table's Actions and the Catalog's views.
   // Raised to the measured 1.62 kB (2026-11-16) + 10 %: the table page reads an artifact with

@@ -379,8 +379,9 @@ export function CatalogList(): JSX.Element {
             </aside>
           )}
           <section className="catalog-main" ref={main}>
-            {/* Above a notice as well: a drop that took the namespace out of the tree is still confirmed. */}
-            {placeNote !== null && notice !== null && (
+            {/* One place, above any notice, so the note never remounts when the tree turns the
+                place unknown (a drop that took the namespace out of the tree is still confirmed). */}
+            {placeNote !== null && (
               <Suspense fallback={null}>
                 <PlaceNote note={placeNote} />
               </Suspense>
@@ -390,11 +391,6 @@ export function CatalogList(): JSX.Element {
               <>
                 <ViewSwitch view={view} />
                 {onAll && <CatalogSearch view={view} onSearch={search} />}
-                {placeNote !== null && (
-                  <Suspense fallback={null}>
-                    <PlaceNote note={placeNote} />
-                  </Suspense>
-                )}
                 <div className="catalog-bar">
                   <div className="catalog-result-line">
                     <p className="catalog-result" role="status" tabIndex={-1} ref={resultLine}>

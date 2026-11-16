@@ -1400,6 +1400,42 @@ describe("CatalogList", () => {
       });
     });
 
+    it("keeps the same note, with the focus, while the tree turns the place unknown", async () => {
+      const tree = held();
+      const { router } = renderShell("/catalog/prod/gold.sales/fact_sales", {
+        routes: { "GET /api/v1/tables/tree": tree.route },
+      });
+      await screen.findByRole("heading", { level: 1, name: "fact_sales" });
+
+      await act(async () => {
+        await router.navigate("/catalog?env=prod&ns=ml", {
+          state: { placeNote: "artifactDropped", namespace: "ml", artifact: "ml.model" },
+        });
+      });
+      const note = await screen.findByText(/^Dropped artifact ml\.model\./);
+      await waitFor(() => {
+        expect(note).toHaveFocus();
+      });
+      const lost: unknown[] = [];
+      const onFocusOut = (event: FocusEvent): void => {
+        lost.push(event.relatedTarget);
+      };
+      document.addEventListener("focusout", onFocusOut);
+
+      await act(async () => {
+        tree.release({ status: 200, body: TREE });
+        await Promise.resolve();
+      });
+
+      expect(
+        await screen.findByText("There is no namespace ml in prod that you may read."),
+      ).toBeVisible();
+      document.removeEventListener("focusout", onFocusOut);
+      expect(screen.getByText(/^Dropped artifact ml\.model\./)).toBe(note);
+      expect(note).toHaveFocus();
+      expect(lost).toEqual([]);
+    });
+
     it("quotes the environment in the deploy command of an empty place", async () => {
       renderShell("/catalog?env=dev's", {
         routes: {
