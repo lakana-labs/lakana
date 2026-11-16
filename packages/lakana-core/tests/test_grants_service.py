@@ -159,6 +159,38 @@ def test_a_scope_filter_is_an_exact_match_not_ancestor_expanded(
     assert len(at_environment.items) == 1
 
 
+def test_list_grants_filters_by_kind_alone(session: Session) -> None:
+    """`kind` without an object lists every grant on that level, the instance among them."""
+    grants = GrantService(session, AllowAllAuthorization())
+    principals = PrincipalService(session, AllowAllAuthorization())
+    admin = _admin()
+    _persist_actor(session, admin)
+    _add_principal(principals, admin, "alice")
+    on_instance = grants.grant(
+        admin, principal="alice", role=Role.VIEWER, kind=SecurableKind.INSTANCE
+    )
+    listed = grants.list_grants(admin, kind=SecurableKind.INSTANCE).items
+    assert [row.id for row in listed] == [on_instance.id]
+    assert grants.list_grants(admin, kind=SecurableKind.TABLE).items == []
+
+
+def test_list_grants_refuses_a_kind_other_than_the_objects(session: Session) -> None:
+    """A kind and an object of another level could match nothing: the refusal says so."""
+    grants = GrantService(session, AllowAllAuthorization())
+    admin = _admin()
+    _persist_actor(session, admin)
+    with pytest.raises(ValidationError, match=r"instance.*environment"):
+        grants.list_grants(
+            admin, kind=SecurableKind.INSTANCE, scope=Securable.environment_scope("dev")
+        )
+    assert (
+        grants.list_grants(
+            admin, kind=SecurableKind.ENVIRONMENT, scope=Securable.environment_scope("dev")
+        ).items
+        == []
+    )
+
+
 def test_revoke_sets_revoked_at_and_revoked_by(session: Session) -> None:
     """Revoking a grant sets its revoked_at/revoked_by, not deleting the row."""
     grants = GrantService(session, AllowAllAuthorization())

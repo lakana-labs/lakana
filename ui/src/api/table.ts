@@ -55,8 +55,8 @@ export interface ColumnOut {
 /** What a person may do to a table, as the server offers it. */
 export type TableAction = "drop" | "rebuild" | "maintain" | "set_retention";
 
-/** The deployed project file that declares a table. */
-interface DefinedByOut {
+/** The deployed project file that declares a table or an artifact. */
+export interface DefinedByOut {
   /** The repository's name. */
   readonly repository: string;
   /** The file's path in the repository. */
@@ -467,6 +467,27 @@ export async function listGrantsAt(level: GrantLevel): Promise<GrantPage> {
       query.set("table", level.table);
     }
   }
+  return firstGrants(query);
+}
+
+/**
+ * Lists the grants on the whole instance, which apply to every table. Only an administrator may
+ * list grants.
+ *
+ * @returns The first {@link MOST_GRANTS} of them, newest first, and whether the server has more.
+ * @throws {ApiError} for a refusal.
+ */
+export async function listInstanceGrants(): Promise<GrantPage> {
+  return firstGrants(new URLSearchParams({ kind: "INSTANCE" }));
+}
+
+/**
+ * Reads the first page of a grants listing.
+ *
+ * @param query - The listing's filters.
+ * @returns The first {@link MOST_GRANTS} grants, and whether the server has more.
+ */
+async function firstGrants(query: URLSearchParams): Promise<GrantPage> {
   query.set("limit", String(MOST_GRANTS));
   const page = await api.page(`/api/v1/grants?${query.toString()}`);
   return { grants: page.body as readonly GrantOut[], more: page.nextCursor !== null };

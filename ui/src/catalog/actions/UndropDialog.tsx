@@ -14,7 +14,7 @@ import { ActionDialog } from "../../shell/ActionDialog";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
-import { ConfirmRow } from "./ConfirmRow";
+import { ConfirmRow, useConfirm } from "./ConfirmRow";
 import { ProtectedReason } from "./ProtectedReason";
 import { useProtected } from "./useProtected";
 
@@ -68,7 +68,7 @@ export function UndropDialog({
           await undropTable(
             { environment, namespace: row.namespace, name: row.name },
             {
-              newName: taken === null ? null : name.trim(),
+              newName: taken === null ? null : name,
               breakGlassReason: needsReason ? reason.trim() : null,
             },
           ),
@@ -83,11 +83,14 @@ export function UndropDialog({
     });
   };
 
-  const submit = (): void => {
-    if (!missing && protectedEnvironment !== undefined && !attempt.busy) {
-      restore();
-    }
-  };
+  const confirm = useConfirm({
+    busy: attempt.busy,
+    waiting: protectedEnvironment === undefined,
+    failed: protectedEnvironment === null,
+    disabled: missing,
+    onConfirm: restore,
+  });
+  const submit = confirm.press;
   return (
     <ActionDialog onClose={onCancel}>
       <Heading slot="title">
@@ -118,9 +121,7 @@ export function UndropDialog({
       <ConfirmRow
         attempt={attempt}
         label={t("table.actions.undrop.confirm")}
-        waiting={protectedEnvironment === undefined}
-        disabled={missing}
-        onConfirm={restore}
+        confirm={confirm}
         onCancel={onCancel}
       />
     </ActionDialog>

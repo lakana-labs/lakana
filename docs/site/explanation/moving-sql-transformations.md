@@ -3,8 +3,8 @@
 You may already transform data with SQL files, one file per table, run by a tool that works out
 the order from the references between them. This page says what each of the usual concepts of such
 a tool becomes in Lakana, what has no counterpart (and what to do instead), what you get in
-return, and when to stay where you are. A worked conversion, step by step, is the tutorial
-[Move a SQL project to Lakana](../tutorials/move-a-sql-project.md).
+return, and when to stay where you are. A worked conversion, step by step, is the how-to guide
+[Move a SQL project to Lakana](../how-to/move-a-sql-project.md).
 
 Lakana runs no other tool's project, and it has no converter: you rewrite each file by hand. The
 files are mostly SQL you already have, so the work is in the edges: how a table refers to another,
@@ -22,7 +22,7 @@ The left column uses the words most SQL-file transformation tools share; your to
 | How a model is **materialised**: table, view, incremental | `materialize: table` or `view`, and for a table `write: replace`, `append`, `merge` or `history` in the front-matter | A table is replaced on every run by default. A view is a view. `write: append` adds the rows whose `watermark` column is above the highest value already in the table; `write: merge` updates the rows whose `key` the table has and adds the rest. See [Write modes](../reference/asset-front-matter.md#write-modes). |
 | An **ephemeral** model (inlined into the models that use it) | A `WITH` clause, or a view | Nothing inlines a file for you. |
 | A **test** (not null, unique, accepted values, relationships, or a query of your own) | A **check**: `checks/<namespace>/<table>/<name>.sql`, a `SELECT` that returns the rows that are wrong | Each of the four built-in tests is a short query, and [Check your data](../how-to/check-your-data.md#five-checks-to-copy) has five to copy. A check that fails sets the table back to what it was (`block`, the default), leaves the data and stops what is built from it (`keep`), or only reports (`warn`). Reference: [Checks](../reference/checks.md). |
-| A **source** (a table that something else loads) | A table that already exists in the environment, which an asset reads by its name | Load it with `lakana table create` and `lakana table append`, register files under `raw/` with `lakana table create-external`, or write a [Python asset](python-assets.md) that fetches it. A check may test a table your project only reads: see [A table your project only reads](../how-to/check-your-data.md#a-table-your-project-only-reads). |
+| A **source** (a table that something else loads) | A table that already exists in the environment, which an asset reads by its name | Load it with `lakana table create` and `lakana table append`, register files under `raw/` with `lakana table create-external` (see [Register files as an external table](../how-to/register-files-as-an-external-table.md)), or write a [Python asset](python-assets.md) that fetches it. A check may test a table your project only reads: see [A table your project only reads](../how-to/check-your-data.md#a-table-your-project-only-reads). |
 | A **seed** (a small CSV kept in the repository) | The CSV stays in git; **loading is a command**: `lakana table create`, then `lakana table append` (`lakana table replace` to load a changed file) | A deploy does not load files. For a handful of rows an asset made of a `VALUES` list is deployed and versioned with the code, and needs no load. |
 | A **run** (build everything, in order) | A **deploy** and a **run**: `lakana deploy --env dev`, then `lakana run --env dev` | A deploy checks a commit and records it as a project version; a run executes that version, never your working copy. `lakana deploy --dry-run` shows what would change. |
 | A **selection** of models (`--select`, tags, graph operators) | `lakana run --select 'silver.*'`, with `--upstream` and `--downstream` | Patterns are shell globs over table names. A **job** in `lakana.yaml` gives a selection a name and, if you want, a cron schedule: [Run a job on a schedule](../how-to/run-a-job-on-a-schedule.md). |
@@ -88,7 +88,7 @@ stores tables in Apache Iceberg.
 ## How to move, in an order that keeps you safe
 
 1. **Start with the end of the pipeline.** Pick one table that people use, and move the tables it
-   needs, with the raw tables they read. A small project first, as in the tutorial.
+   needs, with the raw tables they read. A small project first, as in the guide.
 2. **Load the sources and seeds** into a `dev` environment, rewrite the files, and run.
 3. **Compare** the result with what your current tool builds, with queries on both, until the
    numbers agree. Keep the old pipeline running until they do.

@@ -312,19 +312,16 @@ function PreviewGrid({ page, cells, name }: PreviewGridProps): JSX.Element {
 
 /**
  * The Preview tab: runs the preview while it is open, cancels it when it is left, and shows the
- * rows, the masked columns and Refresh; a person who may not run queries, and an artifact, get
- * one line and no request.
+ * rows, the masked columns and Refresh; a person who may not run queries gets one line and no
+ * request. An artifact has no Preview tab.
  *
  * @returns The tab's content.
  */
 export function PreviewTab(): JSX.Element {
   const { t } = useTranslation();
-  const { ref, table } = useTableData();
-  const preview = usePreview(ref, table.kind);
+  const { ref } = useTableData();
+  const preview = usePreview(ref);
   const { phase, status, page, error } = preview;
-  if (phase === "artifact") {
-    return <p className="empty">{t("table.preview.artifact")}</p>;
-  }
   if (phase === "not_allowed") {
     return (
       <p className="empty">{t("table.preview.notAllowed", { environment: ref.environment })}</p>

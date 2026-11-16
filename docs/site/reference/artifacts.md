@@ -428,8 +428,8 @@ The command never deletes older versions: only a run prunes, with the asset's `k
 [Limit how many versions are kept](../how-to/limit-artifact-versions.md)). The namespace must
 exist; otherwise the command fails with `Namespace models not found in 'dev'.` A new artifact's
 name may not hold a control character, a format character (such as U+202E or a zero-width space)
-or a line or paragraph separator, as for a table: the refusal names the character as `U+XXXX`. An
-artifact that already has such a name keeps working.
+or a line or paragraph separator, as for a table: the refusal names the character as `U+XXXX`.
+Nor may it start or end with a space. An artifact that already has such a name keeps working.
 
 A new artifact cannot be uploaded under a name a deployed project declares: the upload answers
 ``` `models.churn` is declared by a deployed project. Defined in analytics/assets/models/churn.py. Choose another name, or remove it there and deploy first.```

@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { manageRoutes, retention } from "../../test/manage";
 import { renderShell } from "../../test/render";
@@ -19,6 +19,13 @@ function rows(): HTMLElement[] {
 }
 
 describe("ExpiringView", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: Date.parse("2026-11-16T06:00:00Z"), toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("lists each table with when it expires and why", async () => {
     renderShell(ADDRESS, { routes: manageRoutes() });
 
@@ -29,7 +36,10 @@ describe("ExpiringView", () => {
       "/catalog/prod/gold.sales/fact_sales",
     );
     expect(row).toHaveTextContent("gold.sales");
-    expect(row?.querySelector("time")?.getAttribute("datetime")).toBe("2026-12-12T06:00:00Z");
+    const time = row?.querySelector("time");
+    expect(time?.getAttribute("datetime")).toBe("2026-12-12T06:00:00Z");
+    expect(time).toHaveTextContent("in 26 days");
+    expect(row).not.toHaveTextContent("just now");
     expect(row).toHaveTextContent("30 days after its last activity, set for the table by ana");
   });
 

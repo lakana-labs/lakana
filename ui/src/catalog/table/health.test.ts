@@ -282,6 +282,51 @@ describe("bandWords", () => {
     expect(words("volume", { low: 0, high: 1, median: 1 })).toBe("0 to 1 row added");
   });
 
+  it("names the day of a weekday's volume band, as the server's alert does", () => {
+    const saturday = { low: 450, high: 550, median: 500, basis: "weekday", weekday: "saturday" };
+    expect(words("volume", saturday)).toBe("450 to 550 rows added on Saturdays");
+    expect(words("volume", { ...saturday, low: 0, high: 1, weekday: "monday" })).toBe(
+      "0 to 1 row added on Mondays",
+    );
+  });
+
+  it("names no day for a band of all days, an older band or a day it does not know", () => {
+    const band = { low: 900, high: 1_100, median: 1_000 };
+    const plain = "900 to 1,100 rows added";
+    expect(words("volume", { ...band, basis: "all" })).toBe(plain);
+    expect(words("volume", { ...band, basis: "all", weekday: "monday" })).toBe(plain);
+    expect(words("volume", { ...band, basis: "weekday", weekday: "Caturday" })).toBe(plain);
+    expect(words("volume", { ...band, basis: "weekday", weekday: null })).toBe(plain);
+  });
+
+  it("has a day word for every weekday the server stores", () => {
+    // The server's list, read from its source, so a renamed day fails here before it shows raw.
+    const source = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../../../packages/lakana-core/src/lakana_core/catalog/health_signals.py",
+      ),
+      "utf8",
+    );
+    const listed = /^WEEKDAYS = \(([^)]*)\)/m.exec(source)?.[1] ?? "";
+    const days = [...listed.matchAll(/"([^"]+)"/g)].map((match) => match[1] as string);
+    expect(days).toHaveLength(7);
+    expect(
+      days.map(
+        (weekday) =>
+          words("volume", { low: 1, high: 2, basis: "weekday", weekday }).split(" on ")[1],
+      ),
+    ).toEqual([
+      "Mondays",
+      "Tuesdays",
+      "Wednesdays",
+      "Thursdays",
+      "Fridays",
+      "Saturdays",
+      "Sundays",
+    ]);
+  });
+
   it("says the usual share of empty values", () => {
     expect(words("null_rate", { low: 0, high: 0.05, median: 0 })).toBe("up to 5.0 % empty");
     expect(words("null_rate", { low: 0.012, high: 0.2, median: 0.1 })).toBe(

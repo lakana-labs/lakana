@@ -1646,8 +1646,8 @@ class Tables:
             Dot-joined `"namespace.table"` name.
         schema
             The table's columns: a `pyarrow.Schema`, anything exposing the
-            Arrow C schema interface such as a polars `Schema` (both
-            converted via `lakana._arrow.schema_to_columns`), or an
+            Arrow C schema interface such as a polars `Schema` (the SDK turns
+            both into the list of columns the server takes), or an
             already-JSON-shaped list of `{"name", "type", "nullable"}` dicts. A polars
             `Schema` needs Polars 1.37 or newer; with an older Polars pass
             `pyarrow.schema(...)` or a list of columns instead.
@@ -1766,7 +1766,7 @@ class Tables:
         the table's now-current state is a reasonable default for a client
         that just wants its rows written.
 
-        Sent with its own `_APPEND_TIMEOUT_SECONDS` (300s) timeout, longer
+        Sent with its own timeout of 300 seconds, longer
         than `Client`'s general default, since an append body can be large
         enough that the general default is not a reasonable bound. **A timeout here is ambiguous,
         not a clean

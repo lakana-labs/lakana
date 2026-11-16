@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from sqlalchemy import exists, or_, select, update
@@ -457,6 +458,7 @@ class GrantService:
         group_name: str | None = None,
         action: Action | None = None,
         scope: Securable | None = None,
+        kind: SecurableKind | None = None,
         limit: int = 100,
         cursor: str | None = None,
     ) -> Page[Grant]:
@@ -478,6 +480,10 @@ class GrantService:
             Only grants that give this action: the action itself, or a role that carries it.
         scope
             Only grants on exactly this object.
+        kind
+            Only grants on objects of this kind: `SecurableKind.INSTANCE` lists the grants on the
+            whole instance, which apply to everything in it. With `scope`, it must be the
+            scope's own kind.
         limit
             Most grants returned.
         cursor
@@ -492,8 +498,8 @@ class GrantService:
         Raises
         ------
         ValidationError
-            If both `principal_name` and `group_name` are given, `limit` is below 1, or
-            `cursor` is not one this server issued for the grants list.
+            If both `principal_name` and `group_name` are given, `kind` is not `scope`'s kind,
+            `limit` is below 1, or `cursor` is not one this server issued for the grants list.
         NotFoundError
             If no principal has `principal_name`, or no group has `group_name`.
         PermissionDenied
@@ -505,6 +511,12 @@ class GrantService:
             raise ValidationError(
                 "Pass at most one of `principal_name` and `group_name`: a grant is made to a "
                 "principal or to a group, never to both."
+            )
+        if kind is not None and scope is not None and kind != scope.kind:
+            raise ValidationError(
+                f"`kind` asks for the grants on the {kind.value.lower()} level, but the object "
+                f"given (`environment`, `namespace`, `table`) is on the {scope.kind.value.lower()} "
+                "level. Leave out `kind`, or the object."
             )
         query = select(Grant).where(Grant.revoked_at.is_(None))
         if principal_name is not None:
@@ -522,6 +534,8 @@ class GrantService:
                 == (scope.namespace.joined() if scope.namespace is not None else None),
                 Grant.table == scope.table,
             )
+        if kind is not None:
+            query = query.where(Grant.kind == kind)
         return newest_first(
             self._session,
             query,
@@ -810,6 +824,33 @@ def mark_admin_holders(session: Session) -> None:
             .values(held_admin=True)
             .execution_options(synchronize_session="fetch")
         )
+
+
+def held_admin_ids(session: Session, rows: Iterable[Principal]) -> set[uuid.UUID]:
+    """Say which of these principals hold instance ADMIN now or have ever held it.
+
+    `Principal.held_admin`, or ADMIN covering them now (directly or through a group): a grant
+    made before the mark existed is backfilled by migration 0070, and this is the second net.
+    The one rule for who only the server operator may recover
+    (`lakana_core.identity.links.LinkService.issue_recovery`) and for what the principal read
+    routes show.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    rows
+        The principals.
+
+    Returns
+    -------
+    set of uuid.UUID
+        The ids of those that hold or held ADMIN.
+    """
+    found = list(rows)
+    unmarked = [row.id for row in found if not row.held_admin]
+    current = active_instance_admin_ids(session) if unmarked else set()
+    return {row.id for row in found if row.held_admin or row.id in current}
 
 
 def active_instance_admin_ids(

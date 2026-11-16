@@ -270,3 +270,11 @@ def test_the_header_shows_the_logo_and_the_tab_the_favicon() -> None:
     theme = _config()["theme"]
     assert (SITE / theme["logo"]).is_file()
     assert (SITE / theme["favicon"]).is_file()
+
+
+def test_cards_stay_flat_on_hover_and_focus() -> None:
+    css = _css()
+    rule = re.search(r"[^}]*\.grid\.cards > ul > li:hover[^{]*:focus-within[^{]*\{([^}]*)\}", css)
+    assert rule, "no hover/focus-within rule for cards"
+    assert "box-shadow: none" in rule.group(1)
+    assert "border-color: var(--color-edge)" in rule.group(1)

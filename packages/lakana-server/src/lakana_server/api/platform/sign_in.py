@@ -472,7 +472,7 @@ def passkey_sign_in(
     )
 
 
-@router.post("/step-up/options", response_model=PasskeyOptionsOut, responses=errors(401))
+@router.post("/step-up/options", response_model=PasskeyOptionsOut, responses=errors(401, 409))
 def step_up_options(
     principal: PrincipalRef = Depends(get_principal),
     passkeys: PasskeyService = Depends(get_passkey_service),
@@ -482,8 +482,9 @@ def step_up_options(
     Some actions in the web interface need a passkey touch no older than 15 minutes, such as
     adding or removing a passkey, issuing invites and recovery links and ending other people's
     sessions; without one they answer 403 `StepUpRequired`. The options list your own
-    passkeys. A token has no browser session, so it gets 409: step-up never applies to a
-    token's requests.
+    passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a
+    passkey on your account page first. A token has no browser session, so it gets 409:
+    step-up never applies to a token's requests.
 
     Parameters
     ----------

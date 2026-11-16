@@ -28,7 +28,7 @@ import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import { retentionWords } from "../retention";
 import "./actionStrings";
-import { ConfirmRow } from "./ConfirmRow";
+import { ConfirmRow, useConfirm } from "./ConfirmRow";
 import { useProtected } from "./useProtected";
 
 /** The three rules a table can have. */
@@ -107,6 +107,13 @@ function RetentionForm({ place, onClose, current }: RetentionFormProps): JSX.Ele
       setSaved(answer);
     });
   };
+  const confirm = useConfirm({
+    busy: attempt.busy,
+    disabled: rule === null,
+    onConfirm: () => {
+      save(rule as RetentionRule);
+    },
+  });
   if (saved !== null) {
     return (
       <>
@@ -167,10 +174,7 @@ function RetentionForm({ place, onClose, current }: RetentionFormProps): JSX.Ele
       <ConfirmRow
         attempt={attempt}
         label={t("table.actions.retention.save")}
-        disabled={rule === null}
-        onConfirm={() => {
-          save(rule as RetentionRule);
-        }}
+        confirm={confirm}
         onCancel={onClose}
       />
     </>
