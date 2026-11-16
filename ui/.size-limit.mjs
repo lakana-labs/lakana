@@ -52,7 +52,14 @@ const NAMED_LIMITS = [
   // share with the table's Actions (below).
   // Raised to the measured 3.41 kB (2026-11-16) + 10 %: the list frame, the Expiring list (when, due now and the
   // retention sentence) and the Orphans list with its Drop dialog and its sentences.
-  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.75 kB" },
+  // Lowered to the measured 2.98 kB (2026-11-16) + 10 %: the list frame and the paging by cursor
+  // moved into a chunk of their own (below) once an artifact's open uploads became their second
+  // importer.
+  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.28 kB" },
+  // Measured 1.1 kB (2026-11-16) + 10 %: the list frame (skeleton, the server's sentence with Try
+  // again, the empty sentence, the scrolling table and Show more) and the paging by cursor, which
+  // the Catalog's views share with an artifact's open uploads.
+  { name: "the list frame", prefix: "ViewList-", limit: "1.21 kB" },
   // Measured 2.29 kB (2026-11-16) + 10 %: the Drop dialog with the break-glass reason field and
   // the strings of the actions, which the table's Actions and the Catalog's views share.
   // Lowered to the measured 0.81 kB (2026-11-16) + 10 %: the reason field, the confirm row, the
@@ -161,7 +168,10 @@ const NAMED_LIMITS = [
   // Raised to the measured 4.39 kB (2026-11-16) + 10 %: Delete… on a version, its dialog with the
   // size and file count, the passkey and protected-environment steps (their code stays in
   // ProtectedReason-), and what the delete freed and kept, in the command line's words.
-  { name: "an artifact's Versions tab", prefix: "VersionsTab-", limit: "4.83 kB" },
+  // Raised to the measured 5.12 kB (2026-11-16) + 10 %: your open uploads below the versions,
+  // their reading that shows nothing without one or on a 403, Withdraw at once with the line that
+  // takes the focus, the server's sentence and the read again after a 409.
+  { name: "an artifact's Versions tab", prefix: "VersionsTab-", limit: "5.63 kB" },
   // Measured 3.83 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
   // included. The page and the two tabs share them, so the bundler gave them a chunk of their own,
   // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.

@@ -18,6 +18,7 @@ import { useTableData } from "../table/TableContext";
 import "./artifactStrings";
 import { DeleteVersionDialog } from "./DeleteVersionDialog";
 import { ShowMore, useShowMore } from "./ShowMore";
+import { UploadsBlock } from "./UploadsBlock";
 import { VersionFiles } from "./VersionFiles";
 
 /** How many characters of a commit the Stored column shows, as git's short form. */
@@ -293,6 +294,7 @@ export default function VersionsTab(): JSX.Element | null {
         )}
         <ShowMore rows={rows} />
       </section>
+      <UploadsBlock place={ref} />
       {deleting !== null && (
         <DeleteVersionDialog
           place={ref}

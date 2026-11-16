@@ -571,6 +571,17 @@
   gap: var(--space-2);
 }
 
+/* An open upload's id is a machine's word: monospace, like a column's type. */
+.upload-id {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+/* The line after a Withdraw: no room while it is empty. */
+.uploads-result {
+  margin: 0;
+}
+
 .versions-section .show-more,
 .version-files .show-more {
   margin-top: var(--space-3);

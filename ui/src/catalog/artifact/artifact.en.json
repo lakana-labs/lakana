@@ -52,5 +52,20 @@
     "keptByAnother": "{{amount}} that another version also uses",
     "keptByUpload": "{{amount}} that an open upload names",
     "keptForSweep": "{{amount}} that Lakana's periodic clean-up decides about: it removes what nothing else needs and keeps the rest"
+  },
+  "uploads": {
+    "heading": "Your open uploads",
+    "intro": "Uploads you began and did not finish. Each holds one of the artifact's upload places until you withdraw it or it expires. Files it already stored stay until Lakana's periodic clean-up finds that nothing needs them.",
+    "region": "Your open uploads of {{artifact}}",
+    "none": "You have no open uploads of {{artifact}}.",
+    "columns": {
+      "upload": "Upload",
+      "began": "Began",
+      "expires": "Expires",
+      "actions": "Actions"
+    },
+    "withdraw": "Withdraw",
+    "withdrawOf": "Withdraw upload {{id}}",
+    "withdrew": "Withdrew upload {{id}}."
   }
 }

@@ -27,8 +27,8 @@
     note: "artifacts are rows of the Catalog list, with the tables",
   }
 "artifact upload": { class: git, reason: "local file/dir upload from code or terminal" }
-"artifact uploads abort": { class: ui, part: 3 }
-"artifact uploads list": { class: ui, part: 3 }
+"artifact uploads abort": { class: ui, part: 3, done: true }
+"artifact uploads list": { class: ui, part: 3, done: true }
 "artifact versions delete": { class: ui, part: 3, done: true }
 "artifact versions list": { class: ui, part: 3, done: true }
 "audit list": { class: ui, part: 8 }
@@ -220,7 +220,7 @@
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}":
   { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}":
-  { class: ui, part: 3 }
+  { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}":
   { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
@@ -263,7 +263,7 @@
     done: true,
     note: "artifacts are rows of the Catalog list, with the tables",
   }
-"GET /api/v1/environments/{env}/artifacts/uploads": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/artifacts/uploads": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/checks": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deployments": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deploys": { class: read, part: 5 }

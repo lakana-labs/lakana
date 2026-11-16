@@ -143,7 +143,9 @@ export {
   downloadFile,
   getArtifact,
   getVersion,
+  listUploads,
   listVersions,
+  withdrawUpload,
 } from "./artifacts";
 export type {
   ArtifactFileOut,

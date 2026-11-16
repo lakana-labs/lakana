@@ -159,6 +159,19 @@ describe("VersionsTab", () => {
     expect(cells(zero)[4]).toBe("Deleted WHEN");
   });
 
+  it("shows your open uploads below the versions", async () => {
+    renderShell(TAB, { routes: artifactRoutes() });
+
+    const versions = await screen.findByRole("heading", { level: 2, name: "Versions" });
+    const uploads = await screen.findByRole("heading", { level: 2, name: "Your open uploads" });
+    expect(versions.compareDocumentPosition(uploads)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      await screen.findByRole("button", {
+        name: "Withdraw upload 6f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f",
+      }),
+    ).toBeVisible();
+  });
+
   it("says when the artifact has no version yet", async () => {
     renderShell(TAB, { routes: { ...artifactRoutes(), [VERSIONS]: { status: 200, body: [] } } });
 
