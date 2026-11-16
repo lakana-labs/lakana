@@ -208,6 +208,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "conflict",
         "in_run",
         "is_protected",
+        # the grant migration `0080` kept of identical ones, on each other copy's
+        # `GRANT_REVOKED` (#673)
+        "kept_grant_id",
         "kept_not_restored",
         "kept_reason",
         "kept_restored",

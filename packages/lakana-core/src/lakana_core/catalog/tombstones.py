@@ -39,6 +39,7 @@ from lakana_core.auth import PrincipalRef, Securable
 from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.catalog.locations import lock_location
 from lakana_core.catalog.translations import translation_rows
+from lakana_core.grants.duplicates import live_twin
 from lakana_core.grants.revocation import POLICY_MODELS, RevokedPolicy, revoke_attached
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
@@ -832,7 +833,8 @@ def unrevoke(
 
     Uncommitted. A row comes back only if it is still revoked at exactly `revoked_at`; one
     deleted since, or revoked again since, stays as it is, and an entry of an unknown kind is
-    ignored.
+    ignored. A grant whose twin is live (`lakana_core.grants.duplicates`) stays revoked too: the
+    access is there already, and the database holds one live grant of each twin set.
 
     Parameters
     ----------
@@ -858,12 +860,16 @@ def unrevoke(
         policy = session.get(model, uuid.UUID(entry["id"]), populate_existing=True)
         if policy is None or policy.revoked_at is None or policy.revoked_at != revoked_at:
             continue
-        policy.revoked_at = None
-        policy.revoked_by = None
         if rebind is not None:
             rebind(policy)
+        if isinstance(policy, Grant) and live_twin(session, policy) is not None:
+            # A live grant gives the same access already (two copies from before #673, or
+            # one made since); bringing this one back would only duplicate it.
+            continue
+        policy.revoked_at = None
+        policy.revoked_by = None
+        session.flush()
         restored.append({"kind": entry["kind"], "id": entry["id"]})
-    session.flush()
     return restored
 
 

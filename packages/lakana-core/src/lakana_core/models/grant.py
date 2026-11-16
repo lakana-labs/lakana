@@ -3,13 +3,51 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, String, Uuid
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Uuid, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.auth import Action, SecurableKind
 from lakana_core.grants.roles import Role
 from lakana_core.models.base import Base, UTCDateTime
+
+_SUBJECT_AND_ACCESS = (
+    "coalesce(principal_id, group_id)",
+    "coalesce(role, '')",
+    "coalesce(action, '')",
+)
+"""The subject and what is granted, without a NULL: exactly one of each pair is set."""
+
+LIVE_GRANT_TARGETS: dict[SecurableKind, tuple[str, ...]] = {
+    SecurableKind.INSTANCE: (),
+    SecurableKind.ENVIRONMENT: ("environment_id",),
+    SecurableKind.NAMESPACE: ("environment_id", "namespace"),
+    SecurableKind.TABLE: ("table_id",),
+}
+"""The columns that bind a live grant of each kind to its target, in its unique index."""
+
+
+def _live_grant_index(kind: SecurableKind) -> Index:
+    """Build one kind's unique index of live grants.
+
+    Parameters
+    ----------
+    kind
+        The kind.
+
+    Returns
+    -------
+    Index
+        `ux_grants_live_<kind>`. Migration `0080` creates the same, written out on its own.
+    """
+    condition = text(f"revoked_at IS NULL AND kind = '{kind.name}'")
+    return Index(
+        f"ux_grants_live_{kind.name.lower()}",
+        *(text(e) for e in (*_SUBJECT_AND_ACCESS, *LIVE_GRANT_TARGETS[kind])),
+        unique=True,
+        sqlite_where=condition,
+        postgresql_where=condition,
+    )
 
 
 class Grant(Base):
@@ -24,6 +62,11 @@ class Grant(Base):
     `namespace` is stored unit-separator-joined, matching `Namespace.path`'s
     convention, so a grant on `gold` is findable via a prefix match against
     `gold\x1fbronze` the same way `Namespace` resolves child namespaces.
+
+    At most one live grant of each kind exists per subject, role or action, and target
+    (`ux_grants_live_<kind>`, #673): a target id that is NULL, because its row was deleted, is
+    distinct from every other, so grants whose target is gone never collide.
+    `lakana_core.grants.duplicates` finds the twin the index would refuse.
 
     Soft-deleted on revoke (`revoked_at`/`revoked_by`), matching
     `PersonalAccessToken`/`TaskToken`'s existing revocation pattern — a
@@ -40,6 +83,7 @@ class Grant(Base):
             "(role IS NULL) != (action IS NULL)",
             name="exactly_one_grant",
         ),
+        *(_live_grant_index(kind) for kind in SecurableKind),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
