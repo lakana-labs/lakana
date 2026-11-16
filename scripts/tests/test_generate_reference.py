@@ -15,12 +15,15 @@ from scripts.generate_reference import (
     CLI_PAGE,
     OPENAPI_PAGE,
     SETTINGS_PAGE,
+    SITE_PREFIX,
     docstring_parameters,
     main,
     real_pages,
+    render_api_nav,
     render_cli,
     render_openapi,
     render_settings,
+    splice_region,
 )
 
 
@@ -261,17 +264,61 @@ def test_check_fails_on_a_stale_page_and_names_the_command(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A page that differs from the code is reported with the regenerating command."""
-    pages = {"reference/cli.md": "fresh\n"}
-    assert main(["--check"], site=tmp_path, generate=lambda: pages) == 1
+    pages = {"docs/site/reference/cli.md": "fresh\n"}
+    assert main(["--check"], root=tmp_path, generate=lambda: pages) == 1
     out = capsys.readouterr().err
     assert "reference/cli.md" in out
     assert "uv run python scripts/generate_reference.py" in out
-    assert main([], site=tmp_path, generate=lambda: pages) == 0
-    assert main([], site=tmp_path, generate=lambda: pages) == 0
-    assert (tmp_path / "reference" / "cli.md").read_text(encoding="utf-8") == "fresh\n"
-    assert main(["--check"], site=tmp_path, generate=lambda: pages) == 0
-    pages["reference/cli.md"] = "newer\n"
-    assert main(["--check"], site=tmp_path, generate=lambda: pages) == 1
+    assert main([], root=tmp_path, generate=lambda: pages) == 0
+    assert main([], root=tmp_path, generate=lambda: pages) == 0
+    page = tmp_path / "docs" / "site" / "reference" / "cli.md"
+    assert page.read_text(encoding="utf-8") == "fresh\n"
+    assert main(["--check"], root=tmp_path, generate=lambda: pages) == 0
+    pages["docs/site/reference/cli.md"] = "newer\n"
+    assert main(["--check"], root=tmp_path, generate=lambda: pages) == 1
+
+
+def test_splice_region_replaces_the_body_at_the_markers_indent() -> None:
+    """The body replaces the lines between the markers, indented like the begin marker."""
+    text = "a:\n  # generated:begin x\n  - old\n  # generated:end x\nb\n"
+    assert splice_region(text, "x", "- one\n- two:\n    - p.md\n", path="m.yml") == (
+        "a:\n  # generated:begin x\n  - one\n  - two:\n      - p.md\n  # generated:end x\nb\n"
+    )
+
+
+def test_splice_region_refuses_missing_or_doubled_markers() -> None:
+    """A region without exactly one begin and one end marker is an error naming the file."""
+    for text in ("no markers\n", "# generated:begin x\n# generated:begin x\n# generated:end x\n"):
+        with pytest.raises(ValueError, match=r"m\.yml.*generated region x"):
+            splice_region(text, "x", "- a\n", path="m.yml")
+
+
+def test_render_api_nav_groups_the_parts() -> None:
+    """Each part is a navigation group listing its pages."""
+    assert render_api_nav([("Command line", ["reference/cli.md", "reference/cli/env.md"])]) == (
+        "- Command line:\n    - reference/cli.md\n    - reference/cli/env.md\n"
+    )
+
+
+def test_check_reports_a_left_over_page_in_an_owned_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A page the code no longer produces, in a generated directory, fails the check."""
+    left = tmp_path / "docs/site/reference/rest/gone.md"
+    left.parent.mkdir(parents=True)
+    left.write_text("old\n", encoding="utf-8")
+    assert main(["--check"], root=tmp_path, generate=lambda: {}) == 1
+    assert "docs/site/reference/rest/gone.md" in capsys.readouterr().err
+
+
+def test_writing_deletes_a_left_over_page(tmp_path: Path) -> None:
+    """Regenerating removes a page the code no longer produces and keeps the others."""
+    keep = {"docs/site/reference/rest/kept.md": "k\n"}
+    gone = tmp_path / "docs/site/reference/rest/gone.md"
+    gone.parent.mkdir(parents=True)
+    gone.write_text("old\n", encoding="utf-8")
+    assert main([], root=tmp_path, generate=lambda: keep) == 0
+    assert not gone.exists() and (tmp_path / "docs/site/reference/rest/kept.md").is_file()
 
 
 @pytest.mark.slow
@@ -334,7 +381,7 @@ def test_the_openapi_document_describes_the_routers_it_is_given() -> None:
 @pytest.mark.slow
 def test_the_committed_openapi_document_is_the_platform_api_only() -> None:
     """Every route is under /api/; the Iceberg REST catalog has its own specification."""
-    doc = json.loads(real_pages()[OPENAPI_PAGE])
+    doc = json.loads(real_pages()[SITE_PREFIX + OPENAPI_PAGE])
     assert doc["paths"]
     assert [path for path in doc["paths"] if not path.startswith("/api/")] == []
 
@@ -349,7 +396,7 @@ def test_an_instance_serves_the_committed_platform_routes(tmp_path: Path) -> Non
     served = create_app(
         Settings(database=DatabaseConfig(url=f"sqlite:///{tmp_path}/x.db"))
     ).openapi()
-    committed = json.loads(real_pages()[OPENAPI_PAGE])
+    committed = json.loads(real_pages()[SITE_PREFIX + OPENAPI_PAGE])
     platform = {path: item for path, item in served["paths"].items() if path.startswith("/api/")}
     assert platform == committed["paths"]
 
@@ -363,7 +410,7 @@ _INTERNAL = re.compile(
 @pytest.mark.slow
 def test_no_setting_description_names_internal_code() -> None:
     """The settings page is user documentation: a description names no internal code."""
-    page = real_pages()[SETTINGS_PAGE]
+    page = real_pages()[SITE_PREFIX + SETTINGS_PAGE]
     rows = [line for line in page.splitlines() if line.startswith("| `LAKANA_")]
     assert rows
     bad = [row.split("|")[1].strip() for row in rows if _INTERNAL.search(row.split("|", 5)[5])]
@@ -387,7 +434,7 @@ def _operations() -> list[tuple[str, str, dict]]:
     list of tuple
         The method, the path and the operation object of each route.
     """
-    doc = json.loads(real_pages()[OPENAPI_PAGE])
+    doc = json.loads(real_pages()[SITE_PREFIX + OPENAPI_PAGE])
     return [
         (method.upper(), path, operation)
         for path, item in doc["paths"].items()

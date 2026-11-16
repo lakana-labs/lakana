@@ -171,8 +171,12 @@ nav:
           - reference/network-settings.md
           - reference/log-events.md
       - API reference:
-          - reference/cli.md
-          - reference/rest-api.md
+          # generated:begin api-nav — written by scripts/generate_reference.py; do not edit by hand
+          - Command line:
+              - reference/cli.md
+          - REST API:
+              - reference/rest-api.md
+          # generated:end api-nav
   - Project:
       - explanation/roadmap.md
       - explanation/support.md

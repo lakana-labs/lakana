@@ -8,8 +8,13 @@ of the model's docstring). ``docs/site/reference/openapi.json`` is the OpenAPI d
 platform REST API (every route under ``/api/``; the Iceberg REST catalog is versioned by the
 Iceberg specification and left out), the snapshot ``scripts/openapi_diff.py`` compares in CI.
 
+The script also owns the directories in ``OWNED_DIRS`` (a page there that the code no longer
+produces is deleted) and the ``api-nav`` region of ``mkdocs.yml``, the lines between the
+``generated:begin api-nav`` and ``generated:end api-nav`` markers, which list the API reference.
+
 No page is edited by hand. ``--check`` writes nothing and fails when a page differs from
-what the code produces, naming the page and the command that regenerates it. The Markdown pages
+what the code produces, or is left over in an owned directory, naming the file and the command
+that regenerates it. The Markdown pages
 contain no fenced or indented code, because the block checker (``scripts/docs_blocks.py``) can
 only judge blocks that a person marked.
 
@@ -37,7 +42,8 @@ from typer._click import Command, Context, Parameter
 from typer.core import TyperArgument, TyperGroup, TyperOption
 
 ROOT = Path(__file__).resolve().parents[1]
-SITE = ROOT / "docs" / "site"
+SITE_PREFIX = "docs/site/"
+"""The repository path of the site; the page constants below are relative to it."""
 CLI_PAGE = "reference/cli.md"
 SETTINGS_PAGE = "reference/settings.md"
 OPENAPI_PAGE = "reference/openapi.json"
@@ -46,6 +52,14 @@ OPENAPI_VERSION = "unreleased"
 """The snapshot's ``info.version``; the release workflow writes the release's version instead."""
 CONTRACT_URL = "https://lakana-labs.github.io/lakana/reference/rest-api/"
 REGENERATE = "uv run python scripts/generate_reference.py"
+OWNED_DIRS: tuple[str, ...] = (
+    "docs/site/reference/cli",
+    "docs/site/reference/rest",
+    "docs/site/reference/sdk",
+)
+"""Directories only this script writes: a page in them that the code no longer produces goes."""
+NAV_REGION = "api-nav"
+"""The marked region of ``mkdocs.yml`` that lists the API reference pages."""
 _MAX_HEADING = 6
 _NOT_DOCUMENTED = "(not documented)"
 
@@ -601,13 +615,79 @@ def render_openapi(routers: Sequence[APIRouter]) -> str:
     return json.dumps(app.openapi(), indent=2, ensure_ascii=False) + "\n"
 
 
-def real_pages() -> dict[str, str]:
+def splice_region(text: str, name: str, body: str, *, path: str) -> str:
+    """Replace the lines between a region's ``generated:begin`` and ``generated:end`` markers.
+
+    Parameters
+    ----------
+    text
+        The file's text.
+    name
+        The region's name, as the markers spell it.
+    body
+        The new lines of the region, unindented; each non-empty line is indented like the
+        begin marker.
+    path
+        The file's repository path, named in the error.
+
+    Returns
+    -------
+    str
+        The text with the region's body replaced.
+
+    Raises
+    ------
+    ValueError
+        When the begin and end markers are not each present exactly once, begin first.
+    """
+    lines = text.splitlines(keepends=True)
+    begins = [i for i, line in enumerate(lines) if f"generated:begin {name}" in line]
+    ends = [i for i, line in enumerate(lines) if f"generated:end {name}" in line]
+    if len(begins) != 1 or len(ends) != 1 or begins[0] > ends[0]:
+        raise ValueError(
+            f"{path}: the markers of the generated region {name} are missing or appear more "
+            f"than once; restore one `generated:begin {name}` and one `generated:end {name}` line"
+        )
+    begin, end = begins[0], ends[0]
+    marker = lines[begin]
+    indent = marker[: len(marker) - len(marker.lstrip())]
+    spliced = [indent + line if line.strip() else line for line in body.splitlines(keepends=True)]
+    return "".join(lines[: begin + 1] + spliced + lines[end:])
+
+
+def render_api_nav(parts: Sequence[tuple[str, Sequence[str]]]) -> str:
+    """Render the navigation of the API reference as unindented YAML.
+
+    Parameters
+    ----------
+    parts
+        Each part's title and its pages, as paths under ``docs/site``.
+
+    Returns
+    -------
+    str
+        One navigation group per part, listing its pages in order.
+    """
+    out: list[str] = []
+    for title, pages in parts:
+        out.append(f"- {title}:\n")
+        out.extend(f"    - {page}\n" for page in pages)
+    return "".join(out)
+
+
+def real_pages(root: Path = ROOT) -> dict[str, str]:
     """Generate the pages from the real code.
+
+    Parameters
+    ----------
+    root
+        The repository root; ``mkdocs.yml`` is read from it.
 
     Returns
     -------
     dict of str to str
-        The Markdown of each page, by path under ``docs/site``.
+        The text of each generated file, by repository path, including ``mkdocs.yml`` with its
+        ``api-nav`` region written.
     """
     from lakana.cli.app import build_app
     from lakana_core.config import Settings as CoreSettings
@@ -615,11 +695,17 @@ def real_pages() -> dict[str, str]:
     from lakana_server.app import ROUTERS
     from lakana_server.settings import Settings as ServerSettings
 
+    nav = render_api_nav([("Command line", [CLI_PAGE]), ("REST API", ["reference/rest-api.md"])])
     return {
-        CLI_PAGE: render_cli(build_app(), prog="lakana"),
-        SETTINGS_PAGE: render_settings([("server", ServerSettings), ("worker", CoreSettings)]),
-        OPENAPI_PAGE: render_openapi(
+        SITE_PREFIX + CLI_PAGE: render_cli(build_app(), prog="lakana"),
+        SITE_PREFIX + SETTINGS_PAGE: render_settings(
+            [("server", ServerSettings), ("worker", CoreSettings)]
+        ),
+        SITE_PREFIX + OPENAPI_PAGE: render_openapi(
             [router for router in ROUTERS if router is not iceberg_router]
+        ),
+        "mkdocs.yml": splice_region(
+            (root / "mkdocs.yml").read_text(encoding="utf-8"), NAV_REGION, nav, path="mkdocs.yml"
         ),
     }
 
@@ -627,24 +713,28 @@ def real_pages() -> dict[str, str]:
 def main(
     argv: Sequence[str] | None = None,
     *,
-    site: Path = SITE,
+    root: Path = ROOT,
     generate: Callable[[], Mapping[str, str]] = real_pages,
 ) -> int:
-    """Write the generated pages, or check that they are current.
+    """Write the generated files, or check that they are current.
+
+    Besides writing what ``generate`` produces, a Markdown page in one of ``OWNED_DIRS`` that it
+    no longer produces is deleted, or, under ``--check``, reported.
 
     Parameters
     ----------
     argv
         Command-line arguments; ``None`` reads ``sys.argv``.
-    site
-        The directory the page paths are relative to.
+    root
+        The directory the file paths are relative to (the repository root).
     generate
-        Produces the pages; replaced in tests.
+        Produces the files, by repository path; replaced in tests.
 
     Returns
     -------
     int
-        0 when the pages were written or are current, 1 when ``--check`` finds a stale page.
+        0 when the files were written or are current, 1 when ``--check`` finds a stale or
+        left-over file.
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument(
@@ -652,21 +742,40 @@ def main(
     )
     args = parser.parse_args(argv)
     stale = 0
-    for relative, text in generate().items():
-        path = site / relative
+    pages = generate()
+    for relative, text in pages.items():
+        path = root / relative
         current = path.read_text(encoding="utf-8") if path.exists() else None
         if args.check:
             if current != text:
                 stale += 1
                 print(
-                    f"docs/site/{relative} is stale: it differs from what the code produces. "
+                    f"{relative} is stale: it differs from what the code produces. "
                     f"Regenerate it with `{REGENERATE}` and commit the result.",
                     file=sys.stderr,
                 )
         elif current != text:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-            print(f"wrote docs/site/{relative}")
+            print(f"wrote {relative}")
+    for owned in OWNED_DIRS:
+        directory = root / owned
+        if not directory.is_dir():
+            continue
+        for page in sorted(directory.rglob("*.md")):
+            relative = page.relative_to(root).as_posix()
+            if relative in pages:
+                continue
+            if args.check:
+                stale += 1
+                print(
+                    f"{relative} is left over: the code no longer produces it. "
+                    f"Regenerate with `{REGENERATE}` and commit the deletion.",
+                    file=sys.stderr,
+                )
+            else:
+                page.unlink()
+                print(f"deleted {relative}")
     return 1 if stale else 0
 
 

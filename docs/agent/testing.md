@@ -445,6 +445,12 @@ route changes, run
 `uv run python scripts/generate_reference.py` and commit the pages; `--check` fails, naming the
 stale page, and runs in CI's `docs` job and in `scripts/tests/test_generate_reference.py`.
 
+The generator also owns the directories `reference/cli/`, `reference/rest/` and `reference/sdk/`:
+a page there that the code no longer produces is deleted when it runs, and `--check` reports it
+as left over. It owns the `api-nav` region of `mkdocs.yml` too, the `API reference` entries
+between the `generated:begin api-nav` and `generated:end api-nav` markers. Never edit inside
+`generated:begin`/`generated:end` markers: change the code and regenerate.
+
 List a new page in its tab's section under `nav` in `mkdocs.yml`, and link it from its tab's
 index (`test_each_tab_index_links_every_page_of_its_tab`). Every entry must be a page and every
 page an entry, once; `scripts/tests/test_docs_site.py` fails otherwise. Link to other pages with
@@ -682,7 +688,7 @@ A change under `docs/examples/` is not a documentation-only change, so CI runs t
 ```bash
 uv sync --locked --all-packages --group docs
 uv run python scripts/docs_blocks.py            # check every block; add --fix to rewrite synced ones
-uv run python scripts/generate_reference.py     # rewrite the CLI, settings and OpenAPI references (--check: fail when stale)
+uv run python scripts/generate_reference.py     # rewrite the generated references and the api-nav region (--check: fail when stale or left over)
 uv run --group docs zensical build --strict     # build into site-build/ (a traceback after the message is normal on failure)
 uv run python scripts/check_built_site.py site-build   # external resources, missing files and URLs outside /lakana/
 uv run --group docs zensical serve              # preview on http://localhost:8000
