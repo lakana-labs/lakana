@@ -33,7 +33,7 @@ import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { shellQuote } from "../shell/shellQuote";
 import { useFocusAfter } from "../shell/useFocusAfter";
-import { markedText } from "../shell/VisibleText";
+import { markedText, VisibleText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import { problemText } from "../sign-in/messages";
 import { httpsForm, queryOrFragment, type RecognisedHost, recogniseHost } from "./hosts";
@@ -156,7 +156,7 @@ function failure(t: ReturnType<typeof useTranslation>["t"], probe: RepositoryPro
   if (probe.outcome === "no_worker") {
     return t("settings.connect.keys.noWorker");
   }
-  return probe.message ?? t("errors.unexpected");
+  return probe.message === null ? t("errors.unexpected") : markedText(probe.message);
 }
 
 /** Properties of {@link CheckOutcome}. */
@@ -330,7 +330,12 @@ function HostKeys({ keys, ticked, onToggle, locked }: HostKeysProps): JSX.Elemen
       <ul className="connect-keys">
         {shown.map((key) => (
           <li key={key.line}>
-            <span>{key.type}</span> <code>{key.fingerprint}</code>
+            <span>
+              <VisibleText text={key.type} />
+            </span>{" "}
+            <code>
+              <VisibleText text={key.fingerprint} />
+            </code>
             <label>
               <input
                 type="checkbox"
@@ -408,7 +413,9 @@ function MadeKeys({ made, name, host }: MadeKeysProps): JSX.Element {
               <li key={key.environment}>
                 <EnvironmentLabel environment={key.environment} />{" "}
                 {!key.made && <span>{t("settings.connect.create.earlier")}</span>}{" "}
-                <code>{key.fingerprint}</code>
+                <code>
+                  <VisibleText text={key.fingerprint} />
+                </code>
                 <CopyLine text={key.public_key} copyLabel={t("settings.connect.create.copy")} />
               </li>
             ))}
@@ -418,7 +425,7 @@ function MadeKeys({ made, name, host }: MadeKeysProps): JSX.Element {
       )}
       {made.notes.map((note) => (
         <p key={note} className="page-notice">
-          {note}
+          <VisibleText text={note} />
         </p>
       ))}
       {made.skipped.length > 0 && (
@@ -477,7 +484,7 @@ function TestAccess({ name, environment, host, headingRef }: TestAccessProps): J
       <CheckOutcome
         check={check}
         waiting={t("settings.connect.test.waiting")}
-        done={ok?.message ?? ""}
+        done={markedText(ok?.message ?? "")}
       />
       {ok !== null && (
         <>
