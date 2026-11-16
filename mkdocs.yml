@@ -106,6 +106,8 @@ nav:
           - how-to/see-where-a-table-is-defined.md
           - how-to/drop-and-restore-a-table.md
           - how-to/let-tables-expire.md
+          - how-to/organise-tables-in-namespaces.md
+          - how-to/register-files-as-an-external-table.md
       - Run an instance:
           - how-to/deploy-with-compose.md
           - how-to/operate-for-others.md

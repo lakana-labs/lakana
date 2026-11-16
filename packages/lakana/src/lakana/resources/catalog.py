@@ -221,7 +221,11 @@ class Catalog:
                 TreeEnvironment(
                     name=env["name"],
                     count=env["count"],
-                    namespaces=[TreeNamespace(n["path"], n["count"]) for n in env["namespaces"]],
+                    namespaces=[
+                        TreeNamespace(n["path"], n["count"], tuple(n.get("actions", [])))
+                        for n in env["namespaces"]
+                    ],
+                    actions=tuple(env.get("actions", [])),
                 )
                 for env in body["environments"]
             ],

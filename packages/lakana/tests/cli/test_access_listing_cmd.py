@@ -86,6 +86,14 @@ def test_grant_list_sends_every_filter_and_names_the_next_page(tmp_path: Path) -
     )
 
 
+def test_grant_list_by_kind_lists_one_level_and_keeps_it_on_the_next_page(tmp_path: Path) -> None:
+    api = _paged("/api/v1/grants", [_GRANT], "next-1")
+    result = invoke(make_state(tmp_path, api), "grant", "list", "--kind", "instance")
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"kind": "INSTANCE"}
+    assert "More results: lakana grant list --kind INSTANCE --cursor next-1" in result.stdout
+
+
 def test_grant_list_without_a_filter_sends_none(tmp_path: Path) -> None:
     api = _paged("/api/v1/grants", [_GRANT], None)
     api.on("GET", "/api/v1/principals", json=[])

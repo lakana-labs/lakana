@@ -1335,10 +1335,16 @@ class TreeNamespaceOut(BaseModel):
         Its path, dotted.
     count
         The readable tables in it and beneath it.
+    actions
+        What the reader's rights allow on it: ``create_namespace``, ``create_external_table``,
+        ``drop``. Rights only; nothing about protection, git or emptiness.
     """
 
     path: str
     count: int
+    actions: list[Literal["create_namespace", "create_external_table", "drop"]] = Field(
+        default_factory=list
+    )
 
 
 class TreeEnvironmentOut(BaseModel):
@@ -1352,11 +1358,14 @@ class TreeEnvironmentOut(BaseModel):
         The readable tables in it.
     namespaces
         Its namespaces the caller is shown, by path.
+    actions
+        What the reader's rights allow on it: ``create_namespace``. Rights only.
     """
 
     name: str
     count: int
     namespaces: list[TreeNamespaceOut]
+    actions: list[Literal["create_namespace"]] = Field(default_factory=list)
 
 
 class TableTreeOut(BaseModel):
@@ -2149,12 +2158,17 @@ class PrincipalOut(BaseModel):
     picture
         The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),
         or `null` without one; it changes whenever the picture does.
+    held_admin
+        Whether the principal holds or has ever held the `ADMIN` role on the instance, directly
+        or through a group. Such a person is recovered only by the server operator. `null`
+        unless the caller is an administrator (the `ADMIN` role on the instance).
     """
 
     name: str
     type: str
     is_active: bool
     picture: str | None = None
+    held_admin: bool | None = None
 
     model_config = {"from_attributes": True}
 

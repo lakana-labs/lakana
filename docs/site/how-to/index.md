@@ -58,6 +58,8 @@ A how-to guide solves one task by the shortest path, for someone who knows what 
 - [See where a table is defined](see-where-a-table-is-defined.md): find the file, line and commit in git that define a table, and read that file in the terminal or the web interface.
 - [Drop and restore a table](drop-and-restore-a-table.md): drop a table, restore it with its data and access rules during the undo period, or delete its files now; delete and restore a whole environment the same way.
 - [Let tables expire](let-tables-expire.md): let a development table, or every table of an environment, be dropped once nobody has used it for a while; see what expires soon, and keep a table.
+- [Organise tables in namespaces](organise-tables-in-namespaces.md): create a namespace, see them, and delete an empty one, on the command line or in the Catalog, also in a protected environment.
+- [Register files as an external table](register-files-as-an-external-table.md): make files that already lie under `raw/` readable as a table, the rules for its location, its formats, and what each refusal means, on the command line or in the Catalog.
 
 ## Run an instance
 

@@ -35,6 +35,7 @@ AND.
 | Group | `--group`, `group_name` | the grants made to this group; at most one of principal and group |
 | Action | `--action`, `action` | the grants that give this action, in any letter case: a grant of the action itself, or of a role that carries it |
 | Object | `--env`, `--ns`, `--table`; `environment`, `namespace`, `table` | the grants on exactly this object: a table (all three), a namespace (environment and namespace) or an environment (environment alone). Grants on an object that contains it are not listed |
+| Kind | `--kind`, `kind` | the grants on every object of one kind, in any letter case: `INSTANCE` (the grants on the whole instance, such as the `ADMIN` role, which apply to every environment, namespace and table), `ENVIRONMENT`, `NAMESPACE` or `TABLE`. With an object filter it must be that object's kind. The filter needs a server of this release or later: an older server ignores `kind` and answers with all grants |
 
 The order is the time a grant was made, newest first; equal times by id. `--limit` and `--cursor`
 page through the list as they do for the [runs, queries and deploys lists](lists.md#paging): 1 to
@@ -114,11 +115,24 @@ What the answer takes into account:
 or group was created, newest first; equal times by id. `--limit` and `--cursor` page as for the
 grants.
 
+A principal (`lakana principal list` and `get`, `lakana group members`, and their routes) has
+these fields:
+
+| Field | Meaning |
+|---|---|
+| `name` | the principal's name |
+| `type` | `USER` (a person) or `SERVICE_ACCOUNT` |
+| `is_active` | `false` once it is deactivated |
+| `held_admin` | whether it holds the `ADMIN` role on the instance now or has ever held it, directly or through a group. Only the server operator can recover such a person ([Lost your passkey](../how-to/lost-your-passkey.md)); taking the role away does not change that. Shown only to an administrator: anyone else, such as someone granted only `MANAGE_PRINCIPAL`, gets `null` (an empty cell) |
+
+The REST answer also has `picture`, the etag of the profile picture, which the web interface shows.
+
 ## Refusals
 
 | Cause | Answer |
 |---|---|
 | `principal_name` and `group_name` together | `422`; a grant is made to one or the other |
+| a `kind` that is not one of the four, or not the kind of the object given | `422`; the message names the kinds, or the two levels |
 | a namespace without its environment, a table without its namespace | `422`; the message names what is missing |
 | an unknown action | `422`; the message lists the actions |
 | `READ_QUERY_TEXT` granted on an environment, a namespace or a table | `422`; it is given on the instance only, and the message shows the command |

@@ -223,7 +223,7 @@ describe("AccessTab", () => {
     }
   });
 
-  it("shows administrators who has access at the table, its namespaces and the environment", async () => {
+  it("shows administrators who has access at the table, its namespaces, the environment and the instance", async () => {
     const { server } = renderShell(TAB);
 
     const who = await section("Who has access");
@@ -235,9 +235,11 @@ describe("AccessTab", () => {
       "On namespace gold.sales",
       "On namespace gold",
       "On environment prod",
+      "On the whole instance",
     ]);
-    await within(who).findAllByText("No grants at this level.");
-    expect(within(who).getAllByText("No grants at this level.")).toHaveLength(3);
+    await waitFor(() => {
+      expect(within(who).getAllByText("No grants at this level.")).toHaveLength(4);
+    });
     expect(
       server.sent.filter((request) => request.path.startsWith(GRANTS_PATH)).map((r) => r.path),
     ).toEqual([
@@ -245,6 +247,7 @@ describe("AccessTab", () => {
       `${GRANTS_PATH}?environment=prod&namespace=gold.sales&limit=200`,
       `${GRANTS_PATH}?environment=prod&namespace=gold&limit=200`,
       `${GRANTS_PATH}?environment=prod&limit=200`,
+      `${GRANTS_PATH}?kind=INSTANCE&limit=200`,
     ]);
   });
 
@@ -330,8 +333,9 @@ describe("AccessTab", () => {
       "lakana grant list --env 'prod' --ns 'gold.sales'",
       "lakana grant list --env 'prod' --ns 'gold'",
       "lakana grant list --env 'prod'",
+      "lakana grant list --kind INSTANCE",
     ]);
-    expect(within(who).getAllByText(/^The first 200 at this level;/)).toHaveLength(4);
+    expect(within(who).getAllByText(/^The first 200 at this level;/)).toHaveLength(5);
   });
 
   it("says nothing about a first 200 when a level has exactly 200 grants", async () => {
@@ -340,21 +344,36 @@ describe("AccessTab", () => {
     const who = await section("Who has access");
     // Plain selectors: role queries over 800 rows are slow.
     await waitFor(() => {
-      expect(who.querySelectorAll("tbody tr")).toHaveLength(800);
+      expect(who.querySelectorAll("tbody tr")).toHaveLength(1000);
     });
     expect(who.querySelector(".grants-cut")).toBeNull();
     expect(who.textContent).not.toContain("lists all");
   });
 
-  it("says that grants on the whole instance are not listed, and which command lists them", async () => {
-    renderShell(TAB);
+  it("lists the grants on the whole instance as their own level, with names and roles", async () => {
+    renderShell(TAB, {
+      routes: {
+        [`GET ${GRANTS_PATH}`]: (request) => ({
+          status: 200,
+          body: request.path.includes("kind=INSTANCE")
+            ? [
+                grant({
+                  kind: "INSTANCE",
+                  environment: null,
+                  namespace: null,
+                  table: null,
+                  role: "ADMIN",
+                }),
+              ]
+            : [],
+        }),
+      },
+    });
 
-    const who = await section("Who has access");
-    const line = within(who).getByText(/^Grants on the whole instance, such as the Admin role,/);
-    expect(line).toHaveTextContent(
-      "Grants on the whole instance, such as the Admin role, are not listed here; lakana grant list shows every grant.",
-    );
-    expect(line.querySelector("code")).toHaveTextContent("lakana grant list");
+    const level = await section("On the whole instance", 3);
+    expect(await within(level).findByRole("link", { name: "kim.schulz" })).toBeVisible();
+    expect(rows(level)[0]?.slice(0, 2)).toEqual(["kim.schulz", "Admin role"]);
+    expect(screen.queryByText(/are not listed here/)).not.toBeInTheDocument();
   });
 
   it("marks an invisible character in a level's namespace and environment", async () => {
@@ -370,6 +389,7 @@ describe("AccessTab", () => {
       "On namespace gold.sales",
       "On namespace gold",
       "On environment prU+202Eod",
+      "On the whole instance",
     ]);
     expect(within(headings[3] as HTMLElement).getByText("U+202E")).toHaveClass("char-mark");
   });

@@ -32,7 +32,7 @@ from lakana_core.catalog.health_summary import (
     reference_checks,
     shown_health,
 )
-from lakana_core.catalog.row_actions import table_actions_each
+from lakana_core.catalog.row_actions import place_actions_each, table_actions_each
 from lakana_core.catalog.search import CatalogSearch, SearchHit, _normalized_query
 from lakana_core.db import db_now
 from lakana_core.errors import NotFoundError, ValidationError
@@ -297,10 +297,14 @@ class TreeNamespace:
         Its path, dotted.
     count
         The readable tables in it and beneath it.
+    actions
+        The words of `lakana_core.catalog.row_actions.NAMESPACE_ACTIONS` the reader's rights
+        allow on it.
     """
 
     path: str
     count: int
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -315,11 +319,15 @@ class TreeEnvironment:
         The readable tables in it.
     namespaces
         Its namespaces the caller is shown, by path.
+    actions
+        The words of `lakana_core.catalog.row_actions.ENVIRONMENT_ACTIONS` the reader's rights
+        allow on it.
     """
 
     name: str
     count: int
     namespaces: list[TreeNamespace]
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -745,22 +753,40 @@ class TableListing:
             if may_read:
                 readable[env_id][path] += 1
         rights = answers[len(tables) :]
-        shown: list[TreeEnvironment] = []
+        visible: list[tuple[str, int, list[tuple[str, int, NamespacePath]]]] = []
         for index, (env_id, name) in enumerate(environments):
             may_read_environment, may_read_namespaces = rights[2 * index : 2 * index + 2]
             counts = readable[env_id]
             if not (may_read_environment or counts):
                 continue
             nodes = [
-                TreeNamespace(dotted, _count_under(counts, dotted))
-                for dotted in sorted(
-                    path.replace(NAMESPACE_SEPARATOR, ".")
+                (dotted, _count_under(counts, dotted), NamespacePath.parse(stored))
+                for dotted, stored in sorted(
+                    (path.replace(NAMESPACE_SEPARATOR, "."), path)
                     for owner, path in namespaces
                     if owner == env_id
                 )
             ]
-            nodes = [n for n in nodes if may_read_namespaces or n.count]
-            shown.append(TreeEnvironment(name, counts.total(), nodes))
+            visible.append(
+                (name, counts.total(), [n for n in nodes if may_read_namespaces or n[1]])
+            )
+        # what the reader may do at each shown place: one batch for the whole tree
+        places: list[tuple[str, NamespacePath | None]] = []
+        for name, _, nodes in visible:
+            places.append((name, None))
+            places.extend((name, path) for _, _, path in nodes)
+        allowed = iter(place_actions_each(self._authz, p, places))
+        shown: list[TreeEnvironment] = []
+        for name, count, nodes in visible:
+            env_actions = next(allowed)
+            shown.append(
+                TreeEnvironment(
+                    name,
+                    count,
+                    [TreeNamespace(dotted, n, next(allowed)) for dotted, n, _ in nodes],
+                    env_actions,
+                )
+            )
         shown.sort(key=lambda e: e.name)
         return TableTree(sum(e.count for e in shown), shown)
 

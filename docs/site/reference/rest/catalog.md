@@ -47,7 +47,7 @@ Answer fields: `TableListPageOut`
 
 Count the tables you may read, by environment and namespace
 
-A node's count is what the list answers for it without a search text: only tables you may read are counted, an environment is shown with `READ_ENVIRONMENT` or a readable table in it, a namespace with `READ_NAMESPACE` on its environment or a readable table in it or beneath it. Writes no audit event.
+A node's count is what the list answers for it without a search text: only tables you may read are counted, an environment is shown with `READ_ENVIRONMENT` or a readable table in it, a namespace with `READ_NAMESPACE` on its environment or a readable table in it or beneath it. Each environment and namespace also carries ``actions``: what your rights allow there (``create_namespace``, ``create_external_table``, ``drop``), asked in one batch for the whole tree. They are rights only, and say nothing about protection, git or emptiness. Writes no audit event.
 
 Parameters:
 

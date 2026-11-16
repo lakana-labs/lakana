@@ -48,6 +48,7 @@ Answer fields: `PrincipalOut`
 | `type` | text | yes |  |
 | `is_active` | true or false | yes |  |
 | `picture` | text or null | no |  |
+| `held_admin` | true or false or null | no |  |
 
 ## `GET /api/v1/principals`
 
@@ -104,6 +105,7 @@ Answer fields: `PrincipalOut`
 | `type` | text | yes |  |
 | `is_active` | true or false | yes |  |
 | `picture` | text or null | no |  |
+| `held_admin` | true or false or null | no |  |
 
 ## `DELETE /api/v1/principals/{name}`
 

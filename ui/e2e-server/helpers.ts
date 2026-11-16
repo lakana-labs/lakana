@@ -5,7 +5,8 @@
  * @packageDocumentation
  */
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import AxeBuilder from "@axe-core/playwright";
@@ -243,6 +244,17 @@ async function create(request: APIRequestContext, path: string, body: object): P
 }
 
 /**
+ * The directory of an environment's files: its `file://` root as {@link createEnvironment}
+ * gives it, under `ui/.e2e-server/`, which the server's start clears.
+ *
+ * @param name - The environment's name.
+ * @returns The directory's absolute path.
+ */
+function lakeRoot(name: string): string {
+  return resolve(import.meta.dirname, "..", ".e2e-server", `lake-${name}`);
+}
+
+/**
  * Creates an environment whose files live under `ui/.e2e-server/`, which the server's start
  * clears.
  *
@@ -255,10 +267,24 @@ export function createEnvironment(request: APIRequestContext, name: string): Pro
     name,
     storage: {
       scheme: "file",
-      root: `file://${resolve(import.meta.dirname, "..", ".e2e-server")}/lake-${name}`,
+      root: `file://${lakeRoot(name)}`,
       options: {},
     },
   });
+}
+
+/**
+ * Writes a file into an environment's storage, as a person drops a file under `raw/` for an
+ * external table to read. The directories are made as needed.
+ *
+ * @param environment - The environment, created by {@link createEnvironment}.
+ * @param relative - The file's path under the environment's root, such as `raw/orders/a.csv`.
+ * @param content - The file's text.
+ */
+export function writeRawFile(environment: string, relative: string, content: string): void {
+  const file = resolve(lakeRoot(environment), relative);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, content);
 }
 
 /**
@@ -346,6 +372,31 @@ export function grantTableRead(
     environment,
     namespace,
     table,
+  });
+}
+
+/**
+ * Gives a person one right on an environment, or on a namespace of it.
+ *
+ * @param request - The request context.
+ * @param principal - The person.
+ * @param action - The right, such as `READ_NAMESPACE`.
+ * @param environment - The environment.
+ * @param namespace - The dotted namespace the right is bound to; the whole environment without.
+ * @returns Resolves once the server answered.
+ */
+export function grantOn(
+  request: APIRequestContext,
+  principal: string,
+  action: string,
+  environment: string,
+  namespace?: string,
+): Promise<void> {
+  return create(request, "/api/v1/grants", {
+    principal,
+    action,
+    environment,
+    ...(namespace === undefined ? { kind: "ENVIRONMENT" } : { kind: "NAMESPACE", namespace }),
   });
 }
 
@@ -448,6 +499,25 @@ export async function tableStatus(
 ): Promise<number> {
   const path = `/api/v1/environments/${environment}/namespaces/${namespace}/tables/${name}`;
   const response = await request.get(path, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  return response.status();
+}
+
+/**
+ * Reads a namespace's status as the bootstrap administrator, to see whether it is still there.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param path - The dotted namespace.
+ * @returns The HTTP status: 200 when the namespace exists, 404 when it does not.
+ */
+export async function namespaceStatus(
+  request: APIRequestContext,
+  environment: string,
+  path: string,
+): Promise<number> {
+  const response = await request.get(`/api/v1/environments/${environment}/namespaces/${path}`, {
     headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
   });
   return response.status();
