@@ -620,9 +620,8 @@ describe("PreviewTab", () => {
 
     const region = await screen.findByRole("region", { name: "Preview of fact_U+202Esales" });
     const grid = within(region).getByRole("grid", { name: "The first rows of fact_U+202Esales" });
-    await user.click(
-      within(grid).getAllByRole("row")[1]?.querySelectorAll("[role=gridcell]")[2] as HTMLElement,
-    );
+    const rows = await within(grid).findAllByRole("row");
+    await user.click(rows[1]?.querySelectorAll("[role=gridcell]")[2] as HTMLElement);
 
     expect(await screen.findByRole("region", { name: "noU+2066te, row 1" })).toBeVisible();
   });
