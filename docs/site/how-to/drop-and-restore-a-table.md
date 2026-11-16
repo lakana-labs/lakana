@@ -193,7 +193,7 @@ walks every page.
 
 In the web interface, open **Catalog** and choose **Dropped** above the list. It lists the tables
 dropped from one environment, newest first, with the namespace each was dropped from, when it was
-dropped and until when it can be restored. Choose an environment in the tree first: with none
+dropped ("2 days ago") and until when it can be restored ("in 5 days", the exact time on hover). Choose an environment in the tree first: with none
 chosen, the page lists your environments to pick from. Choose a namespace in the tree to see only
 the tables dropped from that namespace. **Show more** adds the next page. A table whose undo
 period has ended says "No longer restorable" and has no button. The view says so when nothing that can
