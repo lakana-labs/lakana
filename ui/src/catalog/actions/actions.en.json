@@ -5,7 +5,7 @@
     "retention": "Retention…",
     "rebuild": "Rebuild from git…",
     "drop": "Drop…",
-    "definedIn": "Defined in <file /> — change it in git"
+    "definedIn": "Drop is off: <file /> defines this. Remove it there and deploy, then drop it from Orphans."
   },
   "protected": {
     "label": "Why you break the protection of {{environment}}",

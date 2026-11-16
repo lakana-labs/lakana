@@ -343,7 +343,7 @@ describe("VersionsTab", () => {
       "true",
     );
     expect(menu).toHaveAccessibleDescription(
-      "Defined in analytics/assets/ml/model.py — change it in git",
+      "Drop is off: analytics/assets/ml/model.py defines this. Remove it there and deploy, then drop it from Orphans.",
     );
   });
 

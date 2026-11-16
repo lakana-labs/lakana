@@ -228,7 +228,7 @@ for (const theme of ["light", "dark"] as const) {
         expect(note, "the menu is described").not.toBeNull();
         const sentence = page.locator(`[id="${note ?? ""}"]`);
         await expect(sentence).toContainText("models/gold/fact_sales.sql");
-        await expect(sentence).toContainText("change it in git");
+        await expect(sentence).toContainText("Remove it there and deploy");
         await expect(page.getByRole("menuitem", { name: "Drop…" })).toHaveAttribute(
           "aria-disabled",
           "true",

@@ -84,7 +84,7 @@ file's path, never the file's text.
 The web interface follows these rules:
 
 - It offers an action only when its word is in `actions`.
-- When `defined_by` is set, it shows Drop disabled, with "Defined in" and the file.
+- When `defined_by` is set, it shows Drop dimmed and disabled, with "Drop is off:", the file, and the way to drop it from Orphans.
 - It shows Rebuild only when `rebuild` is in `actions`.
 
 The server still checks every request. An action in `actions` can be refused for another reason,
