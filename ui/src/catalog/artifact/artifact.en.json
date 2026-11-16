@@ -16,7 +16,9 @@
     "deletedBy": "Deleted <when/> by <who/>",
     "deleted": "Deleted <when/>",
     "files": "Files",
-    "filesOf": "Files of version {{version}}"
+    "filesOf": "Files of version {{version}}",
+    "delete": "Delete…",
+    "deleteOf": "Delete version {{version}}…"
   },
   "files": {
     "region": "Files of version {{version}}",
@@ -34,5 +36,21 @@
     "tooLarge": "{{size}}: larger than the browser downloads (256 MiB). Use the command above.",
     "mismatch": "{{path}} did not arrive whole, so nothing was saved. Download it again, or use the command above."
   },
-  "showMore": "Show {{count}} more"
+  "showMore": "Show {{count}} more",
+  "delete": {
+    "title": "Delete version {{version}} of {{artifact}}?",
+    "text": "{{size}}, {{files}}. Its bytes are removed from Lakana's storage. Lakana cannot bring them back. The version stays in the list, marked deleted, and its number is never used again.",
+    "confirm": "Delete the version",
+    "close": "Close",
+    "files_one": "{{count, number}} file",
+    "files_other": "{{count, number}} files",
+    "amount": "{{files}} ({{size}})",
+    "noFiles": "no files",
+    "deleted": "Deleted version {{version}} of {{artifact}}. Freed {{freed}}.",
+    "kept": "Kept {{list}}.",
+    "keptByVersion": "{{amount}} that version {{version}} also uses",
+    "keptByAnother": "{{amount}} that another version also uses",
+    "keptByUpload": "{{amount}} that an open upload names",
+    "keptForSweep": "{{amount}} that Lakana's periodic clean-up decides about: it removes what nothing else needs and keeps the rest"
+  }
 }

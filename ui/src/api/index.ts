@@ -138,6 +138,7 @@ export { createExternalTable, createNamespace, deleteNamespace } from "./namespa
 export type { ExternalFormat } from "./namespaces";
 export {
   BROWSER_DOWNLOAD_LIMIT,
+  deleteVersion,
   DownloadMismatch,
   downloadFile,
   getArtifact,

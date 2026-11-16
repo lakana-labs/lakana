@@ -158,7 +158,10 @@ const NAMED_LIMITS = [
   // with current, who stored each and when, the deleted ones, Files one version at a time, the
   // whole version's command, Download with the size and SHA-256 check, the save under the file's
   // own name, and its own strings. It loads only when the tab is opened.
-  { name: "an artifact's Versions tab", prefix: "VersionsTab-", limit: "3.35 kB" },
+  // Raised to the measured 4.39 kB (2026-11-16) + 10 %: Delete… on a version, its dialog with the
+  // size and file count, the passkey and protected-environment steps (their code stays in
+  // ProtectedReason-), and what the delete freed and kept, in the command line's words.
+  { name: "an artifact's Versions tab", prefix: "VersionsTab-", limit: "4.83 kB" },
   // Measured 3.83 kB (2026-11-13) + 10 %: the table page's strings, Health's and Access's
   // included. The page and the two tabs share them, so the bundler gave them a chunk of their own,
   // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.

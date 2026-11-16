@@ -29,7 +29,7 @@
 "artifact upload": { class: git, reason: "local file/dir upload from code or terminal" }
 "artifact uploads abort": { class: ui, part: 3 }
 "artifact uploads list": { class: ui, part: 3 }
-"artifact versions delete": { class: ui, part: 3 }
+"artifact versions delete": { class: ui, part: 3, done: true }
 "artifact versions list": { class: ui, part: 3, done: true }
 "audit list": { class: ui, part: 8 }
 "bundle init": { class: git, reason: "local deployment tooling (compose.yaml, .env)" }
@@ -222,7 +222,7 @@
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}":
   { class: ui, part: 3 }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions/{version}":
-  { class: ui, part: 3 }
+  { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{name}": { class: ui, part: 8 }

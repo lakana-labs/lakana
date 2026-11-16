@@ -1,7 +1,7 @@
 /**
  * An artifact's Versions tab: every version, newest first and deleted ones included, 100 at a
  * time, with who stored it and when, its size and files, and under a live version its files with
- * Download. Its code loads only when the tab is opened.
+ * Download and Delete. Its code loads only when the tab is opened.
  *
  * @packageDocumentation
  */
@@ -16,6 +16,7 @@ import { formatBytes } from "../format";
 import { ListSkeleton } from "../ListSkeleton";
 import { useTableData } from "../table/TableContext";
 import "./artifactStrings";
+import { DeleteVersionDialog } from "./DeleteVersionDialog";
 import { ShowMore, useShowMore } from "./ShowMore";
 import { VersionFiles } from "./VersionFiles";
 
@@ -31,6 +32,16 @@ interface Gone {
   readonly version: number;
   /** The server's sentence. */
   readonly sentence: string;
+  /** The versions as read when the download found it gone; only a newer read can show it. */
+  readonly base: readonly ArtifactVersionOut[] | undefined;
+}
+
+/** Where the focus goes once the delete dialog closes. */
+interface FocusAfterDelete {
+  /** The version's number. */
+  readonly version: number;
+  /** Its Delete button, after a Cancel; else, or when the button is gone, its number. */
+  readonly on: "delete" | "row";
 }
 
 /** Properties of {@link Stored}. */
@@ -70,13 +81,16 @@ function Stored({ row }: StoredProps): JSX.Element {
 /**
  * Reads the versions and lists them. Files opens one version's files at a time below its row.
  * When a download finds its version gone, the versions are read again; once the list shows that
- * version deleted, its files close and the server's sentence stands in its row with the focus.
+ * version deleted, its files close and the server's sentence stands in its row with the focus. A
+ * newer read that shows the version live forgets the sentence. Delete… asks first; Close then
+ * reads the versions and the artifact again, so "current" moves, and the focus goes to the
+ * version's number. Cancel gives it back to Delete…, or to the number once the version is gone.
  *
  * @returns The tab.
  */
 export default function VersionsTab(): JSX.Element | null {
   const { t, i18n } = useTranslation();
-  const { ref, artifact } = useTableData();
+  const { ref, artifact, reloadArtifact } = useTableData();
   const { environment, namespace, name } = ref;
   const load = useCallback(
     () => listVersions({ environment, namespace, name }),
@@ -89,19 +103,38 @@ export default function VersionsTab(): JSX.Element | null {
   const [open, setOpen] = useState<number | null>(null);
   const [gone, setGone] = useState<Gone | null>(null);
   const goneNote = useRef<HTMLParagraphElement>(null);
+  const [deleting, setDeleting] = useState<ArtifactVersionOut | null>(null);
+  const focusAfterDelete = useRef<FocusAfterDelete | null>(null);
   const ids = useId();
   const dotted = markedText(`${namespace}.${name}`);
   const number = new Intl.NumberFormat(i18n.language);
 
   const isDeleted = (version: number): boolean =>
     versions.some((row) => row.version === version && row.deleted_at !== null);
-  const goneShown = gone !== null && isDeleted(gone.version);
+  const goneRead = gone !== null && resource.data !== gone.base;
+  if (goneRead && !isDeleted(gone.version)) {
+    // A newer read shows the version live, so the sentence stays beside its file and is forgotten
+    // here; a later delete of the version must not show it or take the focus.
+    setGone(null);
+  }
+  const goneShown = goneRead && isDeleted(gone.version);
   useEffect(() => {
     if (goneShown) {
       // The files and the button that had the focus are gone with the version.
       goneNote.current?.focus();
     }
   }, [goneShown]);
+  const deleteId = (version: number): string => `${ids}-delete-${String(version)}`;
+  const numberId = (version: number): string => `${ids}-version-${String(version)}`;
+  useEffect(() => {
+    const next = focusAfterDelete.current;
+    if (deleting !== null || next === null) {
+      return;
+    }
+    focusAfterDelete.current = null;
+    const button = next.on === "delete" ? document.getElementById(deleteId(next.version)) : null;
+    (button ?? document.getElementById(numberId(next.version)))?.focus();
+  });
 
   if (resource.data === undefined) {
     return (
@@ -125,7 +158,7 @@ export default function VersionsTab(): JSX.Element | null {
     const cells = (
       <tr key={row.version}>
         <td>
-          <span className="version-number row-name" tabIndex={-1}>
+          <span className="version-number row-name" id={numberId(row.version)} tabIndex={-1}>
             {String(row.version)}
           </span>
           {row.version === artifact?.current_version && (
@@ -152,6 +185,23 @@ export default function VersionsTab(): JSX.Element | null {
               >
                 {t("table.artifact.versions.files")}
               </button>
+              {row.actions.includes("delete") && (
+                <button
+                  type="button"
+                  className="button"
+                  id={deleteId(row.version)}
+                  aria-label={t("table.artifact.versions.deleteOf", { version: row.version })}
+                  onClick={() => {
+                    if (gone?.version === row.version) {
+                      // A download's sentence about this version is consumed: the delete says its own.
+                      setGone(null);
+                    }
+                    setDeleting(row);
+                  }}
+                >
+                  {t("table.artifact.versions.delete")}
+                </button>
+              )}
             </span>
           ) : (
             <>
@@ -189,7 +239,7 @@ export default function VersionsTab(): JSX.Element | null {
             version={row.version}
             id={filesId(row.version)}
             onGone={(sentence) => {
-              setGone({ version: row.version, sentence });
+              setGone({ version: row.version, sentence, base: resource.data });
               resource.reload();
             }}
           />
@@ -243,6 +293,23 @@ export default function VersionsTab(): JSX.Element | null {
         )}
         <ShowMore rows={rows} />
       </section>
+      {deleting !== null && (
+        <DeleteVersionDialog
+          place={ref}
+          version={deleting}
+          onGone={resource.reload}
+          onCancel={() => {
+            focusAfterDelete.current = { version: deleting.version, on: "delete" };
+            setDeleting(null);
+          }}
+          onDone={() => {
+            focusAfterDelete.current = { version: deleting.version, on: "row" };
+            setDeleting(null);
+            resource.reload();
+            reloadArtifact();
+          }}
+        />
+      )}
     </div>
   );
 }
