@@ -212,6 +212,22 @@ describe("ColumnsTab", () => {
     expect(region.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
 
+  it("marks a hidden character in a column's type, such as a struct's field name", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: {
+          status: 200,
+          body: withColumn("channel", { type: "struct<1: chan\u202Enel: optional string>" }),
+        },
+      },
+    });
+
+    const region = await screen.findByRole("region", { name: "Table columns" });
+    const type = within(region).getByText("U+202E", { selector: ".column-type > .char-mark" });
+    expect(type.parentElement).toHaveTextContent("struct<1: chanU+202Enel: optional string>");
+    expect(region.textContent).not.toMatch(/\u202E/u);
+  });
+
   it("shows a column's label under its name", async () => {
     renderShell(PAGE, {
       routes: {

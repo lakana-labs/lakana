@@ -134,7 +134,9 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
           )}
         </td>
         <td>
-          <code className="column-type">{column.type}</code>
+          <code className="column-type">
+            <VisibleText text={column.type} />
+          </code>
           {!full && roleWord !== null && <span className="second">{roleWord}</span>}
         </td>
         {full && (
