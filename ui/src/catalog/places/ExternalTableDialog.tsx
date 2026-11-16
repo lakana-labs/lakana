@@ -130,8 +130,8 @@ export default function ExternalTableDialog({
       return;
     }
     const sent = {
-      name: name.trim(),
-      locationPattern: location.trim(),
+      name,
+      locationPattern: location,
       format,
       breakGlassReason: needsReason ? reason.trim() : null,
     };

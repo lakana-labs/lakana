@@ -136,7 +136,7 @@ describe("ExternalTableDialog", () => {
     const { server, router, onDone, user } = renderRegister();
 
     await screen.findByRole("button", { name: "Register" });
-    await fill(user, "orders ", "orders/*.csv{Enter}");
+    await fill(user, "orders", "orders/*.csv{Enter}");
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/catalog/prod/bronze/orders");
@@ -150,6 +150,27 @@ describe("ExternalTableDialog", () => {
       },
     ]);
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the name and the location as typed, as the CLI does", async () => {
+    const { server, user } = renderRegister();
+
+    await screen.findByRole("button", { name: "Register" });
+    await fill(user, "orders ", "orders/*.csv ");
+    await user.click(screen.getByRole("radio", { name: "CSV" }));
+    await user.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() => {
+      expect(registrations(server.sent)).toHaveLength(1);
+    });
+    expect(registrations(server.sent)).toEqual([
+      {
+        name: "orders ",
+        location_pattern: "raw/orders/*.csv ",
+        format: "csv",
+        break_glass_reason: null,
+      },
+    ]);
   });
 
   it("shows the server's location refusal word for word and keeps the fields", async () => {
