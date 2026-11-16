@@ -23,7 +23,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           persist-credentials: false
-      - run: semgrep scan --config=p/python --config=p/security-audit --sarif --output=semgrep.sarif
+      # ui/scripts/lint-fixtures holds deliberate violations that lint-ban.test.ts lints on purpose
+      # (raw HTML, for one); they never ship, so the scan leaves them out instead of reporting them.
+      - run: >-
+          semgrep scan --config=p/python --config=p/security-audit
+          --exclude=ui/scripts/lint-fixtures --sarif --output=semgrep.sarif
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: always()
         with:
