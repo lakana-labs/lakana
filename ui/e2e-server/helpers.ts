@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -19,6 +19,8 @@ import {
   expect,
   type Page,
 } from "@playwright/test";
+
+import { CSRF_STORAGE_KEY } from "../src/api/client";
 
 /** The bootstrap administrator's token, as `playwright.server.config.ts` fixes it. */
 const BOOTSTRAP_TOKEN = "lakana_pat_e2ekey_e2esecret";
@@ -285,6 +287,175 @@ export function writeRawFile(environment: string, relative: string, content: str
   const file = resolve(lakeRoot(environment), relative);
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, content);
+}
+
+/**
+ * The path of an artifact's routes.
+ *
+ * @param environment - The environment.
+ * @param artifact - The artifact's dotted name, such as `ml.model`; its namespace must exist.
+ * @returns The path, without a trailing `/`.
+ */
+function artifactPath(environment: string, artifact: string): string {
+  const dot = artifact.lastIndexOf(".");
+  return `/api/v1/environments/${environment}/namespaces/${artifact.slice(0, dot)}/artifacts/${artifact.slice(dot + 1)}`;
+}
+
+/**
+ * The manifest of an upload, as `lakana artifact upload` sends it
+ * (`packages/lakana/src/lakana/_artifact_manifest.py`): a directory of files, sorted by path.
+ *
+ * @param files - Each file's text by its path.
+ * @returns The manifest.
+ */
+function manifest(files: Readonly<Record<string, string>>): object {
+  return {
+    format: 1,
+    is_directory: true,
+    files: Object.keys(files)
+      .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+      .map((path) => {
+        const bytes = Buffer.from(files[path] ?? "");
+        return {
+          path,
+          size: bytes.length,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        };
+      }),
+  };
+}
+
+/**
+ * Stores a version of an artifact as the bootstrap administrator, the way the SDK does: begin an
+ * upload with the manifest, put each file the server is missing, and commit. The first upload
+ * creates the artifact.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param artifact - The artifact's dotted name, such as `ml.model`; its namespace must exist.
+ * @param files - Each file's text by its path in the version.
+ * @returns The version's number.
+ */
+export async function uploadArtifact(
+  request: APIRequestContext,
+  environment: string,
+  artifact: string,
+  files: Readonly<Record<string, string>>,
+): Promise<number> {
+  const headers = { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` };
+  const base = artifactPath(environment, artifact);
+  const begun = await request.post(`${base}/uploads`, { headers, data: manifest(files) });
+  await ensureOk(`POST ${base}/uploads`, begun);
+  const { upload_id: id, missing } = (await begun.json()) as {
+    upload_id: string;
+    missing: string[];
+  };
+  for (const text of Object.values(files)) {
+    const bytes = Buffer.from(text);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    if (missing.includes(sha256)) {
+      const path = `${base}/uploads/${id}/blobs/${sha256}`;
+      await ensureOk(
+        `PUT ${path}`,
+        await request.put(path, {
+          headers: { ...headers, "Content-Type": "application/octet-stream" },
+          data: bytes,
+        }),
+      );
+      missing.splice(missing.indexOf(sha256), 1);
+    }
+  }
+  const committed = await request.post(`${base}/uploads/${id}/commit`, {
+    headers,
+    data: { sources: [] },
+  });
+  await ensureOk(`POST ${base}/uploads/${id}/commit`, committed);
+  return ((await committed.json()) as { version: number }).version;
+}
+
+/**
+ * The headers a request needs to act as the page's signed-in person: the page's CSRF token, and
+ * the origin. The session cookie comes with the page's own request context.
+ *
+ * @param page - The page, signed in.
+ * @returns The headers.
+ */
+async function sessionHeaders(page: Page): Promise<Record<string, string>> {
+  const token = await page.evaluate((key) => localStorage.getItem(key), CSRF_STORAGE_KEY);
+  return { "X-Lakana-CSRF": token ?? "", Origin: ORIGIN };
+}
+
+/**
+ * Begins an upload of one small file as the signed-in page's person, with the page's session and
+ * CSRF token, so that the upload is the person's own, and leaves it open.
+ *
+ * @param page - The page, signed in.
+ * @param environment - The environment.
+ * @param artifact - The artifact's dotted name, such as `ml.model`.
+ * @returns The upload's id.
+ */
+export async function beginUploadAs(
+  page: Page,
+  environment: string,
+  artifact: string,
+): Promise<string> {
+  const path = `${artifactPath(environment, artifact)}/uploads`;
+  const response = await page.request.post(path, {
+    headers: await sessionHeaders(page),
+    data: manifest({ "notes.txt": "not finished" }),
+  });
+  await ensureOk(`POST ${path}`, response);
+  return ((await response.json()) as { upload_id: string }).upload_id;
+}
+
+/**
+ * Reads an artifact as the bootstrap administrator, to see whether it is still there and what
+ * its versions are.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param artifact - The artifact's dotted name.
+ * @returns The HTTP status of the artifact's read, and its versions (none once it is gone).
+ */
+export async function artifactState(
+  request: APIRequestContext,
+  environment: string,
+  artifact: string,
+): Promise<{ status: number; versions: { version: number; deleted_at: string | null }[] }> {
+  const headers = { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` };
+  const base = artifactPath(environment, artifact);
+  const status = (await request.get(base, { headers })).status();
+  if (status !== 200) {
+    return { status, versions: [] };
+  }
+  const response = await request.get(`${base}/versions`, { headers });
+  await ensureOk(`GET ${base}/versions`, response);
+  return {
+    status,
+    versions: (await response.json()) as { version: number; deleted_at: string | null }[],
+  };
+}
+
+/**
+ * Lists the signed-in page's person's own open uploads of an artifact, with the page's session
+ * and CSRF token.
+ *
+ * @param page - The page, signed in.
+ * @param environment - The environment.
+ * @param artifact - The artifact's dotted name.
+ * @returns The uploads' ids.
+ */
+export async function uploadsAs(
+  page: Page,
+  environment: string,
+  artifact: string,
+): Promise<string[]> {
+  const path = `/api/v1/environments/${environment}/artifacts/uploads?name=${encodeURIComponent(artifact)}`;
+  const response = await page.request.get(path, { headers: await sessionHeaders(page) });
+  await ensureOk(`GET ${path}`, response);
+  return ((await response.json()) as { items: { upload_id: string }[] }).items.map(
+    (item) => item.upload_id,
+  );
 }
 
 /**
