@@ -6,10 +6,9 @@
  *
  * @packageDocumentation
  */
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { expect, type Locator, type Page, type Request, type Route } from "@playwright/test";
 
-import { expect, type Page, type Request, type Route } from "@playwright/test";
+import { apiTypes, typeOf } from "./api-types";
 
 /** The right-to-left override, the character a spoofed name hides behind. */
 export const RLO = "‮";
@@ -17,37 +16,43 @@ export const RLO = "‮";
 /** The override as it appears in a URL. */
 const RLO_ENCODED = /%E2%80%AE/gi;
 
-/**
- * The fields of `src/api` whose type is a union of string literals (an enum such as `state`, or
- * an alias of one such as `TextSource`): the interface compares them, never shows them.
- *
- * @returns Their names.
- */
-function literalFields(): Set<string> {
-  const api = resolve(import.meta.dirname, "../src/api");
-  const text = readdirSync(api)
-    .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
-    .map((file) => readFileSync(resolve(api, file), "utf8"))
-    .join("\n");
-  const literal = String.raw`(?:"[^"]*"|null)`;
-  const union = (atom: string): string => String.raw`\|?\s*${atom}(?:\s*\|\s*${atom})*`;
-  const aliases = [
-    ...text.matchAll(new RegExp(String.raw`type (\w+)\s*=\s*${union(literal)}\s*;`, "g")),
-  ].map((match) => match[1] ?? "");
-  const atom = `(?:${[literal, ...aliases].join("|")})`;
-  const field = new RegExp(
-    String.raw`readonly (\w+)\??:\s*(?:readonly\s+)?\(?${union(atom)}\)?(?:\[\])?\s*;`,
-    "g",
-  );
-  return new Set([...text.matchAll(field)].map((match) => match[1] ?? ""));
-}
+/** The answer types of `src/api`, read from the source ({@link apiTypes}). */
+const API_TYPES = apiTypes();
 
 /**
- * The fields whose strings are codes: those {@link literalFields} finds, and those `src/api`
- * types as `string` but documents as a code the interface translates (`item`, `causes`, `via`),
- * compares (`outcome`) or matches on (`matched`).
+ * Fields `src/api` types as `string` but documents as a code, by type: the interface translates
+ * them (`item`, `causes`, `via`, a check's `outcome`) or compares them (a lineage node's or
+ * edge's `kind`, a probe's `kind`, `state` and `outcome`, a link's `kind` and `state`, a search
+ * hit's `kind` and `matched`). An override in one sends the screen down a branch the server never
+ * takes, which the named values of a step then miss. Every other `string` field carries an
+ * override, even where the same name is a code in another type.
  */
-const CODE_FIELDS = new Set([...literalFields(), "causes", "item", "matched", "outcome", "via"]);
+export const STRING_CODES: Readonly<Record<string, readonly string[]>> = {
+  BrowserSessionOut: ["via"],
+  CheckHealthOut: ["outcome"],
+  GraphEdgeOut: ["kind"],
+  GraphNodeOut: ["kind"],
+  HealthSummaryOut: ["item"],
+  InstanceStatusOut: ["causes"],
+  LinkDescriptionOut: ["kind", "state"],
+  RepositoryProbeOut: ["kind", "outcome", "state"],
+  SessionOut: ["via"],
+  TableMatchOut: ["kind", "matched"],
+};
+
+/**
+ * The fields of an answer's object that hold codes: those of its type ({@link typeOf}) whose
+ * type is a union of string literals, and its {@link STRING_CODES}.
+ *
+ * @param keys - The object's keys.
+ * @returns The fields.
+ */
+function codeFields(keys: readonly string[]): ReadonlySet<string> {
+  const type = typeOf(API_TYPES, keys);
+  return type === undefined
+    ? new Set()
+    : new Set([...type.literal, ...(STRING_CODES[type.name] ?? [])]);
+}
 
 /**
  * A code by its shape: an upper-case constant (`USER`, `READ_TABLE`, `SUBMIT_QUERY`), or a time
@@ -69,14 +74,20 @@ const ID_FIELD = /^(.+_)?id$/;
  *
  * @param value - The string.
  * @param field - The field that holds it.
+ * @param codes - The code fields of the object that holds it ({@link codeFields}).
  * @param ids - The ids of the answer.
  * @returns Whether it is a code.
  */
-function isCode(value: string, field: string, ids: ReadonlySet<string>): boolean {
+function isCode(
+  value: string,
+  field: string,
+  codes: ReadonlySet<string>,
+  ids: ReadonlySet<string>,
+): boolean {
   return (
     value === "" ||
     ids.has(value) ||
-    CODE_FIELDS.has(field) ||
+    codes.has(field) ||
     ID_FIELD.test(field) ||
     CODE_VALUE.test(value) ||
     (field === "type" && ERROR_TYPE.test(value))
@@ -103,26 +114,30 @@ function idsOf(value: unknown, field = "", ids = new Set<string>()): Set<string>
 }
 
 /**
- * The answer with an override at the end of every text but the codes ({@link isCode}).
+ * The answer with an override at the end of every text but the codes ({@link isCode}), each
+ * object read as the `src/api` type it fits ({@link typeOf}).
  *
  * @param answer - The answer as a stub wrote it.
  * @returns The poisoned answer.
  */
 export function poison(answer: unknown): unknown {
   const ids = idsOf(answer);
-  const walk = (value: unknown, field: string): unknown => {
+  const walk = (value: unknown, field: string, codes: ReadonlySet<string>): unknown => {
     if (typeof value === "string") {
-      return isCode(value, field, ids) ? value : value + RLO;
+      return isCode(value, field, codes, ids) ? value : value + RLO;
     }
     if (Array.isArray(value)) {
-      return value.map((item: unknown) => walk(item, field));
+      return value.map((item: unknown) => walk(item, field, codes));
     }
     if (value !== null && typeof value === "object") {
-      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, walk(item, key)]));
+      const own = codeFields(Object.keys(value));
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, walk(item, key, own)]),
+      );
     }
     return value;
   };
-  return walk(answer, "");
+  return walk(answer, "", new Set());
 }
 
 /**
@@ -253,8 +268,10 @@ export function poisoned(page: Page): Page {
 
 /**
  * Every place on the page that shows the override itself: a text node (an `<svg>`'s `<title>`
- * included), an attribute that names or describes an element, or the document's title. A form
- * field's own value is left out, as a person edits the text as it is.
+ * included), an attribute that names or describes an element, the text of an
+ * `<input type="button">`, `submit` or `reset`, or the document's title. A form field's own value
+ * is left out, as a person edits the text as it is. The walk does not enter shadow roots: the
+ * interface attaches none (no `attachShadow` in `src/`).
  *
  * @param page - The page.
  * @returns Where each one is, with the override written `⟨RLO⟩`.
@@ -270,6 +287,9 @@ export function rawOverrides(page: Page): Promise<string[]> {
       "title",
       "alt",
       "placeholder",
+      "label",
+      "aria-braillelabel",
+      "aria-brailleroledescription",
     ];
     /**
      * A short path to an element, for the report.
@@ -309,20 +329,67 @@ export function rawOverrides(page: Page): Promise<string[]> {
         }
       }
     }
+    for (const input of document.body.querySelectorAll<HTMLInputElement>(
+      "input[type=button], input[type=submit], input[type=reset]",
+    )) {
+      if (input.value.includes(rlo)) {
+        found.push(`value of ${where(input)}: ${shown(input.value)}`);
+      }
+    }
     return found;
   }, RLO);
 }
 
 /**
- * Asserts that the page shows at least one mark, so the check cannot pass on a page that never
- * received a poisoned answer, and that it shows no override itself; the latter softly, so one run
- * names every screen that does.
+ * Asserts that the screen shows each of the stubbed values it names with its mark, inside the
+ * open dialog or else `<main>` (the shell's own marks, such as the user menu's name, do not
+ * count), so a step whose screen never got its poisoned answer fails; and that the page shows no
+ * override itself, softly, so one run names every screen that does.
+ *
+ * @param page - The page.
+ * @param label - What the page shows, for the message.
+ * @param values - Stubbed values the screen shows, as the stubs write them.
+ */
+export async function expectMarked(
+  page: Page,
+  label: string,
+  values: readonly [string, ...string[]],
+): Promise<void> {
+  await page.waitForLoadState("networkidle");
+  const dialog = page.getByRole("dialog");
+  const scope: Locator = (await dialog.count()) > 0 ? dialog.last() : page.locator("main");
+  for (const value of values) {
+    await expect(scope, `${label}: ${value} shown with its mark`).toContainText(`${value}U+202E`);
+  }
+  await expectNoRaw(page, label);
+}
+
+/**
+ * Asserts, softly, that the page shows no override itself: for a step whose own part (an open
+ * menu of the interface's words) shows no stubbed value.
  *
  * @param page - The page.
  * @param label - What the page shows, for the message.
  */
-export async function expectMarked(page: Page, label: string): Promise<void> {
-  await page.waitForLoadState("networkidle");
-  await expect(page.locator("body"), `${label}: no mark shown`).toContainText("U+202E");
+export async function expectNoRaw(page: Page, label: string): Promise<void> {
   expect.soft(await rawOverrides(page), `${label}: a hidden character shown as itself`).toEqual([]);
+}
+
+/**
+ * Records the paths of the API requests the page sends, the overrides taken out, so a test can
+ * require that each one was stubbed: an unstubbed request would reach `vite preview` and answer
+ * with no poisoned text.
+ *
+ * @param page - The page.
+ * @returns The paths, filled as requests go out.
+ */
+export function apiPaths(page: Page): string[] {
+  const paths: string[] = [];
+  page.on("request", (request) => {
+    const path = clean(new URL(request.url()).pathname);
+    if (path.startsWith("/api/")) {
+      paths.push(path);
+    }
+  });
+  return paths;
 }

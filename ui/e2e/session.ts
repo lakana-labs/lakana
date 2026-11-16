@@ -220,7 +220,7 @@ const LATE_ARRIVAL = tableRow({
 });
 
 /**
- * What `GET /api/v1/tables` answers for a query: a search finds a column and a description, the
+ * What `GET /api/v1/tables` answers for a query: a search finds a column and a translated description, the
  * text "nothing" finds nothing, the namespace "bronze" holds no table, an environment "staging"
  * does not exist, and the first page has a second one behind its cursor.
  *
@@ -263,8 +263,8 @@ function tablesAnswer(url: URL): { status: number; json: unknown } {
             column: null,
             column_type: null,
             snippet: `Every ${q} ranked by the trips it served`,
-            language: "en",
-            translated: false,
+            language: "de",
+            translated: true,
           },
         },
       ],
