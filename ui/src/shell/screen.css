@@ -208,6 +208,16 @@ tr:hover .chevron {
   outline-offset: 2px;
 }
 
+/* A few short choices side by side, which wrap at 320 px; the label and any text stay above. */
+.field[data-orientation="horizontal"] {
+  flex-flow: row wrap;
+  column-gap: var(--space-4);
+}
+
+.field[data-orientation="horizontal"] > :not(.radio-field) {
+  flex-basis: 100%;
+}
+
 .field [slot="description"],
 .field [slot="errorMessage"] {
   color: var(--color-text-muted);

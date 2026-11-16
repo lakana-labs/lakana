@@ -30,6 +30,7 @@ export { getTableTree, listTables, TABLE_SORTS } from "./catalog";
 export type {
   HealthSummaryOut,
   OwnerOut,
+  PlaceAction,
   SortOrder,
   TableListItemOut,
   TableMatchOut,
@@ -133,5 +134,7 @@ export {
   setRetention,
 } from "./manage";
 export type { OrphanOut, RetentionRule, TableRebuildOut, TableRetentionOut } from "./manage";
+export { createExternalTable, createNamespace, deleteNamespace } from "./namespaces";
+export type { ExternalFormat } from "./namespaces";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";

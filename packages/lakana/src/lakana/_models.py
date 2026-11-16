@@ -4868,10 +4868,14 @@ class TreeNamespace:
         Its path, dotted.
     count
         The readable tables in it and beneath it.
+    actions
+        What your rights allow there: ``create_namespace``, ``create_external_table``,
+        ``drop``. Empty for an older server.
     """
 
     path: str
     count: int
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -4886,11 +4890,14 @@ class TreeEnvironment:
         The readable tables in it.
     namespaces
         Its namespaces you are shown, by path.
+    actions
+        What your rights allow there: ``create_namespace``. Empty for an older server.
     """
 
     name: str
     count: int
     namespaces: list[TreeNamespace]
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
