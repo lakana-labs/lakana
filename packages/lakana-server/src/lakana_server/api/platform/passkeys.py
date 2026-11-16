@@ -131,7 +131,7 @@ def passkey_registration_options(
     minutes of signing in with a setup, invite or recovery link; every later one needs a passkey
     touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link
     may add only the first passkey. After those 15 minutes, a session from a link or a local
-    sign-in without a usable passkey gets 403 `PermissionDenied`, naming `lakana server start
+    sign-in without a usable passkey gets a 403 that names `lakana server start
     --local` or a recovery link, since a touch cannot help it. The options ask for a
     discoverable passkey with user verification (a PIN, fingerprint or face) and no
     attestation.
