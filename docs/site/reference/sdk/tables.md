@@ -137,6 +137,7 @@ Returns: `Table`. The table, with the texts it shows now.
 | `lakana.NotFound` | If the table, or the column, does not exist. |
 | `lakana.PermissionDenied` | Without the right to describe the table. |
 | `lakana.ValidationError` | If a text breaks its rules, or `lang` or `label_language` is not a language tag. |
+| `lakana.InvalidResponse` | With `label_language`, when the server is older than it and edited the label in the description's language instead; the message names that language. A label in another language is read back once to check this. |
 
 ### `client.tables.delete`
 

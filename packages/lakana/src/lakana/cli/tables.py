@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 import lakana
+from lakana._languages import canonical_language
 from lakana._models import (
     CheckHealth,
     Column,
@@ -1508,7 +1509,7 @@ def describe(
     target = f"{_output.inline(name)}" + (f" column {_output.inline(column)}" if column else "")
     languages = _output.inline(lang or table.main_language)
     if label_lang is not None:
-        languages += f", the label in {_output.inline(label_lang)}"
+        languages += f", the label in {_output.inline(canonical_language(label_lang))}"
     where = f"{_output.inline(environment)} ({languages})"
     if not reset:
         _output.done(state, f"Described {target} in {where}", table)

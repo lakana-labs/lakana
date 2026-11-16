@@ -1249,6 +1249,10 @@ def test_a_label_in_a_51st_language_is_refused_even_when_the_description_languag
         catalog_with_orders.set_table_description(
             principal, _ORDERS, "Une ligne.", label="Ordini", language="fr", label_language="it"
         )
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "id", "Le numéro.", label="Numéro", language="fr", label_language="FR"
+    )
+    assert len(row.text_languages or []) == MAX_EDIT_LANGUAGES
     catalog_with_orders.set_table_description(
         principal, _ORDERS, "Une ligne.", label="y", language="fr", label_language=tags[0]
     )

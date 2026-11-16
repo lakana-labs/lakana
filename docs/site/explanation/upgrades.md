@@ -193,7 +193,10 @@ restore a table](../how-to/drop-and-restore-a-table.md).
 A description save can now name the label's language apart from the description's:
 `label_language` in the body of `PATCH …/tables/{name}` and `PUT …/columns/{column}/description`,
 `label_language=` in `client.tables.describe`, and `--label-lang` on `lakana table describe`.
-Without it a save works as before, both fields in `lang`. The web interface uses it: a label shown in
+Without it a save works as before, both fields in `lang`. It needs a server of this release or
+later: an older server ignores `label_language` and saves the label in `lang`, and the SDK and the
+CLI then fail with `The server ignored label_language: it is older than this SDK, …`, so upgrade
+the server before the CLI and the SDK if you use it. The web interface uses it: a label shown in
 another language than the description is now saved, and reset by **Back to the text from Git**, in
 the label's own language instead of the description's. A label saved before in the description's
 language by mistake stays there; to remove only that label edit, send `{"label": null}` with

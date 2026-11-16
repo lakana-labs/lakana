@@ -149,6 +149,14 @@ its edit. Passing neither raises `ValueError("give description, label or both; N
 edit")`. `label_language="en"` edits the label in that language while the description is edited in
 `lang`; without a `label` it raises `ValueError("label_language names the language of label; give
 label with it")`.
+
+`label_language` and `--label-lang` need a server of this release or later: an older server ignores
+the field and edits the label in the description's language. The SDK and the CLI check the
+answer, reading the label back in its language when the answer shows another, and raise
+`lakana.errors.InvalidResponse` (the CLI exits `1`) with `The server ignored label_language: it is
+older than this SDK, so the label was saved in fr, the description's language, not in en. …`, which
+also says how to undo the edit. A reset of a label that had no edit in `label_language` cannot be
+told apart this way: on an older server it removes the label's edit in the description's language.
 `Table.description`, `Table.description_source`, `Column.description` and
 `Column.description_source` hold what the server returned; they are `None` for an older server.
 

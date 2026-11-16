@@ -284,6 +284,37 @@ describe("Overview editing", () => {
     });
   });
 
+  it("sends no label language when only the description changes beside a label in another", async () => {
+    const mixed = table({
+      language: "de",
+      translations: GERMAN,
+      description: "Jeder Verkauf.",
+      description_language: "de",
+      label: "Sales",
+      label_source: "project",
+      label_language: "en",
+    });
+    const { server, user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: { status: 200, body: mixed },
+        [`PATCH ${TABLE_PATH}`]: { status: 200, body: mixed },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const description = screen.getByRole("textbox", { name: "Description (German)" });
+    await user.clear(description);
+    await user.type(description, "Alle Verkäufe.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(server.sent.some((request) => request.method === "PATCH")).toBe(true);
+    });
+    const patch = server.sent.find((request) => request.method === "PATCH");
+    expect(patch?.path).toBe(`${TABLE_PATH}?lang=de`);
+    expect(patch?.body).toEqual({ description: "Alle Verkäufe." });
+  });
+
   it("goes back to the text from Git for a label in the language it is shown in", async () => {
     const mixed = table({
       language: "de",

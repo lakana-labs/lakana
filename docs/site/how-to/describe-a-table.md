@@ -95,7 +95,9 @@ buttons wait, and the open one keeps your text until you save or cancel.
   when the label has no German translation yet: the label is then saved in English and the
   description in German. When the table has texts in more than one language, each field names its
   language, such as "Label (English)" and "Description (German)", and **Back to the text from
-  Git** removes the edits in those languages only. When the table has no text in your language yet,
+  Git** removes the edits in those languages only. A label shown in the table's main language is
+  reset there, so every reader whose language has no label of its own sees the change, not only
+  readers of the description's language. When the table has no text in your language yet,
   the page shows and edits the table's main language and tells those who may edit.
 - **Two people at once.** Whoever saves last wins: the page does not warn that someone saved
   before you did, and after your save it shows what the server holds. Look at the text again before

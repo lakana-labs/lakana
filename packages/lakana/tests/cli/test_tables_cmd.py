@@ -435,8 +435,10 @@ def test_table_describe_sets_a_label_in_a_language(tmp_path: Path) -> None:
 
 def test_table_describe_sets_the_label_in_its_own_language(tmp_path: Path) -> None:
     api = FakeApi()
-    api.on("PATCH", f"{_BASE}/sales", json={**_TABLE, "language": "fr"})
+    labelled = {**_TABLE, "label": "Sales", "label_source": "edited", "label_language": "en"}
+    api.on("PATCH", f"{_BASE}/sales", json={**labelled, "language": "fr"})
     api.on("PUT", f"{_BASE}/sales/columns/id/description", json={**_TABLE, "language": "fr"})
+    api.on("GET", f"{_BASE}/sales", json={**_TABLE, "language": "en"})
     table = invoke(
         make_state(tmp_path, api),
         "table",
@@ -449,7 +451,7 @@ def test_table_describe_sets_the_label_in_its_own_language(tmp_path: Path) -> No
         "--lang",
         "fr",
         "--label-lang",
-        "en",
+        "EN",
         "--env",
         "dev",
     )
@@ -470,16 +472,44 @@ def test_table_describe_sets_the_label_in_its_own_language(tmp_path: Path) -> No
     )
     assert table.exit_code == 0, table.stderr
     assert column.exit_code == 0, column.stderr
-    assert [json.loads(r.content) for r in api.requests] == [
-        {"description": "Les ventes.", "label": "Sales", "label_language": "en"},
+    writes = [r for r in api.requests if r.method != "GET"]
+    assert [json.loads(r.content) for r in writes] == [
+        {"description": "Les ventes.", "label": "Sales", "label_language": "EN"},
         {"description": None, "label": None, "label_language": "en"},
     ]
-    assert [r.url.params["lang"] for r in api.requests] == ["fr", "fr"]
+    assert [r.url.params["lang"] for r in writes] == ["fr", "fr"]
     assert "Described bronze.sales in dev (fr, the label in en)" in _plain(table.stdout)
     assert (
         "Reset the description and label of bronze.sales column id in dev (fr, the label in en)"
         in _plain(column.stdout)
     )
+
+
+def test_table_describe_fails_when_an_older_server_saves_the_label_in_lang(tmp_path: Path) -> None:
+    api = FakeApi()
+    french = {**_TABLE, "label": "Sales", "label_source": "edited", "label_language": "fr"}
+    api.on("PATCH", f"{_BASE}/sales", json={**french, "language": "fr"})
+    api.on("GET", f"{_BASE}/sales", json={**_TABLE, "language": "en"})
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--label",
+        "Sales",
+        "--lang",
+        "fr",
+        "--label-lang",
+        "en",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code != 0
+    assert "Described" not in result.stdout
+    assert (
+        "The server ignored label_language: it is older than this SDK, so the label was saved in "
+        "fr, the description's language, not in en."
+    ) in " ".join(_plain(result.stderr).split())
 
 
 def test_table_describe_label_lang_needs_a_label_or_reset(tmp_path: Path) -> None:
