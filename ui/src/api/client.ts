@@ -439,4 +439,19 @@ export const api = {
     );
     return response.blob();
   },
+
+  /**
+   * Reads a file the person asked to download, such as one file of an artifact version. A link
+   * to the API would carry no CSRF token and be refused, so the interface reads the file here and
+   * saves it from an object URL. Not a background request: the person acts. A read never asks
+   * for a passkey touch, so there is no step-up retry.
+   *
+   * @param path - The path under the server.
+   * @returns The file.
+   * @throws {ApiError} for a refusal or an unreachable server.
+   */
+  async download(path: string): Promise<Blob> {
+    const response = await exchangeWith("GET", path, { accept: "application/octet-stream" }, {});
+    return response.blob();
+  },
 };

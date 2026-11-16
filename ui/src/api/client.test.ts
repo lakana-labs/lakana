@@ -294,6 +294,22 @@ describe("api.upload and api.blob", () => {
     expect(server.sent[0]?.headers["x-lakana-background"]).toBe("1");
   });
 
+  it("download sends the CSRF token and asks for octet-stream, not as a background request", async () => {
+    const server = fakeServer({
+      "GET /api/v1/files/one": { status: 200, blob: new Blob(["bytes"]) },
+    });
+    setCsrfToken("csrf-1");
+
+    const read = await api.download("/api/v1/files/one");
+
+    expect(await read.text()).toBe("bytes");
+    expect(server.sent[0]?.headers).toMatchObject({
+      accept: "application/octet-stream",
+      "x-lakana-csrf": "csrf-1",
+    });
+    expect(server.sent[0]?.headers["x-lakana-background"]).toBeUndefined();
+  });
+
   it("asks the server again before showing a file the browser has cached", async () => {
     // A replaced picture keeps its URL; only the etag changes, so a cached copy must be checked.
     const server = fakeServer({

@@ -136,5 +136,13 @@ export {
 export type { OrphanOut, RetentionRule, TableRebuildOut, TableRetentionOut } from "./manage";
 export { createExternalTable, createNamespace, deleteNamespace } from "./namespaces";
 export type { ExternalFormat } from "./namespaces";
+export type {
+  ArtifactFileOut,
+  ArtifactKeptOut,
+  ArtifactOut,
+  ArtifactUploadOut,
+  ArtifactVersionDeletedOut,
+  ArtifactVersionOut,
+} from "./artifacts";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";
