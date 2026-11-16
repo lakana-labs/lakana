@@ -137,4 +137,19 @@ describe("MatchLine", () => {
     expect(container.querySelector("mark")).toHaveTextContent("dim");
     expect(container.querySelectorAll(".char-mark")).toHaveLength(3);
   });
+
+  it("marks hidden characters in a translation's language and in a field it has no word for", () => {
+    const container = line({
+      kind: "table",
+      matched: "foot\u202Enote",
+      column: null,
+      column_type: null,
+      snippet: "Every sale",
+      language: "d\u202Ee",
+      translated: true,
+    });
+
+    expect(container).toHaveTextContent("footU+202Enote · Every sale · dU+202Ee");
+    expect(container.textContent).not.toMatch(/\u202E/u);
+  });
 });
