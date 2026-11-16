@@ -9,6 +9,7 @@ import { type JSX, useEffect, useState, useSyncExternalStore } from "react";
 
 import { changedPicture, pictureUrl, releasePicture, watchPictures } from "../api";
 import { initials } from "./initials";
+import { markedText } from "../shell/VisibleText";
 
 /**
  * The etag of a person's picture as this tab knows it: what this tab last set or removed, else
@@ -79,7 +80,9 @@ export function Avatar({ name, displayName, etag, size, label }: AvatarProps): J
   }, [name, current]);
   const url = shown !== null && shown.key === key ? shown.url : null;
   const naming =
-    label === undefined ? { "aria-hidden": true } : { role: "img", "aria-label": label };
+    label === undefined
+      ? { "aria-hidden": true }
+      : { role: "img", "aria-label": markedText(label) };
   return (
     <span className={`avatar avatar-${String(size)}`} {...naming}>
       {url === null ? (

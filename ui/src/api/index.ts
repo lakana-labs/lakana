@@ -30,6 +30,7 @@ export { getTableTree, listTables, TABLE_SORTS } from "./catalog";
 export type {
   HealthSummaryOut,
   OwnerOut,
+  PlaceAction,
   SortOrder,
   TableListItemOut,
   TableMatchOut,
@@ -93,6 +94,7 @@ export {
   getTableHealth,
   listColumnMasks,
   listGrantsAt,
+  listInstanceGrants,
   listRowFilters,
   myPermissions,
   submitPreview,
@@ -132,5 +134,26 @@ export {
   setRetention,
 } from "./manage";
 export type { OrphanOut, RetentionRule, TableRebuildOut, TableRetentionOut } from "./manage";
+export { createExternalTable, createNamespace, deleteNamespace } from "./namespaces";
+export type { ExternalFormat } from "./namespaces";
+export {
+  BROWSER_DOWNLOAD_LIMIT,
+  deleteVersion,
+  DownloadMismatch,
+  downloadFile,
+  getArtifact,
+  getVersion,
+  listUploads,
+  listVersions,
+  withdrawUpload,
+} from "./artifacts";
+export type {
+  ArtifactFileOut,
+  ArtifactKeptOut,
+  ArtifactOut,
+  ArtifactUploadOut,
+  ArtifactVersionDeletedOut,
+  ArtifactVersionOut,
+} from "./artifacts";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";

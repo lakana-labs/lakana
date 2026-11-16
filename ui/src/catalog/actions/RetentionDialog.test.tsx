@@ -304,4 +304,23 @@ describe("RetentionDialog", () => {
     expect(screen.getByRole("radio", { name: "After days without activity" })).toBeEnabled();
     expect(screen.getByRole("radio", { name: "On a day" })).toBeEnabled();
   });
+
+  it("marks a hidden character of a protected environment's name", async () => {
+    const place = { ...PLACE, environment: "pr\u202Eod" };
+    fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/pr\u202Eod": {
+        status: 200,
+        body: { name: "pr\u202Eod", is_protected: true },
+      },
+      [GET.replace("/prod/", "/pr\u202Eod/")]: {
+        status: 200,
+        body: retention({ source: null, days: null, set_by: null, expires_at: null }),
+      },
+    });
+    render(<RetentionDialog place={place} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(/^prU\+202Eod is protected, so/u)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\u202E/u);
+  });
 });

@@ -8,6 +8,8 @@ import itertools
 import sys
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from pyiceberg.conversions import to_bytes
@@ -27,6 +29,8 @@ from pyiceberg.types import (
 from lakana_core.catalog import health_signals
 from lakana_core.catalog.health_signals import (
     MIN_HISTORY,
+    WEEKDAY_MIN_LOADS,
+    WEEKDAY_WEEKS,
     Band,
     ColumnMetrics,
     HealthEffects,
@@ -110,7 +114,7 @@ def test_a_steady_history_is_widened_by_the_floor() -> None:
 def test_volume_fires_when_the_rows_collapse() -> None:
     fired = volume_signal({"added-records": "120", "total-records": "120"}, _volumes(*[10_000] * 8))
     assert (fired.state, fired.observed) == ("fired", {"added": 120, "total": 120})
-    assert fired.band == {"low": 9_000.0, "high": 11_000.0, "median": 10_000.0}
+    assert fired.band == {"low": 9_000.0, "high": 11_000.0, "median": 10_000.0, "basis": "all"}
     steady = volume_signal({"added-records": "10100"}, _volumes(*[10_000] * 8))
     assert (steady.state, steady.observed) == ("ok", {"added": 10_100, "total": None})
 
@@ -160,6 +164,234 @@ def test_a_commit_that_read_no_data_files_is_not_a_load_with_a_zero_count() -> N
 def test_volume_history_ignores_entries_without_a_count() -> None:
     history = [{"added": 10_000}] * 8 + [{"added": None}, {}]
     assert volume_signal({"added-records": "10000"}, history).state == "ok"
+
+
+_SATURDAY = datetime(2026, 11, 14, 6, 0, tzinfo=UTC)
+"""A Saturday morning commit, in UTC and in Europe/Berlin."""
+
+
+def _daily(weeks: int, *, weekend: int = 500, weekday: int = 1_000) -> list[dict[str, Any]]:
+    """Build the volume history of a daily load with a weekly rhythm, before `_SATURDAY`.
+
+    Parameters
+    ----------
+    weeks
+        How many weeks of daily loads, newest first.
+    weekend
+        The rows a Saturday or Sunday load adds.
+    weekday
+        The rows any other day's load adds.
+
+    Returns
+    -------
+    list of dict
+        Observed values with the time of their commit, as `recent_observations` gives them.
+    """
+    days = (_SATURDAY - timedelta(days=n) for n in range(1, 7 * weeks + 1))
+    return [
+        {"added": weekend if at.weekday() >= 5 else weekday, "total": 1, "observed_at": at}
+        for at in days
+    ]
+
+
+def test_a_weekly_rhythm_is_judged_against_the_same_weekday() -> None:
+    """A usual Saturday is ok; the band of all days would call it a drop (#565)."""
+    history = _daily(WEEKDAY_WEEKS)
+    seen = volume_signal({"added-records": "520"}, history, at=_SATURDAY)
+    assert seen.state == "ok"
+    assert seen.band == {
+        "low": 450.0,
+        "high": 550.0,
+        "median": 500.0,
+        "basis": "weekday",
+        "weekday": "saturday",
+    }
+    assert volume_signal({"added-records": "520"}, history).state == "fired"
+
+
+@pytest.mark.parametrize(("rows", "state"), [(250, "fired"), (50, "fired"), (1_000, "fired")])
+def test_the_weekday_band_still_finds_truncated_and_duplicated_weekend_loads(
+    rows: int, state: str
+) -> None:
+    """Half, a tenth or twice a Saturday's rows fire, the doubled load included (#565)."""
+    seen = volume_signal({"added-records": str(rows)}, _daily(WEEKDAY_WEEKS), at=_SATURDAY)
+    assert (seen.state, (seen.band or {}).get("basis")) == (state, "weekday")
+
+
+def _alternating(
+    weeks: int, *, saturday: tuple[int, int], other: tuple[int, int]
+) -> list[dict[str, Any]]:
+    """Build a daily volume history before `_SATURDAY` whose loads alternate week by week.
+
+    Parameters
+    ----------
+    weeks
+        How many weeks of daily loads.
+    saturday
+        The rows of a Saturday load in even and odd weeks back.
+    other
+        The rows of any other day's load in even and odd weeks back.
+
+    Returns
+    -------
+    list of dict
+        Observed values with their commit time, newest first.
+    """
+    found = []
+    for n in range(1, 7 * weeks + 1):
+        at = _SATURDAY - timedelta(days=n)
+        pair = saturday if at.weekday() == 5 else other
+        found.append({"added": pair[(n - 1) // 7 % 2], "total": 1, "observed_at": at})
+    return found
+
+
+def test_a_rhythmless_noisy_table_widens_a_steady_weekday_to_the_pooled_spread() -> None:
+    """Saturday's own loads barely move, the other days do: their spread sets the width (#565).
+
+    Saturday alone gives 1,000 ± 100 (the 10 % floor over 4 x 20); every load's distance from its
+    own weekday's median is 50 on six days of seven, so the pooled half-width is 4 x 50.
+    """
+    history = _alternating(WEEKDAY_WEEKS, saturday=(980, 1_020), other=(950, 1_050))
+    seen = volume_signal({"added-records": "1150"}, history, at=_SATURDAY)
+    assert seen.state == "ok"
+    assert seen.band == {
+        "low": 800.0,
+        "high": 1_200.0,
+        "median": 1_000.0,
+        "basis": "weekday",
+        "weekday": "saturday",
+    }
+    assert volume_signal({"added-records": "500"}, history, at=_SATURDAY).state == "fired"
+
+
+def test_a_weekday_with_too_few_loads_does_not_widen_the_pooled_spread() -> None:
+    """Sundays seen only twice, wildly apart, stay out of the pooled spread (#565).
+
+    Saturdays are steady at 1,000, Fridays alternate 900 and 1,100 (distance 100 from their median);
+    the two Sundays are 100 and 100,000 but too few to count, so the pooled half-width is
+    4 x 50 = 200, not the 4 x 100 that counting them would give.
+    """
+    days = [(7 * n, 1_000) for n in range(1, WEEKDAY_WEEKS + 1)]
+    days += [(7 * n - 6, (900, 1_100)[n % 2]) for n in range(1, WEEKDAY_WEEKS + 1)]
+    days += [(6, 100), (13, 100_000)]
+    history = [
+        {"added": rows, "total": 1, "observed_at": _SATURDAY - timedelta(days=back)}
+        for back, rows in sorted(days)
+    ]
+    seen = volume_signal({"added-records": "1000"}, history, at=_SATURDAY)
+    assert seen.band == {
+        "low": 800.0,
+        "high": 1_200.0,
+        "median": 1_000.0,
+        "basis": "weekday",
+        "weekday": "saturday",
+    }
+
+
+def test_a_weekly_table_judges_a_steady_saturday_with_the_spread_of_the_week() -> None:
+    """A low, steady Saturday takes the wider pooled spread of the weekdays around it (#565).
+
+    Saturday alone gives 500 ± 50 (the floor); weekdays alternate 950 and 1,050, so the pooled
+    half-width is 4 x 50 = 200 once they are more than half of the loads.
+    """
+    history = _alternating(WEEKDAY_WEEKS, saturday=(500, 500), other=(950, 1_050))
+    seen = volume_signal({"added-records": "650"}, history, at=_SATURDAY)
+    assert seen.state == "ok"
+    assert seen.band == {
+        "low": 300.0,
+        "high": 700.0,
+        "median": 500.0,
+        "basis": "weekday",
+        "weekday": "saturday",
+    }
+    for rows in (250, 50, 1_000):
+        assert volume_signal({"added-records": str(rows)}, history, at=_SATURDAY).state == "fired"
+
+
+def test_too_few_loads_of_the_weekday_fall_back_to_the_band_of_all_loads() -> None:
+    """With fewer than `WEEKDAY_MIN_LOADS` Saturdays the band of all loads judges (#565)."""
+    history = _daily(WEEKDAY_MIN_LOADS - 1)
+    seen = volume_signal({"added-records": "1000"}, history, at=_SATURDAY)
+    assert (seen.state, (seen.band or {}).get("basis")) == ("ok", "all")
+
+
+def test_loads_older_than_the_lookback_do_not_count_for_the_weekday() -> None:
+    """Only the last `WEEKDAY_WEEKS` weeks count: older Saturdays leave the band of all loads."""
+    old = [
+        {**item, "observed_at": item["observed_at"] - timedelta(weeks=WEEKDAY_WEEKS)}
+        for item in _daily(WEEKDAY_WEEKS)
+    ]
+    seen = volume_signal({"added-records": "1000"}, old, at=_SATURDAY)
+    assert (seen.band or {}).get("basis") == "all"
+
+
+def test_stored_loads_without_a_time_do_not_count_for_the_weekday() -> None:
+    """History without a commit time judges against the band of all loads, as before (#565)."""
+    history = [
+        {k: v for k, v in item.items() if k != "observed_at"} for item in _daily(WEEKDAY_WEEKS)
+    ]
+    history[0]["observed_at"] = "2026-11-13T06:00:00+00:00"  # not a time: ignored
+    seen = volume_signal({"added-records": "1000"}, history, at=_SATURDAY)
+    assert (seen.state, (seen.band or {}).get("basis")) == ("ok", "all")
+
+
+def test_a_weekday_band_needs_the_least_history_of_any_band() -> None:
+    """A weekly load has a band only from `MIN_HISTORY` loads, like any other table."""
+    weekly = [
+        {"added": 1_000, "total": 1, "observed_at": _SATURDAY - timedelta(weeks=n)}
+        for n in range(1, MIN_HISTORY)
+    ]
+    assert volume_signal({"added-records": "1000"}, weekly, at=_SATURDAY).state == "no_history"
+
+
+def test_the_weekday_is_taken_in_the_given_zone() -> None:
+    """A commit at 23:30 UTC on Friday is a Saturday load in Berlin, as its history is."""
+    berlin = ZoneInfo("Europe/Berlin")
+    at = datetime(2026, 11, 13, 23, 30, tzinfo=UTC)
+    history = [
+        {**item, "observed_at": item["observed_at"] - timedelta(hours=6, minutes=30)}
+        for item in _daily(WEEKDAY_WEEKS)
+    ]
+    seen = volume_signal({"added-records": "500"}, history, at=at, zone=berlin)
+    assert (seen.state, (seen.band or {}).get("weekday")) == ("ok", "saturday")
+    in_utc = volume_signal({"added-records": "500"}, history, at=at)
+    assert (in_utc.band or {}).get("weekday") == "friday"
+
+
+def test_a_naive_time_in_the_history_is_read_as_utc() -> None:
+    """SQLite gives times without a zone; they are UTC."""
+    history = [
+        {**item, "observed_at": item["observed_at"].replace(tzinfo=None)}
+        for item in _daily(WEEKDAY_WEEKS)
+    ]
+    seen = volume_signal({"added-records": "500"}, history, at=_SATURDAY)
+    assert (seen.band or {}).get("basis") == "weekday"
+
+
+def test_the_alert_of_a_weekday_band_names_the_weekday() -> None:
+    text = alert_text(
+        "gold.orders",
+        "volume",
+        None,
+        "fired",
+        {"added": 120, "total": 120},
+        {"low": 450.0, "high": 550.0, "median": 500.0, "basis": "weekday", "weekday": "saturday"},
+        snapshot_id=4711,
+        observed_at=_AT,
+    )
+    assert text is not None
+    assert "usually 450–550 on Saturdays (snapshot 4711" in text
+    damaged = alert_text(
+        "gold.orders",
+        "volume",
+        None,
+        "fired",
+        {"added": 120, "total": 120},
+        {"low": 450.0, "high": 550.0, "median": 500.0, "basis": "weekday", "weekday": "x"},
+        snapshot_id=4711,
+        observed_at=_AT,
+    )
+    assert damaged is not None and "usually 450–550 (snapshot" in damaged
 
 
 def test_column_metrics_add_up_the_added_files() -> None:

@@ -7,6 +7,7 @@ import type { JSX } from "react";
 import { Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
+import { markedText } from "../../shell/VisibleText";
 import "./actionStrings";
 
 /** The most the server takes as a reason. */
@@ -56,9 +57,11 @@ export function ProtectedReason({
         }
       }}
     >
-      <Label>{t("table.actions.protected.label", { environment })}</Label>
+      <Label>{t("table.actions.protected.label", { environment: markedText(environment) })}</Label>
       <Input />
-      <Text slot="description">{t("table.actions.protected.text", { environment })}</Text>
+      <Text slot="description">
+        {t("table.actions.protected.text", { environment: markedText(environment) })}
+      </Text>
     </TextField>
   );
 }

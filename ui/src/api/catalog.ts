@@ -112,6 +112,13 @@ export interface TableListPageOut {
   readonly capped: boolean;
 }
 
+/**
+ * What the reader's rights allow on a place of the tree: create a namespace in it, register an
+ * external table in it (a namespace only) or delete it (a namespace only). Rights only: the server
+ * still refuses a namespace that is not empty or a protected environment without a reason.
+ */
+export type PlaceAction = "create_namespace" | "create_external_table" | "drop";
+
 /** The counts of readable tables, as `GET /api/v1/tables/tree` answers them. */
 export interface TableTreeOut {
   /** The readable tables in every environment. */
@@ -120,7 +127,14 @@ export interface TableTreeOut {
   readonly environments: readonly {
     readonly name: string;
     readonly count: number;
-    readonly namespaces: readonly { readonly path: string; readonly count: number }[];
+    /** What the reader may do there; missing from an older server. */
+    readonly actions?: readonly PlaceAction[];
+    readonly namespaces: readonly {
+      readonly path: string;
+      readonly count: number;
+      /** What the reader may do there; missing from an older server. */
+      readonly actions?: readonly PlaceAction[];
+    }[];
   }[];
 }
 

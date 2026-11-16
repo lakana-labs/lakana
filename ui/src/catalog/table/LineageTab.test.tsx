@@ -13,7 +13,9 @@ import {
   LINEAGE_PATH,
   lineage,
   ROOT,
+  table,
   TABLE,
+  TABLE_PATH,
   UP,
   UP2,
 } from "../../test/table";
@@ -298,6 +300,23 @@ describe("LineageTab", () => {
     await waitFor(() => {
       expect(open).toHaveFocus();
     });
+  });
+
+  it("marks hidden characters of the table's name in the regions and the dialog's heading", async () => {
+    const { user } = renderShell(TAB, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: { status: 200, body: table({ name: "fact_\u202Esales" }) },
+      },
+    });
+    await screen.findByRole("region", { name: "Lineage of fact_U+202Esales" });
+
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Lineage of fact_U+202Esales" });
+    expect(
+      within(dialog).getByRole("region", { name: "Lineage of fact_U+202Esales, full screen" }),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading").textContent).not.toContain("\u202E");
   });
 
   it("opens a table from the drawing without loading the page again", async () => {

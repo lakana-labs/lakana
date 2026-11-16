@@ -23,4 +23,19 @@ describe("ChooseEnvironment", () => {
       "/catalog?env=prod&view=orphans",
     ]);
   });
+
+  it("marks hidden characters in an environment's name", () => {
+    const tree = {
+      count: 0,
+      environments: [{ name: "pr\u202Eod", count: 0, actions: [], namespaces: [] }],
+    };
+    render(
+      <MemoryRouter>
+        <ChooseEnvironment view={{ ...DEFAULT_VIEW, view: "orphans" }} root={buildTree(tree)} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link")).toHaveTextContent("prU+202Eod");
+    expect(screen.getByText("U+202E")).toHaveClass("char-mark");
+  });
 });

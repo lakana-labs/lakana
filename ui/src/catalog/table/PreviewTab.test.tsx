@@ -259,21 +259,6 @@ describe("PreviewTab", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("You may not run queries here.");
   });
 
-  it("says an artifact has no preview and asks nothing", async () => {
-    const { server } = renderShell(PREVIEW, {
-      routes: { [`GET ${TABLE_PATH}`]: { status: 200, body: table({ kind: "ARTIFACT" }) } },
-    });
-
-    expect(
-      await screen.findByText(
-        "An artifact holds files, not rows, so it has no preview. Download its files with lakana artifact download.",
-      ),
-    ).toBeVisible();
-    expect(sent(server, "GET", "/permissions?environment=prod")).toEqual([]);
-    expect(sent(server, "POST", "/preview")).toEqual([]);
-    expect(server.sent.filter((request) => request.path.includes("/queries"))).toEqual([]);
-  });
-
   it("waits with words after a second", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     renderShell(PREVIEW, {
@@ -612,5 +597,32 @@ describe("PreviewTab", () => {
     ]);
     expect(within(row).getByRole("gridcell", { name: "null" })).toBe(cells[1]);
     expect(cells[3]?.querySelector(".value-marker")).toHaveTextContent("binary, 12 bytes");
+  });
+
+  it("marks hidden characters of the table's and a column's name in the grid's names", async () => {
+    const crafted = TABLE_PATH.replace("fact_sales", "fact_\u202Esales");
+    const page = result();
+    const { user } = renderShell("/catalog/prod/gold.sales/fact_%E2%80%AEsales/preview", {
+      routes: {
+        [`GET ${crafted}`]: { status: 200, body: table({ name: "fact_\u202Esales" }) },
+        [`POST ${crafted}/preview`]: { status: 202, body: { query_id: QUERY_ID } },
+        [RESULT_ROUTE]: {
+          status: 200,
+          body: {
+            ...page,
+            columns: page.columns.map((column, index) =>
+              index === 2 ? { ...column, name: "no\u2066te" } : column,
+            ),
+          },
+        },
+      },
+    });
+
+    const region = await screen.findByRole("region", { name: "Preview of fact_U+202Esales" });
+    const grid = within(region).getByRole("grid", { name: "The first rows of fact_U+202Esales" });
+    const rows = await within(grid).findAllByRole("row");
+    await user.click(rows[1]?.querySelectorAll("[role=gridcell]")[2] as HTMLElement);
+
+    expect(await screen.findByRole("region", { name: "noU+2066te, row 1" })).toBeVisible();
   });
 });

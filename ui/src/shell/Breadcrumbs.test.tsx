@@ -73,4 +73,32 @@ describe("Breadcrumbs", () => {
     const separator = screen.getByText("›");
     expect(separator).toHaveAttribute("aria-hidden", "true");
   });
+
+  it("marks hidden characters in every part", () => {
+    render(
+      <RouterProvider
+        router={createMemoryRouter([
+          {
+            path: "*",
+            element: (
+              <Breadcrumbs
+                trail={[{ to: "/a", label: "pr\u202Eod" }]}
+                current={"fact_\u2066sales"}
+              />
+            ),
+          },
+        ])}
+      />,
+    );
+
+    const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(nav).getByRole("link")).toHaveTextContent("prU+202Eod");
+    expect(nav).toHaveTextContent("fact_U+2066sales");
+    expect(nav.textContent).not.toMatch(/[\u202E\u2066]/u);
+    expect(
+      within(nav)
+        .getAllByText(/^U\+20/u)
+        .map((mark) => mark.className),
+    ).toEqual(["char-mark", "char-mark"]);
+  });
 });

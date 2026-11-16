@@ -103,6 +103,9 @@ const HOME: Record<string, unknown> = {
   "/api/v1/info": { version: "0.23.0" },
 };
 
+/** What an administrator may do on each namespace of the tree. */
+const PLACE_ACTIONS = ["create_namespace", "create_external_table", "drop"];
+
 /** What the Catalog reads besides the list: a tree of two environments and an empty namespace. */
 const CATALOG: Record<string, unknown> = {
   "/api/v1/environments/prod": { name: "prod", is_protected: false },
@@ -134,14 +137,20 @@ const CATALOG: Record<string, unknown> = {
   "/api/v1/tables/tree": {
     count: 4,
     environments: [
-      { name: "dev", count: 1, namespaces: [{ path: "gold", count: 1 }] },
+      {
+        name: "dev",
+        count: 1,
+        actions: ["create_namespace"],
+        namespaces: [{ path: "gold", count: 1, actions: PLACE_ACTIONS }],
+      },
       {
         name: "prod",
         count: 3,
+        actions: ["create_namespace"],
         namespaces: [
-          { path: "gold", count: 3 },
-          { path: "gold.sales", count: 1 },
-          { path: "bronze", count: 0 },
+          { path: "gold", count: 3, actions: PLACE_ACTIONS },
+          { path: "gold.sales", count: 1, actions: PLACE_ACTIONS },
+          { path: "bronze", count: 0, actions: PLACE_ACTIONS },
         ],
       },
     ],

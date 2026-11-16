@@ -44,6 +44,18 @@ is freed:
 Deleted version 3 of dev/models.scratch_model. Freed 1 file (33 B).
 ```
 
+**In the web interface:** open the artifact's page in the Catalog and its **Versions** tab, and
+press **Delete…** beside the version. The button shows only beside a live version you may delete,
+and also on an artifact a deployed project produces: deleting a version stays possible there. The
+dialog asks the same question, "Delete version 3 of models.scratch_model?", with the version's size
+and number of files, and says that its number is never used again; press **Delete the version**.
+From a browser the server asks for a passkey touch within the last 15 minutes: touch your passkey
+when the browser asks, and the delete is sent again. The command line uses a token and is never
+asked. If the delete is refused, for example because someone deleted the version meanwhile, or the
+passkey touch fails, the dialog stays open with the server's sentence and nothing is deleted. Only
+when the version is already gone or already deleted (the server answers 404 or 409) is the list
+read again. Cancel closes it.
+
 ## What the answer says
 
 The command tells you how many files and bytes it freed from Lakana's storage, and, when a file
@@ -68,6 +80,11 @@ A file stays for one of three reasons:
 | `that version 2 also uses` (or `that another version also uses`) | A version that is not deleted has the same file. Lakana names the version only when you may read the artifact. | Nothing. Delete that version too to free the file. |
 | `that an open upload names` | Someone began an upload that lists the file and has not finished it. | Wait until it is committed, withdrawn or has expired (one hour by default). The person who began it can withdraw it: [List and withdraw an open upload](withdraw-an-artifact-upload.md). |
 | `that Lakana's periodic clean-up decides about: it removes what nothing else needs and keeps the rest` | This request did not remove the file: a large version (the request removes up to 200 files or 5 seconds' worth), a storage error, a manifest the catalog does not know after a restore, a damaged manifest, or a file stored again while the delete ran. | Nothing: the clean-up removes the file if no version and no open upload needs it, and keeps it if one does, so it may stay for good. Ask the operator if it stays and you expect it gone. |
+
+**In the web interface:** after the delete, the dialog says the same, in one paragraph: `Deleted
+version 1 of models.scratch_twin. Freed no files. Kept 1 file (33 B) that version 2 also uses.`
+Press **Close**: the versions and the artifact are read again, the version shows as deleted, and
+**current** moves to the version before it if you deleted the current one.
 
 A file that two paths of one version share counts once. With `--output json` the answer has the
 same numbers: `freed_files`, `freed_bytes`, `kept_files`, `kept_bytes` and `kept`, a list of
@@ -105,6 +122,10 @@ The command warns that the write is audited. Without the two options the server 
 ``Environment 'prod' is protected: only runs of the deployed project version may write. See `lakana run`.``
 `--break-glass` without `--reason` is a usage error, and so is `--reason` alone.
 
+**In the web interface,** the dialog of a protected environment also asks why you break the
+protection of the environment, the same reason `--reason` takes, and **Delete the version** waits
+until you give one.
+
 ## Drop the whole artifact
 
 Dropping removes every version with its files, and the artifact's grants. The example drops
@@ -138,6 +159,23 @@ Dropped artifact dev/models.scratch_model; its files are removed from storage, a
 - The server removes the files inside the request, so a very large artifact can take minutes. A
   reverse proxy in front of the server must allow a request that long, or you see a 504 for a drop
   that still finishes. Check with the `artifact list` subcommand before you run it again.
+
+**In the web interface,** open the artifact's page in the Catalog and choose **Actions**, then
+**Drop…**. The menu shows **Drop…** only if you may drop the artifact. The dialog asks "Drop
+models.scratch_model?" and says "This cannot be undone: every version's files are deleted."; press
+**Drop the artifact**. From a browser the server asks for a passkey touch within the last 15
+minutes: touch your passkey when the browser asks, and the drop is sent again. The command line
+uses a token and is never asked. The Catalog then opens the artifact's namespace and says "Dropped
+artifact models.scratch_model. Its files are removed from storage, and Lakana's periodic clean-up
+removes any it could not." In a protected environment the dialog also asks why you break the
+protection of the environment, the same text `--reason` takes with `--break-glass`.
+
+For an artifact a deployed project produces, **Drop…** is shown but cannot be chosen, and the menu
+says `Defined in analytics/assets/ml/model.py — change it in git` with the repository and the file
+that declare it; a screen reader hears it when the menu opens. Deleting single versions stays
+possible. If the drop is refused, for instance because a deploy made the artifact git-owned after
+you opened its page, or the passkey touch fails, the dialog stays open with the server's sentence
+and nothing is dropped.
 
 ## When it fails
 

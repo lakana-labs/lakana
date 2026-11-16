@@ -16,14 +16,14 @@ import {
   myPermissions,
   submitPreview,
 } from "../../api";
-import type { QueryRunStatus, ResultPageOut, TableOut, TableRef } from "../../api";
+import type { QueryRunStatus, ResultPageOut, TableRef } from "../../api";
 import { useMe } from "../../shell/me";
 import { problemText } from "../../sign-in/messages";
 import type { StatusKind } from "../../status/status";
 import "./tableStrings";
 
 /** Where a preview is: asking, refused before asking, waiting for its run, or ended. */
-type PreviewPhase = "checking" | "not_allowed" | "artifact" | "waiting" | "done" | "failed";
+type PreviewPhase = "checking" | "not_allowed" | "waiting" | "done" | "failed";
 
 /** What the Preview tab shows. */
 export interface PreviewState {
@@ -57,7 +57,6 @@ const BUSY_WAIT_MS = 1_000;
 const BUSY_RETRIES = 5;
 
 const CHECKING: PreviewState = { phase: "checking", status: null, page: null, error: null };
-const ARTIFACT: PreviewState = { ...CHECKING, phase: "artifact" };
 
 /**
  * Ignores a failed cancel: the run has ended already, or the server will end it at its timeout,
@@ -77,13 +76,9 @@ function ignore(): undefined {
  * cancels a run still `QUEUED` or `RUNNING`, and a submission that answers after the cleanup
  * cancels its own run. StrictMode's mount, unmount and mount so leaves no run behind.
  * @param ref - The table.
- * @param kind - What it is; an artifact has no preview, and nothing is asked for one.
  * @returns The state and `refresh`, which cancels a waiting run and runs the preview again.
  */
-export function usePreview(
-  ref: TableRef,
-  kind: TableOut["kind"],
-): PreviewState & { readonly refresh: () => void } {
+export function usePreview(ref: TableRef): PreviewState & { readonly refresh: () => void } {
   const { t } = useTranslation();
   // The run reads the words through a ref, so a change of language never cancels and reruns it.
   const words = useRef(t);
@@ -91,14 +86,11 @@ export function usePreview(
     words.current = t;
   }, [t]);
   const me = useMe();
-  const [state, setState] = useState<PreviewState>(kind === "ARTIFACT" ? ARTIFACT : CHECKING);
+  const [state, setState] = useState<PreviewState>(CHECKING);
   const [round, setRound] = useState(0);
   const { environment, namespace, name } = ref;
 
   useEffect(() => {
-    if (kind === "ARTIFACT") {
-      return undefined;
-    }
     let alive = true;
     let runId: string | null = null;
     let active = false;
@@ -224,7 +216,7 @@ export function usePreview(
         cancelQuery(environment, runId).catch(ignore);
       }
     };
-  }, [environment, namespace, name, kind, me.name, round]);
+  }, [environment, namespace, name, me.name, round]);
 
   const refresh = useCallback(() => {
     setState(CHECKING);

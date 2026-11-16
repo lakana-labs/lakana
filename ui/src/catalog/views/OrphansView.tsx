@@ -61,13 +61,19 @@ export function OrphansView({ environment, namespace, onChanged }: OrphansViewPr
   }, [dropped]);
 
   const rows = pages.items ?? [];
+  const shownEnvironment = markedText(environment);
   return (
     <div className="orphans-view">
-      <p className="page-purpose">{t("catalog.views.orphans.purpose", { environment })}</p>
+      <p className="page-purpose">
+        {t("catalog.views.orphans.purpose", { environment: shownEnvironment })}
+      </p>
       <p>
         {namespace === null
-          ? t("catalog.views.orphans.inEnvironment", { environment })
-          : t("catalog.views.orphans.wholeEnvironment", { environment, namespace })}
+          ? t("catalog.views.orphans.inEnvironment", { environment: shownEnvironment })
+          : t("catalog.views.orphans.wholeEnvironment", {
+              environment: shownEnvironment,
+              namespace: markedText(namespace),
+            })}
       </p>
       <p className="catalog-result" role="status" tabIndex={-1} ref={status}>
         {dropped !== null && t("catalog.views.dropped.droppedNow", { table: markedText(dropped) })}
@@ -76,7 +82,7 @@ export function OrphansView({ environment, namespace, onChanged }: OrphansViewPr
       <ViewList
         pages={pages}
         rowCount={rows.length}
-        empty={t("catalog.views.orphans.empty", { environment })}
+        empty={t("catalog.views.orphans.empty", { environment: shownEnvironment })}
         region={t("catalog.views.orphans.region")}
         head={
           <tr>

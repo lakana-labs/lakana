@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { artifactRoutes } from "../../test/artifacts";
 import { renderShell } from "../../test/render";
 import { permissions, table, TABLE, TABLE_PATH } from "../../test/table";
 
@@ -12,6 +13,21 @@ describe("Overview", () => {
 
     expect(await screen.findByText("Every sale in every store, one row per sale.")).toBeVisible();
     expect(screen.getByText("From the project in Git")).toBeVisible();
+  });
+
+  it("marks a hidden character in the description", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: {
+          status: 200,
+          body: table({ description: "Sales of analy\u202Etics." }),
+        },
+      },
+    });
+
+    const mark = await screen.findByText("U+202E", { selector: ".description-text > .char-mark" });
+    expect(mark.parentElement).toHaveTextContent("Sales of analyU+202Etics.");
+    expect(mark.parentElement?.textContent).not.toMatch(/\u202E/u);
   });
 
   it("says a description was edited here", async () => {
@@ -104,6 +120,18 @@ describe("Overview", () => {
       .getAllByRole("heading", { level: 2 })
       .map((heading) => heading.textContent);
     expect(names).toEqual(["Description", "Columns", "Health", "Facts", "Comes from · goes to"]);
+  });
+
+  it("shows no Columns and no Health block for an artifact", async () => {
+    const { server } = renderShell("/catalog/prod/ml/model", { routes: artifactRoutes() });
+
+    await screen.findByRole("heading", { level: 2, name: "Facts" });
+    await screen.findByRole("heading", { level: 2, name: "Comes from · goes to" });
+    const names = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent);
+    expect(names).toEqual(["Description", "Facts", "Comes from · goes to"]);
+    expect(server.sent.some((request) => request.path.includes("/health"))).toBe(false);
   });
 
   it("gives administrators Readers › and Health details › on Overview", async () => {

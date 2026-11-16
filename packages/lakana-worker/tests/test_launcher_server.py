@@ -708,7 +708,7 @@ def test_sigterm_removes_the_containers_of_live_runs_and_ends_the_server(
     client.sendall(json.dumps({**RUN, "token": token}).encode() + b"\n")
     _wait_for(lambda: sum(path.endswith("/start") for _, path, _ in engine.calls) >= 2)
 
-    handlers[signal.SIGTERM](signal.SIGTERM, None)  # ty: ignore[call-non-callable]
+    handlers[signal.SIGTERM](signal.SIGTERM, None)  # ty: ignore[not-callable]
     thread.join(10)
 
     assert not thread.is_alive()

@@ -112,6 +112,15 @@ def test_grants_list_page_sends_every_filter_and_reads_the_cursor() -> None:
     assert seen[-1] == {"group_name": "team", "cursor": "next"}
 
 
+def test_grants_list_by_kind_sends_it_in_capitals() -> None:
+    seen: list[dict[str, str]] = []
+    grants = Grants(_transport(_pages("/api/v1/grants", _GRANT, seen)))
+    grants.list(kind="instance")
+    assert seen == [{"kind": "INSTANCE"}]
+    list(grants.iter(kind="TABLE", page_size=1))
+    assert seen[1] == {"kind": "TABLE", "limit": "1"}
+
+
 def test_grants_iter_walks_every_page() -> None:
     seen: list[dict[str, str]] = []
     grants = Grants(_transport(_pages("/api/v1/grants", _GRANT, seen)))

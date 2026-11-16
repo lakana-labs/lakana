@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { listExpiring } from "../../api/manage";
-import { VisibleText } from "../../shell/VisibleText";
+import { markedText, VisibleText } from "../../shell/VisibleText";
 import { When } from "../cells";
 import { tablePath } from "../paths";
 import { retentionWords } from "../retention";
@@ -41,7 +41,7 @@ export function ExpiringView({ environment, namespace }: ExpiringViewProps): JSX
   // The present is read once per mount, so a render never depends on the clock.
   const [now] = useState(Date.now);
   const rows = pages.items ?? [];
-  const place = namespace ?? environment;
+  const place = markedText(namespace ?? environment);
   return (
     <div className="expiring-view">
       <p className="page-purpose">{t("catalog.views.expiring.purpose", { place })}</p>
@@ -72,7 +72,7 @@ export function ExpiringView({ environment, namespace }: ExpiringViewProps): JSX
               {row.expires_at !== null && Date.parse(row.expires_at) <= now ? (
                 t("catalog.views.expiring.dueNow")
               ) : (
-                <When iso={row.expires_at} never={t("catalog.views.dropped.neverKnown")} />
+                <When iso={row.expires_at} never={t("catalog.views.dropped.neverKnown")} ahead />
               )}
             </td>
             <td>{retentionWords(t, row)}</td>

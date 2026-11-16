@@ -116,6 +116,23 @@ describe("DropDialog", () => {
     ]);
   });
 
+  it("marks hidden characters of a protected environment's name in the reason's label and help", async () => {
+    fakeServer({
+      ...manageRoutes(),
+      "GET /api/v1/environments/pr\u202Eod": {
+        status: 200,
+        body: { name: "pr\u202Eod", is_protected: true },
+      },
+    });
+    renderDrop("TABLE", { ...REF, environment: "pr\u202Eod" });
+
+    const reason = await screen.findByRole("textbox", {
+      name: /Why you break the protection of prU\+202Eod/,
+    });
+    expect(reason).toBeInTheDocument();
+    expect(screen.getByRole("dialog").textContent).not.toContain("\u202E");
+  });
+
   it("sends the drop again after the touch exactly as before, with purge and the reason", async () => {
     fakeWebAuthn();
     let tries = 0;
@@ -266,9 +283,9 @@ describe("DropDialog", () => {
     });
     const { onDone, user } = renderDrop();
 
-    expect(screen.getByRole("button", { name: /Drop the table/ })).toHaveAttribute(
-      "aria-disabled",
-      "true",
+    // Pressable while it checks: a press is kept, not lost (ConfirmRow's own tests).
+    expect(screen.getByRole("button", { name: "Drop the table" })).not.toHaveAttribute(
+      "data-pending",
     );
     protection.release({ status: 200, body: { name: "prod", is_protected: true } });
     const reason = await screen.findByRole("textbox", {
@@ -293,5 +310,22 @@ describe("DropDialog", () => {
 
     expect(await screen.findByRole("button", { name: "Drop the table" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox")).toBeInTheDocument();
+  });
+
+  it("ignores Escape and Cancel while the drop is pending", async () => {
+    const slow = held();
+    fakeServer({ ...manageRoutes(), [DROP]: slow.route });
+    const { onDone, onCancel, user } = renderDrop();
+
+    await user.click(await screen.findByRole("button", { name: "Drop the table" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    slow.release({ status: 204 });
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledTimes(1);
+    });
   });
 });

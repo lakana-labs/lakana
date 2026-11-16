@@ -1,0 +1,39 @@
+{
+  "menu": {
+    "button": "Actions",
+    "name": "Actions for {{place}}",
+    "newNamespace": "New namespace…",
+    "newExternalTable": "New external table…",
+    "delete": "Delete namespace…",
+    "onlyEmpty": "Only an empty namespace can be deleted."
+  },
+  "create": {
+    "title": "New namespace in {{place}}",
+    "path": "Path",
+    "pathText": "Dotted, such as gold.sales.",
+    "confirm": "Create"
+  },
+  "delete": {
+    "title": "Delete namespace {{namespace}}?",
+    "text": "Only an empty namespace can be deleted. The grants given on it are revoked.",
+    "confirm": "Delete the namespace"
+  },
+  "external": {
+    "title": "New external table in {{namespace}}",
+    "name": "Name",
+    "nameText": "The table's name, without its namespace.",
+    "location": "Location",
+    "locationText": "Files under raw/: a directory and a file pattern, such as raw/orders/*.csv. The table reads the matching files directly in that directory, and no other external table may use it. At least one file must match: Lakana reads one to learn the columns.",
+    "format": "Format",
+    "csv": "CSV",
+    "json": "JSON",
+    "parquet": "Parquet",
+    "confirm": "Register"
+  },
+  "note": {
+    "created": "Created namespace {{namespace}}.",
+    "deleted": "Deleted namespace {{namespace}}.",
+    "notShown": "Created namespace {{namespace}}. You may not read the namespaces of {{environment}}, so the tree does not show it while it holds no table you may read.",
+    "artifactDropped": "Dropped artifact {{artifact}}. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not."
+  }
+}

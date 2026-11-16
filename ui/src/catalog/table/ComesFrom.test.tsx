@@ -95,6 +95,28 @@ describe("ComesFrom", () => {
     expect(within(box).queryByRole("link", { name: "nodot" })).not.toBeInTheDocument();
   });
 
+  it("marks hidden characters in a table's name, linked or not", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${LINEAGE_PATH}`]: (request) => ({
+          status: 200,
+          body: request.path.includes("direction=up")
+            ? lineage(tables(["staging.stg_\u202Esales", "no\u2066dot"]))
+            : DOWN,
+        }),
+      },
+    });
+
+    const box = await section();
+
+    expect(
+      await within(box).findByRole("link", { name: "staging.stg_U+202Esales" }),
+    ).toBeInTheDocument();
+    expect(box).toHaveTextContent("noU+2066dot");
+    expect(within(box).queryByRole("link", { name: "noU+2066dot" })).not.toBeInTheDocument();
+    expect(box.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
+
   it("says Nothing upstream and Nothing downstream", async () => {
     renderShell(PAGE, {
       routes: { [`GET ${LINEAGE_PATH}`]: { status: 200, body: lineage([]) } },

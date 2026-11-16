@@ -121,6 +121,14 @@ A dash with its words ("Not known", "Never written", "Never read") means the fig
 exist yet, as for a view. Press a row, or its name, to open the table's page (see
 [Open a table](open-a-table.md)).
 
+A name created before Lakana refused hidden characters may still hold one: a bidirectional
+control such as U+202E, a zero-width space or a line separator, which would hide or reorder the
+letters around it. Wherever the web interface shows a name (the list, the tree, a table's page,
+its heading and breadcrumb, the browser tab's title, a dialog, a command to copy), it shows such a
+character as a small mark with its code point, such as `U+202E`, so two names that look alike
+read differently. A command you copy keeps the name exactly as stored. To rename such a table,
+see [upgrade notes](../explanation/upgrades.md#invisible-characters-in-new-table-namespace-and-column-names-are-refused-breaking).
+
 Press a column heading to sort by it; press it again to reverse the order. The sorted heading
 shows an arrow. **Sort by** at the top right offers the same columns and **Created**, which is
 not a column, and **Order** names the direction in words that fit the key ("Newest first",

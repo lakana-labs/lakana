@@ -70,3 +70,65 @@ it("ships no string of the views or the actions in the first load, and importing
   );
   expect(i18n.t("catalog.views.retention.never")).toBe("never");
 });
+
+it("ships no string of the place menu in the first load, and importing PlaceActions registers them", async () => {
+  const i18n = initI18n();
+
+  expect(Object.keys(en.catalog)).not.toContain("places");
+  expect(i18n.exists("catalog.places.delete.title")).toBe(false);
+
+  await import("../catalog/places/PlaceActions");
+
+  expect(i18n.t("catalog.places.delete.title", { namespace: "silver" })).toBe(
+    "Delete namespace silver?",
+  );
+  expect(i18n.t("catalog.places.note.created", { namespace: "gold.finance" })).toBe(
+    "Created namespace gold.finance.",
+  );
+  expect(i18n.t("catalog.places.note.artifactDropped", { artifact: "ml.model" })).toBe(
+    "Dropped artifact ml.model. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not.",
+  );
+});
+
+it("ships no string of an artifact's versions in the first load, and importing VersionsTab registers them", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("table.artifact.versions.heading")).toBe(false);
+
+  await import("../catalog/artifact/VersionsTab");
+
+  expect(i18n.t("table.artifact.versions.heading")).toBe("Versions");
+  expect(i18n.t("table.artifact.files.mismatch", { path: "models/model.pkl" })).toBe(
+    "models/model.pkl did not arrive whole, so nothing was saved. Download it again, or use the command above.",
+  );
+});
+
+it("marks a hidden character in every interpolated value, and leaves other values as they are", () => {
+  const i18n = initI18n();
+  i18n.addResource(
+    "en",
+    "translation",
+    "probe.sentence",
+    "{{name}} has {{count}} rows since {{date}}",
+  );
+
+  expect(
+    i18n.t("probe.sentence", { name: "fact_\u202Eselas", count: 3, date: "Nov 8, 2026" }),
+  ).toBe("fact_U+202Eselas has 3 rows since Nov 8, 2026");
+  // Marking is idempotent: a value already marked at its call site is not marked twice.
+  expect(i18n.t("probe.sentence", { name: "fact_U+202Eselas", count: 3, date: "x" })).toBe(
+    "fact_U+202Eselas has 3 rows since x",
+  );
+  // Markup stays text: React escapes it where the sentence is shown.
+  expect(i18n.t("probe.sentence", { name: "<b>x</b>", count: 1, date: "&" })).toBe(
+    "<b>x</b> has 1 rows since &",
+  );
+});
+
+it("keeps a command to copy exact: its values are not marked, CopyLine shows the marks", () => {
+  const i18n = initI18n();
+
+  expect(i18n.t("access.recovery.command", { name: "k\u202Eim" })).toBe(
+    "lakana recovery create k\u202Eim",
+  );
+});

@@ -6,6 +6,7 @@
 import type { TFunction } from "i18next";
 
 import { ApiError } from "../api";
+import { markedText } from "../shell/VisibleText";
 
 /** The browser's WebAuthn refusals the interface names, with the key of their sentence. */
 const BROWSER_REFUSALS: Readonly<Record<string, string>> = {
@@ -32,8 +33,20 @@ const ENDED_REASONS = new Set([
 ]);
 
 /**
- * Names what went wrong: a passkey refusal of the browser, an unreachable server, or the
- * server's own sentence, which names the cause and the next step.
+ * Whether a step-up failed because the person's account has no passkey to touch.
+ *
+ * @param error - What was thrown.
+ * @returns True for the server's 409 `NoPasskeyError`.
+ */
+export function needsPasskey(error: unknown): boolean {
+  return error instanceof ApiError && error.type === "NoPasskeyError";
+}
+
+/**
+ * Names what went wrong: a passkey refusal of the browser, an unreachable server, an account
+ * without a passkey to touch, or the server's own sentence, which names the cause and the next
+ * step. The server's sentence often names stored things (a repository, a table), so a hidden
+ * character in it shows as a mark ({@link markedText}).
  *
  * @param t - The translation function.
  * @param error - What was thrown.
@@ -44,8 +57,11 @@ export function problemText(t: TFunction, error: unknown): string {
     const key = BROWSER_REFUSALS[error.name];
     return key === undefined ? t("passkey.failed", { name: error.name }) : t(key);
   }
+  if (needsPasskey(error)) {
+    return t("passkey.none");
+  }
   if (error instanceof ApiError) {
-    return error.type === "NetworkError" ? t("errors.unreachable") : error.detail;
+    return error.type === "NetworkError" ? t("errors.unreachable") : markedText(error.detail);
   }
   return t("errors.unexpected");
 }
@@ -62,7 +78,9 @@ export function endedReason(t: TFunction, error: unknown): string | undefined {
     if (error.reason === undefined) {
       return undefined;
     }
-    return ENDED_REASONS.has(error.reason) ? t(`session.ended.${error.reason}`) : error.detail;
+    return ENDED_REASONS.has(error.reason)
+      ? t(`session.ended.${error.reason}`)
+      : markedText(error.detail);
   }
   return problemText(t, error);
 }

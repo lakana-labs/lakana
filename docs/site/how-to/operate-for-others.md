@@ -66,7 +66,7 @@ in that does not involve the server.
 
 **Environments.** An environment is a separate area with its own tables and its own storage. The
 bundle creates one, `dev`, in its own object storage. `lakana env create` makes more
-([the command](../reference/cli.md#lakana-env-create)), and each environment can be protected
+([the command](../reference/cli/lakana-env.md#lakana-env-create)), and each environment can be protected
 so that only deployed projects change its tables: [Protected environments](projects.md#protected-environments-lockdown-and-break-glass).
 
 A second environment, such as `prod`, needs the bundle's storage and its secret; the commands are in
@@ -210,7 +210,7 @@ describes both logs and what the lines look like.
 
 **The audit log.** It records who signed in, what was granted and revoked, who deployed and
 ran, and every refusal. Reading it needs the `ADMIN` role; `lakana audit list` filters it
-([the command](../reference/cli.md#lakana-audit-list)). What it records: [What the audit log records](../explanation/security.md#what-the-audit-log-records).
+([the command](../reference/cli/lakana-audit.md#lakana-audit-list)). What it records: [What the audit log records](../explanation/security.md#what-the-audit-log-records).
 
 **Failing jobs.** Get a message in your chat tool when a scheduled job fails:
 [Get told when a job fails](get-told-when-a-job-fails.md).

@@ -71,7 +71,9 @@ passkey ([Invite your team](../how-to/invite-your-team.md),
   rules, repositories and package indexes; creating an environment or changing its protection or
   storage; binding a run-as account to a deploy; and dropping a table (with or without purging
   its files), a namespace, an artifact or one artifact version. Restoring a dropped table needs
-  no touch. A stolen session cookie alone is therefore
+  no touch. An account with no passkey yet (after `lakana server start --local`, say) has nothing
+  to touch: the interface says so and links to **Passkeys and sessions**, in the menu under your
+  name, where you add one first. A stolen session cookie alone is therefore
   not enough for any of them. A request with an API token needs no touch: the token is what the
   command line uses.
 - **A passkey is bound to the address.** The browser offers a passkey only to the site it was made
@@ -174,7 +176,7 @@ it is hidden, until someone grants the right to them by name. Your own events al
 text in new events (`LAKANA_AUDIT__QUERY_TEXT`: `full`, `hash` or `off`); see
 [Other people's query text and column values](../reference/lists.md#other-peoples-query-text-and-column-values-in-the-audit-log).
 `lakana audit list` filters it by event type, kind (`--kind connection`), environment, principal and time
-([the command](../reference/cli.md#lakana-audit-list)). To keep the log bounded, repeated refusals of one
+([the command](../reference/cli/lakana-audit.md#lakana-audit-list)). To keep the log bounded, repeated refusals of one
 principal are counted after a number per minute that an operator sets
 (`LAKANA_DENIAL_AUDIT__PER_PRINCIPAL_PER_MINUTE`, [settings](../reference/settings.md)).
 For the same reason a successful sign-in is recorded once per token every 15 minutes, not on every

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AccessOut } from "../../api";
 import { MeContext } from "../../shell/me";
+import { artifact } from "../../test/artifacts";
 import { fakeServer } from "../../test/server";
 import { permissions, table } from "../../test/table";
 import { TableProvider, useTableData } from "./TableContext";
@@ -42,7 +43,7 @@ function around(
   return function Wrapper({ children }) {
     return (
       <MeContext value={person(name)}>
-        <TableProvider place={PLACE} loaded={loaded}>
+        <TableProvider place={PLACE} loaded={loaded} artifact={null}>
           {children}
         </TableProvider>
       </MeContext>
@@ -91,7 +92,7 @@ describe("TableContext", () => {
     const { result } = renderHook(() => useTableData(), {
       wrapper: ({ children }) => (
         <MeContext value={person("kim")}>
-          <TableProvider place={PLACE} loaded={table()}>
+          <TableProvider place={PLACE} loaded={table()} artifact={null}>
             {children}
           </TableProvider>
         </MeContext>
@@ -115,7 +116,7 @@ describe("TableContext", () => {
     const { result, rerender } = renderHook(() => useTableData(), {
       wrapper: ({ children }) => (
         <MeContext value={person("kim")}>
-          <TableProvider place={PLACE} loaded={read}>
+          <TableProvider place={PLACE} loaded={read} artifact={null}>
             {children}
           </TableProvider>
         </MeContext>
@@ -130,6 +131,84 @@ describe("TableContext", () => {
     read = table({ description: "Read again." });
     rerender();
     expect(result.current.table.description).toBe("Read again.");
+  });
+
+  describe("an artifact", () => {
+    const READ = "GET /api/v1/environments/prod/namespaces/ml/artifacts/model";
+    const ML = { environment: "prod", namespace: "ml", name: "model" };
+
+    /**
+     * Provides the artifact's page as kim, with the artifact's read answered by `answer`.
+     *
+     * @param answer - What the artifact's read answers.
+     * @param answer.status - Its HTTP status.
+     * @param answer.body - Its body.
+     * @returns The rendered hook.
+     */
+    function provide(answer: { status: number; body: unknown }) {
+      const server = fakeServer({
+        "GET /api/v1/principals/kim/permissions": {
+          status: 200,
+          body: permissions("kim", ["READ_TABLE"]),
+        },
+        [READ]: answer,
+      });
+      const entry = table({ kind: "ARTIFACT", namespace: "ml", name: "model" });
+      const first = artifact();
+      const rendered = renderHook(() => useTableData(), {
+        wrapper: ({ children }) => (
+          <MeContext value={person("kim")}>
+            <TableProvider place={ML} loaded={entry} artifact={first}>
+              {children}
+            </TableProvider>
+          </MeContext>
+        ),
+      });
+      return { ...rendered, server, entry, first };
+    }
+
+    it("reads the artifact again on reloadArtifact and keeps the table", async () => {
+      const { result, entry, first } = provide({
+        status: 200,
+        body: artifact({ current_version: 2, versions: 3 }),
+      });
+      expect(result.current.artifact).toBe(first);
+
+      act(() => {
+        result.current.reloadArtifact();
+      });
+
+      await waitFor(() => {
+        expect(result.current.artifact?.current_version).toBe(2);
+      });
+      expect(result.current.table).toBe(entry);
+    });
+
+    it("keeps the artifact shown when it cannot be read again", async () => {
+      const { result, server, first } = provide({ status: 500, body: { detail: "Broke." } });
+
+      act(() => {
+        result.current.reloadArtifact();
+      });
+
+      await waitFor(() => {
+        expect(server.sent.some((request) => request.path.endsWith("/artifacts/model"))).toBe(true);
+      });
+      expect(result.current.artifact).toBe(first);
+    });
+  });
+
+  it("has no artifact for a table, and reads none on reloadArtifact", async () => {
+    const { result } = renderHook(() => useTableData(), { wrapper: around("kim", ["READ_TABLE"]) });
+    await waitFor(() => {
+      expect(result.current.permissions.data?.principal).toBe("kim");
+    });
+
+    act(() => {
+      result.current.reloadArtifact();
+    });
+
+    expect(result.current.artifact).toBeNull();
   });
 
   it("says so outside a table's page", () => {

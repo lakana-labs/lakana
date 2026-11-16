@@ -134,4 +134,19 @@ describe("SessionsPanel", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Passkeys work only at the address/);
   });
+
+  it("marks hidden characters in the browser's own text and its name", async () => {
+    renderShell("/account", {
+      routes: {
+        "GET /api/v1/principals/admin/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/admin/sessions": {
+          status: 200,
+          body: [{ ...HERE, user_agent: "Fire\u202Efox/158", browser: "Fire\u202Efox 158" }],
+        },
+      },
+    });
+
+    const named = await screen.findByText("FireU+202Efox 158, from 192.0.2.1");
+    expect(named).toHaveAttribute("title", "FireU+202Efox/158");
+  });
 });

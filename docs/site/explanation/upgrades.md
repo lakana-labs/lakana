@@ -339,10 +339,28 @@ table reads.
 
 Existing names are not touched: they stay readable and writable, a schema change or redeploy may
 keep a column it already has, and an Iceberg client's rename (`rename_table`) moves a table to a
-plain name. To find them, search the JSON output of `lakana --output json table list` (and of
+plain name. The web interface shows each such character in a name as a visible mark with its code
+point, such as `U+202E`, in the Catalog, on the table and artifact pages and in their dialogs. To find them, search the JSON output of `lakana --output json table list` (and of
 `lakana --output json table get NAME` for columns) for these characters, for example with
 `grep -nP '[\x{00AD}\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2028}\x{2029}\x{2060}-\x{206F}\x{FEFF}]|\\u00[0-9a-f]{2}'`
 in a UTF-8 locale.
+
+### A space at the start or end of a new name is refused (breaking)
+
+A new namespace, table, view, artifact or column name may no longer start or end with a space
+(any Unicode space, such as a no-break space). `" gold"` and `"orders "` look like `gold` and
+`orders` in every list, and are almost always a typing mistake. The rule applies wherever the
+invisible characters above are refused, and the refusal says what to use instead, for example
+`Table name 'orders ' ends with a space, so it would look like 'orders' in every list but be a
+different name. Use 'orders' instead, or another name without a space at either end.` A column
+name of only spaces is refused with `Column name '  ' is only spaces, so it would look empty in
+every list. Name it with visible characters, such as letters, digits and '_'.` A space inside a
+name stays allowed.
+
+Earlier releases accepted such names (422 from the REST API now). The web interface sent a new
+namespace's path and an undrop's new name without their outer spaces; it now sends them as typed,
+so it and the CLI create the same names and refuse the same ones with the same sentence. Existing
+names are not touched: they stay readable and writable, and can be renamed or dropped.
 
 ### Control characters in asset files are refused (breaking)
 

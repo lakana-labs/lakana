@@ -15,6 +15,7 @@ import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import { useSession } from "./SessionProvider";
 import { PendingButton } from "../shell/PendingButton";
+import { markedText } from "../shell/VisibleText";
 
 /** Properties of {@link SessionsPanel}. */
 export interface SessionsPanelProps {
@@ -72,7 +73,7 @@ export function SessionsPanel({ name, own }: SessionsPanelProps): JSX.Element {
             <ul>
               {open.map((one) => (
                 <li key={one.id}>
-                  <span title={one.user_agent === "" ? undefined : one.user_agent}>
+                  <span title={one.user_agent === "" ? undefined : markedText(one.user_agent)}>
                     {t("sessions.browser", {
                       browser: one.browser === "" ? t("sessions.unknownBrowser") : one.browser,
                       peer: one.peer,
@@ -94,7 +95,7 @@ export function SessionsPanel({ name, own }: SessionsPanelProps): JSX.Element {
       <AttemptStatus attempt={attempt} waiting={t("common.working")} />
       {confirming && (
         <ConfirmDialog
-          title={t("sessions.confirm", { name })}
+          title={t("sessions.confirm", { name: markedText(name) })}
           confirmLabel={t("sessions.confirmEnd")}
           onConfirm={() => endSessions(name)}
           onCancel={() => {
@@ -106,7 +107,7 @@ export function SessionsPanel({ name, own }: SessionsPanelProps): JSX.Element {
             sessions.reload();
           }}
         >
-          <p>{t("sessions.effect", { name })}</p>
+          <p>{t("sessions.effect", { name: markedText(name) })}</p>
         </ConfirmDialog>
       )}
     </section>

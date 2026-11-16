@@ -105,11 +105,10 @@ function sentTo(server: ReturnType<typeof fakeServer>, method: string, prefix: s
 /**
  * Renders the hook for the fact table.
  *
- * @param kind - What the table is.
  * @returns The rendered hook.
  */
-function preview(kind: "TABLE" | "VIEW" | "ARTIFACT" = "TABLE") {
-  return renderHook(() => usePreview(REF, kind), { wrapper: Me });
+function preview() {
+  return renderHook(() => usePreview(REF), { wrapper: Me });
 }
 
 describe("usePreview", () => {
@@ -211,7 +210,7 @@ describe("usePreview", () => {
         [`POST ${QUERIES_PATH}/${id}/cancel`]: { status: 200, body: queryStatus("CANCELLED") },
       });
     }
-    const { unmount } = renderHook(() => usePreview(REF, "TABLE"), {
+    const { unmount } = renderHook(() => usePreview(REF), {
       wrapper: Me,
       reactStrictMode: true,
     });
@@ -471,15 +470,6 @@ describe("usePreview", () => {
 
     expect(result.current.phase).toBe("not_allowed");
     expect(sentTo(server, "POST", "/")).toEqual([]);
-  });
-
-  it("asks nothing for an artifact", async () => {
-    const server = serve(["SUCCEEDED"]);
-    const { result } = preview("ARTIFACT");
-    await settle();
-
-    expect(result.current.phase).toBe("artifact");
-    expect(server.sent).toEqual([]);
   });
 
   it("cancels a waiting run and runs again on refresh", async () => {

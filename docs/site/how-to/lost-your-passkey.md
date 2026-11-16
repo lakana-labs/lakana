@@ -42,7 +42,7 @@ or open the person under **People** and choose it there. Type the person's name;
 your own passkey the interface shows the link once. Send it to that person on a channel you
 trust (the link is as good as a sign-in). The open links are listed on the same tab, where
 **Withdraw** stops one. From the command line, `recovery create` followed by the person's name
-does the same; the [CLI reference](../reference/cli.md#lakana-recovery) lists the commands that
+does the same; the [CLI reference](../reference/cli/lakana-recovery.md) lists the commands that
 list the open links and withdraw one.
 
 Confirm that the request really comes from that person before you send a link, for example by

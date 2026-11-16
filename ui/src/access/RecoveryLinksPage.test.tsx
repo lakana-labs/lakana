@@ -18,28 +18,16 @@ const ISSUED = {
 };
 
 /**
- * The permissions route's answer for a person who is, or is not, an administrator.
+ * The principal route's answer for a person who holds or has held the ADMIN role, or has not.
  *
- * @param admin - Whether the person holds the ADMIN role on the instance.
+ * @param name - The person's name.
+ * @param heldAdmin - Whether they hold or have ever held ADMIN.
  * @returns The fake route's answer.
  */
-function permissions(admin: boolean): { status: number; body: unknown } {
+function principal(name: string, heldAdmin: boolean): { status: number; body: unknown } {
   return {
     status: 200,
-    body: {
-      principal: "x",
-      active: true,
-      scope: { kind: "INSTANCE", environment: null, namespace: null, table: null },
-      permissions: [
-        {
-          action: "MANAGE_PRINCIPAL",
-          allowed: admin,
-          via: admin ? [{ kind: "role", role: "ADMIN" }] : [],
-          reason: null,
-        },
-      ],
-      note: null,
-    },
+    body: { name, type: "USER", is_active: true, picture: null, held_admin: heldAdmin },
   };
 }
 
@@ -48,7 +36,7 @@ describe("RecoveryLinksPage", () => {
     const { user, router } = renderShell("/access/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": { status: 200, body: [OPEN] },
-        "GET /api/v1/principals/kim/permissions": permissions(false),
+        "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
       },
@@ -75,7 +63,7 @@ describe("RecoveryLinksPage", () => {
     const { user } = renderShell("/access/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": () => ({ status: 200, body: open }),
-        "GET /api/v1/principals/sam/permissions": permissions(false),
+        "GET /api/v1/principals/sam": principal("sam", false),
         "POST /api/v1/principals/sam/recovery-link": () => {
           open = [{ ...OPEN, id: "r-2", name: "sam" }];
           return { status: 201, body: ISSUED };
@@ -99,7 +87,7 @@ describe("RecoveryLinksPage", () => {
     const { user, server } = renderShell("/access/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": { status: 200, body: [] },
-        "GET /api/v1/principals/ada/permissions": permissions(true),
+        "GET /api/v1/principals/ada": principal("ada", true),
       },
     });
     await screen.findByText(/No recovery link is open/);
@@ -108,7 +96,7 @@ describe("RecoveryLinksPage", () => {
     await user.type(screen.getByRole("textbox", { name: "Name" }), "ada");
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "ada is an administrator" });
+    const dialog = await screen.findByRole("dialog", { name: "ada is or was an administrator" });
     expect(within(dialog).getByText("lakana recovery create ada")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Done" })).toHaveFocus();
@@ -121,7 +109,7 @@ describe("RecoveryLinksPage", () => {
     const { user } = renderShell("/access/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": { status: 200, body: [] },
-        "GET /api/v1/principals/nobody/permissions": {
+        "GET /api/v1/principals/nobody": {
           status: 404,
           body: { type: "NotFoundError", detail: "No principal named 'nobody'." },
         },
@@ -200,5 +188,18 @@ describe("RecoveryLinksPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { level: 1, name: "Access" })).toHaveFocus();
     });
+  });
+
+  it("marks a hidden character of the person's name", async () => {
+    renderShell("/access/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": { status: 200, body: [{ ...OPEN, name: "k\u202Eim" }] },
+      },
+    });
+
+    const link = await screen.findByRole("link", { name: "kU+202Eim" });
+    const row = link.closest("tr") as HTMLElement;
+    expect(within(row).getByRole("button", { name: /kU\+202Eim/u })).toBeInTheDocument();
+    expect(row.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
 });
