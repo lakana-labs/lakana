@@ -1,0 +1,119 @@
+name: Fuzzing
+
+# ClusterFuzzLite runs the Atheris harnesses in fuzz/ (docs/agent/security.md, "Fuzzing"):
+# about five minutes on a pull request that changes what they parse with, and an hour every night
+# on main, which keeps the corpus as an artifact of this workflow for the next run to start from.
+# A crash fails the run and uploads its input as the `fuzz-crash-*` artifact.
+#
+# On GitHub's runner, never `CI_RUNNER`: the actions build and run Docker images, and a pull
+# request's harnesses are its own code. The actions clone the repository themselves (a public
+# one, so without a token) and build .clusterfuzzlite/Dockerfile; their own images
+# (gcr.io/oss-fuzz-base/clusterfuzzlite-*:v1) are named by the actions, not by this file.
+on:
+  pull_request:
+    paths:
+      # What the harnesses import: scripts/tests/test_fuzz.py fails when a module they load is
+      # missing here.
+      - "fuzz/**"
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/fuzz.yml"
+      - "uv.lock"
+      - "packages/lakana-core/pyproject.toml"
+      - "packages/lakana-core/src/lakana_core/*.py"
+      - "packages/lakana-core/src/lakana_core/access/**"
+      - "packages/lakana-core/src/lakana_core/artifacts/__init__.py"
+      - "packages/lakana-core/src/lakana_core/artifacts/manifest.py"
+      - "packages/lakana-core/src/lakana_core/grants/__init__.py"
+      - "packages/lakana-core/src/lakana_core/grants/roles.py"
+      - "packages/lakana-core/src/lakana_core/jobs/__init__.py"
+      - "packages/lakana-core/src/lakana_core/jobs/cron.py"
+      - "packages/lakana-core/src/lakana_core/jobs/tz.py"
+      - "packages/lakana-core/src/lakana_core/projects/**"
+  schedule:
+    - cron: "0 2 * * *"     # every night, 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pull-request:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: fuzz-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      actions: read            # find the nightly run's corpus among this repository's artifacts
+    steps:
+      - name: Build the fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: python
+          sanitizer: address
+      - name: Fuzz for five minutes
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          github-token: ${{ github.token }}
+          mode: code-change
+          fuzz-seconds: 300
+          sanitizer: address
+      - name: Upload the input that crashed
+        if: ${{ failure() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: fuzz-crash-pull-request
+          path: ./out/artifacts
+
+  nightly:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read            # download the corpus the previous run kept
+    steps:
+      - name: Build the fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: python
+          sanitizer: address
+      - name: Fuzz for an hour and keep the corpus
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          github-token: ${{ github.token }}
+          mode: batch
+          fuzz-seconds: 3600
+          sanitizer: address
+      - name: Upload the input that crashed
+        if: ${{ failure() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: fuzz-crash-nightly
+          path: ./out/artifacts
+
+  # ClusterFuzzLite requires pruning beside batch fuzzing: it drops the inputs that add no
+  # coverage, so the kept corpus does not grow without bound.
+  prune:
+    needs: nightly
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read            # download the corpus to prune
+    steps:
+      - name: Build the fuzzers
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: python
+      - name: Prune the corpus
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          github-token: ${{ github.token }}
+          mode: prune
+          fuzz-seconds: 600

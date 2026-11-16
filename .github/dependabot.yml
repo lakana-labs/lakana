@@ -53,6 +53,16 @@ updates:
     commit-message:
       prefix: "deps"
 
+  - package-ecosystem: "docker"
+    directory: "/.clusterfuzzlite"   # ClusterFuzzLite's builder image (latest, by digest) and the uv image
+    schedule:
+      interval: "weekly"
+    groups:
+      fuzz-images:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
   - package-ecosystem: "pip"
     directory: "/scripts"         # requirements-uv.txt: the hash-pinned uv of the five-minute test
     schedule:
