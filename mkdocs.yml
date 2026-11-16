@@ -59,7 +59,6 @@ nav:
       - Advanced:
           - tutorials/train-a-model.md
       - tutorials/index.md
-      - tutorials/move-a-sql-project.md   # leaves in Task 4
   - How-to guides:
       - how-to/index.md
       - Load data:
@@ -83,6 +82,7 @@ nav:
       - Deploy and schedule:
           - how-to/projects.md
           - how-to/connect-a-repository.md
+          - how-to/move-a-sql-project.md
           - how-to/deploy-from-github-actions.md
           - how-to/deploy-from-gitlab-ci.md
           - how-to/run-a-job-on-a-schedule.md

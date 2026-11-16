@@ -4,7 +4,7 @@ You may already transform data with SQL files, one file per table, run by a tool
 the order from the references between them. This page says what each of the usual concepts of such
 a tool becomes in Lakana, what has no counterpart (and what to do instead), what you get in
 return, and when to stay where you are. A worked conversion, step by step, is the tutorial
-[Move a SQL project to Lakana](../tutorials/move-a-sql-project.md).
+[Move a SQL project to Lakana](../how-to/move-a-sql-project.md).
 
 Lakana runs no other tool's project, and it has no converter: you rewrite each file by hand. The
 files are mostly SQL you already have, so the work is in the edges: how a table refers to another,

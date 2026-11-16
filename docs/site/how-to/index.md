@@ -30,6 +30,7 @@ A how-to guide solves one task by the shortest path, for someone who knows what 
 
 - [Projects and deploys](projects.md): start a project, deploy it, run it, set up CI and write a first Python asset. The layout, the keys and the rules are in the reference.
 - [Connect a repository](connect-a-repository.md): let Lakana make a deploy key for each environment, add the public keys at your git host, and deploy from the repository over SSH.
+- [Move a SQL project to Lakana](move-a-sql-project.md): convert a small project of SQL files by hand into a Lakana project, deploy it to your own machine, run it twice and query the result.
 - [Deploy from GitHub Actions without a stored secret](deploy-from-github-actions.md): let a workflow exchange its OIDC ID token for a one-deploy token, with the trust rules, the workflow and what to do when the exchange is refused.
 - [Deploy from GitLab CI without a stored secret](deploy-from-gitlab-ci.md): the same for a GitLab pipeline, and how one job submits twice.
 - [Run a job on a schedule](run-a-job-on-a-schedule.md): declare a job and its cron schedule, bind a run principal, pause it, start it from CI, and what happens when the project is busy or the platform was down.

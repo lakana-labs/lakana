@@ -207,12 +207,25 @@ def test_the_site_is_built_from_docs_site_into_an_ignored_directory() -> None:
     assert "site-build/" in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
 
 
+MOVED = {"tutorials/move-a-sql-project.md": "how-to/move-a-sql-project.md"}
+"""Pages that moved; the old path keeps a short page that points on, outside the navigation."""
+
+
 def test_every_page_is_in_the_navigation_and_every_entry_exists() -> None:
     """A page nobody can reach, or an entry with no page, is a mistake."""
     listed = _nav_files(_config()["nav"])
     on_disk = sorted(p.relative_to(SITE).as_posix() for p in SITE.rglob("*.md"))
-    assert sorted(listed) == on_disk
+    assert sorted(listed) == [p for p in on_disk if p not in MOVED]
     assert len(listed) == len(set(listed))
+
+
+def test_a_moved_page_keeps_a_short_page_at_its_old_path() -> None:
+    for old, new in MOVED.items():
+        text = (SITE / old).read_text(encoding="utf-8")
+        assert (SITE / new).is_file()
+        assert f"({os.path.relpath(new, Path(old).parent)})" in text
+        assert find_blocks(SITE / old) == []
+        assert len(text.split()) <= 60
 
 
 def _tab(title: str) -> list | str:
@@ -237,7 +250,6 @@ INDEXED_TABS = {
 }
 NOT_ON_AN_INDEX = (
     "tutorials/index.md",
-    "tutorials/move-a-sql-project.md",  # Task 4 drops this one
     "reference/cli/",
     "reference/rest/",
     "reference/sdk/",
