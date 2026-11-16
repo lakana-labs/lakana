@@ -19,6 +19,7 @@ import type { CursorPage } from "../../api/manage";
 import { PendingButton } from "../../shell/PendingButton";
 import { markedText, VisibleText } from "../../shell/VisibleText";
 import { problemText } from "../../sign-in/messages";
+import { useWhen } from "../../shell/useWhen";
 import { When } from "../cells";
 import { useCursorPages } from "../views/useCursorPages";
 import { ViewList } from "../views/ViewList";
@@ -82,6 +83,7 @@ export function UploadsBlock({ place }: UploadsBlockProps): JSX.Element | null {
   const pages = useCursorPages(`${environment}\u0000${artifact}`, (cursor) =>
     readUploads(environment, artifact, cursor),
   );
+  const when = useWhen();
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [working, setWorking] = useState<ReadonlySet<string>>(new Set());
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -156,7 +158,7 @@ export function UploadsBlock({ place }: UploadsBlockProps): JSX.Element | null {
               <When iso={row.created_at} never="" />
             </td>
             <td>
-              <When iso={row.expires_at} never="" />
+              <time dateTime={row.expires_at}>{when(row.expires_at)}</time>
             </td>
             <td>
               <PendingButton

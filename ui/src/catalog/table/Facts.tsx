@@ -146,7 +146,7 @@ function VersionFacts({ artifact }: VersionFactsProps): JSX.Element {
     <>
       <Fact term={t("table.facts.currentVersion")}>
         {artifact.current_version === null
-          ? t("table.facts.noVersion")
+          ? t(artifact.versions === 0 ? "table.facts.noVersionYet" : "table.facts.noVersion")
           : t("table.facts.version", { version: artifact.current_version })}
       </Fact>
       <Fact term={t("table.facts.versions")}>

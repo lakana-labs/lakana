@@ -112,7 +112,10 @@ describe("UploadsBlock", () => {
     expect(row).toHaveTextContent(FIRST);
     expect(row.querySelector(".upload-id")).toHaveTextContent(FIRST);
     const times = [...row.querySelectorAll("time")].map((time) => time.getAttribute("datetime"));
-    expect(times).toEqual(["2026-11-15T10:00:00Z", "2026-11-16T10:00:00Z"]);
+    expect(times).toEqual(["2026-11-15T10:00:00Z", "2099-11-16T10:00:00Z"]);
+    // A time ahead is worded as a date, never as "just now".
+    expect(within(row).getByText(/2099/, { selector: "time" })).toBeVisible();
+    expect(within(row).queryByText("just now", { selector: "time" })).not.toBeInTheDocument();
     expect(within(row).getByRole("button", { name: `Withdraw upload ${FIRST}` })).toBeVisible();
   });
 

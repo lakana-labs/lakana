@@ -116,7 +116,7 @@ export function upload(overrides: Partial<ArtifactUploadOut> = {}): ArtifactUplo
     upload_id: "6f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f",
     artifact: "ml.model",
     created_at: "2026-11-15T10:00:00Z",
-    expires_at: "2026-11-16T10:00:00Z",
+    expires_at: "2099-11-16T10:00:00Z",
     ...overrides,
   };
 }

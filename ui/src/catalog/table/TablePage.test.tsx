@@ -22,10 +22,11 @@ async function heading(name = "fact_sales"): Promise<HTMLElement> {
 /**
  * The tab links, once the table has arrived.
  *
+ * @param name - The tab row's name, "Sections of the table" unless the page is an artifact's.
  * @returns The links, in order.
  */
-async function tabs(): Promise<HTMLElement[]> {
-  const row = await screen.findByRole("navigation", { name: "Sections of the table" });
+async function tabs(name = "Sections of the table"): Promise<HTMLElement[]> {
+  const row = await screen.findByRole("navigation", { name });
   return within(row).getAllByRole("link");
 }
 
@@ -379,7 +380,7 @@ describe("an artifact's page", () => {
   it("reads the artifact too for an ARTIFACT entry and shows its four tabs in order, each with its own address", async () => {
     const { server } = renderShell(ARTIFACT_PAGE, { routes: artifactRoutes() });
 
-    const links = await tabs();
+    const links = await tabs("Sections of the artifact");
     expect(links.map((link) => link.textContent)).toEqual([
       "Overview",
       "Versions",
@@ -393,6 +394,8 @@ describe("an artifact's page", () => {
       `${ARTIFACT_PAGE}/access`,
     ]);
     expect(links[0]).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "Sections of the artifact" })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Sections of the table" })).toBeNull();
     expect(
       server.sent.filter((request) => request.method === "GET" && request.path === ARTIFACT_READ),
     ).toHaveLength(1);
@@ -401,7 +404,7 @@ describe("an artifact's page", () => {
   it("opens the Versions tab at its address", async () => {
     renderShell(`${ARTIFACT_PAGE}/versions`, { routes: artifactRoutes() });
 
-    const links = await tabs();
+    const links = await tabs("Sections of the artifact");
     expect(links.find((link) => link.textContent === "Versions")).toHaveAttribute(
       "aria-current",
       "page",
@@ -423,7 +426,7 @@ describe("an artifact's page", () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(ARTIFACT_PAGE);
     });
-    const links = await tabs();
+    const links = await tabs("Sections of the artifact");
     expect(links[0]).toHaveAttribute("aria-current", "page");
     expect(router.state.historyAction).toBe("REPLACE");
   });

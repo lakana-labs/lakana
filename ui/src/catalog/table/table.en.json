@@ -1,5 +1,6 @@
 {
   "tabsLabel": "Sections of the table",
+  "tabsLabelArtifact": "Sections of the artifact",
   "tabs": {
     "overview": "Overview",
     "columns": "Columns",
@@ -82,6 +83,7 @@
     "currentVersion": "Current version",
     "version": "{{version}}",
     "noVersion": "None: every version is deleted",
+    "noVersionYet": "None yet",
     "versions": "Versions",
     "versionsCount_one": "{{count}}, deleted ones included",
     "versionsCount_other": "{{count}}, deleted ones included",

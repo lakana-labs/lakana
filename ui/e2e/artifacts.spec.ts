@@ -29,7 +29,7 @@ const TABS = ["Overview", "Versions", "Lineage", "Access"] as const;
  */
 function tabLink(page: Page, name: string): Locator {
   return page
-    .getByRole("navigation", { name: "Sections of the table" })
+    .getByRole("navigation", { name: "Sections of the artifact" })
     .getByRole("link", { name, exact: true });
 }
 
@@ -147,7 +147,7 @@ for (const theme of ["light", "dark"] as const) {
         expect(await violations(page), "the Versions tab with files and uploads").toEqual([]);
 
         await page.getByRole("button", { name: "Delete version 2…" }).click();
-        const remove = page.getByRole("dialog", { name: "Delete version 2 of ml.model?" });
+        const remove = page.getByRole("dialog", { name: /^Deleted? version 2 of ml\.model\??$/ });
         await expect(remove.getByRole("button", { name: "Delete the version" })).toBeEnabled();
         expect(await violations(page), "the Delete dialog").toEqual([]);
         await confirm(remove.getByRole("button", { name: "Delete the version" }));
@@ -206,8 +206,10 @@ for (const theme of ["light", "dark"] as const) {
         const deleteButton = page.getByRole("button", { name: "Delete version 2…" });
         await tabTo(page, deleteButton);
         await page.keyboard.press("Enter");
-        const dialog = page.getByRole("dialog", { name: "Delete version 2 of ml.model?" });
+        const dialog = page.getByRole("dialog", { name: /^Deleted? version 2 of ml\.model\??$/ });
         await expect(dialog).toBeVisible();
+        // The dialog takes the focus as it opens; an Escape before that reaches the page behind it.
+        await expect(dialog.getByRole("button", { name: "Delete the version" })).toBeEnabled();
         await page.keyboard.press("Escape");
         await expect(dialog).toBeHidden();
         await expect(deleteButton).toBeFocused();
@@ -397,7 +399,7 @@ test.describe("Delete a version with the passkey in real Chromium", () => {
 
     await page.goto(`${ORIGIN}${ADDRESS}/versions`);
     await page.getByRole("button", { name: "Delete version 2…" }).click();
-    const dialog = page.getByRole("dialog", { name: "Delete version 2 of ml.model?" });
+    const dialog = page.getByRole("dialog", { name: /^Deleted? version 2 of ml\.model\??$/ });
     await confirm(dialog.getByRole("button", { name: "Delete the version" }));
 
     await expect(

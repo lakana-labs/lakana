@@ -72,7 +72,7 @@ test("an administrator opens an artifact from the catalog list, downloads a file
   expect(await violations(page), "the Overview").toEqual([]);
 
   await page
-    .getByRole("navigation", { name: "Sections of the table" })
+    .getByRole("navigation", { name: "Sections of the artifact" })
     .getByRole("link", { name: "Versions", exact: true })
     .click();
   await page.getByRole("button", { name: "Files of version 1" }).click();
@@ -105,7 +105,7 @@ test("an administrator with a passkey deletes a version, then drops the artifact
   await page.goto(`${address}/versions`);
   await expect(versionRow(page, 2)).toContainText("current");
   await page.getByRole("button", { name: "Delete version 2…" }).click();
-  const dialog = page.getByRole("dialog", { name: "Delete version 2 of ml.model?" });
+  const dialog = page.getByRole("dialog", { name: /^Deleted? version 2 of ml\.model\??$/ });
   expect(await violations(page), "the Delete dialog").toEqual([]);
   // The passkey touch the server asks for is answered by the virtual authenticator.
   await dialog.getByRole("button", { name: "Delete the version" }).click();
@@ -136,13 +136,18 @@ test("an administrator with a passkey deletes a version, then drops the artifact
 });
 
 test("a person withdraws their own open upload", async ({ browser, browserName, request }) => {
-  test.skip(browserName !== "chromium", "the virtual authenticator is CDP");
+  // Withdraw itself needs no passkey: invitedPerson enrols one with the CDP virtual authenticator.
+  test.skip(
+    browserName !== "chromium",
+    "invitedPerson enrols a passkey, and the authenticator is CDP",
+  );
   const { environment, address } = await lake(request);
   const { page } = await invitedPerson(browser, request, (person) =>
     makeAdministrator(request, person),
   );
   await skipTheWelcome(page);
   const upload = await beginUploadAs(page, environment, "ml.model");
+  expect(await uploadsAs(page, environment, "ml.model")).toEqual([upload]);
 
   await page.goto(`${address}/versions`);
   const uploads = page.getByRole("region", { name: "Your open uploads of ml.model" });

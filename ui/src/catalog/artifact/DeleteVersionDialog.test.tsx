@@ -225,7 +225,7 @@ describe("DeleteVersionDialog", () => {
     await waitFor(() => {
       expect(done).toHaveFocus();
     });
-    expect(screen.getByRole("dialog")).toHaveAccessibleName("Delete version 3 of ml.model?");
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("Deleted version 3 of ml.model");
     expect(screen.queryByRole("button", { name: "Delete the version" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
 

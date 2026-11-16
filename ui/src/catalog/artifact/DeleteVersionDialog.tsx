@@ -107,7 +107,7 @@ export function DeleteVersionDialog({
   return (
     <ActionDialog onClose={close}>
       <Heading slot="title">
-        {t("table.artifact.delete.title", {
+        {t(deleted === null ? "table.artifact.delete.title" : "table.artifact.delete.titleDone", {
           version: version.version,
           artifact: markedText(dotted),
         })}

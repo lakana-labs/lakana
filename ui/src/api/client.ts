@@ -46,6 +46,15 @@ export interface RequestOptions {
   readonly keepalive?: boolean;
 }
 
+/** A download whose body stream broke before it ended, such as a connection cut in the middle. */
+export class DownloadCut extends Error {
+  /** Builds the error. */
+  constructor() {
+    super("The download's body stream broke.");
+    this.name = "DownloadCut";
+  }
+}
+
 /** A refusal or failure the server answered, with its cause and the next step. */
 export class ApiError extends Error {
   /** The HTTP status; 0 when the server could not be reached. */
@@ -449,9 +458,15 @@ export const api = {
    * @param path - The path under the server.
    * @returns The file.
    * @throws {ApiError} for a refusal or an unreachable server.
+   * @throws {DownloadCut} when the body's stream breaks before it ends.
    */
   async download(path: string): Promise<Blob> {
     const response = await exchangeWith("GET", path, { accept: "application/octet-stream" }, {});
-    return response.blob();
+    try {
+      return await response.blob();
+    } catch (error) {
+      // A cut connection breaks the stream with a TypeError; nothing else is read here.
+      throw error instanceof TypeError ? new DownloadCut() : error;
+    }
   },
 };

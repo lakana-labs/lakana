@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   CSRF_STORAGE_KEY,
+  DownloadCut,
   api,
   onUnauthorized,
   send,
@@ -308,6 +309,18 @@ describe("api.upload and api.blob", () => {
       "x-lakana-csrf": "csrf-1",
     });
     expect(server.sent[0]?.headers["x-lakana-background"]).toBeUndefined();
+  });
+
+  it("download names a body cut in the middle, and passes any other error on", async () => {
+    fakeServer({ "GET /api/v1/files/one": { status: 200, blob: new Blob(["bytes"]) } });
+    const read = vi.spyOn(Response.prototype, "blob");
+
+    read.mockRejectedValueOnce(new TypeError("network error"));
+    await expect(api.download("/api/v1/files/one")).rejects.toBeInstanceOf(DownloadCut);
+
+    read.mockRejectedValueOnce(new RangeError("other"));
+    await expect(api.download("/api/v1/files/one")).rejects.toBeInstanceOf(RangeError);
+    read.mockRestore();
   });
 
   it("asks the server again before showing a file the browser has cached", async () => {

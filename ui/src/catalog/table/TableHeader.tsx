@@ -33,7 +33,7 @@ export function TableHeader(): JSX.Element {
         <EnvironmentLabel environment={ref.environment} />
       </p>
       <SectionTabs
-        label={t("table.tabsLabel")}
+        label={t(table.kind === "ARTIFACT" ? "table.tabsLabelArtifact" : "table.tabsLabel")}
         tabs={tabsFor(table.kind).map((tab) => ({
           to: tablePath(ref.environment, ref.namespace, ref.name, tab),
           label: t(`table.tabs.${tab}`),

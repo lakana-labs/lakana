@@ -183,12 +183,25 @@ describe("VersionFiles", () => {
 
   it("says the file did not arrive whole when the connection breaks in the middle", async () => {
     fakeServer(artifactRoutes());
-    vi.spyOn(api, "download").mockRejectedValue(new TypeError("network error"));
+    vi.spyOn(Response.prototype, "blob").mockRejectedValue(new TypeError("network error"));
     const { user } = renderFiles();
 
     await user.click(await screen.findByRole("button", { name: "Download models/model.pkl" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(MISMATCH);
+    expect(saveBlob).not.toHaveBeenCalled();
+  });
+
+  it("shows the real cause of an error that is not a broken body", async () => {
+    fakeServer(artifactRoutes());
+    vi.spyOn(api, "download").mockRejectedValue(new TypeError("a bug of ours"));
+    const { user } = renderFiles();
+
+    await user.click(await screen.findByRole("button", { name: "Download models/model.pkl" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).not.toHaveTextContent("did not arrive whole");
+    expect(alert).toHaveTextContent("Something went wrong");
     expect(saveBlob).not.toHaveBeenCalled();
   });
 

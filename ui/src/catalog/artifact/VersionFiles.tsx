@@ -105,11 +105,10 @@ export function VersionFiles({ place, version, id, onGone }: VersionFilesProps):
     try {
       saveBlob(await downloadFile(place, version, file), fileName(file.path));
     } catch (error) {
-      // A cut connection breaks the body's stream with a TypeError: the file did not arrive whole.
-      const broken = error instanceof DownloadMismatch || error instanceof TypeError;
-      const sentence = broken
-        ? t("table.artifact.files.mismatch", { path: markedText(file.path) })
-        : problemText(t, error);
+      const sentence =
+        error instanceof DownloadMismatch
+          ? t("table.artifact.files.mismatch", { path: markedText(file.path) })
+          : problemText(t, error);
       setNotes((previous) => ({ ...previous, [file.path]: sentence }));
       if (error instanceof ApiError && error.status === 404) {
         onGone(sentence);

@@ -94,7 +94,7 @@ first, the deleted ones included. A row shows the number, with **current** under
 version; when the version was stored, with who stored it and from which commit when known; its
 size; and its number of files. A deleted version says when and by whom it was deleted, such as
 `Deleted 2 days ago by kim.schulz`, and has no buttons. The tab shows 100 versions at first;
-**Show 100 more** adds the next ones.
+**Show more** adds the next ones, up to 100 at a time.
 
 If you have no versions listed, or the artifact does not appear, the run that produces it has not
 stored a version yet. The messages you can meet are in "When it fails".

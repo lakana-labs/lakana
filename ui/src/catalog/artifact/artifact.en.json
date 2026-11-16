@@ -39,6 +39,7 @@
   "showMore": "Show {{count}} more",
   "delete": {
     "title": "Delete version {{version}} of {{artifact}}?",
+    "titleDone": "Deleted version {{version}} of {{artifact}}",
     "text": "{{size}}, {{files}}. Its bytes are removed from Lakana's storage. Lakana cannot bring them back. The version stays in the list, marked deleted, and its number is never used again.",
     "confirm": "Delete the version",
     "close": "Close",

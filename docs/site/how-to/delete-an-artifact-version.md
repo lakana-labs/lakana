@@ -52,8 +52,9 @@ and number of files, and says that its number is never used again; press **Delet
 From a browser the server asks for a passkey touch within the last 15 minutes: touch your passkey
 when the browser asks, and the delete is sent again. The command line uses a token and is never
 asked. If the delete is refused, for example because someone deleted the version meanwhile, or the
-passkey touch fails, the dialog stays open with the server's sentence, nothing is deleted, and the
-list is read again. Cancel closes it.
+passkey touch fails, the dialog stays open with the server's sentence and nothing is deleted. Only
+when the version is already gone or already deleted (the server answers 404 or 409) is the list
+read again. Cancel closes it.
 
 ## What the answer says
 

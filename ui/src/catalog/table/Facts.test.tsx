@@ -193,6 +193,14 @@ describe("Facts", () => {
       ).toEqual(["Owner", "Current version", "Versions", "Keeps", "Size", "Expires", "Created"]);
     });
 
+    it("says None yet for an artifact that has no version at all", async () => {
+      renderArtifact({ current_version: null, versions: 0, size_bytes: 0 });
+
+      const list = await facts();
+      expect(fact(list, "Current version")).toHaveTextContent("None yet");
+      expect(fact(list, "Current version")).not.toHaveTextContent("every version is deleted");
+    });
+
     it("says None: every version is deleted when current_version is null", async () => {
       renderArtifact({ current_version: null, size_bytes: 0 });
 
