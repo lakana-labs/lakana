@@ -32,7 +32,12 @@ router = APIRouter(
 )
 
 
-def principals_out(rows: Iterable[Principal], pictures: PictureService) -> list[PrincipalOut]:
+def principals_out(
+    rows: Iterable[Principal],
+    pictures: PictureService,
+    service: PrincipalService,
+    principal: PrincipalRef,
+) -> list[PrincipalOut]:
     """Describe principals, each with its picture's etag, read in one statement.
 
     Parameters
@@ -41,6 +46,10 @@ def principals_out(rows: Iterable[Principal], pictures: PictureService) -> list[
         The principals, already authorized for the caller.
     pictures
         The picture service, asked for the etags.
+    service
+        The principal service, asked which of them hold or have held ADMIN.
+    principal
+        The caller: `held_admin` is filled in only for an administrator.
 
     Returns
     -------
@@ -49,8 +58,14 @@ def principals_out(rows: Iterable[Principal], pictures: PictureService) -> list[
     """
     found = list(rows)
     etags = pictures.etags_of(row.id for row in found)
+    held = service.held_admin_of(principal, found)
     return [
-        PrincipalOut.model_validate(row).model_copy(update={"picture": etags.get(row.id)})
+        PrincipalOut.model_validate(row).model_copy(
+            update={
+                "picture": etags.get(row.id),
+                "held_admin": None if held is None else held[row.id],
+            }
+        )
         for row in found
     ]
 
@@ -93,7 +108,10 @@ def create_principal(
         Mapped to 409 by `install_exception_handlers`.
     """
     created = service.create_principal(principal, name=body.name, type=PrincipalType[body.type])
-    return PrincipalOut.model_validate(created)
+    held = service.held_admin_of(principal, [created])
+    return PrincipalOut.model_validate(created).model_copy(
+        update={"held_admin": None if held is None else held[created.id]}
+    )
 
 
 @router.get("/{name}", response_model=PrincipalOut, responses=errors(403, 404))
@@ -129,7 +147,9 @@ def get_principal_by_name(
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
     """
-    return principals_out([service.get_principal_by_name(principal, name)], pictures)[0]
+    return principals_out(
+        [service.get_principal_by_name(principal, name)], pictures, service, principal
+    )[0]
 
 
 @router.get("/{name}/permissions", response_model=PermissionsOut, responses=errors(403, 404))
@@ -220,7 +240,7 @@ def list_principals(
     """
     page = service.list_principals(principal, q=q, limit=limit, cursor=cursor)
     set_next_cursor(response, page.next_cursor)
-    return principals_out(page.items, pictures)
+    return principals_out(page.items, pictures, service, principal)
 
 
 @router.delete("/{name}", status_code=204, responses=errors(403, 404, 409))

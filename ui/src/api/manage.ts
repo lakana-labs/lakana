@@ -136,7 +136,7 @@ export interface CursorPage<T> {
  * @param suffix - What follows it, such as `/orphans`.
  * @returns The path.
  */
-function environmentPath(environment: string, suffix = ""): string {
+export function environmentPath(environment: string, suffix = ""): string {
   return `/api/v1/environments/${encodeURIComponent(environment)}${suffix}`;
 }
 
@@ -147,7 +147,7 @@ function environmentPath(environment: string, suffix = ""): string {
  * @param query - The query.
  * @returns The path with its `?query`, or the path alone.
  */
-function withQuery(path: string, query: URLSearchParams): string {
+export function withQuery(path: string, query: URLSearchParams): string {
   const text = query.toString();
   return text === "" ? path : `${path}?${text}`;
 }
@@ -174,7 +174,10 @@ function pageQuery(cursor: string | null, query = new URLSearchParams()): URLSea
  * @param query - A query to start from.
  * @returns The query.
  */
-function breakGlassQuery(reason: string | null, query = new URLSearchParams()): URLSearchParams {
+export function breakGlassQuery(
+  reason: string | null,
+  query = new URLSearchParams(),
+): URLSearchParams {
   if (reason !== null) {
     query.set("break_glass_reason", reason);
   }

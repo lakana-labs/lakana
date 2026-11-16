@@ -1448,7 +1448,7 @@ Usage: `lakana grant list [OPTIONS]`
 
 List active grants, newest first; without a filter, every grant.
 
-Filters combine. `--principal` and `--group` list the grants made to them (not those a principal has through its groups: `lakana access explain` says that). `--action` lists the grants that give an action, by itself or through a role. `--env`, with `--ns` and `--table`, lists the grants on exactly that object. A long list prints a "More results" line with the command that shows the next page.
+Filters combine. `--principal` and `--group` list the grants made to them (not those a principal has through its groups: `lakana access explain` says that). `--action` lists the grants that give an action, by itself or through a role. `--env`, with `--ns` and `--table`, lists the grants on exactly that object. `--kind INSTANCE` lists the grants on the whole instance, which apply to every environment, namespace and table; `--kind` with `--env` must name that object's kind. A long list prints a "More results" line with the command that shows the next page.
 
 A grant gives a role or a single action, so one column, `access`, shows whichever it is; it never drops. The table names who each grant is for in `subject` (`user alice`, `service ci-bot`, `group analysts`); the API answers with the names, so listing costs one request. Only an answer without a name shows the id and a notice (a server older than this CLI, or a person or group deleted a moment ago). A column with nothing in it is left out. When the terminal is too narrow the table leaves out `kind`, `namespace`, `table` and `environment`, in that order, and folds a long `subject` onto more lines, so that the `id` that `grant revoke` needs always stays whole, and a line under the table shows the revoke command; `--output json` always has every field.
 
@@ -1462,6 +1462,7 @@ A grant of `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN` as a single action h
 | `--env` | text | none | Environment. |
 | `--ns` | text | none | Namespace (dotted). |
 | `--table` | text | none | Table name. |
+| `--kind` | text | none | Only grants on objects of this kind: INSTANCE (the whole instance), ENVIRONMENT, NAMESPACE or TABLE. |
 | `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |
 

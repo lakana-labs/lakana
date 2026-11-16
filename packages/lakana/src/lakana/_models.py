@@ -1435,11 +1435,17 @@ class Principal:
         `"USER"` or `"SERVICE_ACCOUNT"`.
     is_active
         Whether this principal can currently authenticate.
+    held_admin
+        Whether the principal holds or has ever held the `ADMIN` role on the instance, directly
+        or through a group: only the server operator recovers such a person
+        (`lakana recovery create` with the bootstrap token). `None` unless you are an
+        administrator, or from a server older than this field.
     """
 
     name: str
     type: str
     is_active: bool
+    held_admin: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -4862,10 +4868,14 @@ class TreeNamespace:
         Its path, dotted.
     count
         The readable tables in it and beneath it.
+    actions
+        What your rights allow there: ``create_namespace``, ``create_external_table``,
+        ``drop``. Empty for an older server.
     """
 
     path: str
     count: int
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -4880,11 +4890,14 @@ class TreeEnvironment:
         The readable tables in it.
     namespaces
         Its namespaces you are shown, by path.
+    actions
+        What your rights allow there: ``create_namespace``. Empty for an older server.
     """
 
     name: str
     count: int
     namespaces: list[TreeNamespace]
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

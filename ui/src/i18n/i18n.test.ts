@@ -70,3 +70,19 @@ it("ships no string of the views or the actions in the first load, and importing
   );
   expect(i18n.t("catalog.views.retention.never")).toBe("never");
 });
+
+it("ships no string of the place menu in the first load, and importing PlaceActions registers them", async () => {
+  const i18n = initI18n();
+
+  expect(Object.keys(en.catalog)).not.toContain("places");
+  expect(i18n.exists("catalog.places.delete.title")).toBe(false);
+
+  await import("../catalog/places/PlaceActions");
+
+  expect(i18n.t("catalog.places.delete.title", { namespace: "silver" })).toBe(
+    "Delete namespace silver?",
+  );
+  expect(i18n.t("catalog.places.note.created", { namespace: "gold.finance" })).toBe(
+    "Created namespace gold.finance.",
+  );
+});

@@ -310,6 +310,16 @@ def list_grants(
     env: _ENV = None,
     ns: _NS = None,
     table: _TABLE = None,
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help=(
+                "Only grants on objects of this kind: INSTANCE (the whole instance), "
+                "ENVIRONMENT, NAMESPACE or TABLE."
+            ),
+        ),
+    ] = None,
     limit: LIMIT = None,
     cursor: CURSOR = None,
 ) -> None:
@@ -318,8 +328,10 @@ def list_grants(
     Filters combine. `--principal` and `--group` list the grants made to them (not those a
     principal has through its groups: `lakana access explain` says that). `--action` lists the
     grants that give an action, by itself or through a role. `--env`, with `--ns` and `--table`,
-    lists the grants on exactly that object. A long list prints a "More results" line with the
-    command that shows the next page.
+    lists the grants on exactly that object. `--kind INSTANCE` lists the grants on the whole
+    instance, which apply to every environment, namespace and table; `--kind` with `--env` must
+    name that object's kind. A long list prints a "More results" line with the command that
+    shows the next page.
 
     A grant gives a role or a single action, so one column, `access`, shows whichever it is;
     it never drops. The table names who each grant is for in `subject` (`user alice`,
@@ -354,6 +366,8 @@ def list_grants(
         Only grants on this namespace (or, with `table`, inside it).
     table
         Only grants on this table.
+    kind
+        Only grants on objects of this kind.
     limit
         Most grants returned (1 to 200); the server's default when omitted.
     cursor
@@ -362,6 +376,7 @@ def list_grants(
     state = state_of(ctx)
     client = state.client()
     wanted = action.upper() if action else None
+    level = kind.upper() if kind else None
     page = client.grants.list_page(
         principal_name=principal,
         group_name=group,
@@ -369,6 +384,7 @@ def list_grants(
         environment=env,
         namespace=ns,
         table=table,
+        kind=level,
         limit=limit,
         cursor=cursor,
     )
@@ -409,6 +425,7 @@ def list_grants(
             "--env": env,
             "--ns": ns,
             "--table": table,
+            "--kind": level,
             "--limit": limit,
         },
         page.next_cursor,

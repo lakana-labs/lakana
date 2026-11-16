@@ -90,10 +90,10 @@
 "login": { class: ui, part: 1 }
 "logout": { class: ui, part: 1 }
 "me set": { class: ui, part: 1 }
-"ns create": { class: ui, part: 3 }
-"ns delete": { class: ui, part: 3 }
+"ns create": { class: ui, part: 3, done: true, note: "properties are set from the CLI" }
+"ns delete": { class: ui, part: 3, done: true }
 "ns get": { class: read, part: 3 }
-"ns list": { class: read, part: 3 }
+"ns list": { class: read, part: 3, done: true, note: "properties are set from the CLI" }
 "orphans": { class: ui, part: 3, done: true }
 "passkey list": { class: ui, part: 1 }
 "passkey remove": { class: ui, part: 1 }
@@ -160,7 +160,7 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
-"table create-external": { class: ui, part: 3 }
+"table create-external": { class: ui, part: 3, done: true }
 "table definition": { class: read, part: 3, done: true }
 "table delete": { class: ui, part: 3, done: true }
 "table describe": { class: ui, part: 3, done: true }
@@ -204,7 +204,7 @@
 "DELETE /api/v1/environments/{environment_name}/secrets/{secret_name}": { class: ui, part: 7 }
 "DELETE /api/v1/environments/{env}/deployments/{repo}": { class: ui, part: 5 }
 "DELETE /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7 }
-"DELETE /api/v1/environments/{env}/namespaces/{path}": { class: ui, part: 3 }
+"DELETE /api/v1/environments/{env}/namespaces/{path}": { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}": { class: ui, part: 3 }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}":
   { class: ui, part: 3 }
@@ -258,7 +258,7 @@
 "GET /api/v1/environments/{env}/jobs": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/jobs/{job}": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/jobs/{job}/tasks/{task}/attempts": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/namespaces": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces": { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions": { class: ui, part: 3 }
@@ -401,7 +401,7 @@
 "POST /api/v1/environments/{env}/jobs/{job}/pause": { class: ui, part: 5 }
 "POST /api/v1/environments/{env}/jobs/{job}/resume": { class: ui, part: 5 }
 "POST /api/v1/environments/{env}/jobs/{job}/runs": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/namespaces": { class: ui, part: 3 }
+"POST /api/v1/environments/{env}/namespaces": { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads":
   { class: git, reason: "artifact upload" }
 "POST /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}/commit":
@@ -411,7 +411,8 @@
     class: git,
     reason: "local exploration tool; tables are defined by assets in Git; file upload with schema preview (#224) is the UI's exploration path",
   }
-"POST /api/v1/environments/{env}/namespaces/{path}/tables/external": { class: ui, part: 3 }
+"POST /api/v1/environments/{env}/namespaces/{path}/tables/external":
+  { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/data":
   {
     class: git,
