@@ -35,7 +35,7 @@ AND.
 | Group | `--group`, `group_name` | the grants made to this group; at most one of principal and group |
 | Action | `--action`, `action` | the grants that give this action, in any letter case: a grant of the action itself, or of a role that carries it |
 | Object | `--env`, `--ns`, `--table`; `environment`, `namespace`, `table` | the grants on exactly this object: a table (all three), a namespace (environment and namespace) or an environment (environment alone). Grants on an object that contains it are not listed |
-| Kind | `--kind`, `kind` | the grants on every object of one kind, in any letter case: `INSTANCE` (the grants on the whole instance, such as the `ADMIN` role, which apply to every environment, namespace and table), `ENVIRONMENT`, `NAMESPACE` or `TABLE`. With an object filter it must be that object's kind |
+| Kind | `--kind`, `kind` | the grants on every object of one kind, in any letter case: `INSTANCE` (the grants on the whole instance, such as the `ADMIN` role, which apply to every environment, namespace and table), `ENVIRONMENT`, `NAMESPACE` or `TABLE`. With an object filter it must be that object's kind. The filter needs a server of this release or later: an older server ignores `kind` and answers with all grants |
 
 The order is the time a grant was made, newest first; equal times by id. `--limit` and `--cursor`
 page through the list as they do for the [runs, queries and deploys lists](lists.md#paging): 1 to
