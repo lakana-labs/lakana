@@ -7050,25 +7050,25 @@ matter for an operator deciding where to run it:
 ## Process
 
 Every PR runs bandit, gitleaks, pip-audit, npm audit and osv-scanner (over the npm locks of `ui/`
-and `tools/jscpd`), and the license check (`security.yml`).
-gitleaks uses its default rules plus the allowlist in `.gitleaks.toml`, which may hold only
-exact literals — test-fixture token values, or a specific code line the generic-api-key rule
-misreads (e.g. `token=token, …` in `lakana login`) — never a pattern broad enough to hide a real
-credential. Prefer fixture tokens that don't trip the rules at all; allowlist one only when the
-test needs its shape (e.g. the SDK's masking tests, which need a secret with underscores and
-dashes). gitleaks scans every commit in a PR, so a false positive in any earlier commit needs an
-allowlist entry even after the line has changed. Scope such an entry to the commits that carry the
-line (an `[[allowlists]]` table with `condition = "AND"`, `commits` and `regexes`): a global line
-entry for a fake key header also hides a real key written right after it, because the
-private-key rule's match runs on to the next key's header. The `secrets` job runs the gitleaks command line
-(MIT) from one pinned release whose SHA-256 is checked, not the gitleaks GitHub Action, which needs
-a paid licence key for a repository owned by an organisation; raise the version and the checksum
-together from the release's checksums file. Any
-feature touching auth, policy, secrets, or the query path should also get a `/security-review`
-pass before merge. Semgrep runs weekly (`security-deep.yml`; it leaves out `ui/scripts/lint-fixtures`, the deliberate violations `lint-ban.test.ts` lints); CodeQL (`codeql.yml`) runs on every
-pull request, every push to `main` and weekly; both upload SARIF to code scanning. OpenSSF Scorecard (`scorecard.yml`) runs on every push to `main`,
-weekly and on a branch-protection change, and publishes its score for the README badge; read the
-results at <https://scorecard.dev/viewer/?uri=github.com/lakana-labs/lakana>.
+and `tools/jscpd`), and the license check (`security.yml`). gitleaks uses its default rules plus the
+allowlist in `.gitleaks.toml`, which may hold only exact literals — test-fixture token values, or a
+specific code line the generic-api-key rule misreads (e.g. `token=token, …` in `lakana login`) —
+never a pattern broad enough to hide a real credential. Prefer fixture tokens that don't trip the
+rules at all; allowlist one only when the test needs its shape (e.g. the SDK's masking tests, which
+need a secret with underscores and dashes). gitleaks scans every commit in a PR, so a false positive
+in any earlier commit needs an allowlist entry even after the line has changed. Scope such an entry
+to the commits that carry the line (an `[[allowlists]]` table with `condition = "AND"`, `commits`
+and `regexes`): a global line entry for a fake key header also hides a real key written right after
+it, because the private-key rule's match runs on to the next key's header. The `secrets` job runs
+the gitleaks command line (MIT) from one pinned release whose SHA-256 is checked, not the gitleaks
+GitHub Action, which needs a paid licence key for a repository owned by an organisation; raise the
+version and the checksum together from the release's checksums file. Any feature touching auth,
+policy, secrets, or the query path should also get a `/security-review` pass before merge. Semgrep
+runs weekly (`security-deep.yml`; it leaves out `ui/scripts/lint-fixtures`, the deliberate
+violations `lint-ban.test.ts` lints); CodeQL (`codeql.yml`) runs on every pull request, every push
+to `main` and weekly; both upload SARIF to code scanning. OpenSSF Scorecard (`scorecard.yml`) runs
+on every push to `main`, weekly and on a branch-protection change, and publishes its score for the
+README badge; read the results at <https://scorecard.dev/viewer/?uri=github.com/lakana-labs/lakana>.
 
 ### Image scan
 
