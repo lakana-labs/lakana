@@ -140,9 +140,11 @@ from lakana_core.catalog.health import (
     stored_stats,
 )
 from lakana_core.catalog.health_jobs import (
+    deployed_manifests,
     judged_by_run,
     queue_health_notifications,
     rows_to_tell,
+    writing_zone,
 )
 from lakana_core.catalog.health_read import (
     UNKNOWN_SIGNAL_MESSAGE,
@@ -6368,6 +6370,14 @@ class CatalogService:
             The rows to add after the swap.
         """
         with self._session.no_autoflush:
+            now = db_now(self._session)
+            # The weekday of the volume band is the writing jobs' (#565); a new table has no
+            # history to compare with, and volume off needs no band.
+            zone = (
+                UTC
+                if new_table or effects.of("volume") == "off"
+                else writing_zone(deployed_manifests(self._session, environment_id), ref.dotted())
+            )
             pairs = commit_observations(
                 self._session,
                 table=ref.dotted(),
@@ -6379,8 +6389,9 @@ class CatalogService:
                 effects=effects,
                 files=files,
                 own_summaries=own_summaries,
+                now=now,
+                zone=zone,
             )
-            now = db_now(self._session)
         snapshot = after.current_snapshot()
         return signal_rows(
             pairs,
