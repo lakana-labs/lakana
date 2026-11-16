@@ -167,7 +167,8 @@ has no name (a server older than your CLI, or a person or group deleted a moment
 shows the id there and a notice says so. A column that is empty for every grant is left out, and
 when the terminal is too narrow a line under the table says which columns were left out;
 `--output json` always has every field. `--env dev` lists who has access to one
-environment, with their roles; without a filter `lakana grant list` shows every grant, newest
+environment, with their roles; `--kind INSTANCE` lists the grants on the whole instance, such as
+the administrators' `ADMIN` role, which apply everywhere; without a filter `lakana grant list` shows every grant, newest
 first, and a long list ends with the command that shows the next page. The column `last_used_at`
 of `token list` shows whether a token is in use. To see what one person may do and through which
 grant, read [Why may (or may not) someone do this?](why-may-someone-do-this.md). Every filter and
