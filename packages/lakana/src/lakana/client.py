@@ -309,8 +309,8 @@ class Client:
         environment
             The environment to run the query against.
         timeout
-            Seconds to wait before giving up, or `None` to wait
-            indefinitely. Passed straight through to `QueryRun.wait`.
+            Seconds to wait for the query to finish before giving up, or `None` to wait
+            indefinitely.
         into
             Write the result into this table or view instead.
         mode

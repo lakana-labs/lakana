@@ -419,6 +419,11 @@ def render_cli_pages(app: typer.Typer, prog: str = "lakana") -> dict[str, str]:
     for name, group in groups.items():
         out: list[str] = []
         _render_command(group, f"{prog} {name}", 0, out)
+        out[2:2] = [
+            "Part of the [Command line reference](../cli.md), which lists the options for every"
+            " command.",
+            "",
+        ]
         pages[f"reference/cli/{prog}-{name}.md"] = _page(out)
     return pages
 
@@ -900,6 +905,10 @@ def tag_slug(tag: str) -> str:
     return slug
 
 
+_HTTP_METHODS = frozenset({"get", "put", "post", "delete", "options", "head", "patch", "trace"})
+"""The keys of an OpenAPI path item that are operations."""
+
+
 def _tagged(doc: Mapping[str, Any]) -> dict[str, list[tuple[str, str, Mapping[str, Any]]]]:
     """Group the operations of a document by the page of their tag.
 
@@ -923,6 +932,8 @@ def _tagged(doc: Mapping[str, Any]) -> dict[str, list[tuple[str, str, Mapping[st
     owners: dict[str, str] = {}
     for path, item in doc["paths"].items():
         for method, operation in item.items():
+            if method not in _HTTP_METHODS:  # `parameters`, `summary` and the like
+                continue
             tags = operation.get("tags")
             if not tags:
                 raise ValueError(f"{method.upper()} {path} has no tag; give its router a tag")
@@ -1711,8 +1722,7 @@ def render_sdk_pages(
     ]
     for name, obj in exported:
         kind, link = _index_row(name, obj, package, client_cls)
-        shown = name if name.startswith("_") else f"{pkg}.{name}"  # `__version__`, not `lakana._`
-        index.append(f"| `{shown}` | {kind} | {link} |")
+        index.append(f"| `{pkg}.{name}` | {kind} | {link} |")
     index += [
         "",
         "## Resources of the client",
@@ -1731,7 +1741,7 @@ def render_sdk_pages(
     client_doc = parse_numpydoc(client_cls.__doc__)
     call = f"{pkg}.{client_name}"
     client = [
-        "# The client",
+        "# Python SDK: The client",
         "",
         *_doc_text(client_doc),
         *_constructor(call, client_cls, client_doc),
@@ -1743,7 +1753,7 @@ def render_sdk_pages(
         client += _render_member(f"{prefix}.{name}", kind, func, package, 2)
 
     error_page = [
-        "# Errors",
+        "# Python SDK: Errors",
         "",
         f"The errors the `{pkg}` package exports and what each means; each method of the client"
         " names the ones it raises.",
@@ -1763,7 +1773,7 @@ def render_sdk_pages(
     _add_page(pages, f"{SDK_DIR}/errors.md", _page(error_page, source))
     for stem, funcs in functions.items():
         lines = [
-            f"# {title_from_slug(stem)}",
+            f"# Python SDK: {title_from_slug(stem)}",
             "",
             "Part of the [Python SDK reference](index.md).",
             "",
@@ -1773,7 +1783,7 @@ def render_sdk_pages(
         _add_page(pages, f"{SDK_DIR}/{stem}.md", _page(lines, source))
     for stem, resources in modules.items():
         lines = [
-            f"# {title_from_slug(stem)}",
+            f"# Python SDK: {title_from_slug(stem)}",
             "",
             "Part of the [Python SDK reference](index.md).",
             "",
@@ -1819,10 +1829,11 @@ def splice_region(text: str, name: str, body: str, *, path: str) -> str:
     lines = text.splitlines(keepends=True)
     begins = [i for i, line in enumerate(lines) if f"generated:begin {name}" in line]
     ends = [i for i, line in enumerate(lines) if f"generated:end {name}" in line]
-    if len(begins) != 1 or len(ends) != 1 or begins[0] > ends[0]:
+    if len(begins) != 1 or len(ends) != 1 or begins[0] >= ends[0]:
         raise ValueError(
             f"{path}: the markers of the generated region {name} are missing or appear more "
-            f"than once; restore one `generated:begin {name}` and one `generated:end {name}` line"
+            f"than once, or are not on separate lines, begin before end; restore one "
+            f"`generated:begin {name}` and one `generated:end {name}` line"
         )
     begin, end = begins[0], ends[0]
     marker = lines[begin]
@@ -1914,7 +1925,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     root: Path = ROOT,
-    generate: Callable[[], Mapping[str, str]] = real_pages,
+    generate: Callable[[], Mapping[str, str]] | None = None,
 ) -> int:
     """Write the generated files, or check that they are current.
 
@@ -1928,7 +1939,8 @@ def main(
     root
         The directory the file paths are relative to (the repository root).
     generate
-        Produces the files, by repository path; replaced in tests.
+        Produces the files, by repository path; ``None`` generates them from the real code, with
+        ``mkdocs.yml`` and the REST index read from ``root``. Replaced in tests.
 
     Returns
     -------
@@ -1938,11 +1950,13 @@ def main(
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument(
-        "--check", action="store_true", help="write nothing; fail when a page is stale"
+        "--check",
+        action="store_true",
+        help="write nothing; fail when a page is stale or left over in a generated directory",
     )
     args = parser.parse_args(argv)
     stale = 0
-    pages = generate()
+    pages = (generate or (lambda: real_pages(root)))()
     for relative, text in pages.items():
         path = root / relative
         current = path.read_text(encoding="utf-8") if path.exists() else None

@@ -26,7 +26,7 @@ Every name the `lakana` package exports and every resource of its client, with t
 | `lakana.RunFailed` | error | [Errors](errors.md) |
 | `lakana.ServerError` | error | [Errors](errors.md) |
 | `lakana.ValidationError` | error | [Errors](errors.md) |
-| `__version__` | version text |  |
+| `lakana.__version__` | version text |  |
 | `lakana.asset` | function | [Assets](assets.md) |
 | `lakana.output_dir` | function | [Assets](assets.md) |
 

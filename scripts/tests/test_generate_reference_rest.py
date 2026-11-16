@@ -431,6 +431,21 @@ def test_two_tags_with_one_slug_are_refused() -> None:
         )
 
 
+def test_a_path_item_key_that_is_not_a_method_is_not_a_route() -> None:
+    """Shared `parameters` and a `summary` of a path item are not operations."""
+    doc = {
+        "paths": {
+            "/a": {
+                "summary": "Shared.",
+                "parameters": [{"name": "x", "in": "query"}],
+                "get": {"tags": ["Things"], "responses": {}},
+            }
+        }
+    }
+    pages = render_rest_pages(doc)
+    assert list(pages) == ["reference/rest/things.md"]
+
+
 def test_a_route_without_a_tag_is_refused() -> None:
     """Every route needs a tag, or it would be on no page."""
     with pytest.raises(ValueError, match="GET /a has no tag"):

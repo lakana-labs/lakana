@@ -55,6 +55,6 @@ Reference states exact facts, to look up, and does not teach.
 
 - [Command line](cli.md): every `lakana` command and sub-command with its arguments and options. Generated from the code.
 - [Python SDK](sdk/index.md): every name the `lakana` package exports and every resource of the client, with the signature, parameters, return value and errors of each method. Generated from the code.
-- [The REST API as a contract](rest-api.md): the platform API and the Iceberg REST catalog, what Lakana promises, what counts as breaking, how deprecations are announced, and where to get the [OpenAPI document](openapi.json) (generated from the code).
+- [The REST API as a contract](rest-api.md): the platform API and the Iceberg REST catalog, what Lakana promises, what counts as breaking, how deprecations are announced, the page of each area of the API, and where to get the [OpenAPI document](openapi.json) (the area pages and the document are generated from the code).
 
 Pages are added here as they are written.
