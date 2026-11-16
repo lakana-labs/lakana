@@ -234,6 +234,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "shortened",
         # the environments a deploy key was not made in: their secrets are not the caller's
         "skipped",
+        # grants a restore left revoked because an identical one is live, each with that one's
+        # id (#673)
+        "skipped_grants",
         "state",
         "status",
         "stopped",

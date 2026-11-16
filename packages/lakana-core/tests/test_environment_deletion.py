@@ -1341,3 +1341,102 @@ def test_the_last_purge_locks_the_remaining_tables_in_id_order_before_the_delete
     delete = next(i for i, sql in enumerate(seen) if sql.startswith("DELETE FROM environments"))
     assert lock < delete
     assert session.scalars(select(Table)).all() == []
+
+
+def _copy(session: Session, grant: Grant, *, revoked_at: datetime | None) -> Grant:
+    """Write a second copy of a grant past the service, as releases before #673 could.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    grant
+        The grant to copy.
+    revoked_at
+        When the copy was revoked, or `None` for a live one.
+
+    Returns
+    -------
+    Grant
+        The copy, committed.
+    """
+    copy = Grant(
+        id=uuid.uuid4(),
+        principal_id=grant.principal_id,
+        role=grant.role,
+        action=grant.action,
+        kind=grant.kind,
+        environment=grant.environment,
+        namespace=grant.namespace,
+        table=grant.table,
+        environment_id=grant.environment_id,
+        table_id=grant.table_id,
+        granted_by=grant.granted_by,
+        granted_at=grant.granted_at,
+        revoked_at=revoked_at,
+        revoked_by=grant.revoked_by,
+    )
+    session.add(copy)
+    session.commit()
+    return copy
+
+
+def test_a_restore_names_each_grant_it_leaves_revoked_for_a_live_twin(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """#673: a grant whose twin is live stays revoked, and both restore events name the pair."""
+    table_id = _table(catalog, principal, "gold.orders")
+    on_table, on_environment, _ = _grants(session, principal, _ref("gold.orders"))
+    catalog.delete_environment(principal, "dev")
+    deleted_at = _env(session).deleted_at
+    live_twin = _copy(session, on_environment, revoked_at=None)
+    record = _record(session, table_id)
+    assert record is not None
+    table_copy = _copy(session, on_table, revoked_at=deleted_at)
+    record.revoked_policy_ids = [
+        *record.revoked_policy_ids,
+        {"kind": "grant", "id": str(table_copy.id)},
+    ]
+    session.commit()
+
+    catalog.restore_environment(principal, "dev")
+
+    assert _revoked_at(session, Grant, on_environment.id) == deleted_at
+    assert _revoked_at(session, Grant, on_table.id) is None
+    assert _revoked_at(session, Grant, table_copy.id) == deleted_at
+    on_table_skipped = {"id": str(table_copy.id), "kept_grant_id": str(on_table.id)}
+    (undropped,) = _events(session, AuditEventType.TABLE_UNDROPPED)
+    assert undropped.detail["skipped_grants"] == [on_table_skipped]
+    (restored,) = _events(session, AuditEventType.ENVIRONMENT_RESTORED)
+    assert restored.detail["skipped_grants"] == [
+        on_table_skipped,
+        {"id": str(on_environment.id), "kept_grant_id": str(live_twin.id)},
+    ]
+    assert restored.detail["restored_policies"] == 2
+
+
+def test_an_undrop_names_each_grant_it_leaves_revoked_for_a_live_twin(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """#673: an undrop leaves the second copy of a table grant revoked and says so."""
+    table_id = _table(catalog, principal, "gold.orders")
+    on_table, _, _ = _grants(session, principal, _ref("gold.orders"))
+    catalog.drop_table(principal, _ref("gold.orders"))
+    record = _record(session, table_id)
+    assert record is not None
+    table_copy = _copy(session, on_table, revoked_at=record.dropped_at)
+    record.revoked_policy_ids = [
+        *record.revoked_policy_ids,
+        {"kind": "grant", "id": str(table_copy.id)},
+    ]
+    session.commit()
+
+    catalog.undrop_table(principal, _ref("gold.orders"))
+
+    assert _revoked_at(session, Grant, on_table.id) is None
+    assert _revoked_at(session, Grant, table_copy.id) is not None
+    (undropped,) = _events(session, AuditEventType.TABLE_UNDROPPED)
+    assert undropped.detail["skipped_grants"] == [
+        {"id": str(table_copy.id), "kept_grant_id": str(on_table.id)}
+    ]
+    assert "skipped_grants" not in _events(session, AuditEventType.TABLE_DROPPED)[0].detail

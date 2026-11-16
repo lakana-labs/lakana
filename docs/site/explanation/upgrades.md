@@ -280,6 +280,11 @@ audit event without an actor, with `reason` `duplicate` and the id of the kept g
 copy too. It runs with the other migrations, and nothing else has to be done. Going back drops the
 indexes; the revoked copies stay revoked.
 
+A table undrop or an environment restore leaves a grant it would bring back revoked when an
+identical grant is in force, and its `TABLE_UNDROPPED` or `ENVIRONMENT_RESTORED` event lists it
+under `skipped_grants`, each with the `id` of the grant left revoked and the `kept_grant_id` of
+the one in force.
+
 ### Indexes on the artifact tables
 
 Migration `0079` adds six indexes to `artifact_versions` and `artifact_uploads`, so deleting a

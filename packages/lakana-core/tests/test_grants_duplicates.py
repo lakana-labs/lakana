@@ -375,13 +375,16 @@ def test_a_restore_leaves_revoked_a_grant_whose_twin_is_live(
     session.add(twin)
     session.commit()
 
+    skipped: list[dict[str, str]] = []
     restored = unrevoke(
         session,
         [{"kind": "grant", "id": str(made.id)}, {"kind": "grant", "id": str(twin.id)}],
         revoked_at=when,
+        skipped=skipped,
     )
     session.commit()
 
     assert restored == [{"kind": "grant", "id": str(made.id)}]
+    assert skipped == [{"id": str(twin.id), "kept_grant_id": str(made.id)}]
     assert [g.id for g in _live(session)] == [made.id]
     assert twin.revoked_at is not None

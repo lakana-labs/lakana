@@ -103,7 +103,7 @@ Revoke a grant
 
 From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.
 
-Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Answers 409 too, creating nothing, when the principal or group already holds the same role or action on the same object; the message names that grant's id.
+Answers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).
 
 Needs the `ADMIN` role on the instance. Answers 404 when there is no such grant and 409 when revoking it would leave the instance without an active administrator.
 

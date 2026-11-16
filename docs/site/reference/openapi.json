@@ -11862,7 +11862,7 @@
           "grants"
         ],
         "summary": "Revoke a grant",
-        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited). Answers 409 too, creating nothing, when the principal or group already holds the same role or action on the same object; the message names that grant's id.\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such grant and 409 when revoking it would leave the instance without an active administrator.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nAnswers 409 when an access file manages the scope; `override_managed` with `override_reason` overrides it (ADMIN on the instance; audited).\n\nNeeds the `ADMIN` role on the instance. Answers 404 when there is no such grant and 409 when revoking it would leave the instance without an active administrator.",
         "operationId": "revoke_grant_api_v1_grants__grant_id__delete",
         "parameters": [
           {
