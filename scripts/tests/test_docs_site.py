@@ -1,5 +1,6 @@
 """Tests for the documentation site's configuration."""
 
+import os
 import re
 import subprocess
 import unicodedata
@@ -157,7 +158,14 @@ Tying output blocks to the regions of the examples (#265) lowered `UNCHECKED_OUT
 so the orphan drop and `lakana table rebuild` of `drop-and-restore-a-table.md` are tested:
 `NOT_TESTED_CEILING` fell from 64 to 62, and the rise of 80 to 82 above no longer applies.
 """
-SECTIONS = ("tutorials", "how-to", "reference", "explanation")
+TABS = {
+    "What is Lakana?": "index.md",
+    "Learn": "learn/index.md",
+    "How-to guides": "how-to/index.md",
+    "Concepts": "explanation/index.md",
+    "Reference": "reference/index.md",
+    "Project": "explanation/roadmap.md",
+}
 
 
 def _config() -> dict:
@@ -199,18 +207,87 @@ def test_the_site_is_built_from_docs_site_into_an_ignored_directory() -> None:
     assert "site-build/" in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
 
 
+MOVED = {"tutorials/move-a-sql-project.md": "how-to/move-a-sql-project.md"}
+"""Pages that moved; the old path keeps a short page that points on, outside the navigation."""
+
+
 def test_every_page_is_in_the_navigation_and_every_entry_exists() -> None:
     """A page nobody can reach, or an entry with no page, is a mistake."""
     listed = _nav_files(_config()["nav"])
     on_disk = sorted(p.relative_to(SITE).as_posix() for p in SITE.rglob("*.md"))
-    assert sorted(listed) == on_disk
+    assert sorted(listed) == [p for p in on_disk if p not in MOVED]
     assert len(listed) == len(set(listed))
 
 
-def test_the_four_sections_exist() -> None:
-    """Tutorials, how-to guides, reference and explanation each have a landing page."""
-    for section in SECTIONS:
-        assert (SITE / section / "index.md").is_file()
+def test_a_moved_page_keeps_a_short_page_at_its_old_path() -> None:
+    for old, new in MOVED.items():
+        text = (SITE / old).read_text(encoding="utf-8")
+        assert (SITE / new).is_file()
+        assert f"({os.path.relpath(new, Path(old).parent)})" in text
+        assert find_blocks(SITE / old) == []
+        assert len(text.split()) <= 60
+
+
+def _tab(title: str) -> list | str:
+    """Return the `nav` value of one tab.
+
+    Parameters
+    ----------
+    title
+        The tab's title, such as `Learn`.
+
+    Returns
+    -------
+    list or str
+        The tab's entries, or its single page path.
+    """
+    return next(next(iter(e.values())) for e in _config()["nav"] if next(iter(e)) == title)
+
+
+def test_the_navigation_is_six_tabs_in_order() -> None:
+    config = _config()
+    assert [next(iter(e)) for e in config["nav"]] == list(TABS)
+    for title, first in TABS.items():
+        value = _tab(title)
+        assert (value if isinstance(value, str) else _nav_files(value)[0]) == first
+        assert (SITE / first).is_file()
+    assert {"navigation.tabs", "navigation.indexes"} <= set(config["theme"]["features"])
+
+
+INDEXED_TABS = {
+    "Learn": "learn/index.md",
+    "How-to guides": "how-to/index.md",
+    "Concepts": "explanation/index.md",
+    "Reference": "reference/index.md",
+}
+NOT_ON_AN_INDEX = (
+    "tutorials/index.md",
+    # reserved for the generated reference (PR B); their pages are listed by the generator
+    "reference/cli/",
+    "reference/rest/",
+    "reference/sdk/",
+)
+
+
+def test_the_navigation_sections_are_the_index_headings_in_order() -> None:
+    """A tab's index has one `##` per `nav` section, in the same order."""
+    for title in ("How-to guides", "Reference", "Learn"):
+        sections = [next(iter(e)) for e in _tab(title) if isinstance(e, dict)]
+        text = (SITE / INDEXED_TABS[title]).read_text(encoding="utf-8")
+        assert sections == re.findall(r"^## (.+?)\s*$", text, flags=re.MULTILINE), title
+
+
+def test_each_tab_index_links_every_page_of_its_tab() -> None:
+    """Every page of an indexed tab is linked from that tab's index."""
+    missing = []
+    for title, index in INDEXED_TABS.items():
+        text = (SITE / index).read_text(encoding="utf-8")
+        for page in _nav_files(_tab(title)):
+            if page == index or page.startswith(NOT_ON_AN_INDEX):
+                continue
+            if f"({os.path.relpath(page, Path(index).parent)}" not in text:
+                missing.append(f"{index} -> {page}")
+    assert missing == []
 
 
 def test_no_file_names_a_page_at_its_old_path() -> None:
@@ -483,3 +560,63 @@ def test_no_page_holds_an_invisible_format_character() -> None:
         if unicodedata.category(char) == "Cf"
     ]
     assert found == [], f"replace each invisible character with a visible notation: {found}"
+
+
+ALLOWED_EXTENSIONS = frozenset(
+    {"admonition", "pymdownx.superfences", "pymdownx.tabbed", "md_in_html"}
+)
+"""The Markdown extensions mkdocs.yml may list; md_in_html renders the Learn page's cards."""
+
+
+def test_the_configuration_lists_only_allowed_markdown_extensions() -> None:
+    names = {next(iter(e)) if isinstance(e, dict) else e for e in _config()["markdown_extensions"]}
+    assert names <= ALLOWED_EXTENSIONS, sorted(names - ALLOWED_EXTENSIONS)
+
+
+LEVELS = ("Beginner", "Intermediate", "Advanced")
+LEARN_NOW = {
+    "Beginner": ["../tutorials/getting-started.md"],
+    "Intermediate": ["../tutorials/python-sample.md"],
+    "Advanced": ["../tutorials/train-a-model.md"],
+}
+"""Today's tutorials stand under their levels until the lessons that fold them in land."""
+
+
+def test_the_learn_page_lists_the_tutorials_under_their_levels() -> None:
+    text = (SITE / "learn" / "index.md").read_text(encoding="utf-8")
+    sections = re.split(r"^## ", text, flags=re.MULTILINE)[1:]
+    assert [s.splitlines()[0].strip() for s in sections] == list(LEVELS)
+    for section in sections:
+        level = section.splitlines()[0].strip()
+        assert '<div class="grid cards" markdown>' in section
+        for link in LEARN_NOW[level]:
+            assert f"]({link})" in section
+        assert section.count('class="lakana-level"') == len(LEARN_NOW[level])
+    assert "<a " not in text  # links stay Markdown, so the strict build checks them
+
+
+def _prose_words(text: str) -> int:
+    """Count the words a reader sees: link targets, heading marks and list markers left out.
+
+    Parameters
+    ----------
+    text
+        Markdown source.
+
+    Returns
+    -------
+    int
+        The number of words in the rendered prose.
+    """
+    text = re.sub(r"\]\([^)]*\)", "]", text)
+    text = re.sub(r"^\s*(?:#+|[-*])\s+", "", text, flags=re.MULTILINE)
+    return len(re.sub(r"[*\[\]]", "", text).split())
+
+
+def test_the_home_page_is_what_is_lakana_with_two_ways_in() -> None:
+    """The home page names the tab, links the two ways in and stays about one screen."""
+    text = (SITE / "index.md").read_text(encoding="utf-8")
+    assert text.startswith("# What is Lakana?\n")
+    assert "(learn/index.md)" in text
+    assert "(how-to/index.md)" in text
+    assert _prose_words(text) <= 440  # about one screen: today's page plus 10 %

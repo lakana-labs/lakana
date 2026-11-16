@@ -452,7 +452,7 @@ of "done".
   protected environment asks for an explicit step.
 
 **User documentation ships with the change.**
-- User documentation lives in `docs/site/` (one directory per kind, below); `mkdocs.yml` lists
+- User documentation lives in `docs/site/` (six tabs, below); `mkdocs.yml` lists
   the pages. `docs/agent/*` is not part of it. How to add a page, a code block or an example:
   "The documentation site" in `docs/agent/testing.md`.
 - A change that adds or changes user-facing behaviour (CLI, SDK, REST, settings, front-matter,
@@ -460,11 +460,13 @@ of "done".
   statements the change makes false; this covers what the change makes new.
 - Write for the reader who has not seen the feature: say what it is for before how it works, and
   show a complete example that can be copied and run.
-- Documentation comes in four kinds; put new text in the right one:
-  - **Tutorial:** learn by doing, start to finish.
-  - **How-to guide:** one task, the shortest path.
-  - **Reference:** exact facts — every option, default and limit.
-  - **Explanation:** why it works this way.
+- The site has six tabs; put new text in the right one:
+  - **What is Lakana?** (the home page) and **Learn** (learn by doing, start to finish).
+  - **How-to guides:** one task, the shortest path.
+  - **Concepts** (why it works this way) and **Project** (roadmap, support, known gaps); both
+    come from `docs/site/explanation/`.
+  - **Reference:** exact facts: every option, default and limit.
+  - Pages keep their files when the tabs change; "Pages" in `docs/agent/testing.md` has the map.
 - Code a page shows comes from a tested example (`docs/examples/`, run by CI) or is checked by
   `scripts/docs_blocks.py`; a block marked "not tested" needs a reason and is counted. A snippet
   nothing exercises is a defect.

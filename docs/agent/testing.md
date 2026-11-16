@@ -242,7 +242,8 @@ guard against a broken page, so `docs` has no condition. `scripts/tests/test_doc
 which reads `mkdocs.yml` (the navigation, `docs_dir`), is among those `scripts/tests`, so a
 docs-only change to the navigation is checked by it and by the strict build. Because `lint` and `static` are skipped for such a change,
 the same file fails on a `hooks:` key or a plugin in `mkdocs.yml` (code run at build time) until it
-is listed in a pull request that is not docs-only. A push to `main` runs everything unless
+is listed in a pull request that is not docs-only. The same file refuses a Markdown extension outside
+`ALLOWED_EXTENSIONS`. A push to `main` runs everything unless
 it proves the content was tested (below).
 
 "Documentation" is defined in one place, `scripts/docs_only.py`: a file under `docs/`, the root
@@ -419,14 +420,21 @@ tested and counted (below). Everything here is for someone adding or changing a 
 
 ### Pages
 
-One directory per kind, each with an `index.md` that introduces it:
+The site has six tabs, in this order. Each is fed by one or two directories, and each but the
+first and the last opens on an `index.md` that introduces it and links every page of the tab:
 
-| Directory | Kind | A page is |
+| Tab | Directory | A page is |
 |---|---|---|
-| `docs/site/tutorials/` | Tutorial | learning by doing, start to finish, one working result |
-| `docs/site/how-to/` | How-to guide | one task, the shortest path |
-| `docs/site/reference/` | Reference | exact facts: every option, default and limit |
-| `docs/site/explanation/` | Explanation | why it works this way |
+| What is Lakana? | `docs/site/index.md` | the home page |
+| Learn | `docs/site/learn/` and `docs/site/tutorials/` | learning by doing, start to finish, one working result |
+| How-to guides | `docs/site/how-to/` | one task, the shortest path |
+| Concepts | `docs/site/explanation/` | how Lakana works and why |
+| Reference | `docs/site/reference/` | exact facts: every option, default and limit |
+| Project | `docs/site/explanation/` | the roadmap, support, upgrade policy and known gaps |
+
+Within a tab, `nav` groups the pages into named sections, and the tab's index has one `##` per
+section in the same order. A page keeps its file when it moves between tabs or sections: only
+`nav` and the index pages change, so no published URL breaks (the site has no redirects).
 
 Three reference files are generated, never edited by hand: `reference/cli.md` from the Typer app,
 `reference/settings.md` from the settings models of `lakana-core` and `lakana-server` (the
@@ -437,9 +445,10 @@ route changes, run
 `uv run python scripts/generate_reference.py` and commit the pages; `--check` fails, naming the
 stale page, and runs in CI's `docs` job and in `scripts/tests/test_generate_reference.py`.
 
-A new page must be listed under `nav` in `mkdocs.yml`, and every entry must be a page;
-`scripts/tests/test_docs_site.py` fails otherwise. Link to other pages with relative `.md` links;
-the strict build fails on a broken link or anchor.
+List a new page in its tab's section under `nav` in `mkdocs.yml`, and link it from its tab's
+index (`test_each_tab_index_links_every_page_of_its_tab`). Every entry must be a page and every
+page an entry, once; `scripts/tests/test_docs_site.py` fails otherwise. Link to other pages with
+relative `.md` links; the strict build fails on a broken link or anchor.
 
 ### Rules for pages
 

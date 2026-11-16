@@ -35,125 +35,148 @@ theme:
         name: Switch to light mode
   features:
     - content.code.copy
+    - navigation.indexes
     - navigation.sections
+    - navigation.tabs
 extra_css:
   - assets/stylesheets/still-water.css
 markdown_extensions:
   - admonition
+  - md_in_html
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
 # Navigation completeness (every page listed, every entry a page) is enforced by
 # scripts/tests/test_docs_site.py, because the generator does not check it.
 nav:
-  - Home: index.md
-  - Tutorials:
+  - What is Lakana?: index.md
+  - Learn:
+      - learn/index.md
+      - Beginner:
+          - tutorials/getting-started.md
+      - Intermediate:
+          - tutorials/python-sample.md
+      - Advanced:
+          - tutorials/train-a-model.md
       - tutorials/index.md
-      - tutorials/getting-started.md
-      - tutorials/python-sample.md
-      - tutorials/train-a-model.md
-      - tutorials/move-a-sql-project.md
   - How-to guides:
       - how-to/index.md
-      - how-to/projects.md
-      - how-to/connect-a-repository.md
-      - how-to/load-data-from-a-source.md
-      - how-to/read-from-a-sql-server-database.md
-      - how-to/deploy-from-github-actions.md
-      - how-to/deploy-from-gitlab-ci.md
-      - how-to/check-your-data.md
-      - how-to/notice-a-broken-pipeline.md
-      - how-to/run-a-job-on-a-schedule.md
-      - how-to/get-told-when-a-job-fails.md
-      - how-to/deploy-with-compose.md
-      - how-to/operate-for-others.md
-      - how-to/instance-health.md
-      - how-to/export-and-keep-the-audit-log.md
-      - how-to/install-without-internet-access.md
-      - how-to/start-in-the-web-interface.md
-      - how-to/invite-your-team.md
-      - how-to/give-a-second-person-access.md
-      - how-to/lost-your-passkey.md
-      - how-to/keep-access-in-a-reviewed-file.md
-      - how-to/why-may-someone-do-this.md
-      - how-to/upgrade-to-artifacts.md
-      - how-to/manage-secrets.md
-      - how-to/private-package-index.md
-      - how-to/run-python-tasks-in-containers.md
-      - how-to/models-with-scikit-learn.md
-      - how-to/inspect-and-download-artifact-versions.md
-      - how-to/limit-artifact-versions.md
-      - how-to/delete-an-artifact-version.md
-      - how-to/filter-rows.md
-      - how-to/mask-a-column.md
-      - how-to/declare-a-tables-model.md
-      - how-to/keep-layers-apart.md
-      - how-to/keep-the-history-of-a-dimension.md
-      - how-to/describe-a-table.md
-      - how-to/translate-labels-and-descriptions.md
-      - how-to/keep-a-glossary.md
-      - how-to/model-a-star-schema.md
-      - how-to/find-what-a-change-breaks.md
-      - how-to/drop-and-restore-a-table.md
-      - how-to/let-tables-expire.md
-      - how-to/clean-up-files-left-by-older-releases.md
-      - how-to/find-a-table.md
-      - how-to/organise-tables-in-namespaces.md
-      - how-to/register-files-as-an-external-table.md
-      - how-to/open-a-table.md
-      - how-to/preview-a-table.md
-      - how-to/see-where-a-table-is-defined.md
-      - how-to/find-a-run.md
-      - how-to/stop-a-query.md
-      - how-to/why-is-it-waiting.md
-      - how-to/withdraw-an-artifact-upload.md
-  - Reference:
-      - reference/index.md
-      - reference/artifacts.md
-      - reference/package-indexes.md
-      - reference/connections.md
-      - reference/ingest.md
-      - reference/ci-trust-rules.md
-      - reference/checks.md
-      - reference/descriptions.md
-      - reference/translations.md
-      - reference/glossary.md
-      - reference/graph.md
-      - reference/merge.md
-      - reference/history.md
-      - reference/load.md
-      - reference/table-health.md
-      - reference/search.md
-      - reference/table-list.md
-      - reference/query-result-page.md
-      - reference/lists.md
-      - reference/access.md
-      - reference/access-file.md
-      - reference/jobs.md
-      - reference/sql-in-queries.md
-      - reference/project-layout.md
-      - reference/asset-front-matter.md
-      - reference/lakana-yaml.md
-      - reference/python-assets.md
-      - reference/network-settings.md
-      - reference/compose-bundle.md
-      - reference/log-events.md
-      - reference/cli.md
-      - reference/settings.md
-      - reference/rest-api.md
-      - reference/why-did-it-fail.md
-  - Explanation:
+      - Load data:
+          - how-to/load-data-from-a-source.md
+          - how-to/read-from-a-sql-server-database.md
+          - how-to/private-package-index.md
+          - how-to/run-python-tasks-in-containers.md
+      - Model data:
+          - how-to/declare-a-tables-model.md
+          - how-to/keep-layers-apart.md
+          - how-to/model-a-star-schema.md
+          - how-to/keep-the-history-of-a-dimension.md
+          - how-to/describe-a-table.md
+          - how-to/translate-labels-and-descriptions.md
+          - how-to/keep-a-glossary.md
+      - Check data quality and health:
+          - how-to/check-your-data.md
+          - how-to/notice-a-broken-pipeline.md
+          - how-to/find-what-a-change-breaks.md
+          - how-to/get-told-when-a-job-fails.md
+      - Deploy and schedule:
+          - how-to/projects.md
+          - how-to/connect-a-repository.md
+          - how-to/move-a-sql-project.md
+          - how-to/deploy-from-github-actions.md
+          - how-to/deploy-from-gitlab-ci.md
+          - how-to/run-a-job-on-a-schedule.md
+          - how-to/find-a-run.md
+          - how-to/stop-a-query.md
+          - how-to/why-is-it-waiting.md
+      - Access and security:
+          - how-to/give-a-second-person-access.md
+          - how-to/invite-your-team.md
+          - how-to/lost-your-passkey.md
+          - how-to/keep-access-in-a-reviewed-file.md
+          - how-to/why-may-someone-do-this.md
+          - how-to/filter-rows.md
+          - how-to/mask-a-column.md
+          - how-to/manage-secrets.md
+      - The catalog and the web interface:
+          - how-to/start-in-the-web-interface.md
+          - how-to/find-a-table.md
+          - how-to/open-a-table.md
+          - how-to/preview-a-table.md
+          - how-to/see-where-a-table-is-defined.md
+          - how-to/drop-and-restore-a-table.md
+          - how-to/let-tables-expire.md
+          - how-to/organise-tables-in-namespaces.md
+          - how-to/register-files-as-an-external-table.md
+      - Run an instance:
+          - how-to/deploy-with-compose.md
+          - how-to/operate-for-others.md
+          - how-to/instance-health.md
+          - how-to/export-and-keep-the-audit-log.md
+          - how-to/install-without-internet-access.md
+          - how-to/upgrade-to-artifacts.md
+          - how-to/clean-up-files-left-by-older-releases.md
+      - Models and artifacts:
+          - how-to/models-with-scikit-learn.md
+          - how-to/inspect-and-download-artifact-versions.md
+          - how-to/limit-artifact-versions.md
+          - how-to/delete-an-artifact-version.md
+          - how-to/withdraw-an-artifact-upload.md
+  - Concepts:
       - explanation/index.md
       - explanation/scope.md
       - explanation/where-lakana-fits.md
       - explanation/moving-sql-transformations.md
-      - explanation/roadmap.md
-      - explanation/support.md
-      - explanation/upgrades.md
-      - explanation/what-leaves-the-machine.md
       - explanation/security.md
+      - explanation/what-leaves-the-machine.md
       - explanation/artifacts.md
       - explanation/python-assets.md
       - explanation/when-columns-change.md
-      - explanation/compose-known-gaps.md
       - explanation/how-lakana-looks.md
+  - Reference:
+      - reference/index.md
+      - Project files:
+          - reference/lakana-yaml.md
+          - reference/project-layout.md
+          - reference/asset-front-matter.md
+          - reference/python-assets.md
+          - reference/ingest.md
+          - reference/access-file.md
+      - SQL and queries:
+          - reference/sql-in-queries.md
+          - reference/query-result-page.md
+          - reference/load.md
+          - reference/merge.md
+          - reference/history.md
+      - Catalog and tables:
+          - reference/table-list.md
+          - reference/search.md
+          - reference/descriptions.md
+          - reference/translations.md
+          - reference/glossary.md
+          - reference/graph.md
+          - reference/artifacts.md
+      - Data quality and runs:
+          - reference/checks.md
+          - reference/table-health.md
+          - reference/jobs.md
+          - reference/lists.md
+          - reference/why-did-it-fail.md
+      - Access and connections:
+          - reference/access.md
+          - reference/ci-trust-rules.md
+          - reference/connections.md
+          - reference/package-indexes.md
+      - Operations:
+          - reference/settings.md
+          - reference/compose-bundle.md
+          - reference/network-settings.md
+          - reference/log-events.md
+      - API reference:
+          - reference/cli.md
+          - reference/rest-api.md
+  - Project:
+      - explanation/roadmap.md
+      - explanation/support.md
+      - explanation/upgrades.md
+      - explanation/compose-known-gaps.md
