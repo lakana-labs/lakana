@@ -6,16 +6,20 @@ import json
 import logging
 import sys
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from zoneinfo import ZoneInfo
 
 import pyarrow as pa
 import pytest
 from core_test_helpers import _prepared_catalog
 from health_test_helpers import (
+    _MANIFEST,
     _ORDERS,
     _SILVER,
     _T0,
+    _deployed,
     _environment_id,
     _rows,
     _seed,
@@ -34,8 +38,9 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog import field_ids, health_record
+from lakana_core.catalog.health_jobs import writing_zone
 from lakana_core.catalog.health_record import commit_observations, recent_observations, signal_rows
-from lakana_core.catalog.health_signals import HealthEffects, Observation
+from lakana_core.catalog.health_signals import WEEKDAYS, HealthEffects, Observation
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import ValidationError
 from lakana_core.identifiers import TableRef
@@ -198,7 +203,7 @@ def test_volume_fires_against_a_history_of_eight(
             TableHealthSignal.signal == "volume", TableHealthSignal.state == "fired"
         )
     ).one()
-    assert fired.band == {"low": 900.0, "high": 1_100.0, "median": 1_000.0}
+    assert fired.band == {"low": 900.0, "high": 1_100.0, "median": 1_000.0, "basis": "all"}
 
 
 def test_schema_compares_with_the_schema_of_the_snapshot_before(
@@ -465,10 +470,186 @@ def test_the_history_is_the_newest_thirty_of_each_signal_and_column(
     session
         Database session.
     """
-    _seed(session, "volume", {"added": 5, "total": 5}, count=35)
-    _seed(session, "null_rate", {"nulls": 0, "values": 1, "rate": 0.0}, count=2, column="id")
+    _seed(session, "volume", {"added": 5, "total": 5}, count=65)
+    _seed(session, "null_rate", {"nulls": 0, "values": 1, "rate": 0.0}, count=35, column="id")
+    _seed(session, "schema", {"columns": []}, count=65)
     found = recent_observations(session, _table_id(session))
-    assert (len(found["volume", None]), len(found["null_rate", "id"])) == (30, 2)
+    assert (len(found["volume", None]), len(found["null_rate", "id"])) == (60, 30)
+
+
+def test_volume_history_carries_the_commit_time_for_the_weekday_band(
+    catalog: CatalogService, session: Session
+) -> None:
+    """A volume item holds its row's ``observed_at``, newest first; other signals do not (#565).
+
+    Parameters
+    ----------
+    catalog
+        The catalog, which creates the table.
+    session
+        Database session.
+    """
+    _seed(session, "volume", {"added": 5, "total": 5}, count=2)
+    _seed(session, "null_rate", {"nulls": 0, "values": 1, "rate": 0.0}, count=1, column="id")
+    found = recent_observations(session, _table_id(session))
+    times = [item["observed_at"].astimezone(UTC) for item in found["volume", None]]
+    assert times == [_T0 + timedelta(days=1), _T0]
+    assert found["null_rate", "id"] == [{"nulls": 0, "values": 1, "rate": 0.0}]
+
+
+def _daily_history(session: Session, rows: int, *, days: int = 56) -> None:
+    """Record a daily volume history ending a day before now, every load the same size.
+
+    Parameters
+    ----------
+    session
+        Database session; commits.
+    rows
+        The rows each load added.
+    days
+        How many days.
+    """
+    now = datetime.now(UTC)
+    table_id, environment_id = _table_id(session), _environment_id(session)
+    for day in range(days, 0, -1):
+        session.add(
+            TableHealthSignal(
+                id=uuid.uuid4(),
+                environment_id=environment_id,
+                table_id=table_id,
+                signal="volume",
+                column_name=None,
+                snapshot_id=100 - day,
+                sequence_number=100 - day,
+                observed={"added": rows, "total": rows},
+                band=None,
+                state="ok",
+                effect="warn",
+                observed_at=now - timedelta(days=day),
+            )
+        )
+    session.commit()
+
+
+def _volume_row(session: Session) -> TableHealthSignal:
+    """Read the volume row of the newest commit, by time: the seeded history's numbers are higher.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    TableHealthSignal
+        The row.
+    """
+    return session.scalars(
+        select(TableHealthSignal)
+        .where(TableHealthSignal.signal == "volume")
+        .order_by(TableHealthSignal.observed_at.desc())
+        .limit(1)
+    ).one()
+
+
+def test_a_commit_is_judged_against_its_weekday_in_the_writing_jobs_zone(
+    catalog: CatalogService, session: Session, principal: PrincipalRef
+) -> None:
+    """The volume band of a daily table is its weekday's, in the zone of the job (#565).
+
+    The zone is one whose date differs from UTC's now, so its weekday is the one judged.
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    """
+    now = datetime.now(UTC)
+    zone = "Pacific/Kiritimati" if now.hour >= 10 else "Etc/GMT+12"
+    manifest = {**_MANIFEST, "jobs": {"nightly": _job(zone)}}
+    _deployed(session, manifest)
+    _daily_history(session, 1_000)
+    catalog.append(principal, _ORDERS, _rows([1, 2, 3]))
+    row = _volume_row(session)
+    assert row.band is not None and row.state == "fired"
+    expected = WEEKDAYS[row.observed_at.astimezone(ZoneInfo(zone)).weekday()]
+    assert (row.band["basis"], row.band["weekday"]) == ("weekday", expected)
+
+
+def test_without_a_writing_job_the_weekday_is_utc(
+    catalog: CatalogService, session: Session, principal: PrincipalRef
+) -> None:
+    """A table no deployed job builds takes its weekday in UTC (#565).
+
+    Parameters
+    ----------
+    catalog
+        The catalog.
+    session
+        Database session.
+    principal
+        The writer.
+    """
+    _daily_history(session, 3)
+    catalog.append(principal, _ORDERS, _rows([1, 2, 3]))
+    row = _volume_row(session)
+    assert row.band is not None and row.state == "ok"
+    expected = WEEKDAYS[row.observed_at.astimezone(UTC).weekday()]
+    assert (row.band["basis"], row.band["weekday"]) == ("weekday", expected)
+
+
+def _job(zone: str | None) -> dict[str, object]:
+    """Build a manifest job that builds `silver.orders`.
+
+    Parameters
+    ----------
+    zone
+        Its schedule's zone; `None` for a job without a schedule.
+
+    Returns
+    -------
+    dict
+        The job's entry.
+    """
+    if zone is None:
+        return {"select": ["silver.orders"]}
+    return {"select": ["silver.orders"], "schedule": {"cron": "0 6 * * *", "timezone": zone}}
+
+
+@pytest.mark.parametrize(
+    ("zones", "expected"),
+    [
+        (["Europe/Berlin"], "Europe/Berlin"),
+        (["Europe/Berlin", "Europe/Berlin"], "Europe/Berlin"),
+        (["Europe/Berlin", "America/New_York"], "UTC"),
+        (["Europe/Berlin", None], "UTC"),
+        ([None], "UTC"),
+        ([], "UTC"),
+        (["Not/AZone"], "UTC"),
+        (["../../etc/passwd"], "UTC"),
+    ],
+    ids=["one", "same", "differ", "unscheduled", "only-unscheduled", "none", "unknown", "path"],
+)
+def test_the_writing_zone_is_the_one_zone_of_the_building_jobs(
+    zones: list[str | None], expected: str
+) -> None:
+    """One zone among the building jobs is the table's; anything else is UTC (#565).
+
+    Parameters
+    ----------
+    zones
+        The zones of the jobs that build the table, `None` for one without a schedule.
+    expected
+        The zone's name.
+    """
+    jobs = {f"j{n}": _job(zone) for n, zone in enumerate(zones)}
+    manifest = {**_MANIFEST, "jobs": {**jobs, "other": _job("Asia/Tokyo") | {"select": ["gold.*"]}}}
+    found = writing_zone([(uuid.uuid4(), manifest)], "silver.orders")
+    assert str(found) == expected
 
 
 def test_the_history_reaches_back_only_twice_history_commits(
@@ -512,7 +693,9 @@ def test_delete_only_commits_do_not_take_places_in_the_volume_window(
     _seed(session, "volume", {"added": 5, "total": 5}, count=3)
     _seed(session, "volume", {"added": 0, "loaded": False, "total": 5}, count=4, first_day=3)
     found = recent_observations(session, _table_id(session))
-    assert found["volume", None] == [{"added": 5, "total": 5}] * 3
+    assert [{"added": o["added"], "total": o["total"]} for o in found["volume", None]] == [
+        {"added": 5, "total": 5}
+    ] * 3
 
 
 def test_set_back_rows_neither_feed_the_band_nor_reach_back_its_window(
@@ -545,7 +728,9 @@ def test_set_back_rows_neither_feed_the_band_nor_reach_back_its_window(
     )
     session.commit()
     found = recent_observations(session, _table_id(session))
-    assert found["volume", None] == [{"added": 5, "total": 5}] * 3
+    assert [{"added": o["added"], "total": o["total"]} for o in found["volume", None]] == [
+        {"added": 5, "total": 5}
+    ] * 3
 
 
 @pytest.mark.parametrize(
