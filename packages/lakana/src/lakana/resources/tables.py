@@ -1124,13 +1124,15 @@ class Tables:
         label: str | _Unset | None = _UNSET,
         column: str | None = None,
         lang: str | None = None,
+        label_language: str | None = None,
     ) -> Table:
         """Set the description or label of a table or one of its columns, or reset them.
 
         A text set here is shown instead of the one a deploy publishes from the asset header or a
         translation file, and a deploy never replaces it. Resetting (`None`) removes it, so the
         project's text shows again; a field you leave out stays as it is. Without `lang`, the
-        edit is in the table's main language. Needs to own the table or hold `DROP_TABLE` on it.
+        edit is in the table's main language; `label_language` puts the label in another language
+        than the description. Needs to own the table or hold `DROP_TABLE` on it.
 
         Parameters
         ----------
@@ -1148,6 +1150,9 @@ class Tables:
             The language edited, such as `"fr"`; also the language of the returned texts. Without
             it, the edit is in the table's main language and the returned texts follow your
             profile's language, then the server's main language.
+        label_language
+            The language the label is edited in, such as `"en"`, when it is not `lang`'s; without
+            it, the label is edited in the same language as the description. Needs `label`.
 
         Returns
         -------
@@ -1157,13 +1162,13 @@ class Tables:
         Raises
         ------
         ValueError
-            If neither `description` nor `label` is given.
+            If neither `description` nor `label` is given, or `label_language` without `label`.
         lakana.errors.NotFound
             If the table, or the column, does not exist.
         lakana.errors.PermissionDenied
             Without the right to describe the table.
         lakana.errors.ValidationError
-            If a text breaks its rules or `lang` is not a language tag.
+            If a text breaks its rules, or `lang` or `label_language` is not a language tag.
         """
         body: dict[str, str | None] = {}
         if not isinstance(description, _Unset):
@@ -1172,6 +1177,10 @@ class Tables:
             body["label"] = label
         if not body:
             raise ValueError("give description, label or both; None removes an edit")
+        if label_language is not None:
+            if "label" not in body:
+                raise ValueError("label_language names the language of label; give label with it")
+            body["label_language"] = label_language
         namespace, name = _split_namespace_table(qualified_name)
         path_params = {"env": environment, "path": namespace, "name": name}
         if column is None:

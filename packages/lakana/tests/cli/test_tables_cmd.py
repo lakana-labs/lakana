@@ -433,6 +433,76 @@ def test_table_describe_sets_a_label_in_a_language(tmp_path: Path) -> None:
     assert "Described bronze.sales in dev (fr)" in result.stdout
 
 
+def test_table_describe_sets_the_label_in_its_own_language(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("PATCH", f"{_BASE}/sales", json={**_TABLE, "language": "fr"})
+    api.on("PUT", f"{_BASE}/sales/columns/id/description", json={**_TABLE, "language": "fr"})
+    table = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--text",
+        "Les ventes.",
+        "--label",
+        "Sales",
+        "--lang",
+        "fr",
+        "--label-lang",
+        "en",
+        "--env",
+        "dev",
+    )
+    column = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--column",
+        "id",
+        "--reset",
+        "--lang",
+        "fr",
+        "--label-lang",
+        "en",
+        "--env",
+        "dev",
+    )
+    assert table.exit_code == 0, table.stderr
+    assert column.exit_code == 0, column.stderr
+    assert [json.loads(r.content) for r in api.requests] == [
+        {"description": "Les ventes.", "label": "Sales", "label_language": "en"},
+        {"description": None, "label": None, "label_language": "en"},
+    ]
+    assert [r.url.params["lang"] for r in api.requests] == ["fr", "fr"]
+    assert "Described bronze.sales in dev (fr, the label in en)" in _plain(table.stdout)
+    assert (
+        "Reset the description and label of bronze.sales column id in dev (fr, the label in en)"
+        in _plain(column.stdout)
+    )
+
+
+def test_table_describe_label_lang_needs_a_label_or_reset(tmp_path: Path) -> None:
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api),
+        "table",
+        "describe",
+        "bronze.sales",
+        "--text",
+        "Hi",
+        "--label-lang",
+        "en",
+        "--env",
+        "dev",
+    )
+    assert result.exit_code != 0
+    assert "--label-lang names the language of --label; give --label LABEL or --reset with it." in (
+        _plain(result.stderr)
+    )
+    assert api.requests == []
+
+
 def test_table_describe_without_lang_names_the_main_language(tmp_path: Path) -> None:
     api = FakeApi()
     api.on(

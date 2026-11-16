@@ -296,3 +296,60 @@ def test_a_creator_without_read_is_refused_and_nothing_is_stored(client: TestCli
             ).all()
             == []
         )
+
+
+def test_label_language_saves_the_label_apart_from_the_description(client: TestClient) -> None:
+    """A table's label goes to `en` while its description goes to `?lang=fr`; a column's too."""
+    _setup(client)
+    response = client.patch(
+        f"{_TABLES}/t",
+        params={"lang": "fr"},
+        headers=AUTH_HEADER,
+        json={"description": "Les ventes.", "label": "Sales", "label_language": "en"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["description"], body["description_language"]) == ("Les ventes.", "fr")
+    assert (body["label"], body["label_language"], body["label_source"]) == (
+        "Sales",
+        "en",
+        "edited",
+    )
+    response = client.put(
+        f"{_TABLES}/t/columns/id/description",
+        params={"lang": "fr"},
+        headers=AUTH_HEADER,
+        json={"description": "Le numéro.", "label": "Number", "label_language": "EN"},
+    )
+    assert response.status_code == 200, response.text
+    (column,) = [c for c in response.json()["schema"] if c["name"] == "id"]
+    assert (column["label"], column["label_language"]) == ("Number", "en")
+    assert (column["description"], column["description_language"]) == ("Le numéro.", "fr")
+    with Session(client.app.state.engine) as session:
+        events = session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == AuditEventType.TABLE_DESCRIBED)
+            .order_by(AuditEvent.occurred_at)
+        ).all()
+        assert (events[-1].detail["language"], events[-1].detail["label_language"]) == ("fr", "en")
+
+
+def test_a_label_language_without_a_label_or_not_a_tag_is_422(client: TestClient) -> None:
+    _setup(client)
+    alone = client.patch(
+        f"{_TABLES}/t",
+        params={"lang": "fr"},
+        headers=AUTH_HEADER,
+        json={"description": "Les ventes.", "label_language": "en"},
+    )
+    assert alone.status_code == 422
+    assert "send `label` with it" in alone.json()["detail"]
+    bad = client.put(
+        f"{_TABLES}/t/columns/id/description",
+        headers=AUTH_HEADER,
+        json={"label": "X", "label_language": "fr_FR"},
+    )
+    assert bad.status_code == 422
+    assert bad.json()["detail"].startswith("label_language: `fr_FR` is not a language tag")
+    with Session(client.app.state.engine) as session:
+        assert session.scalars(select(Table)).one().text_languages is None

@@ -578,6 +578,36 @@ def test_tables_describe_with_a_column_puts_to_the_columns_route() -> None:
     assert json.loads(body) == {"description": "Key"}
 
 
+def test_tables_describe_sends_the_labels_own_language_in_the_body() -> None:
+    """`label_language` goes into the body beside `label`; `lang` stays the query parameter."""
+    seen: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((str(request.url.query, "ascii"), json.loads(request.content)))
+        return httpx.Response(
+            200,
+            json={"name": "sales", "namespace": "bronze", "uuid": "u1", "schema": []},
+        )
+
+    tables = Tables(_transport(handler))
+    tables.describe(
+        "dev", "bronze.sales", "Les ventes.", label="Sales", lang="fr", label_language="en"
+    )
+    tables.describe("dev", "bronze.sales", label=None, column="id", label_language="de")
+
+    assert seen == [
+        ("lang=fr", {"description": "Les ventes.", "label": "Sales", "label_language": "en"}),
+        ("", {"label": None, "label_language": "de"}),
+    ]
+
+
+def test_tables_describe_refuses_a_label_language_without_a_label() -> None:
+    """Nothing is sent: a label language without a label would change nothing."""
+    tables = Tables(_transport(lambda request: httpx.Response(500)))
+    with pytest.raises(ValueError, match="label_language names the language of label"):
+        tables.describe("dev", "bronze.sales", "Text", label_language="en")
+
+
 def test_tables_delete_sends_a_delete() -> None:
     """`tables.delete` DELETEs `.../namespaces/{path}/tables/{name}`."""
     seen: dict[str, Any] = {}

@@ -246,6 +246,72 @@ describe("Overview editing", () => {
     });
   });
 
+  it("saves the label and the description each in the language it is shown in", async () => {
+    const mixed = table({
+      language: "de",
+      translations: GERMAN,
+      description: "Jeder Verkauf.",
+      description_language: "de",
+      label: "Sales",
+      label_source: "project",
+      label_language: "en",
+    });
+    const { server, user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: { status: 200, body: mixed },
+        [`PATCH ${TABLE_PATH}`]: { status: 200, body: mixed },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const label = screen.getByRole("textbox", { name: "Label (English)" });
+    const description = screen.getByRole("textbox", { name: "Description (German)" });
+    await user.clear(label);
+    await user.type(label, "All sales");
+    await user.clear(description);
+    await user.type(description, "Alle Verkäufe.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(server.sent.some((request) => request.method === "PATCH")).toBe(true);
+    });
+    const patch = server.sent.find((request) => request.method === "PATCH");
+    expect(patch?.path).toBe(`${TABLE_PATH}?lang=de`);
+    expect(patch?.body).toEqual({
+      description: "Alle Verkäufe.",
+      label: "All sales",
+      label_language: "en",
+    });
+  });
+
+  it("goes back to the text from Git for a label in the language it is shown in", async () => {
+    const mixed = table({
+      language: "de",
+      translations: GERMAN,
+      description: "Jeder Verkauf.",
+      description_source: "edited",
+      description_language: "de",
+      label: "Sales",
+      label_source: "edited",
+      label_language: "en",
+    });
+    const { server, user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: { status: 200, body: mixed },
+        [`PATCH ${TABLE_PATH}`]: { status: 200, body: TABLE },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Back to the text from Git" }));
+
+    await waitFor(() => {
+      expect(server.sent.some((request) => request.method === "PATCH")).toBe(true);
+    });
+    const patch = server.sent.find((request) => request.method === "PATCH");
+    expect(patch?.path).toBe(`${TABLE_PATH}?lang=de`);
+    expect(patch?.body).toEqual({ description: null, label: null, label_language: "en" });
+  });
+
   it("closes without a request when nothing changed", async () => {
     const { server, user } = renderShell(PAGE);
 
