@@ -41,7 +41,7 @@ or for R-first groups.
 
 Lakana is pre-1.0: the API and the data layout may change between releases, and it is not ready
 for production data until v1.0.0. You work with it through the command line, the Python SDK or
-the REST API. The web interface is under way: a first part exists, off by default.
+the REST API. The web interface is under way and off by default: sign-in, Home and the Catalog exist.
 
 Lakana is open source, with best-effort [support](explanation/support.md), and we
 found no telemetry in its code: see [what leaves the machine](explanation/what-leaves-the-machine.md).

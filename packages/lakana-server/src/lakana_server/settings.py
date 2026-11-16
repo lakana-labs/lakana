@@ -286,8 +286,8 @@ class UiConfig(BaseModel):
         is being built; turn it on to try it). The interface's files come with a released
         server; in a source checkout, build them first:
         `npm --prefix ui ci && npm --prefix ui run build`. The interface calls only the REST API,
-        with the user's own credential. Until sign-in exists it reads no data. Session lengths
-        are not environment settings: Settings → Sign-in in the interface, or
+        with the user's own credential, so it shows only what that person may read. Session
+        lengths are not environment settings: Settings → Sign-in in the interface, or
         `lakana sign-in settings`.
     public_url
         The address people open the interface at, such as `https://lakana.example`: a
