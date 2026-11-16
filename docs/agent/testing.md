@@ -403,8 +403,8 @@ every missing output of it means "run everything".
   environment variables. A new scheduled workflow joins its list, or `_NOT_REPORTED` in
   `scripts/tests/test_workflows.py` says why not (`mutation.yml` today).
 - **`fuzz.yml`** (Fuzzing) runs ClusterFuzzLite over the Atheris harnesses in `fuzz/`: about five
-  minutes on a pull request that changes what they load, an hour every night with corpus pruning
-  after it. On GitHub's runner whatever `CI_RUNNER` says (the actions run Docker, and a pull
+  minutes on a pull request from a branch of this repository (never a fork's) that changes what
+  they load, an hour every night on `main` with corpus pruning after it. On GitHub's runner whatever `CI_RUNNER` says (the actions run Docker, and a pull
   request's harnesses are its own code); each job has `contents: read` and `actions: read` (the
   corpus is kept as an artifact). What it fuzzes and where a crash goes: "Fuzzing" in
   `docs/agent/security.md`.

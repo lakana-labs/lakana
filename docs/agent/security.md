@@ -7114,24 +7114,34 @@ assigned to the maintainer, or comments on the one still open (`scheduled-failur
 ClusterFuzzLite (`.clusterfuzzlite/`, `.github/workflows/fuzz.yml`) runs three Atheris harnesses
 (`fuzz/*_fuzzer.py`), each over one parser that takes untrusted text:
 
-- `query_guard`: `check_blacklist`, then `extract_table_refs`, then `rewrite_query` with a source
-  for every table (a plain read, one with a row filter and a column mask, an empty one), as the
-  query path calls them;
+- `query_guard`: `check_blacklist`, then `extract_table_refs` and `extract_lineage`, then
+  `rewrite_query` with a source for every table (a plain read, one with a row filter and a column
+  mask, an empty one), as the query path calls them;
 - `project_files`: an asset file's `/* lakana */` front-matter and `lakana.yaml`;
 - `access_file`: the access file (#46).
 
 What each checks is in `fuzz/targets.py`: the parser accepts the text or refuses it with an
-expected exception, and nothing else. For the guard the expected ones are exactly what
-`_fail_closed` lets through (`LakanaError`, the parser's syntax errors including its
-`RecursionError`, `MemoryError`); the harness calls the functions under that wrapper, since the
-wrapper turns any other exception into a refusal and would hide it. For the two file parsers it is
-`ValidationError`. A test (`scripts/tests/test_fuzz.py`) keeps both lists in step with the code
-and runs every seed on every pull request. The guard's seeds are the statements of its own tests
+expected exception, and nothing else. `_fail_closed` turns any exception but its own list into a
+refusal, which would hide a bug, so the harness calls the functions under it. Its refusals are
+narrower than that list (`GUARD_REFUSALS`): `LakanaError`, `ParseError` and `TokenError`; a
+`RecursionError` only when parsing the text alone raises it too (the parser's nesting limit, not a
+walker's), and a `MemoryError` never. For the two file parsers it is `ValidationError`. A test
+(`scripts/tests/test_fuzz.py`) reads `_fail_closed`'s list from its source and compares it with
+`FAIL_CLOSED_PASSES`, and runs every seed on every pull request. The guard's seeds are the statements of its own tests
 that earlier guard-fuzzing runs collected, one per sequence of token types
 (`fuzz/seeds/*.json`; `fuzz/seed_corpus.py` writes them out).
 
-A pull request that changes a module the harnesses load fuzzes for about five minutes (the path
-filter in `fuzz.yml`; the test fails when a loaded module is missing from it). Every night `main`
+A pull request from a branch of this repository that changes a module the harnesses load fuzzes
+for about five minutes (the path filter in `fuzz.yml`; the test fails when a module the seeds load
+is missing from it). **A pull request from a fork is not fuzzed**: the fuzzers run in
+`run_fuzzers`' container, which holds `ACTIONS_RUNTIME_TOKEN`, so the pull request's harness code
+could upload an artifact named like the corpus; the GitHub Actions filestore takes the newest
+artifact of that name from the whole repository, from any branch or workflow, and unpacks it with
+`tarfile.extractall`, so the next nightly run on `main` would fuzz from, or unpack files out of, an
+archive the fork chose. Its change is fuzzed by the nightly run after it is merged. To fuzz forks
+too, keep the corpus in a `storage-repo` that only the nightly job can write to (a deploy key in
+that job alone); pull requests then read it but cannot replace it. The nightly and pruning jobs run
+only on `main`, also when started by hand, so no other branch publishes a corpus. Every night `main`
 is fuzzed for an hour and the corpus is pruned; it is kept as an artifact of the workflow, so the
 next run, and a pull request's, starts from it. **A crash fails the run** and its input is
 uploaded as the artifact `fuzz-crash-pull-request` or `fuzz-crash-nightly` (ClusterFuzzLite's

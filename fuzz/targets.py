@@ -20,27 +20,45 @@ import contextlib
 import inspect
 from collections.abc import Callable
 
+import sqlglot.errors
+
 from lakana_core.access.file import parse_access_file
 from lakana_core.errors import LakanaError, ValidationError
+from lakana_core.lineage import extract_lineage
 from lakana_core.projects.frontmatter import parse_front_matter
 from lakana_core.projects.project_config import parse_project_config
 from lakana_core.query_rewrite import (
     TableSource,
+    _parse_sql,
     check_blacklist,
     extract_table_refs,
     rewrite_query,
 )
 from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
 
-GUARD_REFUSALS: tuple[type[BaseException], ...] = (LakanaError, MemoryError, *SQL_SYNTAX_ERRORS)
-"""What the guard may raise for a query it does not accept.
+FAIL_CLOSED_PASSES: tuple[type[BaseException], ...] = (LakanaError, MemoryError, *SQL_SYNTAX_ERRORS)
+"""What `lakana_core.query_rewrite._fail_closed` lets through unchanged.
 
-Exactly what `lakana_core.query_rewrite._fail_closed` lets through unchanged: a `LakanaError`
-(the guard's own refusals are `ValidationError`), a syntax error of the parser
-(`SQL_SYNTAX_ERRORS`: `ParseError`, `TokenError` and the parser's `RecursionError` on deep
-nesting) and `MemoryError`. Every other exception is a bug in the guard. In production
-`_fail_closed` turns it into a refusal, so it never lets a query through, but it would also hide
-it from the fuzzer: the targets call the functions it wraps.
+Every other exception it turns into a refusal: in production a bug in the guard never lets a
+query through, but the wrapper would also hide that bug from the fuzzer, so the target calls the
+functions it wraps. ``scripts/tests/test_fuzz.py`` keeps this tuple equal to the wrapper's.
+"""
+
+GUARD_REFUSALS: tuple[type[BaseException], ...] = (
+    LakanaError,
+    sqlglot.errors.ParseError,
+    sqlglot.errors.TokenError,
+)
+"""What the guard, the lineage and the rewrite may raise for a query they do not accept.
+
+Narrower than `FAIL_CLOSED_PASSES`, since the fuzzer looks for what production tolerates:
+
+- a `RecursionError` is a refusal only when parsing the text alone (`_parse_sql`, the guard's
+  own parse) raises it too: the parser's limit on nesting. One raised by a walker of the guard,
+  the lineage or the rewrite over a tree that parsed is a crash: the reader would get a refusal
+  that reads as a syntax error for SQL that has none.
+- a `MemoryError` is always a crash: no input of 4 KiB (the fuzzers' ``max_len``) should exhaust
+  memory.
 """
 
 PARSER_REFUSALS: tuple[type[BaseException], ...] = (ValidationError,)
@@ -54,6 +72,7 @@ a pydantic error that escaped or a `RecursionError` from the YAML loader, is a b
 _check_blacklist: Callable[..., None] = inspect.unwrap(check_blacklist)
 _extract_table_refs: Callable[..., list[str]] = inspect.unwrap(extract_table_refs)
 _rewrite_query: Callable[..., object] = inspect.unwrap(rewrite_query)
+_extract_lineage: Callable[..., object] = extract_lineage
 
 _PLAIN = TableSource(
     urls=("s3://lakana/warehouse/t/data/0.parquet",),
@@ -96,11 +115,35 @@ def decode(data: bytes) -> str | None:
         return None
 
 
+def parse_alone_recurses(sql: str) -> bool:
+    """Say whether parsing the text alone hits the parser's limit on nesting.
+
+    Parameters
+    ----------
+    sql
+        The query text.
+
+    Returns
+    -------
+    bool
+        `True` when the guard's own parse (`_parse_sql`) raises `RecursionError`.
+    """
+    try:
+        _parse_sql(sql, "duckdb")
+    except RecursionError:
+        return True
+    except GUARD_REFUSALS:
+        pass
+    return False
+
+
 def query_guard(data: bytes) -> None:
-    """Run a query through the guard and, once it passes, through the rewrite.
+    """Run a query through the guard and, once it passes, through the lineage and the rewrite.
 
     The order is the query path's (`lakana_worker.pipeline`): `check_blacklist`, then
-    `extract_table_refs`, then `rewrite_query` with a source for every table the query names.
+    `extract_table_refs` and `extract_lineage`, then `rewrite_query` with a source for every
+    table the query names. `extract_lineage` has no `_fail_closed` wrapper, so an unexpected
+    exception there would reach the reader as a server error.
     Each table gets one of three sources, by its position, so that the plain read, the read
     with a row filter and a column mask, and the empty relation are all exercised.
 
@@ -113,6 +156,8 @@ def query_guard(data: bytes) -> None:
     ------
     Exception
         Any exception outside `GUARD_REFUSALS`, unchanged: that is the finding.
+    RecursionError
+        Unless parsing the text alone raises it too (`parse_alone_recurses`).
     """
     sql = decode(data)
     if sql is None:
@@ -120,10 +165,14 @@ def query_guard(data: bytes) -> None:
     try:
         _check_blacklist(sql)
         refs = _extract_table_refs(sql)
+        _extract_lineage(sql)
         sources = {ref: _SOURCES[index % len(_SOURCES)] for index, ref in enumerate(refs)}
         _rewrite_query(sql, sources)
     except GUARD_REFUSALS:
         return
+    except RecursionError:
+        if not parse_alone_recurses(sql):
+            raise
 
 
 def project_files(data: bytes) -> None:

@@ -5,6 +5,15 @@ name: Fuzzing
 # on main, which keeps the corpus as an artifact of this workflow for the next run to start from.
 # A crash fails the run and uploads its input as the `fuzz-crash-*` artifact.
 #
+# Only a pull request from a branch of this repository is fuzzed, and only `main` runs the
+# nightly and pruning jobs (also when started by hand). The fuzzers run inside run_fuzzers'
+# container, which holds ACTIONS_RUNTIME_TOKEN, so a pull request's harness code could upload an
+# artifact named like the corpus; the GitHub Actions filestore takes the newest artifact of that
+# name from the whole repository, whatever branch or workflow made it, and unpacks it with
+# tarfile.extractall. A fork's change is fuzzed by the nightly run once it is merged; a
+# storage-repo that only the nightly job can write to would let forks be fuzzed too
+# (docs/agent/security.md, "Fuzzing").
+#
 # On GitHub's runner, never `CI_RUNNER`: the actions build and run Docker images, and a pull
 # request's harnesses are its own code. The actions clone the repository themselves (a public
 # one, so without a token) and build .clusterfuzzlite/Dockerfile; their own images
@@ -38,7 +47,7 @@ permissions:
 
 jobs:
   pull-request:
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -48,6 +57,9 @@ jobs:
       contents: read
       actions: read            # find the nightly run's corpus among this repository's artifacts
     steps:
+      # Without a token the build logs "ERROR - Could not get coverage" (a 401 on the artifacts
+      # API) while it looks for a coverage report. Expected: no job makes one, so every fuzzer
+      # is kept.
       - name: Build the fuzzers
         id: build
         uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
@@ -69,13 +81,16 @@ jobs:
           path: ./out/artifacts
 
   nightly:
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
       contents: read
       actions: read            # download the corpus the previous run kept
     steps:
+      # Without a token the build logs "ERROR - Could not get coverage" (a 401 on the artifacts
+      # API) while it looks for a coverage report. Expected: no job makes one, so every fuzzer
+      # is kept.
       - name: Build the fuzzers
         id: build
         uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
@@ -100,13 +115,14 @@ jobs:
   # coverage, so the kept corpus does not grow without bound.
   prune:
     needs: nightly
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       actions: read            # download the corpus to prune
     steps:
+      # The 401 "Could not get coverage" error in this step's log is expected, as above.
       - name: Build the fuzzers
         uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
         with:

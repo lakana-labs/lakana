@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import ast
+import builtins
+import inspect
 import json
 import re
 import subprocess
 import sys
+import textwrap
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -15,8 +18,10 @@ import pytest
 import yaml
 from fuzz import seed_corpus, targets
 
+from lakana_core import query_rewrite
 from lakana_core.access.file import AccessFileError
 from lakana_core.errors import ValidationError
+from lakana_core.lineage import extract_lineage
 from lakana_core.query_rewrite import (
     _fail_closed,
     check_blacklist,
@@ -80,16 +85,68 @@ def test_the_guard_targets_call_the_functions_under_the_fail_closed_wrapper() ->
     assert targets._check_blacklist is check_blacklist.__wrapped__
     assert targets._extract_table_refs is extract_table_refs.__wrapped__
     assert targets._rewrite_query is rewrite_query.__wrapped__
+    # The lineage has no wrapper: what it raises reaches the reader as it is.
+    assert targets._extract_lineage is extract_lineage
+    assert not hasattr(extract_lineage, "__wrapped__")
+
+
+def _wrapper_passes() -> set[type[BaseException]]:
+    """Read the exceptions `_fail_closed` re-raises unchanged from its source.
+
+    Returns
+    -------
+    set of type
+        The classes named in the handler whose body is a bare ``raise``.
+    """
+    tree = ast.parse(textwrap.dedent(inspect.getsource(_fail_closed)))
+    (handler,) = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ExceptHandler)
+        and len(node.body) == 1
+        and isinstance(node.body[0], ast.Raise)
+        and node.body[0].exc is None
+    ]
+    assert isinstance(handler.type, ast.Tuple)
+    passes: set[type[BaseException]] = set()
+    for element in handler.type.elts:
+        if isinstance(element, ast.Starred):
+            assert isinstance(element.value, ast.Name)
+            passes.update(getattr(query_rewrite, element.value.id))
+        else:
+            assert isinstance(element, ast.Name)
+            passes.add(getattr(query_rewrite, element.id, None) or getattr(builtins, element.id))
+    return passes
+
+
+def test_fail_closed_passes_is_the_wrapper_s_own_tuple() -> None:
+    """The whole set, read from `_fail_closed`'s source: a new member there fails here."""
+    assert _wrapper_passes() == set(targets.FAIL_CLOSED_PASSES)
+    assert len(targets.FAIL_CLOSED_PASSES) == len(set(targets.FAIL_CLOSED_PASSES))
+
+
+_PROBES: tuple[type[BaseException], ...] = (
+    KeyError,
+    AttributeError,
+    ValueError,
+    TimeoutError,
+    KeyboardInterrupt,
+)
+"""Exceptions in neither set, among them one that is not an `Exception`."""
 
 
 @pytest.mark.parametrize(
-    "error",
-    [ValidationError("no"), MemoryError(), RecursionError(), KeyError("x"), AttributeError("x")],
+    "kind",
+    sorted(
+        {*targets.FAIL_CLOSED_PASSES, *targets.GUARD_REFUSALS, *_PROBES},
+        key=lambda kind: kind.__qualname__,
+    ),
 )
-def test_the_guard_s_refusals_are_exactly_what_its_wrapper_lets_through(
-    error: BaseException,
+def test_fail_closed_passes_on_exactly_its_tuple_and_what_is_not_an_exception(
+    kind: type[BaseException],
 ) -> None:
-    """`GUARD_REFUSALS` is what `_fail_closed` passes on unchanged; it refuses all else."""
+    """Every member of both sets, and the probes, through the real wrapper."""
+    error = kind("x")
 
     def fails() -> None:
         """Raise the error.
@@ -104,7 +161,38 @@ def test_the_guard_s_refusals_are_exactly_what_its_wrapper_lets_through(
     with pytest.raises(BaseException) as raised:
         _fail_closed(fails)()
     passed_through = raised.value is error
-    assert passed_through == isinstance(error, targets.GUARD_REFUSALS)
+    expected = isinstance(error, targets.FAIL_CLOSED_PASSES) or not isinstance(error, Exception)
+    assert passed_through == expected
+
+
+def test_the_fuzzer_s_refusals_are_narrower_than_the_wrapper_s() -> None:
+    """A `MemoryError` is a crash; a `RecursionError` only a refusal when parsing raises it."""
+    assert set(targets.GUARD_REFUSALS) < set(targets.FAIL_CLOSED_PASSES)
+    for kind in (MemoryError, RecursionError):
+        assert not issubclass(kind, targets.GUARD_REFUSALS)
+
+
+_DEEP = b"SELECT " + b"(" * 1500 + b"1" + b")" * 1500
+"""A query whose parse alone hits the parser's limit on nesting."""
+
+
+@pytest.mark.parametrize("attribute", ["_check_blacklist", "_extract_lineage", "_rewrite_query"])
+def test_a_recursion_error_is_a_refusal_only_when_parsing_alone_raises_it(
+    attribute: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert targets.parse_alone_recurses(_DEEP.decode())
+    assert not targets.parse_alone_recurses("SELECT a FROM b.c")
+    monkeypatch.setattr(targets, attribute, _raising(RecursionError("walker")))
+    targets.query_guard(_DEEP)
+    with pytest.raises(RecursionError, match="walker"):
+        targets.query_guard(b"SELECT a FROM b.c")
+
+
+@pytest.mark.parametrize("attribute", ["_check_blacklist", "_extract_lineage", "_rewrite_query"])
+def test_a_memory_error_is_a_crash(attribute: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(targets, attribute, _raising(MemoryError()))
+    with pytest.raises(MemoryError):
+        targets.query_guard(b"SELECT a FROM b.c")
 
 
 def _raising(error: BaseException) -> Callable[..., None]:
@@ -145,6 +233,7 @@ def _raising(error: BaseException) -> Callable[..., None]:
     ("name", "attribute", "refusal"),
     [
         ("query_guard", "_check_blacklist", ValidationError("refused")),
+        ("query_guard", "_extract_lineage", ValidationError("refused")),
         ("query_guard", "_rewrite_query", ValidationError("refused")),
         ("project_files", "parse_front_matter", ValidationError("refused")),
         ("project_files", "parse_project_config", ValidationError("refused")),
@@ -199,8 +288,13 @@ def _glob(pattern: str) -> re.Pattern[str]:
 
 def test_a_pull_request_that_changes_what_a_harness_loads_runs_the_fuzzers() -> None:
     """Every lakana-core module the targets load is under the workflow's path filter."""
+    # After every seed through its target: a module a parser imports only when it runs is loaded.
     script = (
-        "import sys, fuzz.targets; "
+        "import sys\n"
+        "from fuzz import seed_corpus, targets\n"
+        "for name, target in targets.TARGETS.items():\n"
+        "    for data in seed_corpus.seeds(name).values():\n"
+        "        target(data)\n"
         "print('\\n'.join(sorted(m.__file__ for n, m in sys.modules.items() "
         "if n.split('.')[0] == 'lakana_core')))"
     )
@@ -231,8 +325,26 @@ def test_the_pull_request_run_is_short_and_the_nightly_run_keeps_the_corpus() ->
         "nightly": ("batch", 3600),
         "prune": ("prune", 600),
     }
-    assert jobs["pull-request"]["if"] == "${{ github.event_name == 'pull_request' }}"
-    assert jobs["nightly"]["if"] == "${{ github.event_name != 'pull_request' }}"
+
+
+def test_only_this_repository_s_pull_requests_and_main_are_fuzzed() -> None:
+    """A fork's harness code could upload an artifact the nightly run on `main` takes as corpus.
+
+    The fuzzers run where `ACTIONS_RUNTIME_TOKEN` is, and the filestore takes the newest corpus
+    artifact of the repository, from any branch, and unpacks it with `tarfile.extractall`.
+    """
+    jobs = _workflow()["jobs"]
+    assert jobs["pull-request"]["if"] == (
+        "${{ github.event_name == 'pull_request'"
+        " && github.event.pull_request.head.repo.full_name == github.repository }}"
+    )
+    assert jobs["nightly"]["if"] == (
+        "${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}"
+    )
+    assert jobs["prune"]["if"] == (
+        "${{ !cancelled() && github.event_name != 'pull_request'"
+        " && github.ref == 'refs/heads/main' }}"
+    )
 
 
 @pytest.mark.parametrize("job", ["pull-request", "nightly"])
