@@ -1292,9 +1292,16 @@ in `ui (e2e smoke)` and `ui (e2e server)` beside it (the required check `ui` wai
     new `string` code joins `STRING_CODES` only with what the interface does with it.
   - **What each step asserts.** `expectMarked(page, label, values)` names one or more stubbed
     values the step's screen shows and requires each with its mark (`fact_salesU+202E`) inside
-    the open dialog, or else `<main>`: the shell's own marks (the user menu's name) do not count,
-    so a screen that got no poisoned answer, or went down a branch a poisoned code sent it
-    (a search hit shown as a name hit when its `kind` was poisoned), fails. Then, softly so one
+    the open dialog, or else `<main>`; the shell's own marks (the user menu's name) do not count.
+    A step proves its screen read its own answer only when a named value comes from that answer:
+    a table's or place's name also reaches the page from the address (which carries the
+    override) and an artifact's from its header, so a step that names one of those proves only
+    what the next step needs (the loaded entry's Actions button). A tab or a dialog that reads
+    its own answer names a value from it where the answer holds one the screen shows
+    (Retention its rule's `ana`; the artifact's Lineage stub holds only the artifact, which the
+    tab does not name, so that step rests on the header and the raw scan); then a screen that
+    got no poisoned answer, or went down a branch a poisoned code sent it (a search hit shown as
+    a name hit when its `kind` was poisoned), fails. Then, softly so one
     run names every screen, it requires no U+202E in a text node (an SVG `<title>` included), the
     document title, the text of an `<input type="button">`, `submit` or `reset`, or an
     `aria-label`, `aria-description`, `aria-roledescription`, `aria-valuetext`,

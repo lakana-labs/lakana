@@ -114,11 +114,13 @@ async function visit(
  * @param page - The page.
  * @param actions - The name of the Actions button.
  * @param values - Stubbed values the page and every dialog show.
+ * @param own - For a dialog that reads its own answer, by its item: a value from that answer.
  */
 async function eachAction(
   page: Page,
   actions: RegExp,
   values: readonly [string, ...string[]],
+  own: Readonly<Record<string, readonly [string, ...string[]]>> = {},
 ): Promise<void> {
   const button = page.getByRole("button", { name: actions }).first();
   await button.click();
@@ -137,7 +139,7 @@ async function eachAction(
     await entry.click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expectMarked(page, `the ${item} dialog`, values);
+    await expectMarked(page, `the ${item} dialog`, own[item] ?? values);
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
   }
@@ -301,7 +303,8 @@ test("Home, the Catalog and Access mark hidden characters", async ({ page }) => 
   await visit(page, `/catalog?env=${n("prod")}&ns=${n("gold.sales")}`, ["fact_sales"]);
   await visit(page, `/catalog?env=${n("prod")}&ns=${n("gold")}`, ["station_ranking"]);
   // A column hit and a translated description: the snippet and its language.
-  await visit(page, "/catalog?q=store", ["store_id", "ranked by the trips it served", "de"]);
+  await visit(page, "/catalog?q=store", ["store_id", "ranked by the trips it served"]);
+  await expect(page.locator(".match-line > span", { hasText: /^deU\+202E$/ })).toHaveCount(1);
   await visit(page, `/catalog?env=${n("staging")}`, ["staging"]);
   await visit(page, "/access", ["admin"]);
   expectOnlyStubbed(paths, STUBBED);
@@ -351,7 +354,8 @@ test("a table's actions, the catalog's views and a git-owned table mark hidden c
   await visit(page, `/catalog?env=${n("prod")}&view=expiring`, ["late_arrival"]);
   await visit(page, `/catalog?env=${n("prod")}&view=orphans`, ["clean"]);
   await visit(page, TABLE, ["fact_sales"]);
-  await eachAction(page, /^Actions$/, ["fact_sales"]);
+  // Retention reads the table's rule; its title alone comes from the address.
+  await eachAction(page, /^Actions$/, ["fact_sales"], { "Retention…": ["ana"] });
   await stubGitOwned(poisoned(page));
   await visit(page, TABLE, ["fact_sales"]);
   await eachAction(page, /^Actions$/, ["fact_sales"]);
@@ -374,6 +378,8 @@ test("an artifact's page marks hidden characters", async ({ page }) => {
   const paths = apiPaths(page);
   await stubArtifacts(poisoned(page));
   await visit(page, ARTIFACT, ["ana.nowak"]);
+  // The stub's lineage holds the artifact alone, which the tab does not name ("Nothing upstream
+  // or downstream"): the header's name is all the step can require.
   await visit(page, `${ARTIFACT}/lineage`, ["model"]);
   await visit(page, `${ARTIFACT}/access`, ["kim.schulz"]);
   await visit(page, `${ARTIFACT}/versions`, ["model"]);
