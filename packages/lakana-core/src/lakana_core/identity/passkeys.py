@@ -200,14 +200,19 @@ def _passkey_name(name: str | None) -> str:
     Raises
     ------
     ValidationError
-        If it is longer than 100 characters or contains a control character.
+        If it is longer than 100 characters or contains a control, format or other character
+        of Unicode category ``C``, or a line or paragraph separator.
     """
     text = (name or "").strip()
     if not text:
         return "Passkey"
-    if len(text) > _MAX_NAME or any(unicodedata.category(ch).startswith("C") for ch in text):
+    if len(text) > _MAX_NAME or any(
+        unicodedata.category(ch).startswith("C") or unicodedata.category(ch) in ("Zl", "Zp")
+        for ch in text
+    ):
         raise ValidationError(
-            f"A passkey name has at most {_MAX_NAME} characters and no control characters. "
+            f"A passkey name has at most {_MAX_NAME} characters and no control characters or "
+            "line breaks. "
             "Choose a shorter name, such as the device it is on."
         )
     return text
