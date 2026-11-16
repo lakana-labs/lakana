@@ -6,13 +6,13 @@
  */
 import { type JSX, lazy, type RefObject, Suspense, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, Navigate } from "react-router";
 
-import { getTable, recordOpened, type TableRef } from "../../api";
+import { getArtifact, getTable, recordOpened, type TableRef } from "../../api";
 import { useMe } from "../../shell/me";
 import { type Resource, useResource } from "../../shell/useResource";
-import type { TableOut } from "../../api";
-import { catalogPath, type TableTab } from "../paths";
+import type { ArtifactOut, TableOut } from "../../api";
+import { catalogPath, tablePath, type TableTab, tabsFor } from "../paths";
 import { DEFAULT_VIEW } from "../view";
 import { ColumnsTab } from "./ColumnsTab";
 import { Overview } from "./Overview";
@@ -35,6 +35,29 @@ const HealthTab = lazy(() => import("./HealthTab"));
 const AccessTab = lazy(() => import("./AccessTab"));
 const ReferencesTab = lazy(() => import("./ReferencesTab"));
 
+// An artifact's versions, their files and Download load only when its Versions tab is opened.
+const VersionsTab = lazy(() => import("../artifact/VersionsTab"));
+
+/** What the page reads: the table, and for an artifact its own entry as well. */
+export interface LoadedTable {
+  /** The table as the server answered it. */
+  readonly table: TableOut;
+  /** The artifact, read only when the table's kind is `ARTIFACT`; else null. */
+  readonly artifact: ArtifactOut | null;
+}
+
+/**
+ * Reads the table, then, for an artifact, the artifact too: both need the right to read it, so
+ * either failure fails the page.
+ *
+ * @param ref - The table the address names.
+ * @returns The table and the artifact, or null for the artifact of anything else.
+ */
+async function readTable(ref: TableRef): Promise<LoadedTable> {
+  const table = await getTable(ref);
+  return { table, artifact: table.kind === "ARTIFACT" ? await getArtifact(ref) : null };
+}
+
 /** Properties of {@link TablePage}. */
 export interface TablePageProps {
   /** The table the address names. */
@@ -45,8 +68,8 @@ export interface TablePageProps {
   readonly headingRef: RefObject<HTMLHeadingElement | null>;
   /** Told whether the table is still being read, so the frame can say it is loading once. */
   readonly onWaiting: (waiting: boolean) => void;
-  /** Told the table once it is read, and null while it is read or cannot be shown. */
-  readonly onLoaded: (table: TableOut | null) => void;
+  /** Told the table and its artifact once they are read, and null while they are read or cannot be shown. */
+  readonly onLoaded: (loaded: LoadedTable | null) => void;
 }
 
 /** Properties of {@link Problem}. */
@@ -54,7 +77,7 @@ interface ProblemProps {
   /** The table that could not be read. */
   readonly place: TableRef;
   /** What the read answered. */
-  readonly resource: Resource<TableOut>;
+  readonly resource: Resource<LoadedTable>;
   /** The page's heading. */
   readonly headingRef: RefObject<HTMLHeadingElement | null>;
 }
@@ -104,8 +127,9 @@ function Problem({ place, resource, headingRef }: ProblemProps): JSX.Element {
 }
 
 /**
- * Reads the table when the page opens, records it as opened once, and shows its header and the
- * tab the address names.
+ * Reads the table when the page opens, and an artifact's own entry with it, records it as opened
+ * once, and shows its header and the tab the address names. A tab its kind does not have gives
+ * way to its Overview.
  *
  * @param props - The table, the tab and the heading.
  * @param props.place - The table the address names.
@@ -126,18 +150,19 @@ export function TablePage({
   const me = useMe();
   const { environment, namespace, name } = place;
   const load = useCallback(
-    () => getTable({ environment, namespace, name }),
+    () => readTable({ environment, namespace, name }),
     [environment, namespace, name],
   );
   const resource = useResource(load);
-  const loaded = resource.data;
+  const read = resource.data;
+  const loaded = read?.table;
   const waiting = loaded === undefined && resource.error === null;
   useEffect(() => {
     onWaiting(waiting);
   }, [waiting, onWaiting]);
   useEffect(() => {
-    onLoaded(loaded ?? null);
-  }, [loaded, onLoaded]);
+    onLoaded(read ?? null);
+  }, [read, onLoaded]);
   const recorded = useRef(false);
   useEffect(() => {
     if (loaded !== undefined && !recorded.current) {
@@ -149,15 +174,19 @@ export function TablePage({
     }
   }, [loaded, me.name, environment]);
 
-  if (loaded === undefined) {
+  if (read === undefined) {
     return resource.error === null ? (
       <TableSkeleton />
     ) : (
       <Problem place={place} resource={resource} headingRef={headingRef} />
     );
   }
+  if (!tabsFor(read.table.kind).includes(tab)) {
+    // Preview on an artifact, or Versions on a table: the entry's Overview, in place of the address.
+    return <Navigate replace to={tablePath(environment, namespace, name)} />;
+  }
   return (
-    <TableProvider place={place} loaded={loaded}>
+    <TableProvider place={place} loaded={read.table} artifact={read.artifact}>
       <TableHeader />
       <section className="table-tab" aria-label={t(`table.tabs.${tab}`)}>
         {tab === "overview" && <Overview />}
@@ -180,6 +209,11 @@ export function TablePage({
         {tab === "health" && (
           <Suspense fallback={<p role="status">{t("table.loadingTab")}</p>}>
             <HealthTab />
+          </Suspense>
+        )}
+        {tab === "versions" && (
+          <Suspense fallback={<p role="status">{t("table.loadingTab")}</p>}>
+            <VersionsTab />
           </Suspense>
         )}
         {tab === "access" && (

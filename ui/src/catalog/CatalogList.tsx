@@ -271,7 +271,12 @@ export function CatalogList(): JSX.Element {
   const noteState = location.state as Omit<PlaceNoteState, "environment"> | null;
   const placeNote =
     environment !== null && noteState?.placeNote !== undefined
-      ? { placeNote: noteState.placeNote, namespace: noteState.namespace, environment }
+      ? {
+          placeNote: noteState.placeNote,
+          namespace: noteState.namespace,
+          environment,
+          ...(noteState.artifact === undefined ? {} : { artifact: noteState.artifact }),
+        }
       : null;
   const onCreated = (environmentOfPlace: string, path: string): void => {
     created.current = { environment: environmentOfPlace, path, before: tree.data };
@@ -374,16 +379,18 @@ export function CatalogList(): JSX.Element {
             </aside>
           )}
           <section className="catalog-main" ref={main}>
+            {/* One place, above any notice, so the note never remounts when the tree turns the
+                place unknown (a drop that took the namespace out of the tree is still confirmed). */}
+            {placeNote !== null && (
+              <Suspense fallback={null}>
+                <PlaceNote note={placeNote} />
+              </Suspense>
+            )}
             {notice}
             {notice === null && (
               <>
                 <ViewSwitch view={view} />
                 {onAll && <CatalogSearch view={view} onSearch={search} />}
-                {placeNote !== null && (
-                  <Suspense fallback={null}>
-                    <PlaceNote note={placeNote} />
-                  </Suspense>
-                )}
                 <div className="catalog-bar">
                   <div className="catalog-result-line">
                     <p className="catalog-result" role="status" tabIndex={-1} ref={resultLine}>

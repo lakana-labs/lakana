@@ -33,6 +33,7 @@
   "note": {
     "created": "Created namespace {{namespace}}.",
     "deleted": "Deleted namespace {{namespace}}.",
-    "notShown": "Created namespace {{namespace}}. You may not read the namespaces of {{environment}}, so the tree does not show it while it holds no table you may read."
+    "notShown": "Created namespace {{namespace}}. You may not read the namespaces of {{environment}}, so the tree does not show it while it holds no table you may read.",
+    "artifactDropped": "Dropped artifact {{artifact}}. Its files are removed from storage, and Lakana's periodic clean-up removes any it could not."
   }
 }
