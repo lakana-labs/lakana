@@ -264,6 +264,30 @@ def test_a_rhythmless_noisy_table_widens_a_steady_weekday_to_the_pooled_spread()
     assert volume_signal({"added-records": "500"}, history, at=_SATURDAY).state == "fired"
 
 
+def test_a_weekday_with_too_few_loads_does_not_widen_the_pooled_spread() -> None:
+    """Sundays seen only twice, wildly apart, stay out of the pooled spread (#565).
+
+    Saturdays are steady at 1,000, Fridays alternate 900 and 1,100 (distance 100 from their median);
+    the two Sundays are 100 and 100,000 but too few to count, so the pooled half-width is
+    4 x 50 = 200, not the 4 x 100 that counting them would give.
+    """
+    days = [(7 * n, 1_000) for n in range(1, WEEKDAY_WEEKS + 1)]
+    days += [(7 * n - 6, (900, 1_100)[n % 2]) for n in range(1, WEEKDAY_WEEKS + 1)]
+    days += [(6, 100), (13, 100_000)]
+    history = [
+        {"added": rows, "total": 1, "observed_at": _SATURDAY - timedelta(days=back)}
+        for back, rows in sorted(days)
+    ]
+    seen = volume_signal({"added-records": "1000"}, history, at=_SATURDAY)
+    assert seen.band == {
+        "low": 800.0,
+        "high": 1_200.0,
+        "median": 1_000.0,
+        "basis": "weekday",
+        "weekday": "saturday",
+    }
+
+
 def test_a_weekly_table_judges_a_steady_saturday_with_the_spread_of_the_week() -> None:
     """A low, steady Saturday takes the wider pooled spread of the weekdays around it (#565).
 
