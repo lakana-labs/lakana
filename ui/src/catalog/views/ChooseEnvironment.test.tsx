@@ -22,6 +22,7 @@ describe("ChooseEnvironment", () => {
       "/catalog?env=dev&view=orphans",
       "/catalog?env=prod&view=orphans",
     ]);
+    for (const link of links) expect(link).toHaveClass("button");
   });
 
   it("marks hidden characters in an environment's name", () => {
