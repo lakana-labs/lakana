@@ -168,4 +168,33 @@ describe("UndropDialog", () => {
     expect(screen.getByRole("textbox", { name: "Restore as" })).toBeInTheDocument();
     expect(server.sent.filter((request) => request.method === "POST")).toHaveLength(1);
   });
+
+  it("sends the new name as typed, so the server judges a space at an end", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/prod": { status: 200, body: { name: "prod", is_protected: false } },
+      [UNDROP]: { status: 200, body: TABLE },
+    });
+    const onDone = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <UndropDialog
+        row={dropped()}
+        environment="prod"
+        onDone={onDone}
+        onCancel={vi.fn()}
+        nameTaken={TAKEN}
+      />,
+    );
+
+    await user.type(await screen.findByRole("textbox", { name: "Restore as" }), " returns_old");
+    await user.click(await screen.findByRole("button", { name: "Undrop" }));
+
+    await waitFor(() => {
+      expect(onDone).toHaveBeenCalledWith(TABLE);
+    });
+    expect(server.sent.at(-1)?.body).toEqual({
+      new_name: " returns_old",
+      break_glass_reason: null,
+    });
+  });
 });

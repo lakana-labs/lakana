@@ -304,6 +304,47 @@ def refuse_hidden_characters(name: str, *, what: str) -> None:
     )
 
 
+def refuse_outer_whitespace(name: str, *, what: str) -> None:
+    """Refuse a new name that starts or ends with whitespace.
+
+    ``" gold"`` and ``"orders "`` look like ``gold`` and ``orders`` in every list and are
+    almost always a typing mistake. The same places that call `refuse_hidden_characters`
+    call this, so a stored name is never judged: it is loaded, renamed and dropped as before.
+    A space inside a name stays allowed.
+
+    Parameters
+    ----------
+    name
+        The new name.
+    what
+        Noun describing it, such as ``"Table name"`` or ``"Column name"``.
+
+    Raises
+    ------
+    ValidationError
+        If the name starts or ends with a character `str.isspace` accepts; the message says
+        where and names the name to use instead, or, for a name of only spaces, asks for
+        visible characters.
+    """
+    starts = name[:1].isspace()
+    ends = name[-1:].isspace()
+    if not (starts or ends):
+        return
+    if not name.strip():
+        # A namespace or table name of only spaces is refused earlier, by
+        # `validate_path_component`; a column name is not, and has no name to suggest.
+        raise ValidationError(
+            f"{what} '{shown(name)}' is only spaces, so it would look empty in every list. "
+            "Name it with visible characters, such as letters, digits and '_'."
+        )
+    where = "starts and ends" if starts and ends else "starts" if starts else "ends"
+    raise ValidationError(
+        f"{what} '{shown(name)}' {where} with a space, so it would look like "
+        f"'{shown(name.strip())}' in every list but be a different name. Use "
+        f"'{shown(name.strip())}' instead, or another name without a space at either end."
+    )
+
+
 def check_new_name(component: str, *, what: str) -> None:
     """Apply the rules only a namespace or table name that is being created must meet.
 
@@ -317,10 +358,12 @@ def check_new_name(component: str, *, what: str) -> None:
     Raises
     ------
     ValidationError
-        From `refuse_percent_in_new_name` or `refuse_hidden_characters`.
+        From `refuse_percent_in_new_name`, `refuse_hidden_characters` or
+        `refuse_outer_whitespace`.
     """
     refuse_percent_in_new_name(component, what=what)
     refuse_hidden_characters(component, what=what)
+    refuse_outer_whitespace(component, what=what)
 
 
 @dataclass(frozen=True)

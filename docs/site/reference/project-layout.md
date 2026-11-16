@@ -11,7 +11,8 @@ becomes the table `<namespace…>.<name>`; nested directories are nested namespa
 component may contain a dot, and a table or namespace the deploy creates may not contain a `%`
 (one that already exists keeps its name and deploys as before). A table, namespace or column the
 deploy creates may not hold a control character, a format character (such as U+202E or a
-zero-width space) or a line or paragraph separator; one that already exists keeps its name. Each SQL file holds exactly one query (`SELECT`, `WITH … SELECT` or a set operation). A table produced by another
+zero-width space) or a line or paragraph separator, and may not start or end with a space; one
+that already exists keeps its name. Each SQL file holds exactly one query (`SELECT`, `WITH … SELECT` or a set operation). A table produced by another
 asset of the same repository is a DAG edge; anything else is an external input and must exist in
 the environment (readable by whoever deploys) or be produced by another repository's current
 deployment.
